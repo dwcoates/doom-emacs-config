@@ -16,7 +16,7 @@ func (c *Converter) skillSettled(call openCall, markdown string, ts int64) *conv
 	success := &conversationv1.AgentSkillUseSuccess{
 		Skill:     &conversationv1.AgentSkillName{Name: skillName(call)},
 		Document:  &conversationv1.AgentSkillDocument{Markdown: markdown},
-		SettledAt: settledAt(ts),
+		SettledAt: settledAt(ts, call.startedAt),
 	}
 	if call.retainedAllowedTools != nil {
 		success.AllowedTools = call.retainedAllowedTools

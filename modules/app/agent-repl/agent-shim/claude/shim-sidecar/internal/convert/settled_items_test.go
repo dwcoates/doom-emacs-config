@@ -8,6 +8,9 @@ package convert
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -116,5 +119,103 @@ func TestFailedSendLeavesTheSummaryUnsetWhenTheCallerGaveNone(t *testing.T) {
 	// Assert
 	if summary := got.GetSendMessage().GetFailure().GetSummary(); summary != nil {
 		t.Fatalf("Summary = %v, want unset: the caller supplied none", summary)
+	}
+}
+
+// settleInstants collects every settle instant a message carries, at any depth.
+func settleInstants(m proto.Message) []*conversationv1.AgentActivitySettledAt {
+	var out []*conversationv1.AgentActivitySettledAt
+	var walk func(protoreflect.Message)
+	walk = func(msg protoreflect.Message) {
+		if settled, ok := msg.Interface().(*conversationv1.AgentActivitySettledAt); ok {
+			out = append(out, settled)
+		}
+		msg.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+			switch {
+			case fd.IsList() && fd.Kind() == protoreflect.MessageKind:
+				for i := 0; i < v.List().Len(); i++ {
+					walk(v.List().Get(i).Message())
+				}
+			case fd.IsMap():
+			case fd.Kind() == protoreflect.MessageKind:
+				walk(v.Message())
+			}
+			return true
+		})
+	}
+	walk(m.ProtoReflect())
+	return out
+}
+
+func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   toolKind
+		input  map[string]any
+		result map[string]any
+		failed bool
+	}{
+		{name: "a failed read", kind: kindRead, input: map[string]any{"file_path": "/p"}, failed: true},
+		{name: "a failed write", kind: kindWrite, input: map[string]any{"file_path": "/p"}, failed: true},
+		{name: "a failed edit", kind: kindEdit, input: map[string]any{"file_path": "/p"}, failed: true},
+		{name: "a failed grep", kind: kindGrep, input: map[string]any{"pattern": "x"}, failed: true},
+		{name: "a failed glob", kind: kindGlob, input: map[string]any{"pattern": "x"}, failed: true},
+		{name: "a failed shell call", kind: kindBash, input: map[string]any{"command": "x"}, failed: true},
+		{name: "a failed spawn", kind: kindSubagent, input: map[string]any{"prompt": "x"}, failed: true},
+		{name: "a failed skill", kind: kindSkill, input: map[string]any{"skill": "x"}, failed: true},
+		{name: "a failed send", kind: kindSendMessage, input: map[string]any{"to": "x"}, failed: true},
+		{name: "a failed fetch", kind: kindWebFetch, input: map[string]any{"url": "https://x"}, failed: true},
+		{name: "a failed search", kind: kindWebSearch, input: map[string]any{"query": "x"}, failed: true},
+		{name: "a failed artifact call", kind: kindArtifact, input: map[string]any{"file_path": "/p"}, failed: true},
+		{name: "a failed plan-mode call", kind: kindPlanMode, failed: true},
+		{name: "a failed findings report", kind: kindReportFindings, failed: true},
+		{name: "a failed worktree call", kind: kindWorktree, failed: true},
+		{name: "a failed cron call", kind: kindCron, failed: true},
+		{name: "a failed push", kind: kindPushNotification, failed: true},
+		{name: "a failed wakeup", kind: kindScheduleWakeup, failed: true},
+		{name: "a failed monitor", kind: kindMonitor, failed: true},
+		{
+			name:   "a read that answered",
+			kind:   kindRead,
+			input:  map[string]any{"file_path": "/p"},
+			result: map[string]any{"type": "text", "file": map[string]any{"filePath": "/p", "content": "c", "numLines": 1.0, "totalLines": 1.0}},
+		},
+		{
+			name:   "a shell call that exited",
+			kind:   kindBash,
+			input:  map[string]any{"command": "true"},
+			result: map[string]any{"stdout": "", "stderr": "", "exitCode": 0.0},
+		},
+		{
+			name:   "a send that was delivered",
+			kind:   kindSendMessage,
+			input:  map[string]any{"to": "vetter", "message": "go"},
+			result: map[string]any{"success": true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a call announced at 1000 and settled at 4000.
+			c := newTestConverter(t)
+			call := openCall{input: tt.input, startedAt: 1000, activityID: "toolu_s"}
+			block := map[string]any{"content": "Error: refused"}
+
+			// Act
+			got := c.settledItem(tt.kind, call, tt.result, block, tt.failed, 4000, Attribution{})
+
+			// Assert
+			if got == nil {
+				t.Fatal("the result settled no unit")
+			}
+			instants := settleInstants(got)
+			if len(instants) == 0 {
+				t.Fatal("the settled arm carried no settle instant to check")
+			}
+			for _, instant := range instants {
+				if instant.GetStartedAt().GetAtMs() != 1000 {
+					t.Fatalf("settle instant %v restates start %v, want 1000", instant, instant.GetStartedAt())
+				}
+			}
+		})
 	}
 }
