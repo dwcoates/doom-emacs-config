@@ -19,6 +19,7 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
+	"fmt"
 )
 
 func TestWorkspaceFleetTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
@@ -1044,5 +1045,104 @@ func TestABringUpHandsTheWatcherNoTurnsOpenAtAttach(t *testing.T) {
 	// Assert.
 	if len(f.openAtAttach) != 1 || len(f.openAtAttach[0]) != 0 {
 		t.Fatalf("OpenAtAttach per watcher start = %v, want one start carrying none", f.openAtAttach)
+	}
+}
+
+func TestAnInstallOfADeadShimIsRefusedAndHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.reaped = true
+
+	// Act.
+	err := f.fleet.Install(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if !errors.Is(err, ErrInstallDeadShim) {
+		t.Fatalf("Install() = %v, want ErrInstallDeadShim", err)
+	}
+	f.fleet.mu.RLock()
+	_, held := f.fleet.sessions[ws.ID]
+	f.fleet.mu.RUnlock()
+	if held {
+		t.Fatal("the fleet holds a dead client")
+	}
+}
+
+func TestHandOverClosesTheWatchesBeforeItDetaches(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	var order []string
+	watcher := &fakeWatcher{onClose: func() { order = append(order, fmt.Sprintf("close(detached=%d)", f.client.detached)) }}
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: watcher})
+
+	// Act.
+	handed, err := f.fleet.HandOver(ws.ID)
+
+	// Assert.
+	if err != nil || !handed {
+		t.Fatalf("HandOver = (%v, %v), want (true, nil)", handed, err)
+	}
+	if !watcher.closed || f.client.detached != 1 {
+		t.Fatalf("closed=%v detached=%d, want the watches closed and the shim detached once", watcher.closed, f.client.detached)
+	}
+	if len(order) != 1 || order[0] != "close(detached=0)" {
+		t.Fatalf("close order = %v, want the watches closed before the detach", order)
+	}
+}
+
+func TestHandOverAnswersFalseForAWorkspaceWithNoSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	handed, err := f.fleet.HandOver(ws.ID)
+
+	// Assert.
+	if err != nil || handed {
+		t.Fatalf("HandOver = (%v, %v), want (false, nil)", handed, err)
+	}
+	if f.client.detached != 0 {
+		t.Fatalf("detached = %d, want nothing detached", f.client.detached)
+	}
+}
+
+func TestHandOverSurfacesAFailedCloseAndDetachesNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: &fakeWatcher{closeErr: errors.New("the sinks would not join")}})
+
+	// Act.
+	_, err := f.fleet.HandOver(ws.ID)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the sinks would not join") {
+		t.Fatalf("HandOver error = %v, want the failed close surfaced", err)
+	}
+	if f.client.detached != 0 {
+		t.Fatalf("detached = %d, want nothing detached after a failed close", f.client.detached)
+	}
+}
+
+func TestAPrelaunchBesideAnAdoptedRelaunchedShimTakesTheNextGeneration(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	f := newFleetFixture(t)
+	f.socketDir = dir
+	ws := f.workspace("w1")
+	held := filepath.Join(dir, "w1.n1.sock")
+	if err := os.WriteFile(held, nil, 0o600); err != nil {
+		t.Fatalf("writing the adopted shim's socket path: %v", err)
+	}
+
+	// Act.
+	got := f.fleet.freshSocketPath(ws.ID)
+
+	// Assert.
+	if want := filepath.Join(dir, "w1.n2.sock"); got != want {
+		t.Fatalf("freshSocketPath = %q, want %q past the adopted shim's generation", got, want)
 	}
 }
