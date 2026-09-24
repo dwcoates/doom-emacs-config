@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // commitLine renders one line of commitFormat output.
@@ -1490,8 +1492,9 @@ func TestChangedPathsKeepsAPathWithUnusualBytesUnquoted(t *testing.T) {
 
 // --- IsClean / CurrentBranch -------------------------------------------
 
-func TestIsCleanAsksForThePorcelainStatus(t *testing.T) {
-	// Arrange.
+func TestIsCleanAsksForThePorcelainStatusWithoutOptionalLocks(t *testing.T) {
+	// Arrange: a probe must not refresh and write the index, which would take
+	// index.lock against the tree's user and bump the index's mtime.
 	git, _ := newTestClient(t)
 	fake := newFakeGit(t, ok(""))
 
@@ -1501,7 +1504,7 @@ func TestIsCleanAsksForThePorcelainStatus(t *testing.T) {
 	}
 
 	// Assert.
-	fake.assertSubject(0, "status", "--porcelain")
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
 }
 
 func TestIsCleanIsTrueForAnEmptyStatus(t *testing.T) {
@@ -1603,5 +1606,452 @@ func TestCurrentBranchFailurePropagates(t *testing.T) {
 	var failure *Error
 	if !errors.As(err, &failure) {
 		t.Fatalf("CurrentBranch error = %v (%T), want a *gitclient.Error", err, err)
+	}
+}
+
+// --- RemoveCleanWorktree / PruneWorktrees --------------------------------
+
+func TestRemoveCleanWorktreeNeverForces(t *testing.T) {
+	// Arrange: git's own refusal of a dirty tree is the safety this removal
+	// rests on, so --force must never reach it.
+	git, _ := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	fake := newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+
+	// Act.
+	if err := git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir); err != nil {
+		t.Fatalf("RemoveCleanWorktree: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "remove", worktreeDir)
+	fake.assertSubject(1, "worktree", "prune")
+}
+
+func TestRemoveCleanWorktreeDetachesTheDirectoryBeforeGitRuns(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+
+	// Act.
+	if err := git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir); err != nil {
+		t.Fatalf("RemoveCleanWorktree: %v", err)
+	}
+
+	// Assert.
+	if got := strings.Join(surfaces.dirEvents, ","); got != "detach "+worktreeDir {
+		t.Fatalf("log sink directory events = %q, want only the detach", got)
+	}
+}
+
+func TestRemoveCleanWorktreeRefusalReturnsGitsEvidence(t *testing.T) {
+	// Arrange: the tree became dirty after the caller looked.
+	git, _ := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t,
+		fails(128, "fatal: contains modified or untracked files, use --force to delete it\n", "worktree", "remove"),
+		ok("", "worktree", "prune"),
+	)
+
+	// Act.
+	err := git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "modified or untracked") {
+		t.Fatalf("RemoveCleanWorktree = %v, want git's refusal as a *gitclient.Error", err)
+	}
+}
+
+func TestRemoveCleanWorktreeRefusalReattachesTheSurvivingTree(t *testing.T) {
+	// Arrange: a tree git kept may still be somebody's workspace, whose sinks
+	// must keep their canonical links.
+	git, surfaces := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t,
+		fails(128, "fatal: contains modified or untracked files\n", "worktree", "remove"),
+		ok("", "worktree", "prune"),
+	)
+
+	// Act.
+	_ = git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	if got := strings.Join(surfaces.dirEvents, ","); got != "detach "+worktreeDir+",attach "+worktreeDir {
+		t.Fatalf("log sink directory events = %q, want the refused tree detached then re-attached", got)
+	}
+}
+
+func TestRemoveCleanWorktreeReattachFailureIsReturnedAndLogged(t *testing.T) {
+	// Arrange: the removal is refused and the tree's re-attach then fails.
+	git, surfaces := newTestClient(t)
+	surfaces.attachFailure = errors.New("attach refused")
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t,
+		fails(128, "fatal: contains modified or untracked files\n", "worktree", "remove"),
+		ok("", "worktree", "prune"),
+	)
+
+	// Act.
+	err := git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(err.Error(), "attach refused") {
+		t.Fatalf("RemoveCleanWorktree = %v, want both the refusal and the attach failure", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.remove_clean_worktree"); !found {
+		t.Fatal("the attach failure was not recorded at ERROR")
+	}
+}
+
+func TestRemoveCleanWorktreeSuccessReattachesNothing(t *testing.T) {
+	// Arrange: a removed tree stays detached, so a late record cannot bring
+	// it back.
+	git, surfaces := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+
+	// Act.
+	if err := git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir); err != nil {
+		t.Fatalf("RemoveCleanWorktree: %v", err)
+	}
+
+	// Assert.
+	for _, event := range surfaces.dirEvents {
+		if strings.HasPrefix(event, "attach ") {
+			t.Fatalf("log sink directory events = %v, want no re-attach after a removal", surfaces.dirEvents)
+		}
+	}
+}
+
+func TestPruneWorktreesRunsThePrune(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("", "worktree", "prune"))
+
+	// Act.
+	if err := git.PruneWorktrees(context.Background(), "/repo"); err != nil {
+		t.Fatalf("PruneWorktrees: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "prune")
+}
+
+func TestPruneWorktreesFailureIsReturnedAndLogged(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "fatal: could not prune\n", "worktree", "prune"))
+
+	// Act.
+	err := git.PruneWorktrees(context.Background(), "/repo")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("PruneWorktrees = %v, want a *gitclient.Error", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.prune_worktrees"); !found {
+		t.Fatal("the prune failure was not recorded at ERROR")
+	}
+}
+
+// --- ListWorktrees -------------------------------------------------------
+
+func TestListWorktreesAsksForTheNULSeparatedPorcelain(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("worktree /repo\x00HEAD aaaa\x00branch refs/heads/main\x00\x00", "worktree", "list"))
+
+	// Act.
+	if _, err := git.ListWorktrees(context.Background(), "/repo"); err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "list", "--porcelain", "-z")
+}
+
+func TestListWorktreesReadsEveryAttribute(t *testing.T) {
+	cases := []struct {
+		name   string
+		record string
+		want   Worktree
+	}{
+		{"branch", "worktree /wt\x00HEAD aaaa\x00branch refs/heads/feat/x\x00\x00",
+			Worktree{Dir: "/wt", Head: "aaaa", Branch: "feat/x"}},
+		{"detached", "worktree /wt\x00HEAD aaaa\x00detached\x00\x00",
+			Worktree{Dir: "/wt", Head: "aaaa", Detached: true}},
+		{"bare", "worktree /repo.git\x00bare\x00\x00",
+			Worktree{Dir: "/repo.git", Bare: true}},
+		{"locked with a reason", "worktree /wt\x00HEAD aaaa\x00branch refs/heads/x\x00locked on a usb stick\x00\x00",
+			Worktree{Dir: "/wt", Head: "aaaa", Branch: "x", Locked: true, LockedReason: "on a usb stick"}},
+		{"locked without a reason", "worktree /wt\x00HEAD aaaa\x00branch refs/heads/x\x00locked\x00\x00",
+			Worktree{Dir: "/wt", Head: "aaaa", Branch: "x", Locked: true}},
+		{"prunable", "worktree /wt\x00HEAD aaaa\x00branch refs/heads/x\x00prunable gitdir file points to non-existent location\x00\x00",
+			Worktree{Dir: "/wt", Head: "aaaa", Branch: "x", Prunable: true, PrunableReason: "gitdir file points to non-existent location"}},
+		{"a path with spaces", "worktree /a dir/wt\x00HEAD aaaa\x00branch refs/heads/x\x00\x00",
+			Worktree{Dir: "/a dir/wt", Head: "aaaa", Branch: "x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			newFakeGit(t, ok(tc.record, "worktree", "list"))
+
+			// Act.
+			got, err := git.ListWorktrees(context.Background(), "/repo")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ListWorktrees: %v", err)
+			}
+			if len(got) != 1 || !reflect.DeepEqual(got[0], tc.want) {
+				t.Fatalf("ListWorktrees = %+v, want [%+v]", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestListWorktreesKeepsGitsOrderMainFirst(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("worktree /repo\x00HEAD aaaa\x00branch refs/heads/main\x00\x00"+
+		"worktree /wt\x00HEAD bbbb\x00branch refs/heads/x\x00\x00", "worktree", "list"))
+
+	// Act.
+	got, err := git.ListWorktrees(context.Background(), "/repo")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	if len(got) != 2 || got[0].Dir != "/repo" || got[1].Dir != "/wt" {
+		t.Fatalf("ListWorktrees = %+v, want /repo then /wt", got)
+	}
+}
+
+func TestListWorktreesRefusesAnUnknownAttribute(t *testing.T) {
+	// Arrange: a newer git stating something new about a tree must not be
+	// read as a tree with nothing to say.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("worktree /wt\x00HEAD aaaa\x00frozen\x00\x00", "worktree", "list"))
+
+	// Act.
+	_, err := git.ListWorktrees(context.Background(), "/repo")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "frozen") {
+		t.Fatalf("ListWorktrees = %v, want a refusal naming the unknown attribute", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.list_worktrees"); !found {
+		t.Fatal("the unreadable listing was not recorded at ERROR")
+	}
+}
+
+func TestListWorktreesRefusesAnUnterminatedRecord(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("worktree /wt\x00HEAD aaaa", "worktree", "list"))
+
+	// Act.
+	_, err := git.ListWorktrees(context.Background(), "/repo")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "not terminated") {
+		t.Fatalf("ListWorktrees = %v, want a refusal of the truncated record", err)
+	}
+}
+
+func TestListWorktreesFailurePropagates(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n", "worktree", "list"))
+
+	// Act.
+	_, err := git.ListWorktrees(context.Background(), "/repo")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("ListWorktrees = %v, want a *gitclient.Error", err)
+	}
+}
+
+// --- AdminDir / CommitterTime / TreeOf -----------------------------------
+
+func TestAdminDirAsksTheWorktreeForItsAbsoluteGitDir(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("/repo/.git/worktrees/wt\n", "rev-parse"))
+
+	// Act.
+	got, err := git.AdminDir(context.Background(), "/wt")
+
+	// Assert.
+	if err != nil || got != "/repo/.git/worktrees/wt" {
+		t.Fatalf("AdminDir = (%q, %v), want the per-worktree git dir", got, err)
+	}
+	if call := fake.only(); call.dashCDir() != "/wt" || !reflect.DeepEqual(call.subject(), []string{"rev-parse", "--absolute-git-dir"}) {
+		t.Fatalf("AdminDir ran %v in %s, want rev-parse --absolute-git-dir in the worktree", call.subject(), call.dashCDir())
+	}
+}
+
+func TestCommitterTimeReadsTheCommitterDate(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("2026-09-01T10:00:00+02:00\n", "show"))
+
+	// Act.
+	got, err := git.CommitterTime(context.Background(), "/repo", "abc")
+
+	// Assert.
+	if err != nil || !got.Equal(time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)) {
+		t.Fatalf("CommitterTime = (%v, %v), want 2026-09-01T08:00Z", got, err)
+	}
+	fake.assertSubject(0, "show", "--no-patch", "--format=%cI", "abc")
+}
+
+func TestCommitterTimeRefusesAnUnreadableDate(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("yesterday\n", "show"))
+
+	// Act.
+	_, err := git.CommitterTime(context.Background(), "/repo", "abc")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("CommitterTime = nil error for an unreadable date, want a refusal")
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.committer_time"); !found {
+		t.Fatal("the unreadable date was not recorded at ERROR")
+	}
+}
+
+func TestTreeOfPeelsTheRefToItsTree(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("tttt\n", "rev-parse"))
+
+	// Act.
+	got, err := git.TreeOf(context.Background(), "/repo", "abc")
+
+	// Assert.
+	if err != nil || got != "tttt" {
+		t.Fatalf("TreeOf = (%q, %v), want tttt", got, err)
+	}
+	fake.assertSubject(0, "rev-parse", "--verify", "--end-of-options", "abc^{tree}")
+}
+
+// --- MergeTree -----------------------------------------------------------
+
+func TestMergeTreeWritesTheTreeWithoutMessages(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("tttt\n", "merge-tree"))
+
+	// Act.
+	if _, err := git.MergeTree(context.Background(), "/repo", "base", "other"); err != nil {
+		t.Fatalf("MergeTree: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "merge-tree", "--write-tree", "--no-messages", "base", "other")
+}
+
+func TestMergeTreeAnswersACleanMergesTree(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("tttt\n", "merge-tree"))
+
+	// Act.
+	got, err := git.MergeTree(context.Background(), "/repo", "base", "other")
+
+	// Assert.
+	if err != nil || got != (MergeTreeOutcome{Tree: "tttt"}) {
+		t.Fatalf("MergeTree = (%+v, %v), want the clean tree", got, err)
+	}
+}
+
+func TestMergeTreeAnswersAConflictAsAnOutcome(t *testing.T) {
+	// Arrange: exit 1 is git's "the merge would conflict", an answer.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, gitFixture{Match: []string{"merge-tree"}, Stdout: "cccc\n100644 aaaa 1\tf.txt\n", Exit: 1})
+
+	// Act.
+	got, err := git.MergeTree(context.Background(), "/repo", "base", "other")
+
+	// Assert.
+	if err != nil || got != (MergeTreeOutcome{Tree: "cccc", Conflicted: true}) {
+		t.Fatalf("MergeTree = (%+v, %v), want the conflicted outcome", got, err)
+	}
+	if record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.merge_tree"); found {
+		t.Fatalf("a conflict was recorded at ERROR: %+v", record)
+	}
+}
+
+func TestMergeTreeFailsOnAnyOtherExit(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: unknown option `write-tree'\n", "merge-tree"))
+
+	// Act.
+	_, err := git.MergeTree(context.Background(), "/repo", "base", "other")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("MergeTree = %v, want a *gitclient.Error", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.merge_tree"); !found {
+		t.Fatal("the failure was not recorded at ERROR")
+	}
+}
+
+func TestMergeTreeFailsWhenNoTreeIsPrinted(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("", "merge-tree"))
+
+	// Act.
+	_, err := git.MergeTree(context.Background(), "/repo", "base", "other")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("MergeTree = nil error with no tree printed, want a refusal")
+	}
+}
+
+// --- DeleteBranchAt ------------------------------------------------------
+
+func TestDeleteBranchAtComparesAndDeletes(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("", "update-ref"))
+
+	// Act.
+	if err := git.DeleteBranchAt(context.Background(), "/repo", "feat/x", "aaaa"); err != nil {
+		t.Fatalf("DeleteBranchAt: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "update-ref", "-d", "refs/heads/feat/x", "aaaa")
+}
+
+func TestDeleteBranchAtMovedBranchIsARefusal(t *testing.T) {
+	// Arrange: a commit landed on the branch after the caller judged it.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: cannot lock ref 'refs/heads/feat/x': is at bbbb but expected aaaa\n", "update-ref"))
+
+	// Act.
+	err := git.DeleteBranchAt(context.Background(), "/repo", "feat/x", "aaaa")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "expected aaaa") {
+		t.Fatalf("DeleteBranchAt = %v, want git's refusal", err)
 	}
 }

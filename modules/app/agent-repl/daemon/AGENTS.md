@@ -292,6 +292,8 @@ restart.
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
 | `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
+| `AGENT_REPL_WORKTREE_REAP_IDLE` | operator | the landed-worktree reaper's idle threshold (a Go duration; default `24h`): a worktree with any sign of activity newer than this is never judged. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
+| `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary every one of the daemon's OWN calls execs: the login pty, and `internal/headless`'s runs (the classifier's routing question and the workspace naming call). A fake script in tests. Naming it EXPLICITLY is also what makes those spawns legal under `AGENT_REPL_FORBID_VENDOR_CALLS`: the guard refuses only the bare default `claude`, since an explicit path is by definition not a call to the real CLI |
@@ -912,6 +914,98 @@ Rules that fall out of it, and that a change to any of these numbers must keep:
   `EscalationBound`. That derivation is separate and is not sized by the table
   above.
 
+## The landed-worktree reaper (`internal/worktreereap`)
+
+The merge queue retires the worktrees it merges. Agents also cut worktrees
+for themselves, and a branch can land by a squash or a cherry-pick the queue
+never saw, so the daemon sweeps for them itself. The decision is PROGRAMMATIC;
+nothing about it is agentic.
+
+**Schedule.** One background loop (`worktree_reaper` in `graph.go`): the first
+sweep `5m` after start, then one every `24h`, so a daemon that restarts daily
+still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
+the schedule by hand and never sleeps. **One sweep at a time**: in process a
+`TryLock` refuses a second (`ErrSweepRunning`), and across processes the sweep
+holds `<lock dir>/worktree-reap.lock` (`internal/flock`) for its whole run,
+so an incumbent and its handover successor never sweep together; the loser
+records INFO and sweeps nothing.
+
+**Which repositories.** Every row of `wsm.ListRepositories` -- the
+repositories the daemon registered for its workspaces. The "default branch"
+is whatever `gitclient.DefaultBranch` resolves for the repository at sweep
+time (never a hardcoded `master`); it is resolved ONCE per repository to a
+commit and its tree, and every worktree is judged against that pair.
+
+**The landed rule.** A worktree has landed iff `git merge-tree --write-tree
+--no-messages <default commit> <HEAD>` exits 0 with EXACTLY the default
+commit's tree: merging the branch into the default branch would change
+nothing. It is about CHANGES, not commits, so a merge, a cherry-pick and a
+squash all count; a conflict (exit 1) or any other tree is not landed. It
+needs git >= 2.38.
+
+**The gates, in the order they are asked** (each keep is DEBUG
+`daemon.worktreereap.keep` with its `reason`, and counted in the summary):
+
+1. the main worktree (git's first listing entry, or the repository's own
+   dir) and a bare entry -- never judged;
+2. `locked` -- kept; `prunable` -- NOT removed: the repository gets one `git
+   worktree prune` (INFO `daemon.worktreereap.prune` naming every entry);
+3. the checkout of a registered workspace that is NOT CLOSED
+   (`open_workspace`), the checkout of any workspace the fleet holds a LIVE
+   SESSION for (`live_session`, `Fleet.Workspaces`), and a branch an open
+   workspace was cut from (`parent_of_open_workspace`: a nested workspace
+   merges into its parent's worktree);
+4. a linked worktree ON the default branch (removing it would delete the
+   default branch), an unborn HEAD, a directory that is not there;
+5. **the idle gate** (`recently_active`): the newest of the worktree's admin
+   files' mtimes (`<git dir>/worktrees/<name>/{HEAD,index,logs/HEAD}`, from
+   `rev-parse --absolute-git-dir`; HEAD is required, the other two may be
+   absent), the HEAD commit's COMMITTER time, and -- for a registered
+   workspace -- the record's `created_at`, `last_activity_at`,
+   `last_selected_at` and `merged_at`, must be older than the threshold
+   (`AGENT_REPL_WORKTREE_REAP_IDLE`, default `24h`). The admin files move on
+   every checkout, add, commit, reset and rebase step; the committer time
+   covers a commit written elsewhere; the record covers the daemon's own
+   knowledge that somebody was there. The merge stamp is also what keeps a
+   worktree the merge queue is retiring out of the sweep: the queue stamps
+   `merged_at` before `closed` and before its own removal. Files in the tree
+   are not read: a tree only qualifies when it is clean, and a clean tree is
+   what its HEAD records. Activity is read BEFORE any probe, and
+   `gitclient.IsClean` runs `git --no-optional-locks status`, so nothing the
+   sweep runs can look like work;
+6. dirty (`git status --porcelain` non-empty: modified OR untracked; ignored
+   files do not count);
+7. the landed rule (`merge_conflicts`, `unlanded`).
+
+**Removal.** `gitclient.RemoveCleanWorktree` -- the same door
+`RemoveWorktree` is (the log sinks are detached first, the prune runs, the
+postcondition decides) but WITHOUT `--force`, so a tree that became dirty
+after it was judged is refused by git and kept (and re-attached to its
+sinks). Only after the removal succeeds is the branch deleted, by
+`gitclient.DeleteBranchAt` -- `git update-ref -d refs/heads/<b> <judged
+head>`, git's compare-and-delete rather than `branch -D`, so a branch that
+moved after it was judged survives with the commit nobody judged. A registered
+workspace's row is left as it is (closed), exactly as the merge queue leaves
+the workspaces it merges.
+
+**Records.** INFO `daemon.worktreereap.remove` per removal (worktree, branch,
+head, default branch and commit, `why`, `last_activity`,
+`last_activity_signal`, `idle_for`) and INFO `daemon.worktreereap.branch` per
+deleted branch; ERROR for any step that fails (`daemon.worktreereap.repo`,
+`.judge`, `.remove`, `.branch`, `.prune`), after which the sweep goes on with
+the next worktree or repository; INFO `daemon.worktreereap.sweep` for the
+start and the summary (repositories, worktrees judged, removed and their dirs,
+branches deleted, pruned, kept by reason, failures). A git the daemon's own
+exit cancelled is INFO, never a failure. A registered repository whose main
+worktree is gone is INFO and skipped.
+
+**Priority.** The sweep takes no lock an interactive or prompt path takes: it
+reads the registry (two short queries) and the fleet's live set (one read-lock
+snapshot) once per sweep, and everything else is its own git children. Those
+children are NOT niced: the daemon has no idiom for lowering a child's
+priority (`bin/background.sh` is the test suites'), and git inherits the
+daemon's own.
+
 ## Coverage deliberately not attainable under the no-git-in-tests directive
 
 The git client's tests pin argv, env scrubbing, `-C` selection and output
@@ -920,6 +1014,9 @@ behavior: that a `--no-ff` merge yields a two-parent commit, that the
 landed range equals the source branch, that a conflicted merge leaves
 unmerged index entries and MERGE_HEAD, that a revert removes the content
 in one commit, that `worktree prune` clears a stale registration, the
-exact `status --porcelain` markers, that git honors GIT_DIR over `-C`, and
+exact `status --porcelain` markers, that git honors GIT_DIR over `-C`, that
+`merge-tree --write-tree` of a squash-landed branch answers the default
+branch's own tree, that `update-ref -d <ref> <old>` refuses a moved ref, and
 real-git version compatibility (`rev-list --no-commit-header` needs
-git >= 2.33). Those are e2e facts now (the project lead's suite).
+git >= 2.33, `merge-tree --write-tree` needs git >= 2.38, `worktree list -z`
+needs git >= 2.36). Those are e2e facts now (the project lead's suite).

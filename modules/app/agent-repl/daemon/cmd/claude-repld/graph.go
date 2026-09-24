@@ -780,6 +780,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the command-file ingress: %w", err)
 	}
 
+	// THE LANDED-WORKTREE REAPER reads the registry and the fleet's live set
+	// and takes no lock any interactive path takes: it is background work.
+	reaper, err := buildWorktreeReaper(git, p.DB, fleet.Workspaces, log)
+	if err != nil {
+		return nil, err
+	}
+
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
@@ -859,6 +866,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 			}},
+			{Name: "worktree_reaper", Run: reaper.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,
@@ -1194,14 +1202,7 @@ func resolveHoldoutWarnEvery() (time.Duration, error) {
 	if raw == "" {
 		return 0, nil
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", HoldoutWarnEnv, raw, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", HoldoutWarnEnv, raw)
-	}
-	return d, nil
+	return parsePositiveDuration(HoldoutWarnEnv, raw)
 }
 
 // adoptedDeathWitness renders a kernel-lock probe as the supervisor's
@@ -1228,17 +1229,7 @@ const envStartSessionBound = "AGENT_REPL_START_SESSION_BOUND"
 // workspace.DefaultStartSessionBound; a malformed or non-positive value is a
 // REFUSAL, on the same reasoning resolveAdoptBound states.
 func resolveStartBound(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return workspace.DefaultStartSessionBound, nil
-	}
-	bound, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envStartSessionBound, value, err)
-	}
-	if bound <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envStartSessionBound, value)
-	}
-	return bound, nil
+	return resolveDurationKnob(envStartSessionBound, value, workspace.DefaultStartSessionBound)
 }
 
 // envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the
@@ -1250,17 +1241,7 @@ const envBootAdoptBound = "AGENT_REPL_BOOT_ADOPT_BOUND"
 // because a knob that silently did nothing would make the run it was set for
 // report a bound it never used.
 func resolveAdoptBound(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return boot.DefaultAdoptBound, nil
-	}
-	bound, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envBootAdoptBound, value, err)
-	}
-	if bound <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envBootAdoptBound, value)
-	}
-	return bound, nil
+	return resolveDurationKnob(envBootAdoptBound, value, boot.DefaultAdoptBound)
 }
 
 // footerFaults is the health package's fault sink, drawn on the footer. It
