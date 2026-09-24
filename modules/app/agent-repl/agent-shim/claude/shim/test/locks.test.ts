@@ -460,7 +460,7 @@ describe("the claim protocol over a synthetic holder", () => {
         typed: refusal instanceof locks.LockHolderUnavailableError,
         osError: (refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError,
         killed: child.killed,
-      }).toEqual({ typed: true, osError: textContaining("within 250 ms"), killed: ["SIGKILL"] });
+      }).toEqual({ typed: true, osError: textContaining(`within ${locks.HOLDER_ANSWER_TIMEOUT_MS} ms`), killed: ["SIGKILL"] });
     } finally {
       vi.useRealTimers();
     }
