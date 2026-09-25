@@ -27,6 +27,12 @@ type BashRunReplay struct {
 	PinSeq uint64
 }
 
+// bashRunRowsSQL binds (run, the bash kind). It is at package scope so the
+// suite EXPLAINs the production text itself (bashrun_test.go).
+const bashRunRowsSQL = `SELECT position, write_seq, frame FROM entry
+	  WHERE run_id = ? AND kind = ?
+	  ORDER BY position ASC`
+
 // BashRun reads every stored row of one detached shell run, in FIRST-INSERT
 // order, plus the pin the live tail begins after.
 //
@@ -49,10 +55,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	}
 	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
 
-	const querySQL = `SELECT position, write_seq, frame FROM entry
-	  WHERE run_id = ? AND kind = ?
-	  ORDER BY position ASC`
-	rows, err := tx.QueryContext(ctx, querySQL, runID, kindBash)
+	rows, err := tx.QueryContext(ctx, bashRunRowsSQL, runID, kindBash)
 	if err != nil {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "reading the rows of run %q", runID))
 	}

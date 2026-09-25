@@ -369,3 +369,14 @@ func TestBashRunStatesItsOutmodedRowsOnceAtInfo(t *testing.T) {
 		t.Fatalf("error records = %q, want none for outmoded rows", got)
 	}
 }
+
+func TestTheBashRunReadBuildsNoAutomaticIndex(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	plan := queryPlan(t, d, bashRunRowsSQL, "run-1", kindBash)
+
+	// Assert
+	assertNoAutomaticIndex(t, "the bash-run read", plan)
+}
