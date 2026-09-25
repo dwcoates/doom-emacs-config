@@ -191,12 +191,12 @@ func (i *Index) refresh(clearMisses bool) {
 	// sent every watcher back to a per-id glob over every shim directory,
 	// which held 74% of the sidecar's CPU (2026-09-24 profile, 2085 watchers,
 	// 132 shim directories).
-	stamp := i.linkFingerprint()
+	stamp, records := i.fingerprints()
 	if clearMisses || stamp != i.linkStamp {
 		i.unlinked = map[string]bool{}
 	}
 	i.linkStamp = stamp
-	i.recordStamp = i.recordFingerprint()
+	i.recordStamp = records
 
 	for _, path := range i.glob(filepath.Join(i.stateDir, "shim", "*", "agent-id.json")) {
 		var record agentIDRecord
@@ -369,47 +369,49 @@ func (i *Index) RecheckLinks() {
 
 // linkFingerprint renders the link directories and their mtimes, in a stable
 // order, so two checks over an unchanged tree read identically.
-//
-// A DIRECTORY THAT CANNOT BE STAT'D IS RENDERED AS SUCH rather than skipped: a
-// workspace whose records became unreadable is a CHANGE, and skipping it would
-// make the tree look untouched.
 func (i *Index) linkFingerprint() string {
-	dirs := i.glob(filepath.Join(i.stateDir, "shim", "*"))
-	sort.Strings(dirs)
-	var out strings.Builder
-	for _, dir := range dirs {
-		linkDir := filepath.Join(dir, "vendor-id")
-		out.WriteString(linkDir)
-		if info, err := os.Stat(linkDir); err == nil {
-			out.WriteString("|" + strconv.FormatInt(info.ModTime().UnixNano(), 10))
-		} else {
-			out.WriteString("|absent")
-		}
-		out.WriteByte('\n')
-	}
-	return out.String()
+	link, _ := i.fingerprints()
+	return link
 }
 
 // recordFingerprint renders every identity record directory — each
 // `<state>/shim/<key>` and its `vendor-id` — with its mtime, in a stable order.
-// A directory that cannot be stat'd is rendered as such, so a workspace whose
-// records became unreadable reads as a change rather than as untouched.
 func (i *Index) recordFingerprint() string {
+	_, record := i.fingerprints()
+	return record
+}
+
+// fingerprints renders both fingerprints from ONE glob of `<state>/shim/*` and
+// one stat per directory.
+//
+// OPTIMIZATION: the two share a walk because a refresh needs both, and the
+// active-workspace probe runs a refresh check every poll tick; one glob per
+// refresh instead of two keeps a rescan's identity cost to a constant handful
+// of globs (cycle_test.go pins it).
+//
+// A DIRECTORY THAT CANNOT BE STAT'D IS RENDERED AS SUCH rather than skipped: a
+// workspace whose records became unreadable is a CHANGE, and skipping it would
+// make the tree look untouched.
+func (i *Index) fingerprints() (link, record string) {
 	dirs := i.glob(filepath.Join(i.stateDir, "shim", "*"))
 	sort.Strings(dirs)
-	var out strings.Builder
+	var links, records strings.Builder
 	for _, dir := range dirs {
 		for _, path := range []string{dir, filepath.Join(dir, "vendor-id")} {
-			out.WriteString(path)
+			line := path
 			if info, err := os.Stat(path); err == nil {
-				out.WriteString("|" + strconv.FormatInt(info.ModTime().UnixNano(), 10))
+				line += "|" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
 			} else {
-				out.WriteString("|absent")
+				line += "|absent"
 			}
-			out.WriteByte('\n')
+			line += "\n"
+			records.WriteString(line)
+			if path != dir {
+				links.WriteString(line)
+			}
 		}
 	}
-	return out.String()
+	return links.String(), records.String()
 }
 
 // readLink reads and validates one vendor-session pointer file.
@@ -435,6 +437,10 @@ func (i *Index) readLink(path string) (vendorLinkRecord, bool) {
 // glob enumerates one shape under the state root. A glob error is a malformed
 // PATTERN, which is this package's own bug, so it is stated at error rather
 // than passed off as "no records".
+// Globs is how many filepath.Glob calls the index has made, for the suites
+// that pin the poll and rescan paths' cost.
+func (i *Index) Globs() int { return i.globs }
+
 func (i *Index) glob(pattern string) []string {
 	i.globs++
 	matches, err := filepath.Glob(pattern)
