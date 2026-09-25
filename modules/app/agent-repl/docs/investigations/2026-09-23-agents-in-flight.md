@@ -12,7 +12,9 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `feat/every-turn-ends-visibly` | `~/.config/doom-worktrees/every-turn-ends-visibly` | Owner ruling: one door closes every turn row AND writes its `turn_ended` row (with replay backfill and a source-scan guard); a non-normal ending draws a red-bordered purple response bubble (the ONLY UI change allowed; anything else is surfaced first); a shim death gets its own reason; tool groups never span turns. | `aeb94414b855775de` | 09-24 |
+| `perf/store-live-work-indexes` | `~/.config/doom-worktrees/store-live-work-indexes` | Real indexes for the store's `live_work` query (and any hot query still auto-indexing), applied in place with no nuke, plus a query-plan test. | `a649448e0d0a80c4e` | 09-25 |
+
+Then: the owner asked to bounce everything (Emacs, webapp, backends) once this lands.
 
 ## Still waiting on the owner
 
@@ -21,6 +23,8 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- 09-25: `feat/sidecar-watches-active-workspaces` (the sidecar watches only active workspaces) and `fix/sidecar-writes-lineage` (a copied subagent keeps its spawner lineage) were merged by the lead. The lineage test was fixed for the required write class, and the store and sidecar suites are green.
+- 09-24: every turn ends visibly (one close door), and many handover, relaunch and perf fixes (see `git log`).
 - CPU (owner report, 19:05): a lead-made wait loop from 09-23 (`until [ -s /dev/null ]`) had spun one core for 19 h; it was killed. The sidecar held 70-90% of a core, and a 20 s pprof (the new `--pprof`, `feat/sidecar-pprof`, enabled via `launchctl setenv AGENT_REPL_SIDECAR_PPROF_ADDR`) showed 74% in rekeyRotations→Resolve→Glob: the poll-path Refresh dropped every remembered miss on each tick. Fixed (`27b092b36`), and the sidecar is now 1-4%. Handover and relaunch defects landed (`fix/first-real-handover-defects`), and the 19:0x deploy was a clean handover. NEXT: watch only open workspaces' files (owner idea; ~2085 files down to ~20), and the store `live_work` query builds 4 AUTOMATIC indexes per call (~400 ms; add real indexes without a schema nuke).
 - 09-24 18:27 deploy (MCP card, lock arms, keepalive retired, dead-shim revival, adopted turns): all suites green, but the handover's stale bounce misfired (see the handover-defects row). Workspace 9e138edb has no shim until its next select or prompt revives it. Store profiling result: WARN `store.db.slow-query` `live_work` is persistently about 375 ms (to investigate).
 - MCP calls are an ordinary tool-call arm and card; the `keepalive` unserved arm is retired in the proto; every lock-holder failure is a truthful `LockHolderFailure` refusal (`feat/mcp-card-keepalive-retire-lock-arms`; all suites green on master after regenerating the conflicting store protos). A shim that dies on its own is revived unasked in about 150 ms and the turn it cut ends; an adoption closes turns that ended unobserved (`fix/dead-shim-recovery-and-adopted-turns`). Open for the owner: the footer shows a brief `disconnected`/`shim_died` transient during the revival; hiding it would be a UI change.
