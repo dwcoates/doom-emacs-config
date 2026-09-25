@@ -527,6 +527,34 @@ func TestTheSweepsCursorPageSeeksTheCursorKey(t *testing.T) {
 	}
 }
 
+// The sweep's delete joins cursor to the ledger through a subquery, which is
+// exactly the shape SQLite answers with an AUTOMATIC index when the join column
+// has no real one.
+func TestTheSweepsStatementsBuildNoAutomaticIndex(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+		args      []any
+	}{
+		{name: "the delete", statement: ledgerPruneDeleteSQL,
+			args: []any{"", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch}},
+		{name: "the page read", statement: ledgerSweepPageSQL,
+			args: []any{"", ledgerSweepCursorsPerBatch}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			assertNoAutomaticIndex(t, test.name, plan)
+		})
+	}
+}
+
 // ---- the sweep is bounded in work, and timed like any write ----
 
 // seedCursorFiles inserts `files` cursor rows, each with one ledger row far
