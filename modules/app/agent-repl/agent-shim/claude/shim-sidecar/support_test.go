@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/livelock"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
 )
@@ -147,12 +150,21 @@ type harness struct {
 	// under. It exists for every harness so a subject can drop a record into it
 	// without rebuilding the sidecar; an empty one resolves nothing, which is
 	// what every other subject sees.
-	state  string
-	clock  time.Time
-	socket string
+	state string
+	// lockDir is where the shims' workspace locks live; a session the harness
+	// ACTIVATES holds a real flock there, exactly as a live shim does.
+	lockDir string
+	// held is every workspace lock the harness holds, by workspace key.
+	held map[string]*os.File
+	// recorded maps every vendor session id an identity record the harness
+	// wrote names — an agent-id.json's original or a link's rotated id — to
+	// that record's workspace key.
+	recorded map[string]string
+	clock    time.Time
+	socket   string
 }
 
-func shortSocket(t *testing.T) string {
+func shortSocket(t testing.TB) string {
 	t.Helper()
 	raw := make([]byte, 4)
 	if _, err := rand.Read(raw); err != nil {
@@ -169,7 +181,15 @@ func shortSocket(t *testing.T) string {
 
 // newHarness builds the sidecar. store == nil leaves the socket unbound, which
 // is what an unreachable store looks like.
-func newHarness(t *testing.T, store *fakeStore) *harness {
+func newHarness(t testing.TB, store *fakeStore) *harness {
+	t.Helper()
+	return newHarnessAtLevel(t, store, sharedlogging.LevelDebug)
+}
+
+// newHarnessAtLevel is newHarness with its log threshold chosen: the benchmark
+// runs at production's info so it measures the cycle rather than the
+// formatting of debug records nothing would keep.
+func newHarnessAtLevel(t testing.TB, store *fakeStore, level sharedlogging.Level) *harness {
 	t.Helper()
 	base := t.TempDir()
 	h := &harness{
@@ -179,10 +199,13 @@ func newHarness(t *testing.T, store *fakeStore) *harness {
 		spool:     filepath.Join(base, "spool"),
 		workspace: filepath.Join(base, "workspace"),
 		state:     filepath.Join(base, "state"),
+		lockDir:   filepath.Join(base, "lock"),
+		held:      map[string]*os.File{},
+		recorded:  map[string]string{},
 		clock:     time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC),
 		socket:    shortSocket(t),
 	}
-	for _, dir := range []string{h.rootA, h.spool, h.state} {
+	for _, dir := range []string{h.rootA, h.spool, h.state, h.lockDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("creating %s: %v", dir, err)
 		}
@@ -192,10 +215,11 @@ func newHarness(t *testing.T, store *fakeStore) *harness {
 	}
 	var logs []string
 	h.logs = &logs
-	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	log := logging.NewAtLevel(sliceWriter{lines: &logs}, io.Discard, level).With(logging.Context{Component: "sidecar-test"})
 	h.sc = newSidecar(Options{
 		StoreSocket:    h.socket,
 		StateDir:       h.state,
+		LockDir:        h.lockDir,
 		ConfigRoots:    []string{h.rootA},
 		SpoolRoot:      h.spool,
 		PollInterval:   time.Second,
@@ -204,10 +228,95 @@ func newHarness(t *testing.T, store *fakeStore) *harness {
 	h.sc.now = func() time.Time { return h.clock }
 	h.sc.jitter = func(d time.Duration) time.Duration { return d }
 	h.sc.bootTimeMs = func() int64 { return 0 }
+	t.Cleanup(func() {
+		for key := range h.held {
+			h.release(t, key)
+		}
+	})
+	// THE SESSION EVERY SPAWN FIXTURE NAMES IS A LIVE agent-repl SESSION, so a
+	// spool its launch claims belongs to an active workspace.
+	h.activate(t, "session-1")
 	return h
 }
 
-func (h *harness) serve(t *testing.T, store *fakeStore) {
+// workspaceKeyOf is the fixture's workspace key for a session: eight hex digits,
+// the shape the shim's md5(cwd)[:8] has. Nothing reads meaning into it; it only
+// has to join the identity record to its lock by name.
+func workspaceKeyOf(session string) string {
+	sum := md5.Sum([]byte(session))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// activate makes session a LIVE agent-repl session: the shim's agent-id.json
+// names it as its workspace's conversation, and the workspace's kernel lock is
+// held, exactly as a shim inside StartSession holds it. It answers the key.
+//
+// A session an identity record already names — the original a subject minted,
+// or a rotation it linked — is not given a second record: its workspace's lock
+// is held, which is what makes it live.
+func (h *harness) activate(t testing.TB, session string) string {
+	t.Helper()
+	key, recorded := h.recorded[session]
+	if !recorded {
+		key = workspaceKeyOf(session)
+		h.writeAgentID(t, key, session)
+	}
+	h.hold(t, key)
+	return key
+}
+
+// hold takes a workspace's kernel lock, as a live shim holds it, unless the
+// harness already does.
+func (h *harness) hold(t testing.TB, key string) {
+	t.Helper()
+	if _, ok := h.held[key]; ok {
+		return
+	}
+	path := livelock.Path(h.lockDir, key)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatalf("creating the workspace lock %s: %v", path, err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("taking the workspace lock %s: %v", path, err)
+	}
+	h.held[key] = file
+}
+
+// release drops a workspace's lock, which is what a shim's death looks like to
+// every other process.
+func (h *harness) release(t testing.TB, key string) {
+	t.Helper()
+	file, ok := h.held[key]
+	if !ok {
+		t.Fatalf("workspace %s's lock is not held", key)
+	}
+	delete(h.held, key)
+	if err := file.Close(); err != nil {
+		t.Fatalf("releasing workspace %s's lock: %v", key, err)
+	}
+}
+
+// writeAgentID writes a workspace's agent-id.json by tmp-and-rename, the way the
+// shim's engine/identity.ts does, so the record directory's mtime moves.
+func (h *harness) writeAgentID(t testing.TB, key, original string) {
+	t.Helper()
+	dir := filepath.Join(h.state, "shim", key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	record := `{"original_vendor_session_id":"` + original + `","workspace_key":"` + key + `","minted_at_ms":1735689600000}` + "\n"
+	temporary := filepath.Join(dir, "agent-id.json.tmp")
+	if err := os.WriteFile(temporary, []byte(record), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", temporary, err)
+	}
+	if err := os.Rename(temporary, filepath.Join(dir, "agent-id.json")); err != nil {
+		t.Fatalf("renaming %s into place: %v", temporary, err)
+	}
+	h.recorded[original] = key
+}
+
+func (h *harness) serve(t testing.TB, store *fakeStore) {
 	t.Helper()
 	listener, err := net.Listen("unix", h.socket)
 	if err != nil {
@@ -232,8 +341,18 @@ func (h *harness) serve(t *testing.T, store *fakeStore) {
 // advance moves the fake clock.
 func (h *harness) advance(d time.Duration) { h.clock = h.clock.Add(d) }
 
-// transcript writes a session transcript and returns its resolved path.
-func (h *harness) transcript(t *testing.T, session string, lines ...string) string {
+// transcript writes a LIVE agent-repl session's transcript and returns its
+// resolved path; the session is activated first.
+func (h *harness) transcript(t testing.TB, session string, lines ...string) string {
+	t.Helper()
+	h.activate(t, session)
+	return h.inactiveTranscript(t, session, lines...)
+}
+
+// inactiveTranscript writes a transcript WITHOUT making its session live: an
+// external session, a closed workspace's, or a rotation whose link has not
+// landed. It returns the resolved path.
+func (h *harness) inactiveTranscript(t testing.TB, session string, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(h.rootA, "projects", "proj", session+".jsonl")
 	h.write(t, path, strings.Join(lines, "\n")+"\n")
@@ -253,7 +372,7 @@ func (h *harness) spoolFile(t *testing.T, taskID, content string) string {
 	return normalized(path)
 }
 
-func (h *harness) write(t *testing.T, path, content string) {
+func (h *harness) write(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("creating %s: %v", filepath.Dir(path), err)

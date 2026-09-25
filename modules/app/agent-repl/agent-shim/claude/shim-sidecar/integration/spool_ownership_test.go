@@ -368,7 +368,7 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 	if err := os.Symlink(realSpoolRoot, linkSpoolRoot); err != nil {
 		t.Fatalf("symlink %s -> %s: %v", linkSpoolRoot, realSpoolRoot, err)
 	}
-	tree := &vendorTree{t: t, Root: filepath.Join(base, "config-root"), SpoolRoot: linkSpoolRoot}
+	tree := &vendorTree{t: t, Root: filepath.Join(base, "config-root"), SpoolRoot: linkSpoolRoot, live: liveRootFor(t)}
 	mustMkdirAll(t, filepath.Join(tree.Root, "projects"))
 
 	cwd := "/Users/dodgecoates/spool-symlink-probe"
