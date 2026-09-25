@@ -837,7 +837,7 @@ func (s *sidecar) rescan() {
 	}
 	// THE ACTIVE SET IS RE-READ BEFORE THE SCAN IS GATED BY IT, so the first
 	// cycle's walk admits exactly the files of the workspaces that are live.
-	s.refreshActive(now)
+	s.refreshActiveAfterRescanRefresh(now)
 	if s.cursors == nil {
 		// An admitted file's cursor could not be recovered; production is
 		// suspended and the next cycle rescans.

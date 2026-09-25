@@ -134,7 +134,25 @@ func (s *sidecar) goDormant(target discover.Target) {
 // It runs on every poll tick and inside every rescan.
 func (s *sidecar) refreshActive(now time.Time) {
 	s.requireCursors("refreshActive")
-	refreshed := s.identity.RefreshIfMoved()
+	s.applyActive(now, s.identity.RefreshIfMoved())
+}
+
+// refreshActiveAfterRescanRefresh is refreshActive for the rescan, which has
+// just refreshed the identity records itself.
+//
+// OPTIMIZATION: the record fingerprint is not re-walked (one glob and two stats
+// per workspace saved per rescan), and the dormant set is not re-offered for
+// the refresh — the scan right after offers every discovered file anyway.
+func (s *sidecar) refreshActiveAfterRescanRefresh(now time.Time) {
+	s.requireCursors("refreshActive")
+	s.applyActive(now, false)
+}
+
+// applyActive is the body of both: probe the locks, then reconcile the watched
+// set. recordsMoved says an identity record changed, which can change which
+// conversation a dormant file belongs to without any lock changing.
+func (s *sidecar) applyActive(now time.Time, recordsMoved bool) {
+	refreshed := recordsMoved
 	next := s.probeActive()
 	var started, ended int
 	for original, key := range s.active {
