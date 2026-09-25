@@ -468,6 +468,7 @@ func TestTheConfiguredRecoveryLadderReachesTheCycle(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket:       filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:           t.TempDir(),
 		RecoverBackoffMin: 3 * time.Millisecond,
 		RecoverBackoffMax: 7 * time.Millisecond,
 	}
@@ -597,6 +598,7 @@ func TestTheConfiguredLostWindowsReachTheTracker(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket: filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:     t.TempDir(),
 		Stale: stale.Options{
 			Grace:           11 * time.Millisecond,
 			ShellSilence:    22 * time.Millisecond,
@@ -622,6 +624,7 @@ func TestTheConfiguredHoldWindowReachesTheHeldIndex(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket:        filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:            t.TempDir(),
 		UnownedSpoolWindow: 12 * time.Millisecond,
 	}
 

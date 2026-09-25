@@ -48,18 +48,21 @@ func writesUnderBook(store *fakeStore, book string) int {
 }
 
 // TestARotatedTranscriptSeenBeforeItsLinkIsNotRead is the race itself, forced:
-// nothing of the rotated file may reach the store under its own id.
+// nothing of the rotated file may reach the store under its own id. No record
+// names the rotated id yet, so no active workspace owns it and it is not even
+// admitted (active.go); the rotation hold below is the second guard.
 func TestARotatedTranscriptSeenBeforeItsLinkIsNotRead(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, caveatLine, clearLine, localLine)
+	path := h.inactiveTranscript(t, bookRotated, caveatLine, clearLine, localLine)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
+	h.sc.discoverChanged()
 	h.sc.pollAll()
 
 	// Assert.
@@ -71,20 +74,31 @@ func TestARotatedTranscriptSeenBeforeItsLinkIsNotRead(t *testing.T) {
 	}
 }
 
-// TestTheRotationHoldIsStatedOnce: the hold begins at INFO, once, however many
-// polls re-examine it.
-func TestTheRotationHoldIsStatedOnce(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, &fakeStore{})
+// heldRotation arranges the rotation hold's own subject: a rotated transcript
+// beside a recorded sibling, offered to the hold directly. Admission would
+// never offer it — no record names it yet — so the hold's verdicts are
+// exercised on the target the scan produces.
+func heldRotation(t *testing.T, h *harness, lines ...string) (string, discover.Target) {
+	t.Helper()
 	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, caveatLine, clearLine, localLine)
+	path := h.inactiveTranscript(t, bookRotated, lines...)
+	target := scannedTarget(t, h, path)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
+	return path, target
+}
+
+// TestTheRotationHoldIsStatedOnce: the hold begins at INFO, once, however many
+// times it is re-examined.
+func TestTheRotationHoldIsStatedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	path, target := heldRotation(t, h, caveatLine, clearLine, localLine)
 
 	// Act.
-	h.sc.pollAll()
-	h.sc.pollAll()
+	h.sc.awaitsRotationLink(target)
+	h.sc.awaitsRotationLink(target)
 
 	// Assert.
 	rec := h.requireOnce(t, "rotation-hold", "info")
@@ -93,21 +107,24 @@ func TestTheRotationHoldIsStatedOnce(t *testing.T) {
 	}
 }
 
-// TestTheLinkReleasesTheHoldOnTheNextPoll: once the shim names the book, the
-// very next read takes the file from its start, under the original's book.
-func TestTheLinkReleasesTheHoldOnTheNextPoll(t *testing.T) {
+// TestTheLinkAdmitsTheRotationOnTheNextTick: once the shim names the book, the
+// very next poll tick admits the file and reads it from its start, under the
+// original's book. It is the rotation INTO an active workspace being followed.
+func TestTheLinkAdmitsTheRotationOnTheNextTick(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, caveatLine, clearLine, localLine)
+	path := h.inactiveTranscript(t, bookRotated, caveatLine, clearLine, localLine)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
+	h.sc.discoverChanged()
 	h.sc.pollAll()
 
-	// Act: the shim writes its link, and no rescan runs before the next poll.
+	// Act: the shim writes its link, and no rescan runs before the next tick.
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.sc.discoverChanged()
 	h.sc.pollAll()
 
 	// Assert.
@@ -116,16 +133,13 @@ func TestTheLinkReleasesTheHoldOnTheNextPoll(t *testing.T) {
 		t.Fatal("the rotated transcript is still unwatched after its link landed")
 	}
 	if got := w.ctx.MainAgentID; got != bookOriginal {
-		t.Errorf("the released transcript books to %q, want the original %q", got, bookOriginal)
+		t.Errorf("the admitted transcript books to %q, want the original %q", got, bookOriginal)
 	}
 	if n := writesUnderBook(store, bookRotated); n != 0 {
 		t.Errorf("%d batch(es) landed under the rotated id %q", n, bookRotated)
 	}
 	if n := writesUnderBook(store, bookOriginal); n == 0 {
-		t.Error("nothing of the released transcript reached the original's book")
-	}
-	if _, still := h.sc.rotationHeld[path]; still {
-		t.Error("the released transcript is still in the hold")
+		t.Error("nothing of the admitted transcript reached the original's book")
 	}
 }
 
@@ -133,16 +147,13 @@ func TestTheLinkReleasesTheHoldOnTheNextPoll(t *testing.T) {
 func TestTheReleaseIsStated(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	recordedSibling(t, h)
-	h.transcript(t, bookRotated, caveatLine, clearLine, localLine)
-	if err := h.sc.beginCycle(); err != nil {
-		t.Fatalf("beginCycle: %v", err)
-	}
-	h.sc.pollAll()
+	_, target := heldRotation(t, h, caveatLine, clearLine, localLine)
+	h.sc.awaitsRotationLink(target)
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.sc.identity.Refresh()
 
 	// Act.
-	h.sc.pollAll()
+	h.sc.awaitsRotationLink(target)
 
 	// Assert.
 	released := 0
@@ -156,43 +167,39 @@ func TestTheReleaseIsStated(t *testing.T) {
 	}
 }
 
-// TestAClearInADirectoryTheShimNeverRecordedKeepsItsOwnBook: a conversation the
-// vendor ran outside the shim is untouched — R9's resume rule books it.
-func TestAClearInADirectoryTheShimNeverRecordedKeepsItsOwnBook(t *testing.T) {
+// TestAClearInADirectoryTheShimNeverRecordedIsNotHeld: the hold is only for a
+// clear the shim will link; beside no shim conversation it holds nothing. (No
+// active workspace owns such a file either, so it is never admitted.)
+func TestAClearInADirectoryTheShimNeverRecordedIsNotHeld(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	path := h.transcript(t, bookRotated, caveatLine, clearLine, localLine)
-
-	// Act.
+	path := h.inactiveTranscript(t, bookRotated, caveatLine, clearLine, localLine)
+	target := scannedTarget(t, h, path)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
 
+	// Act.
+	held := h.sc.awaitsRotationLink(target)
+
 	// Assert.
-	w, watched := h.sc.watchers[path]
-	if !watched {
-		t.Fatal("a clear with no shim conversation beside it is held; nothing will ever link it")
-	}
-	if got := w.ctx.MainAgentID; got != bookRotated {
-		t.Errorf("it books to %q, want its own id %q", got, bookRotated)
+	if held {
+		t.Error("a clear with no shim conversation beside it is held; nothing will ever link it")
 	}
 }
 
 // TestATranscriptThatDoesNotOpenWithAClearIsNotHeld: an ordinary transcript
-// beside a shim conversation is read at once.
+// beside a shim conversation is not held.
 func TestATranscriptThatDoesNotOpenWithAClearIsNotHeld(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, promptLine)
+	_, target := heldRotation(t, h, promptLine)
 
 	// Act.
-	if err := h.sc.beginCycle(); err != nil {
-		t.Fatalf("beginCycle: %v", err)
-	}
+	held := h.sc.awaitsRotationLink(target)
 
 	// Assert.
-	if _, watched := h.sc.watchers[path]; !watched {
+	if held {
 		t.Error("a transcript that opens with an ordinary prompt was held")
 	}
 }
@@ -202,17 +209,14 @@ func TestATranscriptThatDoesNotOpenWithAClearIsNotHeld(t *testing.T) {
 func TestATranscriptWithNoUserRecordYetIsHeld(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, caveatLine)
+	_, target := heldRotation(t, h, caveatLine)
 
 	// Act.
-	if err := h.sc.beginCycle(); err != nil {
-		t.Fatalf("beginCycle: %v", err)
-	}
+	held := h.sc.awaitsRotationLink(target)
 
 	// Assert.
-	if _, watched := h.sc.watchers[path]; watched {
-		t.Error("a transcript that has not yet said whether it opens with a clear was read")
+	if !held {
+		t.Error("a transcript that has not yet said whether it opens with a clear was not held")
 	}
 }
 
@@ -245,7 +249,7 @@ func TestAnUnreadableOpeningIsHeldAndWarned(t *testing.T) {
 	// after the open succeeds.
 	h := newHarness(t, &fakeStore{})
 	recordedSibling(t, h)
-	path := h.transcript(t, bookRotated, clearLine)
+	path := h.inactiveTranscript(t, bookRotated, clearLine)
 	target := scannedTarget(t, h, path)
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("removing %s: %v", path, err)

@@ -68,6 +68,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/stale"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/buildreport"
 )
 
 // Defaults for the two loop intervals. Polling is frequent because it is what
@@ -168,7 +169,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	lockDir, err := buildreport.ResolveDir(os.Getenv)
+	if err != nil {
+		reportFatal(fmt.Errorf("resolve the workspace-lock directory: %w", err), os.Stderr)
+		os.Exit(1)
+	}
+
 	options := Options{
+		LockDir:            lockDir,
 		StoreSocket:        *storeSocket,
 		StateDir:           resolveStateDir(*stateDir),
 		ConfigRoots:        parseRoots(*configRoots),
@@ -212,6 +220,11 @@ type Options struct {
 	RecoverBackoffMax time.Duration
 	// PprofAddr is the opt-in profiling surface's address. Empty is OFF.
 	PprofAddr string
+	// LockDir is the kernel-lock directory the shims hold their workspace locks
+	// in ($AGENT_REPL_LOCK_DIR, else ~/.cache/agent-repl/run). A held lock is
+	// what makes a workspace ACTIVE, and only an active workspace's files are
+	// watched (active.go). Required.
+	LockDir string
 }
 
 // durationSource is one duration option's two spellings: the flag value the
@@ -508,8 +521,8 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 	// would print `/tmp` above thousands of records under `/private/tmp` and
 	// break the one join this record exists to make.
 	logf.With(logging.Context{Operation: "start"}).Log(
-		"sidecar starting config_roots=%v spool_root=%s state_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
-		sc.disc.ConfigRoots(), sc.disc.SpoolRoot(), options.StateDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
+		"sidecar starting config_roots=%v spool_root=%s state_dir=%s lock_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
+		sc.disc.ConfigRoots(), sc.disc.SpoolRoot(), options.StateDir, options.LockDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
 	if err := sc.Run(stop); err != nil {
 		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
 		return err

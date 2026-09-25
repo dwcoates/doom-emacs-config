@@ -309,6 +309,9 @@ type vendorTree struct {
 	t         *testing.T
 	Root      string // a --config-roots entry
 	SpoolRoot string // a --spool-root value
+	// live is the subject's state root, where a session is made LIVE the way a
+	// shim makes one (helpers_live_test.go). Every tree of one subject shares it.
+	live *liveRoot
 }
 
 func newVendorTree(t *testing.T) *vendorTree {
@@ -318,6 +321,7 @@ func newVendorTree(t *testing.T) *vendorTree {
 		t:         t,
 		Root:      filepath.Join(base, "config-root"),
 		SpoolRoot: filepath.Join(base, "spool-root"),
+		live:      liveRootFor(t),
 	}
 	mustMkdirAll(t, filepath.Join(v.Root, "projects"))
 	mustMkdirAll(t, filepath.Join(v.SpoolRoot, "claude-"+spoolUID))
@@ -332,6 +336,7 @@ func newVendorTreeSharingSpool(t *testing.T, spoolRoot string) *vendorTree {
 		t:         t,
 		Root:      filepath.Join(t.TempDir(), "config-root-2"),
 		SpoolRoot: spoolRoot,
+		live:      liveRootFor(t),
 	}
 	mustMkdirAll(t, filepath.Join(v.Root, "projects"))
 	return v
@@ -341,11 +346,25 @@ func (v *vendorTree) projectDir(slug string) string {
 	return filepath.Join(v.Root, "projects", slug)
 }
 
+// sessionPath is the transcript path of a LIVE agent-repl session: asking for
+// it makes the session live (helpers_live_test.go), because only an active
+// workspace's files are read.
 func (v *vendorTree) sessionPath(slug, session string) string {
+	v.live.activate(v.t, session)
+	return v.inactiveSessionPath(slug, session)
+}
+
+// inactiveSessionPath is the transcript path of a session that is NOT live: a
+// session run outside agent-repl, a closed workspace's, or a rotation whose
+// link has not landed yet.
+func (v *vendorTree) inactiveSessionPath(slug, session string) string {
 	return filepath.Join(v.projectDir(slug), session+".jsonl")
 }
 
+// subagentPath is a subagent transcript of a LIVE session; its parent session
+// is made live.
 func (v *vendorTree) subagentPath(slug, session, agentID string) string {
+	v.live.activate(v.t, session)
 	return filepath.Join(v.projectDir(slug), session, "subagents", "agent-"+agentID+".jsonl")
 }
 
@@ -669,6 +688,7 @@ type sidecarOptions struct {
 func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
 	t.Helper()
 	return sidecarOptions{
+		StateDir:     tree.live.state,
 		StoreSocket:  storeSocket,
 		ConfigRoots:  []string{tree.Root},
 		SpoolRoot:    tree.SpoolRoot,
@@ -771,7 +791,7 @@ type sidecarProc struct {
 func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	t.Helper()
 	if opts.StateDir == "" {
-		opts.StateDir = t.TempDir()
+		opts.StateDir = liveRootFor(t).state
 	}
 	daemon := startFakeClientLog(t, opts.StateDir, opts.LogPath, opts.ConfigRoots)
 	mustMkdirAll(t, filepath.Dir(opts.LogPath))
@@ -816,7 +836,10 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		// A private lock dir keeps the boot's build-report write
 		// (agentrepl/logging/buildreport) out of the owner's real
 		// ~/.cache/agent-repl/run.
-		"AGENT_REPL_LOCK_DIR="+filepath.Join(opts.StateDir, "lock"),
+		// It is also where the sidecar probes the shims' WORKSPACE LOCKS, so a
+		// session the subject made live (helpers_live_test.go) is one this
+		// sidecar reads.
+		"AGENT_REPL_LOCK_DIR="+liveLockDir(opts.StateDir),
 	)
 	hasLogLevel := false
 	for _, value := range opts.ExtraEnv {

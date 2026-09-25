@@ -441,6 +441,7 @@ func TestAnEmptySpoolBacklogEmitsNoSummary(t *testing.T) {
 // cwd, so workspace attribution cannot be resolved and the transcript is held.
 func (h *harness) unresolvableTranscript(t *testing.T, session string) string {
 	t.Helper()
+	h.activate(t, session)
 	path := filepath.Join(h.rootA, "projects", "proj", session+".jsonl")
 	h.write(t, path, promptLine+"\n")
 	return normalized(path)

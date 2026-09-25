@@ -57,6 +57,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/identity"
+	"agentrepl/shim-claude-sidecar/internal/livelock"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
@@ -170,6 +171,26 @@ type sidecar struct {
 	// ORIGINAL id — the shim-minted main AgentId — through the identity files
 	// the shim writes. It is refreshed on the rescan interval, beside discovery.
 	identity *identity.Index
+	// lockHeld probes the workspace locks live shims hold (active.go); it is
+	// livelock.Held.
+	lockHeld liveProbe
+	// active maps every conversation whose workspace lock is held — by its
+	// ORIGINAL vendor session id — to its workspace key, as of the last probe.
+	// Only files of an active or draining conversation are watched (active.go).
+	// Process-scoped: a store outage does not change which shims are alive.
+	active map[string]string
+	// draining holds the conversations whose lock was released while one of
+	// their watched files was still owed something; they stay watched until
+	// the LOST policy's bounds say nothing more is owed.
+	draining map[string]string
+	// dormant is every discovered file no active or draining conversation
+	// owns, by resolved path: kept UNREAD so an activation can read it from its
+	// cursor without a per-file walk of the disk.
+	dormant map[string]discover.Target
+	// lockFailures and drainFailures remember the probe failures already
+	// stated, so a condition is one record rather than one per tick.
+	lockFailures  map[string]string
+	drainFailures map[string]string
 	// rotationHeld is every main transcript held UNREAD because its book is
 	// owed by a rotation link the shim has not written yet (rotation.go), by
 	// resolved path. Process-scoped: the hold is a fact about the disk, which a
@@ -381,12 +402,19 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		workspaceBySession: map[string]workspaceAttribution{},
 		workspaceFailures:  map[string]string{},
 		rotationHeld:       map[string]discover.Target{},
+		lockHeld:           livelock.Held,
+		active:             map[string]string{},
+		draining:           map[string]string{},
+		dormant:            map[string]discover.Target{},
+		lockFailures:       map[string]string{},
+		drainFailures:      map[string]string{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
 		now:        time.Now,
 		jitter:     jitterBackoff,
 		bootTimeMs: bootTimeMillis,
 	}
+	requireLockDir(options)
 	s.backoffMin, s.backoffMax = resolveBackoff(options.RecoverBackoffMin, options.RecoverBackoffMax)
 	s.identity = identity.New(options.StateDir, log.With(logging.Context{Component: "identity"}))
 	s.owners = newOwnerIndex(log.With(logging.Context{Component: "owner"}))
@@ -785,9 +813,19 @@ func (s *sidecar) rescan() {
 	// RE-KEYED, so a rotation that happened since the last pass is already
 	// known when the transcript it produced is first seen.
 	s.identity.Refresh()
+	// THE ACTIVE SET IS RE-READ BEFORE THE SCAN IS GATED BY IT, so the first
+	// cycle's walk admits exactly the files of the workspaces that are live.
+	s.refreshActive(now)
+	if s.cursors == nil {
+		// An admitted file's cursor could not be recovered; production is
+		// suspended and the next cycle rescans.
+		return
+	}
 	s.rekeyRotations()
 	s.refreshSpawnFacts()
-	if _, ok := s.watchTargets(s.disc.Scan(), now); !ok {
+	scanned := s.disc.Scan()
+	s.pruneDormant(scanned)
+	if _, ok := s.watchTargets(scanned, now); !ok {
 		return
 	}
 	s.reportRescan()
@@ -818,6 +856,16 @@ func (s *sidecar) rescan() {
 // stat per candidate directory and nothing else.
 func (s *sidecar) discoverChanged() {
 	s.requireCursors("discoverChanged")
+	// WHICH WORKSPACES ARE ACTIVE IS ASKED FIRST, so a file of a workspace that
+	// opened on this tick is admitted and read on this tick, and neither the
+	// probe nor the poll after it spends a stat on a file whose workspace has
+	// drained (active.go).
+	s.refreshActive(s.now())
+	if s.cursors == nil {
+		// An admitted file's cursor could not be recovered; production is
+		// suspended, and so is the rest of this tick.
+		return
+	}
 	changed := s.disc.ScanChanged()
 	if len(changed) == 0 {
 		return
@@ -864,6 +912,14 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 		if target.MetaMissing {
 			// discover.withMeta already stated this once; the target stays
 			// discovered and is re-checked on the next rescan.
+			continue
+		}
+		if !s.admits(target) {
+			// NO ACTIVE WORKSPACE OWNS IT, so it is not read, not attributed and
+			// not polled (active.go). This is before resolveTarget on purpose:
+			// attribution reads the transcript, and that is a per-file cost the
+			// gate exists to avoid.
+			s.goDormant(target)
 			continue
 		}
 		resolved, ok := s.resolveTarget(target, now)
@@ -1055,6 +1111,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		s.rewindOnce(target, identity, tailer, now)
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
+	delete(s.dormant, target.Path)
 	s.trackDetached(target, now)
 	// PER FILE, SO VERBOSE. This process watches every transcript under both
 	// config roots with no age bound, which on a developer's machine is
