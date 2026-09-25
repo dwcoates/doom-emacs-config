@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -468,6 +469,7 @@ func TestTheConfiguredRecoveryLadderReachesTheCycle(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket:       filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:           t.TempDir(),
 		RecoverBackoffMin: 3 * time.Millisecond,
 		RecoverBackoffMax: 7 * time.Millisecond,
 	}
@@ -597,6 +599,7 @@ func TestTheConfiguredLostWindowsReachTheTracker(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket: filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:     t.TempDir(),
 		Stale: stale.Options{
 			Grace:           11 * time.Millisecond,
 			ShellSilence:    22 * time.Millisecond,
@@ -622,6 +625,7 @@ func TestTheConfiguredHoldWindowReachesTheHeldIndex(t *testing.T) {
 	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
 	options := Options{
 		StoreSocket:        filepath.Join(os.TempDir(), "ar-unused.sock"),
+		LockDir:            t.TempDir(),
 		UnownedSpoolWindow: 12 * time.Millisecond,
 	}
 
@@ -2800,8 +2804,13 @@ func TestARescanInsideTheClearIntervalKeepsTheRememberedMisses(t *testing.T) {
 	// Arrange: a first pass over watched transcripts nothing links, so each id
 	// is a remembered miss.
 	h := newHarness(t, &fakeStore{})
-	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
-		h.transcript(t, session, promptLine)
+	// Every watched MAIN transcript belongs to a live workspace and so is named
+	// by an identity record; the watchers whose ids nothing links are claimed
+	// spools whose spawner is an unrecorded agent.
+	for i, spawner := range []string{"agent-1", "agent-2", "agent-3"} {
+		task := fmt.Sprintf("b%dmiss", i)
+		h.spoolFile(t, task, "work\n")
+		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1")
 	}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
@@ -2825,8 +2834,13 @@ func TestARescanInsideTheClearIntervalKeepsTheRememberedMisses(t *testing.T) {
 func TestARescanPastTheClearIntervalDropsTheRememberedMisses(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
-		h.transcript(t, session, promptLine)
+	// Every watched MAIN transcript belongs to a live workspace and so is named
+	// by an identity record; the watchers whose ids nothing links are claimed
+	// spools whose spawner is an unrecorded agent.
+	for i, spawner := range []string{"agent-1", "agent-2", "agent-3"} {
+		task := fmt.Sprintf("b%dmiss", i)
+		h.spoolFile(t, task, "work\n")
+		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1")
 	}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)

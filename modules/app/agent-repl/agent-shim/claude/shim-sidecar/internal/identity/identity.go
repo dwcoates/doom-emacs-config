@@ -135,6 +135,12 @@ type Index struct {
 	// each `<state>/shim/*/vendor-id` and its mtime, which moves when a file is
 	// created in it. An empty stamp means no check has run yet.
 	linkStamp string
+	// recordStamp fingerprints EVERY identity record directory as of the last
+	// refresh: each `<state>/shim/<key>` (agent-id.json is written by
+	// tmp-and-rename there) and its `vendor-id`, with their mtimes. It is what
+	// lets RefreshIfMoved answer "has any record changed" with one readdir and
+	// two stats per workspace instead of re-reading every record.
+	recordStamp string
 	// globs counts filepath.Glob calls, for the suite that pins the poll
 	// path's cost.
 	globs int
@@ -185,11 +191,12 @@ func (i *Index) refresh(clearMisses bool) {
 	// sent every watcher back to a per-id glob over every shim directory,
 	// which held 74% of the sidecar's CPU (2026-09-24 profile, 2085 watchers,
 	// 132 shim directories).
-	stamp := i.linkFingerprint()
+	stamp, records := i.fingerprints()
 	if clearMisses || stamp != i.linkStamp {
 		i.unlinked = map[string]bool{}
 	}
 	i.linkStamp = stamp
+	i.recordStamp = records
 
 	for _, path := range i.glob(filepath.Join(i.stateDir, "shim", "*", "agent-id.json")) {
 		var record agentIDRecord
@@ -218,6 +225,65 @@ func (i *Index) refresh(clearMisses bool) {
 	i.log.With(logging.Context{Operation: "identity-refresh"}).LogVerbose(
 		"read the shim's identity records under %s: %d minted identit(ies), %d vendor-session link(s)",
 		i.stateDir, len(i.originals), len(i.links))
+}
+
+// RefreshIfMoved re-reads every record, keeping the remembered misses as
+// RefreshKeepingMisses does, but ONLY when a record directory changed since the
+// last refresh, and reports whether it did.
+//
+// IT IS AN OPTIMIZATION FOR THE ACTIVE-WORKSPACE PROBE, which runs on every poll
+// tick. Re-reading all 132 agent-id.json files and every link each second would
+// be ~150 file reads a second for records that change a handful of times a day;
+// the fingerprint is one readdir of `<state>/shim` plus two stats per workspace
+// (~265 stats on the owner's machine, 2026-09-24). Every record the shim writes
+// lands by tmp-and-rename or removal inside one of those directories, which
+// moves that directory's mtime, so the fingerprint cannot miss a record the
+// shim wrote. The rescan's unconditional Refresh stays the backstop for a write
+// inside the same mtime tick as the fingerprint.
+func (i *Index) RefreshIfMoved() bool {
+	if i.stateDir == "" {
+		return false
+	}
+	if i.recordStamp != "" && i.recordFingerprint() == i.recordStamp {
+		return false
+	}
+	i.refresh(false)
+	return true
+}
+
+// Workspaces answers each workspace key an agent-id.json names, mapped to the
+// conversation's ORIGINAL vendor session id — the book that workspace's shim
+// writes, as of the last refresh.
+func (i *Index) Workspaces() map[string]string {
+	out := make(map[string]string, len(i.originals))
+	for original, key := range i.originals {
+		if key == "" {
+			continue
+		}
+		out[key] = original
+	}
+	return out
+}
+
+// Lookup is Resolve WITHOUT the disk fallback: it answers from the records the
+// last refresh read and never globs.
+//
+// IT IS AN OPTIMIZATION FOR THE ACTIVE-WORKSPACE GATE, which asks about every
+// discovered file on every rescan (~2100 on the owner's machine). Resolve's
+// miss path is one glob over every workspace's link directory per unrecorded
+// id per refresh — the very per-id glob that held most of a core before the
+// negative cache existed. The gate does not need it: the active-workspace probe
+// refreshes the index on the tick a record directory moves and then re-offers
+// every file it gated out, so an answer that is one tick behind the disk is
+// corrected on the next tick.
+func (i *Index) Lookup(vendorSessionID string) Resolution {
+	if linked, ok := i.links[vendorSessionID]; ok {
+		return linked
+	}
+	if key, ok := i.originals[vendorSessionID]; ok {
+		return Resolution{Original: vendorSessionID, Source: SourceAgentIDRecord, WorkspaceKey: key}
+	}
+	return Resolution{Original: vendorSessionID, Source: SourceUnrecorded}
 }
 
 // Resolve answers which book a transcript carrying vendorSessionID writes to.
@@ -303,25 +369,49 @@ func (i *Index) RecheckLinks() {
 
 // linkFingerprint renders the link directories and their mtimes, in a stable
 // order, so two checks over an unchanged tree read identically.
+func (i *Index) linkFingerprint() string {
+	link, _ := i.fingerprints()
+	return link
+}
+
+// recordFingerprint renders every identity record directory — each
+// `<state>/shim/<key>` and its `vendor-id` — with its mtime, in a stable order.
+func (i *Index) recordFingerprint() string {
+	_, record := i.fingerprints()
+	return record
+}
+
+// fingerprints renders both fingerprints from ONE glob of `<state>/shim/*` and
+// one stat per directory.
+//
+// OPTIMIZATION: the two share a walk because a refresh needs both, and the
+// active-workspace probe runs a refresh check every poll tick; one glob per
+// refresh instead of two keeps a rescan's identity cost to a constant handful
+// of globs (cycle_test.go pins it).
 //
 // A DIRECTORY THAT CANNOT BE STAT'D IS RENDERED AS SUCH rather than skipped: a
 // workspace whose records became unreadable is a CHANGE, and skipping it would
 // make the tree look untouched.
-func (i *Index) linkFingerprint() string {
+func (i *Index) fingerprints() (link, record string) {
 	dirs := i.glob(filepath.Join(i.stateDir, "shim", "*"))
 	sort.Strings(dirs)
-	var out strings.Builder
+	var links, records strings.Builder
 	for _, dir := range dirs {
-		linkDir := filepath.Join(dir, "vendor-id")
-		out.WriteString(linkDir)
-		if info, err := os.Stat(linkDir); err == nil {
-			out.WriteString("|" + strconv.FormatInt(info.ModTime().UnixNano(), 10))
-		} else {
-			out.WriteString("|absent")
+		for _, path := range []string{dir, filepath.Join(dir, "vendor-id")} {
+			line := path
+			if info, err := os.Stat(path); err == nil {
+				line += "|" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+			} else {
+				line += "|absent"
+			}
+			line += "\n"
+			records.WriteString(line)
+			if path != dir {
+				links.WriteString(line)
+			}
 		}
-		out.WriteByte('\n')
 	}
-	return out.String()
+	return links.String(), records.String()
 }
 
 // readLink reads and validates one vendor-session pointer file.

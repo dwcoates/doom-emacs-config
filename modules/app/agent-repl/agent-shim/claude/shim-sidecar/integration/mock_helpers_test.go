@@ -323,6 +323,7 @@ type mockTree struct {
 	FakeSpool  string // what the mock was given: <SpoolRoot>/claude-<uid>
 	Cwd        string // the workspace the mock ran in
 	LogPath    string // the shim's own log (fd 3), for evidence in failures
+	State      string // the shim's AGENT_REPL_STATE_DIR, holding its identity records
 
 	// VendorSessionID is what StartSession reported: the session the turn ran
 	// under. After a rotation the LAST transcript is a different id.
@@ -412,6 +413,7 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 		SpoolRoot:  filepath.Join(base, "spool"),
 		Cwd:        filepath.Join(base, "work"),
 		LogPath:    filepath.Join(base, "shim.log"),
+		State:      filepath.Join(base, "state"),
 	}
 	tree.FakeSpool = filepath.Join(tree.SpoolRoot, "claude-"+spoolUID)
 	for _, d := range []string{tree.ConfigRoot, tree.FakeSpool, tree.Cwd, filepath.Join(base, "state"), filepath.Join(base, "lock")} {
@@ -446,7 +448,7 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	cmd.Env = append(os.Environ(),
 		"CLAUDE_CONFIG_DIR="+tree.ConfigRoot,
 		"AGENT_REPL_FAKE_SPOOL_ROOT="+tree.FakeSpool,
-		"AGENT_REPL_STATE_DIR="+filepath.Join(base, "state"),
+		"AGENT_REPL_STATE_DIR="+tree.State,
 		"AGENT_REPL_LOCK_DIR="+filepath.Join(base, "lock"),
 		// The shim spawns this for each kernel claim; without it the mocked
 		// vendor refuses every session and generates no fixture at all.
@@ -1051,7 +1053,12 @@ func ingestMock(t *testing.T, tree *mockTree) *mockIngest {
 	t.Helper()
 	store := startRealStore(t)
 	proxy := startProxyStore(t, store.Socket)
+	// THE MOCKED VENDOR'S SHIM IS GONE BY NOW, and a workspace is active only
+	// while a shim holds its lock. The subject stands in for that shim over the
+	// identity records it left, so its conversation is live for this sidecar.
+	newLiveRoot(t, tree.State).holdEveryRecordedWorkspace(t)
 	opts := sidecarOptions{
+		StateDir:           tree.State,
 		StoreSocket:        proxy.Socket,
 		ConfigRoots:        []string{tree.ConfigRoot},
 		SpoolRoot:          tree.SpoolRoot,

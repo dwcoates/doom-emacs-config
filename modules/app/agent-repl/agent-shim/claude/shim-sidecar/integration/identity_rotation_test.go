@@ -2,7 +2,6 @@ package integration
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -34,33 +33,19 @@ const (
 	rotationWorkspaceKey = "0a1b2c3d"
 )
 
-// stateRootWithIdentity builds a state root holding the shim's identity record
-// for one conversation, in engine/identity.ts's own on-disk field names.
-func stateRootWithIdentity(t *testing.T, originalID string) string {
+// stateRootWithIdentity writes the shim's identity record for one conversation
+// into the subject's state root, in engine/identity.ts's own on-disk field
+// names, and holds its workspace's lock: the shim that minted it is live.
+func stateRootWithIdentity(t *testing.T, tree *vendorTree, originalID string) string {
 	t.Helper()
-	stateDir := filepath.Join(t.TempDir(), "state")
-	dir := filepath.Join(stateDir, "shim", rotationWorkspaceKey)
-	mustMkdirAll(t, dir)
-	mustWriteFile(t, filepath.Join(dir, "agent-id.json"), `{
-  "original_vendor_session_id": "`+originalID+`",
-  "workspace_key": "`+rotationWorkspaceKey+`",
-  "minted_at_ms": 1735689600000
-}
-`)
-	return stateDir
+	tree.live.mint(t, rotationWorkspaceKey, originalID)
+	return tree.live.state
 }
 
 // writeVendorLink writes the pointer file SessionIdentity.rotate leaves behind.
-func writeVendorLink(t *testing.T, stateDir, vendorID, originalID string) {
+func writeVendorLink(t *testing.T, tree *vendorTree, vendorID, originalID string) {
 	t.Helper()
-	dir := filepath.Join(stateDir, "shim", rotationWorkspaceKey, "vendor-id")
-	mustMkdirAll(t, dir)
-	mustWriteFile(t, filepath.Join(dir, vendorID+".json"), `{
-  "vendor_session_id": "`+vendorID+`",
-  "original_vendor_session_id": "`+originalID+`",
-  "linked_at_ms": 1735689700000
-}
-`)
+	tree.live.link(t, rotationWorkspaceKey, vendorID, originalID)
 }
 
 func mustWriteFile(t *testing.T, path, content string) {
@@ -81,8 +66,8 @@ func TestARotatedTranscriptsRecordsLandInTheOriginalsBook(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	stateDir := stateRootWithIdentity(t, rotationOriginalID)
-	writeVendorLink(t, stateDir, rotationNewID, rotationOriginalID)
+	stateDir := stateRootWithIdentity(t, tree, rotationOriginalID)
+	writeVendorLink(t, tree, rotationNewID, rotationOriginalID)
 	captured := loadCapturedSession(t)
 
 	options := defaultSidecarOptions(t, fake.Socket, tree)
@@ -113,60 +98,39 @@ func TestARotatedTranscriptsRecordsLandInTheOriginalsBook(t *testing.T) {
 	}
 }
 
-// TestARotationLinkThatAppearsMidTailMovesTheBook is the race the reader must
-// survive: the transcript is discovered and read BEFORE its link file is
-// visible, so the first records were booked under the rotated id.
-func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
+// TestARotationIsNotReadUntilItsLinkNamesItsBook is the race the reader must
+// survive: the rotated transcript is written BEFORE its link file exists. No
+// identity record names it yet, so no active workspace owns it and it is not
+// read at all (active.go); when the link lands it is admitted and read from its
+// start, so every record lands in the original's book and none is ever booked
+// under the rotated id. (It used to be read at once under the rotated id and
+// re-keyed mid-tail, which split the conversation's first records off.)
+func TestARotationIsNotReadUntilItsLinkNamesItsBook(t *testing.T) {
 	t.Parallel()
 	// Arrange: an identity, and no link yet.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	stateDir := stateRootWithIdentity(t, rotationOriginalID)
+	stateDir := stateRootWithIdentity(t, tree, rotationOriginalID)
 	captured := loadCapturedSession(t)
 
 	options := defaultSidecarOptions(t, fake.Socket, tree)
 	options.StateDir = stateDir
+	// The gate's per-file decision is DEBUG, and it is the signal this subject
+	// waits on.
+	options.ExtraEnv = append(options.ExtraEnv, "AGENT_REPL_LOG_LEVEL=debug")
 	startSidecar(t, options)
-	g := newGrowingFile(t, tree.sessionPath(captured.Slug, rotationNewID))
-	// THE HEAD MUST CONVERT TO A TYPED ENTRY. The book is read off a STORED
-	// update's `top_level`, and residue is never stored — so a head of the
-	// capture's opening bookkeeping lines would leave the store empty and the
-	// precondition unable to say which book the file was reading into. Lines 0-7
-	// end on the first response's own assistant record, which is typed.
+	g := newGrowingFile(t, tree.inactiveSessionPath(captured.Slug, rotationNewID))
 	for _, line := range captured.Lines[:8] {
 		g.AppendLine(line)
 	}
-	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
-	// The books are read off `top_level`, which every update carries, rather
-	// than off page lines alone.
-	if books := booksOf(fake.Entries()); !contains(books, rotationNewID) {
-		t.Fatalf("precondition: with no link on disk the transcript must book under its own id %q; the books written were %v",
-			rotationNewID, books)
-	}
-
-	// Act: the link appears...
-	writeVendorLink(t, stateDir, rotationNewID, rotationOriginalID)
-	// ...and the tail is appended only once the reader has OBSERVED it. The
-	// production guarantee is "the book moves on the next poll after the link
-	// appears", and `pollAll` re-resolves every watched file's book BEFORE it
-	// reads a byte, so no record is ever converted under a book the disk has
-	// already contradicted. What is NOT guaranteed — and what this subject was
-	// silently leaning on — is that a tail appended in the same instant as the
-	// link is read on a LATER tick than the one that first sees the link: under
-	// load the reader can pick up both in one pass, and then there is no
-	// mid-tail rotation left to observe. Waiting on the reader's own book-move
-	// record is what makes the ordering this subject is named for real.
-	//
-	// THE RECORD IS MATCHED BY ITS IDS, NOT BY ITS PATH: the sidecar states the
-	// symlink-resolved path (/private/var/...) and the harness holds the
-	// unresolved one (/var/...), so a path comparison would never match here.
-	awaitLog(ctx, t, options.LogPath, "the book move off the rotated id", func(r logRecord) bool {
-		return r.Operation == "identity-rekey" && r.Level == "warn" &&
-			r.Context["vendor_session_id"] == rotationNewID &&
-			r.Context["book_agent_id"] == rotationOriginalID
+	awaitLog(ctx, t, options.LogPath, "the rotated transcript gated out before its link", func(r logRecord) bool {
+		return r.Operation == "watch-dormant" && r.Context["vendor_session_id"] == rotationNewID
 	})
+
+	// Act: the link appears, and the tail is appended.
+	writeVendorLink(t, tree, rotationNewID, rotationOriginalID)
 	for _, line := range captured.Lines[8:] {
 		g.AppendLine(line)
 	}
@@ -175,43 +139,53 @@ func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
 		return e.GetUpsertKey() == "activity:"+capturedBashCall1
 	})
 
-	// Assert: everything read after the link landed in the original's book.
-	unit := entryByUpsertKey(fake.Entries(), "activity:"+capturedBashCall1)
+	// Assert: the whole file landed in the original's book, and none of it
+	// under the rotated id.
+	entries := fake.Entries()
+	unit := entryByUpsertKey(entries, "activity:"+capturedBashCall1)
 	if got := unit.GetAgentUpdate().GetServeableFrame().GetPageAgentId().GetValue(); got != rotationOriginalID {
 		t.Errorf("after the link appeared the unit landed in book %q, wanted %q", got, rotationOriginalID)
 	}
+	if books := booksOf(entries); contains(books, rotationNewID) {
+		t.Errorf("records were booked under the rotated id %q before its link named its book; the books written were %v", rotationNewID, books)
+	}
 }
 
-// TestATranscriptWithNoIdentityRecordKeepsItsOwnBook: a tree no shim ever wrote
-// a record for reads exactly as it did before the records existed.
-func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
+// TestASessionRunOutsideAgentReplIsNotRead: a transcript no shim ever wrote a
+// record for is a session run outside agent-repl, and no active workspace owns
+// it, so it is never read (owner ruling, 2026-09-24). It used to be read and
+// booked under its own id.
+func TestASessionRunOutsideAgentReplIsNotRead(t *testing.T) {
 	t.Parallel()
-	// Arrange: a state root with no record for this conversation at all.
+	// Arrange: a live agent-repl conversation, and an external session beside it.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	stateDir := stateRootWithIdentity(t, rotationOriginalID)
 	captured := loadCapturedSession(t)
-
 	options := defaultSidecarOptions(t, fake.Socket, tree)
-	options.StateDir = stateDir
+	options.ExtraEnv = append(options.ExtraEnv, "AGENT_REPL_LOG_LEVEL=debug")
+	startSidecar(t, options)
 
 	// Act.
-	startSidecar(t, options)
-	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
+	external := newGrowingFile(t, tree.inactiveSessionPath(captured.Slug, captured.Session))
 	for _, line := range captured.Lines {
-		g.AppendLine(line)
+		external.AppendLine(line)
 	}
-	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
-	fake.awaitEntry(ctx, t, "the unrecorded transcript's unit", func(e *storev1.StoreEntry) bool {
-		return e.GetUpsertKey() == "activity:"+capturedBashCall1
+	awaitLog(ctx, t, options.LogPath, "the external session gated out", func(r logRecord) bool {
+		return r.Operation == "watch-dormant" && r.Context["vendor_session_id"] == captured.Session
 	})
+	cwd := "/Users/dodgecoates/live-beside-external-probe"
+	live := newGrowingFile(t, tree.sessionPath(cwdSlug(cwd), rotationOriginalID))
+	live.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), rotationOriginalID, cwd)))
+	awaitCursorInBatches(ctx, t, fake, live.Path(), live.Offset())
 
 	// Assert.
-	unit := entryByUpsertKey(fake.Entries(), "activity:"+capturedBashCall1)
-	if got := unit.GetAgentUpdate().GetServeableFrame().GetPageAgentId().GetValue(); got != captured.Session {
-		t.Errorf("an unrecorded transcript landed in book %q, wanted its own file's uuid %q", got, captured.Session)
+	if latestCursorFor(fake.Batches(), external.Path()) != nil {
+		t.Errorf("the external session's transcript was read: %s", external.Path())
+	}
+	if lines := linesForBook(fake.Entries(), captured.Session); len(lines) != 0 {
+		t.Errorf("the external session produced %d page line(s)", len(lines))
 	}
 }
 

@@ -26,19 +26,12 @@ const (
 )
 
 // mintIdentity writes the shim's agent-id.json for a workspace, in
-// engine/identity.ts's own field names.
+// engine/identity.ts's own field names, and holds the workspace's lock: a shim
+// that minted an identity is a live shim.
 func (h *harness) mintIdentity(t *testing.T, workspaceKey, originalID string) {
 	t.Helper()
-	dir := filepath.Join(h.state, "shim", workspaceKey)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("creating %s: %v", dir, err)
-	}
-	h.write(t, filepath.Join(dir, "agent-id.json"), `{
-  "original_vendor_session_id": "`+originalID+`",
-  "workspace_key": "`+workspaceKey+`",
-  "minted_at_ms": 1735689600000
-}
-`)
+	h.writeAgentID(t, workspaceKey, originalID)
+	h.hold(t, workspaceKey)
 }
 
 // linkVendorSession writes the pointer file a rotation leaves behind.
@@ -54,6 +47,7 @@ func (h *harness) linkVendorSession(t *testing.T, workspaceKey, vendorID, origin
   "linked_at_ms": 1735689700000
 }
 `)
+	h.recorded[vendorID] = workspaceKey
 }
 
 // TestARotatedTranscriptIsWatchedUnderTheOriginalsBook is the whole point: the
@@ -128,12 +122,14 @@ func TestAnUnlinkedTranscriptKeepsItsOwnBook(t *testing.T) {
 	}
 }
 
-// TestATranscriptWithNoIdentityRecordKeepsItsOwnBook is the no-shim case — a
-// tree the sidecar reads that no shim ever wrote a record for.
-func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
+// TestATranscriptWithNoIdentityRecordIsNotWatched is the no-shim case — a
+// session no shim ever wrote a record for, which is a session run outside
+// agent-repl. No active workspace owns it, so it is never read (owner ruling,
+// 2026-09-24; active.go). It used to be read and booked under its own id.
+func TestATranscriptWithNoIdentityRecordIsNotWatched(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	path := h.transcript(t, bookRotated, assistantLine)
+	path := h.inactiveTranscript(t, bookRotated, assistantLine)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -141,8 +137,8 @@ func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
 	}
 
 	// Assert.
-	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookRotated {
-		t.Errorf("an unrecorded transcript books to %q, want its own id %q", got, bookRotated)
+	if _, watched := h.sc.watchers[path]; watched {
+		t.Error("a transcript no identity record names is watched")
 	}
 }
 
@@ -199,6 +195,9 @@ func TestALinkThatAppearsBetweenTwoRescansMovesTheBookOnTheVeryNextPoll(t *testi
 	h.mintIdentity(t, bookWorkspace, bookOriginal)
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
 	h.write(t, path, assistantLine+"\n"+assistantLine+"\n")
+	// ONE POLL TICK: the discovery half re-reads the identity records whose
+	// directory moved, then the read (active.go refreshActive).
+	h.sc.discoverChanged()
 	h.sc.pollAll()
 
 	// Assert: the records this poll read landed in the original's book.
@@ -405,7 +404,7 @@ func TestAnUnrecordedResolutionNeverMovesAFileOffItsBook(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: the file is booked to the original on real evidence.
 			h := newHarness(t, &fakeStore{})
-			path := h.transcript(t, bookRotated, assistantLine)
+			path := h.inactiveTranscript(t, bookRotated, assistantLine)
 			h.mintIdentity(t, bookWorkspace, bookOriginal)
 			h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
 			if err := h.sc.beginCycle(); err != nil {
