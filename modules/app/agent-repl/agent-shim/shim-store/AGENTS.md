@@ -301,6 +301,37 @@ same version carries a shape this one did not write), a database with no
 is damaged. A recreate that fails after the superseded file has been unlinked is
 ERROR too — there is no database at all at that point.
 
+### An index is built in place, never by a version bump
+
+AN INDEX IS NOT A SHAPE CHANGE. It holds nothing a query can observe, so adding
+one never bumps `SchemaVersion` — a bump would nuke the owner's database to add
+a lookup structure SQLite builds in place. The one in-place schema step is
+`ensureIndexes` (`internal/db/db.go`): on every open of a matching database it
+builds any `lineageIndexes` entry that is missing with `CREATE INDEX IF NOT
+EXISTS`, through the write gate in one bulk transaction; a fresh database gets
+them in `createSchema`'s own transaction. It only ever ADDS: nothing is dropped,
+rebuilt or rewritten, and a database carrying every index is left untouched.
+
+- **WHY THE LINEAGE INDEXES EXIST.** `GetLiveWork` walks a session's lineage
+  through `agent.spawned_by_agent`, `agent.spawned_by_workflow`,
+  `workflow.spawner_agent` and `detached_work.owner_agent`. With none of them
+  indexed SQLite built four AUTOMATIC indexes from full scans on every call,
+  264-498 ms each in the owner's log (2026-09-24/25). Each is an optimization and
+  carries a comment saying so.
+- **A FAILED BUILD NEVER NUKES.** The database it failed on is one this binary
+  created, carrying the owner's rows. `ensureIndexes` records the failure once at
+  ERROR and returns an `indexMigrationError`, which `Open` returns as-is instead
+  of reaching the unlink.
+- **A PLAN IS THE ASSERTION.** `assertNoAutomaticIndex` (`db_test.go`) fails a
+  plan that builds an AUTOMATIC index, and the live-work, read, bash-run, write
+  and sweep statements are each EXPLAINed against it from their production text
+  at package scope. The live-work listings drive from the lineage with `CROSS
+  JOIN`, because the other order built an automatic index over the materialized
+  lineage.
+- **ADDING ONE.** Append to `lineageIndexes` (or a sibling list applied the same
+  way) with a comment naming the statement it serves; do not edit `schemaDDL`
+  for it and do not bump the version.
+
 ### Throwing the database away on purpose: `bin/store-reset.sh`
 
 THE STORE NEEDS NO RETENTION DURING DEVELOPMENT (owner ruling 2026-09-13), and

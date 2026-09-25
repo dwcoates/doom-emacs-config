@@ -880,3 +880,30 @@ func TestOpenPageServesEachLineWithItsTurn(t *testing.T) {
 		t.Fatalf("served turn = %q, want %q", got, "turn-a")
 	}
 }
+
+// ---- the read statements seek real indexes ----
+
+func TestEveryReadStatementBuildsNoAutomaticIndex(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+		args      []any
+	}{
+		{name: "the open-page lines", statement: pageLinesSQL(pageBoundAboveFloor), args: []any{"agent-1", kindPageLine, 0, 11}},
+		{name: "the read-page lines", statement: pageLinesSQL(pageBoundBelow), args: []any{"agent-1", kindPageLine, 100, 11}},
+		{name: "the stale-pointer probe", statement: pointerInBookSQL, args: []any{1, "agent-1", kindPageLine}},
+		{name: "the lines-since replay", statement: linesSinceSQL, args: []any{"agent-1", kindPageLine, 0}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			assertNoAutomaticIndex(t, test.name, plan)
+		})
+	}
+}
