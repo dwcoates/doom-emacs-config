@@ -101,7 +101,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 		floorPosition = position
 	}
 
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, `position > ?`, floorPosition)
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBoundAboveFloor, floorPosition)
 	if err != nil {
 		return OpenedPage{}, d.refuse(base, err)
 	}
@@ -151,7 +151,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 		fields.Position = after.GetValue()
 		return nil, d.refuse(fields, err)
 	}
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, `position < ?`, position)
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBoundBelow, position)
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
@@ -189,10 +189,7 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	}
 	started := d.mono()
 
-	const querySQL = `SELECT position, write_seq, frame FROM entry
-	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
-	  ORDER BY write_seq ASC`
-	rows, err := d.read.QueryContext(ctx, querySQL, agentID, kindPageLine, afterSeq)
+	rows, err := d.read.QueryContext(ctx, linesSinceSQL, agentID, kindPageLine, afterSeq)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "replaying lines of book %q", agentID))
 	}
@@ -262,9 +259,7 @@ func validateBook(agentID string, pageSize uint32) error {
 // its page would serve one agent's lines under another's name.
 func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, position int64, field, value string) error {
 	var one int
-	err := tx.QueryRowContext(ctx,
-		`SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind = ?`,
-		position, agentID, kindPageLine).Scan(&one)
+	err := tx.QueryRowContext(ctx, pointerInBookSQL, position, agentID, kindPageLine).Scan(&one)
 	switch {
 	case err == nil:
 		return nil
@@ -273,6 +268,32 @@ func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, posi
 	default:
 		return storagef(err, "validating %s against book %q", field, agentID)
 	}
+}
+
+// THE READ STATEMENTS ARE AT PACKAGE SCOPE so the suite EXPLAINs the
+// production text itself (read_test.go) rather than a copy that can drift.
+const (
+	// linesSinceSQL binds (book, the page-line kind, the write_seq after which
+	// to replay).
+	linesSinceSQL = `SELECT position, write_seq, frame FROM entry
+	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
+	  ORDER BY write_seq ASC`
+
+	// pointerInBookSQL binds (position, book, the page-line kind).
+	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind = ?`
+
+	// pageBoundAboveFloor is OpenPage's bound: every line above the floor.
+	pageBoundAboveFloor = `position > ?`
+	// pageBoundBelow is ReadPage's bound: every line older than the pointer.
+	pageBoundBelow = `position < ?`
+)
+
+// pageLinesSQL is one page's statement under one of the two bounds above. It
+// binds (book, the page-line kind, the bound, the page size plus one).
+func pageLinesSQL(boundClause string) string {
+	return `SELECT position, frame FROM entry
+	  WHERE book_agent_id = ? AND kind = ? AND ` + boundClause + `
+	  ORDER BY position DESC LIMIT ?`
 }
 
 // pageLines reads one page of a book, newest first, and reports whether older
@@ -286,10 +307,7 @@ func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, posi
 // `kind = page_line` is the never-served index doing its work: a keep-alive or
 // a residue row carries no book at all, so no page can reach one.
 func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize uint32, boundClause string, bound int64) ([]*storev1.StoreLineAt, bool, error) {
-	querySQL := `SELECT position, frame FROM entry
-	  WHERE book_agent_id = ? AND kind = ? AND ` + boundClause + `
-	  ORDER BY position DESC LIMIT ?`
-	rows, err := tx.QueryContext(ctx, querySQL, agentID, kindPageLine, bound, int64(pageSize)+1)
+	rows, err := tx.QueryContext(ctx, pageLinesSQL(boundClause), agentID, kindPageLine, bound, int64(pageSize)+1)
 	if err != nil {
 		return nil, false, storagef(err, "reading a page of book %q", agentID)
 	}

@@ -1036,64 +1036,7 @@ func TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget(t *testing.T) 
 // or a primary key that did not land, turns one of these into a scan that is
 // invisible on an idle box and ruinous on a loaded one.
 func TestEveryStatementOfAWriteBatchSeeksRatherThanScans(t *testing.T) {
-	tests := []struct {
-		name      string
-		statement string
-		args      []any
-	}{
-		{
-			name:      "the write ordinal the batch orders itself by",
-			statement: `SELECT COALESCE(MAX(write_seq), 0) FROM entry`,
-		},
-		{
-			name:      "the absorption probe against the write ledger",
-			statement: `SELECT 1 FROM write_ledger WHERE write_id = ?`,
-			args:      []any{"corpus-write-1"},
-		},
-		{
-			name:      "the identity probe against the entry row",
-			statement: `SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`,
-			args:      []any{"corpus-key-1"},
-		},
-		{
-			name: "the entry upsert",
-			statement: `INSERT INTO entry (upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame, first_inserted_at_ms, last_written_at_ms)
-			  VALUES (?,?,?,?,?,?,?,?,?,?,?)
-			  ON CONFLICT(upsert_key) DO UPDATE SET write_id = excluded.write_id`,
-			args: []any{"k", "w", 1, 2, "page_line", nil, nil, nil, []byte{0}, testNow, testNow},
-		},
-		{
-			name:      "the ledger insert that stamps the batch's source position",
-			statement: `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset) VALUES (?,?,?,?,?,?)`,
-			args:      []any{"w", "k", 1, testNow, "corpus-file-0", 0},
-		},
-		{
-			name: "the residue shape upsert",
-			statement: `INSERT INTO residue_shapes (shape_hash, kind, key_structure, first_example, first_seen_ms, last_seen_ms, count)
-			  VALUES (?,?,?,?,?,?,1)
-			  ON CONFLICT(shape_hash) DO UPDATE SET
-			    last_seen_ms = MAX(residue_shapes.last_seen_ms, excluded.last_seen_ms),
-			    count = residue_shapes.count + 1`,
-			args: []any{"h", "unparsed", "{a:string}", nil, testNow, testNow},
-		},
-		{
-			name: "the cursor advance",
-			statement: `INSERT INTO cursor (file_id, path, offset, carry, updated_at_ms) VALUES (?,?,?,?,?)
-			  ON CONFLICT(file_id) DO UPDATE SET offset = excluded.offset`,
-			args: []any{"corpus-file-0", "/p", 0, nil, testNow},
-		},
-		{
-			name:      "the detached-work join lookup",
-			statement: `SELECT work_id FROM detached_work WHERE origin_unit = ? LIMIT 1`,
-			args:      []any{"act-1"},
-		},
-		{
-			name:      "the agent terminal update",
-			statement: `UPDATE agent SET ended_at_ms = ?, terminal = ? WHERE agent_id = ?`,
-			args:      []any{testNow, []byte{0}, "agent-1"},
-		},
-	}
-	for _, test := range tests {
+	for _, test := range writeBatchStatements {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange
 			d, _ := newStore(t)
@@ -1105,6 +1048,84 @@ func TestEveryStatementOfAWriteBatchSeeksRatherThanScans(t *testing.T) {
 			assertNoTableScan(t, test.name, plan)
 		})
 	}
+}
+
+// TestEveryStatementOfAWriteBatchBuildsNoAutomaticIndex holds the write
+// transaction to the same bar as live_work: no statement may answer a lookup
+// by building a throwaway index from a full scan.
+func TestEveryStatementOfAWriteBatchBuildsNoAutomaticIndex(t *testing.T) {
+	for _, test := range writeBatchStatements {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			assertNoAutomaticIndex(t, test.name, plan)
+		})
+	}
+}
+
+// writeBatchStatements is every statement of the write transaction, with
+// representative arguments.
+var writeBatchStatements = []struct {
+	name      string
+	statement string
+	args      []any
+}{
+	{
+		name:      "the write ordinal the batch orders itself by",
+		statement: `SELECT COALESCE(MAX(write_seq), 0) FROM entry`,
+	},
+	{
+		name:      "the absorption probe against the write ledger",
+		statement: `SELECT 1 FROM write_ledger WHERE write_id = ?`,
+		args:      []any{"corpus-write-1"},
+	},
+	{
+		name:      "the identity probe against the entry row",
+		statement: `SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`,
+		args:      []any{"corpus-key-1"},
+	},
+	{
+		name: "the entry upsert",
+		statement: `INSERT INTO entry (upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame, first_inserted_at_ms, last_written_at_ms)
+			  VALUES (?,?,?,?,?,?,?,?,?,?,?)
+			  ON CONFLICT(upsert_key) DO UPDATE SET write_id = excluded.write_id`,
+		args: []any{"k", "w", 1, 2, "page_line", nil, nil, nil, []byte{0}, testNow, testNow},
+	},
+	{
+		name:      "the ledger insert that stamps the batch's source position",
+		statement: `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset) VALUES (?,?,?,?,?,?)`,
+		args:      []any{"w", "k", 1, testNow, "corpus-file-0", 0},
+	},
+	{
+		name: "the residue shape upsert",
+		statement: `INSERT INTO residue_shapes (shape_hash, kind, key_structure, first_example, first_seen_ms, last_seen_ms, count)
+			  VALUES (?,?,?,?,?,?,1)
+			  ON CONFLICT(shape_hash) DO UPDATE SET
+			    last_seen_ms = MAX(residue_shapes.last_seen_ms, excluded.last_seen_ms),
+			    count = residue_shapes.count + 1`,
+		args: []any{"h", "unparsed", "{a:string}", nil, testNow, testNow},
+	},
+	{
+		name: "the cursor advance",
+		statement: `INSERT INTO cursor (file_id, path, offset, carry, updated_at_ms) VALUES (?,?,?,?,?)
+			  ON CONFLICT(file_id) DO UPDATE SET offset = excluded.offset`,
+		args: []any{"corpus-file-0", "/p", 0, nil, testNow},
+	},
+	{
+		name:      "the detached-work join lookup",
+		statement: `SELECT work_id FROM detached_work WHERE origin_unit = ? LIMIT 1`,
+		args:      []any{"act-1"},
+	},
+	{
+		name:      "the agent terminal update",
+		statement: `UPDATE agent SET ended_at_ms = ?, terminal = ? WHERE agent_id = ?`,
+		args:      []any{testNow, []byte{0}, "agent-1"},
+	},
 }
 
 // ---- the class decides how a batch is committed ----
@@ -1328,10 +1349,10 @@ func TestWriteBatchKeepsARowsFirstTurnStamp(t *testing.T) {
 		return stampedTurn(entry, turn)
 	}
 	tests := []struct {
-		name        string
-		first       string
-		second      string
-		wantServed  string
+		name       string
+		first      string
+		second     string
+		wantServed string
 	}{
 		{name: "an unstamped write inherits the stored turn", first: "turn-a", second: "", wantServed: "turn-a"},
 		{name: "a write naming another turn keeps the stored one", first: "turn-a", second: "turn-b", wantServed: "turn-a"},

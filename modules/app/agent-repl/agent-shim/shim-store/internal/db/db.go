@@ -42,6 +42,11 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
+//
+// AN INDEX IS NOT A SHAPE CHANGE, SO ADDING ONE NEVER BUMPS THIS. Bumping it
+// would nuke the owner's database to add a lookup structure SQLite can build
+// in place; the lineage indexes (lineageIndexes) are applied to a matching
+// database by ensureIndexes instead.
 const SchemaVersion = 7
 
 // THE PAGE CACHE AND THE MAP. SQLite's default cache is 2 MB per connection,
@@ -349,6 +354,16 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		return finishOpen(d, log, path, opts)
 	}
 
+	// A FAILED IN-PLACE INDEX BUILD NEVER REACHES THE NUKE. The database it
+	// failed on is one THIS binary created, carrying its rows, and an index is
+	// an optimization: discarding the owner's record because a lookup
+	// structure could not be added would trade the data for its speed. The
+	// failure was recorded once by ensureIndexes, and the open fails with it.
+	var indexErr *indexMigrationError
+	if errors.As(err, &indexErr) {
+		return nil, err
+	}
+
 	// THE FILE IS IN THE WAY, SO IT GOES. A --db path this binary cannot even
 	// read as a database is the SAME situation as a schema this binary did not
 	// create, and the store answers BOTH the same way: it REMOVES the file and
@@ -586,6 +601,10 @@ func (d *DB) Close() error {
 // against a database that was just emptied, and a CREATE that silently
 // tolerated an existing object is exactly how two binaries end up believing
 // they share a shape they do not.
+//
+// THE ONE EXCEPTION IS lineageIndexes, below: indexes added after a schema
+// version shipped, applied IN PLACE to a matching database rather than by a
+// version bump that would nuke it.
 const schemaDDL = `
 CREATE TABLE entry (
   position             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -721,6 +740,51 @@ CREATE INDEX residue_shapes_last_seen ON residue_shapes(last_seen_ms);
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
 
+// lineageIndexes are the indexes the session-lineage walk (sessionLineageCTE
+// in live.go) seeks by. Each is AN OPTIMIZATION and nothing else: no answer
+// changes with or without it, only how SQLite finds the rows.
+//
+// WHY THEY EXIST. Without them SQLite answered every GetLiveWork by building
+// four AUTOMATIC indexes — one per spawn or owner column the recursive step
+// joins on — from a full scan of the table, rebuilt on EVERY run and thrown
+// away after it: 264-498ms per call in the owner's log (2026-09-24/25,
+// statement=live_work over its 250ms budget), for an answer that is usually
+// empty. With them each recursive step is a seek.
+//
+// WHY THEY ARE HERE AND NOT IN schemaDDL. They were added after SchemaVersion 7
+// shipped, and a version bump nukes the database. An index is not a shape
+// change — it holds nothing a query can observe — so ensureIndexes builds any
+// missing one IN PLACE with `CREATE INDEX IF NOT EXISTS`, on a fresh database
+// and on the owner's existing one alike. The statements are idempotent, so a
+// database that already carries them is left exactly as it is.
+var lineageIndexes = []struct{ name, ddl string }{
+	// OPTIMIZATION: the lineage's subagent step, `agent.spawned_by_agent =
+	// lineage.agent_id`, seeks here instead of building an automatic index
+	// over every agent row on every live-work read.
+	{"agent_spawned_by_agent", `CREATE INDEX IF NOT EXISTS agent_spawned_by_agent ON agent(spawned_by_agent)`},
+	// OPTIMIZATION: both workflow steps of the lineage end in
+	// `agent.spawned_by_workflow = <workflow or announcement id>`, which seeks
+	// here instead of building an automatic index per read.
+	{"agent_spawned_by_workflow", `CREATE INDEX IF NOT EXISTS agent_spawned_by_workflow ON agent(spawned_by_workflow)`},
+	// OPTIMIZATION: the lineage's workflow-row step, `workflow.spawner_agent =
+	// lineage.agent_id`, seeks here instead of building an automatic index
+	// per read.
+	{"workflow_spawner_agent", `CREATE INDEX IF NOT EXISTS workflow_spawner_agent ON workflow(spawner_agent)`},
+	// OPTIMIZATION: the lineage's announcement step AND the live-work detached
+	// listing both join `detached_work.owner_agent = lineage.agent_id`, which
+	// seeks here instead of building an automatic index per read.
+	{"detached_work_owner_agent", `CREATE INDEX IF NOT EXISTS detached_work_owner_agent ON detached_work(owner_agent)`},
+}
+
+// indexMigrationError is a failure to build a missing lineage index in place.
+// It is a storage failure (it wraps ErrStorage through its cause), and it is
+// its own type so Open can tell it apart from a file it should discard: the
+// database it failed on is one this binary created, and is never nuked for it.
+type indexMigrationError struct{ err error }
+
+func (e *indexMigrationError) Error() string { return e.err.Error() }
+func (e *indexMigrationError) Unwrap() error { return e.err }
+
 // schemaTables is the exact table set schemaDDL produces, sorted. It is
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
@@ -776,7 +840,7 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 	if current == SchemaVersion && slicesEqual(tables, schemaTables) {
 		d.log.LogVerbose(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
 			"schema already current version=%d", current)
-		return nil
+		return d.ensureIndexes(ctx, path)
 	}
 	// AN EMPTY FILE IS A FIRST CREATE, NOT A NUKE. Every fresh store — every
 	// launch on a new machine, every test process, and every reopen after Open
@@ -863,6 +927,13 @@ func (d *DB) createSchema(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
 		return storagef(err, "creating the schema")
 	}
+	// A fresh database gets the lineage indexes in the SAME transaction as the
+	// tables, so no database this binary creates is ever without them.
+	for _, index := range lineageIndexes {
+		if _, err := tx.ExecContext(ctx, index.ddl); err != nil {
+			return storagef(err, "creating index %s", index.name)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_meta(version) VALUES (?)`, SchemaVersion); err != nil {
 		return storagef(err, "stamping schema version %d", SchemaVersion)
 	}
@@ -870,6 +941,82 @@ func (d *DB) createSchema(ctx context.Context) error {
 		return storagef(err, "committing schema creation")
 	}
 	return nil
+}
+
+// ensureIndexes builds, IN PLACE, every lineage index a matching database is
+// missing. It is the store's one in-place schema step, and it only ever ADDS an
+// index: nothing is dropped, rebuilt or rewritten, and a database carrying
+// every index is left untouched (one verbose record, no write transaction).
+//
+// A failure is recorded here, once, at ERROR, and returned as an
+// indexMigrationError, which Open refuses to answer with a nuke.
+func (d *DB) ensureIndexes(ctx context.Context, path string) error {
+	fields := logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "sqlite_master"}
+	fail := func(err error) error {
+		failed := fields
+		failed.Level = "error"
+		failed.ErrorCause = err.Error()
+		d.log.Log(failed, "building the missing lineage indexes in place failed; the database is left as it was and the open fails: %v", err)
+		return &indexMigrationError{err: err}
+	}
+	present, err := d.indexNames(ctx)
+	if err != nil {
+		return fail(err)
+	}
+	var missing []string
+	for _, index := range lineageIndexes {
+		if !contains(present, index.name) {
+			missing = append(missing, index.name)
+		}
+	}
+	if len(missing) == 0 {
+		d.log.LogVerbose(fields, "every lineage index is present count=%d", len(lineageIndexes))
+		return nil
+	}
+
+	started := d.mono()
+	tx, release, err := d.beginWrite(ctx, WriteBulk)
+	if err != nil {
+		return fail(storagef(err, "begin the lineage index build"))
+	}
+	defer release()
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	for _, index := range lineageIndexes {
+		if !contains(missing, index.name) {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, index.ddl); err != nil {
+			return fail(storagef(err, "creating index %s", index.name))
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fail(storagef(err, "committing the lineage index build"))
+	}
+	d.log.Log(fields, "built the missing lineage indexes in place indexes=%v duration_ms=%d",
+		missing, d.mono().Sub(started).Milliseconds())
+	return nil
+}
+
+// indexNames lists every index on disk, sorted.
+func (d *DB) indexNames(ctx context.Context) ([]string, error) {
+	rows, err := d.sql.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index'`)
+	if err != nil {
+		return nil, storagef(err, "listing indexes")
+	}
+	defer rows.Close() //nolint:errcheck // the deferred close of a read
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, storagef(err, "scanning an index name")
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, storagef(err, "iterating index names")
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func contains(haystack []string, needle string) bool {
