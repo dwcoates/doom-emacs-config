@@ -29,6 +29,9 @@ import (
 //
 // UNION, not UNION ALL, so a cycle in corrupt data terminates rather than
 // recursing forever.
+//
+// EVERY JOIN COLUMN HERE IS INDEXED (lineageIndexes in db.go) — an
+// optimization: without them each run built four automatic indexes.
 const sessionLineageCTE = `WITH RECURSIVE lineage(agent_id) AS (
     SELECT ?
     UNION
@@ -42,6 +45,44 @@ const sessionLineageCTE = `WITH RECURSIVE lineage(agent_id) AS (
       JOIN detached_work w ON a.spawned_by_workflow = w.work_id
       JOIN lineage l ON w.owner_agent = l.agent_id
   )`
+
+// THE LIVE-WORK STATEMENTS ARE AT PACKAGE SCOPE so the suite EXPLAINs the
+// production text itself (live_test.go) rather than a copy that can drift.
+//
+// `lineage l CROSS JOIN <table>` STATES THE JOIN ORDER, AS AN OPTIMIZATION.
+// The lineage is a handful of ids; driven from it, each row is one seek on the
+// table's own key (agent) or on detached_work_owner_agent. Written the other
+// way round the planner put the table outermost and built an AUTOMATIC index
+// over the materialized lineage on every run — CROSS JOIN is SQLite's
+// documented way to pin the order so a row estimate cannot flip it back.
+const (
+	// liveAgentsSQL binds (session, session): the lineage root, then the main
+	// agent excluded from the listing.
+	liveAgentsSQL = sessionLineageCTE + `
+	  SELECT a.agent_id FROM lineage l CROSS JOIN agent a ON a.agent_id = l.agent_id
+	  WHERE a.ended_at_ms IS NULL AND a.agent_id != ?
+	  ORDER BY a.started_at_ms ASC, a.agent_id ASC`
+
+	// liveDetachedSQL binds (session, the workflow kind excluded).
+	liveDetachedSQL = sessionLineageCTE + `
+	  SELECT w.work_id FROM lineage l CROSS JOIN detached_work w ON w.owner_agent = l.agent_id
+	  WHERE w.ended_at_ms IS NULL AND w.kind != ?
+	  ORDER BY w.announced_at_ms ASC, w.work_id ASC`
+
+	// liveWorkGapsSQL binds (the workflow kind excluded). See liveWorkGaps.
+	liveWorkGapsSQL = `
+	  SELECT 'detached_work:' || work_id FROM detached_work
+	  WHERE ended_at_ms IS NULL AND kind != ? AND owner_agent IS NULL
+	  UNION ALL
+	  SELECT 'agent:' || a.agent_id FROM agent a
+	  WHERE a.ended_at_ms IS NULL AND (
+	    (a.spawned_by_agent IS NOT NULL
+	      AND NOT EXISTS (SELECT 1 FROM agent p WHERE p.agent_id = a.spawned_by_agent))
+	    OR (a.spawned_by_workflow IS NOT NULL
+	      AND NOT EXISTS (SELECT 1 FROM workflow f WHERE f.run_agent_id = a.spawned_by_workflow)
+	      AND NOT EXISTS (SELECT 1 FROM detached_work w WHERE w.work_id = a.spawned_by_workflow)))
+	  ORDER BY 1`
+)
 
 // LiveWork answers ONE SESSION'S open obligations: everything the record says
 // started and holds no terminal for, within the lineage of `session` — the
@@ -76,11 +117,7 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 	// transaction. It once also held a producer's instant, which made the
 	// ordering a comparison across the store's, the shim's and the vendor's
 	// clocks; the agent id breaks a tie so the listing is fixed either way.
-	const agentsSQL = sessionLineageCTE + `
-	  SELECT a.agent_id FROM agent a JOIN lineage l ON a.agent_id = l.agent_id
-	  WHERE a.ended_at_ms IS NULL AND a.agent_id != ?
-	  ORDER BY a.started_at_ms ASC, a.agent_id ASC`
-	agents, err := d.scanStrings(ctx, agentsSQL, session, session)
+	agents, err := d.scanStrings(ctx, liveAgentsSQL, session, session)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "scanning live agents"))
 	}
@@ -95,11 +132,7 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 		return nil, err
 	}
 
-	const detachedSQL = sessionLineageCTE + `
-	  SELECT w.work_id FROM detached_work w JOIN lineage l ON w.owner_agent = l.agent_id
-	  WHERE w.ended_at_ms IS NULL AND w.kind != ?
-	  ORDER BY w.announced_at_ms ASC, w.work_id ASC`
-	detached, err := d.scanStrings(ctx, detachedSQL, session, detachedKindWorkflow)
+	detached, err := d.scanStrings(ctx, liveDetachedSQL, session, detachedKindWorkflow)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "scanning live detached work"))
 	}
@@ -135,19 +168,7 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 // session's main agent, which is legitimately rootless, so it is not a gap the
 // store can name.
 func (d *DB) liveWorkGaps(ctx context.Context, base logging.Fields) error {
-	const gapsSQL = `
-	  SELECT 'detached_work:' || work_id FROM detached_work
-	  WHERE ended_at_ms IS NULL AND kind != ? AND owner_agent IS NULL
-	  UNION ALL
-	  SELECT 'agent:' || a.agent_id FROM agent a
-	  WHERE a.ended_at_ms IS NULL AND (
-	    (a.spawned_by_agent IS NOT NULL
-	      AND NOT EXISTS (SELECT 1 FROM agent p WHERE p.agent_id = a.spawned_by_agent))
-	    OR (a.spawned_by_workflow IS NOT NULL
-	      AND NOT EXISTS (SELECT 1 FROM workflow f WHERE f.run_agent_id = a.spawned_by_workflow)
-	      AND NOT EXISTS (SELECT 1 FROM detached_work w WHERE w.work_id = a.spawned_by_workflow)))
-	  ORDER BY 1`
-	gaps, err := d.scanStrings(ctx, gapsSQL, detachedKindWorkflow)
+	gaps, err := d.scanStrings(ctx, liveWorkGapsSQL, detachedKindWorkflow)
 	if err != nil {
 		return d.refuse(base, storagef(err, "scanning live work no session's lineage reaches"))
 	}

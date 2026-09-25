@@ -745,6 +745,249 @@ func TestOpenLeavesTheFileOfAMatchingDatabaseInPlace(t *testing.T) {
 	}
 }
 
+// ---- the lineage indexes are built in place ----
+
+// lineageIndexNames lists the lineage indexes present on disk, sorted.
+func lineageIndexNames(t *testing.T, d *DB) []string {
+	t.Helper()
+	present, err := d.indexNames(ctx())
+	if err != nil {
+		t.Fatalf("indexNames: %v", err)
+	}
+	var out []string
+	for _, index := range lineageIndexes {
+		if contains(present, index.name) {
+			out = append(out, index.name)
+		}
+	}
+	return out
+}
+
+// wantLineageIndexNames is every lineage index, in declaration order.
+func wantLineageIndexNames() []string {
+	var out []string
+	for _, index := range lineageIndexes {
+		out = append(out, index.name)
+	}
+	return out
+}
+
+// preIndexDatabase writes a database carrying SchemaVersion's tables and one
+// entry row but NONE of the lineage indexes — the shape the owner's events.db
+// had before they were added — and returns its path, closed.
+func preIndexDatabase(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	for _, index := range lineageIndexes {
+		if _, err := d.sql.Exec(`DROP INDEX ` + index.name); err != nil {
+			t.Fatalf("dropping %s: %v", index.name, err)
+		}
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return path
+}
+
+func TestOpenCreatesTheLineageIndexesOnAFreshDatabase(t *testing.T) {
+	// Arrange
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if got, want := lineageIndexNames(t, d), wantLineageIndexNames(); !slicesEqual(got, want) {
+		t.Fatalf("lineage indexes = %v, want %v", got, want)
+	}
+}
+
+func TestOpenBuildsTheMissingLineageIndexesOnAPreExistingDatabase(t *testing.T) {
+	// Arrange
+	path := preIndexDatabase(t)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if got, want := lineageIndexNames(t, d), wantLineageIndexNames(); !slicesEqual(got, want) {
+		t.Fatalf("lineage indexes = %v, want %v", got, want)
+	}
+}
+
+func TestOpenKeepsTheRowsOfADatabaseItBuildsIndexesOn(t *testing.T) {
+	// Arrange: the build is IN PLACE — the owner's record is never discarded
+	// to add a lookup structure.
+	path := preIndexDatabase(t)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry`); got != 1 {
+		t.Fatalf("entry rows = %d, want the pre-existing 1", got)
+	}
+}
+
+func TestOpenKeepsTheFileOfADatabaseItBuildsIndexesOn(t *testing.T) {
+	// Arrange: the nuke unlinks, so an unchanged file identity is what proves
+	// the build never reached it.
+	path := preIndexDatabase(t)
+	before := fileIdentity(t, path)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if after := fileIdentity(t, path); after != before {
+		t.Fatalf("file identity = %v, want the pre-existing database's own file %v", after, before)
+	}
+}
+
+func TestOpenRecordsTheLineageIndexesItBuiltInPlace(t *testing.T) {
+	// Arrange
+	path := preIndexDatabase(t)
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	s.assertLogged(t, "info", "built the missing lineage indexes in place indexes=[agent_spawned_by_agent agent_spawned_by_workflow workflow_spawner_agent detached_work_owner_agent]")
+}
+
+func TestOpenBuildsNothingOnADatabaseThatAlreadyCarriesTheLineageIndexes(t *testing.T) {
+	// Arrange: the migration is idempotent — a second open of a database the
+	// first open already indexed builds nothing.
+	path := preIndexDatabase(t)
+	_, firstLog := newSink(t)
+	first, err := OpenWithOptions(path, firstLog, Options{})
+	if err != nil {
+		t.Fatalf("first reopen: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("second reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	for _, message := range recordsAtLevel(t, s, "info") {
+		if strings.Contains(message, "built the missing lineage indexes") {
+			t.Fatalf("a database already carrying every lineage index was rebuilt: %q", message)
+		}
+	}
+	s.assertLogged(t, "debug", "every lineage index is present")
+}
+
+// squattedIndexDatabase is preIndexDatabase with a VIEW holding the name of one
+// lineage index: SQLite refuses `CREATE INDEX IF NOT EXISTS` over a name a view
+// already owns, and a view is not a table, so the table set still matches and
+// the open reaches the in-place build.
+func squattedIndexDatabase(t *testing.T) string {
+	t.Helper()
+	path := preIndexDatabase(t)
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	defer raw.Close() //nolint:errcheck // test teardown
+	if _, err := raw.Exec(`CREATE VIEW agent_spawned_by_agent AS SELECT 1`); err != nil {
+		t.Fatalf("creating the squatting view: %v", err)
+	}
+	return path
+}
+
+func TestOpenRecordsAFailedLineageIndexBuildThroughItsLogger(t *testing.T) {
+	// Arrange
+	path := squattedIndexDatabase(t)
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions succeeded over an index build that cannot succeed")
+	}
+	s.assertLogged(t, "error", "building the missing lineage indexes in place failed")
+}
+
+func TestOpenReportsAFailedLineageIndexBuildAsAStorageFailure(t *testing.T) {
+	// Arrange
+	path := squattedIndexDatabase(t)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions succeeded over an index build that cannot succeed")
+	}
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("err = %v, want ErrStorage", err)
+	}
+}
+
+func TestOpenNeverNukesADatabaseWhoseLineageIndexBuildFailed(t *testing.T) {
+	// Arrange: the database is one this binary created, carrying its rows, and
+	// an index is an optimization — its failure must not discard the record.
+	path := squattedIndexDatabase(t)
+	before := fileIdentity(t, path)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions succeeded over an index build that cannot succeed")
+	}
+	if after := fileIdentity(t, path); after != before {
+		t.Fatalf("file identity = %v, want the database's own file %v left in place", after, before)
+	}
+}
+
 func TestOpenRefusesAMalformedSlowQueryThreshold(t *testing.T) {
 	// Arrange
 	t.Setenv(EnvSlowQueryMs, "not-a-number")
@@ -1033,6 +1276,19 @@ func assertNoTableScan(t *testing.T, what, plan string) {
 		if strings.HasPrefix(strings.TrimSpace(step), "SCAN ") {
 			t.Fatalf("%s walks a whole table or index instead of seeking:\n%s", what, plan)
 		}
+	}
+}
+
+// assertNoAutomaticIndex fails if the plan builds an AUTOMATIC index: SQLite's
+// answer to a join or correlated lookup on a column no real index covers, which
+// it builds from a full scan on EVERY run and throws away after it. That is the
+// cost the lineage indexes remove from live_work (264-498ms per call on the
+// owner's box), and a plan is the only place it shows up the same way on every
+// machine.
+func assertNoAutomaticIndex(t *testing.T, what, plan string) {
+	t.Helper()
+	if strings.Contains(plan, "AUTOMATIC") {
+		t.Fatalf("%s builds an automatic index on every run instead of seeking a real one:\n%s", what, plan)
 	}
 }
 
