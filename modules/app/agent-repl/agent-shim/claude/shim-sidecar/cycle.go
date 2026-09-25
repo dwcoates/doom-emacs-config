@@ -141,7 +141,14 @@ type watched struct {
 	terminated bool
 }
 
+// missClearInterval bounds how long a remembered identity miss can outlive a
+// link write the directory fingerprint failed to see (see rescan).
+const missClearInterval = 5 * time.Minute
+
 type sidecar struct {
+	// lastMissClear is when rescan last ran the unconditional Refresh.
+	lastMissClear time.Time
+
 	options Options
 	store   *storeclient.Client
 	disc    *discover.Discoverer
@@ -812,7 +819,22 @@ func (s *sidecar) rescan() {
 	// THE IDENTITY RECORDS ARE RE-READ BEFORE ANYTHING IS DISCOVERED OR
 	// RE-KEYED, so a rotation that happened since the last pass is already
 	// known when the transcript it produced is first seen.
-	s.identity.Refresh()
+	//
+	// OPTIMIZATION (2026-09-24, owner rule: never remove without asking). An
+	// unconditional Refresh drops every remembered miss, and the rekey right
+	// after it then re-globs every shim directory once per watcher: ~5 s of CPU
+	// per 30 s rescan with 2085 watchers and 132 shim directories (a 30 s pprof
+	// put 60% of the sidecar under Resolve's glob from here). A miss can only be
+	// falsified by a link file landing, which moves its directory's mtime, so
+	// the rescan keeps the misses unless that happened; the full clear still
+	// runs every missClearInterval as the net under a write inside the
+	// fingerprint's mtime tick.
+	if now.Sub(s.lastMissClear) >= missClearInterval {
+		s.identity.Refresh()
+		s.lastMissClear = now
+	} else {
+		s.identity.RefreshKeepingMisses()
+	}
 	// THE ACTIVE SET IS RE-READ BEFORE THE SCAN IS GATED BY IT, so the first
 	// cycle's walk admits exactly the files of the workspaces that are live.
 	s.refreshActive(now)
