@@ -250,7 +250,7 @@ func TestASettledSpawnWhoseLineageCannotBeWrittenFailsTheBatchLoudly(t *testing.
 	}
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "test-producer",
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive,
 		batch(pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub"))))), nil)
 
 	// Assert
