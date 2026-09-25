@@ -666,3 +666,49 @@ func TestASpawnFrameDoesNotMoveTheStartOfAnAgentTheStoreAlreadyHeardFrom(t *test
 		t.Fatalf("spawned_by_agent = %q, want agent-main", got)
 	}
 }
+
+// ---- the live-work statements seek real indexes ----
+
+// liveWorkStatements is every statement GetLiveWork runs, as production text
+// with representative arguments.
+var liveWorkStatements = []struct {
+	name      string
+	statement string
+	args      []any
+}{
+	{name: "the live agents listing", statement: liveAgentsSQL, args: []any{"agent-main", "agent-main"}},
+	{name: "the live detached listing", statement: liveDetachedSQL, args: []any{"agent-main", detachedKindWorkflow}},
+	{name: "the unreachable-obligation scan", statement: liveWorkGapsSQL, args: []any{detachedKindWorkflow}},
+}
+
+func TestEveryLiveWorkStatementBuildsNoAutomaticIndex(t *testing.T) {
+	for _, test := range liveWorkStatements {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			assertNoAutomaticIndex(t, test.name, plan)
+		})
+	}
+}
+
+func TestTheSessionLineageSeeksEachLineageIndex(t *testing.T) {
+	for _, index := range lineageIndexes {
+		t.Run(index.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			plan := queryPlan(t, d, liveAgentsSQL, "agent-main", "agent-main")
+
+			// Assert
+			if !strings.Contains(plan, "USING INDEX "+index.name+" ") {
+				t.Fatalf("the lineage walk does not seek %s:\n%s", index.name, plan)
+			}
+		})
+	}
+}
