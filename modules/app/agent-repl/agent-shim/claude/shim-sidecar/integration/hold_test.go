@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -252,6 +253,15 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	// each rewind it performs, so more than one of those records is a frame held
 	// twice — the unbounded deferral this file's whole design forbids — and none
 	// would mean the record was converted without ever being held at all.
+	//
+	// FILE-SCOPED RECORDS ARRIVE THROUGH THE ASYNCHRONOUS ClientLog FORWARD, so
+	// a snapshot taken the instant the store holds the entry can predate the
+	// hold records. The forward is one FIFO queue, and the forced conversion's
+	// own `hold` record is written after the first delivery's `tailer-hold`, so
+	// once it has arrived every record this assertion counts has too.
+	awaitLog(ctx, t, opts.LogPath, "the forced conversion's hold record", func(r logRecord) bool {
+		return r.Operation == "hold" && strings.Contains(r.Message, "no summary followed")
+	})
 	records := readLog(t, opts.LogPath)
 	rewinds := recordsFor(records, "tailer-hold")
 	if len(rewinds) != 1 {
