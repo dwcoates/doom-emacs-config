@@ -122,7 +122,11 @@ overwrites their real `shim-store.build.json`.
 - `agent` — one row per `AgentId`, main agent included. THE home of agent
   metadata: `spawned_by_agent` XOR `spawned_by_workflow` (main: neither), the
   unpacked `AgentSubagentStart` fields, `started_at_ms`, `ended_at_ms`
-  (NULL = live), `terminal`.
+  (NULL = live), `terminal`. `spawned_by_agent` is written by a spawn's START
+  and ALSO by its SUCCESS when that names `created_agent_id`: the file plane
+  delivers a synchronous spawn only as its conclusion, and the success is then
+  the one frame stating the spawner. The success writes LINEAGE ONLY — never the
+  start's metadata columns.
 - `entry` — the spine: `position` (FIRST-insert order — the page order and the
   pointer; an upsert keeps it), `upsert_key` UNIQUE, `write_id` UNIQUE,
   `write_seq` (store-internal global write ordinal, bumped on every insert AND

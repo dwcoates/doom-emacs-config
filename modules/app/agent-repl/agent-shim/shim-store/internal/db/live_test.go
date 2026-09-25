@@ -239,6 +239,25 @@ func TestLiveWorkIncludesANestedSubagentOfTheSession(t *testing.T) {
 	}
 }
 
+func TestLiveWorkIncludesASubagentWhoseSpawnWasDeliveredOnlySettled(t *testing.T) {
+	// Arrange: the file plane's shape for a session no shim watched — the
+	// subagent's own frames first, then its spawn, stated only as the success.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "toolu_sub", frameItem(activityFrame("toolu_sub", "act-1", prose()))))
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub")))))
+
+	// Act
+	live, err := d.LiveWork(ctx(), "agent-main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	if agents, _ := liveIDs(live); len(agents) != 1 || agents[0] != "toolu_sub" {
+		t.Fatalf("live_agents = %v, want [toolu_sub]", agents)
+	}
+}
+
 func TestLiveWorkIncludesDetachedWorkOwnedByANestedSubagent(t *testing.T) {
 	// Arrange: the shell run was announced by the SUBAGENT, not the main agent.
 	d, _ := newStore(t)

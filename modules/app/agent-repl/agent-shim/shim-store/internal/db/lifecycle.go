@@ -84,8 +84,13 @@ func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, agentID strin
 	}
 	act := activity.Activity
 	if subagent, ok := act.GetItem().(*conversationv1.AgentActivity_Subagent); ok {
-		if start, ok := subagent.Subagent.GetResult().(*conversationv1.AgentSubagent_Start); ok {
-			if err := d.createSpawnedAgent(ctx, tx, agentID, start.Start, now); err != nil {
+		switch result := subagent.Subagent.GetResult().(type) {
+		case *conversationv1.AgentSubagent_Start:
+			if err := d.createSpawnedAgent(ctx, tx, agentID, result.Start, now); err != nil {
+				return err
+			}
+		case *conversationv1.AgentSubagent_Success:
+			if err := d.recordSettledSpawnLineage(ctx, tx, agentID, result.Success.GetCreatedAgentId().GetValue(), now); err != nil {
 				return err
 			}
 		}
@@ -189,6 +194,43 @@ func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy strin
 	}
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: created},
 		"spawned agent recorded spawned_by=%q", spawnedBy)
+	return nil
+}
+
+// recordSettledSpawnLineage records WHO SPAWNED an agent from the spawn's
+// SETTLED frame, for the delivery that carries no start at all.
+//
+// A FILE-PLANE DELIVERY OF A SYNCHRONOUS SPAWN IS ONLY EVER ITS CONCLUSION. The
+// sidecar announces a spawn at its RESULT (the vendor names the outcome there),
+// so a session no shim watched states the spawn as an AgentSubagentSuccess in
+// the spawner's book and never as a start — and the success carries
+// created_agent_id for exactly that case. It is the same statement a start
+// makes: the agent whose book holds the spawn unit created that agent. Reading
+// lineage from the start alone left every such subagent with no spawner, so no
+// session's live-work lineage reached it (51 live `toolu_` agents on the owner's
+// store, 2026-09-23).
+//
+// LINEAGE AND NOTHING ELSE. The start's metadata columns are the start's; a
+// conclusion does not restate them, and overwriting them with a conclusion's
+// view would erase what a start already recorded. The spawner is the one fact
+// both arms state identically.
+//
+// A SUCCESS NAMING NO CREATED AGENT STATES NO LINEAGE. The field is optional —
+// a producer that could not name the created agent leaves it UNSET rather than
+// inventing one — so there is nothing to record and nothing wrong.
+func (d *DB) recordSettledSpawnLineage(ctx context.Context, tx *sql.Tx, spawnedBy, created string, now int64) error {
+	fields := logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: created}
+	if created == "" {
+		fields.AgentID = spawnedBy
+		d.log.LogVerbose(fields, "a settled spawn names no created agent; it states no lineage")
+		return nil
+	}
+	const upsertSQL = `INSERT INTO agent (agent_id, spawned_by_agent, started_at_ms) VALUES (?, ?, ?)
+	  ON CONFLICT(agent_id) DO UPDATE SET spawned_by_agent = excluded.spawned_by_agent`
+	if _, err := tx.ExecContext(ctx, upsertSQL, created, spawnedBy, now); err != nil {
+		return d.queryError("store.db.write-batch", "agent", fields, storagef(err, "recording the spawner of settled spawn %q", created))
+	}
+	d.log.LogVerbose(fields, "spawn lineage recorded from the settled spawn spawned_by=%q", spawnedBy)
 	return nil
 }
 
