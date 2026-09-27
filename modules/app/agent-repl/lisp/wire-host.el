@@ -44,6 +44,7 @@
 (declare-function agent-repl-wire--object "wire-common")
 (declare-function agent-repl-wire-decode-drain-reason "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
+(declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
 (declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
@@ -572,6 +573,10 @@ directory."
   "Decode the `open_in_editor' push arm VALUE."
   (agent-repl-wire-decode-host-open-in-editor value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-ending (value)
+  "Decode the `ending' push arm VALUE."
+  (agent-repl-wire-decode-daemon-stream-ending value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-push (value)
   "Decode `WatchHostWorkspaceResponse''s `push' oneof from the object VALUE."
   (agent-repl-wire--decode-oneof
@@ -584,14 +589,15 @@ directory."
      (reloadWebapp :reload-webapp
                    agent-repl-wire-decode-watch-host-workspace-response-reload-webapp)
      (openInEditor :open-in-editor
-                   agent-repl-wire-decode-watch-host-workspace-response-open-in-editor))))
+                   agent-repl-wire-decode-watch-host-workspace-response-open-in-editor)
+     (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host notification transferred reloadWebapp openInEditor))
+     '(host notification transferred reloadWebapp openInEditor ending))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))
@@ -1321,7 +1327,12 @@ it, and drops any it does not recognize."
      (drainCancelled :drain-cancelled agent-repl-wire-decode-daemon-drain-cancelled)
      (mutationProgress :mutation-progress
                        agent-repl-wire-decode-workspace-mutation-progress)
-     (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp))))
+     (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp)
+     (ending :ending agent-repl-wire-decode-watch-daemon-response-ending))))
+
+(defun agent-repl-wire-decode-watch-daemon-response-ending (value)
+  "Decode `WatchDaemonResponse''s `ending' push arm VALUE."
+  (agent-repl-wire-decode-daemon-stream-ending value))
 
 (defun agent-repl-wire-decode-watch-daemon-response-reload-elisp (value)
   "Decode `WatchDaemonResponse''s `reload_elisp' push arm VALUE."
@@ -1332,7 +1343,8 @@ it, and drops any it does not recognize."
   (let ((object (agent-repl-wire--object "WatchDaemonResponse" value)))
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
-     '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp))
+     '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
+       ending))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

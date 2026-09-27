@@ -708,8 +708,30 @@ composer and vendor_info arms together."
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
-                             "mutationProgress" "reloadElisp")
+                             "mutationProgress" "reloadElisp" "ending")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-daemon-ending-decodes-to-its-arm ()
+  "The daemon stream's planned ending decodes to the `:ending' arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response "{\"ending\":{}}")
+                 '(:arm :ending :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-host-push-arms-pinned ()
+  "The host stream's push arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                        "WatchHostWorkspaceResponse")
+                       #'string<)
+                 (sort (list "host" "notification" "transferred" "reloadWebapp"
+                             "openInEditor" "ending")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
+  "The host stream's planned ending decodes to the `:ending' arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response "{\"ending\":{}}")
+                 '(:arm :ending :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-reload-elisp-decodes-its-root-and-build ()
   "A deploy's reload push carries the root to load from and the build it is."

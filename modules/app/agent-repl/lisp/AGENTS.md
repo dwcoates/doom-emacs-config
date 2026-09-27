@@ -59,7 +59,7 @@ daemon is asked; everything after the claim is shared:
 | trigger | claim |
 | --- | --- |
 | `transferred` push; `transferring_away` / `not_yet_adopted` refusal; successor accepted | `:adopt` (AdoptHostWorkspace, the handover rendezvous; the webview is reloaded BESIDE the adopt) |
-| host stream lost (`stream-lost`); a call finding its connection closed (`dead-connection`); a promotion that left the workspace on the old daemon (`promotion`); `link-up` | `:register` (RegisterWorkspace, idempotent by dir; the webview is reloaded after the subscribe) |
+| host stream lost (`stream-lost`); host stream ended after the daemon's planned ending (`planned-ending`); a call finding its connection closed (`dead-connection`); a promotion that left the workspace on the old daemon (`promotion`); `link-up` | `:register` (RegisterWorkspace, idempotent by dir; the webview is reloaded after the subscribe) |
 
 Both end in `agent-repl-host--reattached`: the old stream cancelled, the
 host stream re-subscribed on the new daemon (which moves `:conn`/`:ref`, and
@@ -80,6 +80,16 @@ workspace's outage-held prompts there).
   still on the old connection and every detached one.
 - Every walk carries a token; only the newest walk for a workspace may
   finish, and a close of a stream the workspace already left is stale.
+- A PLANNED end is told apart by the daemon's own last frame: the host,
+  daemon and roster streams each carry an `ending` arm
+  (`DaemonStreamEnding`) that a planned stand-down sends immediately
+  before its clean end. The consumer marks the stream that carried it, and
+  a clean `(:ended)` of THAT stream is INFO (`elisp.host.stream-ended-planned`,
+  `elisp.link.down-planned`, `elisp.roster.stream-close: reason=planned-ending`)
+  followed by the very same walk a loss takes. A clean end without the
+  frame, or an error after it, stays the loss it always was
+  (`elisp.host.stream-lost` ERROR, `elisp.link.down` WARN, the roster's
+  ERROR).
 - The roster stream follows the same rule (`agent-repl-roster--follow-live-daemon`):
   an accepted stream that is lost is re-subscribed on the live daemon; with no
   link, or on a stream never accepted, the link's own edge re-subscribes.

@@ -292,6 +292,17 @@ request is built only from complete values."
     (agent-repl-wire--fail message-name '- "expected an empty message"))
   nil)
 
+;;;; ---- agentrepl.v1.DaemonStreamEnding ----
+
+;; The LAST frame of a standing stream whose daemon stands down in a PLANNED
+;; exit (daemon_stream_ending.proto).  It rides the host, daemon and roster
+;; streams alike, so its one decoder is shared here.
+(defun agent-repl-wire-decode-daemon-stream-ending (value)
+  "Decode VALUE as the empty `DaemonStreamEnding' -- presence is the fact.
+The stream's clean end that follows it is PLANNED: the consumer logs it
+at INFO and reattaches to the live daemon rather than calling it lost."
+  (agent-repl-wire--decode-empty "DaemonStreamEnding" value))
+
 ;;;; ---- workspace.v1.WorkspaceRef ----
 
 (defun agent-repl-wire-decode-workspace-ref (value)
