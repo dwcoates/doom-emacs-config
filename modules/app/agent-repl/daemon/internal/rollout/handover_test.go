@@ -983,6 +983,67 @@ func TestHandoverStandsDownAWorkspaceItCannotTransfer(t *testing.T) {
 	}
 }
 
+// TestHandoverNeverTransfersAClosedWorkspace asserts the defense in depth
+// behind wsm.SetClosed's release: a closed row still naming this daemon (the
+// stale record 498b3b658c074bf4 carried, 2026-09-27) is never transferred.
+func TestHandoverNeverTransfersAClosedWorkspace(t *testing.T) {
+	tests := []struct {
+		name         string
+		close        bool
+		live         bool
+		wantTransfer bool
+		wantKills    int
+	}{
+		{name: "an open served workspace is transferred", close: false, live: true, wantTransfer: true, wantKills: 0},
+		{name: "a closed row with a stale serving claim is not transferred", close: true, live: false, wantTransfer: false, wantKills: 0},
+		{name: "a closed row with a live session is stood down, not transferred", close: true, live: true, wantTransfer: false, wantKills: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			shim := h.fleet.live[ws]
+			if tt.close {
+				if err := h.db.SetClosed(ctx, ws, true); err != nil {
+					t.Fatalf("SetClosed: %v", err)
+				}
+				// The stale record: a closed row a leaked path left served.
+				if err := h.db.ClaimServing(ctx, ws, selfInstance); err != nil {
+					t.Fatalf("ClaimServing: %v", err)
+				}
+			}
+			if !tt.live {
+				delete(h.fleet.live, ws)
+			}
+			adoptions := 0
+			if tt.wantTransfer {
+				adoptions = 1
+			}
+
+			// Act
+			if err := runHandover(t, h, adoptions); err != nil {
+				t.Fatalf("Handover: %v", err)
+			}
+
+			// Assert
+			transferred := false
+			for _, call := range h.registry.Requests() {
+				if call.WS == ws && call.Req.Reason == string(ReasonHandoverTransfer) {
+					transferred = true
+				}
+			}
+			if transferred != tt.wantTransfer {
+				t.Fatalf("transferred = %v, want %v; requests %+v", transferred, tt.wantTransfer, h.registry.Requests())
+			}
+			if got := len(shim.ForceKills()); got != tt.wantKills {
+				t.Fatalf("force kills = %d, want %d", got, tt.wantKills)
+			}
+		})
+	}
+}
+
 // TestHandoverEndsAnUntransferredSessionBeforeStoppingItsProcess asserts the
 // order: the shim writes its own terminals as the session ends, and a signal
 // alone gives it no chance to.
