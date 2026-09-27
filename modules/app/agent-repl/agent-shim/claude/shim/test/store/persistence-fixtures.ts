@@ -165,7 +165,7 @@ export function bashRunEntry(
   const run = unit(runValue);
   return {
     agentId: book,
-    upsertKey: `bash:${runValue}`,
+    upsertKey: `bash:${runValue}:start`,
     source: { vendorUuid: `uuid-${runValue}`, discriminator: "agent_bash.start" },
     keepalive: false,
     turn: undefined,

@@ -81,14 +81,14 @@ export function bashRowEntry(init: {
   readonly run: string;
   readonly frame: conversationv1.AgentBash;
   readonly writeId: string;
-  /** Defaults to the contract's `bash:<run activity id>`. */
+  /** Defaults to the run's START key, `bash:<run activity id>:start`, both planes' spelling. */
   readonly upsertKey?: string;
   readonly topLevel?: string;
 }): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
     plane: filePlane(),
     writeId: init.writeId,
-    upsertKey: init.upsertKey ?? `bash:${init.run}`,
+    upsertKey: init.upsertKey ?? `bash:${init.run}:start`,
     entry: {
       case: "agentUpdate",
       value: create(storev1.StoreAgentUpdateSchema, {
