@@ -8,6 +8,9 @@
  * arm a reader is told, which is the whole point of `lost` — and the ruling
  * itself belongs to whoever holds the live set.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
@@ -20,6 +23,7 @@ import {
   createTaskKindRegistry,
   detachableKind,
   detachedWorkKind,
+  isAgentTaskType,
   taskKindOf,
   TASK_KIND_CAPACITY,
   lostAgentEntry,
@@ -1709,5 +1713,36 @@ describe("the task registry's agent join", () => {
     // Assert.
     const warned = logRecordsSince(before).filter((record) => record.level === "warn");
     expect(warned.map((record) => record.context.task_id)).toEqual(["task-0"]);
+  });
+});
+
+describe("isAgentTaskType", () => {
+  it.each([
+    { taskType: "local_agent", agent: true },
+    { taskType: undefined, agent: true },
+    { taskType: "", agent: true },
+    { taskType: "local_bash", agent: false },
+    { taskType: "monitor", agent: false },
+    { taskType: "mcp_task", agent: false },
+  ])("answers $agent for task_type $taskType", ({ taskType, agent }) => {
+    // Arrange, Act, Assert.
+    expect(isAgentTaskType(taskType)).toBe(agent);
+  });
+
+  it("is the one reader of the vendor's task_type words outside the table", () => {
+    // Arrange: every authored source file but the mock vendor, which WRITES them.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../../src");
+    const files = readdirSync(root, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".ts") && !file.startsWith("fake"));
+
+    // Act.
+    const readers = files.flatMap((file) => {
+      const text = readFileSync(join(root, file), "utf8");
+      const hits = text.match(/"local_(agent|bash|workflow)"/g) ?? [];
+      return file === join("convert", "detached.ts") ? hits.slice(3) : hits.map(() => file);
+    });
+
+    // Assert: the words appear only in VENDOR_TASK_KINDS.
+    expect(readers).toEqual([]);
   });
 });

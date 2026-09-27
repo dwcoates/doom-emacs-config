@@ -39,6 +39,7 @@ import {
   type PersistEntry,
   type Persistence,
 } from "../store/persistence.js";
+import { isAgentTaskType } from "../convert/detached.js";
 import { storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
@@ -754,7 +755,7 @@ export class TurnEngine {
       .find((item) => item.taskId === target.value || item.toolUseId === target.value);
     if (
       busy !== undefined &&
-      (busy.taskType === undefined || busy.taskType === "" || busy.taskType === "local_agent")
+      isAgentTaskType(busy.taskType)
     ) {
       LOGGER.debug(
         { agent_id: target.value, task_id: busy.taskId },
