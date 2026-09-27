@@ -251,7 +251,7 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     const originalInstant = 1_700_000_000_000;
@@ -298,7 +298,7 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     await seedBashLifecycle(
@@ -361,46 +361,69 @@ describe("WatchBash serves the SIDECAR's rows", () => {
 });
 
 describe("WatchBash and the rows it relays", () => {
-  test("it opens on an ANNOUNCED run whose rows do not exist yet", async () => {
+  test("an ANNOUNCED run opens with `start` at once, before the sidecar has written a row", async () => {
     // THE ANNOUNCEMENT IS A CONSUMER OBLIGATION: the daemon opens the stream
     // the moment it sees one, which is necessarily before the sidecar has
-    // written a single row. The store answers `CodeNotFound` for a run it has
-    // never heard of, and the shim must tolerate that -- an open that failed
-    // here would make the eager-open rule impossible to obey, and the consumer
-    // would have to poll to find out when the stream became openable.
+    // written a single row. The shim wrote the run's start ahead of the
+    // announcement, so the first frame is owed immediately — never a silent
+    // wait for a producer this process cannot see.
     const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
 
-    // Opened with NOTHING in the store for this run.
+    // Opened with NO sidecar row for this run, and none is ever seeded.
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
         create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
         options,
       ),
     );
-    // The sidecar's rows arrive afterwards, as they do in life.
-    await seedBashLifecycle(
-      createStoreClient(shim.dirs.storeSocket),
-      sidecarProducer(started.vendorSessionId),
-      {
-        run,
-        work: run,
-        command: "sleep 1 && echo done",
-        startedAtMs: 1_700_000_000_000,
-        chunks: ["late\n"],
-        exitCode: 0,
-        topLevel: started.vendorSessionId,
-      },
-    );
-    const frames = await bash.drain();
+    const first = bashFrame(await bash.next());
 
-    const arms = frames.map((frame) => bashFrame(frame).result.case);
-    expect(arms[0]).toBe("start");
-    expect(arms.at(-1)).toBe("success");
+    expect(first.result.case).toBe("start");
+    bash.close();
+    stream.close();
+  });
+
+  test("the sidecar's rows written after the shim's start follow it on the same stream", async () => {
+    // THE PLANES SHARE ONE ROW PER FACT: the sidecar's tail and terminal land
+    // on the run the shim's start opened, and are served after it.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    expect(bashFrame(await bash.next()).result.case).toBe("start");
+
+    await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
+      bashRowEntry({
+        run,
+        frame: bashTail("late\n"),
+        writeId: `${run}-tail`,
+        upsertKey: `bash:${run}:tail`,
+        topLevel: started.vendorSessionId,
+      }),
+      bashRowEntry({
+        run,
+        frame: bashCompleted("sleep 1 && echo done", 0, "late\n"),
+        writeId: `${run}-terminal`,
+        upsertKey: `bash:${run}:terminal`,
+        topLevel: started.vendorSessionId,
+      }),
+    ]);
+    const arms = (await bash.drain()).map((frame) => bashFrame(frame).result.case);
+
+    expect(arms).toEqual(["start", "tail", "success"]);
     stream.close();
   });
 
@@ -411,7 +434,7 @@ describe("WatchBash and the rows it relays", () => {
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
 
@@ -625,7 +648,7 @@ describe("what the PRODUCER states about a shell run", () => {
 
     // The detached path, whose rows are the SIDECAR's and are seeded here as
     // everywhere else in this file.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     await seedBashLifecycle(
