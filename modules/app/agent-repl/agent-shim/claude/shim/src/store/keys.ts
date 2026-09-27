@@ -147,6 +147,11 @@ export function terminalUpsertKey(
   )}`;
 }
 
+/** The prefix every row of one detached shell run is keyed under. */
+function bashRunPrefix(run: conversationv1.AgentActivityId): string {
+  return `bash:${requireValue(run.value, "the bash run's activity id")}`;
+}
+
 /**
  * A detached shell run's START row, keyed by the RUN's activity id.
  *
@@ -158,9 +163,14 @@ export function terminalUpsertKey(
  * once, and under that spelling the terminal erased the output entirely — so
  * `WatchBashRun`, which replays a run's rows in first-insert order, had nothing
  * to replay.
+ *
+ * `bash:<run>:start`, THE SIDECAR'S SPELLING (`BashStartKey`, shim-sidecar
+ * internal/convert/keys.go). The shim is the start's one producer — it writes
+ * the row at the run's announcement — and a key that disagreed with the other
+ * plane's for the same fact would let the two write two starts for one run.
  */
-export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
-  return `bash:${requireValue(run.value, "the bash run's activity id")}`;
+export function bashStartUpsertKey(run: conversationv1.AgentActivityId): string {
+  return `${bashRunPrefix(run)}:start`;
 }
 
 /**
@@ -174,7 +184,7 @@ export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
  * outmoded and nothing mints that spelling any more.
  */
 export function bashTailUpsertKey(run: conversationv1.AgentActivityId): string {
-  return `${bashUpsertKey(run)}:tail`;
+  return `${bashRunPrefix(run)}:tail`;
 }
 
 /**
@@ -184,7 +194,7 @@ export function bashTailUpsertKey(run: conversationv1.AgentActivityId): string {
  * the output the run produced on its way there.
  */
 export function bashTerminalUpsertKey(run: conversationv1.AgentActivityId): string {
-  return `${bashUpsertKey(run)}:terminal`;
+  return `${bashRunPrefix(run)}:terminal`;
 }
 
 /**

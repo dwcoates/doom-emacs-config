@@ -292,11 +292,8 @@ interface Reader {
     pageSize: number,
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
-  openBashRun(
-    work: conversationv1.DetachedWorkId,
-    announcement?: () => BashRunStanding,
-  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
-  /** Relay one shell-run frame to whoever is watching that run. */
+  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  /** Observe one shell-run frame the writer took: the log line that says it was written. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
   /**
    * Report that a batch LANDED, so a watcher waiting for one of its books wakes.
@@ -331,69 +328,17 @@ interface ReaderOptions extends ReadRetryOptions {
 }
 
 /**
- * How long a waiter sleeps before re-asking the store for a run it is waiting
- * on, when no in-process note has woken it.
- *
- * The note from {@link Reader.noteBashFrame} is the real signal and needs no
- * timer: it fires the instant THIS shim's writer commits a row. The SIDECAR
- * writes rows in another process, though, and its commits reach no listener
- * here — so a waiter also re-asks the store on this cadence. That is polling an
- * external resource for a fact only it holds, not a sleep standing in for
- * synchronization.
- */
-const BASH_ROW_RECHECK_MS = 25;
-
-/**
- * The ceiling a shell run's recheck backs off to while it waits.
- *
- * AN ANNOUNCED RUN IS WAITED FOR UNTIL ITS ROWS LAND, however long that takes.
- * The rows of a detached shell are the SIDECAR's to write, from the spool it
- * reads only once the spawning call's launch has been observed, so their
- * arrival is bounded by nothing in this process. A wall-clock window here --
- * this used to give a run that had left the live set 500ms -- refused the
- * watch the moment a loaded host made the sidecar slower than that
- * (TestBashDetachExplicitPoll, 2026-09-24: rows durable 523ms after the run
- * concluded), and the daemon, told the run does not exist, never re-opened it:
- * the shell's head never settled. The consumer's own cancel ends the wait.
- *
- * The recheck doubles from BASH_ROW_RECHECK_MS to this, so a run whose rows
- * are late costs four store reads a second rather than forty. It is the agent
- * recheck's cadence (AGENT_ROW_RECHECK_MS), so a late shell is seen no later
- * than a late agent book, and the first rechecks stay the 25ms the detached
- * shell perf row is budgeted on (e2e/PERF-SPEC.md).
- */
-const BASH_ROW_RECHECK_CEILING_MS = 250;
-
-/**
  * How long a waiter sleeps before re-asking the store for an AGENT's book.
  *
  * The note from {@link Reader.noteAgentRows} is the real signal here, and it is
  * COMPLETE for one shim: every row that creates an agent row is written by this
  * process, so a waiter is woken by the very commit it was blocked on. The
- * recheck is the belt to that braces, and it is deliberately slower than the
- * shell-run cadence: an agent wait stands for as long as a fresh session is
- * idle, and re-asking the store forty times a second meanwhile would be a busy
- * loop against an external resource.
+ * recheck is the belt to that braces, and it is deliberately slow: an agent
+ * wait stands for as long as a fresh session is idle, and re-asking the store
+ * forty times a second meanwhile would be a busy loop against an external
+ * resource.
  */
 const AGENT_ROW_RECHECK_MS = 250;
-
-/**
- * Where an ANNOUNCED shell run stands, as the caller that announced it sees it.
- *
- * The store refuses a run it holds no row for, and the daemon subscribes within
- * a few milliseconds of the announcement, so that refusal is routinely a race
- * rather than an answer. Which race it is depends on this:
- *
- * - `live` — the run is still in the live set; its rows are simply not written
- *   yet, and the wait stands for as long as that holds.
- * - `concluded` — the run was announced and has already left the live set. Its
- *   rows may still be unwritten (the fold that retires a run is the same fold
- *   that produces them, and a detached shell's rows are the sidecar's), so the
- *   wait stands until they land.
- * - `unknown` — nothing was ever announced under this handle. There is no
- *   promise to wait on, and the store's refusal is the answer.
- */
-export type BashRunStanding = "live" | "concluded" | "unknown";
 
 /** One "wait for the first row" rendezvous, keyed by whatever names the thing. */
 interface FirstRowGate {
@@ -409,9 +354,9 @@ interface FirstRowGate {
 /**
  * A first-row rendezvous on one recheck cadence.
  *
- * ONE HELPER FOR BOTH WAITS. A shell run and an agent book race the same way —
- * an eager consumer arrives before the producer's first commit — and two
- * hand-rolled copies of this loop would drift apart at the first fix.
+ * AN AGENT BOOK'S WAIT, AND NO LONGER A SHELL RUN'S. A shell run's first row is
+ * its start, which this shim writes ahead of the run's announcement, so a watch
+ * opened on an announced run finds it in the store and waits for nobody.
  */
 function firstRowGate(recheckMs: number): FirstRowGate {
   const waiters = new Map<string, Set<() => void>>();
@@ -447,16 +392,6 @@ export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
 
   /**
-   * Who is waiting for a given run's FIRST stored row, by run value.
-   *
-   * `WatchBashRun` answers `NotFound` until the run has a row, and the daemon
-   * opens a watch the moment the announcement reaches it — so an eager,
-   * correct consumer routinely arrives first. The announcement is a promise
-   * that the run exists, so that race is waited out rather than refused.
-   */
-  const bashRows = firstRowGate(BASH_ROW_RECHECK_MS);
-
-  /**
    * Who is waiting for a given AGENT's first stored row, by agent value.
    *
    * `OpenAgentSession` refuses `unknown_agent` until something has been written
@@ -487,21 +422,6 @@ export function createReader(options: ReaderOptions): Reader {
    * succeeds — either way the book demonstrably exists.
    */
   const booksMinted = new Set<string>();
-
-  /** Wake everyone waiting on this run; the store now holds a row for it. */
-  const wakeFirstRowWaiters = (runValue: string): void => bashRows.wake(runValue);
-
-  /** Wait for this run's first row to land, or for DELAYMS to recheck. */
-  const awaitFirstRow = (runValue: string, delayMs: number): Promise<void> => bashRows.wait(runValue, delayMs);
-
-  /**
-   * Runs whose TERMINAL row this shim has written, by run value.
-   *
-   * The concluded-but-unwritten wait ends on exactly this fact: once the
-   * terminal has landed, a store that still holds no row for the run is
-   * answering about a run that really is absent, and the refusal is the truth.
-   */
-  const bashTerminalsWritten = new Set<string>();
 
   /**
    * The open itself.
@@ -1215,7 +1135,7 @@ export function createReader(options: ReaderOptions): Reader {
         readAgentPageOnce(agent, pageSize, after),
       );
     },
-    async openBashRun(work, announcement) {
+    async openBashRun(work) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
       // is no side table to consult and no way for a lookup to go stale — and a
@@ -1235,69 +1155,39 @@ export function createReader(options: ReaderOptions): Reader {
       const abort = new AbortController();
       LOGGER.debug({ run: runValue, work: work.value }, "following a shell run's stored rows");
       let opened = false;
-      let recheckMs = BASH_ROW_RECHECK_MS;
       return {
         async *[Symbol.asyncIterator]() {
           try {
-            // A REFUSED OPEN IS A RACE, NOT AN ANSWER, while the shim still
-            // believes the run is live. `WatchBashRun` answers `NotFound`
-            // until the run has its first row, and the daemon opens its watch
-            // the instant the announcement lands — so re-ask until a row
-            // exists or the run leaves the live set. Refusing here would tell
-            // a consumer that work it was just told to follow does not exist.
-            for (;;) {
-              try {
-                for await (const push of client.watchBashRun(
-                  create(storev1.WatchBashRunRequestSchema, { run }),
-                  abort.signal,
-                )) {
-                  opened = true;
-                  const frame = push.row?.frame;
-                  if (frame === undefined) {
-                    throw new PersistenceError(
-                      "store_unavailable",
-                      "the store pushed a bash row with no frame",
-                    );
-                  }
-                  yield frame;
-                }
-                return;
-              } catch (error) {
-                // Only a refusal BEFORE the first row is a race; once rows have
-                // been served the run plainly exists and the failure is real.
-                if (opened || !isNotFound(error)) throw error;
-                // WAITING NEEDS A REASON. A caller with no belief about the run
-                // has given none, so the store's refusal stands — only a caller
-                // that says "I still hold this run" turns the refusal into a
-                // race worth waiting out.
-                if (announcement === undefined) throw error;
-                const standing = announcement();
-                if (standing === "unknown") throw error;
-                if (abort.signal.aborted) throw error;
-                // A RUN THAT LEFT THE LIVE SET WAS STILL ANNOUNCED, and an
-                // announced run whose rows are merely late is not a run that
-                // does not exist: its rows are the sidecar's to write, on no
-                // schedule this process can see (BASH_ROW_RECHECK_CEILING_MS).
-                // Only THIS shim having written the run's terminal makes the
-                // store's refusal an answer about a genuinely absent run.
-                if (standing === "concluded" && bashTerminalsWritten.has(runValue)) throw error;
-                LOGGER.logVerbose(
-                  { run: runValue, work: work.value, standing, recheck_ms: recheckMs },
-                  "the store has no row for this shell run yet; waiting for its first row",
+            // A REFUSED OPEN IS THE ANSWER, NEVER A RACE TO WAIT OUT. A run
+            // this shim announced has its START in the store before its
+            // announcement (the writer's one ordered buffer), and the caller
+            // makes that start durable before it opens (engine/turn.ts
+            // `watchBash`). So the store refusing the run means no row for it
+            // exists: the contract's "not a live shell: refused". Waiting for a
+            // producer this process cannot see stood the stream open, SILENT,
+            // forever on a shell the sidecar never tailed (2026-09-27).
+            for await (const push of client.watchBashRun(
+              create(storev1.WatchBashRunRequestSchema, { run }),
+              abort.signal,
+            )) {
+              opened = true;
+              const frame = push.row?.frame;
+              if (frame === undefined) {
+                throw new PersistenceError(
+                  "store_unavailable",
+                  "the store pushed a bash row with no frame",
                 );
-                await awaitFirstRow(runValue, recheckMs);
-                recheckMs = Math.min(recheckMs * 2, BASH_ROW_RECHECK_CEILING_MS);
               }
+              yield frame;
             }
           } catch (error) {
             if (isNotFound(error)) {
-              // A REFUSED OPEN means the store holds no row for this run — the
-              // announcement reached us before the run's first row did. It is
+              // A REFUSED OPEN means the store holds no row for this run. It is
               // an `unknown_work` refusal, not a transport failure, so the
               // caller can say so rather than reporting the store as broken.
               LOGGER.debug(
                 { run: runValue, work: work.value },
-                "the store holds no rows for this shell run yet",
+                "the store holds no rows for this shell run; the watch is refused",
               );
               throw new PersistenceError(
                 "unknown_work",
@@ -1316,15 +1206,7 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     noteBashFrame(runValue, frame) {
-      // A TERMINAL ROW ENDS THE CONCLUDED-BUT-UNWRITTEN WAIT: after this write
-      // the store either holds the run or the run is genuinely absent.
-      const arm = frame.result.case;
-      if (arm === "success" || arm === "failure") bashTerminalsWritten.add(runValue);
-      // THE FIRST-ROW SIGNAL. A watcher that arrived before this run had a row
-      // is blocked on exactly this commit, so waking it here is what makes the
-      // wait a synchronization rather than a poll.
-      wakeFirstRowWaiters(runValue);
-      // NOTHING TO RELAY ANY MORE. A run is served from the store's own rows,
+      // NOTHING TO RELAY OR WAKE. A run is served from the store's own rows,
       // so a frame this shim wrote reaches a watcher the same way the sidecar's
       // do — through `WatchBashRun`. Kept as the writer's one observation point
       // so a frame that never reached the store is visible in the log.

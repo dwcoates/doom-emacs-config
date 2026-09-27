@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../../src/proto.js";
-import { bashConverter } from "../../../src/convert/tools/bash.js";
+import { bashConverter, shellCommandOf } from "../../../src/convert/tools/bash.js";
 import { toolProgress } from "../../../src/convert/entries.js";
 import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
 
@@ -728,5 +728,20 @@ describe("bashConverter.cut", () => {
 
     // Assert.
     expect(item).toBeUndefined();
+  });
+});
+
+describe("shellCommandOf", () => {
+  it("restates the call's command line", () => {
+    // Arrange, Act.
+    const command = shellCommandOf(call({ command: "sleep 3" }));
+
+    // Assert.
+    expect(command?.line).toBe("sleep 3");
+  });
+
+  it("names no command for a call that named no command line", () => {
+    // Arrange, Act, Assert.
+    expect(shellCommandOf(call({}))).toBeUndefined();
   });
 });
