@@ -38,5 +38,11 @@ message WatchAgentResponse {
     conversation.v1.HistoryPage page = 1;
     // Every later frame: one entry as written.
     conversation.v1.HistoryEntryAt entry = 2;
+    // An entry the store RETIRED: a re-derivation of the record behind it
+    // found the record no longer converts to it, so it is no longer part of
+    // this agent's history and no page serves it again. It carries the entry
+    // as last served, at its own pointer, so the caller removes whatever it
+    // drew for it. The pointer stays a valid known_through.
+    conversation.v1.HistoryEntryAt retired = 3;
   }
 }

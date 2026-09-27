@@ -545,7 +545,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 }
 
 func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.WatchAgentSessionResponse], line LineWritten) error {
-	if err := stream.Send(&storev1.WatchAgentSessionResponse{Line: line.Line}); err != nil {
+	if err := stream.Send(&storev1.WatchAgentSessionResponse{Frame: &storev1.WatchAgentSessionResponse_Line{Line: line.Line}}); err != nil {
 		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
 			"sending a line to the watcher failed: %v", err)
 		return err
