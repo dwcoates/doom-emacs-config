@@ -45,7 +45,7 @@ func TestBetweenSweepsGapScan(t *testing.T) {
 	home, stateDir, runDir := sweepEdgePaths(t)
 	workspaces := sweepEdgeWorkspaces(ctx, t, stateDir)
 
-	sources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), workspaces))
+	sources, err := EnumerateSources(RealEnv(home, workspaces))
 	if err != nil {
 		t.Fatalf("enumerate the logs to scan: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestBetweenSweepsMarkTheSweepEnd(t *testing.T) {
 	home, stateDir, runDir := sweepEdgePaths(t)
 	workspaces := sweepEdgeWorkspaces(ctx, t, stateDir)
 
-	sources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), workspaces))
+	sources, err := EnumerateSources(RealEnv(home, workspaces))
 	if err != nil {
 		t.Fatalf("enumerate the logs to mark: %v", err)
 	}

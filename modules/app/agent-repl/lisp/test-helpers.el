@@ -390,8 +390,8 @@ work in the batch process.  Ignores every argument by design."
     ;; Keep debug-file assertions stable across aggregate-suite module reloads:
     ;; `core.el' intentionally re-reads this environment variable on every load.
     (setenv "AGENT_REPL_LOG_LEVEL" "debug")
-    ;; The global Emacs sink now lives in a UID-scoped OS-temp directory rather
-    ;; than the state tree.  Pre-bind its defcustom to this process's state dir
+    ;; The global Emacs sink's default is baked from the state root when
+    ;; `core.el' loads.  Pre-bind its defcustom to this process's state dir
     ;; so concurrent ERT processes cannot contend for one append-file lock.
     (setq agent-repl-log-file-name
           (expand-file-name "global-emacs.log" test-state-dir)))

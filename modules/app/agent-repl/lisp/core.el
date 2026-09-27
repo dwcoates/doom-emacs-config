@@ -504,6 +504,9 @@ that identity is minted by the daemon and only received here."
 
 (defun agent-repl--default-log-directory ()
   "Return agent-repl's private directory under the OS temporary root.
+It held the central sink until the sink moved under the state root's
+`logs/' (see `agent-repl--default-log-file-name'); it is still validated
+as private whenever `agent-repl-log-file-name' is customized into it.
 The numeric Unix user ID keeps users from colliding when
 `temporary-file-directory' names a shared directory such as /tmp on Linux.
 The directory is not created here.
@@ -519,36 +522,55 @@ the logfile path is itself a prerequisite for emitting a log line."
    (expand-file-name (format "doom-agent-repl-%d" (user-uid))
                      temporary-file-directory)))
 
+(defconst agent-repl--central-log-file-basename "emacs.central.log"
+  "File name of the durable central Emacs sink inside the state `logs/'.
+It follows that directory's `<runtime>.<kind>.log' scheme, beside the
+daemon's own `daemon.run.log'.")
+
 (defconst agent-repl--default-log-file-name
-  (expand-file-name "doom-agent-repl.log"
-                    (agent-repl--default-log-directory))
-  "Default OS-temporary path for workspace-agnostic agent-repl records.")
+  (agent-repl--global-state-file
+   (concat "logs/" agent-repl--central-log-file-basename))
+  "Default durable path for workspace-agnostic agent-repl records.
+
+THE CENTRAL SINK LIVES BESIDE EVERY OTHER DURABLE TARGET (owner ruling,
+2026-09-27): `~/.claude-emacs/logs/emacs.central.log'.  Creation, fork,
+kill, teardown and daemon administration are recorded under the
+`:agent-repl-central' scope, and a record a person is asked to read must
+not sit where the operating system may sweep it or where a per-launcher
+TMPDIR moves it -- the same rule the workspace targets already follow
+\(`agent-repl--emacs-log-target-directory').")
 
 (defconst agent-repl--retired-state-log-file-name
   (agent-repl--global-state-file "doom-agent-repl.log")
   "Retired pre-temp-directory default for workspace-agnostic records.")
 
+(defconst agent-repl--retired-temp-log-file-name
+  (expand-file-name "doom-agent-repl.log"
+                    (agent-repl--default-log-directory))
+  "Retired OS-temporary default for workspace-agnostic records.")
+
 (defun agent-repl--normalize-log-file-name (value)
   "Return the active logfile path for configured VALUE.
-The retired state-tree default is redirected to the new OS-temporary default
-so reloading this module updates an already-bound defcustom.  Every other
-explicit path is preserved.  No file is moved, copied, read, or deleted."
-  (if (equal (expand-file-name value)
-             (expand-file-name agent-repl--retired-state-log-file-name))
+Each retired default -- the state-tree root file and the OS-temporary
+file -- is redirected to the current default so reloading this module
+updates an already-bound defcustom.  Every other explicit path is
+preserved.  No file is moved, copied, read, or deleted."
+  (if (member (expand-file-name value)
+              (list (expand-file-name agent-repl--retired-state-log-file-name)
+                    (expand-file-name agent-repl--retired-temp-log-file-name)))
       agent-repl--default-log-file-name
     value))
 
 (defcustom agent-repl-log-file-name agent-repl--default-log-file-name
   "Path to the workspace-agnostic agent-repl log file.
-Defaults to `doom-agent-repl.log' in a UID-qualified private directory under
-Emacs's `temporary-file-directory'.  On macOS that is normally the per-user
-/var/folders/.../T tree; on Linux it is commonly
-/tmp/doom-agent-repl-<uid>/doom-agent-repl.log.
+Defaults to `emacs.central.log' in the state root's `logs/' directory,
+normally ~/.claude-emacs/logs/emacs.central.log, beside the daemon's
+`daemon.run.log' and every workspace's log target.
 
 Workspace-owned records do not use this path.  They persist through the
 workspace's canonical .claude/emacs/emacs.log symlink.
 
-Existing logs under ~/.claude-emacs are intentionally neither migrated nor
+Logs at the retired defaults are intentionally neither migrated nor
 deleted.  The value is passed through `expand-file-name', and the parent
 directory is created on demand by `agent-repl--logfile-path'."
   :type 'string
@@ -751,9 +773,11 @@ metadata as an argument rather than splicing it into the format."
 
 (defun agent-repl--logfile-path ()
   "Return the expanded path of `agent-repl-log-file-name'.
-The parent directory is created if it does not exist.  The default
-UID-qualified temporary directory is required to be a real directory owned by
-the current user and is forced to mode 0700.
+The parent directory is created if it does not exist.  The state root's
+`logs/' directory, where the default sink lives, is required to be a real
+directory rather than a symlink.  The retired UID-qualified temporary
+directory, when a customized path still names it, is required to be a real
+directory owned by the current user and is forced to mode 0700.
 
 Do not instrument this helper through the logging ladder: it is called while
 constructing every file-backed log entry."
@@ -765,6 +789,12 @@ constructing every file-backed log entry."
     (when (equal (directory-file-name dir)
                  (directory-file-name (agent-repl--default-log-directory)))
       (agent-repl--validate-private-log-directory dir))
+    ;; The state `logs/' directory holds every Emacs target, so the central
+    ;; sink is held to the SAME real-directory rule the workspace targets are
+    ;; minted under: a symlinked `logs/' is refused, never followed.
+    (when (equal (directory-file-name dir)
+                 (directory-file-name (agent-repl--emacs-log-target-directory)))
+      (agent-repl--ensure-real-log-directory dir))
     path))
 
 (defun agent-repl--validate-private-log-directory (dir)

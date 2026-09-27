@@ -15,8 +15,13 @@ Workspace records are written to a runtime-owned temporary target reached
 through `<workspace>/.claude/emacs/emacs.log`. The active file is capped at
 64 MiB and retains five completed generations, `.1` newest through `.5`
 oldest. The canonical symlink always names the active target path. Central
-records use the private global Emacs log under the UID-scoped OS temporary
-directory.
+records -- everything logged under the `:agent-repl-central` scope, such as
+creation, fork, kill, teardown and daemon administration -- go to the durable
+central sink `<state>/logs/emacs.central.log` (`agent-repl-log-file-name`),
+beside the daemon's `daemon.run.log`, through the same rungs and the same
+rotation. Its directory is held to the real-directory rule the workspace
+targets are minted under, and the retired OS-temporary default is redirected
+to it on reload.
 
 Every record contains timestamp, runtime, PID, level, verbosity, operation,
 message, and structured context. Workspace records also contain

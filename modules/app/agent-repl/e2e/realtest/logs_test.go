@@ -164,14 +164,14 @@ func TestEnumerateNamesTheModuleLogAndItsPreviousSibling(t *testing.T) {
 	}
 }
 
-func TestRealEnvResolvesTheModuleLogUnderTheTemporaryDirectory(t *testing.T) {
-	// Arrange: lisp/core.el's default is UID-qualified under
-	// `temporary-file-directory`; the ~/.claude-emacs path is RETIRED and
-	// holds only historical records.
-	env := RealEnv("/Users/someone", "/var/folders/xx/T", 501, nil)
+func TestRealEnvResolvesTheModuleLogToTheDurableCentralSink(t *testing.T) {
+	// Arrange: lisp/core.el's default is the state root's
+	// logs/emacs.central.log; both earlier defaults are RETIRED and hold only
+	// historical records.
+	env := RealEnv("/Users/someone", nil)
 
 	// Assert.
-	want := "/var/folders/xx/T/doom-agent-repl-501/doom-agent-repl.log"
+	want := "/Users/someone/.claude-emacs/logs/emacs.central.log"
 	if env.ModuleLog != want {
 		t.Errorf("the module log resolved to %q, want %q", env.ModuleLog, want)
 	}

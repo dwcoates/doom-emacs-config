@@ -415,7 +415,7 @@ func TestRealtestSendAPrompt(t *testing.T) {
 	t.Logf("before the run the state database holds %d open workspace(s) and %d closed",
 		len(openBefore), len(closedBefore))
 
-	env := RealEnv(home, os.TempDir(), os.Getuid(), openBefore)
+	env := RealEnv(home, openBefore)
 	sources, err := EnumerateSources(env)
 	if err != nil {
 		t.Fatalf("enumerate the logs to harvest: %v", err)
@@ -1805,7 +1805,7 @@ func rt9TabName(ctx context.Context, t *testing.T, client *Client, ws Workspace)
 // rt9Sources enumerates the log sources for a workspace set.
 func rt9Sources(t *testing.T, home string, workspaces []Workspace) []Source {
 	t.Helper()
-	sources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), workspaces))
+	sources, err := EnumerateSources(RealEnv(home, workspaces))
 	if err != nil {
 		t.Fatalf("enumerate the logs: %v", err)
 	}
