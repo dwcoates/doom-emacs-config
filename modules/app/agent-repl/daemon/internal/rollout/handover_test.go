@@ -863,6 +863,32 @@ func loggedError(log *dlog.TestSurfaces, operation, substr string) bool {
 	return false
 }
 
+// loggedErrorWith reports an ERROR under operation whose message holds substr
+// and whose cause holds cause.
+func loggedErrorWith(log *dlog.TestSurfaces, operation, substr, cause string) bool {
+	for _, rec := range records(log, operation) {
+		got, _ := rec.Context["cause"].(string)
+		if rec.Level == dlog.LevelError && strings.Contains(rec.Message, substr) && strings.Contains(got, cause) {
+			return true
+		}
+	}
+	return false
+}
+
+// Quiesced answers the workspaces whose intake was quiesced, in order.
+func (h *harness) Quiesced() []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.quiesced...)
+}
+
+// Drained answers the workspaces whose held intake was drained, in order.
+func (h *harness) Drained() []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.drained...)
+}
+
 // listFailingDB is the state client with its workspace listing refusable, so
 // the handover's `served` step fails AFTER the successor is up.
 type listFailingDB struct {
@@ -910,6 +936,17 @@ func failuresAfterSpawn() []failureAfterSpawn {
 			logged: "the successor did not come up",
 		},
 		{
+			name: "the successor exited before it answered a health probe",
+			deps: noDeps,
+			arm: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.readyErr = &SuccessorExitedError{PID: fakeSuccessorPID, Exit: "exit status 1"}
+			},
+			heal: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.readyErr = nil
+			},
+			logged: "the successor never proved it was serving",
+		},
+		{
 			name: "listing what is served failed",
 			deps: func(_ *testing.T, fail *atomic.Bool) func(*Deps) {
 				return func(d *Deps) { d.DB = listFailingDB{DB: d.DB, fail: fail} }
@@ -935,6 +972,37 @@ func failuresAfterSpawn() []failureAfterSpawn {
 			},
 			logged: "the intent manifest could not be written after the announcement",
 		},
+	}
+}
+
+// TestASuccessorThatDiesBeforeItIsReadyIsHandedNothing is invariant C, the
+// 2026-09-27 incident's first half: the successor reported its address and
+// exited before it could serve. Nothing may be quiesced, announced or asked
+// of the bounce registry, no lease may be taken, and the ERROR names the
+// successor's exit.
+func TestASuccessorThatDiesBeforeItIsReadyIsHandedNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.spawner.readyErr = &SuccessorExitedError{PID: fakeSuccessorPID, Exit: "exit status 1"}
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), false)
+
+	// Assert
+	var exited *SuccessorExitedError
+	if !errors.As(err, &exited) {
+		t.Fatalf("HandOver = %v, want the successor's exit", err)
+	}
+	if len(h.announcer.Sent()) != 0 || len(h.registry.Requests()) != 0 || len(h.Quiesced()) != 0 {
+		t.Fatalf("announced %d, transfers asked %d, quiesced %v: want nothing touched",
+			len(h.announcer.Sent()), len(h.registry.Requests()), h.Quiesced())
+	}
+	if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+		t.Fatalf("Lease after the abandoned handover = (held %v, %v), want none", held, dbErr)
+	}
+	if !loggedErrorWith(h.log, opHandover, "the successor never proved it was serving", "exit status 1") {
+		t.Fatalf("records = %+v, want the ERROR naming the successor's exit", h.log.Records())
 	}
 }
 
@@ -1002,7 +1070,12 @@ func TestAnAbandonedHandoverDisarmsTheRendezvousItsAnnouncementArmed(t *testing.
 	// Arrange: the manifest fails after the announcement armed the rendezvous.
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	manifestFailure := failuresAfterSpawn()[2]
+	var manifestFailure failureAfterSpawn
+	for _, f := range failuresAfterSpawn() {
+		if f.name == "the manifest could not be written after the announcement" {
+			manifestFailure = f
+		}
+	}
 	manifestFailure.arm(t, h, &atomic.Bool{})
 
 	// Act

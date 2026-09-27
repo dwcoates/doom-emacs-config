@@ -244,6 +244,9 @@ type Deps struct {
 	// StandDownWindow is how long a gracefully killed shim has before the
 	// force-kill. Its expiry is a LOUD log, not an invariant.
 	StandDownWindow time.Duration
+	// ReadyBound bounds the wait for a spawned successor to prove it is
+	// serving (Successor.Ready). Zero means DefaultReadyBound.
+	ReadyBound time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock
 	// Lifetime is the daemon's serving lifetime. Work the controller runs past
@@ -292,6 +295,15 @@ type Successor interface {
 	// Address is the successor's own `127.0.0.1:<port>`, as it reported it;
 	// empty when it never reported one.
 	Address() string
+	// PID is the successor's process id, for the records that name it.
+	PID() int
+	// Ready answers nil ONLY once the successor has proven it is serving: a
+	// real DaemonHealth round trip on its reported address. A reported
+	// address is not that proof -- it is written the instant the listener is
+	// bound, before the successor has opened its state or reached its server.
+	// It answers *SuccessorExitedError when the process ends first, and an
+	// error wrapping ctx's when the bound runs out first.
+	Ready(ctx context.Context) error
 	// Stop ends the successor and returns nil ONLY once the process is
 	// confirmed gone (reaped). An error means it may still be running, and the
 	// caller must go on treating it as alive.
@@ -474,6 +486,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandDownWindow <= 0 {
 		deps.StandDownWindow = DefaultStandDownWindow
+	}
+	if deps.ReadyBound <= 0 {
+		deps.ReadyBound = DefaultReadyBound
 	}
 	c := &controller{
 		deps:          deps,
