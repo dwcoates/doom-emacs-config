@@ -1518,6 +1518,102 @@ on finishes would miss a workspace going back to work."
                           (string-search "method=\"WatchWorkspaceRoster\"" text))
                         logs)))))
 
+;;;; ---- The roster follows the live daemon ----
+;;
+;; Regression, 2026-09-27: a daemon exited under a standing roster stream
+;; (`WatchWorkspaceRoster ... no-end-frame') and nothing re-subscribed it
+;; unless the link itself went down or was promoted.
+
+(defmacro agent-repl-test-roster--with-stream (live &rest body)
+  "Run BODY with the stubbed link answering LIVE and a roster stream recorder.
+Each subscribe answers a fresh stream record `(:conn C :on-close F
+:on-open F)', newest first in `streams'."
+  (declare (indent 1))
+  `(let ((streams nil)
+         (agent-repl-roster--stream nil)
+         (agent-repl-roster--accepted nil))
+     (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,live))
+               ((symbol-function 'agent-repl-connect-stream-cancel) #'ignore)
+               ((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                (lambda (conn _on-push on-close &optional on-open)
+                  (let ((record (list :conn conn :on-close on-close :on-open on-open)))
+                    (push record streams)
+                    record))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-an-accepted-stream-lost-resubscribes-on-the-live-daemon ()
+  "A stream the daemon accepted and then dropped is re-subscribed on the live one."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe dead)
+        (funcall (plist-get (car streams) :on-open))
+        ;; Act
+        (funcall (plist-get (car streams) :on-close)
+                 '(:error (:kind :no-end-frame :message "producer closed without an end frame")))
+        ;; Assert
+        (should (eq (plist-get agent-repl-roster--stream :conn) live))))))
+
+(ert-deftest agent-repl-test-roster-a-resubscription-on-loss-is-recorded-at-info ()
+  "The loss is ERROR already; the re-subscription that answers it is INFO."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream live
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+          (agent-repl-roster-subscribe dead)
+          (funcall (plist-get (car streams) :on-open))
+          ;; Act
+          (funcall (plist-get (car streams) :on-close) '(:ended)))
+        ;; Assert
+        (should (member "elisp.roster.resubscribed-on-loss address=\"127.0.0.1:58175\"" logs))))))
+
+(ert-deftest agent-repl-test-roster-a-stream-lost-with-no-link-waits-for-the-link-up ()
+  "With no daemon reachable nothing is dialed; the link-up edge subscribes."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((dead (agent-repl-connect-open "127.0.0.1:61043")))
+      (agent-repl-test-roster--with-stream nil
+        (agent-repl-roster-subscribe dead)
+        (funcall (plist-get (car streams) :on-open))
+        ;; Act
+        (funcall (plist-get (car streams) :on-close) '(:ended))
+        ;; Assert
+        (should (and (= (length streams) 1)
+                     (null agent-repl-roster--stream)))))))
+
+(ert-deftest agent-repl-test-roster-a-stream-never-accepted-is-not-redialed-from-its-close ()
+  "A stream that died before acceptance met a daemon that is not answering."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((live (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe live)
+        ;; Act
+        (funcall (plist-get (car streams) :on-close) '(:error (:kind :transport)))
+        ;; Assert
+        (should (= (length streams) 1))))))
+
+(ert-deftest agent-repl-test-roster-a-stale-stream-close-keeps-the-standing-stream ()
+  "A close of a stream already replaced does not forget the one standing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old-conn (agent-repl-connect-open "127.0.0.1:61043"))
+          (new-conn (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-roster--with-stream new-conn
+        (agent-repl-roster-subscribe old-conn)
+        (let ((old (car streams)))
+          (agent-repl-roster-subscribe new-conn)
+          ;; Act
+          (funcall (plist-get old :on-close) '(:ended))
+          ;; Assert
+          (should (eq agent-repl-roster--stream (car streams))))))))
+
 ;;; test-roster.el ends here
 
 ;;;; ---- Tests: move-tab-to-back ----
