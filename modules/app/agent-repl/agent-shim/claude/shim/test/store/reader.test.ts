@@ -720,12 +720,17 @@ describe("openBashRun", () => {
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
     );
-    const first = run[Symbol.asyncIterator]().next();
+    // THE EXPECTATION IS ATTACHED BEFORE THE WRITE. The refusal lands while the
+    // flush below is awaited, and a rejection with no handler yet attached is
+    // reported by the runner as unhandled even though it is asserted later.
+    const refused = expect(run[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      kind: "unknown_work",
+    });
 
     plane.write([bashStartEntry()]);
     await plane.flush();
 
-    await expect(first).rejects.toMatchObject({ kind: "unknown_work" });
+    await refused;
   });
 });
 
