@@ -281,6 +281,106 @@ func TestAStaleDaemonIsHandedOverAndItsSuccessorTakesTheRest(t *testing.T) {
 	}
 }
 
+// TestAStaleDaemonAcrossALayoutChangeIsRestartedNotHandedOver is invariant B:
+// a joining successor cannot carry an older state layout forward, so a fresh
+// build that writes a different layout is rolled out stop-then-start. On
+// 2026-09-27 it was handed over, and the successor died at boot.
+func TestAStaleDaemonAcrossALayoutChangeIsRestartedNotHandedOver(t *testing.T) {
+	tests := []struct {
+		name  string
+		force bool
+	}{
+		{name: "an unforced deploy restarts at freeness"},
+		{name: "a forced deploy restarts at once", force: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+			h.freshLayout = runningLayout + 1
+			h.rollout.acceptance = rollout.HandoverAcceptance{Workspaces: 2, Busy: 1}
+
+			// Act
+			result, err := h.d.Deploy(context.Background(), tc.force)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+			if len(h.rollout.handovers) != 0 || len(h.rollout.restarts) != 1 || h.rollout.restarts[0] != tc.force {
+				t.Fatalf("handovers %v, restarts %v: want one restart with force=%v and no handover", h.rollout.handovers, h.rollout.restarts, tc.force)
+			}
+			daemon := outcome(t, result, ComponentDaemon)
+			if daemon.Kind != RestartingAcrossLayout || daemon.Layouts != (LayoutChange{Running: runningLayout, Fresh: runningLayout + 1}) {
+				t.Fatalf("daemon = %+v, want the restart naming both layouts", daemon)
+			}
+			for _, c := range []Component{ComponentShim, ComponentWebapp} {
+				if got := outcome(t, result, c).Kind; got != DeferredToSuccessor {
+					t.Fatalf("%s = %s, want deferred to the replacement", c, got)
+				}
+			}
+		})
+	}
+}
+
+func TestTheLayoutQuestionIsAskedOfTheStagedDaemon(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if len(h.layoutAsked) != 1 || !strings.HasSuffix(h.layoutAsked[0], filepath.Join("daemon", "bin", "claude-repld")) || strings.HasPrefix(h.layoutAsked[0], h.live.ModuleRoot) {
+		t.Fatalf("layout asked of %v, want the one staged daemon binary", h.layoutAsked)
+	}
+}
+
+func TestADaemonWhoseFreshLayoutCannotBeReadIsNeitherHandedOverNorRestarted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.layoutErr = errors.New("exit status 2")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Deploy succeeded with the fresh layout unknown")
+	}
+	if len(h.rollout.handovers) != 0 || len(h.rollout.restarts) != 0 {
+		t.Fatalf("handovers %v, restarts %v: want neither on a guess", h.rollout.handovers, h.rollout.restarts)
+	}
+	if !logged(h.log, "error", opDecide, "the fresh daemon's state layout could not be read") {
+		t.Fatalf("records = %+v, want the unread layout at ERROR", h.log.Records())
+	}
+}
+
+func TestARefusedRestartIsTheDeploysAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.freshLayout = runningLayout + 1
+	h.rollout.restartErr = &rollout.ErrAlreadyRollingOut{WaitingOn: []ids.WorkspaceID{"ws-a"}}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var inFlight *rollout.ErrAlreadyRollingOut
+	if !errors.As(err, &inFlight) {
+		t.Fatalf("Deploy = %v, want the restart's refusal", err)
+	}
+	if !logged(h.log, "error", opDecide, "the restart was not accepted") {
+		t.Fatalf("records = %+v, want the refused restart at ERROR", h.log.Records())
+	}
+}
+
 func TestARefusedHandoverIsTheDeploysAnswer(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

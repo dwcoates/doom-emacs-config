@@ -135,6 +135,45 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 	}
 }
 
+func TestTheRolloutFlagsAreParsed(t *testing.T) {
+	tests := []struct {
+		name          string
+		argv          []string
+		wantReplacing bool
+		wantLayout    bool
+	}{
+		{name: "the replacing flag", argv: []string{"--replacing"}, wantReplacing: true},
+		{name: "the layout question", argv: []string{"-layout-version"}, wantLayout: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			opts, err := parseFlags("claude-repld", tt.argv)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			if opts.replacing != tt.wantReplacing || opts.layoutVersion != tt.wantLayout {
+				t.Fatalf("replacing %v layoutVersion %v, want %v %v", opts.replacing, opts.layoutVersion, tt.wantReplacing, tt.wantLayout)
+			}
+		})
+	}
+}
+
+// TestAReplacementIsNeverAlsoJoining pins that the two roles are exclusive: a
+// replacement boots as the incumbent once its predecessor is gone, a
+// successor joins a predecessor that is still serving.
+func TestAReplacementIsNeverAlsoJoining(t *testing.T) {
+	// Act.
+	_, err := parseFlags("claude-repld", []string{"--replacing", "--joining", "127.0.0.1:1"})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("parseFlags accepted a daemon that both replaces and joins")
+	}
+}
+
 // TestTheGraphNamesEveryUnwiredCollaborator pins that a graph which cannot be
 // built says WHICH collaborator has no landed source, rather than failing with
 // a bare refusal a reader has to go hunting behind. The list is empty today —

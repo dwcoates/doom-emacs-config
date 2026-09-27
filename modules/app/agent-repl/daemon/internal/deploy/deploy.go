@@ -36,6 +36,7 @@ import (
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/wsm"
 )
 
 // The deploy's operations. Every decision — built, stale, bounced now,
@@ -71,6 +72,11 @@ const (
 	ShimsBouncing       OutcomeKind = "shims"
 	ReloadPushed        OutcomeKind = "reload_pushed"
 	DeferredToSuccessor OutcomeKind = "deferred_to_successor"
+	// RestartingAcrossLayout is a stale daemon whose fresh build writes a
+	// DIFFERENT state layout: it is rolled out stop-then-start
+	// (rollout.Controller.Restart), never handed over, because a joining
+	// successor cannot carry an older layout forward on its read-only handle.
+	RestartingAcrossLayout OutcomeKind = "restarting_across_layout"
 )
 
 // Outcome is one component's decision.
@@ -79,12 +85,21 @@ type Outcome struct {
 	// Build is the fresh build's content hash.
 	Build string
 	Kind  OutcomeKind
-	// Handover is set for HandingOver.
+	// Handover is set for HandingOver and RestartingAcrossLayout.
 	Handover rollout.HandoverAcceptance
+	// Layouts is set for RestartingAcrossLayout: the running and the fresh
+	// state layout.
+	Layouts LayoutChange
 	// Shims is set for ShimsBouncing: one entry per stale shim.
 	Shims []ShimBounce
 	// Recipients is set for ReloadPushed.
 	Recipients int
+}
+
+// LayoutChange is the state layout a running daemon writes and the one its
+// fresh build writes.
+type LayoutChange struct {
+	Running, Fresh int
 }
 
 // ShimBounce is one stale shim and the registry's decision for it.
@@ -115,6 +130,7 @@ func (e *ServiceRestartFailed) Error() string {
 // Rollout is the slice of the rollout controller a deploy acts through.
 type Rollout interface {
 	HandOver(ctx context.Context, force bool) (rollout.HandoverAcceptance, error)
+	Restart(ctx context.Context, force bool) (rollout.HandoverAcceptance, error)
 	CheckStaleness(ctx context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error)
 	Joining() bool
 	RollingOut() ([]ids.WorkspaceID, bool)
@@ -177,8 +193,14 @@ type Deps struct {
 	// Lifetime bounds the deploys a landing starts; nil leaves them bounded by
 	// the process alone.
 	Lifetime context.Context
-	Clock    Clock
-	Log      dlog.Surfaces
+	// StateLayout answers the state layout a daemon binary writes; nil is
+	// BinaryLayout, which asks the binary itself.
+	StateLayout func(ctx context.Context, bin string) (int, error)
+	// RunningLayout is the state layout THIS process writes; zero is
+	// wsm.LayoutVersion, which is what this binary was built with.
+	RunningLayout int
+	Clock         Clock
+	Log           dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -224,6 +246,12 @@ func New(deps Deps) (*Deployer, error) {
 	}
 	if deps.Alive == nil {
 		deps.Alive = processAlive
+	}
+	if deps.StateLayout == nil {
+		deps.StateLayout = BinaryLayout
+	}
+	if deps.RunningLayout == 0 {
+		deps.RunningLayout = wsm.LayoutVersion
 	}
 	return &Deployer{deps: deps, log: deps.Log.Global()}, nil
 }
@@ -291,7 +319,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
 		return result, err
 	}
 	result.Outcomes = append(result.Outcomes, d.elisp(fresh))
-	rest, err := d.daemonShimWebapp(ctx, fresh, force)
+	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, force)
 	result.Outcomes = append(result.Outcomes, rest...)
 	if err != nil {
 		return result, err
@@ -563,12 +591,37 @@ func (d *Deployer) elisp(fresh builds) Outcome {
 // stale daemon is HANDED OVER, and its successor takes the shims and the
 // webviews onto the fresh build; otherwise each stale shim goes to the bounce
 // registry and each stale webview is told to reload.
-func (d *Deployer) daemonShimWebapp(ctx context.Context, fresh builds, force bool) ([]Outcome, error) {
+func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh builds, force bool) ([]Outcome, error) {
 	daemon := Outcome{Component: ComponentDaemon, Build: fresh.daemon, Kind: UpToDate}
 	if fresh.daemon != d.deps.DaemonBuild {
-		d.log.Info(opDecide, "this daemon runs an older build; handing over", dlog.Context{
-			"running": d.deps.DaemonBuild, "fresh": fresh.daemon, "forced": force,
-		})
+		// THE FRESH BINARY IS ASKED WHICH LAYOUT IT WRITES before anything is
+		// decided. A handover's successor opens the state READ-ONLY and cannot
+		// migrate it, so a layout change handed over is a successor that dies
+		// at boot (2026-09-27); it is rolled out stop-then-start instead. A
+		// binary that cannot answer is not handed over on a guess.
+		layout, err := d.deps.StateLayout(ctx, staged.DaemonBin())
+		fields := dlog.Context{"running": d.deps.DaemonBuild, "fresh": fresh.daemon, "forced": force}
+		if err != nil {
+			d.log.Error(opDecide, "the fresh daemon's state layout could not be read; the daemon is neither handed over nor restarted", withCause(fields, err))
+			return []Outcome{daemon}, fmt.Errorf("deploy: read the fresh daemon's state layout: %w", err)
+		}
+		fields["running_layout"], fields["fresh_layout"] = d.deps.RunningLayout, layout
+		if layout != d.deps.RunningLayout {
+			d.log.Info(opDecide, "this daemon runs an older build whose state layout differs from the fresh one; restarting it rather than handing over", fields)
+			accepted, err := d.deps.Rollout.Restart(ctx, force)
+			if err != nil {
+				d.log.Error(opDecide, "the restart was not accepted", withCause(fields, err))
+				return []Outcome{daemon}, err
+			}
+			daemon.Kind, daemon.Handover = RestartingAcrossLayout, accepted
+			daemon.Layouts = LayoutChange{Running: d.deps.RunningLayout, Fresh: layout}
+			return []Outcome{
+				daemon,
+				{Component: ComponentShim, Build: fresh.shim, Kind: DeferredToSuccessor},
+				{Component: ComponentWebapp, Build: fresh.webapp, Kind: DeferredToSuccessor},
+			}, nil
+		}
+		d.log.Info(opDecide, "this daemon runs an older build; handing over", fields)
 		accepted, err := d.deps.Rollout.HandOver(ctx, force)
 		if err != nil {
 			d.log.Error(opDecide, "the handover was not accepted", withCause(dlog.Context{"forced": force}, err))

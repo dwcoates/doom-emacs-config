@@ -27,6 +27,10 @@ func runHandover(t *testing.T, h *harness, workspaces int) error {
 	for range workspaces {
 		h.clock.awaitArmed(t, adoptionWindow)
 	}
+	// THE SUCCESSOR ADOPTS every workspace the handover transferred. Left
+	// unadopted, an expired window takes the workspace back and the handover
+	// never exits (see the reclaim tests).
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 	h.registry.wait()
@@ -454,15 +458,90 @@ func TestHandoverSkipsASessionlessForeignWorkspaceAtDebug(t *testing.T) {
 	}
 }
 
+// expireAdoption runs a handover of one workspace nobody adopts and fires its
+// adoption window, joining the handover to its end.
+func expireAdoption(t *testing.T, h *harness) {
+	t.Helper()
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	h.clock.Fire(adoptionWindow)
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+}
+
+// The reclaim tests are invariant D, the 2026-09-27 incident's second half:
+// five transferred workspaces nobody adopted kept their quiesce holds and no
+// daemon served them. An expired window now TAKES THE WORKSPACE BACK.
+
+func TestAnExpiredAdoptionWindowTakesTheWorkspaceBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil || owner == nil || *owner != selfInstance {
+		t.Fatalf("serving owner after the expiry = %v (%v), want this daemon again", owner, err)
+	}
+	if standing := h.c.Standing(ws); standing != StandingOwned {
+		t.Fatalf("standing = %v, want owned: the workspace is served here again", standing)
+	}
+}
+
+func TestAnExpiredAdoptionWindowReleasesTheTransfersHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("Lease after the expiry = (held %v, %v), want the quiesce hold released", held, err)
+	}
+}
+
+func TestAnExpiredAdoptionWindowEndsTheTransfersKeptDrain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if ended := h.registry.EndedDrains(); len(ended) != 1 || ended[0] != ws {
+		t.Fatalf("ended drains = %v, want the taken-back workspace's dispatch resumed", ended)
+	}
+}
+
+func TestAnExpiredAdoptionWindowReattachesTheDetachedShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if adoptions := h.fleet.Adoptions(); len(adoptions) != 1 || adoptions[0] != ws {
+		t.Fatalf("adoptions = %v, want the detached shim re-attached here", adoptions)
+	}
+}
+
 func TestAnExpiredAdoptionWindowRecordsTheWorkspacesOwnFault(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 
 	// Act
-	if err := runHandover(t, h, 1); err != nil {
-		t.Fatalf("Handover: %v", err)
-	}
+	expireAdoption(t, h)
 	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
 
 	// Assert
@@ -472,6 +551,120 @@ func TestAnExpiredAdoptionWindowRecordsTheWorkspacesOwnFault(t *testing.T) {
 	if len(faults) != 1 {
 		t.Fatalf("adoption-expiry faults = %d, want the workspace's own one", len(faults))
 	}
+	if !loggedError(h.log, opAdoption, "this daemon took it back") {
+		t.Fatalf("records = %+v, want the reclaim stated at ERROR", h.log.Records())
+	}
+}
+
+func TestAHandoverWithAReclaimedWorkspaceDoesNotExit(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	select {
+	case <-h.exits:
+		t.Fatalf("the daemon exited with a workspace it took back")
+	default:
+	}
+	if !loggedError(h.log, opHandover, "were reclaimed and are served here again") {
+		t.Fatalf("records = %+v, want the unfinished handover at ERROR", h.log.Records())
+	}
+}
+
+// TestAWorkspaceTheSuccessorClaimedIsNotTakenBack pins the arbitration: a
+// successor that claimed the row keeps the workspace, however late.
+func TestAWorkspaceTheSuccessorClaimedIsNotTakenBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	successor := ids.InstanceID("daemon-successor")
+	if err := h.db.ClaimServing(context.Background(), ws, successor); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+
+	// Act
+	reclaimed, err := h.c.reclaim(context.Background(), ws, "", true, true, dlog.Context{})
+
+	// Assert
+	if err != nil || reclaimed {
+		t.Fatalf("reclaim = (%v, %v), want (false, nil): the successor won the row", reclaimed, err)
+	}
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil || owner == nil || *owner != successor {
+		t.Fatalf("serving owner = %v (%v), want the successor kept", owner, err)
+	}
+	h.clock.Fire(adoptionWindow)
+	awaitExit(t, h)
+}
+
+// The failed-transfer tests are invariant A's handover half: a transfer that
+// fails after its quiesce releases the hold it took and serves the workspace
+// here again.
+
+func TestATransferWhoseShimWillNotDetachReleasesItsHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.handOverErr[ws] = errFake
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert
+	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("Lease after the failed transfer = (held %v, %v), want the quiesce hold released", held, err)
+	}
+}
+
+func TestATransferWhoseServingReleaseFailsTakesTheWorkspaceBack(t *testing.T) {
+	// Arrange
+	fail := &atomic.Bool{}
+	h := newHarness(t, func(d *Deps) { d.DB = releaseFailingDB{DB: d.DB, fail: fail} })
+	ws, _ := h.workspace(t)
+	fail.Store(true)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert
+	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("Lease after the failed transfer = (held %v, %v), want the quiesce hold released", held, err)
+	}
+	if adoptions := h.fleet.Adoptions(); len(adoptions) != 1 || adoptions[0] != ws {
+		t.Fatalf("adoptions = %v, want the detached shim re-attached here", adoptions)
+	}
+	if standing := h.c.Standing(ws); standing != StandingOwned {
+		t.Fatalf("standing = %v, want owned", standing)
+	}
+}
+
+// releaseFailingDB refuses ReleaseServing while fail is set.
+type releaseFailingDB struct {
+	wsm.DB
+	fail *atomic.Bool
+}
+
+func (d releaseFailingDB) ReleaseServing(ctx context.Context, ws wsm.WorkspaceID, instance wsm.InstanceID) error {
+	if d.fail.Load() {
+		return errFake
+	}
+	return d.DB.ReleaseServing(ctx, ws, instance)
 }
 
 func TestAnAdoptionThatLandedRecordsNoFault(t *testing.T) {
@@ -516,7 +709,7 @@ func TestTransferAcceptsServingOwnershipThatAlreadyMoved(t *testing.T) {
 	var windows sync.WaitGroup
 
 	// Act.
-	err = h.c.transfer(context.Background(), record, "127.0.0.1:7788", Participants{}, &windows)
+	err = h.c.transfer(context.Background(), record, &handoverPlan{successor: "127.0.0.1:7788"}, Participants{}, &windows)
 	windows.Wait()
 
 	// Assert.
@@ -553,6 +746,7 @@ func TestANeverFreeWorkspaceIsWaitedOnForeverAndNamedOnACadence(t *testing.T) {
 	warns := levelRecords(records(h.log, opHandover), "warn")
 	h.registry.free(ws)
 	h.clock.awaitArmed(t, adoptionWindow)
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 
@@ -589,6 +783,7 @@ func TestANeverFreeWorkspaceIsNeverInterruptedToHurryIt(t *testing.T) {
 	detached := shim.Detached()
 	h.registry.free(ws)
 	h.clock.awaitArmed(t, adoptionWindow)
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 
@@ -634,6 +829,7 @@ func TestAForcedHandoverTransfersEveryWorkspaceNow(t *testing.T) {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 
@@ -677,7 +873,7 @@ func TestAHandoverWithATransferTheRegistryRefusedDoesNotExit(t *testing.T) {
 func TestAHandoverWithAFailedTransferDoesNotExit(t *testing.T) {
 	// Arrange: the quiesce fails, so the transfer does.
 	h := newHarness(t, func(d *Deps) {
-		d.Quiesce = func(context.Context, ids.WorkspaceID) error { return errFake }
+		d.Quiesce = func(context.Context, ids.WorkspaceID) (ids.LeaseID, error) { return "", errFake }
 	})
 	h.workspace(t)
 
@@ -863,6 +1059,32 @@ func loggedError(log *dlog.TestSurfaces, operation, substr string) bool {
 	return false
 }
 
+// loggedErrorWith reports an ERROR under operation whose message holds substr
+// and whose cause holds cause.
+func loggedErrorWith(log *dlog.TestSurfaces, operation, substr, cause string) bool {
+	for _, rec := range records(log, operation) {
+		got, _ := rec.Context["cause"].(string)
+		if rec.Level == dlog.LevelError && strings.Contains(rec.Message, substr) && strings.Contains(got, cause) {
+			return true
+		}
+	}
+	return false
+}
+
+// Quiesced answers the workspaces whose intake was quiesced, in order.
+func (h *harness) Quiesced() []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.quiesced...)
+}
+
+// Drained answers the workspaces whose held intake was drained, in order.
+func (h *harness) Drained() []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.drained...)
+}
+
 // listFailingDB is the state client with its workspace listing refusable, so
 // the handover's `served` step fails AFTER the successor is up.
 type listFailingDB struct {
@@ -910,6 +1132,17 @@ func failuresAfterSpawn() []failureAfterSpawn {
 			logged: "the successor did not come up",
 		},
 		{
+			name: "the successor exited before it answered a health probe",
+			deps: noDeps,
+			arm: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.readyErr = &SuccessorExitedError{PID: fakeSuccessorPID, Exit: "exit status 1"}
+			},
+			heal: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.readyErr = nil
+			},
+			logged: "the successor never proved it was serving",
+		},
+		{
 			name: "listing what is served failed",
 			deps: func(_ *testing.T, fail *atomic.Bool) func(*Deps) {
 				return func(d *Deps) { d.DB = listFailingDB{DB: d.DB, fail: fail} }
@@ -935,6 +1168,37 @@ func failuresAfterSpawn() []failureAfterSpawn {
 			},
 			logged: "the intent manifest could not be written after the announcement",
 		},
+	}
+}
+
+// TestASuccessorThatDiesBeforeItIsReadyIsHandedNothing is invariant C, the
+// 2026-09-27 incident's first half: the successor reported its address and
+// exited before it could serve. Nothing may be quiesced, announced or asked
+// of the bounce registry, no lease may be taken, and the ERROR names the
+// successor's exit.
+func TestASuccessorThatDiesBeforeItIsReadyIsHandedNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.spawner.readyErr = &SuccessorExitedError{PID: fakeSuccessorPID, Exit: "exit status 1"}
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), false)
+
+	// Assert
+	var exited *SuccessorExitedError
+	if !errors.As(err, &exited) {
+		t.Fatalf("HandOver = %v, want the successor's exit", err)
+	}
+	if len(h.announcer.Sent()) != 0 || len(h.registry.Requests()) != 0 || len(h.Quiesced()) != 0 {
+		t.Fatalf("announced %d, transfers asked %d, quiesced %v: want nothing touched",
+			len(h.announcer.Sent()), len(h.registry.Requests()), h.Quiesced())
+	}
+	if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+		t.Fatalf("Lease after the abandoned handover = (held %v, %v), want none", held, dbErr)
+	}
+	if !loggedErrorWith(h.log, opHandover, "the successor never proved it was serving", "exit status 1") {
+		t.Fatalf("records = %+v, want the ERROR naming the successor's exit", h.log.Records())
 	}
 }
 
@@ -1002,7 +1266,12 @@ func TestAnAbandonedHandoverDisarmsTheRendezvousItsAnnouncementArmed(t *testing.
 	// Arrange: the manifest fails after the announcement armed the rendezvous.
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	manifestFailure := failuresAfterSpawn()[2]
+	var manifestFailure failureAfterSpawn
+	for _, f := range failuresAfterSpawn() {
+		if f.name == "the manifest could not be written after the announcement" {
+			manifestFailure = f
+		}
+	}
 	manifestFailure.arm(t, h, &atomic.Bool{})
 
 	// Act

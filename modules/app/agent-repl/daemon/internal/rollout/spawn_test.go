@@ -2,10 +2,12 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -467,5 +469,145 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 				t.Fatalf("kill(%d, 0) = %v after Stop, want ESRCH: the successor is still there", pid, err)
 			}
 		})
+	}
+}
+
+// spawnStandIn spawns a stand-in successor that reports its address and then
+// runs tail, with probe as its health probe. A successor still running at the
+// end of the test is stopped.
+func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
+	t.Helper()
+	state := t.TempDir()
+	script := filepath.Join(state, "successor.sh")
+	body := "#!/bin/sh\n" +
+		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" + tail
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	spawner := NewProcessSpawner(script, state)
+	spawner.Poll = time.Millisecond
+	spawner.Timeout = 10 * time.Second
+	spawner.StopGrace = 50 * time.Millisecond
+	spawner.Probe = probe
+	spawner.ProbeEvery = time.Millisecond
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := successor.Stop(context.Background()); err != nil {
+			t.Errorf("stop the stand-in: %v", err)
+		}
+	})
+	return successor
+}
+
+func TestReadyAnswersOnceTheSuccessorAnswersItsHealthProbe(t *testing.T) {
+	// Arrange: the successor answers on the third probe, as one still
+	// finishing its boot does.
+	var probes atomic.Int32
+	successor := spawnStandIn(t, "exec sleep 60\n", func(context.Context, string) error {
+		if probes.Add(1) < 3 {
+			return errors.New("connection refused")
+		}
+		return nil
+	})
+
+	// Act
+	err := successor.Ready(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Ready = %v, want nil once the probe answered", err)
+	}
+	if got := probes.Load(); got != 3 {
+		t.Fatalf("probes = %d, want exactly the three it took to answer", got)
+	}
+}
+
+// TestReadyNamesTheExitOfASuccessorThatDiesBeforeAnswering is the 2026-09-27
+// successor: it reported its address and then exited on a state layout it
+// could not read, without ever serving.
+func TestReadyNamesTheExitOfASuccessorThatDiesBeforeAnswering(t *testing.T) {
+	// Arrange
+	successor := spawnStandIn(t, "exit 3\n", func(context.Context, string) error {
+		return errors.New("connection refused")
+	})
+
+	// Act
+	err := successor.Ready(context.Background())
+
+	// Assert
+	var exited *SuccessorExitedError
+	if !errors.As(err, &exited) {
+		t.Fatalf("Ready = %v, want *SuccessorExitedError", err)
+	}
+	if exited.PID != successor.PID() || exited.Exit != "exit status 3" {
+		t.Fatalf("exit = %+v, want pid %d and \"exit status 3\"", exited, successor.PID())
+	}
+}
+
+func TestReadyGivesUpAtItsBoundOnASuccessorThatNeverAnswers(t *testing.T) {
+	// Arrange
+	successor := spawnStandIn(t, "exec sleep 60\n", func(context.Context, string) error {
+		return errors.New("connection refused")
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	// Act
+	err := successor.Ready(ctx)
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Ready = %v, want the bound's deadline", err)
+	}
+}
+
+// TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces covers the restart's
+// spawn: the replacement is the same binary, told it replaces, never joining.
+// The stand-in reports its last argument through a FIFO, whose open blocks
+// until the stand-in writes, so the read IS the synchronization.
+func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
+	// Arrange
+	state := t.TempDir()
+	fifo := filepath.Join(state, "argv")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	script := filepath.Join(state, "replacement.sh")
+	body := "#!/bin/sh\nfor last; do :; done\nprintf '%s' \"$last\" > " + fifo + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	spawner := NewProcessSpawner(script, state)
+
+	// Act
+	pid, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err != nil || pid <= 0 {
+		t.Fatalf("SpawnReplacement = (%d, %v), want a started process", pid, err)
+	}
+	last, err := os.ReadFile(fifo)
+	if err != nil {
+		t.Fatalf("read the stand-in's report: %v", err)
+	}
+	if string(last) != "--"+ReplacingFlagName {
+		t.Fatalf("the replacement's last argument = %q, want --%s", last, ReplacingFlagName)
+	}
+}
+
+func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
+	// Arrange
+	spawner := NewProcessSpawner("", t.TempDir())
+
+	// Act
+	_, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("SpawnReplacement accepted an empty binary path")
 	}
 }
