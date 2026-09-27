@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/peer.proto.
  */
 export const file_conversation_v1_peer: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxImAKC1BlZXJNZXNzYWdlEicKBWFnZW50GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSDgoGc2VuZGVyGAIgASgJEgwKBGJvZHkYAyABKAkSCgoCaWQYBCABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIvYBCgtQZWVyTWVzc2FnZRInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEg4KBnNlbmRlchgCIAEoCRIMCgRib2R5GAMgASgJEgoKAmlkGAQgASgJEkEKDWludGVyX3Nlc3Npb24YBSABKAsyKC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VJbnRlclNlc3Npb25IABJJChFzdWJhZ2VudF9oYW5kYmFjaxgGIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVN1YmFnZW50SGFuZGJhY2tIAEIGCgRraW5kIhkKF1BlZXJNZXNzYWdlSW50ZXJTZXNzaW9uIh0KG1BlZXJNZXNzYWdlU3ViYWdlbnRIYW5kYmFja0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
 
 /**
  * A message another Claude session (a peer, or a returning subagent) sent into
@@ -74,6 +74,34 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
    * @generated from field: string id = 4;
    */
   id: string;
+
+  /**
+   * WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record
+   * (`origin.handback`). A consumer draws the two differently: an inter-session
+   * message is an aside worth reading in place, while a hand-back's report is
+   * the returning subagent's result and belongs with that subagent. UNSET when
+   * the producer did not state the kind; a consumer treats it as an
+   * inter-session message.
+   *
+   * @generated from oneof conversation.v1.PeerMessage.kind
+   */
+  kind: {
+    /**
+     * Another Claude session sent this agent a message.
+     *
+     * @generated from field: conversation.v1.PeerMessageInterSession inter_session = 5;
+     */
+    value: PeerMessageInterSession;
+    case: "interSession";
+  } | {
+    /**
+     * A subagent this agent started handed its final report back.
+     *
+     * @generated from field: conversation.v1.PeerMessageSubagentHandback subagent_handback = 6;
+     */
+    value: PeerMessageSubagentHandback;
+    case: "subagentHandback";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -82,4 +110,36 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
  */
 export const PeerMessageSchema: GenMessage<PeerMessage> = /*@__PURE__*/
   messageDesc(file_conversation_v1_peer, 0);
+
+/**
+ * Another Claude session sent this agent a message.
+ *
+ * @generated from message conversation.v1.PeerMessageInterSession
+ */
+export type PeerMessageInterSession = Message<"conversation.v1.PeerMessageInterSession"> & {
+};
+
+/**
+ * Describes the message conversation.v1.PeerMessageInterSession.
+ * Use `create(PeerMessageInterSessionSchema)` to create a new message.
+ */
+export const PeerMessageInterSessionSchema: GenMessage<PeerMessageInterSession> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_peer, 1);
+
+/**
+ * A subagent this agent started handed its final report back. The report is
+ * this record's `body`; the same text is the subagent's own
+ * AgentSubagentHandback on its stream.
+ *
+ * @generated from message conversation.v1.PeerMessageSubagentHandback
+ */
+export type PeerMessageSubagentHandback = Message<"conversation.v1.PeerMessageSubagentHandback"> & {
+};
+
+/**
+ * Describes the message conversation.v1.PeerMessageSubagentHandback.
+ * Use `create(PeerMessageSubagentHandbackSchema)` to create a new message.
+ */
+export const PeerMessageSubagentHandbackSchema: GenMessage<PeerMessageSubagentHandback> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_peer, 2);
 
