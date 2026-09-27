@@ -24,6 +24,11 @@ const (
 	OpDropStream        = "drop_stream"
 	OpInfo              = "info"
 	OpCount             = "count"
+	// OpSetLiveWork states the live membership later re-announcements carry;
+	// its payload is a SessionStarted whose live_work is taken.
+	OpSetLiveWork = "set_live_work"
+	// OpSilenceBash makes every later WatchBash open for Work go unanswered.
+	OpSilenceBash = "silence_bash"
 )
 
 // Stream names accepted by drop_stream.
@@ -163,6 +168,13 @@ func ParseCommand(line []byte) (Command, error) {
 		case StreamSession, StreamAgent, StreamBash:
 		default:
 			return Command{}, fmt.Errorf("%s: unknown stream %q", c.Op, c.Stream)
+		}
+	case OpSetLiveWork:
+		// An EMPTY payload is a well-formed SessionStarted naming nothing
+		// live, which is exactly what stating an empty membership encodes to.
+	case OpSilenceBash:
+		if c.Work == "" {
+			return Command{}, fmt.Errorf("%s: work is required", c.Op)
 		}
 	case OpExit:
 		if c.Code < 0 || c.Code > 125 {

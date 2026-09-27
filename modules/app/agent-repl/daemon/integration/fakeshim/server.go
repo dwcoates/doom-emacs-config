@@ -180,6 +180,17 @@ type server struct {
 	// real shim's reannounceStart does, so an adopting daemon learns from the
 	// shim which of its open turn rows are still running.
 	turnInFlight *conversationv1.TurnId
+	// liveNow, once set_live_work has stated it, is the live membership every
+	// later re-announcement states, as the real shim's reannounceStart
+	// recomputes it; until then the re-announcement states what StartSession
+	// answered with.
+	liveNow    []*conversationv1.AgentDetachedWork
+	liveNowSet bool
+	// silencedBash are the detached-work handles whose WatchBash opens the
+	// fake never answers: no opening frame, ever, until the caller gives up.
+	// It is the real shim's WatchBash on a run the store holds no row for,
+	// which waits for a first row that never comes.
+	silencedBash map[string]bool
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
@@ -210,8 +221,31 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 		bashEndings:     map[string]*conversationv1.AgentBash{},
 		bashStarts:      map[string]*conversationv1.AgentBash{},
 		openPermissions: map[string]openPermission{},
+		silencedBash:    map[string]bool{},
 		unhang:          make(chan struct{}),
 	}
+}
+
+// setLiveWork states the live membership every later re-announcement carries.
+func (s *server) setLiveWork(live []*conversationv1.AgentDetachedWork) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.liveNow = live
+	s.liveNowSet = true
+}
+
+// silenceBash makes every later WatchBash open for work go unanswered.
+func (s *server) silenceBash(work string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.silencedBash[work] = true
+}
+
+// bashSilenced reports whether WatchBash opens for work go unanswered.
+func (s *server) bashSilenced(work string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.silencedBash[work]
 }
 
 // queueAnswer files the next scripted answer for a verb.
@@ -417,6 +451,12 @@ func (s *server) startedSession() *conversationv1.SessionStarted {
 	}
 	started := proto.Clone(s.started).(*conversationv1.SessionStarted)
 	started.TurnInFlight = s.turnInFlight
+	if s.liveNowSet {
+		started.LiveWork = make([]*conversationv1.AgentDetachedWork, 0, len(s.liveNow))
+		for _, item := range s.liveNow {
+			started.LiveWork = append(started.LiveWork, proto.Clone(item).(*conversationv1.AgentDetachedWork))
+		}
+	}
 	return started
 }
 
@@ -680,6 +720,11 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 		return err
 	}
 	work := req.Msg.GetWork().GetValue()
+	if s.bashSilenced(work) {
+		// NO OPENING FRAME, EVER: the open is held until the caller gives up.
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	id, ch, backlog := s.subscribeBash(work)
 	defer s.bashes.unsubscribe(id)
 
