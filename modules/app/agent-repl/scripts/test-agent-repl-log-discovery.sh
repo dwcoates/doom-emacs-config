@@ -69,6 +69,16 @@ case "$out" in
   *) fail "global Emacs query output: $out" ;;
 esac
 
+# The durable central Emacs sink is found with no override: it is the state
+# root's logs/emacs.central.log, where Emacs writes it by default.
+mkdir -p "$state/logs"
+printf '%s\n' '{"timestamp":"2026-07-28T12:00:04Z","runtime":"emacs","pid":405,"level":"info","verbosity":"normal","operation":"emacs.test","message":"central-emacs","context":{}}' >"$state/logs/emacs.central.log"
+out="$(HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISCOVER" --global --runtime emacs --pid 405)"
+case "$out" in
+  *'"message":"central-emacs"'*) ;;
+  *) fail "default central Emacs query output: $out" ;;
+esac
+
 if HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISCOVER" --workspace "$workspace" --runtime shim --pid 1 >/dev/null 2>&1; then
   fail 'querying an absent selected log succeeded'
 fi

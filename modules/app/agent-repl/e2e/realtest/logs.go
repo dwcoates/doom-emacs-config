@@ -114,15 +114,17 @@ type Env struct {
 
 // RealEnv is the owner's machine.
 //
-// The module log resolves the way lisp/core.el resolves it — under
-// `temporary-file-directory`, UID-qualified. The pre-2026 default under
-// ~/.claude-emacs is RETIRED and redirected by
-// `agent-repl--normalize-log-file-name`, so files still standing at that older
-// path hold only historical records and no run may harvest them.
-func RealEnv(home, tmpdir string, uid int, workspaces []Workspace) Env {
+// The module log resolves the way lisp/core.el resolves it — the durable
+// central sink `logs/emacs.central.log` under the state root, beside the
+// daemon's own run log. Both earlier defaults (`doom-agent-repl.log` at the
+// state root, then under the UID-qualified `temporary-file-directory`) are
+// RETIRED and redirected by `agent-repl--normalize-log-file-name`, so files
+// still standing at those paths hold only historical records and no run may
+// harvest them.
+func RealEnv(home string, workspaces []Workspace) Env {
 	return Env{
 		StateDir:    filepath.Join(home, ".claude-emacs"),
-		ModuleLog:   filepath.Join(tmpdir, fmt.Sprintf("doom-agent-repl-%d", uid), "doom-agent-repl.log"),
+		ModuleLog:   filepath.Join(home, ".claude-emacs", "logs", "emacs.central.log"),
 		CacheLogDir: filepath.Join(home, ".cache", "agent-repl", "log"),
 		Workspaces:  workspaces,
 	}
