@@ -871,6 +871,16 @@ through `reviveIfParked` and inherits this; nothing in the verbs calls
 N callers, exactly one Start), and the request-order landing by
 `TestARevivalFinishingNeverRestampsTheSelection`.
 
+## A duplicate is only a submission the queue accepted
+
+`internal/prompthandler` + `wsm.ClaimIdempotencyKey` (2026-09-27: three prompts claimed, never delivered, re-driven after a respawn under the same keys, answered `duplicate_submission` and dropped by Emacs).
+
+- **A CLAIM IS `accepted` ONLY ONCE THE QUEUE TOOK ITS SUBMISSION.** `idempotency_keys.accepted_at` is stamped by `AcceptIdempotencyKey` after `Queue.Submit` / `SubmitSessionAct` return success, under `context.WithoutCancel`. Only an accepted claim answers `duplicate_submission`.
+- **AN UNACCEPTED CLAIM IS RE-DRIVEN, NOT REFUSED.** Its retry rebinds the claim to a fresh turn (`ClaimRedriven`, the old turn logged as `abandoned_turn`) and is delivered. This is durable state, so a process that dies between the claim and the stamp leaves exactly this.
+- **A HOLD IS ACCEPTANCE EVIDENCE.** An unstamped claim whose turn stands in `held_prompts` (never deleted, only tombstoned) is accepted, and stamped in the claim's own transaction, so a crash between the hold and the stamp cannot re-drive a prompt the tray carries.
+- **ONE KEY'S SUBMISSIONS ARE SERIALIZED IN-PROCESS** (`prompthandler/claim.go`): a retry arriving while its original is still inside the queue waits for it (or for its own context), so a hung original is never re-driven beside itself.
+- **THE IRREDUCIBLE WINDOW** is a process death after the shim accepted `StartTurn` (or `PromptAgent`, a parked route, an act) and before the stamp commits: the retry re-drives. Closing it needs the shim to answer a repeated `StartTurn` turn id idempotently.
+
 ## A held-prompt edit is a claim the queue owns under its delivery lock
 
 `EditHeldPrompt` (owner spec, 2026-09-23; `internal/promptqueue/edit.go`).

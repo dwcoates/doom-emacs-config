@@ -7,6 +7,7 @@
 package wsm
 
 import (
+	"fmt"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -486,6 +487,51 @@ type DisplacedClaim struct {
 	// Closed is true when the claim also closed the turn, which was still open
 	// (as CloseOrphaned: no terminal was ever seen for it).
 	Closed bool
+}
+
+// ClaimStanding is what an idempotency claim found standing on its key.
+type ClaimStanding int
+
+// The claim standings.
+const (
+	// ClaimMinted is a first claim: the key is now bound to the offered turn,
+	// unaccepted until the queue takes the submission.
+	ClaimMinted ClaimStanding = iota
+	// ClaimAccepted is a key whose submission the queue ACCEPTED (delivered or
+	// durably held). Only this standing refuses a retry as a duplicate.
+	ClaimAccepted
+	// ClaimRedriven is a key whose earlier submission never reached
+	// acceptance: its handler blocked, errored, was cancelled, or its process
+	// died mid-submit. The claim is REBOUND to the offered turn, and the retry
+	// is driven under it.
+	ClaimRedriven
+)
+
+// String renders a claim standing for a log record.
+func (c ClaimStanding) String() string {
+	switch c {
+	case ClaimMinted:
+		return "minted"
+	case ClaimAccepted:
+		return "accepted"
+	case ClaimRedriven:
+		return "redriven"
+	default:
+		return fmt.Sprintf("claim_standing(%d)", int(c))
+	}
+}
+
+// IdempotencyClaim is what ClaimIdempotencyKey found and did.
+type IdempotencyClaim struct {
+	// Standing says which of the three answers this is.
+	Standing ClaimStanding
+	// Turn is the turn the key is bound to once the claim commits: the offered
+	// turn for ClaimMinted and ClaimRedriven, the accepted submission's turn
+	// for ClaimAccepted.
+	Turn TurnID
+	// Abandoned is the turn an unaccepted claim was bound to before a
+	// ClaimRedriven rebound it; empty otherwise.
+	Abandoned TurnID
 }
 
 // OrphanReport is what CloseOrphans closed, in one transaction.

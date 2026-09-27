@@ -29,6 +29,9 @@ const (
 // NO execution and NO response formatting.
 type handler struct {
 	deps Deps
+	// keys serializes the submissions of one idempotency key in this process;
+	// see claim.go.
+	keys *inflight
 }
 
 // newHandler validates the wiring and builds the handler.
@@ -49,7 +52,7 @@ func newHandler(deps Deps) (*handler, error) {
 		deps.MintTurn = wsm.NewTurnID
 	}
 	deps.Log.Global().Debug(opNew, "the prompt handler is wired", nil)
-	return &handler{deps: deps}, nil
+	return &handler{deps: deps, keys: newInflight()}, nil
 }
 
 // Submit runs one submission, in the one order the contract fixes: the origin
@@ -88,14 +91,19 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		return h.act(ctx, ws, got, idempotencyKey, origin, log)
 	}
 
-	turn, err := h.mintTurn(ctx, ws, idempotencyKey, log)
+	c, err := h.mintTurn(ctx, ws, idempotencyKey, log)
 	if err != nil {
 		return Outcome{}, err
 	}
+	defer c.done()
+	turn := c.turn
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target,
 	})
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := h.accept(ctx, ws, c, log); err != nil {
 		return Outcome{}, err
 	}
 	log.Info(opSubmit, "the prompt was forwarded to the queue", dlog.Context{
@@ -137,14 +145,20 @@ func (h *handler) refuse(ws ids.WorkspaceID, got recognized, log dlog.Logger) Ou
 // model change does not.
 func (h *handler) act(ctx context.Context, ws ids.WorkspaceID, got recognized, idempotencyKey string, origin conversationv1.PromptOrigin, log dlog.Logger) (Outcome, error) {
 	act := promptqueue.Act{Kind: ActCommands[got.spec.command], Value: got.arg, Origin: origin}
+	var c claim
 	if act.Kind != promptqueue.ActSetModel {
-		turn, err := h.mintTurn(ctx, ws, idempotencyKey, log)
+		minted, err := h.mintTurn(ctx, ws, idempotencyKey, log)
 		if err != nil {
 			return Outcome{}, err
 		}
-		act.Turn = turn
+		c = minted
+		defer c.done()
+		act.Turn = c.turn
 	}
 	if err := h.deps.Queue.SubmitSessionAct(ctx, ws, act); err != nil {
+		return Outcome{}, err
+	}
+	if err := h.accept(ctx, ws, c, log); err != nil {
 		return Outcome{}, err
 	}
 	log.Info(opSubmit, "a session-acting command went down the one delivery path",
@@ -153,24 +167,68 @@ func (h *handler) act(ctx context.Context, ws ids.WorkspaceID, got recognized, i
 }
 
 // mintTurn mints the turn the daemon acknowledges with, claiming the client's
-// idempotency key first: a retried request must not be a second turn.
-func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyKey string, log dlog.Logger) (ids.TurnID, error) {
+// idempotency key first: a retried request must not be a second turn, and a
+// retry of a submission the queue never accepted must not be refused.
+//
+// The returned claim holds the key against a concurrent submission of it in
+// this process until the caller calls done.
+func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyKey string, log dlog.Logger) (claim, error) {
 	turn := h.deps.MintTurn()
 	if idempotencyKey == "" {
 		log.Debug(opSubmit, "the submission carried no idempotency key", dlog.Context{"turn": string(turn)})
-		return turn, nil
+		return claim{turn: turn}, nil
 	}
-	existing, err := h.deps.DB.ClaimIdempotencyKey(ctx, ws, idempotencyKey, turn)
+	release, waited, err := h.keys.acquire(ctx, ws, idempotencyKey)
 	if err != nil {
+		log.Info(opSubmit, "the caller gave up waiting on the key's in-flight submission; nothing was claimed",
+			dlog.Context{"cause": err.Error()})
+		return claim{}, fmt.Errorf("wait for the in-flight submission of the idempotency key on %q: %w", ws, err)
+	}
+	if waited {
+		log.Debug(opSubmit, "waited for the key's in-flight submission to finish before claiming", nil)
+	}
+	got, err := h.deps.DB.ClaimIdempotencyKey(ctx, ws, idempotencyKey, turn)
+	if err != nil {
+		release()
 		log.Error(opSubmit, "the idempotency key could not be claimed", dlog.Context{"cause": err.Error()})
-		return "", fmt.Errorf("claim the idempotency key on %q: %w", ws, err)
+		return claim{}, fmt.Errorf("claim the idempotency key on %q: %w", ws, err)
 	}
-	if existing != nil {
+	switch got.Standing {
+	case wsm.ClaimAccepted:
+		release()
 		log.Warn(opSubmit, "the idempotency key already claimed a turn",
-			dlog.Context{"existing_turn": string(*existing)})
-		return "", ErrDuplicateSubmission
+			dlog.Context{"existing_turn": string(got.Turn)})
+		return claim{}, ErrDuplicateSubmission
+	case wsm.ClaimRedriven:
+		log.Info(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under a fresh turn",
+			dlog.Context{"turn": string(got.Turn), "abandoned_turn": string(got.Abandoned)})
+	case wsm.ClaimMinted:
+		log.Debug(opSubmit, "claimed the idempotency key", dlog.Context{"turn": string(got.Turn)})
+	default:
+		release()
+		log.Error(opSubmit, "the idempotency claim answered a standing the handler does not know",
+			dlog.Context{"standing": got.Standing.String()})
+		return claim{}, fmt.Errorf("claim the idempotency key on %q: unknown standing %s", ws, got.Standing)
 	}
-	return turn, nil
+	return claim{turn: got.Turn, key: idempotencyKey, release: release}, nil
+}
+
+// accept stamps the claim accepted once the queue took the submission, so only
+// now does a retry of the key answer duplicate_submission.
+//
+// THE STAMP OUTLIVES THE REQUEST. The queue already took the prompt, so a
+// caller whose context ends in this instant must not leave the claim reading
+// unaccepted -- its retry would be re-driven into a second delivery.
+func (h *handler) accept(ctx context.Context, ws ids.WorkspaceID, c claim, log dlog.Logger) error {
+	if c.key == "" {
+		return nil
+	}
+	if err := h.deps.DB.AcceptIdempotencyKey(context.WithoutCancel(ctx), ws, c.key, c.turn); err != nil {
+		log.Error(opSubmit, "the queue accepted the submission but its idempotency claim could not be recorded accepted; a retry of the key would be driven again",
+			dlog.Context{"turn": string(c.turn), "cause": err.Error()})
+		return fmt.Errorf("record the idempotency key accepted on %q: %w", ws, err)
+	}
+	return nil
 }
 
 // logger resolves a workspace's durable logger. Failing to resolve the
