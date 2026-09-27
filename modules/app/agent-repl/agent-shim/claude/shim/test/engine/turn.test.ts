@@ -1808,9 +1808,12 @@ describe("WatchAgent", () => {
   it("then tails one entry per store write", async () => {
     const h = await harness();
     h.persistence.tail = [
-      create(conversationv1.HistoryEntryAtSchema, {
-        at: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-      }),
+      {
+        case: "entry",
+        value: create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        }),
+      },
     ];
     const frames: string[] = [];
 
@@ -1821,6 +1824,31 @@ describe("WatchAgent", () => {
     }
 
     expect(frames).toEqual(["page", "entry"]);
+  });
+
+  it("relays a retired line as the retired arm, carrying the entry at its pointer", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.tail = [
+      {
+        case: "retired",
+        value: create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "p-7" }),
+        }),
+      },
+    ];
+    const frames: { arm: string; at: string | undefined }[] = [];
+
+    // Act.
+    for await (const response of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      if (response.frame.case === "page") continue;
+      frames.push({ arm: response.frame.case ?? "", at: response.frame.value?.at?.value });
+    }
+
+    // Assert.
+    expect(frames).toEqual([{ arm: "retired", at: "p-7" }]);
   });
 
   it("closes the stream at the transport when the target names no agent", async () => {
