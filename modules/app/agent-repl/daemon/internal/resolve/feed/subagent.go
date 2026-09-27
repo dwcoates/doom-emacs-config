@@ -32,6 +32,16 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		state = &subagentState{}
 		s.subagents[unitID] = state
+		// AN ANNOUNCEMENT ALREADY NAMED THIS UNIT'S AGENT: the bubble is born
+		// addressing its sub-feed rather than held for a start that, for a
+		// subagent resumed by SendMessage, never comes.
+		if named, announced := s.announcedAgents[unitID]; announced {
+			state.created = named
+			delete(s.announcedAgents, unitID)
+			r.logger(s.id).Debug("daemon.feed.subagent_named_by_announcement",
+				"a spawn's first frame took the agent its detachment announcement named",
+				dlog.Context{"unit": unitID, "agent": named.GetValue()})
+		}
 	}
 	// A SPAWN HAS ONE HOME: the feed its first frame was drawn in. A later frame
 	// of the same unit carried on another agent's book (the task stream's
@@ -615,9 +625,17 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
+		unitID := origin.Detached.GetDetachedFromId().GetValue()
+		// THE ANNOUNCED AGENT NAMES THE BUBBLE'S SUB-FEED. A subagent resumed
+		// by SendMessage detaches from the SEND, whose frames never name the
+		// agent, so without this its bubble addressed no sub-feed
+		// (daemon.feed.subagent_without_start, 2026-09-27).
+		if agent := work.GetKind().GetSubagent().GetAgentId(); agent.GetValue() != "" {
+			r.nameAnnouncedAgent(s, unitID, agent)
+		}
 		// ONE IDENTITY SPANS THE MOVE: the element already on screen continues
 		// as a detached one rather than being replaced by a second drawing.
-		r.detachUnit(s, announcer, origin.Detached.GetDetachedFromId().GetValue(), workID, stated)
+		r.detachUnit(s, announcer, unitID, workID, stated)
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
 		case *conversationv1.DetachableWork_Subagent:
@@ -642,6 +660,45 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 				"a detached-work kind draws no feed row", dlog.Context{"work": workID})
 		}
 	}
+}
+
+// nameAnnouncedAgent takes the agent a subagent detachment announced as the
+// created agent of the unit it detached from:
+//
+//   - no bubble yet: the name is kept for the bubble's first frame;
+//   - a bubble holding frames that named no agent: they are released now,
+//     drawn addressing the announced agent's sub-feed;
+//   - a bubble whose start already named an agent: the start stands, and an
+//     announcement naming a DIFFERENT one is a producer contract violation,
+//     recorded at ERROR.
+func (r *resolver) nameAnnouncedAgent(s *wsState, unitID string, agent *conversationv1.AgentId) {
+	state, ok := s.subagents[unitID]
+	if !ok {
+		s.announcedAgents[unitID] = agent
+		r.logger(s.id).Debug("daemon.feed.announced_agent_held",
+			"a subagent detachment named its agent before the unit drew; the bubble takes it when it does",
+			dlog.Context{"unit": unitID, "agent": agent.GetValue()})
+		return
+	}
+	if created := state.created.GetValue(); created != "" {
+		if created != agent.GetValue() {
+			r.logger(s.id).Error("daemon.feed.announced_agent_conflict",
+				"a subagent detachment named a different agent than the spawn's own start; the start's agent stands",
+				dlog.Context{"unit": unitID, "created": created, "announced": agent.GetValue()})
+		}
+		return
+	}
+	state.created = agent
+	held := state.held
+	if len(held) == 0 {
+		return
+	}
+	state.held = nil
+	state.heldBound = false
+	r.logger(s.id).Debug("daemon.feed.subagent_named_by_announcement",
+		"a spawn's held frames are drawn under the agent its detachment announcement named",
+		dlog.Context{"unit": unitID, "agent": agent.GetValue(), "frames": len(held)})
+	r.drawReleasedSpawn(s, unitID, state, held, "when its detachment named the agent")
 }
 
 // detachUnit moves the unit a detachment names to its detached drawing, in its

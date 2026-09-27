@@ -117,6 +117,13 @@ type wsState struct {
 	// agent that turns out to carry the unit, and so a detachment that never
 	// finds its unit is reported with its full context.
 	heldDetachments map[string]heldDetachment
+	// announcedAgents are the agents a detachment announcement NAMED for a
+	// unit that had drawn no bubble yet, by unit. The announcement's subagent
+	// kind names the running agent (AgentDetachedWork.kind), and for a
+	// subagent RESUMED BY SENDMESSAGE nothing else ever does: the unit is the
+	// send, so no spawn start will arrive to name it. The bubble takes it when
+	// it is first drawn (drawSubagent).
+	announcedAgents map[string]*conversationv1.AgentId
 	// detachedUnits are the units a detachment announced BEFORE this resolver
 	// had drawn them, kept so the placement survives the order the frames
 	// arrive in. A store replay is the ordinary case: a unit's row replays at
@@ -532,6 +539,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		liveMonitors:         map[string]struct{}{},
 		detachedUnits:        map[string]string{},
 		heldDetachments:      map[string]heldDetachment{},
+		announcedAgents:      map[string]*conversationv1.AgentId{},
 		subagents:            map[string]*subagentState{},
 		standing:             map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows:       map[string]*permissionState{},
