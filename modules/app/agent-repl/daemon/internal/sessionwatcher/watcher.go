@@ -258,11 +258,19 @@ type watcher struct {
 	agents map[string]*agentWatch
 	// shells is one entry per live detached shell, keyed by DetachedWorkId.value.
 	shells map[string]*shellWatch
-	// monitors is every live background watcher, keyed by DetachedWorkId.value.
-	// A monitor opens NO stream — the contract gives it none — so its liveness
-	// is tracked from the announcement and dropped at the monitor activity's
-	// own terminal.
-	monitors map[string]*conversationv1.DetachedWorkId
+	// live is THE LIVE-WORK LEDGER: one entry per detached item the shim has
+	// announced and not yet concluded, keyed by DetachedWorkId.value. It is
+	// the one thing the live-work set is read from, and it is SEPARATE FROM
+	// THE WATCHES: an item is admitted at its announcement and leaves only
+	// through concludeLocked, at the shim's own conclusion of it, whether its
+	// watch is open, still opening, refused, or was never opened at all (a
+	// monitor has none; an unaddressable subagent cannot have one). See
+	// livework.go.
+	live map[string]*liveItem
+	// liveSeq numbers admissions to the ledger, so a re-announcement is only
+	// ever reconciled against items admitted BEFORE the shim was asked for
+	// it (see reconcileLiveWorkLocked).
+	liveSeq uint64
 
 	// known is the newest pointer served on each watch, keyed by AgentId.value
 	// with mainWatchKey for the main agent's. It is what a re-open passes as
@@ -364,18 +372,18 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 	runCtx, cancel := context.WithCancel(ctx)
 	w := &watcher{
-		ws:       ws,
-		client:   client,
-		sinks:    sinks,
-		log:      log.With(dlog.Context{"workspace_id": string(ws)}),
-		ctx:      runCtx,
-		cancel:   cancel,
-		link:     shimclient.LinkConnected,
-		addr:     rootAddress(),
-		agents:   map[string]*agentWatch{},
-		shells:   map[string]*shellWatch{},
-		monitors: map[string]*conversationv1.DetachedWorkId{},
-		known:    map[string]*conversationv1.HistoryPointer{},
+		ws:     ws,
+		client: client,
+		sinks:  sinks,
+		log:    log.With(dlog.Context{"workspace_id": string(ws)}),
+		ctx:    runCtx,
+		cancel: cancel,
+		link:   shimclient.LinkConnected,
+		addr:   rootAddress(),
+		agents: map[string]*agentWatch{},
+		shells: map[string]*shellWatch{},
+		live:   map[string]*liveItem{},
+		known:  map[string]*conversationv1.HistoryPointer{},
 
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},
@@ -906,25 +914,20 @@ func (w *watcher) takeStreamsLocked() []func() {
 
 // ---- the live-work level ----
 
-// liveWorkLocked reports the live set, which IS the open watch set plus the
-// monitors that have no stream to open. Sorted so the published value is
-// stable frame to frame.
+// liveWorkLocked reports the live set, read from the ledger and from nothing
+// else: a watch's state says nothing about liveness. Sorted so the published
+// value is stable frame to frame.
 func (w *watcher) liveWorkLocked() LiveWorkSet {
 	var live LiveWorkSet
-	for _, a := range w.agents {
-		if a.work == nil {
-			// A SYNC subagent's watch carries no detached-work handle: it is
-			// the turn's own progress, not live work, and freeness must not
-			// wait on it.
-			continue
+	for _, item := range w.live {
+		switch item.kind {
+		case kindSubagent:
+			live.Agents = append(live.Agents, item.agentOrHandle())
+		case kindBash:
+			live.Shells = append(live.Shells, item.work)
+		case kindMonitor:
+			live.Monitors = append(live.Monitors, item.work)
 		}
-		live.Agents = append(live.Agents, a.id)
-	}
-	for _, s := range w.shells {
-		live.Shells = append(live.Shells, s.work)
-	}
-	for _, m := range w.monitors {
-		live.Monitors = append(live.Monitors, m)
 	}
 	sort.Slice(live.Agents, func(i, j int) bool { return live.Agents[i].GetValue() < live.Agents[j].GetValue() })
 	sort.Slice(live.Shells, func(i, j int) bool { return live.Shells[i].GetValue() < live.Shells[j].GetValue() })
@@ -1169,7 +1172,7 @@ func (w *watcher) reopenLocked(reason string) {
 		w.openAgentStreamLocked(a)
 	}
 	for _, s := range w.shells {
-		w.openShellStreamLocked(s, shellKeptOnFailure)
+		w.openShellStreamLocked(s)
 	}
 }
 
@@ -1193,6 +1196,10 @@ type openTicket struct {
 	gen    uint64
 	ctx    context.Context
 	cancel context.CancelFunc
+	// liveSeq is the ledger's admission count when the open was DECIDED. A
+	// session watch's re-announcement is computed by the shim after that
+	// instant, so it can only speak for items admitted by then.
+	liveSeq uint64
 }
 
 // decideOpenLocked mints the ticket for one open of the watch whose open in
@@ -1218,7 +1225,7 @@ func (w *watcher) decideOpenLocked(stream, key string, current *openTicket) (*op
 	current.abandon()
 	ctx, cancel := context.WithCancel(w.ctx)
 	w.opens.Add(1)
-	return &openTicket{gen: w.gen, ctx: ctx, cancel: cancel}, true
+	return &openTicket{gen: w.gen, ctx: ctx, cancel: cancel, liveSeq: w.liveSeq}, true
 }
 
 // abandon cancels an open nobody will install. It is nil-safe, because a
@@ -1310,7 +1317,7 @@ func (w *watcher) openSession(t *openTicket) {
 	installed := &ticketedStream[*shimv1.WatchSessionResponse]{Stream: stream, cancel: t.cancel}
 	w.sessionStream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_session", "session watch opened", nil)
-	go w.runSession(t.gen, installed)
+	go w.runSession(t.gen, t.liveSeq, installed)
 	w.mu.Unlock()
 	w.flushTurnEnds()
 }
@@ -1406,38 +1413,27 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	w.flushTurnEnds()
 }
 
-// shellOpenFailure is what a detached shell's FAILED open does to its entry.
-type shellOpenFailure int
-
-const (
-	// shellKeptOnFailure leaves the entry registered with no stream: the
-	// fleet re-open's case, where the entry was already live and its next
-	// announcement or the next re-open is what retries it.
-	shellKeptOnFailure shellOpenFailure = iota
-	// shellForgottenOnFailure forgets the entry and republishes the live set.
-	// A NIL-STREAM ENTRY OPENED BY AN ANNOUNCEMENT NEVER PERSISTS: while one
-	// sits in the map every repeated announcement would be answered "already
-	// watched", so the refusal would be permanent. Forgetting it makes the next
-	// announcement open the watch afresh.
-	shellForgottenOnFailure
-)
-
 // openShellStreamLocked DECIDES the open (or re-open) of one detached shell's
 // watch; openShell makes it off mu. A failed open is surfaced (a refusal, or a
-// severed link) when it completes, and onFailure says what then happens to
-// the entry. A shell whose open of this generation is already in flight is
-// left to it.
-func (w *watcher) openShellStreamLocked(s *shellWatch, onFailure shellOpenFailure) {
+// severed link) when it completes. A shell whose open of this generation is
+// already in flight is left to it.
+//
+// A FAILED OPEN NEVER TOUCHES LIVENESS. The shell stays in the ledger, and its
+// entry stays registered with no stream, so its next announcement or the next
+// fleet re-open is what retries it. Forgetting the entry on a failure made a
+// watch that could not be opened into a statement that the shell had ENDED,
+// which only the shim may make (livework.go).
+func (w *watcher) openShellStreamLocked(s *shellWatch) {
 	t, ok := w.decideOpenLocked("shell", s.work.GetValue(), s.opening)
 	if !ok {
 		return
 	}
 	s.opening = t
-	go w.openShell(t, s, onFailure)
+	go w.openShell(t, s)
 }
 
 // openShell makes one decided WatchBash open OFF mu and installs it.
-func (w *watcher) openShell(t *openTicket, s *shellWatch, onFailure shellOpenFailure) {
+func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 	defer w.opens.Done()
 	stream, err := w.client.WatchBash(t.ctx, s.work)
 	w.mu.Lock()
@@ -1455,10 +1451,6 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch, onFailure shellOpenFai
 			w.openRefusedLocked("watch_bash", key, w.shells[key] == s, &s.refusals, err)
 		} else {
 			w.severedLocked("watch_bash", "WatchBash could not be opened", err)
-		}
-		if onFailure == shellForgottenOnFailure && w.shells[key] == s {
-			delete(w.shells, key)
-			w.publishLiveWorkLocked()
 		}
 		w.mu.Unlock()
 		t.cancel()
@@ -1565,8 +1557,10 @@ func watchKey(id *conversationv1.AgentId) string {
 
 // ---- consuming streams ----
 
-// runSession consumes the session's standing stream.
-func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchSessionResponse]) {
+// runSession consumes the session's standing stream. openedAt is the ledger's
+// admission count when this watch's open was decided: the most its
+// re-announcement can speak for.
+func (w *watcher) runSession(gen, openedAt uint64, stream shimclient.Stream[*shimv1.WatchSessionResponse]) {
 	for {
 		frame, err := stream.Recv()
 		if err != nil {
@@ -1585,7 +1579,7 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchS
 			w.routeSessionUpdateLocked(frame.GetUpdate())
 		case frame.GetSessionStarted() != nil:
 			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch", dlog.Context{"function": "watcher", "branch": "case frame.GetSessionStarted() != nil"})
-			w.reannouncedLocked(frame.GetSessionStarted())
+			w.reannouncedLocked(frame.GetSessionStarted(), openedAt)
 		default:
 			// The shim client validates the oneof before a frame ever reaches
 			// here, so an unset arm at this seam is an invariant violation and
@@ -1601,15 +1595,25 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchS
 // reannouncedLocked takes the shim's ONCE-PER-WATCH re-announcement of the
 // session's own SessionStarted (landing 7).
 //
-// A watcher that ALREADY HOLDS the facts ignores it: the re-announcement rides
-// every new watch, including each re-open after a link break, and re-publishing
-// the same facts would be churn on every subscriber for no new information. It
-// is the ORDINARY case, so it is not warned.
-func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
+// A watcher that ALREADY HOLDS the facts does not take them again: the
+// re-announcement rides every new watch, including each re-open after a link
+// break, and re-publishing the same facts would be churn on every subscriber
+// for no new information. It is the ORDINARY case, so it is not warned.
+//
+// ITS LIVE MEMBERSHIP IS ALWAYS RECONCILED, though. The re-announcement's
+// live_work is the shim's statement of what is live NOW, and it is the one
+// statement that reaches this daemon after a conclusion it missed -- a terminal
+// that fell in a link gap, or one no stream this daemon watches ever carried.
+// An item the ledger holds that the shim no longer names has ended, and is
+// retired (reconcileLiveWorkLocked).
+func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, openedAt uint64) {
 	if w.started {
 		w.log.Debug("daemon.sessionwatcher.watch_session",
-			"ignored a re-announced SessionStarted; the facts are already held",
+			"ignored a re-announced SessionStarted's facts; they are already held, and only its live membership is reconciled",
 			dlog.Context{"vendor_session_id": started.GetVendorSessionId()})
+		if w.reconcileLiveWorkLocked(started, openedAt) {
+			w.publishLiveWorkLocked()
+		}
 		return
 	}
 	w.log.Info("daemon.sessionwatcher.watch_session",
@@ -1630,6 +1634,7 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
 	if w.main == nil || w.main.stream == nil {
 		w.openMainLocked()
 	}
+	w.reconcileLiveWorkLocked(started, openedAt)
 	w.adoptLiveWorkLocked(started)
 	w.publishLiveWorkLocked()
 }
@@ -1880,5 +1885,5 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	}
 	w.log.Warn("daemon.sessionwatcher.watch_bash",
 		"a detached shell's stream ended before the shell settled; re-opening it", ctx)
-	w.openShellStreamLocked(s, shellForgottenOnFailure)
+	w.openShellStreamLocked(s)
 }
