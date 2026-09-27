@@ -132,6 +132,9 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 		return residue("the status is not one the stream plane settles a spawn with")
 	}
 	activity.ActivityId = activityID(notice.toolUseID)
+	if notice.taskID != "" {
+		c.observer.TaskConcluded(notice.taskID)
+	}
 	bound.With(logging.Context{UpsertKey: ActivityKey(notice.toolUseID)}).
 		LogVerbose("task notification (status=%q) settles its backgrounded spawn, as the stream plane's task_notification does", notice.status)
 	return []*storev1.StoreEntry{c.settledEntry(at, agent, notice.toolUseID, activity)}

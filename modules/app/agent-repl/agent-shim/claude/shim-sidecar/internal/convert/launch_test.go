@@ -37,6 +37,8 @@ func (o spawnObserver) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath s
 	*o.spawns = append(*o.spawns, spawnReport{taskID, toolUseID, ownerAgentID, outputPath, backgrounded})
 }
 
+func (o spawnObserver) TaskConcluded(string) {}
+
 func (o spawnObserver) TaskStopped(string) {}
 
 // TestALaunchReportsWhetherTheSpawnWasBackgrounded states the rule over the
