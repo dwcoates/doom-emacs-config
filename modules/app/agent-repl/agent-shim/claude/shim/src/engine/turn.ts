@@ -1255,8 +1255,18 @@ export class TurnEngine {
       yield create(shimv1.WatchAgentResponseSchema, {
         frame: { case: "page", value: opened.page },
       });
-      for await (const entry of opened.tail) {
-        yield create(shimv1.WatchAgentResponseSchema, { frame: { case: "entry", value: entry } });
+      for await (const frame of opened.tail) {
+        // The tail's arms ARE the response's `entry` and `retired` arms: a
+        // retirement reaches the daemon as the entry it last drew, converted
+        // exactly as a served line, so it can remove it.
+        switch (frame.case) {
+          case "entry":
+            yield create(shimv1.WatchAgentResponseSchema, { frame: { case: "entry", value: frame.value } });
+            break;
+          case "retired":
+            yield create(shimv1.WatchAgentResponseSchema, { frame: { case: "retired", value: frame.value } });
+            break;
+        }
       }
       ending = concluded ? "concluded" : "unasked";
     } catch (error) {

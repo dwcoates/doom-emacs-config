@@ -12,7 +12,11 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
-import { PersistenceError, type AgentPageSession } from "../../src/store/persistence.js";
+import {
+  PersistenceError,
+  type AgentPageSession,
+  type AgentTailFrame,
+} from "../../src/store/persistence.js";
 import {
   createReader,
   readFailure,
@@ -229,7 +233,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     session.close();
 
     // Assert.
-    expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-first");
+    expect(unitOf(entryOf(first.value as AgentTailFrame))).toBe("unit-first");
   });
 
   it("refuses unknown_agent when the producer does not vouch for the agent", async () => {
@@ -316,7 +320,7 @@ describe("the tail", () => {
     const first = await pending;
     session.close();
 
-    expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-new");
+    expect(unitOf(entryOf(first.value as AgentTailFrame))).toBe("unit-new");
   });
 
   it("stops promptly when the session is closed, rather than hanging on the drain", async () => {
@@ -397,13 +401,13 @@ describe("the tail", () => {
         opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH),
       watchAgentSession: () =>
         standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
         ]),
     });
     const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const upsert = await iterator.next();
-    expect(unitOf(upsert.value as conversationv1.HistoryEntryAt)).toBe("unit-a");
+    expect(unitOf(entryOf(upsert.value as AgentTailFrame))).toBe("unit-a");
 
     // Act.
     session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
@@ -483,7 +487,7 @@ describe("the refused-open convention", () => {
     const first = await pending;
     session.close();
 
-    expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-1");
+    expect(unitOf(entryOf(first.value as AgentTailFrame))).toBe("unit-1");
     // The re-open states the caller's own high-water mark, which is what makes
     // the recovery lossless.
     expect(reopened[1]).toBeDefined();
@@ -734,6 +738,11 @@ describe("openBashRun", () => {
   });
 });
 
+/** A tail frame's entry, when it is on the `entry` arm; a retirement is not one. */
+function entryOf(frame: AgentTailFrame | undefined): conversationv1.HistoryEntryAt | undefined {
+  return frame?.case === "entry" ? frame.value : undefined;
+}
+
 /** The unit id a history entry's activity frame names. */
 function unitOf(entry: conversationv1.HistoryEntryAt | undefined): string | undefined {
   const frame = entry?.entry?.entry;
@@ -970,7 +979,7 @@ describe("a malformed OpenAgentSession answer", () => {
 });
 
 describe("the tail against a malformed or ending watch", () => {
-  it("refuses a pushed frame that carries no line", async () => {
+  it("refuses a pushed frame with no arm set, line or retired", async () => {
     // Arrange.
     const reader = readerOver({
       openAgentSession: async () => opened(floorPage([]), WATCH),
@@ -1002,7 +1011,7 @@ describe("the tail against a malformed or ending watch", () => {
         request.watch?.value === "watch-1"
           ? { async *[Symbol.asyncIterator]() {} }
           : standingWatch([
-              create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+              create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
             ]),
     });
     const session = await reader.openAgentPage(BOOK, 10);
@@ -1010,7 +1019,7 @@ describe("the tail against a malformed or ending watch", () => {
     // Act.
     const served: (string | undefined)[] = [];
     for await (const entry of session.tail) {
-      served.push(unitOf(entry));
+      served.push(unitOf(entryOf(entry)));
       break;
     }
     session.close();
@@ -1036,7 +1045,7 @@ describe("the tail against a malformed or ending watch", () => {
           ? {
               async *[Symbol.asyncIterator]() {
                 yield create(storev1.WatchAgentSessionResponseSchema, {
-                  line: storedLine("7", "unit-a"),
+                  frame: { case: "line", value: storedLine("7", "unit-a") },
                 });
               },
             }
@@ -1076,7 +1085,7 @@ describe("the tail against a malformed or ending watch", () => {
               async *[Symbol.asyncIterator]() {
                 // The upsert of the oldest row walks the bound back to "1".
                 yield create(storev1.WatchAgentSessionResponseSchema, {
-                  line: storedLine("1", "unit-a-updated"),
+                  frame: { case: "line", value: storedLine("1", "unit-a-updated") },
                 });
               },
             }
@@ -1091,7 +1100,7 @@ describe("the tail against a malformed or ending watch", () => {
     session.close();
 
     // Assert.
-    expect(unitOf(next.value as conversationv1.HistoryEntryAt)).toBe("unit-c");
+    expect(unitOf(entryOf(next.value as AgentTailFrame))).toBe("unit-c");
   });
 
   it("still serves a line the re-open carries at a served pointer when its content changed", async () => {
@@ -1111,7 +1120,7 @@ describe("the tail against a malformed or ending watch", () => {
           ? {
               async *[Symbol.asyncIterator]() {
                 yield create(storev1.WatchAgentSessionResponseSchema, {
-                  line: storedLine("1", "unit-a-updated"),
+                  frame: { case: "line", value: storedLine("1", "unit-a-updated") },
                 });
               },
             }
@@ -1126,7 +1135,7 @@ describe("the tail against a malformed or ending watch", () => {
     session.close();
 
     // Assert.
-    expect(unitOf(next.value as conversationv1.HistoryEntryAt)).toBe("unit-b-updated");
+    expect(unitOf(entryOf(next.value as AgentTailFrame))).toBe("unit-b-updated");
   });
 
   it("records the lines a re-open withheld as already served", async () => {
@@ -1249,7 +1258,7 @@ describe("the tail against a malformed or ending watch", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () =>
         standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("7", "unit-last") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("7", "unit-last") } }),
         ]),
     });
     const session = await reader.openAgentPage(BOOK, 10);
@@ -1257,7 +1266,7 @@ describe("the tail against a malformed or ending watch", () => {
 
     // Act.
     const served: (string | undefined)[] = [];
-    for await (const entry of session.tail) served.push(unitOf(entry));
+    for await (const entry of session.tail) served.push(unitOf(entryOf(entry)));
 
     // Assert. The concluded entry is DELIVERED and then the stream ends.
     expect(served).toEqual(["unit-last"]);
@@ -1320,8 +1329,8 @@ describe("the tail against a malformed or ending watch", () => {
 
     // Assert.
     expect([
-      unitOf(first.value as conversationv1.HistoryEntryAt),
-      unitOf(second.value as conversationv1.HistoryEntryAt),
+      unitOf(entryOf(first.value as AgentTailFrame)),
+      unitOf(entryOf(second.value as AgentTailFrame)),
     ]).toEqual(["unit-a", "unit-b"]);
   });
 });
@@ -1353,7 +1362,7 @@ describe("the deferred book, against a hand-built store", () => {
       },
       watchAgentSession: () =>
         standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("2", "unit-b") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
     const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
@@ -1368,8 +1377,8 @@ describe("the deferred book, against a hand-built store", () => {
 
     // Assert. The page it waited for comes first, then the live tail.
     expect([
-      unitOf(a.value as conversationv1.HistoryEntryAt),
-      unitOf(b.value as conversationv1.HistoryEntryAt),
+      unitOf(entryOf(a.value as AgentTailFrame)),
+      unitOf(entryOf(b.value as AgentTailFrame)),
     ]).toEqual(["unit-a", "unit-b"]);
   });
 
@@ -1392,7 +1401,7 @@ describe("the deferred book, against a hand-built store", () => {
     const first = iterator.next();
     reader.noteAgentRows(["book-1"]);
     const served = await first;
-    expect(unitOf(served.value as conversationv1.HistoryEntryAt)).toEqual("unit-a");
+    expect(unitOf(entryOf(served.value as AgentTailFrame))).toEqual("unit-a");
 
     // Act: the teardown concludes through the head of the book, which is the
     // pointer just served.
@@ -1689,7 +1698,7 @@ describe("the re-open's catch-up page", () => {
         // store never returns above a `known_through` of "2", and one the
         // reader now withholds as already served.)
         return standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("3", "unit-c") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("3", "unit-c") } }),
         ]);
       },
     });
@@ -1716,9 +1725,9 @@ describe("a tail closed under a push", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => ({
         async *[Symbol.asyncIterator]() {
-          yield create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") });
+          yield create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } });
           await held;
-          yield create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("2", "unit-b") });
+          yield create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } });
           await new Promise<never>(() => undefined);
         },
       }),
@@ -1733,7 +1742,7 @@ describe("a tail closed under a push", () => {
     const second = await iterator.next();
 
     // Assert.
-    expect([unitOf(first.value as conversationv1.HistoryEntryAt), second.done]).toEqual([
+    expect([unitOf(entryOf(first.value as AgentTailFrame)), second.done]).toEqual([
       "unit-a",
       true,
     ]);
@@ -1847,7 +1856,7 @@ describe("the deferred book's own waiting", () => {
 
     // Act.
     const served: (string | undefined)[] = [];
-    for await (const entry of session.tail) served.push(unitOf(entry));
+    for await (const entry of session.tail) served.push(unitOf(entryOf(entry)));
 
     // Assert. The row it waited for is delivered, and then the stream ends.
     expect(served).toEqual(["unit-a"]);
@@ -1869,7 +1878,7 @@ describe("the deferred book's own waiting", () => {
       },
       watchAgentSession: () =>
         standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
         ]),
     });
     const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
@@ -1906,7 +1915,7 @@ describe("the deferred book's own waiting", () => {
       },
       watchAgentSession: () =>
         standingWatch([
-          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("2", "unit-b") }),
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
     const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
@@ -1920,8 +1929,8 @@ describe("the deferred book's own waiting", () => {
 
     // Assert. The conclusion lands on the inner tail, which ends on that entry.
     expect([
-      unitOf(first.value as conversationv1.HistoryEntryAt),
-      unitOf(second.value as conversationv1.HistoryEntryAt),
+      unitOf(entryOf(first.value as AgentTailFrame)),
+      unitOf(entryOf(second.value as AgentTailFrame)),
       end.done,
     ]).toEqual(["unit-a", "unit-b", true]);
   });
@@ -1948,7 +1957,7 @@ describe("the deferred book's own waiting", () => {
     session.close();
 
     // Assert.
-    expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-a");
+    expect(unitOf(entryOf(first.value as AgentTailFrame))).toBe("unit-a");
   });
 });
 
@@ -2046,7 +2055,7 @@ describe("a book whose id this shim minted", () => {
     session.close();
 
     // Assert. The rows that landed while it waited come out as tail entries.
-    expect([opens, unitOf(served.value as conversationv1.HistoryEntryAt)]).toEqual([1, "unit-a"]);
+    expect([opens, unitOf(entryOf(served.value as AgentTailFrame))]).toEqual([1, "unit-a"]);
   });
 
   it("asks the store when the producer no longer vouches for the id", async () => {
@@ -2418,6 +2427,228 @@ describe("an open that meets a restarting store", () => {
         message:
           "gave up reading an agent's book: the store stayed unreachable for the whole read retry schedule",
         context: containing({ read: "openAgentBook" }),
+      }),
+    );
+  });
+});
+
+describe("a line the store retired", () => {
+  /** A watch push on the `retired` arm. */
+  function retiredPush(line: storev1.StoreLineAt): storev1.WatchAgentSessionResponse {
+    return create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "retired", value: line } });
+  }
+
+  /** A watch push on the `line` arm. */
+  function linePush(line: storev1.StoreLineAt): storev1.WatchAgentSessionResponse {
+    return create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: line } });
+  }
+
+  /** An open that refuses `unknown_agent`, as the store does for a book with no row. */
+  function refusingOpen(): storev1.OpenAgentSessionResponse {
+    return create(storev1.OpenAgentSessionResponseSchema, {
+      result: {
+        case: "failure",
+        value: create(storev1.OpenAgentSessionFailureSchema, {
+          detail: "no agent row",
+          kind: {
+            case: "unknownAgent",
+            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+          },
+        }),
+      },
+    });
+  }
+
+  it("relays a retired push on the retired arm, converted as a served line is", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH),
+      watchAgentSession: () => standingWatch([retiredPush(storedLine("4", "unit-gone"))]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+
+    // Act.
+    const next = await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    const frame = next.value as AgentTailFrame;
+    expect([frame.case, frame.value.at?.value, unitOf(frame.value)]).toEqual([
+      "retired",
+      "4",
+      "unit-gone",
+    ]);
+  });
+
+  it("relays a line push on the entry arm, unchanged", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH),
+      watchAgentSession: () => standingWatch([linePush(storedLine("4", "unit-here"))]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+
+    // Act.
+    const next = await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    const frame = next.value as AgentTailFrame;
+    expect([frame.case, frame.value.at?.value, unitOf(frame.value)]).toEqual([
+      "entry",
+      "4",
+      "unit-here",
+    ]);
+  });
+
+  it("refuses a retired push whose line carries no pointer", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH),
+      watchAgentSession: () =>
+        standingWatch([
+          retiredPush(create(storev1.StoreLineAtSchema, { line: storedLine("4", "unit-gone").line })),
+        ]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+
+    // Act, Assert.
+    await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
+  it("ends a tail whose conclusion names the retired pointer", async () => {
+    // THE RETIREMENT COUNTS AS SERVED: the store never serves the line again,
+    // so a conclusion through it that waited for a line would stand forever.
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([storedLine("1", "unit-a")]), WATCH),
+      watchAgentSession: () => standingWatch([retiredPush(storedLine("2", "unit-gone"))]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
+
+    // Act.
+    await iterator.next();
+    const end = await Promise.race([iterator.next().then((next) => next.done), hangGuard()]);
+
+    // Assert.
+    expect(end).toBe(true);
+  });
+
+  it("ends a deferred book's tail whose conclusion names the retired pointer", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1 ? refusingOpen() : opened(floorPage([]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([retiredPush(storedLine("2", "unit-gone"))]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    const first = iterator.next();
+    reader.noteAgentRows(["book-1"]);
+    await first;
+
+    // Act.
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
+    const end = await Promise.race([iterator.next().then((next) => next.done), hangGuard()]);
+
+    // Assert.
+    expect(end).toBe(true);
+  });
+
+  it("re-opens from the retired pointer as the last one served", async () => {
+    // Arrange.
+    const reopened: (storev1.StoreItemPointer | undefined)[] = [];
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        reopened.push(request.knownThrough);
+        opens += 1;
+        return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                yield retiredPush(storedLine("7", "unit-gone"));
+              },
+            }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act. The retirement, then the end that forces the re-open.
+    await iterator.next();
+    await Promise.race([iterator.next(), hangGuard()]);
+    session.close();
+
+    // Assert.
+    expect(reopened[1]?.value).toBe("7");
+  });
+
+  it("serves again a row the re-open carries back at a retired pointer, even unchanged", async () => {
+    // A later write of a real record takes the row back at the same position.
+    // The consumer removed it on the retirement, so the already-served check
+    // must never withhold it, whatever its content.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([]), WATCH)
+          : opened(floorPage([storedLine("5", "unit-back")]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                yield retiredPush(storedLine("5", "unit-back"));
+              },
+            }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act.
+    const next = await Promise.race([iterator.next(), hangGuard()]);
+    session.close();
+
+    // Assert.
+    expect(typeof next === "string" ? next : unitOf(entryOf(next.value as AgentTailFrame))).toBe(
+      "unit-back",
+    );
+  });
+
+  it("records each relayed retirement verbosely, with its agent and pointer", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH),
+      watchAgentSession: () => standingWatch([retiredPush(storedLine("4", "unit-gone"))]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const before = logSinkMark();
+
+    // Act.
+    await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    expect(logRecordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        verbosity: "verbose",
+        message: "the store retired a line of an agent's book; relaying the retirement to the consumer",
+        context: containing({ agent: "book-1", pointer: "4" }),
       }),
     );
   });
