@@ -769,6 +769,28 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
 - **THE FILE PLANE is the marker, not the stamp**: the title digest and the
   transcript listing skip a prompt that begins with the keep-alive marker.
 
+## A turn id is started once
+
+`TurnEngine.repeatedStart` (`src/engine/turn.ts`); the contract is the comment on
+`StartTurnRequest.turn`.
+
+- **A REPEAT STARTS NOTHING.** A `StartTurn` repeating a turn id this shim
+  accepted delivers nothing, writes no prompt row, opens no turn, and is
+  answered success: the prompt under that id with the ORIGINAL start's origin,
+  and the opening page the repeat asks for. It is judged first, before the
+  double-submit and open-turn refusals (those are about a DIFFERENT turn) and
+  before any keep-alive wait.
+- **IT IS AN INVARIANT VIOLATION, RECORDED AT ERROR** with the turn, the verb,
+  the original's state (`open`, `ended`, `starting`), both origins, and the
+  session's agent and vendor session ids. Only a daemon that lost its record of
+  an acceptance (a death between the shim's answer and its stamp) re-drives one.
+- **A REPEAT RACING ITS STILL-STARTING ORIGINAL WAITS FOR IT**: an accepted
+  original answers it as above; a refused one leaves it a first start. A
+  refused start is never remembered, so its retry is a first start.
+- **THE MEMORY IS CONSTANT-SIZE**: the last `STARTED_TURNS_REMEMBERED` accepted
+  ids and their origins, never the prompt. It is process memory, so a shim that
+  died forgets; an id pushed out of the window is started as a first start.
+
 ## The hibernate contract: at most one compaction per idle period
 
 `Hibernate` is the daemon's pre-hibernation directive, and the shim's answer to
