@@ -449,10 +449,17 @@ func TestUnknownToolsResultSettlesAsUnmodeledSuccess(t *testing.T) {
 
 // recordingObserver captures the facts a conversion reports to the reader.
 type recordingObserver struct {
-	stopped *[]string
+	stopped   *[]string
+	concluded *[]string
 }
 
 func (o recordingObserver) TaskSpawned(string, string, string, string, bool) {}
+
+func (o recordingObserver) TaskConcluded(taskID string) {
+	if o.concluded != nil {
+		*o.concluded = append(*o.concluded, taskID)
+	}
+}
 
 func (o recordingObserver) TaskStopped(taskID string) {
 	*o.stopped = append(*o.stopped, taskID)
@@ -825,5 +832,27 @@ func TestAnAgentStopRestatesTheCommissionItsLaunchRecorded(t *testing.T) {
 				t.Fatalf("restated = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAnAgentTaskStopReportsTheRunConcluded(t *testing.T) {
+	// Arrange. The stop settles the spawn here, so the reader must learn the run
+	// ended and never conclude it LOST over this terminal.
+	c := newTestConverter(t)
+	var stopped, concluded []string
+	c.SetObserver(recordingObserver{stopped: &stopped, concluded: &concluded})
+	launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+		`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"local_agent","task_id":"a9","message":"stopped"}`)
+
+	// Act.
+	convertLines(t, c, launch, launched, call, result)
+
+	// Assert.
+	if len(concluded) != 1 || concluded[0] != "a9" {
+		t.Fatalf("conclusions reported = %v, want exactly the stopped agent task", concluded)
 	}
 }

@@ -687,3 +687,70 @@ func TestAClaimAppliesAStopThatWasWaitingForIt(t *testing.T) {
 		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
 	}
 }
+
+func TestAConcludedAgentRunIsNeverConcludedLost(t *testing.T) {
+	tests := []struct {
+		name          string
+		concludeFirst bool
+	}{
+		{name: "concluded while its spool is read", concludeFirst: false},
+		{name: "concluded before its spool is claimed", concludeFirst: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+			spool := h.spoolFile(t, "a1notified", "work\n")
+			if tt.concludeFirst {
+				h.sc.TaskConcluded("a1notified")
+			}
+			h.sc.TaskSpawned("a1notified", "toolu_notified", "agent-1", spool, true, "/workspace", "workspace-id", "session-1")
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+			h.sc.pollAll()
+			if !tt.concludeFirst {
+				h.sc.TaskConcluded("a1notified")
+			}
+
+			// Act: the run passes the silence window.
+			h.advance(24 * time.Hour)
+			h.sc.sweep()
+
+			// Assert.
+			h.requireNone(t, "lost-policy", "warn")
+			for _, operation := range []string{"lost-terminal", "lost-terminal-refused", "lost-terminal-unwatched", "lost-terminal-residue", "lost-terminal-unsupported"} {
+				h.requireNone(t, operation, "")
+			}
+		})
+	}
+}
+
+func TestASilentUnconcludedAgentRunIsStillConcludedLost(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "a1silent", "work\n")
+	h.sc.TaskSpawned("a1silent", "toolu_silent", "agent-1", spool, true, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Act.
+	h.advance(24 * time.Hour)
+	h.sc.sweep()
+
+	// Assert.
+	h.requireOnce(t, "lost-terminal", "")
+}
+
+func TestAConclusionWithNoTaskIsRefusedLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	h.sc.TaskConcluded("")
+
+	// Assert.
+	h.requireOnce(t, "task-concluded", "error")
+}

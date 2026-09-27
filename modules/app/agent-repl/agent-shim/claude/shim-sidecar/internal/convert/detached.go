@@ -324,6 +324,7 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		}
 		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: ActivityKey(run)}).
 			Log("TaskStop consumed as the CANCELLED terminal of an agent task")
+		c.observer.TaskConcluded(taskID)
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
 				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
