@@ -36,7 +36,7 @@
     (agent-repl-mutation-progress-register "op-1" :on-stage (lambda (s) (setq got s)))
     ;; Act.
     (agent-repl-mutation-progress-handle
-     (agent-repl-test-mp--progress "op-1" :stage :deriving-name))
+     (agent-repl-test-mp--progress "op-1" :entered-stage :deriving-name))
     ;; Assert.
     (should (eq got :deriving-name))))
 
@@ -75,7 +75,7 @@
   (agent-repl-test-mp--reset)
   ;; Act / Assert: handling does not signal, and registers nothing.
   (agent-repl-mutation-progress-handle
-   (agent-repl-test-mp--progress "op-x" :stage :deriving-name))
+   (agent-repl-test-mp--progress "op-x" :entered-stage :deriving-name))
   (should-not (gethash "op-x" agent-repl-mutation-progress--pending)))
 
 (ert-deftest agent-repl-test-mp-new-op-id-is-unique ()

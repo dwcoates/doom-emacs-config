@@ -1155,16 +1155,51 @@ replaces it."
 
 ;;;; ---- Workspace-mutation progress on WatchDaemon --------------------
 
+(defun agent-repl-test-wire-host--create-stage-push (stage-json)
+  "Return a WatchDaemonResponse JSON carrying create entered_stage STAGE-JSON."
+  (concat "{\"mutationProgress\":{\"opId\":\"op-1\",\"create\":{"
+          "\"enteredStage\":" stage-json "}}}"))
+
 (ert-deftest agent-repl-test-wire-host-mutation-progress-stage ()
   "A create stage push decodes to the op id and the stage keyword."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-watch-daemon-response
-                  (concat "{\"mutationProgress\":{\"opId\":\"op-1\",\"create\":{"
-                          "\"stage\":\"WORKSPACE_CREATE_STAGE_DERIVING_NAME\"}}}"))
+                  (agent-repl-test-wire-host--create-stage-push "{\"derivingName\":{}}"))
                  '(:arm :mutation-progress
                    :value (:op-id "op-1"
                            :event (:arm :create
-                                   :value (:arm :stage :value :deriving-name)))))))
+                                   :value (:arm :entered-stage :value :deriving-name)))))))
+
+(ert-deftest agent-repl-test-wire-host-create-stage-deriving-name ()
+  "The deriving_name arm decodes to `:deriving-name'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-create-stage "{\"derivingName\":{}}")
+              :deriving-name)))
+
+(ert-deftest agent-repl-test-wire-host-create-stage-creating-worktree ()
+  "The creating_worktree arm decodes to `:creating-worktree'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-create-stage "{\"creatingWorktree\":{}}")
+              :creating-worktree)))
+
+(ert-deftest agent-repl-test-wire-host-create-stage-starting-session ()
+  "The starting_session arm decodes to `:starting-session'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-create-stage "{\"startingSession\":{}}")
+              :starting-session)))
+
+(ert-deftest agent-repl-test-wire-host-create-stage-unset-is-a-breach ()
+  "An entered_stage with no arm set is refused, not read as some stage."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-create-stage "{}")
+                 '("WorkspaceCreateStage" stage "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-create-progress-retired-stage-field-is-a-breach ()
+  "A push on the retired field-1 `stage' enum is refused, never misread."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-create-progress
+                  "{\"stage\":\"WORKSPACE_CREATE_STAGE_DERIVING_NAME\"}")
+                 '("WorkspaceCreateProgress" stage "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-mutation-progress-succeeded ()
   "A succeeded push decodes to the minted ref and the workspace name."
@@ -1208,12 +1243,23 @@ replaces it."
     (should (eq (plist-get (plist-get error-val :cause) :arm) :naming-failed))))
 
 (ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-stage-is-a-breach ()
-  "An unknown stage enum name is refused, not guessed at."
-  (should-error
-   (agent-repl-test-wire-host--decode
-    #'agent-repl-wire-decode-watch-daemon-response
-    (concat "{\"mutationProgress\":{\"opId\":\"op-5\",\"create\":{"
-            "\"stage\":\"WORKSPACE_CREATE_STAGE_TELEPORT\"}}}"))))
+  "An unknown create-stage arm is refused as an unknown field, not guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (agent-repl-test-wire-host--create-stage-push "{\"teleporting\":{}}"))
+                 '("WorkspaceCreateStage" teleporting "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-stage-is-logged ()
+  "An unknown create-stage arm is recorded at ERROR before it is refused."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+      (condition-case nil
+          (agent-repl-wire-decode-workspace-create-stage
+           (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))
+        (agent-repl-wire-error nil)))
+    (should (equal logged
+                   '("elisp.wire.contract-breach message=WorkspaceCreateStage field=teleporting reason=unknown field")))))
 
 
 (ert-deftest agent-repl-test-wire-host-mutation-progress-open-stage ()
