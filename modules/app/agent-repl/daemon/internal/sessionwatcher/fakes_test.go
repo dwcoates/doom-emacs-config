@@ -139,6 +139,29 @@ type fakeClient struct {
 	bashOpens    chan bashOpen
 	links        chan shimclient.LinkState
 	exits        chan shimclient.ExitInfo
+	// refusedOpens carries the procedure of every watch open the fake
+	// answered with an error, the moment it answers. With the watcher's
+	// opens made off its lock, it is how a test knows a refused open was
+	// MADE before it joins the open's completion (awaitRefusedOpen).
+	refusedOpens chan string
+
+	// stashedAgentOpens are opens nextAgentOpenFor read past while looking
+	// for another target. Opens decided together are MADE concurrently, so
+	// the order they reach agentOpens in means nothing; a test that wants one
+	// by target takes it by target, and the rest stay queued in order. Read
+	// and written by the test goroutine alone.
+	stashedAgentOpens []agentOpen
+	// settle joins every watch open the watcher has in flight. The harness
+	// sets it, and the no-open assertions call it first, so they judge every
+	// open the watcher decided rather than only the ones already made.
+	settle func()
+
+	// sessionGate, agentGate and bashGate each hold the NEXT open of their
+	// verb until released: a shim that never serves a stream's first frame.
+	// Each is taken by the one open it holds (see openGate.hold).
+	sessionGate *openGate
+	agentGate   *openGate
+	bashGate    *openGate
 
 	mu           sync.Mutex
 	agentErr     error
@@ -174,6 +197,71 @@ func (c *fakeClient) setReaped(info shimclient.ExitInfo) {
 	c.reaped = &info
 }
 
+// openGate holds one watch open inside the fake's verb, the way a shim that
+// never serves the stream's first frame holds shimclient.openStream.
+type openGate struct {
+	// blocked is signalled the moment the open is being held.
+	blocked chan struct{}
+	// release lets the held open complete, successfully.
+	release chan struct{}
+	// honorCtx lets the open's context end the hold, as the real transport
+	// does; without it only release does, which is how a test makes an open
+	// COMPLETE after the watcher stopped wanting it.
+	honorCtx bool
+}
+
+func newOpenGate(honorCtx bool) *openGate {
+	return &openGate{blocked: make(chan struct{}, 1), release: make(chan struct{}), honorCtx: honorCtx}
+}
+
+// hold blocks one open until it is released, or until ctx ends when the gate
+// honors it. It answers the context's error for an open ended that way.
+func (g *openGate) hold(ctx context.Context) error {
+	if g == nil {
+		return nil
+	}
+	g.blocked <- struct{}{}
+	if !g.honorCtx {
+		<-g.release
+		return nil
+	}
+	select {
+	case <-g.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// awaitBlocked waits until the gate is holding its open.
+func (g *openGate) awaitBlocked(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.blocked:
+	case <-time.After(waitDeadline):
+		t.Fatal("the gated open was never made")
+	}
+}
+
+// takeGate hands the caller the gate *slot holds, clearing it, so a gate holds
+// exactly one open.
+func (c *fakeClient) takeGate(slot **openGate) *openGate {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	g := *slot
+	*slot = nil
+	return g
+}
+
+// gate arranges a gate for the next open of one verb and returns it.
+func (c *fakeClient) gate(slot **openGate, honorCtx bool) *openGate {
+	g := newOpenGate(honorCtx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	*slot = g
+	return g
+}
+
 func newFakeClient() *fakeClient {
 	return &fakeClient{
 		sessionOpens: make(chan *fakeStream[*shimv1.WatchSessionResponse], 8),
@@ -181,10 +269,14 @@ func newFakeClient() *fakeClient {
 		bashOpens:    make(chan bashOpen, 32),
 		links:        make(chan shimclient.LinkState, 8),
 		exits:        make(chan shimclient.ExitInfo),
+		refusedOpens: make(chan string, 64),
 	}
 }
 
-func (c *fakeClient) WatchSession(context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
+func (c *fakeClient) WatchSession(ctx context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
+	if err := c.takeGate(&c.sessionGate).hold(ctx); err != nil {
+		return nil, err
+	}
 	stream := newFakeStream[*shimv1.WatchSessionResponse]()
 	c.mu.Lock()
 	c.sessionCount++
@@ -193,11 +285,15 @@ func (c *fakeClient) WatchSession(context.Context) (shimclient.Stream[*shimv1.Wa
 	return stream, nil
 }
 
-func (c *fakeClient) WatchAgent(_ context.Context, req *shimv1.WatchAgentRequest) (shimclient.Stream[*shimv1.WatchAgentResponse], error) {
+func (c *fakeClient) WatchAgent(ctx context.Context, req *shimv1.WatchAgentRequest) (shimclient.Stream[*shimv1.WatchAgentResponse], error) {
+	if err := c.takeGate(&c.agentGate).hold(ctx); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	err := c.agentErr
 	c.mu.Unlock()
 	if err != nil {
+		c.refusedOpens <- "WatchAgent"
 		return nil, err
 	}
 	stream := newFakeStream[*shimv1.WatchAgentResponse]()
@@ -221,11 +317,15 @@ func (c *fakeClient) setBashErr(err error) {
 	c.bashErr = err
 }
 
-func (c *fakeClient) WatchBash(_ context.Context, work *conversationv1.DetachedWorkId) (shimclient.Stream[*conversationv1.AgentBash], error) {
+func (c *fakeClient) WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (shimclient.Stream[*conversationv1.AgentBash], error) {
+	if err := c.takeGate(&c.bashGate).hold(ctx); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	err := c.bashErr
 	c.mu.Unlock()
 	if err != nil {
+		c.refusedOpens <- "WatchBash"
 		return nil, err
 	}
 	stream := newFakeStream[*conversationv1.AgentBash]()
@@ -235,15 +335,70 @@ func (c *fakeClient) WatchBash(_ context.Context, work *conversationv1.DetachedW
 
 func (c *fakeClient) Connectivity() <-chan shimclient.LinkState { return c.links }
 
-// nextAgentOpen returns the next WatchAgent the watcher opened.
+// nextAgentOpen returns the next WatchAgent the watcher opened, a stashed one
+// first.
 func (c *fakeClient) nextAgentOpen(t *testing.T) agentOpen {
 	t.Helper()
+	if len(c.stashedAgentOpens) > 0 {
+		open := c.stashedAgentOpens[0]
+		c.stashedAgentOpens = c.stashedAgentOpens[1:]
+		return open
+	}
 	select {
 	case open := <-c.agentOpens:
 		return open
 	case <-time.After(waitDeadline):
 		t.Fatal("no WatchAgent was opened")
 		return agentOpen{}
+	}
+}
+
+// nextAgentOpenFor returns the next WatchAgent opened for target (empty for
+// the main agent's unset target), stashing every other open it reads past for
+// nextAgentOpen.
+func (c *fakeClient) nextAgentOpenFor(t *testing.T, target string) agentOpen {
+	t.Helper()
+	for i, open := range c.stashedAgentOpens {
+		if open.req.GetTarget().GetValue() == target {
+			c.stashedAgentOpens = append(c.stashedAgentOpens[:i:i], c.stashedAgentOpens[i+1:]...)
+			return open
+		}
+	}
+	deadline := time.After(waitDeadline)
+	for {
+		select {
+		case open := <-c.agentOpens:
+			if open.req.GetTarget().GetValue() == target {
+				return open
+			}
+			c.stashedAgentOpens = append(c.stashedAgentOpens, open)
+		case <-deadline:
+			t.Fatalf("no WatchAgent was opened for %q", target)
+			return agentOpen{}
+		}
+	}
+}
+
+// awaitRefusedOpen waits until the fake has answered one open of procedure
+// with its arranged error, then joins every open in flight, so the watcher
+// has ruled on the refusal by the time it returns.
+func (c *fakeClient) awaitRefusedOpen(t *testing.T, procedure string) {
+	t.Helper()
+	select {
+	case got := <-c.refusedOpens:
+		if got != procedure {
+			t.Fatalf("refused open = %s, want %s", got, procedure)
+		}
+	case <-time.After(waitDeadline):
+		t.Fatalf("no %s open was refused", procedure)
+	}
+	c.settleOpens()
+}
+
+// settleOpens joins every open the watcher has in flight.
+func (c *fakeClient) settleOpens() {
+	if c.settle != nil {
+		c.settle()
 	}
 }
 
@@ -276,6 +431,10 @@ func (c *fakeClient) nextSessionOpen(t *testing.T) *fakeStream[*shimv1.WatchSess
 // before the call that provoked it has been observed to finish.
 func (c *fakeClient) noAgentOpen(t *testing.T) {
 	t.Helper()
+	c.settleOpens()
+	if len(c.stashedAgentOpens) > 0 {
+		t.Fatalf("an unexpected WatchAgent was opened for %q", c.stashedAgentOpens[0].req.GetTarget().GetValue())
+	}
 	select {
 	case open := <-c.agentOpens:
 		t.Fatalf("an unexpected WatchAgent was opened for %q", open.req.GetTarget().GetValue())
@@ -286,6 +445,7 @@ func (c *fakeClient) noAgentOpen(t *testing.T) {
 // noBashOpen asserts no further WatchBash was opened.
 func (c *fakeClient) noBashOpen(t *testing.T) {
 	t.Helper()
+	c.settleOpens()
 	select {
 	case open := <-c.bashOpens:
 		t.Fatalf("an unexpected WatchBash was opened for %q", open.work.GetValue())
@@ -790,7 +950,7 @@ func newHarness(t *testing.T, session Session) *harness {
 	t.Helper()
 	h := startHarness(t, session, nil)
 	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpen(t)
+	open := h.client.nextAgentOpenFor(t, "")
 	h.main, h.mainReq = open.stream, open.req
 	return h
 }
@@ -814,6 +974,9 @@ func newHarnessRefusingAgents(t *testing.T, session Session, refusal error) *har
 	t.Helper()
 	h := startHarness(t, session, func(c *fakeClient) { c.setAgentErr(refusal) })
 	h.session = h.client.nextSessionOpen(t)
+	// The start's main open is made off the watcher's lock: it is joined
+	// here, so every test begins with the refusal already ruled on.
+	h.client.awaitRefusedOpen(t, "WatchAgent")
 	return h
 }
 
@@ -851,6 +1014,7 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 		t.Fatalf("Start: %v", err)
 	}
 	h.w = started.(*watcher)
+	h.client.settle = h.w.opens.Wait
 	t.Cleanup(func() { _ = h.w.Close() })
 	return h
 }
@@ -1769,7 +1933,7 @@ func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	h.rec.until(t, "sidebar.OnLink")
 	h.client.links <- shimclient.LinkConnected
 	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpen(t)
+	open := h.client.nextAgentOpenFor(t, "")
 	h.main, h.mainReq = open.stream, open.req
 	return open.req
 }
