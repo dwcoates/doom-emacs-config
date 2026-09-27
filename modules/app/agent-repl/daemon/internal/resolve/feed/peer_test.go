@@ -170,3 +170,71 @@ func TestReplayedAndLivePeerMessageResolveToOneRow(t *testing.T) {
 		t.Fatalf("rows = %d, want exactly 1 (live and replayed collapse on id p1)", got)
 	}
 }
+
+// peerMessageOf sends one peer message of a stated kind to the main agent.
+func (h *harness) peerMessageOf(id, sender string, peer *conversationv1.PeerMessage) {
+	h.t.Helper()
+	peer.Agent, peer.Sender, peer.Body, peer.Id = mainAgent(), sender, "the whole report", id
+	h.resolver.OnPeerMessage(testWorkspace, peer, nil, noAddress())
+}
+
+func handbackPeer() *conversationv1.PeerMessage {
+	return &conversationv1.PeerMessage{Kind: &conversationv1.PeerMessage_SubagentHandback{SubagentHandback: &conversationv1.PeerMessageSubagentHandback{}}}
+}
+
+func interSessionPeer() *conversationv1.PeerMessage {
+	return &conversationv1.PeerMessage{Kind: &conversationv1.PeerMessage_InterSession{InterSession: &conversationv1.PeerMessageInterSession{}}}
+}
+
+func TestHandbackPeerMessageDrawsTheBadge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.peerMessageOf("p1", "Explore", handbackPeer())
+
+	// Assert.
+	if h.only(rootFeed()).GetSubagentHandback() == nil {
+		t.Fatal("a subagent's hand-back must draw the FeedSubagentHandbackBadge row, not a bubble")
+	}
+}
+
+func TestHandbackBadgeLabelSaysTheSenderReportedBack(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.peerMessageOf("p1", "Explore", handbackPeer())
+
+	// Assert.
+	if got := h.only(rootFeed()).GetSubagentHandback().GetLabel().GetText(); got != "agent Explore reported back" {
+		t.Fatalf("label = %q, want \"agent Explore reported back\"", got)
+	}
+}
+
+func TestHandbackBadgeTakesThePeerRowId(t *testing.T) {
+	// Arrange. Live and adopted deliveries collapse on the id minted from
+	// PeerMessage.id, whichever row kind draws it.
+	h := newHarness(t)
+
+	// Act.
+	h.peerMessageOf("p1", "Explore", handbackPeer())
+
+	// Assert.
+	if got := h.only(rootFeed()).GetId().GetValue(); got != h.peerRowID("p1") {
+		t.Fatalf("row id = %q, want the KindPeer row id for p1 %q", got, h.peerRowID("p1"))
+	}
+}
+
+func TestInterSessionPeerMessageDrawsTheBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.peerMessageOf("p1", "Explore", interSessionPeer())
+
+	// Assert.
+	if h.only(rootFeed()).GetPeerMessage() == nil {
+		t.Fatal("an inter-session peer message must draw the FeedPeerMessage bubble")
+	}
+}

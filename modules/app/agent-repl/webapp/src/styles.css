@@ -1867,6 +1867,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* In-flight badge: the same orange the thinking indicator uses, so a call still
    running reads as the same "model is busy" signal wherever it appears (and it
    matches the arc spinning inside the badge, which is already --thinking). */
+/* A subagent's hand-back marker: the plain pill, quiet, since the report it
+   marks is drawn in the subagent's own card (owner ruling, 2026-09-27). */
+.badge.subagent-handback-badge { color: var(--muted); }
+/* An undelivered subagent result's reason: one quiet line under the report. */
+.subagent-result-reason { color: var(--muted); }
 .badge.run { color: var(--thinking); display: inline-flex; align-items: center; gap: 0.3rem; }
 /* Every tool card's chip sits on the card grey, so the async teal cannot
    tint it: done/running reads identically on a Bash card and an Agent
@@ -2511,7 +2516,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    is deliberately NOT here — like the clear-context boundary rule it spans the
    column as a separator rather than reading as a badge. */
 .result,
-.system-note {
+.system-note,
+.subagent-handback-badge {
   width: fit-content;
   max-width: var(--agent-bubble-cap);
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);

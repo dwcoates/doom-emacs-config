@@ -145,6 +145,11 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		// A send IS an agent-addressed prompt, drawn on the SENDER's feed with
 		// the same component the recipient's delivered prompt is drawn with.
 		row, err = r.drawSendMessage(s, at, act, item.SendMessage)
+	case *conversationv1.AgentActivity_SubagentHandback:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SubagentHandback"})
+		// A hand-back IS the subagent's returned result, drawn once on the
+		// subagent's OWN feed (inside its card) and never as a tool card.
+		row, err = r.drawSubagentResult(s, at, act, item.SubagentHandback)
 	default:
 		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
 		// the topbar's warning dropdown. Every other kind that draws nowhere
