@@ -293,8 +293,6 @@ type watcher struct {
 // activityFact is what one routed activity taught the watcher about the unit
 // it addressed.
 type activityFact struct {
-	// kind is the detachable kind, unset when the unit cannot detach.
-	kind detachedKind
 	// agent is the agent a subagent spawn created, nil for every other kind.
 	agent *conversationv1.AgentId
 	// tool is the call's tool name, empty when the unit is not a tool call.
@@ -308,7 +306,8 @@ type activityFact struct {
 type detachedKind int
 
 const (
-	// kindUnknown is a unit whose kind the watcher could not determine.
+	// kindUnknown is an announcement that named no kind. It is refused, never
+	// routed.
 	kindUnknown detachedKind = iota
 	// kindSubagent is a detached subagent, watched with WatchAgent.
 	kindSubagent
