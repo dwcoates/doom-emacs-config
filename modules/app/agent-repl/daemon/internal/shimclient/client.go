@@ -1524,6 +1524,16 @@ func (c *client) refusedOpen(ctx context.Context, operation string, err error, f
 		c.log.Debug(operation, "shim stream refused", fields)
 		return
 	}
+	// AN OPEN ITS OWN CALLER ABANDONED WAS NOT REFUSED. The caller's context
+	// ending -- a watch reaped, a watcher closed, a failed boot tearing down
+	// the watchers it adopted -- cancels the open this daemon itself asked for,
+	// and the shim said nothing at all. Recorded at ERROR it failed every
+	// teardown that raced an open in flight.
+	if cause := ctx.Err(); cause != nil {
+		fields["cause"] = cause.Error()
+		c.log.Info(operation, "the stream open was abandoned by its own caller before the shim answered", fields)
+		return
+	}
 	switch connect.CodeOf(err) {
 	case connect.CodeNotFound, connect.CodeFailedPrecondition:
 		c.log.Info(operation, "the shim refused the stream open: it holds no such handle; the caller rules on whether that was expected", fields)
