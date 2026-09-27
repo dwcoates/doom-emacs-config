@@ -96,7 +96,8 @@ and are contract on the same terms:
 | `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
-| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `turn-ended` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: every non-thinking `response` and the `turn-ended` bubble, at full height, whose box wears `.bubble-box` alone) | one-bubble, 2026-09-23; `none` 2026-09-27 |
+| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `turn-ended` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: every non-thinking `response` and the `turn-ended` bubble, at full height, whose box wears `.bubble-box` alone; `2` retired 2026-09-27) | one-bubble, 2026-09-23; `none` 2026-09-27 |
+| `data-more` | every CAPPED `.bubble` (src/bubble/draw.ts; absent on an uncapped one) | `fade` (the shared has-more bottom fade) \| `ellipsis` (a one-line cap only: the collapsed body is clamped to its line, which the engine ends in `…` exactly when anything follows it, and the fade is hidden) | held-prompt-quiet-one-line, 2026-09-27 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId: a subagent's bubble, a shell's head, a monitor's Monitor tool-call card) and `data-jump-unresolved` (`notDrawn`; `noFeedEntry` is retired, owner ruling 2026-09-23) | footer-rows-and-work-ids, 2026-09-23 |
@@ -245,10 +246,18 @@ hand any more:
   and one toggle (expand.ts, which also opens a bubble from its header strip).
   A kind's chrome the reader should see only once the bubble is open goes in
   the spec's `expandOnly`, which the same toggle reveals; there is no second
-  fold. A HELD prompt (owner spec, 2026-09-23) is HALF the one width
+  fold. A capped bubble's spec also chooses its MORE SIGNAL (`data-more`,
+  2026-09-27): the shared fade, or the ELLIPSIS, drawn at a one-line cap only
+  (the spec types refuse it elsewhere) — the collapsed body is clamped to its
+  line (`-webkit-line-clamp`), so the engine ends that line in `…` exactly when
+  anything follows it (a wrapped over-long line, a further line, a further
+  block), and the fade is hidden; the measurer still sets `has-more`, reading
+  the clamped body's `scrollHeight`, and nothing keys on it. A HELD prompt
+  (owner spec, 2026-09-23) is HALF the one width
   (`calc(var(--bubble-max-width) / 2)`, so its trees wrap at the half), shows
-  collapsed only its first two lines and its status badges, and keeps the rest
-  expand-only; each status badge's color comes from ONE table,
+  collapsed only its ONE first line under the ellipsis (owner ruling,
+  2026-09-27) and its status badges, and keeps the rest expand-only; its fill
+  is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
   included. A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
@@ -265,7 +274,7 @@ hand any more:
   summaries stay capped.
   `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
   has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
-  it: "more below" is the FADE ONLY, never a chevron, and `has-more` means the
+  it: "more below" is the FADE (or the ellipsis a spec chooses), never a chevron, and `has-more` means the
   BODY's rendered lines run past the cap (never the box's `scrollHeight`, which
   counts the usage corner's hit area); a prompt's border lands once it is
   received and stays (the user's purple independent of the wave, one amber
