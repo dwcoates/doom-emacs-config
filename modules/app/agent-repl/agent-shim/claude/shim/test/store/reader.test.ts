@@ -7,7 +7,7 @@
  * semantics, and a double would be asserting our beliefs about them.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeSync } from "node:fs";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
@@ -1181,14 +1181,14 @@ describe("the tail against a malformed or ending watch", () => {
           : standingWatch([]),
     });
     const session = await reader.openAgentPage(BOOK, 10);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await session.tail[Symbol.asyncIterator]().next();
     session.close();
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message:
@@ -1216,14 +1216,14 @@ describe("the tail against a malformed or ending watch", () => {
           : standingWatch([]),
     });
     const session = await reader.openAgentPage(BOOK, 10);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await Promise.race([session.tail[Symbol.asyncIterator]().next(), hangGuard()]);
     session.close();
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message:
@@ -1262,7 +1262,7 @@ describe("the tail against a malformed or ending watch", () => {
       watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
     });
     const session = await reader.openAgentPage(BOOK, 10);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(
@@ -1270,7 +1270,7 @@ describe("the tail against a malformed or ending watch", () => {
     );
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message:
@@ -1695,17 +1695,6 @@ function refusedOnce(
   };
 }
 
-/** Every structured record the logger wrote since `before`. */
-function recordsSince(before: number): Record<string, unknown>[] {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
-  return calls.slice(before).map(([, bytes, offset, length]) => {
-    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  });
-}
-
 describe("the re-open's catch-up page", () => {
   it("records that the gap exceeded the catch-up budget when the page says more remain", async () => {
     // A bounded re-open that still reports older lines means entries between
@@ -1723,14 +1712,14 @@ describe("the re-open's catch-up page", () => {
       watchAgentSession: refusedOnce(() => standingWatch([])),
     });
     const session = await reader.openAgentPage(BOOK, 10);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await session.tail[Symbol.asyncIterator]().next();
     session.close();
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
@@ -2455,11 +2444,11 @@ describe("an open that meets a restarting store", () => {
       },
       watchAgentSession: () => standingWatch([]),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const session = await reader.openAgentPage(BOOK, 10);
-    const records = recordsSince(before);
+    const records = logRecordsSince(before);
     session.close();
 
     // Assert.
@@ -2507,13 +2496,13 @@ describe("an open that meets a restarting store", () => {
   it("records giving up once the store stayed unreachable for the whole schedule", async () => {
     // Arrange.
     const reader = readerOver({ openAgentSession: async () => Promise.reject(unreachable()) });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await expect(reader.openAgentPage(BOOK, 10)).rejects.toBeInstanceOf(PersistenceError);
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message:

@@ -8,6 +8,7 @@
  */
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { logRecordsSince } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
@@ -18,24 +19,6 @@ import { goldenContext, scenarioNames as captureNames, sdkMessages } from "./gol
 import { driveScenario, expectDroveCleanly } from "../fake/harness.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
-
-/** Every JSONL record the shim persisted to fd 3 since the last clear. */
-function persistedRecords(): Array<{
-  operation: string;
-  message: string;
-  verbosity: string;
-  context: Record<string, unknown>;
-}> {
-  return (mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>).map(
-    ([, bytes, offset, length]) =>
-      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-        operation: string;
-        message: string;
-        verbosity: string;
-        context: Record<string, unknown>;
-      },
-  );
-}
 
 /** An assistant message the SDK would emit for one API response. */
 function assistant(
@@ -1683,7 +1666,7 @@ describe("remembering the vendor's API failure class", () => {
     );
 
     // Assert.
-    const record = persistedRecords().find(
+    const record = logRecordsSince(0).find(
       (candidate) => candidate.operation === "shim.vendor.auth_rejected",
     );
     expect(record?.context.vendor_error).toBe("authentication_failed");
@@ -1702,8 +1685,8 @@ describe("remembering the vendor's API failure class", () => {
     );
 
     // Assert.
-    const records = persistedRecords();
-    expect(records.some((candidate) => candidate.operation.startsWith("shim.vendor."))).toBe(false);
+    const records = logRecordsSince(0);
+    expect(records.some((candidate) => (candidate.operation as string).startsWith("shim.vendor."))).toBe(false);
     const held = records.find(
       (candidate) =>
         candidate.message === "the vendor stated an API failure class; held for the turn's terminal",
@@ -1746,7 +1729,7 @@ describe("where the fold ends a stream", () => {
     const fold = createFold();
     mockedWriteSync.mockClear();
     for (const message of messages) fold.onSdkMessage(message, foldContext());
-    return persistedRecords()
+    return logRecordsSince(0)
       .filter((record) => record.message === UNSETTLED)
       .map((record) => record.context.detected_at);
   }
@@ -2011,7 +1994,7 @@ describe("a compaction's summary record", () => {
     );
 
     // Assert.
-    const error = persistedRecords().find(
+    const error = logRecordsSince(0).find(
       (record) => record.message === "the compaction's summary record carried no text; recording the cut without a summary",
     );
     expect({
@@ -2106,7 +2089,7 @@ describe("a compaction cut still held when its turn ends", () => {
     toolOnlyTurnAfterBoundary();
 
     // Assert.
-    const error = persistedRecords().find(
+    const error = logRecordsSince(0).find(
       (record) => record.message === "a compaction's summary never arrived; recording the held cut without a summary",
     );
     expect({
@@ -2157,7 +2140,7 @@ describe("a second compaction boundary before the first one's summary", () => {
     const output = fold.onSdkMessage(compactBoundary("uuid-second"), foldContext({ nowMs: 1_500 }));
 
     // Assert.
-    const error = persistedRecords().find(
+    const error = logRecordsSince(0).find(
       (record) => record.message === "a compaction's summary never arrived; recording the held cut without a summary",
     );
     expect({

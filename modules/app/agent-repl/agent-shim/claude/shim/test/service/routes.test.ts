@@ -8,26 +8,17 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
-import { writeSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import type { Engine } from "../../src/engine/engine.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { shimRoutes } from "../../src/service/routes.js";
 import * as requests from "./requests.js";
 
-const mockedWriteSync = vi.mocked(writeSync);
-
-function logRecordsSince(before: number): Array<Record<string, unknown>> {
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
-}
-
 function requestBoundariesSince(before: number, rpc: string): Array<{ level: unknown; boundary: unknown }> {
   return logRecordsSince(before)
-    .filter((record) => record.context !== undefined && (record.context as Record<string, unknown>).rpc === rpc)
-    .map((record) => ({ level: record.level, boundary: (record.context as Record<string, unknown>).boundary }))
+    .filter((record) => record.context !== undefined && record.context.rpc === rpc)
+    .map((record) => ({ level: record.level, boundary: record.context.boundary }))
     .filter((record) => record.boundary !== undefined);
 }
 
@@ -187,7 +178,7 @@ describe("shimRoutes request-boundary records", () => {
   it("records a successful unary request's entry and completion at debug", async () => {
     // Arrange.
     const { engine } = recordingEngine();
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await clientFor(engine).startSession(requests.startSessionRequest());
@@ -202,7 +193,7 @@ describe("shimRoutes request-boundary records", () => {
   it("records a successful streaming request's entry and completion at debug", async () => {
     // Arrange.
     const { engine } = recordingEngine();
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await drainToCompletion(clientFor(engine).watchSession(requests.watchSessionRequest()));

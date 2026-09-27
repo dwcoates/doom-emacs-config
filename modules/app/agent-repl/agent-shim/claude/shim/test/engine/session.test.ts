@@ -7,11 +7,12 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
@@ -2085,7 +2086,7 @@ describe("the keep-alive turn serves nothing", () => {
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
     await keepaliveTurn(h, []);
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act
     await beat(h);
@@ -2100,7 +2101,7 @@ describe("the keep-alive turn serves nothing", () => {
     const h = harness();
     await started(h);
     await beat(h);
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act
     h.queries[0]?.query.end();
@@ -2381,7 +2382,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     await keepaliveTurn(h, []);
     h.scheduler.fire(0);
     await drainTurns();
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act
     await h.engine.onSdkMessage(answering(h, errorResultMessage({ errors: ["overloaded"] })));
@@ -4852,12 +4853,8 @@ describe("the vendor request the turn runs under", () => {
 
   /** The request_id the logger stamps right now, undefined when it stamps none. */
   function stampedRequestId(): string | undefined {
-    const before = vi.mocked(writeSync).mock.calls.length;
-    bindLog({ operation: "shim.test.request-id" }).debug({}, "probe");
-    const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
-    const [, bytes, offset, length] = calls[before];
-    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
-    return record.request_id;
+    const [record] = logRecordsDuring(() => bindLog({ operation: "shim.test.request-id" }).debug({}, "probe"));
+    return record.request_id as string | undefined;
   }
 
   beforeEach(() => {
@@ -6161,7 +6158,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // THE NEXT OCCURRENCE EXPLAINS ITSELF. The grounded failure's only evidence
     // was a store frame decoded by hand, because nothing logged the kinds.
     const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
-    const before = logCursor();
+    const before = logSinkMark();
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
     await pending;
@@ -6176,7 +6173,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // account root and which trust key govern this directory is half of that,
     // and it was on neither side's record.
     const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.startSession(freshRequest());
 
@@ -7515,35 +7512,14 @@ describe("reconciliation against work the shim has already SEEN start", () => {
 // The arms a first pass left open.
 // ---------------------------------------------------------------------------
 
-/** How many durable log records have been written so far. */
-function logCursor(): number {
-  return vi.mocked(writeSync).mock.calls.length;
-}
-
 /** The context of the first record since `from` whose message carries `needle`. */
 function logContextFor(from: number, needle: string): Record<string, unknown> | undefined {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
-  for (const [, bytes, offset, length] of calls.slice(from)) {
-    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-      message: string;
-      context: Record<string, unknown>;
-    };
-    if (record.message.includes(needle)) return record.context;
-  }
-  return undefined;
+  return logRecordsSince(from).find((record) => record.message.includes(needle))?.context;
 }
 
 /** The LEVEL of the first record since `from` whose message carries `needle`. */
 function logLevelFor(from: number, needle: string): string | undefined {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
-  for (const [, bytes, offset, length] of calls.slice(from)) {
-    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-      message: string;
-      level: string;
-    };
-    if (record.message.includes(needle)) return record.level;
-  }
-  return undefined;
+  return logRecordsSince(from).find((record) => record.message.includes(needle))?.level;
 }
 
 /** Every fault detail the session's diagnostics carried while `act` ran. */
@@ -7788,7 +7764,7 @@ describe("a vendor failure that is not an Error", () => {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
     h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
-    const before = logCursor();
+    const before = logSinkMark();
 
     await started(h);
 
@@ -7806,7 +7782,7 @@ describe("a vendor failure that is not an Error", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
-    const before = logCursor();
+    const before = logSinkMark();
 
     await started(h);
 
@@ -7863,7 +7839,7 @@ describe("a vendor failure that is not an Error", () => {
       },
     });
     await started(h);
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
@@ -7889,7 +7865,7 @@ describe("a vendor failure that is not an Error", () => {
       uuid: "00000000-0000-4000-8000-0000000000f9",
       session_id: "s",
     } as never);
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
 
@@ -7906,7 +7882,7 @@ describe("a vendor failure that is not an Error", () => {
       .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
@@ -8043,7 +8019,7 @@ describe("whose book a gated ask lands on", () => {
     await started(h);
     const sessionId =
       h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
-    const before = logCursor();
+    const before = logSinkMark();
 
     await askUnder(h, mainAgentId(sessionId).value);
 
@@ -8136,7 +8112,7 @@ describe("what the fold is told about a live task", () => {
         pageSize: 5,
       }),
     );
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.onSdkMessage({
       type: "system",
@@ -8252,7 +8228,7 @@ describe("the vendor answers the engine maps around an absent field", () => {
 
   it("names no previous id when a reset arrives before the session has one", async () => {
     const h = harness();
-    const before = logCursor();
+    const before = logSinkMark();
 
     // The fold refuses to key rows before an identity exists, so the message
     // does not survive the call -- but the reset is noted before that point.
@@ -8568,7 +8544,7 @@ describe("the record a dead vendor leaves", () => {
   }
 
   it("names the cause the stream reported", async () => {
-    const before = logCursor();
+    const before = logSinkMark();
 
     await died({ said: "", code: 1, signal: null });
 
@@ -8580,7 +8556,7 @@ describe("the record a dead vendor leaves", () => {
   it("carries the child's exit code", async () => {
     // THE FACT THAT WAS MISSING. A vendor died on 2026-09-14 and the immediate
     // cause could not be recovered from any log afterwards.
-    const before = logCursor();
+    const before = logSinkMark();
 
     await died({ said: "", code: 137, signal: null });
 
@@ -8588,7 +8564,7 @@ describe("the record a dead vendor leaves", () => {
   });
 
   it("carries the signal that killed the child", async () => {
-    const before = logCursor();
+    const before = logSinkMark();
 
     await died({ said: "", code: null, signal: "SIGKILL" });
 
@@ -8596,7 +8572,7 @@ describe("the record a dead vendor leaves", () => {
   });
 
   it("carries the last words the child wrote to stderr", async () => {
-    const before = logCursor();
+    const before = logSinkMark();
 
     await died({ said: "out of memory\n", code: 137, signal: null });
 
@@ -8609,7 +8585,7 @@ describe("the record a dead vendor leaves", () => {
     // opposite diagnoses.
     const h = harness();
     await started(h);
-    const before = logCursor();
+    const before = logSinkMark();
     h.queries[0]?.query.fail(new Error("the vendor stream broke"));
     for (let attempt = 0; attempt < 50; attempt++) {
       await new Promise((resolve) => setImmediate(resolve));
@@ -8619,7 +8595,7 @@ describe("the record a dead vendor leaves", () => {
   });
 
   it("records the death at ERROR", async () => {
-    const before = logCursor();
+    const before = logSinkMark();
 
     await died({ said: "", code: 1, signal: null });
 
@@ -8791,7 +8767,7 @@ describe("reconciliation's remaining descriptions", () => {
       ],
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
-    const before = logCursor();
+    const before = logSinkMark();
 
     await started(h);
 
@@ -8836,7 +8812,7 @@ describe("a WatchBash stream that ends on its own", () => {
     )) {
       // drained to completion, which is what disposes the watcher
     }
-    const before = logCursor();
+    const before = logSinkMark();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
 
@@ -9298,7 +9274,7 @@ describe("re-announcing live work the record cannot describe", () => {
   it("says the work is not held by this vendor process when the vendor does not hold it", async () => {
     // Arrange.
     const h = await sessionWithForeignHandle(false);
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9314,7 +9290,7 @@ describe("re-announcing live work the record cannot describe", () => {
   it("states unheld work with no start in the main book below warning level", async () => {
     // Arrange.
     const h = await sessionWithForeignHandle(false);
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9326,7 +9302,7 @@ describe("re-announcing live work the record cannot describe", () => {
   it("reports a defect when the vendor DOES still hold the undescribable work", async () => {
     // Arrange.
     const h = await sessionWithForeignHandle(true);
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9350,7 +9326,7 @@ describe("re-announcing live work the record cannot describe", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_unknown" })],
     });
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9376,7 +9352,7 @@ describe("re-announcing live work the record cannot describe", () => {
     await vi.waitFor(() => {
       expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
     });
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9399,7 +9375,7 @@ describe("re-announcing live work the record cannot describe", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_bare" })],
     });
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannounce(h);
@@ -9504,7 +9480,7 @@ describe("re-announcing when the store holds no rows for this agent yet", () => 
   it("states the empty membership below warning level", async () => {
     // Arrange.
     const h = await sessionWithNoBookYet(unknownAgent());
-    const before = logCursor();
+    const before = logSinkMark();
 
     // Act.
     await reannouncedLiveWork(h);
@@ -9551,7 +9527,7 @@ describe("reconciling when the store holds no rows for this agent yet", () => {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
     h.persistence.openError = error;
-    const before = logCursor();
+    const before = logSinkMark();
     await started(h);
     return before;
   }
@@ -9827,7 +9803,7 @@ describe("refreshing the context reading after a main-agent API response", () =>
   it("records a refresh that failed before it could push, at ERROR with its cause", async () => {
     // Arrange.
     const h = await unreportableProbe();
-    const from = logCursor();
+    const from = logSinkMark();
 
     // Act.
     await h.engine.onSdkMessage(apiResponse());

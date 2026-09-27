@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { logRecordsSince } from "../log-records.js";
 import {
   realQueryOptions,
   vendorSpawner,
@@ -324,13 +325,7 @@ describe("createRealQuery", () => {
     );
 
     // Assert.
-    const records = (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>)
-      .map(([, bytes, offset, length]) =>
-        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-          message: string;
-          context: Record<string, unknown>;
-        },
-      )
+    const records = logRecordsSince(0)
       .filter((record) => record.message === "constructing the real vendor query");
     expect(records.map((record) => record.context.vendor_session_id)).toEqual(["vendor-resumed-7"]);
   });
