@@ -433,12 +433,20 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 // continues, for the naming call; empty for a create that forks nothing.
 //
 // THE SOURCE IS THE DAEMON'S OWN RECORD OF THE PARENT CONVERSATION: the
-// prompt rows ConversationPrompts answers — the parent's own turns and every
-// row IT inherited from a fork of its own — which is exactly what the fork
-// ports to the child. It needs no live parent shim, so a hibernated parent is
-// named from as readily as a running one. It is composed by the title
-// synthesizer's one digest composition (the most recent requests, each
+// prompt rows ConversationPrompts would answer — the parent's own turns and
+// every row IT inherited from a fork of its own — which is exactly what the
+// fork ports to the child. It needs no live parent shim, so a hibernated
+// parent is named from as readily as a running one. It is composed by the
+// title synthesizer's one digest composition (the most recent requests, each
 // bounded), so "what this conversation is about" has one spelling.
+//
+// It reads RecentConversationPrompts, not ConversationPrompts: the digest
+// never quotes more than titlesynth.MaxPrompts requests, so naming a fork
+// reads only that bounded tail rather than the parent's whole history — a
+// parent forked many generations deep, or with a long conversation of its
+// own, costs this call the same either way. THE FORK'S OWN PORTED COPY is
+// unaffected: it is written from ConversationPrompts, in forkconversation.go,
+// which this function never touches.
 //
 // A parent with no conversation is REFUSED HERE, before the naming call is
 // paid for, on the same arm the transcript port refuses it with.
@@ -450,7 +458,7 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 	if _, err := v.forkableParentSession(ctx, log, parent); err != nil {
 		return "", err
 	}
-	rows, err := v.deps.DB.ConversationPrompts(ctx, parent)
+	rows, err := v.deps.DB.RecentConversationPrompts(ctx, parent, titlesynth.MaxPrompts)
 	if err != nil {
 		log.Error(opCreate, "could not read the parent conversation to name the fork", dlog.Context{
 			"parent": string(parent), "cause": err.Error(),

@@ -2,11 +2,13 @@ package titlesynth
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -346,6 +348,53 @@ func TestComposeDigestIncludesTheCompactionSummary(t *testing.T) {
 	// Assert.
 	if !containsAll(got, "earlier we discussed backoff", "now add jitter") {
 		t.Fatalf("ComposeDigest = %q, want the summary and the prompt", got)
+	}
+}
+
+func TestComposeDigestEnforcesTheTotalCap(t *testing.T) {
+	// Arrange — MaxPrompts prompts, each near MaxPromptRunes, sum well past
+	// MaxDigestTotalRunes on their own.
+	var prompts []string
+	for i := 0; i < MaxPrompts; i++ {
+		prompts = append(prompts, strings.Repeat("x", MaxPromptRunes))
+	}
+
+	// Act.
+	got := ComposeDigest(strings.Repeat("y", MaxPromptRunes*4), prompts)
+
+	// Assert.
+	if n := utf8.RuneCountInString(got); n > MaxDigestTotalRunes {
+		t.Fatalf("ComposeDigest rendered %d runes, want at most MaxDigestTotalRunes (%d)", n, MaxDigestTotalRunes)
+	}
+}
+
+func TestComposeDigestTrimmingToTheTotalCapKeepsTheNewestPrompts(t *testing.T) {
+	// Arrange — enough padded, uniquely-marked prompts that the rendered digest
+	// must drop some of them (and the summary) to fit under the total cap.
+	const padded = 400
+	var prompts []string
+	for i := 0; i < MaxPrompts; i++ {
+		prompts = append(prompts, fmt.Sprintf("marker-%02d %s", i, strings.Repeat("x", padded)))
+	}
+
+	// Act.
+	got := ComposeDigest(strings.Repeat("summary text ", 200), prompts)
+
+	// Assert — the newest prompt survives, the summary and the oldest of the
+	// batch are the material dropped to make room for it.
+	newest := fmt.Sprintf("marker-%02d", MaxPrompts-1)
+	oldest := fmt.Sprintf("marker-%02d", 0)
+	if !strings.Contains(got, newest) {
+		t.Fatalf("ComposeDigest = %q, want the newest prompt (%s) to survive trimming", got, newest)
+	}
+	if strings.Contains(got, oldest) {
+		t.Fatalf("ComposeDigest = %q, want the oldest prompt (%s) trimmed first", got, oldest)
+	}
+	if strings.Contains(got, "summary text") {
+		t.Fatalf("ComposeDigest = %q, want the summary dropped before any surviving prompt is", got)
+	}
+	if n := utf8.RuneCountInString(got); n > MaxDigestTotalRunes {
+		t.Fatalf("ComposeDigest rendered %d runes, want at most MaxDigestTotalRunes (%d)", n, MaxDigestTotalRunes)
 	}
 }
 

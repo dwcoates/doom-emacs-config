@@ -162,16 +162,117 @@ func (s *store) ConversationPrompts(ctx context.Context, id WorkspaceID) ([]Port
 		out = append(out, row)
 	}
 	for _, t := range own {
-		out = append(out, PortedPrompt{
-			Workspace: t.Workspace,
-			Turn:      t.ID,
-			Ordinal:   int64(len(out)),
-			Text:      t.Text,
-			Origin:    t.Origin,
-			StartedAt: t.StartedAt,
-		})
+		out = append(out, turnAsPortedPrompt(t, int64(len(out))))
 	}
 	return out, nil
+}
+
+// turnAsPortedPrompt is the one conversion from a workspace's own turn to the
+// ConversationPrompts shape, shared by ConversationPrompts and
+// RecentConversationPrompts so the two readers cannot drift into two notions
+// of what a turn looks like ported.
+func turnAsPortedPrompt(t Turn, ordinal int64) PortedPrompt {
+	return PortedPrompt{
+		Workspace: t.Workspace,
+		Turn:      t.ID,
+		Ordinal:   ordinal,
+		Text:      t.Text,
+		Origin:    t.Origin,
+		StartedAt: t.StartedAt,
+	}
+}
+
+// RecentConversationPrompts is a BOUNDED ConversationPrompts, for the one
+// reader that only ever needs the newest rows: the fork-naming digest, which
+// never quotes more than `limit` requests (titlesynth.MaxPrompts). It answers
+// the same rows ConversationPrompts would, truncated to the most recent
+// `limit`, oldest first, with ordinals renumbered from zero — but it reads
+// only that tail of each table, with a SQL LIMIT on each query, rather than
+// ConversationPrompts's whole-history load. A conversation with thousands of
+// turns therefore costs one bounded query per table to name a fork from,
+// not the whole history.
+//
+// It changes nothing about what a fork INHERITS: PutPortedPrompts writes, and
+// ConversationPrompts is what forkconversation.go reads to build, the child's
+// FULL ported copy. This helper has no other caller.
+func (s *store) RecentConversationPrompts(ctx context.Context, id WorkspaceID, limit int) ([]PortedPrompt, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	fields := dlog.Context{"workspace": string(id), "limit": limit}
+
+	var ownTail []Turn
+	err := s.read(ctx, "daemon.wsm.recent_conversation_prompts_own", fields, func(ctx context.Context) error {
+		rows, err := s.db().QueryContext(ctx,
+			`SELECT `+turnColumns+` FROM turns WHERE workspace_id = ? ORDER BY started_at DESC, id DESC LIMIT ?`, id, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			t, err := scanTurn(rows)
+			if err != nil {
+				return err
+			}
+			ownTail = append(ownTail, t)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	reverseTurns(ownTail)
+
+	var inheritedTail []PortedPrompt
+	if remaining := limit - len(ownTail); remaining > 0 {
+		err = s.read(ctx, "daemon.wsm.recent_conversation_prompts_inherited", fields, func(ctx context.Context) error {
+			rows, err := s.db().QueryContext(ctx,
+				`SELECT `+portedPromptColumns+` FROM ported_prompts WHERE workspace_id = ? ORDER BY ordinal DESC, turn_id DESC LIMIT ?`, id, remaining)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				p, err := scanPortedPrompt(rows)
+				if err != nil {
+					return err
+				}
+				inheritedTail = append(inheritedTail, p)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			return nil, err
+		}
+		reversePortedPrompts(inheritedTail)
+	}
+
+	out := make([]PortedPrompt, 0, len(inheritedTail)+len(ownTail))
+	for _, row := range inheritedTail {
+		row.Ordinal = int64(len(out))
+		out = append(out, row)
+	}
+	for _, t := range ownTail {
+		out = append(out, turnAsPortedPrompt(t, int64(len(out))))
+	}
+	return out, nil
+}
+
+// reverseTurns reverses a slice of turns in place, turning a DESC-ordered
+// query result back into the oldest-first order every ConversationPrompts
+// reader expects.
+func reverseTurns(rows []Turn) {
+	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+		rows[i], rows[j] = rows[j], rows[i]
+	}
+}
+
+// reversePortedPrompts reverses a slice of ported prompts in place, the same
+// way reverseTurns does for turns.
+func reversePortedPrompts(rows []PortedPrompt) {
+	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+		rows[i], rows[j] = rows[j], rows[i]
+	}
 }
 
 // RemintPortedPrompts re-mints a conversation for one child: every turn id is

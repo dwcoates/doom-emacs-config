@@ -104,4 +104,13 @@ const (
 	// MaxPromptRunes caps one prompt's length in the model prompt, so a single
 	// pasted wall of text cannot dominate the call.
 	MaxPromptRunes = 1000
+	// MaxDigestTotalRunes caps ComposeDigest's WHOLE rendered output, on top of
+	// the per-item caps above. The per-item caps alone still let the pieces sum
+	// past 44,000 runes (a 4,000-rune summary plus 40 prompts at 1,000 runes
+	// each), which is more than a title call — a handful of tokens from a small
+	// model — needs to spend. When the rendered digest is over this cap, the
+	// OLDEST material is dropped first (the summary, then the oldest surviving
+	// prompt, one at a time) so the newest prompts are always what survives:
+	// recency is what a synthesized or fork-naming title should reflect.
+	MaxDigestTotalRunes = 8000
 )
