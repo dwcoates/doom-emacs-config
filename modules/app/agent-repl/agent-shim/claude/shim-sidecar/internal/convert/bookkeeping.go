@@ -17,7 +17,10 @@ package convert
 //
 // SO EACH SHAPE IS SENT TO THE ARM THE STREAM PLANE USES FOR THE SAME FACT:
 //
-//   - A TASK NOTIFICATION is documented residue, never a prompt.
+//   - A TASK NOTIFICATION settles the backgrounded spawn it names, on the
+//     spawn's own `activity:<tool_use_id>` key, exactly as the shim's
+//     `task_notification` conversion does (tasknotification.go). What cannot be
+//     settled here is documented residue, never a prompt.
 //   - A SLASH COMMAND the CLI answers itself (its expanded envelope, or the bare
 //     `/compact` line some CLI versions also write) is vendor-specific residue:
 //     the daemon consumes a session command before it reaches any stream, and
@@ -99,9 +102,7 @@ func (c *Converter) notTypedByPerson(record, message map[string]any, at Attribut
 	// it; only a record from a CLI that writes no origin is recognized by its
 	// shape, so a person who typed the markup is never overruled.
 	if env.originKind == originTaskNotification || (env.originKind == "" && sole && isTaskNotification(text)) {
-		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("a background task's notification withheld as vendor_specific, never a prompt")
-		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserTaskNotification, record)}, true
+		return c.taskNotification(record, firstText(message), at, env, agent), true
 	}
 	if env.originKind != "" && env.originKind != originHuman {
 		c.log.With(at.ctxFor("not-typed")).

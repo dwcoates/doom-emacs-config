@@ -124,6 +124,9 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 // its launch was given.
 type spawnRecord struct {
 	prompt *conversationv1.AgentSubagentPrompt
+	// startedAtMs is the spawning call's own instant, which a settle restates
+	// beside its own so the settled frame alone states the run's duration.
+	startedAtMs int64
 }
 
 // spawnPrompt is the commission a detached spawn's settle restates: the one its
