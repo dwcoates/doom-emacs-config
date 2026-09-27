@@ -423,9 +423,11 @@ type Watcher interface {
 }
 
 // ParkedRouter delivers one parked submission to the resolution agent as
-// guidance, addressed at the parked tab. It answers with the turn the guidance
-// runs as. It matches merge.ParkedRouter so the wiring is a direct assignment.
-type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error)
+// guidance, addressed at the parked tab, as the SUBMISSION'S OWN TURN: the
+// guidance runs under turn, never one minted downstream, so a retry of the
+// submission re-driven under the same turn id is recognized by the shim as the
+// start it already took.
+type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 
 // RefusalNoter records one drain-refused submission. drain.Controller
 // satisfies it.

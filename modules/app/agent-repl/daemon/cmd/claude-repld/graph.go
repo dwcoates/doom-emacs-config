@@ -503,15 +503,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// orchestrator as guidance. The queue never imports merge, so the
 		// route is a function; the orchestrator does not exist yet, so the
 		// function reads it out of the forwarder when it is called.
-		ParkedRoute: func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
+		ParkedRoute: func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 			orchestrator, ok := mergeRef.orchestrator()
 			if !ok {
-				return "", fmt.Errorf("claude-repld: a parked submission arrived before the merge orchestrator existed")
+				return fmt.Errorf("claude-repld: a parked submission arrived before the merge orchestrator existed")
 			}
-			// The orchestrator answers only whether the guidance was taken;
-			// the turn it runs as is the orchestrator's own and does not come
-			// back through this seam.
-			return "", orchestrator.RouteParked(ctx, ws, said)
+			return orchestrator.RouteParked(ctx, ws, turn, said)
 		},
 		DrainRefusals: refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only
@@ -1052,20 +1049,20 @@ func orderlyExit(stop func()) func(context.Context) error {
 // tab, because the two parked tabs are two different repairs and a prompt's
 // origin is what makes it traceable to the situation that caused it.
 func guidanceRoute(fleet *workspace.Fleet, mergeRef *mergeForwarder) merge.ParkedRouter {
-	return func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
+	return func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 		orchestrator, ok := mergeRef.orchestrator()
 		if !ok {
-			return "", fmt.Errorf("claude-repld: guidance was routed before the merge orchestrator existed")
+			return fmt.Errorf("claude-repld: guidance was routed before the merge orchestrator existed")
 		}
 		facts, known := orchestrator.Facts(ws)
 		if !known {
-			return "", fmt.Errorf("claude-repld: guidance was routed for %q, which has no merge", ws)
+			return fmt.Errorf("claude-repld: guidance was routed for %q, which has no merge", ws)
 		}
 		origin, err := guidanceOrigin(facts.ActiveTab)
 		if err != nil {
-			return "", err
+			return err
 		}
-		return fleet.RouteGuidance(ctx, ws, said, origin)
+		return fleet.RouteGuidance(ctx, ws, turn, said, origin)
 	}
 }
 

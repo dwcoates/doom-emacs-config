@@ -84,8 +84,10 @@ type Orchestrator interface {
 	// orchestrator: the queue recognizes the parked lease policy, never merge
 	// as a concept, and hands the submission here rather than starting a turn
 	// of the session's own. THE LEASE STATE IS THE RECOGNITION — no classifier
-	// and no content inspection happens on this path.
-	RouteParked(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) error
+	// and no content inspection happens on this path. The guidance runs under
+	// turn, the submission's own, so the shim recognizes a re-driven retry of
+	// it as the start it already took.
+	RouteParked(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
@@ -304,10 +306,9 @@ type AdmissionPause func(ctx context.Context, ws ids.WorkspaceID)
 type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (Displaced, bool, error)
 
 // ParkedRouter delivers one parked submission to the resolution agent as
-// guidance, addressed at the parked tab. It answers with the turn the guidance
-// runs as, so the orchestrator resumes on that turn's real end rather than a
-// timer.
-type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error)
+// guidance, addressed at the parked tab, under turn: the submission's own turn,
+// which the orchestrator then resumes on the real end of rather than a timer.
+type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 
 // Trigger is the slice of the daemon's deploy merge uses: the self-reload,
 // told what landed. It is a narrow interface so merge imports neither the

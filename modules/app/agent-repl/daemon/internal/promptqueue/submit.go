@@ -141,8 +141,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 			log.Error(opSubmit, "a parked lease stands but no parked route is wired", fields)
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: no parked route is wired", sub.WS)
 		}
-		turn, err := q.deps.ParkedRoute(ctx, sub.WS, sub.Said)
-		if err != nil {
+		if err := q.deps.ParkedRoute(ctx, sub.WS, sub.Turn, sub.Said); err != nil {
 			log.Error(opSubmit, "the parked route refused the submission",
 				merged(fields, dlog.Context{"cause": err.Error()}))
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: %w", sub.WS, err)
@@ -152,8 +151,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		// address, which the parked lease holder has pointed at its own tab, so
 		// the guidance lands there and never on the root feed.
 		q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
-		log.Info(opSubmit, "routed the submission to the resolution agent as guidance",
-			merged(fields, dlog.Context{"guidance_turn": string(turn)}))
+		log.Info(opSubmit, "routed the submission to the resolution agent as guidance, under the submission's own turn", fields)
 		return Disposition{Delivered: true}, true, nil
 
 	case wsm.PolicyHold:

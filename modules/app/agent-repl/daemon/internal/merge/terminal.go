@@ -638,13 +638,13 @@ func (o *orchestrator) clearOffer(ws ids.WorkspaceID) {
 }
 
 // RouteParked delivers a submission that arrived while the lease stands parked.
-func (o *orchestrator) RouteParked(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) error {
+func (o *orchestrator) RouteParked(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 	r, ok := o.runFor(ws)
 	if !ok {
 		return errNoRun
 	}
 	select {
-	case r.guidance <- said:
+	case r.guidance <- guidance{turn: turn, said: said}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
