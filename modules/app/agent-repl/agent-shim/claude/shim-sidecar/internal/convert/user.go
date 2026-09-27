@@ -73,13 +73,23 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		return append(out, c.peerMessage(record, message, at, env, agent))
 	case env.isMeta:
 		// A harness-injected user record: a system reminder, an attachment
-		// carrier. Not something a person said.
+		// carrier. Not something a person said. The local-command caveat among
+		// them is remembered, because it names the record after it a command
+		// the CLI answers itself (bookkeeping.go).
+		c.noteLocalCommandCaveat(record, env)
 		c.log.With(at.ctxFor("withhold")).
 			LogVerbose("harness-injected user record withheld as vendor_specific")
 		return append(out, VendorSpecificEntry(at, "user/meta", record))
 	default:
+		// NOT EVERY PROMPT-SHAPED RECORD IS SOMETHING A PERSON TYPED: the
+		// vendor's slash-command bookkeeping, a local command's output, the
+		// interrupt marker and a background task's notification all land here,
+		// and each goes to the arm the stream plane uses for the same fact.
+		if entries, handled := c.notTypedByPerson(record, message, at, env, agent); handled {
+			return append(out, entries...)
+		}
 		// A GENUINE HUMAN PROMPT — not a summary, clear, skill, tool-result
-		// carrier, or meta record.
+		// carrier, meta record, or bookkeeping.
 		return append(out, c.humanPrompt(record, message, at, env, agent))
 	}
 }
