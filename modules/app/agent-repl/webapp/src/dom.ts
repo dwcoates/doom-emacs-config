@@ -32,6 +32,18 @@ export function ancestorMatching<T extends { parentElement: T | null }>(
 }
 
 /**
+ * THE WIDTH A BOX'S VERTICAL SCROLLBAR TAKES FROM ITS CONTENT, in px: its
+ * border-box width less its padding-box width (`clientWidth`) less its two side
+ * borders. The one formula every scrollbar measurement shares — the bubble
+ * body's column budget (bubble/body.ts) and the scrollbar hit test
+ * (expand.ts) — so the two cannot disagree about what a bar is. An overlay bar
+ * takes no layout width and reads 0. Validating the answer is the caller's.
+ */
+export function scrollbarWidthPx(box: { offsetWidth: number; clientWidth: number }, sideBordersPx: number): number {
+  return box.offsetWidth - box.clientWidth - sideBordersPx;
+}
+
+/**
  * Make PARENT's children exactly DESIRED, in order, MOVING ONLY WHAT IS OUT OF
  * PLACE. Answers how many elements it had to insert or move.
  *
