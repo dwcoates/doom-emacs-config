@@ -62,7 +62,14 @@ func concludeFirstTurn(t *testing.T, f *fixture) {
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.sessionwatcher.turn_ended", 1)
+	// THE DURABLE CLOSE, not the routing: the session watcher's `turn_ended`
+	// is written before the prompt queue stamps the row, and a SIGKILL landing
+	// between the two left the turn open for the next boot to close as an
+	// orphan at WARN (`closed the in-flight turns of a workspace with no
+	// session`).
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first turn's durable close", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" && r.Message == "stamped the turn's close"
+	})
 }
 
 // footerSettled is a strip that is serving, idle and carries no fault.

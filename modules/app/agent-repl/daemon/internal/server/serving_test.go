@@ -393,3 +393,135 @@ func TestAwaitWritesQuietSettlesOnceThePushHasLeft(t *testing.T) {
 		t.Fatal("AwaitQuiescent = false after the connection wrote and went quiet")
 	}
 }
+
+// standingStreamServing serves one standing stream whose handler flushes its
+// headers and then holds until ended is closed, through a listener whose
+// writes park once the handler has returned, until release is closed.
+func standingStreamServing(t *testing.T, ended <-chan struct{}, held *atomic.Bool, release chan struct{}) (*Serving, string) {
+	t.Helper()
+	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-ended
+		held.Store(true)
+	}), nil)
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	httpServer := &http.Server{Handler: serving}
+	go func() {
+		_ = httpServer.Serve(serving.Listener(&heldWriteListener{Listener: tcp, held: held, release: release}))
+	}()
+	t.Cleanup(func() { _ = httpServer.Close() })
+	return serving, "http://" + tcp.Addr().String() + "/agentrepl.v1.AgentRepl/WatchDaemon"
+}
+
+// openStream opens the standing stream and answers once its headers arrived,
+// so the stream is counted before the test acts.
+func openStream(t *testing.T, url string) {
+	t.Helper()
+	opened := make(chan struct{})
+	go func() {
+		resp, err := h2cClient().Get(url)
+		close(opened)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	}()
+	<-opened
+}
+
+// TestAwaitStreamsEndedWaitsForTheEndFrameToLeave pins that the exit's stream
+// wait is a statement about the SOCKET: a standing stream the exit ended has
+// returned from its handler before its end frame is written, and the wait
+// holds until the socket has taken it.
+func TestAwaitStreamsEndedWaitsForTheEndFrameToLeave(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	serving, url := standingStreamServing(t, ended, &held, release)
+	openStream(t, url)
+
+	// Act
+	serving.EndStreams(func() { close(ended) })
+	gone := make(chan int, 1)
+	go func() { gone <- serving.AwaitStreamsEnded(time.Minute) }()
+
+	// Assert
+	select {
+	case left := <-gone:
+		t.Fatalf("AwaitStreamsEnded returned %d with the end frame not yet written to the socket", left)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if left := <-gone; left != 0 {
+		t.Fatalf("AwaitStreamsEnded = %d once the end frame was written, want 0", left)
+	}
+}
+
+// TestAwaitStreamsEndedReportsTheStreamsStillOpen pins the loud half: a stream
+// that did not end within the bound is answered, because its client will read
+// a cut connection rather than an end frame.
+func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(ended); close(release) })
+	serving, url := standingStreamServing(t, ended, &held, release)
+	openStream(t, url)
+
+	// Act
+	serving.EndStreams(func() {})
+	left := serving.AwaitStreamsEnded(20 * time.Millisecond)
+
+	// Assert
+	if left != 1 {
+		t.Fatalf("AwaitStreamsEnded = %d, want the one stream that never ended", left)
+	}
+}
+
+// TestAwaitStreamsEndedWithNoStreamSettlesAtOnce pins that a daemon nothing
+// watches has no end frame to wait for.
+func TestAwaitStreamsEndedWithNoStreamSettlesAtOnce(t *testing.T) {
+	// Arrange
+	serving := H2C(http.NotFoundHandler(), nil)
+
+	// Act
+	serving.EndStreams(func() {})
+	left := serving.AwaitStreamsEnded(time.Minute)
+
+	// Assert
+	if left != 0 {
+		t.Fatalf("AwaitStreamsEnded = %d with no stream open, want 0", left)
+	}
+}
+
+// TestAStreamItsClientEndedIsNotHeldForAnEndFrame pins that only a stream the
+// EXIT ended waits on the socket: one that ended without the exit is owed no
+// wait, so it is uncounted the moment its handler returns, even while the
+// connection's writes are parked.
+func TestAStreamItsClientEndedIsNotHeldForAnEndFrame(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	serving, url := standingStreamServing(t, ended, &held, release)
+	openStream(t, url)
+
+	// Act
+	close(ended)
+	gone := make(chan int, 1)
+	go func() { gone <- serving.AwaitStreamsEnded(time.Minute) }()
+
+	// Assert
+	select {
+	case left := <-gone:
+		if left != 0 {
+			t.Fatalf("AwaitStreamsEnded = %d, want 0", left)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a stream the exit did not end was held waiting on the socket")
+	}
+}

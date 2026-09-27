@@ -1715,9 +1715,16 @@ never notice a load-time `add-hook' that silently stopped firing."
 
 ;; audit-3 #44
 (ert-deftest agent-repl-itest-composer-outage-drain-skips-a-dead-connection ()
-  "A drain against a DEAD connection WARNs `dead-conn' and re-queues, sending nothing.
+  "A drain against a DEAD connection re-queues, sending nothing.
 R-STABILITY ruling: \"the outage drain skips a dead conn and re-queues\".
-The connection is REALLY closed by the test, not stubbed."
+The connection is REALLY closed by the test, not stubbed.
+
+`agent-repl-host-conn' never answers a connection known dead: it starts
+the workspace\='s reattach onto the live daemon and answers that one, and
+with no link standing here it answers none -- so the drain has NO
+connection to send on and says so (`no-conn'), rather than holding a
+dead one (2026-09-27: a workspace kept its dead daemon\='s address after
+a promotion)."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -1735,7 +1742,7 @@ The connection is REALLY closed by the test, not stubbed."
         (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
         (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
         (should (agent-repl-itest-composer--logged-p
-                 daemon "elisp.prompt-queue.dead-conn" "warn"))))))
+                 daemon "elisp.prompt-queue.no-conn" "warn"))))))
 
 ;; audit-3 #44
 (ert-deftest agent-repl-itest-composer-outage-drain-warns-with-no-connection-at-all ()

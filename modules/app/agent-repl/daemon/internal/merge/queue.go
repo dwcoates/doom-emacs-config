@@ -449,50 +449,11 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 // whether it ran one, so the pump loop ends on an empty or paused queue rather
 // than spinning.
 func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, error) {
-	const op = "daemon.merge.admit"
-	// The pump loop re-reads this every iteration: a drain that began while a
-	// burst was mid-flight stops the burst here rather than after it has taken
-	// the next entry's lease.
-	o.mu.Lock()
-	draining := o.draining
-	o.mu.Unlock()
-	if draining {
-		return false, nil
-	}
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
-	if err != nil {
+	front, lock, admitted, err := o.admitFront(ctx, repo)
+	if err != nil || !admitted {
 		return false, err
 	}
-	if paused {
-		return false, nil
-	}
-	o.mu.Lock()
-	busy := o.running[repo] != nil
-	o.mu.Unlock()
-	if busy {
-		return false, nil
-	}
-	entries, err := o.deps.DB.MergeQueue(ctx, repo)
-	if err != nil {
-		return false, err
-	}
-	if len(entries) == 0 {
-		return false, nil
-	}
-	front := entries[0]
-	lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
-	if err != nil {
-		return false, err
-	}
-	if !taken {
-		o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
-		return false, nil
-	}
-	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
-		lock.Release()
-		return false, err
-	}
-	if err := o.start(ctx, repo, front.Workspace, lock); err != nil {
+	if err := o.start(ctx, repo, front, lock); err != nil {
 		// ONE MERGE'S FAILURE IS NOT THE QUEUE'S. A run that reached its own
 		// terminal has already recorded the failure at ERROR, published the
 		// bubble's terminal and left the queue — so the pump goes on to the
@@ -501,15 +462,93 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 		// The test is whether the entry is STILL THERE: a failure early enough
 		// to leave it admitted has no terminal and no teardown, and continuing
 		// would re-admit the same entry forever. That one stops the pump, as
-		// the caller's ERROR record says.
-		if still, checkErr := o.stillQueued(ctx, repo, front.Workspace); checkErr != nil || still {
+		// the caller's ERROR record says. A draining daemon's store may be
+		// closing under the check, so the check is not made and the pump stops
+		// on the failure, which the caller's ERROR record states.
+		if !o.enterAdmission() {
+			return true, err
+		}
+		still, checkErr := o.stillQueued(ctx, repo, front)
+		o.admissions.Done()
+		if checkErr != nil || still {
 			return true, err
 		}
 		o.deps.Log.Global().Debug("daemon.merge.pump", "a merge ended on its own terminal; the queue continues",
-			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "error": err.Error()})
+			dlog.Context{"repo": string(repo), "workspace": string(front), "error": err.Error()})
 		return true, nil
 	}
 	return true, nil
+}
+
+// enterAdmission registers one admission step against the shutdown drain,
+// and reports false -- registering nothing -- once the daemon is draining.
+// The caller ends the step with o.admissions.Done().
+//
+// IT IS WHAT MAKES "draining" AN EXCLUSION RATHER THAN A HINT. The pump used
+// to READ the flag and then go on to read the store, so a drain that began in
+// between closed the state client under the pump's next read (measured:
+// `daemon.wsm.merge_queue: refused the read ... sql: database is closed` in
+// TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrites).
+// The step is registered under the same lock the drain sets the flag under,
+// and the drain waits for every registered step before it returns.
+func (o *orchestrator) enterAdmission() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.draining {
+		return false
+	}
+	o.admissions.Add(1)
+	return true
+}
+
+// admitFront admits the repository's queue front, as ONE admission step the
+// shutdown drain waits for: every store read and the admission write happen
+// inside it. It answers the admitted workspace and the queue lock the run
+// holds, or admitted=false when there is nothing to admit (a draining daemon,
+// a paused or empty queue, a run already in flight, another daemon's lock).
+func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, *repoLock, bool, error) {
+	const op = "daemon.merge.admit"
+	// The pump loop re-enters this every iteration: a drain that began while a
+	// burst was mid-flight stops the burst here rather than after it has taken
+	// the next entry's lease.
+	if !o.enterAdmission() {
+		return "", nil, false, nil
+	}
+	defer o.admissions.Done()
+	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if paused {
+		return "", nil, false, nil
+	}
+	o.mu.Lock()
+	busy := o.running[repo] != nil
+	o.mu.Unlock()
+	if busy {
+		return "", nil, false, nil
+	}
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if len(entries) == 0 {
+		return "", nil, false, nil
+	}
+	front := entries[0]
+	lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
+	if err != nil {
+		return "", nil, false, err
+	}
+	if !taken {
+		o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+		return "", nil, false, nil
+	}
+	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
+		lock.Release()
+		return "", nil, false, err
+	}
+	return front.Workspace, lock, true, nil
 }
 
 // stillQueued reports whether a workspace's entry is still on its repository's

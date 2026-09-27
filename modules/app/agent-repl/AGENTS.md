@@ -491,7 +491,11 @@ How the daemon puts each component into service:
      shim already serves it — never waiting for a revival.
      Queued prompts never block a bounce; the workspace drains and they are
      delivered to the new shim. Monitors, background shells and background
-     subagents DO block it, because they die with the shim's vendor child;
+     subagents DO block it, because they die with the shim's vendor child.
+     A shim replacement and a handover transfer asked of one workspace
+     coalesce into TWO stages, replacement then transfer, and never one in
+     place of the other (daemon/AGENTS.md, "A coalesced bounce runs every
+     kind it was asked");
    - a stale Emacs is pushed `reload_elisp` (the whole module set in
      `config.el` load order, then the heartbeat and timer re-arm check), and a
      stale webview `reload_webapp`.

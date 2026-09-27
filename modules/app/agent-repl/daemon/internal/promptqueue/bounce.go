@@ -38,18 +38,174 @@ const opBounce = "daemon.promptqueue.bounce"
 // registered workspace.
 
 // pendingBounce is one workspace's standing bounce.
+//
+// A BOUNCE IS UP TO TWO STAGES, AND A REQUEST OF ONE KIND NEVER REPLACES THE
+// OTHER. A shim REPLACEMENT (a stale build, the restart verb, a log at its
+// ceiling) swaps what serves the workspace here; a MOVE (a handover transfer,
+// a layout restart's stand-down: `KeepDraining`) takes the workspace off this
+// daemon. Two requests of the same kind coalesce and the newest wins, because
+// a later deploy's action is the one that knows the build to bounce onto. Two
+// requests of DIFFERENT kinds both run: the replacement first, then the move.
+//
+// Regression, 2026-09-27: a handover's transfer was registered behind a busy
+// workspace and the restart verb then joined it; the newest action won, the
+// restart ran on the outgoing daemon, the transfer's requester was told it had
+// finished, and the daemon exited without ever pushing the transfer notice --
+// the workspace's host stream died under Emacs with no end frame, and Emacs
+// kept calling the dead daemon.
 type pendingBounce struct {
-	req bounce.Request
-	// dones are every requester's completion callbacks: a request that joins a
-	// pending bounce is told how that bounce ended.
-	dones []func(error)
-	// draining reports that the bounce was decided and is running (or, with
-	// KeepDraining, has run): nothing is dispatched to the workspace.
+	// replace is the shim-replacement stage, nil when none was asked. It runs
+	// FIRST.
+	replace *bounceStage
+	// move is the stage that moves the workspace off this daemon, nil when
+	// none was asked. It runs LAST, after any replacement, and a successful
+	// `KeepDraining` move leaves the workspace drained.
+	move *bounceStage
+	// draining reports that the bounce was decided and is running (or, when
+	// kept, has run): nothing is dispatched to the workspace.
 	draining bool
+	// kept reports that every stage has run and the last one's KeepDraining
+	// holds the workspace drained for its new owner.
+	kept bool
 	// waitsOn is the watcher whose work the registered bounce waits on, so a
 	// departure edge is matched to the shim it names: a late edge from a shim
 	// already replaced must not be taken as the end of the new one's work.
 	waitsOn Watcher
+}
+
+// bounceStage is one kind's request and every requester that joined it.
+type bounceStage struct {
+	req bounce.Request
+	// dones are every requester's completion callbacks: a request that joins
+	// a stage is told how that stage ended.
+	dones []func(error)
+	// started reports that the stage has been handed to the bounce's
+	// goroutine; a request of its kind then joins it rather than replacing
+	// its action.
+	started bool
+}
+
+// isMove reports whether req moves the workspace off this daemon rather than
+// replacing its shim.
+func isMove(req bounce.Request) bool { return req.KeepDraining }
+
+// slot answers the stage field req's kind lives in.
+func (p *pendingBounce) slot(req bounce.Request) **bounceStage {
+	if isMove(req) {
+		return &p.move
+	}
+	return &p.replace
+}
+
+// stages answers the stages that stand, in the order they run.
+func (p *pendingBounce) stages() []*bounceStage {
+	var out []*bounceStage
+	for _, s := range []*bounceStage{p.replace, p.move} {
+		if s != nil {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// force reports whether any stage was asked to bounce over work in flight.
+func (p *pendingBounce) force() bool {
+	for _, s := range p.stages() {
+		if s.req.Force {
+			return true
+		}
+	}
+	return false
+}
+
+// reason names every stage's reason, in run order, for the records.
+func (p *pendingBounce) reason() string {
+	var out string
+	for _, s := range p.stages() {
+		if out != "" {
+			out += "+"
+		}
+		out += s.req.Reason
+	}
+	return out
+}
+
+// newStage answers a stage holding req and its requester.
+func newStage(req bounce.Request) *bounceStage {
+	stage := &bounceStage{req: req}
+	if req.Done != nil {
+		stage.dones = []func(error){req.Done}
+	}
+	return stage
+}
+
+// register adds a request to a bounce that has NOT started: a stage of its
+// kind takes the newest action (a force upgrades it), a stage of the other
+// kind is kept beside it. It reports whether a stage of the request's kind
+// was already registered.
+func (p *pendingBounce) register(req bounce.Request) bool {
+	slot := p.slot(req)
+	existing := *slot
+	if existing == nil {
+		*slot = newStage(req)
+		return false
+	}
+	force := existing.req.Force || req.Force
+	existing.req = req
+	existing.req.Force = force
+	if req.Done != nil {
+		existing.dones = append(existing.dones, req.Done)
+	}
+	return true
+}
+
+// joinRunning adds a request to a bounce that is RUNNING. A MOVE the bounce
+// has not got is queued behind the running stage, so a transfer asked while a
+// replacement runs is still made; anything else joins a stage of its own kind
+// (the newest action wins while that stage has not started), or the running
+// stage when its kind has none. It reports whether a stage was queued.
+func (p *pendingBounce) joinRunning(req bounce.Request) (queued bool) {
+	slot := p.slot(req)
+	switch {
+	case *slot == nil && isMove(req):
+		*slot = newStage(req)
+		return true
+	case *slot == nil:
+		if running := p.running(); running != nil && req.Done != nil {
+			running.dones = append(running.dones, req.Done)
+		}
+		return false
+	case !(*slot).started:
+		p.register(req)
+		return false
+	default:
+		if req.Done != nil {
+			(*slot).dones = append((*slot).dones, req.Done)
+		}
+		return false
+	}
+}
+
+// running answers the stage the bounce's goroutine is running, nil when none.
+func (p *pendingBounce) running() *bounceStage {
+	var last *bounceStage
+	for _, s := range p.stages() {
+		if s.started {
+			last = s
+		}
+	}
+	return last
+}
+
+// next marks and answers the next stage to run, nil when every stage ran.
+func (p *pendingBounce) next() *bounceStage {
+	for _, s := range p.stages() {
+		if !s.started {
+			s.started = true
+			return s
+		}
+	}
+	return nil
 }
 
 // ErrBounceMalformed refuses a request missing its reason or its action.
@@ -69,6 +225,15 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	}
 	log = log.With(dlog.Context{"reason": req.Reason, "force": req.Force})
 
+	// A requester told at once is told AFTER the delivery lock is released
+	// (registered before the unlock, so it runs after it), exactly as a
+	// finished bounce's requesters are: its callback may call back in.
+	var tellNow func()
+	defer func() {
+		if tellNow != nil {
+			tellNow()
+		}
+	}()
 	state := q.state(ws)
 	state.drain.Lock()
 	defer state.drain.Unlock()
@@ -80,34 +245,41 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	q.mu.Lock()
 	existing := state.bounce
 	switch {
-	case existing != nil && existing.draining:
+	case existing != nil && existing.kept:
+		// THE WORKSPACE IS NO LONGER THIS DAEMON'S: a move ran and keeps it
+		// drained for its new owner, so nothing asked of it here can run.
+		// Joining the finished bounce would leave the requester waiting on a
+		// callback that was already made.
+		q.mu.Unlock()
+		decision.AlreadyPending = true
+		log.Info(opBounce, "the workspace was moved off this daemon by the bounce that keeps it drained; the request is unregistered", nil)
 		if req.Done != nil {
-			existing.dones = append(existing.dones, req.Done)
+			tellNow = func() { req.Done(bounce.ErrUnregistered) }
 		}
+		return decision, nil
+	case existing != nil && existing.draining:
+		queued := existing.joinRunning(req)
 		q.mu.Unlock()
 		decision.AlreadyPending, decision.Now = true, true
-		log.Info(opBounce, "a bounce is already running for the workspace; the request joins it", nil)
+		if queued {
+			log.Info(opBounce, "a bounce is already running for the workspace; the request's move runs after it", nil)
+		} else {
+			log.Info(opBounce, "a bounce is already running for the workspace; the request joins it", nil)
+		}
 		return decision, nil
 	case existing != nil:
-		// THE NEWEST REQUEST'S ACTION WINS and a force upgrades the pending
+		// THE NEWEST REQUEST OF A KIND WINS and a force upgrades the pending
 		// bounce: a later deploy's action is the one that knows the build to
-		// bounce onto.
-		force := existing.req.Force || req.Force
-		existing.req = req
-		existing.req.Force = force
+		// bounce onto. A request of the OTHER kind is kept beside it.
+		existing.register(req)
 		existing.waitsOn = current
-		if req.Done != nil {
-			existing.dones = append(existing.dones, req.Done)
-		}
 		decision.AlreadyPending = true
 	default:
-		existing = &pendingBounce{req: req, waitsOn: current}
-		if req.Done != nil {
-			existing.dones = []func(error){req.Done}
-		}
+		existing = &pendingBounce{waitsOn: current}
+		existing.register(req)
 		state.bounce = existing
 	}
-	force := existing.req.Force
+	force := existing.force()
 	q.mu.Unlock()
 
 	if !free && !force {
@@ -212,7 +384,7 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		state.drain.Unlock()
 		return
 	}
-	fields["reason"] = pending.req.Reason
+	fields["reason"] = pending.reason()
 
 	// A NEWER SHIM MAY ALREADY SERVE THE WORKSPACE: a held prompt's revival
 	// can bring one up between the death and this decision. The departed
@@ -226,7 +398,7 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		replaced = !currentDeparted
 	}
 
-	if pending.req.ReplacesShim {
+	if pending.replace != nil && pending.replace.req.ReplacesShim {
 		var unregister error
 		switch {
 		case replaced:
@@ -252,11 +424,18 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 			unregister = bounce.ErrUnregistered
 		}
 		if unregister != nil {
-			dones := q.unregisterLocked(state)
-			state.drain.Unlock()
+			dones, moveStands := q.unregisterReplacementLocked(state)
 			if errors.Is(unregister, bounce.ErrUnregistered) {
 				log.Info(opBounce, "the shim departed under a registered bounce with nothing left to replace; unregistered it", fields)
 			}
+			if moveStands {
+				// THE MOVE STILL RUNS: the replacement was dropped, but the
+				// workspace still has to leave this daemon, and the work it
+				// waited on ended with the shim.
+				log.Info(opBounce, "the shim departed under a registered bounce; its move is taken now without the replacement", fields)
+				q.startBounceLocked(ws, state, log)
+			}
+			state.drain.Unlock()
 			for _, done := range dones {
 				done(unregister)
 			}
@@ -319,15 +498,21 @@ func (q *queue) reviveAfterDeath(ws ids.WorkspaceID, state *wsState, record wsm.
 	q.reviveInBackground(q.lifetime(), ws, log)
 }
 
-// unregisterLocked drops the workspace's registered bounce unrun and answers
-// its requesters' callbacks, which the caller tells once the delivery lock is
-// released. The caller holds the delivery lock.
-func (q *queue) unregisterLocked(state *wsState) []func(error) {
+// unregisterReplacementLocked drops the registered bounce's REPLACEMENT stage
+// unrun and answers its requesters' callbacks, which the caller tells once
+// the delivery lock is released. A move registered beside it stays, and
+// moveStands says so; with none, the whole bounce is dropped. The caller
+// holds the delivery lock.
+func (q *queue) unregisterReplacementLocked(state *wsState) (dones []func(error), moveStands bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	dones := state.bounce.dones
-	state.bounce = nil
-	return dones
+	dones = state.bounce.replace.dones
+	state.bounce.replace = nil
+	if state.bounce.move == nil {
+		state.bounce = nil
+		return dones, false
+	}
+	return dones, true
 }
 
 // checkRegistryLocked takes a registered bounce the moment the workspace is
@@ -347,56 +532,88 @@ func (q *queue) checkRegistryLocked(ws ids.WorkspaceID, state *wsState, log dlog
 	turn, detached, free := q.inFlight(ws)
 	if !free {
 		log.Debug(opBounce, "a registered bounce is still waiting on the workspace's work", dlog.Context{
-			"reason": pending.req.Reason, "turn_in_flight": turn, "detached_work": detached,
+			"reason": pending.reason(), "turn_in_flight": turn, "detached_work": detached,
 		})
 		return false
 	}
 	log.Info(opBounce, "the workspace's work ended; taking its registered bounce now", dlog.Context{
-		"reason": pending.req.Reason,
+		"reason": pending.reason(),
 	})
 	q.startBounceLocked(ws, state, log)
 	return true
 }
 
-// startBounceLocked moves the workspace to DRAINING and runs the bounce on its
-// own goroutine, joinable through Drain. The caller holds the delivery lock.
+// startBounceLocked moves the workspace to DRAINING and runs the bounce's
+// stages on its own goroutine, one after the other, joinable through Drain.
+// The caller holds the delivery lock.
 func (q *queue) startBounceLocked(ws ids.WorkspaceID, state *wsState, log dlog.Logger) {
 	q.mu.Lock()
 	pending := state.bounce
 	pending.draining = true
-	req := pending.req
+	reason := pending.reason()
+	first := pending.next()
 	q.mu.Unlock()
 	log.Info(opBounce, "the workspace is draining: nothing is dispatched until the bounce has finished", dlog.Context{
-		"reason": req.Reason, "state": "draining", "before": false, "after": true,
+		"reason": reason, "state": "draining", "before": false, "after": true,
 	})
 	q.bouncing.Add(1)
 	go func() {
 		defer q.bouncing.Done()
-		err := req.Run(q.lifetime(), ws)
-		q.finishBounce(ws, req, err, log)
+		for stage := first; stage != nil; {
+			err := stage.req.Run(q.lifetime(), ws)
+			stage = q.finishStage(ws, stage, err, log)
+		}
 	}()
 }
 
-// finishBounce ends a bounce: the workspace leaves draining (unless the bounce
-// keeps it drained), the acts and prompts it held are delivered to what now
-// serves it, and every requester is told.
-func (q *queue) finishBounce(ws ids.WorkspaceID, req bounce.Request, runErr error, log dlog.Logger) {
+// finishStage ends one stage of a bounce and answers the next one to run, nil
+// when the bounce is over. A stage with another behind it keeps the workspace
+// draining; the last one ends the bounce: the workspace leaves draining
+// (unless that stage keeps it drained), the acts and prompts it held are
+// delivered to what now serves it, and every requester is told.
+func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error, log dlog.Logger) *bounceStage {
 	ctx := context.Background()
+	req := stage.req
 	state := q.state(ws)
 	state.drain.Lock()
 
 	q.mu.Lock()
+	dones := stage.dones
+	stage.dones = nil
 	pending := state.bounce
-	var dones []func(error)
+	var next *bounceStage
 	if pending != nil {
-		dones = pending.dones
-		pending.dones = nil
+		next = pending.next()
 	}
 	keep := runErr == nil && req.KeepDraining
-	if !keep {
-		state.bounce = nil
+	if next == nil {
+		if keep && pending != nil {
+			pending.kept = true
+		} else {
+			state.bounce = nil
+		}
 	}
 	q.mu.Unlock()
+
+	if next != nil {
+		// THE WORKSPACE STAYS DRAINING for the stage behind this one, whether
+		// this one finished or failed: a move asked of the workspace (a
+		// handover's transfer) is owed whatever became of its replacement.
+		if runErr != nil {
+			log.Error(opBounce, "a stage of the bounce failed; the workspace stays draining for the stage after it", dlog.Context{
+				"reason": req.Reason, "next": next.req.Reason, "cause": runErr.Error(),
+			})
+		} else {
+			log.Info(opBounce, "a stage of the bounce finished; the workspace stays draining for the stage after it", dlog.Context{
+				"reason": req.Reason, "next": next.req.Reason,
+			})
+		}
+		state.drain.Unlock()
+		for _, done := range dones {
+			done(runErr)
+		}
+		return next
+	}
 
 	switch {
 	case runErr != nil:
@@ -424,6 +641,7 @@ func (q *queue) finishBounce(ws ids.WorkspaceID, req bounce.Request, runErr erro
 	for _, done := range dones {
 		done(runErr)
 	}
+	return nil
 }
 
 // EndKeptDrain implements Queue.
@@ -440,7 +658,7 @@ func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
 	defer state.drain.Unlock()
 	q.mu.Lock()
 	pending := state.bounce
-	kept := pending != nil && pending.draining && pending.req.KeepDraining
+	kept := pending != nil && pending.kept
 	if kept {
 		state.bounce = nil
 	}
@@ -450,7 +668,7 @@ func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
 		return
 	}
 	log.Info(opBounce, "ended the handover's kept drain; the workspace was taken back and dispatch resumes here", dlog.Context{
-		"reason": pending.req.Reason, "state": "draining", "before": true, "after": false,
+		"reason": pending.reason(), "state": "draining", "before": true, "after": false,
 	})
 	q.resumeDispatchLocked(context.Background(), ws, log)
 }
