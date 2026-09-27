@@ -1983,6 +1983,151 @@ describe("the feed viewport as the async bubble cap's size container", () => {
 });
 
 /**
+ * THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the space between the
+ * conversation and the footer dock holds at EVERY scroll position, not only at
+ * the end of the content. One token sizes both the band at the bottom of
+ * #feed-scroll's viewport, which a mask fades content out across, and the
+ * trailing spacer the last card rests on once the reader reaches the end.
+ */
+const GAP_VAR = "var(--feed-bottom-gap)";
+
+/** Every declaration block whose selector list names SELECTOR exactly, joined. */
+function allDeclarationsOf(selector: string): string {
+  return rulesOf(stylesheet)
+    .filter((rule) => rule.selectors.includes(selector))
+    .map((rule) => rule.declarations)
+    .join(";");
+}
+
+/** The value of PROPERTY in DECLS (the last one wins, as in the cascade), trimmed. */
+function valueOf(decls: string, property: string): string | undefined {
+  const pattern = new RegExp(`(?:^|[;{\\s])${property}\\s*:\\s*([^;]+)`, "g");
+  return [...decls.matchAll(pattern)].at(-1)?.[1]?.replace(/\s+/g, " ").trim();
+}
+
+/** A `rem` length's number, failing loudly on anything else. */
+function rem(length: string | undefined): number {
+  const match = /^(-?[\d.]+)rem$/.exec(length ?? "");
+  if (match === null) throw new Error(`not a rem length: ${String(length)}`);
+  return Number(match[1]);
+}
+
+/** The top padding of a `padding` shorthand (its first component). */
+function paddingTop(decls: string): string | undefined {
+  return valueOf(decls, "padding")?.split(" ")[0];
+}
+
+/** The bottom padding of a `padding` shorthand, per the CSS 1-to-4 value rule. */
+function paddingBottom(decls: string): string | undefined {
+  const parts = valueOf(decls, "padding")?.split(" ") ?? [];
+  return parts.length >= 3 ? parts[2] : parts[0];
+}
+
+describe("the feed's bottom gap", () => {
+  it("declares the gap token once, at :root, as the 1rem #feed's padding used to be", () => {
+    // Arrange / Act
+    const declared = [...stylesheet.matchAll(/--feed-bottom-gap\s*:\s*([^;]+);/g)].map((m) => m[1]?.trim());
+
+    // Assert
+    expect(declared).toEqual(["1rem"]);
+  });
+
+  it("fades the viewport's bottom band out across exactly one gap, from the token", () => {
+    // Arrange / Act
+    const mask = valueOf(allDeclarationsOf("#feed-scroll"), "mask-image");
+
+    // Assert
+    expect(mask).toBe(`linear-gradient( to bottom, #000 calc(100% - ${GAP_VAR}), transparent 100% )`);
+  });
+
+  it("draws the fade as a mask, which is no element and so intercepts no pointer event", () => {
+    // Arrange / Act
+    const overlays = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /^#feed-scroll::(?:before|after)$/.test(sel)) && /background/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(overlays.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("makes the trailing spacer pointer-transparent", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "pointer-events")).toBe("none");
+  });
+
+  it("sizes the trailing spacer by the same token, so the band is empty at the end", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "height")).toBe(GAP_VAR);
+  });
+
+  it("lays the trailing spacer out as a block, so it adds its height to the scrolled content", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "display")).toBe("block");
+  });
+
+  it("pads #feed-scroll nowhere, so the cqh size container keeps its full content box", () => {
+    // Arrange / Act
+    const padding = valueOf(allDeclarationsOf("#feed-scroll"), "padding(?:-bottom)?");
+
+    // Assert
+    expect(padding).toBeUndefined();
+  });
+
+  it("takes the bottom gap off #feed, which no longer carries it inside the scroll box", () => {
+    // Arrange / Act
+    const bottom = paddingBottom(allDeclarationsOf("#feed"));
+
+    // Assert
+    expect(bottom).toBe("0");
+  });
+
+  it("keeps #feed's top padding, so the top of the feed is unchanged", () => {
+    // Arrange / Act
+    const top = paddingTop(allDeclarationsOf("#feed"));
+
+    // Assert
+    expect(top).toBe("1rem");
+  });
+
+  it("keeps the at-bottom distance from the last card to the dock at 1.25rem", () => {
+    // Arrange
+    const token = /--feed-bottom-gap\s*:\s*([^;]+);/.exec(stylesheet)?.[1]?.trim();
+    const footerTop = paddingTop(allDeclarationsOf("#footer"));
+
+    // Act
+    const total = rem(token) + rem(footerTop);
+
+    // Assert
+    expect(total).toBe(1.25);
+  });
+
+  it("gives the hold tray no bottom gap of its own, so a tray rests on the same one", () => {
+    // Arrange / Act
+    const bottom = paddingBottom(allDeclarationsOf("#hold-tray"));
+
+    // Assert
+    expect(bottom).toBe("0");
+  });
+
+  it("keeps the 1rem between the last row and the first held prompt on the tray's top", () => {
+    // Arrange / Act
+    const top = paddingTop(allDeclarationsOf("#hold-tray"));
+
+    // Assert
+    expect(top).toBe("1rem");
+  });
+});
+
+/**
  * THE HELD PROMPT IS A BUBBLE (owner rulings, 2026-09-23, superseding the
  * one-line fold of the same day): it collapses at two lines through the one cap
  * rule, and keeps no private fold of its own.
