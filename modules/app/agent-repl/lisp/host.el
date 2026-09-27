@@ -52,6 +52,7 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
@@ -66,7 +67,9 @@
                   (conn ref on-push on-close &optional on-open))
 
 (declare-function agent-repl-link-primary "daemon-link" ())
+(declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
+(defvar agent-repl-link-promote-functions)
 
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--ws-put "workspace" (ws key val))
@@ -119,6 +122,13 @@ other workspace's panel.")
 (defvar agent-repl-host-update-functions nil
   "Functions run with (WS HOST-PLIST) after every `host' push for WS.")
 
+(defvar agent-repl-host-reattached-functions nil
+  "Functions run with (WS) once WS is re-attached to a daemon.
+Runs from `agent-repl-host--reattached', the end of the one reattach walk,
+whatever started it: a transfer, a lost stream, a dead connection, a
+promotion, a link-up.  From here on `agent-repl-host-conn' names the
+daemon that serves WS, so work held for WS while it had none may go.")
+
 ;;;; ---- Accessors ----
 
 (defun agent-repl-host--entry (ws)
@@ -138,9 +148,36 @@ roster and handed back verbatim.  Nil means the workspace has not been
 registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
 
-(defun agent-repl-host-conn (ws)
-  "Return the connection whose daemon owns WS, or nil."
+(defun agent-repl-host--recorded-conn (ws)
+  "Return the connection recorded for WS, dead or alive, or nil.
+This file\='s own bookkeeping reads it; every consumer that is about to
+send asks `agent-repl-host-conn', which never answers a dead one."
   (plist-get (agent-repl-host--entry ws) :conn))
+
+(defun agent-repl-host-conn (ws)
+  "Return the connection whose LIVE daemon serves WS, or nil.
+THE ONE RESOLUTION every per-workspace call, subscription and page URL is
+addressed by, so none of them can disagree about which daemon serves WS.
+During a blue-green handover the two daemons own different workspaces,
+and this is the one that owns THIS workspace.  Nil when WS has none yet.
+
+A CONNECTION KNOWN DEAD IS NEVER ANSWERED.  Regression, 2026-09-27: a
+daemon exited without transferring a workspace, the link was promoted
+onto its successor, and every SelectWorkspace and MarkWorkspaceViewed for
+that workspace kept going to the dead daemon\='s address
+\(`elisp.connect.call-on-closed-connection') while its webview stayed on
+the dead origin.  A dead recorded connection starts WS\='s reattach onto
+the live daemon (`agent-repl-host--follow-live-daemon'), and the answer is
+the live daemon -- or nil when no link stands, which every caller already
+treats as having no connection."
+  (let ((conn (agent-repl-host--recorded-conn ws)))
+    (if (or (null conn) (agent-repl-connect-connection-alive-p conn))
+        conn
+      (agent-repl-host--follow-live-daemon ws "dead-connection")
+      (let ((now (agent-repl-host--recorded-conn ws)))
+        (if (and now (agent-repl-connect-connection-alive-p now))
+            now
+          (agent-repl-link-live))))))
 
 (defun agent-repl-host-stream (ws)
   "Return WS's standing `WatchHostWorkspace' stream, or nil."
@@ -587,16 +624,20 @@ tombstoned workspace), where it is the best name the record has."
   (agent-repl-host--attach ws conn ref)
   (let* ((id (plist-get ref :id))
          (current (lambda () (or (agent-repl--ws-by-ref-id id) ws)))
-         (stream (agent-repl-rpc-watch-host-workspace
+         (stream nil))
+    ;; THE CLOSE NAMES ITS OWN STREAM, so a close that lands after the
+    ;; workspace already moved to another stream is recognized as stale
+    ;; rather than taken for the loss of the stream now standing.
+    (setq stream (agent-repl-rpc-watch-host-workspace
                   conn ref
                   (lambda (push)
                     (agent-repl-host--handle-push (funcall current) push))
                   (lambda (outcome)
-                    (agent-repl-host--handle-close (funcall current) outcome))
+                    (agent-repl-host--handle-close (funcall current) outcome stream))
                   (lambda ()
                     (let ((now (funcall current)))
                       (agent-repl--info now "elisp.host.subscribed ws=%s method=%S id=%S"
-                                        now "WatchHostWorkspace" id))))))
+                                        now "WatchHostWorkspace" id)))))
     (agent-repl-host--put ws :stream stream)
     (agent-repl--info ws "elisp.host.subscribe-opened ws=%s id=%S" ws (plist-get ref :id))
     stream))
@@ -663,22 +704,37 @@ untouched, because closing a tab is a VIEW act."
   (remhash ws agent-repl-host--by-name)
   (agent-repl--info ws "elisp.host.forgotten ws=%s" ws))
 
-(defun agent-repl-host--handle-close (ws outcome)
-  "React to WS's host stream closing with OUTCOME.
+(defun agent-repl-host--handle-close (ws outcome &optional stream)
+  "React to WS's host STREAM closing with OUTCOME.
 `(:cancelled)' is Emacs's own unsubscribe and is normal.  Anything else
 is the producer dropping a STANDING stream, which the contract calls a
-transport failure — the link's own reconnect owns the recovery, so this
-only records the fact and drops the dead stream."
-  (pcase (car outcome)
-    (:cancelled (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
-    (_
-     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
-     ;; NOTHING CAN RESOLVE THE HOLD ANY MORE.  The hold is a bet that the
-     ;; daemon's next push settles it; a dropped standing stream means no
-     ;; such push is coming, so keeping the composer shut would wedge it
-     ;; until the link's reconnect happened to land a new one.
-     (agent-repl-host-release-restart-hold ws "stream-lost")
-     (agent-repl-host--put ws :stream nil))))
+transport failure: it is recorded at ERROR, the dead stream is dropped,
+and WS FOLLOWS THE LIVE DAEMON (`agent-repl-host--follow-live-daemon').
+
+Regression, 2026-09-27: this used to leave the recovery to the link's own
+reconnect.  But the link does not go down when ONE daemon of a handover
+exits -- it is promoted onto the successor, and a promotion rebuilds
+nothing -- so a workspace the exiting daemon never transferred kept its
+dead connection for good: every later call went to that address and its
+webview stayed blank on the dead origin.
+
+A close of a stream that is no longer WS\='s standing one is STALE: WS
+already moved on, and dropping the stream that stands now would strand
+it.  STREAM nil means the caller did not name the stream."
+  (cond
+   ((and stream (not (eq stream (agent-repl-host-stream ws))))
+    (agent-repl--log ws "elisp.host.stale-stream-close ws=%s outcome=%S" ws outcome))
+   ((eq (car outcome) :cancelled)
+    (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
+   (t
+    (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
+    ;; NOTHING CAN RESOLVE THE HOLD ANY MORE.  The hold is a bet that the
+    ;; daemon's next push settles it; a dropped standing stream means no
+    ;; such push is coming, so keeping the composer shut would wedge it
+    ;; until the link's reconnect happened to land a new one.
+    (agent-repl-host-release-restart-hold ws "stream-lost")
+    (agent-repl-host--put ws :stream nil)
+    (agent-repl-host--follow-live-daemon ws "stream-lost"))))
 
 ;;;; ---- Pushes ----
 
@@ -786,13 +842,145 @@ never asks whether Emacs is focused — that knowledge is only here."
       (agent-repl--info ws "elisp.host.notification-selected ws=%s %s at-ms=%S text=%S"
                         ws context (plist-get note :at-ms) text)))))
 
+;;;; ---- Reattach: the ONE walk that moves a workspace onto a daemon ----
+
+(defvar agent-repl-host--reattach-tokens 0
+  "The last reattach token minted; every walk takes the next one.")
+
+(defun agent-repl-host--reattach (ws new claim trigger &optional on-settled)
+  "Re-attach workspace WS to the daemon on connection NEW, claiming it by CLAIM.
+
+THE ONE REATTACH PATH.  Every way a workspace comes to be served by a
+daemon other than the one its stream stood on goes through here, so no
+two of them can disagree about the walk:
+
+  `:adopt'     the handover rendezvous -- a `transferred' push, a
+               `transferring_away' or `not_yet_adopted' refusal.
+               AdoptHostWorkspace on NEW (`agent-repl-host--adopt-onto').
+  `:register'  WS lost its daemon -- a stream lost, a call that found its
+               connection closed, a promotion that carried no transfer for
+               WS, a link that came back up.  RegisterWorkspace on NEW,
+               idempotent by dir (`agent-repl-host--register-onto').
+
+Both end in `agent-repl-host--reattached': the old stream cancelled and
+the host stream re-subscribed on NEW, which moves `:conn' and `:ref' --
+and with them the webview, which each claim reloads onto NEW's origin at
+the moment its own contract requires.  TRIGGER names what started the
+walk, for the records.  ON-SETTLED, a `:register' walk's continuation, is
+called with no arguments once that walk has an outcome, whichever it was.
+
+EACH WALK TAKES A TOKEN, and only the newest walk for WS may finish: a
+promotion or link-up that starts a walk onto the live daemon supersedes
+one still waiting on a daemon that has since died, and the older walk\='s
+late answer is dropped rather than moving WS back."
+  (let ((token (setq agent-repl-host--reattach-tokens
+                     (1+ agent-repl-host--reattach-tokens))))
+    (agent-repl-host--put ws :reattach (list :token token :conn new :trigger trigger))
+    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
+                      ws (agent-repl-connect-connection-address new) claim trigger)
+    (pcase claim
+      (:adopt (agent-repl-host--adopt-onto ws new token trigger))
+      (:register (agent-repl-host--register-onto ws new token trigger on-settled))
+      (_ (agent-repl--fatal ws "elisp.host.reattach-unknown-claim ws=%s claim=%S trigger=%s"
+                            ws claim trigger)))))
+
+(defun agent-repl-host--reattach-current-p (ws token)
+  "Return non-nil when TOKEN is WS\='s newest reattach walk."
+  (equal token (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :token)))
+
+(defun agent-repl-host--reattached (ws new ref trigger)
+  "Finish WS\='s reattach onto NEW with REF: move the stream, then say so.
+The stream on the daemon WS is leaving is cancelled BEFORE the new one is
+opened, so no workspace ever holds two, and the subscribe is what moves
+`:conn' and `:ref' onto NEW.  TRIGGER is recorded."
+  (agent-repl-host-unsubscribe ws)
+  (agent-repl-host-subscribe new ws ref)
+  (agent-repl-host--put ws :reattach nil)
+  (agent-repl-host--put ws :detached nil)
+  (agent-repl--info ws "elisp.host.reattached ws=%s address=%S trigger=%s"
+                    ws (agent-repl-connect-connection-address new) trigger)
+  (run-hook-with-args 'agent-repl-host-reattached-functions ws))
+
+(defun agent-repl-host--register-onto (ws new token trigger on-settled)
+  "The `:register' claim of reattach TOKEN: register WS\='s dir on NEW.
+Registration is idempotent by dir, so the daemon that now serves Emacs
+hands back the ref it knows WS by, whether it adopted WS\='s shim from a
+daemon that died, took it over at a promotion, or is a fresh daemon after
+an outage.  On success the walk finishes (`agent-repl-host--reattached')
+and the webview is reloaded AFTER the subscribe, because frontend.el
+derives the page URL from `agent-repl-host-conn' and the subscribe is what
+moved it.  A refusal or a transport failure leaves WS detached: the next
+link edge (`agent-repl-host-on-link-up', `agent-repl-host-on-link-promote')
+or the next call that finds its connection dead walks it again.  TRIGGER
+is recorded; ON-SETTLED is called once the walk has an outcome."
+  (let ((dir (agent-repl--ws-get ws :project-dir))
+        (settle (lambda () (when on-settled (funcall on-settled)))))
+    (if (null dir)
+        (progn
+          (agent-repl-host--put ws :reattach nil)
+          (agent-repl--error ws "elisp.host.reattach-without-dir ws=%s trigger=%s" ws trigger)
+          (funcall settle))
+      (agent-repl-host-register
+       new dir
+       (lambda (ref)
+         (cond
+          ((not (agent-repl-host--reattach-current-p ws token))
+           (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+          ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
+          ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
+          ;; vocabulary, so a reader can ask for one edge's walks alone.
+          ((null ref)
+           (agent-repl-host--put ws :reattach nil)
+           (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
+                              ws dir (agent-repl-connect-connection-address new)))
+          (t
+           (agent-repl-host--reattached ws new ref trigger)
+           (agent-repl-frontend-reload-webview ws)
+           (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
+                             ws (agent-repl-connect-connection-address new))))
+         (funcall settle))
+       ws))))
+
+(defun agent-repl-host--follow-live-daemon (ws trigger)
+  "Re-attach WS, which lost its daemon, to the LIVE one -- or wait for it.
+TRIGGER names how the loss was found (`stream-lost', `dead-connection').
+
+THE LIVE DAEMON IS THE LINK\='S (`agent-repl-link-live'), the one source
+the primary itself is resolved from, so a workspace never follows an
+address of its own.  WS is marked `:detached' until a walk finishes, and
+the link\='s edges walk every detached workspace:
+
+  - no link stands: nothing is dialed and nothing polls; the link-up edge
+    re-attaches WS (`agent-repl-host-on-link-up');
+  - a walk onto the live daemon is already in flight: nothing more;
+  - the live daemon IS the one WS lost, and it is handing over: its
+    successor\='s promotion re-attaches WS (`agent-repl-host-on-link-promote')
+    -- registering on a daemon that is leaving would only fail;
+  - otherwise WS is walked onto the live daemon now."
+  (let ((live (agent-repl-link-live))
+        (walk (plist-get (agent-repl-host--entry ws) :reattach)))
+    (agent-repl-host--put ws :detached t)
+    (cond
+     ((null live)
+      (agent-repl--info ws "elisp.host.reattach-awaiting-link ws=%s trigger=%s" ws trigger))
+     ((and walk (eq (plist-get walk :conn) live))
+      (agent-repl--log ws "elisp.host.reattach-in-flight ws=%s trigger=%s address=%S"
+                       ws trigger (agent-repl-connect-connection-address live)))
+     ((and (eq live (agent-repl-host--recorded-conn ws))
+           (or (agent-repl-link-successor) (agent-repl-link-successor-pending-p)))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws=%s trigger=%s address=%S"
+                        ws trigger (agent-repl-connect-connection-address live)))
+     (t
+      (agent-repl-host--reattach ws live :register trigger)))))
+
 ;;;; ---- The handover, per workspace ----
 
-(defun agent-repl-host--adopt-onto (ws new)
-  "Adopt WS onto the NEW daemon, move its webview there, and re-subscribe.
-THE ONE WALK, shared by the `transferred' push and by a per-workspace
-rpc's `transferring_away' refusal — both say the same thing, and a second
-copy of this order would be a second contract.
+(defun agent-repl-host--adopt-onto (ws new token trigger)
+  "The `:adopt' claim of reattach TOKEN: adopt WS onto the NEW daemon.
+Moves WS\='s webview there and re-subscribes on the adopt\='s success.
+Shared by the `transferred' push and by a per-workspace rpc's
+`transferring_away' refusal — both say the same thing, and a second copy
+of this order would be a second contract.  TRIGGER is recorded.
 
 THE ORDER IS THE CONTRACT.  `:conn' is moved to NEW and the webview is
 reloaded FIRST; then AdoptHostWorkspace is issued on the NEW connection;
@@ -854,9 +1042,15 @@ A refusal is not retried here — the daemon answered, and its arms have
 their own walk."
   (let ((ref (agent-repl-host-ref ws))
         (address (agent-repl-connect-connection-address new))
-        (old (agent-repl-host-conn ws)))
-    (if (null ref)
-        (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws)
+        (old (agent-repl-host--recorded-conn ws)))
+    (cond
+     ((not (agent-repl-host--reattach-current-p ws token))
+      ;; A scheduled retry of a walk a newer one has since superseded.
+      (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+     ((null ref)
+      (agent-repl-host--put ws :reattach nil)
+      (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws))
+     (t
       (let ((restore
              (lambda ()
                (agent-repl-host--put ws :conn old)
@@ -871,28 +1065,38 @@ their own walk."
          new (list :workspace ref)
          :on-response
          (lambda (response)
-           (pcase (plist-get response :arm)
-             (:success
-              (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
-              (agent-repl-host-unsubscribe ws)
-              (agent-repl-host-subscribe new ws ref))
-             (:error
-              (funcall restore)
-              (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
-             (arm
-              (funcall restore)
-              (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))
+           (cond
+            ((not (agent-repl-host--reattach-current-p ws token))
+             (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+            (t
+             (pcase (plist-get response :arm)
+               (:success
+                (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
+                (agent-repl-host--reattached ws new ref trigger))
+               (:error
+                (funcall restore)
+                (agent-repl-host--put ws :reattach nil)
+                (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
+               (arm
+                (funcall restore)
+                (agent-repl-host--put ws :reattach nil)
+                (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))))
          :on-failure
          (lambda (detail)
-           (funcall restore)
-           (if (eq new (agent-repl-link-successor))
-               (progn
-                 (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
-                                    ws detail)
-                 (run-at-time agent-repl-host-handover-retry-delay nil
-                              #'agent-repl-host--adopt-onto ws new))
-             (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
-                                ws detail))))))))
+           (cond
+            ((not (agent-repl-host--reattach-current-p ws token))
+             (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+            (t
+             (funcall restore)
+             (if (eq new (agent-repl-link-successor))
+                 (progn
+                   (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
+                                      ws detail)
+                   (run-at-time agent-repl-host-handover-retry-delay nil
+                                #'agent-repl-host--adopt-onto ws new token trigger))
+               (agent-repl-host--put ws :reattach nil)
+               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
+                                  ws detail)))))))))))
 
 (defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the successor daemon after the old one released it.
@@ -957,7 +1161,7 @@ wrong: the announcement is on its way."
      (new
       (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
                         ws (agent-repl-connect-connection-address new))
-      (agent-repl-host--adopt-onto ws new))
+      (agent-repl-host--reattach ws new :adopt "transferred"))
      ((agent-repl-link-successor-pending-p)
       (agent-repl--info ws "elisp.host.transferred-awaiting-successor ws=%s" ws)
       (agent-repl-host--adopt-on-acceptance ws))
@@ -997,7 +1201,7 @@ acceptance itself.  A successor that never arrives simply never wakes it."
           (lambda (_old new)
             (remove-hook 'agent-repl-link-handover-functions retry)
             (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
-            (agent-repl-host--adopt-onto ws new)))
+            (agent-repl-host--reattach ws new :adopt "successor-accepted")))
     (add-hook 'agent-repl-link-handover-functions retry)))
 
 (defun agent-repl-host-handle-refusal (ws arm-plist)
@@ -1028,7 +1232,7 @@ through here, so a repeated refusal cannot recurse into a loop."
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
            (let ((new (agent-repl-host--redial-successor ws address)))
              (if new
-                 (agent-repl-host--adopt-onto ws new)
+                 (agent-repl-host--reattach ws new :adopt "transferring-away")
                ;; The dial stands but is not accepted yet; adopting onto an
                ;; unproven daemon is exactly what the acceptance gate forbids.
                (agent-repl--info ws "elisp.host.awaiting-successor ws=%s address=%S"
@@ -1038,7 +1242,7 @@ through here, so a repeated refusal cannot recurse into a loop."
        (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s" ws)
        (let ((new (agent-repl-link-successor)))
          (if new
-             (agent-repl-host--adopt-onto ws new)
+             (agent-repl-host--reattach ws new :adopt "not-yet-adopted")
            (agent-repl-host--adopt-on-acceptance ws))))
       (_
        (agent-repl--error ws "elisp.host.unknown-refusal-arm ws=%s arm=%S" ws arm)))))
@@ -1179,17 +1383,8 @@ nothing."
             (agent-repl--warn '(:agent-repl-central
                                 "a link-repair candidate without a directory owns no sink")
                               "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)
-          (agent-repl-host-register
-           conn dir
-           (lambda (ref)
-             (if (null ref)
-                 (agent-repl--error ws "elisp.host.link-up-register-failed ws=%s dir=%S" ws dir)
-               (agent-repl-host-subscribe conn ws ref)
-               (agent-repl-frontend-reload-webview ws)
-               (agent-repl--info ws "elisp.host.link-up-webview-repointed ws=%s address=%S"
-                                 ws (agent-repl-connect-connection-address conn)))
-             (funcall settle)))
-           ws)))
+          ;; THE ONE REATTACH PATH, the same walk a lost stream takes.
+          (agent-repl-host--reattach ws conn :register "link-up" settle))))
     ;; Nothing to wait for: no workspace had a dir to re-register, so the
     ;; selection is settled here rather than in a callback that never runs.
     (when (null eligible)
@@ -1211,8 +1406,31 @@ covers by itself."
     (agent-repl--warn '(:agent-repl-central "link loss spans every workspace")
                       "elisp.host.link-down workspaces=%d" affected)))
 
+(defun agent-repl-host-on-link-promote (old new)
+  "Re-attach onto NEW every workspace the promotion left behind on OLD.
+A promotion rebuilds nothing, because every workspace the old daemon
+TRANSFERRED was already adopted onto the successor.  But a daemon can go
+without transferring a workspace -- measured 2026-09-27: a restart that
+ran in the transfer\='s place, and a daemon that exited with the workspace
+still its own -- and such a workspace is still on OLD, whose connection
+this promotion is about to close.  Each one, and each one already
+detached, is walked onto NEW through the one reattach path.  Runs from
+`agent-repl-link-promote-functions', BEFORE OLD is closed."
+  (let (left)
+    (maphash (lambda (ws entry)
+               (when (or (eq (plist-get entry :conn) old)
+                         (plist-get entry :detached))
+                 (push ws left)))
+             agent-repl-host--by-name)
+    (agent-repl--info '(:agent-repl-central "link promotion spans every workspace")
+                      "elisp.host.link-promote left-behind=%d address=%S"
+                      (length left) (agent-repl-connect-connection-address new))
+    (dolist (ws (nreverse left))
+      (agent-repl-host--reattach ws new :register "promotion"))))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl-host-on-link-up)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-host-on-link-down)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-host-on-link-promote)
 (agent-repl--ws-add-activated-hook #'agent-repl-host--on-workspace-activated)
 
 (provide 'host)
