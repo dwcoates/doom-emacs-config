@@ -181,9 +181,16 @@ type DB interface {
 	// turn back. It is what makes the resubmission exactly-once with two
 	// possible owners (the merge's own release and the boot recovery).
 	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error)
-	// ClaimIdempotencyKey binds a client's key to a turn. When the key is
-	// already claimed it returns the existing turn and mints nothing.
-	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (*TurnID, error)
+	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
+	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
+	// binds nothing; a key claimed for a submission that never reached
+	// acceptance is REBOUND to the offered turn (ClaimRedriven), so the retry
+	// is delivered rather than refused.
+	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (IdempotencyClaim, error)
+	// AcceptIdempotencyKey records that the queue accepted the submission the
+	// key is bound to under turn. It refuses a key not bound to that turn, or
+	// already accepted.
+	AcceptIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) error
 
 	// CloseOrphans closes every turn without a terminal in one transaction and
 	// reports what it closed.
