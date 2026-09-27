@@ -1522,9 +1522,11 @@ func TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault(t *testing.T) {
 	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
 		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
 
-	// Act: drive the retries past the bound.
+	// Act: drive the retries past the bound, each one ruled on before the
+	// next frame, since a retry is not made while one is in flight.
 	for i := 0; i < openRefusalLimit; i++ {
 		h.sendSessionUpdate(t, compactingUpdate())
+		h.client.awaitRefusedOpen(t, "WatchAgent")
 	}
 
 	// Assert.
@@ -2423,5 +2425,231 @@ func TestAShimDeathTellsTheFeedTheTurnItCut(t *testing.T) {
 	// Assert.
 	if !hasEvent(h.rec.drain(), "feed.OnTurnOpened") {
 		t.Fatal("the feed was not told the turn the death cut")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// No shim I/O is ever performed under the watcher's lock
+// ---------------------------------------------------------------------------
+
+// withinDeadline runs f on a goroutine of its own and fails the test if it
+// does not return: a call waiting on a wedged watcher's mutex never does, and
+// the test must fail rather than hang with it.
+func withinDeadline(t *testing.T, what string, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(waitDeadline):
+		t.Fatalf("%s never returned: the watcher's lock is held across a watch open", what)
+	}
+}
+
+// relinkWith severs the session stream and brings the link back, which
+// re-opens the whole fleet; the caller takes the re-opened streams itself,
+// because one of them may be held by a gate.
+func (h *harness) relinkWith(t *testing.T) {
+	t.Helper()
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+}
+
+// TestAHungWatchOpenHoldsNoLock is the 2026-09-27T14:00:44 wedge. A detached
+// shell's WatchBash open never got its first frame from the shim, the open was
+// made under the watcher's mutex, and for eighteen minutes TurnInFlight -- and
+// through it every SubmitPrompt for the workspace -- and every other stream's
+// routing waited on that mutex. Every kind of open is held here, forever, and
+// the watcher must go on answering and routing around it.
+func TestAHungWatchOpenHoldsNoLock(t *testing.T) {
+	tests := []struct {
+		name string
+		// gate arranges the open that will hang.
+		gate func(c *fakeClient) *openGate
+		// provoke makes the watcher decide that open.
+		provoke func(t *testing.T, h *harness)
+	}{
+		{
+			name: "a detached shell's WatchBash",
+			gate: func(c *fakeClient) *openGate { return c.gate(&c.bashGate, true) },
+			provoke: func(t *testing.T, h *harness) {
+				h.main.send(t, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+			},
+		},
+		{
+			name: "a detached subagent's WatchAgent",
+			gate: func(c *fakeClient) *openGate { return c.gate(&c.agentGate, true) },
+			provoke: func(t *testing.T, h *harness) {
+				h.main.send(t, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+			},
+		},
+		{
+			name: "the session's WatchSession re-open",
+			gate: func(c *fakeClient) *openGate { return c.gate(&c.sessionGate, true) },
+			provoke: func(t *testing.T, h *harness) {
+				h.relinkWith(t)
+				open := h.client.nextAgentOpenFor(t, "")
+				h.main, h.mainReq = open.stream, open.req
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.quiet()
+			g := tt.gate(h.client)
+
+			// Act: the open is made, and the shim never answers it.
+			tt.provoke(t, h)
+			g.awaitBlocked(t)
+
+			// Assert: the prompt queue's read answers, and another stream's
+			// frames route.
+			var inFlight *ids.TurnID
+			withinDeadline(t, "TurnInFlight", func() { inFlight = h.w.TurnInFlight() })
+			if inFlight == nil || *inFlight != "turn-1" {
+				t.Fatalf("TurnInFlight = %v, want turn-1", inFlight)
+			}
+			withinDeadline(t, "LiveWork", func() { h.w.LiveWork() })
+			withinDeadline(t, "routing a main-watch frame", h.quiet)
+		})
+	}
+}
+
+// TestAStaleWatchOpenIsNeverInstalled pins the other half of the off-lock
+// open: an open the fleet stopped wanting while it was in flight -- the fleet
+// closed, re-opened in a new generation, or reaped the watch -- is DISCARDED
+// when it completes, and the stream it got is closed rather than consumed.
+func TestAStaleWatchOpenIsNeverInstalled(t *testing.T) {
+	tests := []struct {
+		name string
+		// honorCtx is whether the held open ends with its context.
+		honorCtx bool
+		// act makes the held open stale and lets it complete, answering the
+		// stream a re-open installed in its place, if any.
+		act func(t *testing.T, h *harness, g *openGate) *fakeStream[*conversationv1.AgentBash]
+		// assert checks what became of it.
+		assert func(t *testing.T, h *harness, fresh *fakeStream[*conversationv1.AgentBash])
+	}{
+		{
+			name:     "an open that succeeds after Close is closed, not installed",
+			honorCtx: false,
+			act: func(t *testing.T, h *harness, g *openGate) *fakeStream[*conversationv1.AgentBash] {
+				closed := make(chan struct{})
+				go func() {
+					defer close(closed)
+					_ = h.w.Close()
+				}()
+				// Close closes the main stream only after it has marked the
+				// fleet closed, so from here the held open is stale.
+				select {
+				case <-h.main.closed:
+				case <-time.After(waitDeadline):
+					t.Fatal("Close never closed the standing streams")
+				}
+				close(g.release)
+				select {
+				case <-closed:
+				case <-time.After(waitDeadline):
+					t.Fatal("Close never joined the completed open")
+				}
+				return nil
+			},
+			assert: func(t *testing.T, h *harness, _ *fakeStream[*conversationv1.AgentBash]) {
+				stale := h.client.nextBashOpen(t)
+				if !stale.stream.isClosed() {
+					t.Fatal("the stale open's stream was left open")
+				}
+				h.w.mu.Lock()
+				defer h.w.mu.Unlock()
+				if s := h.w.shells["w-1"]; s == nil || s.stream != nil {
+					t.Fatalf("shell watch = %+v, want the entry with no stream installed", s)
+				}
+			},
+		},
+		{
+			name:     "an open that succeeds after a re-open is closed, not installed",
+			honorCtx: false,
+			act: func(t *testing.T, h *harness, g *openGate) *fakeStream[*conversationv1.AgentBash] {
+				h.relinkWith(t)
+				h.session = h.client.nextSessionOpen(t)
+				open := h.client.nextAgentOpenFor(t, "")
+				h.main, h.mainReq = open.stream, open.req
+				// The re-open's own shell open is not held: the gate held one.
+				fresh := h.client.nextBashOpen(t)
+				close(g.release)
+				h.client.settleOpens()
+				return fresh.stream
+			},
+			assert: func(t *testing.T, h *harness, fresh *fakeStream[*conversationv1.AgentBash]) {
+				stale := h.client.nextBashOpen(t)
+				if !stale.stream.isClosed() {
+					t.Fatal("the stale open's stream was left open")
+				}
+				h.w.mu.Lock()
+				defer h.w.mu.Unlock()
+				s := h.w.shells["w-1"]
+				installed, ok := s.stream.(*ticketedStream[*conversationv1.AgentBash])
+				if !ok || installed.Stream != shimclient.Stream[*conversationv1.AgentBash](fresh) {
+					t.Fatalf("installed shell stream = %v, want the re-open's own", s.stream)
+				}
+			},
+		},
+		{
+			name:     "an open still hung at Close is cancelled and discarded",
+			honorCtx: true,
+			act: func(t *testing.T, h *harness, g *openGate) *fakeStream[*conversationv1.AgentBash] {
+				withinDeadline(t, "Close", func() { _ = h.w.Close() })
+				return nil
+			},
+			assert: func(t *testing.T, h *harness, _ *fakeStream[*conversationv1.AgentBash]) {
+				if !h.hasRecord("info", "daemon.sessionwatcher.open_discarded") {
+					t.Fatalf("a cancelled open logged %v, want an info discard record", h.log.Records())
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a detached shell whose open the shim holds.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			g := h.client.gate(&h.client.bashGate, tt.honorCtx)
+			h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+			g.awaitBlocked(t)
+
+			// Act.
+			fresh := tt.act(t, h, g)
+
+			// Assert.
+			tt.assert(t, h, fresh)
+		})
+	}
+}
+
+// TestAReapedWatchReleasesItsHungOpen pins that a watch reaped while its open
+// hangs does not leave that open waiting for the watcher's close: the reap
+// cancels it, and its completion is discarded.
+func TestAReapedWatchReleasesItsHungOpen(t *testing.T) {
+	// Arrange: a spawned subagent whose open the shim holds, then detached.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	g := h.client.gate(&h.client.agentGate, true)
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
+	g.awaitBlocked(t)
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1"))))
+
+	// Act: the detached run settles, which reaps its watch.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))
+
+	// Assert.
+	withinDeadline(t, "the reaped watch's open", h.client.settleOpens)
+	if !h.hasRecord("info", "daemon.sessionwatcher.open_discarded") {
+		t.Fatalf("the reaped watch's open logged %v, want an info discard record", h.log.Records())
 	}
 }
