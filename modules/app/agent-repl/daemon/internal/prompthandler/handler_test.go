@@ -438,6 +438,9 @@ func TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
 	}
 }
 
+// firstTurn is the turn the harness mints for a key's first submission.
+const firstTurn ids.TurnID = "minted-turn"
+
 // retryTurn is the turn a retry mints, distinct from the first submission's.
 const retryTurn ids.TurnID = "retry-turn"
 
@@ -446,10 +449,25 @@ func (h *harness) deliveries() int {
 	return len(h.queue.forwarded()) + len(h.queue.sessionActs())
 }
 
+// deliveredTurns names the turn of everything the handler forwarded down the
+// queue's path, prompts first.
+func (h *harness) deliveredTurns() []ids.TurnID {
+	var out []ids.TurnID
+	for _, sub := range h.queue.forwarded() {
+		out = append(out, sub.Turn)
+	}
+	for _, act := range h.queue.sessionActs() {
+		out = append(out, act.Turn)
+	}
+	return out
+}
+
 // TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted reproduces the
 // 2026-09-27 prompt loss: the key was claimed, the queue never accepted the
 // submission, and the retry under the SAME key must be delivered -- once --
-// rather than refused as a duplicate of a turn nobody delivered.
+// rather than refused as a duplicate of a turn nobody delivered. It is driven
+// under the FIRST submission's turn, never the one the retry minted, so a
+// shim that did accept that turn answers the repeat as a no-op.
 func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -460,7 +478,7 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 			name: "the process died between the claim and the acceptance",
 			text: "hello",
 			arrange: func(t *testing.T, h *harness) {
-				h.db.claimed["key-1"] = &fakeClaim{turn: "abandoned-turn"}
+				h.db.claimed["key-1"] = &fakeClaim{turn: firstTurn}
 				h.respawn(t)
 			},
 		},
@@ -512,14 +530,14 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit: %v, want the retry delivered", err)
 			}
-			if got.Turn != retryTurn {
-				t.Fatalf("turn = %q, want the retry's own %q", got.Turn, retryTurn)
+			if got.Turn != firstTurn {
+				t.Fatalf("turn = %q, want the first submission's %q", got.Turn, firstTurn)
 			}
-			if n := h.deliveries(); n != 1 {
-				t.Fatalf("%d deliveries, want exactly one", n)
+			if turns := h.deliveredTurns(); len(turns) != 1 || turns[0] != firstTurn {
+				t.Fatalf("delivered turns = %v, want exactly one, under %q", turns, firstTurn)
 			}
-			if claim := h.db.claimOn("key-1"); !claim.accepted || claim.turn != retryTurn {
-				t.Fatalf("claim = %+v, want the retry's turn stamped accepted", claim)
+			if claim := h.db.claimOn("key-1"); !claim.accepted || claim.turn != firstTurn {
+				t.Fatalf("claim = %+v, want the first submission's turn stamped accepted", claim)
 			}
 		})
 	}

@@ -19,7 +19,11 @@ import (
 //     whose receiver is not the queue (`…Queue.` anywhere, or the queue's own
 //     `q.` inside this package) — i.e. a direct store close;
 //   - an SQL statement that writes `closed_at` or `close_kind` anywhere but
-//     the three store functions the door calls.
+//     the three store functions the door calls;
+//   - an SQL statement that CLEARS a close (a reopen, `closed_at = NULL`)
+//     anywhere but the one store function the idempotency claim reopens an
+//     orphaned or agent-died turn through, so a reopen can never pass as a
+//     close nor a close as a reopen.
 
 // doorMethods are the store's three ways to close a turn row.
 var doorMethods = map[string]bool{"CloseTurn": true, "CloseOrphans": true, "ClaimDisplacedTurn": true}
@@ -29,6 +33,9 @@ const doorFile = "internal/promptqueue/turnclose.go"
 
 // storeCloseFuncs are the store functions that may hold a closing statement.
 var storeCloseFuncs = map[string]bool{"CloseTurn": true, "CloseOrphans": true, "ClaimDisplacedTurn": true}
+
+// storeReopenFuncs are the store functions that may hold a reopening statement.
+var storeReopenFuncs = map[string]bool{"reopenAmbiguousClose": true}
 
 // doorViolations reports every way FILE (at daemon-relative PATH, in package
 // PKG) closes a turn outside the door.
@@ -52,7 +59,9 @@ func doorViolations(fset *token.FileSet, file *ast.File, path string) []string {
 	})
 	for _, decl := range file.Decls {
 		fn, isFunc := decl.(*ast.FuncDecl)
-		allowed := isFunc && pkg == "wsm" && filepath.Base(path) == "turns.go" && storeCloseFuncs[fn.Name.Name]
+		inTurns := isFunc && pkg == "wsm" && filepath.Base(path) == "turns.go"
+		allowed := inTurns && storeCloseFuncs[fn.Name.Name]
+		reopenAllowed := inTurns && storeReopenFuncs[fn.Name.Name]
 		ast.Inspect(decl, func(n ast.Node) bool {
 			lit, ok := n.(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
@@ -62,8 +71,15 @@ func doorViolations(fset *token.FileSet, file *ast.File, path string) []string {
 			if err != nil {
 				text = lit.Value
 			}
-			if closesARow(text) && !allowed {
-				out = append(out, fset.Position(lit.Pos()).String()+": a statement writes a turn's close outside the store's door functions")
+			switch {
+			case reopensARow(text):
+				if !reopenAllowed {
+					out = append(out, fset.Position(lit.Pos()).String()+": a statement clears a turn's close outside the store's reopen function")
+				}
+			case closesARow(text):
+				if !allowed {
+					out = append(out, fset.Position(lit.Pos()).String()+": a statement writes a turn's close outside the store's door functions")
+				}
 			}
 			return true
 		})
@@ -81,6 +97,12 @@ func throughQueue(x ast.Expr, pkg string) bool {
 		return pkg == "promptqueue" && recv.Name == "q"
 	}
 	return false
+}
+
+// reopensARow reports whether an SQL text clears a turn's close.
+func reopensARow(text string) bool {
+	squeezed := strings.Join(strings.Fields(text), " ")
+	return strings.Contains(squeezed, "closed_at = NULL") || strings.Contains(squeezed, "close_kind = NULL")
 }
 
 // closesARow reports whether an SQL text writes a turn's close.
@@ -193,6 +215,24 @@ func TestTheDoorGuard(t *testing.T) {
 			path: "internal/wsm/turns.go",
 			src:  "package wsm\nfunc CloseTurn() { exec(`UPDATE turns SET closed_at = ?, close_kind = ? WHERE id = ?`) }\n",
 			want: 0,
+		},
+		{
+			name: "a reopening statement inside the store's reopen function is allowed",
+			path: "internal/wsm/turns.go",
+			src:  "package wsm\nfunc reopenAmbiguousClose() { exec(`UPDATE turns SET closed_at = NULL, close_kind = NULL WHERE id = ?`) }\n",
+			want: 0,
+		},
+		{
+			name: "a reopening statement outside the store's reopen function is caught",
+			path: "internal/wsm/turns.go",
+			src:  "package wsm\nfunc PutTurn() { exec(`UPDATE turns SET closed_at = NULL, close_kind = NULL WHERE id = ?`) }\n",
+			want: 1,
+		},
+		{
+			name: "a closing statement inside the store's reopen function is caught",
+			path: "internal/wsm/turns.go",
+			src:  "package wsm\nfunc reopenAmbiguousClose() { exec(`UPDATE turns SET closed_at = ?, close_kind = ? WHERE id = ?`) }\n",
+			want: 1,
 		},
 	}
 	for _, tc := range tests {
