@@ -162,6 +162,8 @@ environment. Every flag is optional.
 | `--feed-tail-retention <rows>` | how many published rows one feed retains for a tail's replay, which is what makes WatchFeed's `token_expired` refusal reachable | `$AGENT_REPL_FEED_TAIL_RETENTION`, else the resolver's `DefaultTailRetention` (4096) |
 | `--footer-momentary-dwell <duration>` | how long a MOMENTARY footer status (`interrupted`, `loading`) stands before the daemon's own successor push retires it | `$AGENT_REPL_FOOTER_MOMENTARY_DWELL`, else the resolver's `DefaultMomentaryDwell` (1.5s) |
 | `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
+| `--layout-version` | print the state layout this binary writes (`wsm.LayoutVersion`) and exit, opening nothing; a deploy asks it of the STAGED binary | off |
+| `--replacing` | this daemon replaces an incumbent restarting across a state layout change: it waits `rollout.ReplacementClaimWait` (1m) for the boot claim instead of `daemonaddr.ClaimWaitBound`; exclusive with `--joining` | off |
 
 ## Run and boot order (binding; `cmd/claude-repld`)
 
@@ -221,7 +223,9 @@ environment. Every flag is optional.
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
    sessionwatcher instead, and any the shim's `turn_in_flight` no longer names
-   is closed orphaned at INFO), recover the in-flight merges, and — for a successor
+   is closed orphaned at INFO), recover the in-flight merges, RELEASE EVERY LEASE
+   THIS PROCESS'S HANDLE DID NOT TAKE (one ERROR `daemon.boot.orphan_leases` per
+   lease; see "A lease dies with the process that took it"), and — for a successor
    — `rollout.Controller.Join`. A JOINING SUCCESSOR RECONCILES NOTHING, so the
    missing-directory close is also done by `verbs.PublishRegistry`, the walk
    that publishes the opening roster;
@@ -605,6 +609,92 @@ one runs is covered by ONE follow-up deploy. Every decision is a record under
 `bin/build-frontend.sh` without `--out` stays Emacs's cold-start build (a
 daemon must exist before it can deploy anything). `agent-shim/wire` is
 DELETED: nothing in the rebuilt daemon imports it.
+
+## A lease dies with the process that took it
+
+A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)
+is OWNED BY THE STATE HANDLE THAT TOOK IT, and a daemon holds exactly one
+handle for its whole life. So:
+
+- **The handle's close releases what it still owns** (`wsm` `Close`, INFO
+  `daemon.wsm.close` naming each lease), merge leases excepted: a merge lease is
+  the merge ledger's durable identity and the next boot's merge recovery
+  resolves it. A row the handle took and another process already released (the
+  successor that adopted a handed-over workspace drains its quiesce hold) is
+  gone, recorded at DEBUG. `run.go` records a failed close at ERROR.
+- **An incumbent's boot releases every lease its handle did not take**
+  (`ForeignLeases`), after the merge recovery, one ERROR per lease with lease,
+  holder, policy and workspace, and tells the queue. The boot claim is the
+  kernel's proof the previous incumbent's process ended, and a joining
+  successor's boot never reaches the step, so each such lease has no living
+  owner: its process died without the close (SIGKILL, SIGQUIT, a crash). A
+  failed read or release fails the boot.
+- **Every operation's lease is scope-bound**: the relaunch's restart hold, a
+  drain fire's holds, the hibernation lease and a handover transfer's quiesce
+  hold are released on every exit path (deferred), on a context the daemon's
+  leaving cannot refuse -- never through the context whose cancellation ended
+  the operation.
+- `handover.Intake.Quiesce` answers the lease it TOOK (empty over another
+  holder's lease), and a transfer releases exactly that lease by id.
+
+Measured 2026-09-27: a failed handover's five `holder=restart` quiesce leases
+survived a fresh boot; the host composer drew `restarting` from them and Emacs
+refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
+
+## A handover transfers only to a successor proven serving, and takes back what is not adopted
+
+- **Readiness is an answer, not a report.** `joining.addr` is written when the
+  successor's listener binds, before it opens its state. `beginHandover` waits
+  (`Deps.ReadyBound`, 30s) for `Successor.Ready`: a real `DaemonHealth` round
+  trip, or the successor's reaped exit (`*SuccessorExitedError`, pid and exit
+  status). Until it answers NOTHING is listed, announced, quiesced or asked of
+  the bounce registry; a successor that dies or never answers abandons the
+  handover at ERROR and the incumbent keeps serving.
+- **The serving row arbitrates a released workspace.** The successor's
+  adoption and the incumbent's reclaim both go through
+  `wsm.ClaimUnownedServing` (claim only if unowned or already ours), and only
+  the side whose claim stood dials the shim -- the successor now claims BEFORE
+  it dials, and drains the handover hold on every path past a won claim.
+- **An expired adoption window reclaims.** The incumbent takes the workspace
+  back: claim, re-adopt the detached shim (a handed-over client leaves the
+  fleet's session map with its detach, so `Adopt` really dials), release the
+  transfer's hold by id, end the bounce registry's kept drain
+  (`promptqueue.Queue.EndKeptDrain`), republish the views, open the
+  workspace's `adoption_window_expired` fault, all at ERROR. A transfer that
+  fails after its quiesce is taken back the same way. A handover with any
+  reclaimed or failed workspace does not exit.
+
+## A state layout change is rolled out stop-then-start, never handed over
+
+A joining successor opens the state READ-ONLY and cannot carry an older layout
+forward (2026-09-27: master landed layout 11 and the successor died refusing
+layout 10). So the deploy asks the STAGED daemon binary its layout
+(`claude-repld -layout-version`, `deploy.BinaryLayout`) before deciding; a
+binary that cannot answer is refused at ERROR. A different layout goes to
+`rollout.Controller.Restart` (`deploy.RestartingAcrossLayout`; shim and webapp
+deferred to the replacement):
+
+1. the one rollout slot is claimed (a handover in flight refuses it, and vice
+   versa), the intent manifest written (no successor), and a PLAIN BOUNCE
+   announced (`shutdown_announced`, cause `self_merge_rollout`, no address);
+2. every served workspace's serving stands down through the bounce registry at
+   its own freeness (all at once when forced): quiesce, detach the shim (left
+   running), release serving -- no transfer notice, no adoption window;
+3. the fresh binary is spawned with `--replacing` (inherited argv and
+   environment, its own session) and this daemon exits. The replacement waits
+   on the boot claim, so it opens -- and migrates -- the state only as its sole
+   writer, then adopts the shims, restores the held prompts and accounts the
+   sessions against the manifest; this process's close released its holds.
+
+A restart that cannot finish (a failed stand-down, a replacement that will not
+start) takes EVERY workspace back, frees the slot and keeps serving, at ERROR.
+
+OPEN CONTRACT QUESTION: `endpoint_deploy.proto` has no daemon arm for this
+restart (only the blue-green `handing_over`), so the `Deploy` rpc answers a
+layout-change deploy as an internal failure naming the unnamed decision while
+the restart proceeds; a landing's deploy (no rpc) is unaffected. The
+announcement reuses `self_merge_rollout` with the address unset, whose comment
+describes a handover. Both await the owner's ruling.
 
 ## Logging
 
