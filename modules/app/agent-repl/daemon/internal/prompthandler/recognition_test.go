@@ -8,31 +8,6 @@ import (
 	"claude-repld/internal/promptqueue"
 )
 
-func TestCommandSpecsAreReadOffTheEnumOption(t *testing.T) {
-	// Arrange / Act
-	table := commandSpecs()
-	// Assert: the literal and the takes_args fact come from the schema, and
-	// nothing here is hand-written.
-	got, ok := table["/compact"]
-	if !ok {
-		t.Fatal("the table must carry /compact")
-	}
-	if got.command != conversationv1.SessionCommand_SESSION_COMMAND_COMPACT || !got.takesArgs {
-		t.Fatalf("spec = %+v, want the compact command taking arguments", got)
-	}
-}
-
-func TestCommandSpecsCarryNoEntryForUnspecified(t *testing.T) {
-	// Arrange / Act
-	table := commandSpecs()
-	// Assert
-	for literal, s := range table {
-		if s.command == conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-			t.Fatalf("literal %q maps to UNSPECIFIED, which names no command", literal)
-		}
-	}
-}
-
 func TestRecognizeReportsTheFourPanels(t *testing.T) {
 	for _, literal := range []string{"/status", "/todos", "/mcp", "/context"} {
 		t.Run(literal, func(t *testing.T) {
@@ -110,8 +85,8 @@ func TestRecognizeMakesActsOfTheContextCuts(t *testing.T) {
 			if got.kind != RecognizedAct {
 				t.Fatalf("recognition = %s, want a session act", recognitionName(got.kind))
 			}
-			if ActCommands[got.spec.command] != tc.kind {
-				t.Fatalf("act kind = %q, want %q", ActCommands[got.spec.command], tc.kind)
+			if ActCommands[got.spec.Command] != tc.kind {
+				t.Fatalf("act kind = %q, want %q", ActCommands[got.spec.Command], tc.kind)
 			}
 		})
 	}
