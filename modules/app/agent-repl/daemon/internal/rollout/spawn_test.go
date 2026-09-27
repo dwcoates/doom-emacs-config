@@ -564,3 +564,50 @@ func TestReadyGivesUpAtItsBoundOnASuccessorThatNeverAnswers(t *testing.T) {
 		t.Fatalf("Ready = %v, want the bound's deadline", err)
 	}
 }
+
+// TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces covers the restart's
+// spawn: the replacement is the same binary, told it replaces, never joining.
+// The stand-in reports its last argument through a FIFO, whose open blocks
+// until the stand-in writes, so the read IS the synchronization.
+func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
+	// Arrange
+	state := t.TempDir()
+	fifo := filepath.Join(state, "argv")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	script := filepath.Join(state, "replacement.sh")
+	body := "#!/bin/sh\nfor last; do :; done\nprintf '%s' \"$last\" > " + fifo + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	spawner := NewProcessSpawner(script, state)
+
+	// Act
+	pid, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err != nil || pid <= 0 {
+		t.Fatalf("SpawnReplacement = (%d, %v), want a started process", pid, err)
+	}
+	last, err := os.ReadFile(fifo)
+	if err != nil {
+		t.Fatalf("read the stand-in's report: %v", err)
+	}
+	if string(last) != "--"+ReplacingFlagName {
+		t.Fatalf("the replacement's last argument = %q, want --%s", last, ReplacingFlagName)
+	}
+}
+
+func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
+	// Arrange
+	spawner := NewProcessSpawner("", t.TempDir())
+
+	// Act
+	_, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("SpawnReplacement accepted an empty binary path")
+	}
+}

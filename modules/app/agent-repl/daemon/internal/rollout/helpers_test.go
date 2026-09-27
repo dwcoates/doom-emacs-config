@@ -169,6 +169,10 @@ type fakeSpawner struct {
 	onSpawn func()
 	// readyErr is what every successor's Ready answers; nil proves it serving.
 	readyErr error
+	// replacementErr is what SpawnReplacement answers.
+	replacementErr error
+	// replacements counts the replacements spawned.
+	replacements int
 	// readies counts the Ready calls.
 	readies int
 	mu      sync.Mutex
@@ -244,6 +248,27 @@ func (c *fakeSuccessor) Ready(context.Context) error {
 	defer c.spawner.mu.Unlock()
 	c.spawner.readies++
 	return c.spawner.readyErr
+}
+
+// SpawnReplacement records a replacement's spawn.
+func (s *fakeSpawner) SpawnReplacement(context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replacementErr != nil {
+		return 0, s.replacementErr
+	}
+	s.replacements++
+	return fakeReplacementPID, nil
+}
+
+// fakeReplacementPID is the pid every fake replacement answers.
+const fakeReplacementPID = 51400
+
+// Replacements counts the replacements spawned.
+func (s *fakeSpawner) Replacements() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.replacements
 }
 
 // Readies counts the readiness waits the handover asked for.

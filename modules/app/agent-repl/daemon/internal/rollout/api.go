@@ -66,6 +66,16 @@ type Controller interface {
 	// the daemon's lifetime. It refuses with *ErrAlreadyRollingOut while a
 	// handover is in flight, and with ErrJoining on a joining successor.
 	HandOver(ctx context.Context, force bool) (HandoverAcceptance, error)
+	// Restart rolls a fresh build out STOP-THEN-START, for a build whose
+	// state layout differs from this one's (a joining successor cannot carry
+	// an older layout forward on its read-only handle). Every served
+	// workspace's serving stands down through the bounce registry at its own
+	// freeness (all at once when forced), its shim detached and left running;
+	// then a replacement is spawned on the fresh binary, waiting on the boot
+	// claim, and this daemon exits. A restart that cannot finish takes every
+	// workspace back and keeps serving. It shares HandOver's one slot and
+	// refusals.
+	Restart(ctx context.Context, force bool) (HandoverAcceptance, error)
 	// BounceShim asks the bounce registry to replace one workspace's shim with
 	// a fresh one on the installed bundle: at once when nothing is in flight or
 	// force is set, else when the workspace's work ends. done, when set, is
@@ -285,6 +295,12 @@ type SuccessorSpawner interface {
 	// daemon running with nothing holding it. A nil Successor means no process
 	// was started.
 	Spawn(ctx context.Context, incumbentAddress string) (Successor, error)
+	// SpawnReplacement starts `<self exe> --replacing` -- an ORDINARY daemon,
+	// not a joining one -- with this process's environment and answers its
+	// pid once it is started. It waits on the boot claim this process holds,
+	// so it opens the state only after this process has exited. The process
+	// outlives this one by design and is never stopped by it.
+	SpawnReplacement(ctx context.Context) (int, error)
 }
 
 // Successor is one spawned successor daemon: the address it reported, and the

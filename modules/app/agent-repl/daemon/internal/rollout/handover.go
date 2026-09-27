@@ -35,6 +35,17 @@ type handoverPlan struct {
 	snapshot       map[ids.WorkspaceID]Participants
 	forced         bool
 	fields         dlog.Context
+	// restart marks a STOP-THEN-START rollout (Restart): no successor is
+	// listening, so a workspace's serving stands down with no transfer notice
+	// and no adoption window, and the end spawns a replacement and exits.
+	restart bool
+	// slot is the rollout slot a restart claimed, released if it abandons.
+	slot *handoverSlot
+	// mu guards moved.
+	mu sync.Mutex
+	// moved is what each of a restart's stand-downs took, so an abandoned
+	// restart takes every one of them back.
+	moved map[ids.WorkspaceID]movedWorkspace
 	// reclaimed counts the workspaces this daemon took BACK after handing
 	// them toward the successor: an adoption window that expired, or a
 	// transfer that failed after its quiesce. A reclaimed workspace is served
@@ -351,6 +362,10 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 	// the accountability record get written at all.
 	windows.Wait()
 
+	if plan.restart {
+		c.finishRestart(ctx, plan, failed)
+		return
+	}
 	if reclaimed := plan.reclaimed.Load(); reclaimed > 0 {
 		// THE RECLAIMED ARE SERVED HERE AGAIN, so exiting would abandon them
 		// exactly as a failed transfer would.
@@ -422,6 +437,17 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	if err := c.releaseServing(ctx, ws.ID, fields); err != nil {
 		return errors.Join(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
+	}
+
+	if plan.restart {
+		// A RESTART HAS NO SUCCESSOR TO NAME: the workspace stays this
+		// daemon's, its intake held, until the process exits and the
+		// replacement adopts its shim at boot.
+		plan.mu.Lock()
+		plan.moved[ws.ID] = movedWorkspace{lease: lease, detached: handed}
+		plan.mu.Unlock()
+		c.log.Info(opTransfer, "stood the workspace's serving down for the restart; its shim keeps running for the replacement", fields)
+		return nil
 	}
 
 	c.recordTransfer(ws.ID, successor)
