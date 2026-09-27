@@ -67,6 +67,15 @@ interface Harness {
    * is the only handle a test has on the conclusion the handler observes.
    */
   readonly watchers: AgentPageSession[];
+  /**
+   * Every stop command the engine held for a turn's terminal, in order, and
+   * whether the vendor interrupt had already been sent when it was held.
+   */
+  readonly stopCommands: {
+    turn: string;
+    command: conversationv1.AgentInterruptedByUser | undefined;
+    afterInterrupt: boolean;
+  }[];
 }
 
 /** Every structured record the logger wrote since `before`. */
@@ -115,6 +124,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     keepaliveEnd: undefined,
     yieldBudgetMs: 60_000,
     watchers: [] as AgentPageSession[],
+    stopCommands: [],
   };
   const context: SessionContext = {
     persistence,
@@ -145,6 +155,9 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     },
     setOpenTurn: (turn) => {
       state.open = turn;
+    },
+    noteStopCommand: (turn, command) => {
+      state.stopCommands.push({ turn: turn.value, command, afterInterrupt: query.calls.includes("interrupt") });
     },
   };
   return Object.assign(state, { turns: new TurnEngine(context) });
@@ -1199,6 +1212,60 @@ describe("KillTurn", () => {
     expect(response.result.case === "success" ? response.result.value.killed?.how.case : undefined).toBe(
       "agentOnly",
     );
+  });
+
+  it("holds the caller's commanded_by for the killed turn's terminal, verbatim", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    const commandedBy = create(conversationv1.AgentInterruptedByUserSchema, {
+      command: { case: "interjection", value: create(conversationv1.AgentInterruptedByUserInterjectionSchema, {}) },
+    });
+
+    // Act
+    await h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN, force: false, commandedBy }));
+
+    // Assert
+    expect(h.stopCommands.map((held) => ({ turn: held.turn, command: held.command }))).toEqual([
+      { turn: "turn-1", command: commandedBy },
+    ]);
+  });
+
+  it("holds an unstated command when the caller stated no commanded_by", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(h.stopCommands.map((held) => ({ turn: held.turn, command: held.command }))).toEqual([
+      { turn: "turn-1", command: undefined },
+    ]);
+  });
+
+  it("holds the stop command BEFORE the vendor interrupt is sent", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(h.stopCommands.map((held) => held.afterInterrupt)).toEqual([false]);
+  });
+
+  it("holds no stop command for a kill that finds no open turn", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(h.stopCommands).toEqual([]);
   });
 
   // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. A non-forced kill used to

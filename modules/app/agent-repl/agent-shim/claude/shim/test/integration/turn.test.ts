@@ -1162,6 +1162,35 @@ describe("KillTurn", () => {
     watch.close();
   });
 
+  test("the interrupted terminal records the caller's commanded_by verbatim", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+
+    await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, {
+        turn: turnId("t1"),
+        force: false,
+        commandedBy: create(conversationv1.AgentInterruptedByUserSchema, {
+          command: { case: "interjection", value: create(conversationv1.AgentInterruptedByUserInterjectionSchema, {}) },
+        }),
+      }),
+    );
+    const terminal = await untilTerminal(watch);
+
+    const frame = entryFrame(terminal);
+    if (frame?.result.case !== "success" || frame.result.value.outcome.case !== "interrupted") {
+      throw new Error("the turn did not conclude AgentSuccess.interrupted");
+    }
+    const cause = frame.result.value.outcome.value.cause;
+    expect(cause.case === "byUser" ? cause.value.command.case : cause.case).toBe("interjection");
+    watch.close();
+  });
+
   test("the shell the stop landed inside SETTLES, interrupted by the user", async () => {
     // WITHOUT THIS THE UNIT NEVER SETTLES. The vendor returns no `tool_result`
     // for a call a stop landed inside — the captured `interrupt` session

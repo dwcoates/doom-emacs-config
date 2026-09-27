@@ -22,7 +22,8 @@ import {
   VENDOR_MESSAGE_MAX,
 } from "../../src/convert/terminals.js";
 import type { VendorApiError } from "../../src/convert/terminals.js";
-import type { conversationv1 } from "../../src/proto.js";
+import { create } from "@bufbuild/protobuf";
+import { conversationv1 } from "../../src/proto.js";
 import type { ContextOverrides } from "./fold-harness.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { foldContext } from "./fold-harness.js";
@@ -290,6 +291,58 @@ describe("an api_error terminal the vendor accounted for with no errors", () => 
     expect(failure?.case === "apiRequestFailed" ? failure.value.message : undefined).toBe(
       "the vendor API failed the request",
     );
+  });
+});
+
+/**
+ * A user stop's `by_user` cause is the KillTurn caller's statement of HOW,
+ * verbatim; a stop nobody stated a how for records no command.
+ */
+describe("a user stop's commanded HOW", () => {
+  /** The `by_user` cause a user-stop terminal folded under `overrides` records. */
+  function byUserOf(overrides: ContextOverrides): conversationv1.AgentInterruptedByUser | undefined {
+    const output = convertResult(resultMessage("aborted_streaming"), foldContext(overrides), undefined);
+    const result = output.turnEnded?.frame.result;
+    if (result?.case !== "success" || result.value.outcome.case !== "interrupted") return undefined;
+    const cause = result.value.outcome.value.cause;
+    return cause.case === "byUser" ? cause.value : undefined;
+  }
+
+  it("records an interjection the caller stated", () => {
+    // Arrange
+    const stopCommand = create(conversationv1.AgentInterruptedByUserSchema, {
+      command: { case: "interjection", value: create(conversationv1.AgentInterruptedByUserInterjectionSchema, {}) },
+    });
+
+    // Act
+    const byUser = byUserOf({ stopCommand });
+
+    // Assert
+    expect(byUser?.command.case).toBe("interjection");
+  });
+
+  it("records a direct stop the caller stated", () => {
+    // Arrange
+    const stopCommand = create(conversationv1.AgentInterruptedByUserSchema, {
+      command: { case: "direct", value: create(conversationv1.AgentInterruptedByUserDirectSchema, {}) },
+    });
+
+    // Act
+    const byUser = byUserOf({ stopCommand });
+
+    // Assert
+    expect(byUser?.command.case).toBe("direct");
+  });
+
+  it("records no command when none was stated", () => {
+    // Arrange + Act
+    const byUser = byUserOf({});
+
+    // Assert
+    expect({ present: byUser !== undefined, command: byUser?.command.case }).toEqual({
+      present: true,
+      command: undefined,
+    });
   });
 });
 

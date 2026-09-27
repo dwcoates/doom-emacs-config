@@ -108,6 +108,14 @@ export interface SessionContext {
   /** Adopt (or clear) the open turn. */
   setOpenTurn(turn: OpenTurn | undefined): void;
   /**
+   * Hold HOW the person commanded the stop about to be issued on `turn`
+   * (`KillTurnRequest.commanded_by`, undefined when the caller stated none),
+   * so the fold records it verbatim on that turn's interrupted terminal.
+   * Noted BEFORE the interrupt, because the vendor's stop result can arrive the
+   * moment the interrupt is sent.
+   */
+  noteStopCommand(turn: conversationv1.TurnId, command: conversationv1.AgentInterruptedByUser | undefined): void;
+  /**
    * Register an open `WatchAgent` tail so the teardown can conclude it.
    *
    * A standing tail must not be CUT at the exit: the consumer is waiting on it
@@ -817,6 +825,7 @@ export class TurnEngine {
     const query = this.session.query();
     // Callback liveness before the interrupt, always.
     this.session.gate.standDown(`turn ${open.id.value} was killed`);
+    this.session.noteStopCommand(open.id, request.commandedBy);
     if (query !== undefined) {
       // The session declares the per-task stop (`perTaskStopAffordance`), so
       // the vendor's interrupt ends the turn and spares its background work.
