@@ -1219,31 +1219,72 @@ shape is refused as an unknown field rather than misread."
        (succeeded :succeeded agent-repl-wire-decode-workspace-create-succeeded)
        (failed :failed agent-repl-wire-decode-workspace-create-failed)))))
 
+;; Each open-stage arm is an empty message: the arm being set is the whole
+;; fact, so each decoder only checks the arm carries no fields.
+(defun agent-repl-wire-decode-workspace-open-stage-checking-worktree (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageCheckingWorktree'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageCheckingWorktree" value))
+
+(defun agent-repl-wire-decode-workspace-open-stage-starting-session (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageStartingSession'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageStartingSession" value))
+
+(defun agent-repl-wire-decode-workspace-open-stage-reviving (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageReviving'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageReviving" value))
+
+(defun agent-repl-wire-decode-workspace-open-stage-clearing-closed (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageClearingClosed'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageClearingClosed" value))
+
+(defun agent-repl-wire-decode-workspace-open-stage-checking-build (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageCheckingBuild'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageCheckingBuild" value))
+
 (defun agent-repl-wire-decode-workspace-open-stage (value)
-  "Decode `WorkspaceOpenStage''s protojson enum-name VALUE into a keyword.
-Enums travel as their string names; an unknown one is a contract breach,
-not a stage to guess at."
-  (pcase value
-    ("WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE" :checking-worktree)
-    ("WORKSPACE_OPEN_STAGE_STARTING_SESSION" :starting-session)
-    ("WORKSPACE_OPEN_STAGE_REVIVING" :reviving)
-    ("WORKSPACE_OPEN_STAGE_CLEARING_CLOSED" :clearing-closed)
-    ("WORKSPACE_OPEN_STAGE_CHECKING_BUILD" :checking-build)
-    (_ (agent-repl-wire--fail "WorkspaceOpenStage" 'stage
-                              (format "unknown enum value %S" value)))))
+  "Decode `WorkspaceOpenStage' from VALUE into the stage keyword.
+THE SET ARM IS THE STAGE, and every arm is an empty message, so the
+keyword is the whole fact: `:checking-worktree', `:starting-session',
+`:reviving', `:clearing-closed' or `:checking-build'.  An arm this codec
+does not hold is refused as an unknown field by the key check -- logged
+at ERROR and signalled, never a stage guessed at or dropped -- and an
+unset oneof is refused likewise."
+  (let ((object (agent-repl-wire--object "WorkspaceOpenStage" value)))
+    (agent-repl-wire--check-keys "WorkspaceOpenStage" object
+                                 '(checkingWorktree startingSession reviving
+                                   clearingClosed checkingBuild))
+    (agent-repl-wire--decoded
+     "WorkspaceOpenStage"
+     (plist-get
+      (agent-repl-wire--decode-oneof
+       "WorkspaceOpenStage" 'stage object
+       '((checkingWorktree :checking-worktree
+                           agent-repl-wire-decode-workspace-open-stage-checking-worktree)
+         (startingSession :starting-session
+                          agent-repl-wire-decode-workspace-open-stage-starting-session)
+         (reviving :reviving
+                   agent-repl-wire-decode-workspace-open-stage-reviving)
+         (clearingClosed :clearing-closed
+                         agent-repl-wire-decode-workspace-open-stage-clearing-closed)
+         (checkingBuild :checking-build
+                        agent-repl-wire-decode-workspace-open-stage-checking-build)))
+      :arm))))
 
 (defun agent-repl-wire-decode-workspace-open-progress (value)
   "Decode `WorkspaceOpenProgress' from VALUE into `(:stage STAGE)'.
-NO TERMINAL STEP: an open is answered synchronously on its own rpc, so
-its success and every refusal reach the caller there.  This message
-carries only the wait that answer cannot express."
+STAGE is the keyword its required `entered_stage' decodes to.  NO
+TERMINAL STEP: an open is answered synchronously on its own rpc, so its
+success and every refusal reach the caller there.  This message carries
+only the wait that answer cannot express.  The retired field-1 `stage'
+enum is not a key this codec holds, so a push in that shape is refused as
+an unknown field rather than misread."
   (let ((object (agent-repl-wire--object "WorkspaceOpenProgress" value)))
-    (agent-repl-wire--check-keys "WorkspaceOpenProgress" object '(stage))
+    (agent-repl-wire--check-keys "WorkspaceOpenProgress" object '(enteredStage))
     (agent-repl-wire--decoded
      "WorkspaceOpenProgress"
-     (list :stage (agent-repl-wire-decode-workspace-open-stage
-                   (agent-repl-wire--decode-string
-                    "WorkspaceOpenProgress" 'stage object))))))
+     (list :stage (agent-repl-wire--decode-message
+                   "WorkspaceOpenProgress" 'enteredStage object
+                   #'agent-repl-wire-decode-workspace-open-stage)))))
 
 (defun agent-repl-wire-decode-workspace-mutation-progress-create (value)
   "Decode `WorkspaceMutationProgress''s `create' event arm from VALUE."
