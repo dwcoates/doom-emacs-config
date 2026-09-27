@@ -1572,13 +1572,18 @@ describe("the thinking bubble", () => {
     expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
   });
 
-  it("keeps the held prompt's two-line cap at two lines", () => {
-    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts),
-    // which the thinking bubble no longer shares.
-    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+  it("caps the held prompt at one line", () => {
+    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts,
+    // pinned there to "1"; owner ruling, 2026-09-27).
+    const rule = declarationsOf('.bubble[data-cap-lines="1"]');
 
     // Assert
-    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("maps no two-line cap now that no bubble collapses at two lines", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf('.bubble[data-cap-lines="2"]')).toBeUndefined();
   });
 
   it("excludes the thinking bubble from the green final-answer rule", () => {

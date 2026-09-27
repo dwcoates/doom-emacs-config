@@ -2242,13 +2242,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
    holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
-   reach it. The shared feed cap for most capped bubbles, two lines for a held
-   prompt, one line for a thinking bubble, and NONE past the header strip for a
+   reach it. The shared feed cap for most capped bubbles, one line for a held
+   prompt and a landed thinking bubble, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
-.bubble[data-cap-lines="2"] { --bubble-cap-lines: 2; }
 .bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
