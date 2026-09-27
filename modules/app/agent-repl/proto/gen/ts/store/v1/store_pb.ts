@@ -41,7 +41,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/store.proto.
  */
 export const file_store_v1_store: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi/gEKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBAUIHCgVlbnRyeUIHCgVfdHVybiKmAgoQU3RvcmVBZ2VudFVwZGF0ZRIwCgl0b3BfbGV2ZWwYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBEjIKD3NlcnZlYWJsZV9mcmFtZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmVIABI0Cg11bnNlcnZlZF9pdGVtGAMgASgLMhsuc3RvcmUudjEuU3RvcmVVbnNlcnZlZEl0ZW1IABIoCgRiYXNoGAQgASgLMhguc3RvcmUudjEuU3RvcmVBZ2VudEJhc2hIABIwCgh3b3JrZmxvdxgFIAEoCzIcLnN0b3JlLnYxLlN0b3JlQWdlbnRXb3JrZmxvd0gAQgwKCmFnZW50X2luZm9CDAoKX3RvcF9sZXZlbCJuCg1TdG9yZVBhZ2VMaW5lEi8KDXBhZ2VfYWdlbnRfaWQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBIsCgphZ2VudF9pdGVtGAIgASgLMhguc3RvcmUudjEuU3RvcmVBZ2VudEl0ZW0iuAEKDlN0b3JlQWdlbnRJdGVtEjQKDGFnZW50X3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIGCgRpdGVtImoKDlN0b3JlQWdlbnRCYXNoEi0KA3J1bhgBIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5SWQSKQoFZnJhbWUYAiABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoImoKElN0b3JlQWdlbnRXb3JrZmxvdxIlCgNydW4YASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBItCgVmcmFtZRgCIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93Il4KBVBsYW5lEicKBnN0cmVhbRgBIAEoCzIVLnN0b3JlLnYxLlBsYW5lU3RyZWFtSAASIwoEZmlsZRgCIAEoCzITLnN0b3JlLnYxLlBsYW5lRmlsZUgAQgcKBXBsYW5lIg0KC1BsYW5lU3RyZWFtIgsKCVBsYW5lRmlsZSLHAQoRU3RvcmVVbnNlcnZlZEl0ZW0SOAoPdmVuZG9yX3NwZWNpZmljGAIgASgLMh0uc3RvcmUudjEuU3RvcmVWZW5kb3JTcGVjaWZpY0gAEikKB3Vua25vd24YAyABKAsyFi5zdG9yZS52MS5TdG9yZVVua25vd25IABIrCgh1bnBhcnNlZBgEIAEoCzIXLnN0b3JlLnYxLlN0b3JlVW5wYXJzZWRIAEIPCg11bnNlcnZlZF9pdGVtSgQIARACUglrZWVwYWxpdmUiSQoTU3RvcmVWZW5kb3JTcGVjaWZpYxIMCgRraW5kGAEgASgJEiQKA3JhdxgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiaAoMU3RvcmVVbmtub3duEhUKDWRpc2NyaW1pbmF0b3IYASABKAkSGwoTZGlzY3JpbWluYXRvcl9maWVsZBgCIAEoCRIkCgNyYXcYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IlEKDVN0b3JlVW5wYXJzZWQSDgoGc291cmNlGAEgASgJEg4KBm9mZnNldBgCIAEoBBITCgtwYXJzZV9lcnJvchgDIAEoCRILCgNyYXcYBCABKAkiegoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQFCEQoPX2N1cnNvcl9hZHZhbmNlIksKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwiIQoQU3RvcmVJdGVtUG9pbnRlchINCgV2YWx1ZRgBIAEoCSKRAQoLU3RvcmVMaW5lQXQSJgoCYXQYASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyEiUKBGxpbmUYAiABKAsyFy5zdG9yZS52MS5TdG9yZVBhZ2VMaW5lEioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQFCBwoFX3R1cm4iQgoRUmVhZEFnZW50UGFnZU1vcmUSLQoJbGFzdF9pdGVtGAEgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlciIUChJSZWFkQWdlbnRQYWdlRmxvb3IiIgoRQWdlbnRTZXNzaW9uVG9rZW4SDQoFdmFsdWUYASABKAkioAEKEEFnZW50U2Vzc2lvblBhZ2USJAoFbGluZXMYASADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdBIrCgRtb3JlGAIgASgLMhsuc3RvcmUudjEuUmVhZEFnZW50UGFnZU1vcmVIABItCgVmbG9vchgDIAEoCzIcLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGbG9vckgAQgoKCGJvdW5kYXJ5QiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi/gEKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBAUIHCgVlbnRyeUIHCgVfdHVybiKmAgoQU3RvcmVBZ2VudFVwZGF0ZRIwCgl0b3BfbGV2ZWwYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBEjIKD3NlcnZlYWJsZV9mcmFtZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmVIABI0Cg11bnNlcnZlZF9pdGVtGAMgASgLMhsuc3RvcmUudjEuU3RvcmVVbnNlcnZlZEl0ZW1IABIoCgRiYXNoGAQgASgLMhguc3RvcmUudjEuU3RvcmVBZ2VudEJhc2hIABIwCgh3b3JrZmxvdxgFIAEoCzIcLnN0b3JlLnYxLlN0b3JlQWdlbnRXb3JrZmxvd0gAQgwKCmFnZW50X2luZm9CDAoKX3RvcF9sZXZlbCJuCg1TdG9yZVBhZ2VMaW5lEi8KDXBhZ2VfYWdlbnRfaWQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBIsCgphZ2VudF9pdGVtGAIgASgLMhguc3RvcmUudjEuU3RvcmVBZ2VudEl0ZW0iuAEKDlN0b3JlQWdlbnRJdGVtEjQKDGFnZW50X3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIGCgRpdGVtImoKDlN0b3JlQWdlbnRCYXNoEi0KA3J1bhgBIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5SWQSKQoFZnJhbWUYAiABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoImoKElN0b3JlQWdlbnRXb3JrZmxvdxIlCgNydW4YASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBItCgVmcmFtZRgCIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93Il4KBVBsYW5lEicKBnN0cmVhbRgBIAEoCzIVLnN0b3JlLnYxLlBsYW5lU3RyZWFtSAASIwoEZmlsZRgCIAEoCzITLnN0b3JlLnYxLlBsYW5lRmlsZUgAQgcKBXBsYW5lIg0KC1BsYW5lU3RyZWFtIgsKCVBsYW5lRmlsZSLHAQoRU3RvcmVVbnNlcnZlZEl0ZW0SOAoPdmVuZG9yX3NwZWNpZmljGAIgASgLMh0uc3RvcmUudjEuU3RvcmVWZW5kb3JTcGVjaWZpY0gAEikKB3Vua25vd24YAyABKAsyFi5zdG9yZS52MS5TdG9yZVVua25vd25IABIrCgh1bnBhcnNlZBgEIAEoCzIXLnN0b3JlLnYxLlN0b3JlVW5wYXJzZWRIAEIPCg11bnNlcnZlZF9pdGVtSgQIARACUglrZWVwYWxpdmUiSQoTU3RvcmVWZW5kb3JTcGVjaWZpYxIMCgRraW5kGAEgASgJEiQKA3JhdxgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiaAoMU3RvcmVVbmtub3duEhUKDWRpc2NyaW1pbmF0b3IYASABKAkSGwoTZGlzY3JpbWluYXRvcl9maWVsZBgCIAEoCRIkCgNyYXcYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IlEKDVN0b3JlVW5wYXJzZWQSDgoGc291cmNlGAEgASgJEg4KBm9mZnNldBgCIAEoBBITCgtwYXJzZV9lcnJvchgDIAEoCRILCgNyYXcYBCABKAkiqgEKCkVudHJ5QmF0Y2gSJQoHZW50cmllcxgBIAMoCzIULnN0b3JlLnYxLlN0b3JlRW50cnkSMgoOY3Vyc29yX2FkdmFuY2UYAiABKAsyFS5zdG9yZS52MS5DdXJzb3JTdGF0ZUgAiAEBEi4KDmFnZW50X2xvY2F0b3JzGAMgAygLMhYuc3RvcmUudjEuQWdlbnRMb2NhdG9yQhEKD19jdXJzb3JfYWR2YW5jZSJPCgxBZ2VudExvY2F0b3ISFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSJwoFYWdlbnQYAiABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCJLCgtDdXJzb3JTdGF0ZRIPCgdmaWxlX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGb2Zmc2V0GAMgASgDEg0KBWNhcnJ5GAQgASgMIiEKEFN0b3JlSXRlbVBvaW50ZXISDQoFdmFsdWUYASABKAkikQEKC1N0b3JlTGluZUF0EiYKAmF0GAEgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlchIlCgRsaW5lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZRIqCgR0dXJuGAMgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZEgAiAEBQgcKBV90dXJuIkIKEVJlYWRBZ2VudFBhZ2VNb3JlEi0KCWxhc3RfaXRlbRgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXIiFAoSUmVhZEFnZW50UGFnZUZsb29yIiIKEUFnZW50U2Vzc2lvblRva2VuEg0KBXZhbHVlGAEgASgJIqABChBBZ2VudFNlc3Npb25QYWdlEiQKBWxpbmVzGAEgAygLMhUuc3RvcmUudjEuU3RvcmVMaW5lQXQSKwoEbW9yZRgCIAEoCzIbLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VNb3JlSAASLQoFZmxvb3IYAyABKAsyHC5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmxvb3JIAEIKCghib3VuZGFyeUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * One write: a conversation.v1 fact inside the storage envelope.
@@ -562,6 +562,22 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
    * @generated from field: optional store.v1.CursorState cursor_advance = 2;
    */
   cursorAdvance?: CursorState | undefined;
+
+  /**
+   * THE VENDOR TASK LOCATORS of the subagents these records book, each paired
+   * with the agent it names. The sidecar states one for every batch it reads
+   * from a subagent's transcript: the locator from the file's name, the agent
+   * from the spawning call its meta file states. Empty for every other batch,
+   * and always empty from the stream plane.
+   *
+   * IT RIDES THE SAME WRITE as the agent's rows, so the pairing is on record
+   * from the agent's first batch onward and GetAgentByVendorTask can answer
+   * for any agent that has ever run. Re-stating a pairing already on record is
+   * absorbed; the store keeps one row per (locator, agent).
+   *
+   * @generated from field: repeated store.v1.AgentLocator agent_locators = 3;
+   */
+  agentLocators: AgentLocator[];
 };
 
 /**
@@ -570,6 +586,40 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
  */
 export const EntryBatchSchema: GenMessage<EntryBatch> = /*@__PURE__*/
   messageDesc(file_store_v1_store, 13);
+
+/**
+ * One subagent's vendor task locator, paired with the agent it names.
+ *
+ * THE LOCATOR IS NEVER THE AGENT. The vendor names a subagent's files and its
+ * task by `<id>` (`agent-<id>.jsonl`, `task_started.task_id`), while every
+ * plane books the agent under the `tool_use_id` of the call that spawned it
+ * (the cross-plane minting rule). This message is the one place the two are
+ * joined, and a consumer compares both for equality only.
+ *
+ * @generated from message store.v1.AgentLocator
+ */
+export type AgentLocator = Message<"store.v1.AgentLocator"> & {
+  /**
+   * The vendor's own `<id>`, verbatim. REQUIRED, non-empty.
+   *
+   * @generated from field: string vendor_task_id = 1;
+   */
+  vendorTaskId: string;
+
+  /**
+   * The agent the locator names. REQUIRED, non-empty.
+   *
+   * @generated from field: conversation.v1.AgentId agent = 2;
+   */
+  agent?: AgentId | undefined;
+};
+
+/**
+ * Describes the message store.v1.AgentLocator.
+ * Use `create(AgentLocatorSchema)` to create a new message.
+ */
+export const AgentLocatorSchema: GenMessage<AgentLocator> = /*@__PURE__*/
+  messageDesc(file_store_v1_store, 14);
 
 /**
  * Where one file has been read to.
@@ -614,7 +664,7 @@ export type CursorState = Message<"store.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 14);
+  messageDesc(file_store_v1_store, 15);
 
 /**
  * An opaque, store-minted position of one item in one book's order. Echoed
@@ -635,7 +685,7 @@ export type StoreItemPointer = Message<"store.v1.StoreItemPointer"> & {
  * Use `create(StoreItemPointerSchema)` to create a new message.
  */
 export const StoreItemPointerSchema: GenMessage<StoreItemPointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 15);
+  messageDesc(file_store_v1_store, 16);
 
 /**
  * One line, its position and its turn, so the caller always holds a reconnect
@@ -672,7 +722,7 @@ export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
  * Use `create(StoreLineAtSchema)` to create a new message.
  */
 export const StoreLineAtSchema: GenMessage<StoreLineAt> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 16);
+  messageDesc(file_store_v1_store, 17);
 
 /**
  * Older lines exist below this page.
@@ -693,7 +743,7 @@ export type ReadAgentPageMore = Message<"store.v1.ReadAgentPageMore"> & {
  * Use `create(ReadAgentPageMoreSchema)` to create a new message.
  */
 export const ReadAgentPageMoreSchema: GenMessage<ReadAgentPageMore> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 17);
+  messageDesc(file_store_v1_store, 18);
 
 /**
  * This page reached the oldest retained line.
@@ -708,7 +758,7 @@ export type ReadAgentPageFloor = Message<"store.v1.ReadAgentPageFloor"> & {
  * Use `create(ReadAgentPageFloorSchema)` to create a new message.
  */
 export const ReadAgentPageFloorSchema: GenMessage<ReadAgentPageFloor> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 18);
+  messageDesc(file_store_v1_store, 19);
 
 /**
  * The address of one opened reading session: an opaque, store-minted token —
@@ -729,7 +779,7 @@ export type AgentSessionToken = Message<"store.v1.AgentSessionToken"> & {
  * Use `create(AgentSessionTokenSchema)` to create a new message.
  */
 export const AgentSessionTokenSchema: GenMessage<AgentSessionToken> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 19);
+  messageDesc(file_store_v1_store, 20);
 
 /**
  * The opening page, newest first.
@@ -770,5 +820,5 @@ export type AgentSessionPage = Message<"store.v1.AgentSessionPage"> & {
  * Use `create(AgentSessionPageSchema)` to create a new message.
  */
 export const AgentSessionPageSchema: GenMessage<AgentSessionPage> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 20);
+  messageDesc(file_store_v1_store, 21);
 
