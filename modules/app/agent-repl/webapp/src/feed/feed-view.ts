@@ -75,6 +75,7 @@ import { thinkingLanded } from "./cards/response.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
+import { drawFeedSubagentHandback } from "./rows/subagent-handback.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
@@ -953,6 +954,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         return drawFeedAgentPrompt(arm.value, rc.previous);
       case "peerMessage":
         return drawFeedPeerMessage(arm.value, rc.previous);
+      case "subagentHandback":
+        return drawFeedSubagentHandback(arm.value);
       case "turnEnded":
         return drawFeedTurnEnded(arm.value, rc);
       case "separation":

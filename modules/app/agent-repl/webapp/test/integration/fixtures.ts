@@ -609,6 +609,17 @@ export const peerMessageRow = (
   );
 
 /**
+ * A SUBAGENT HAND-BACK MARKER — `FeedRow.subagent_handback`: the small inline
+ * badge a subagent's hand-back leaves in the main feed, carrying the daemon's
+ * label and nothing else (the report is drawn in the subagent's own card).
+ */
+export const subagentHandbackRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow(
+    { case: "subagentHandback", value: { label: { text: "agent Explore reported back" } } },
+    overrides,
+  );
+
+/**
  * A REMOVAL — `FeedRow.removed`, the DUAL of an upsert on the same tail: the
  * daemon retired the row this one keys, so the client drops it rather than
  * drawing anything. The arm carries no payload.
