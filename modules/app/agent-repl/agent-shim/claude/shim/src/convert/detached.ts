@@ -165,6 +165,19 @@ export function taskKindOf(taskType: string | undefined): DetachedKindName | und
 }
 
 /**
+ * Whether a task is an AGENT run by its vendor `task_type`: one that names the
+ * subagent kind, or one whose kind was never stated.
+ *
+ * THE UNSTATED CASE IS AN AGENT, and that is a standing rule rather than a
+ * default this helper invents: the subagent terminal is the long-standing
+ * behavior for an untyped task, and only a task the vendor NAMED as something
+ * else is refused one. ONE PLACE for every caller that asks it.
+ */
+export function isAgentTaskType(taskType: string | undefined): boolean {
+  return taskType === undefined || taskType === "" || taskKindOf(taskType) === "subagent";
+}
+
+/**
  * The kind one announcement states. A subagent's carries the agent that is
  * running, so a subagent kind with no agent cannot be built.
  */
@@ -716,7 +729,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
       facts.delete(taskId);
-      return kind === undefined || kind === "local_agent";
+      return isAgentTaskType(kind);
     },
     rememberForeground(taskId) {
       reserve(facts, FACTS_LOST);
@@ -852,7 +865,7 @@ export function convertDetached(
       // which already refuses to settle a shell task's unit for the same
       // reason. (No real capture carries a `task` message at all; the ctrl-b
       // and timeout captures announce from the result.)
-      if (raw.task_type === "local_bash") {
+      if (taskKindOf(raw.task_type) === "bash") {
         LOGGER.debug(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
           "a shell task started; its own tool result announces the detachment and states the cause",
