@@ -676,6 +676,10 @@ func (q *fakeQueue) RequestBounce(context.Context, ids.WorkspaceID, bounce.Reque
 	return bounce.Decision{}, errors.New("fakeQueue: the merge orchestrator never asks for a bounce")
 }
 
+// EndKeptDrain is never asked by the merge orchestrator; a handover's reclaim
+// is the rollout's.
+func (q *fakeQueue) EndKeptDrain(ids.WorkspaceID) {}
+
 func (q *fakeQueue) OnFree(ids.WorkspaceID) {}
 func (q *fakeQueue) OnDeparted(ids.WorkspaceID, promptqueue.Watcher, sessionwatcher.Departure) {
 }
