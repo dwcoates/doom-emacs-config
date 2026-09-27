@@ -891,19 +891,25 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 	}
 }
 
-// TestAForcedRestartJoiningABusyWorkspacesTransferStillTransfersIt pins the
+// TestARestartJoiningABusyWorkspacesTransferStillTransfersIt pins the
 // 2026-09-27 regression at the daemon's own surface: a handover's transfer was
-// registered behind a busy workspace, the forced restart verb joined that
-// registered bounce, and the newest action won -- the restart ran on the
-// outgoing daemon and the workspace was never sent its transfer notice, so its
-// host stream died with the daemon. Both now run: the restart, then the
+// registered behind a busy workspace, the restart verb joined that registered
+// bounce, and the newest action won -- the restart ran on the outgoing daemon
+// and the workspace was never sent its transfer notice, so its host stream died
+// with the daemon. Both now run when the turn ends: the restart, then the
 // transfer, whose notice reaches the host stream.
-func TestAForcedRestartJoiningABusyWorkspacesTransferStillTransfersIt(t *testing.T) {
+//
+// THE RESTART IS GRACEFUL ON PURPOSE. A forced one interrupts the turn first,
+// and whether that turn's end reaches the registry before the restart's own
+// request does is a race: the transfer can start alone and the restart then
+// joins a RUNNING move. A graceful restart registers beside the transfer while
+// the turn still runs, which is exactly the coalescing under test.
+func TestARestartJoiningABusyWorkspacesTransferStillTransfersIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a busy workspace whose transfer is registered behind its turn.
 	selfRepo, d := drainSelfRepoDaemon(t)
-	// The forced restart's trail: the stand-down the fake shim ends by
-	// exiting, and the shim link that dies with it.
+	// The restart's trail: the stand-down the fake shim ends by exiting, and
+	// the shim link that dies with it.
 	d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
 		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
@@ -919,16 +925,22 @@ func TestAForcedRestartJoiningABusyWorkspacesTransferStillTransfersIt(t *testing
 	harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	})
-	d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the transfer registered behind the turn", func(r harness.LogRecord) bool {
-		return r.PID == d.PID() && r.Operation == "daemon.promptqueue.bounce" &&
-			r.Message == "the workspace has work in flight; registered the bounce for when it ends"
-	})
-
-	// Act: the forced restart joins the registered transfer.
-	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: true}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace{force:true} = (%v, %v), want a success", resp, err)
+	registered := func(reason, what string) {
+		d.AwaitWorkspaceLogRecord(f.ws.GetDir(), what, func(r harness.LogRecord) bool {
+			return r.PID == d.PID() && r.Operation == "daemon.promptqueue.bounce" &&
+				r.Message == "the workspace has work in flight; registered the bounce for when it ends" &&
+				r.Context["reason"] == reason
+		})
 	}
+	registered("handover_transfer", "the transfer registered behind the turn")
+	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: false}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace{force:false} = (%v, %v), want a success", resp, err)
+	}
+	registered("restart_verb", "the restart registered beside the transfer")
+
+	// Act: the turn ends, freeing the workspace for the coalesced bounce.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 
 	// Assert: the transfer notice still came, after the restart ran as the
 	// bounce's first stage.
