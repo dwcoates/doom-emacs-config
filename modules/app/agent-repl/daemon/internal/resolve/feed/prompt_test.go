@@ -350,6 +350,30 @@ func TestAnOrdinaryPromptStillDrawsItsBubble(t *testing.T) {
 	}
 }
 
+// A RE-SENT PROMPT REPLACES ITS BUBBLE IN PLACE. The file plane writes an
+// edited or re-sent version of a still-unanswered prompt onto the first
+// version's row and turn (shim-sidecar convert/resend.go), so the feed receives
+// the same turn's prompt again with new words: it must redraw the one bubble,
+// never add a second.
+func TestAPromptReServedOnItsTurnWithNewWordsRedrawsTheOneBubble(t *testing.T) {
+	// Arrange: the first version is drawn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "is that not the case?")
+
+	// Act: the re-sent version arrives on the same turn.
+	h.deliverPrompt("turn-1", "is that not the case? it does send some")
+
+	// Assert.
+	rows := h.userPromptRows()
+	if len(rows) != 1 {
+		t.Fatalf("user-prompt rows = %d, want the one bubble redrawn", len(rows))
+	}
+	blocks := rows[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != "is that not the case? it does send some" {
+		t.Fatalf("bubble holds %v, want the re-sent version's words", blocks)
+	}
+}
+
 // THE DIRECTIVE'S PROMPT STAYS SUPPRESSED WHEN THE OTHER PLANE RE-DELIVERS IT
 // LATE. The file plane's copy of the /clear prompt lands after the turn's
 // terminal; a suppression that forgot the turn at the terminal let it draw a
