@@ -239,6 +239,12 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, fmt.Errorf("create %q: materialize %q: %w", branch, worktreeDir, err)
 	}
 
+	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
+	// registration, a fork's transcript copy, the session bring-up and the
+	// initial prompt's submission (steps 5-7) — is the session stage. Reported
+	// before registration so a watching client stops showing the worktree line
+	// the moment git is done.
+	reportCreateStage(spec, CreateStageStartingSession)
 	record, err := v.Register(ctx, worktreeDir, wsm.RegisterFacts{
 		Name:          branch,
 		Branch:        branch,

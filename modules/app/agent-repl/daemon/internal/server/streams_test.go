@@ -425,8 +425,12 @@ func TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent(t *tes
 		OpId: "op-x",
 		Event: &agentreplv1.WorkspaceMutationProgress_Create{
 			Create: &agentreplv1.WorkspaceCreateProgress{
-				Step: &agentreplv1.WorkspaceCreateProgress_Stage{
-					Stage: agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME,
+				Step: &agentreplv1.WorkspaceCreateProgress_EnteredStage{
+					EnteredStage: &agentreplv1.WorkspaceCreateStage{
+						Stage: &agentreplv1.WorkspaceCreateStage_DerivingName{
+							DerivingName: &agentreplv1.WorkspaceCreateStageDerivingName{},
+						},
+					},
 				},
 			},
 		},

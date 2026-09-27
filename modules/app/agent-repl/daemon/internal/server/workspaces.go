@@ -231,12 +231,14 @@ type createProgressReporter struct {
 }
 
 func (r createProgressReporter) Stage(stage workspace.CreateStage) {
-	var wire agentreplv1.WorkspaceCreateStage
+	wire := &agentreplv1.WorkspaceCreateStage{}
 	switch stage {
 	case workspace.CreateStageDerivingName:
-		wire = agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME
+		wire.Stage = &agentreplv1.WorkspaceCreateStage_DerivingName{DerivingName: &agentreplv1.WorkspaceCreateStageDerivingName{}}
 	case workspace.CreateStageCreatingWorktree:
-		wire = agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_CREATING_WORKTREE
+		wire.Stage = &agentreplv1.WorkspaceCreateStage_CreatingWorktree{CreatingWorktree: &agentreplv1.WorkspaceCreateStageCreatingWorktree{}}
+	case workspace.CreateStageStartingSession:
+		wire.Stage = &agentreplv1.WorkspaceCreateStage_StartingSession{StartingSession: &agentreplv1.WorkspaceCreateStageStartingSession{}}
 	default:
 		// An unmapped stage is a bug in this switch, not a client condition —
 		// but a create's progress relay must never take the daemon down, so it
@@ -249,7 +251,7 @@ func (r createProgressReporter) Stage(stage workspace.CreateStage) {
 		OpId: r.opID,
 		Event: &agentreplv1.WorkspaceMutationProgress_Create{
 			Create: &agentreplv1.WorkspaceCreateProgress{
-				Step: &agentreplv1.WorkspaceCreateProgress_Stage{Stage: wire},
+				Step: &agentreplv1.WorkspaceCreateProgress_EnteredStage{EnteredStage: wire},
 			},
 		},
 	})
