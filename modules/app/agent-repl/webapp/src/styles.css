@@ -3172,36 +3172,25 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    `contain-intrinsic-size: auto <fallback>` is what keeps the scrollbar
    honest while a box is skipped. The `auto` keyword makes the browser REMEMBER
    each box's last rendered size and re-use it, so an item scrolled past twice
-   is only ever estimated once; the length is the first-time guess, and a
-   deferred item overrides it with its own estimate through `--lazy-h`
-   (lazy-item.ts), which is measured from the item's actual text. */
+   is only ever estimated once; the length is the first-time guess. A row's
+   first layout above the reader still changes its height from that guess, and
+   WebKit has no native scroll anchoring to absorb it: the feed anchors the
+   view itself (scroll.ts, `TailFollow`). */
 .feed-item {
   content-visibility: auto;
-  contain-intrinsic-size: auto var(--lazy-h, 320px);
+  contain-intrinsic-size: auto 320px;
 }
 
 /* The overscan buffer's pre-render band (overscan.ts). A row within ~5
    viewport heights of the scroll box is marked so its content-visibility goes
    back to `visible`: it lays out at its real height BEFORE the reader scrolls
-   to it, so nothing shifts under them at the edge. The classic
-   content-visibility jitter is a skipped row laying out for the first time as
-   it enters the viewport and its true height replacing the ~320px guess; this
-   pays that layout a band early. A row that leaves the band loses the class and
-   is skippable again, so the perf win survives for rows far from the viewport. */
+   to it, so a row never changes height at the viewport's edge. Its height
+   still changes from the ~320px guess while it is above the reader, and the
+   feed's scroll anchoring (scroll.ts) keeps that from moving the content under
+   them. A row that leaves the band loses the class and is skippable again, so
+   the perf win survives for rows far from the viewport. */
 .feed-item.overscan {
   content-visibility: visible;
-}
-
-/* The stand-in for an item whose real render has not been paid for yet
-   (lazy-item.ts): the item's own text, wrapped and monospaced-free, at the
-   line height the height estimate assumes. Deliberately unstyled beyond
-   that — it exists to occupy the right amount of space and to keep the item's
-   text in the DOM for the search, not to be mistaken for the real bubble. */
-.feed-placeholder {
-  line-height: 20px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--muted);
 }
 
 /* ---- The login terminal ----------------------------------------------------
