@@ -134,10 +134,19 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 			dlog.Context{"token": token.GetValue(), "pinned_after": minted.afterSeq, "oldest_retained": f.log[0].seq})
 		return nil, ErrTokenExpired
 	}
-	replayed := 0
+	// THE REPLAY OBEYS THE SAME DELIVERY RULES THE LIVE PUSH DOES
+	// (withheldFromPush), judged against the order as it stands now: the log
+	// retains every publication, withheld ones included, and a tail opened
+	// against an earlier pin must not be handed a row the push kept off the
+	// wire.
+	replayed, withheld := 0, 0
 	for _, entry := range f.log {
 		if entry.seq <= minted.afterSeq {
 			r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "entry.seq <= minted.afterSeq"})
+			continue
+		}
+		if entry.row.GetRemoved() == nil && r.withheldFromPush(s, f, entry.row.GetId().GetValue()) {
+			withheld++
 			continue
 		}
 		sub.enqueue(entry.row)
@@ -147,7 +156,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 
 	log.Debug("daemon.feed.tail_opened",
 		"a feed tail was opened at its pinned start",
-		dlog.Context{"feed": key, "pinned_after": minted.afterSeq, "replayed": replayed})
+		dlog.Context{"feed": key, "pinned_after": minted.afterSeq, "replayed": replayed, "withheld": withheld})
 	return &tail{r: r, f: f, sub: sub, token: token}, nil
 }
 

@@ -7,8 +7,40 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/contextcut"
 	"claude-repld/internal/ids"
 )
+
+// THE DRAWN DIVIDER BOUNDS EXACTLY WHEN ITS CUT DOES: the feed reads the bound
+// off drawn rows (boundsDelivery) and the session watcher off the page's cuts
+// (contextcut.Bounds), and the two must be one rule. Each case is one arm.
+func TestADividerBoundsDeliveryExactlyWhenItsCutBounds(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+	}{
+		{name: "cleared", cut: clearedCut()},
+		{name: "compacted", cut: compactedCut("what survived")},
+		{name: "compaction failed", cut: &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "refused"},
+		}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.cutAt("entry-cut", tc.cut)
+
+			// Assert.
+			row := h.only(rootFeed())
+			if got, want := boundsDelivery(row), contextcut.Bounds(tc.cut); got != want {
+				t.Fatalf("boundsDelivery = %v, contextcut.Bounds = %v; the two rules disagree", got, want)
+			}
+		})
+	}
+}
 
 // THE /clear TWO-STAGE DIVIDER. A /clear is reflected the instant the daemon
 // accepts it — the red bar and the cleared feed appear before the shim is asked

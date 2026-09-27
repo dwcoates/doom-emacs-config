@@ -121,6 +121,119 @@ func TestForkedWorkspaceFeedDrawsTheParentsQuestionUnderItsOwnTurnId(t *testing.
 	}
 }
 
+// A FORK'S INHERITED PAST ARRIVES LATE, AND IT NEVER BOUNDS THE FORK'S OWN TURN.
+// The fork resumes a copy of its parent's transcript, and the file plane
+// ingests that copy into the fork's book while the fork's first turn runs: the
+// parent's long conversation — sixteen compactions in it — reaches the fork's
+// watch as live entries, interleaved with the fork's own answers (ship-gns,
+// 2026-09-27). The fork's feed must read: the newest inherited divider, what
+// followed it, then the fork's own question and its answers, contiguous; and a
+// reader following the feed must be pushed only the fork's own rows, so
+// nothing on its screen is ever truncated by an inherited divider.
+func TestAForksLongInheritedHistoryArrivingLiveNeverDisplacesItsOwnTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: a parent with a recorded conversation and a transcript on disk,
+	// forked; a reader following the child's feed from its first moment.
+	f := newOpened(t, harness.Opts{})
+	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
+		t.Fatalf("the parent's StartSession = %v, want fresh", req)
+	}
+	vendorID := f.shim.Info().VendorSessionID
+	f.submit(forkParentQuestion, "fork-long-parent-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	parentProject := createProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
+	if err := os.MkdirAll(parentProject, 0o755); err != nil {
+		t.Fatalf("mkdir the parent's project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(parentProject, vendorID+".jsonl"),
+		[]byte(`{"type":"summary"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed the parent's transcript: %v", err)
+	}
+	child := forkOf(t, f)
+	childShim := f.d.Shim(child)
+	if resume := childShim.ExpectStartSession().GetResume(); resume == nil {
+		t.Fatal("the forked child's StartSession carries no resume")
+	}
+	kid := &fixture{d: f.d, repo: f.repo, ws: child, shim: childShim, t: t}
+	tail := kid.watchRootFeed()
+	own := kid.submit(forkOwnQuestion, "fork-long-child-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).
+		GetSuccess().GetTurn().GetTurn().GetValue()
+	if own == "" {
+		t.Fatal("the fork's own SubmitPrompt minted no turn")
+	}
+
+	// Act: the copied conversation streams in — sixteen compactions, each with
+	// the parent's work around it — and the fork answers in the middle of it.
+	const cuts = 16
+	for i := 0; i < cuts; i++ {
+		childShim.PushAgentFrameIn(mainAgent, "parent-turn-"+itoa(i), feedResponseFrames("inherited-"+itoa(i), inheritedText(i))[1])
+		childShim.PushAgentFrameAt(mainAgent, "inherited-cut-"+itoa(i), updateFrame(mainAgent, &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
+				Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{
+					Summary: &conversationv1.AgentResponseProse{Markdown: "inherited summary " + itoa(i)},
+				}},
+			}},
+		}))
+		if i == cuts/2 {
+			childShim.PushAgentFrameIn(mainAgent, own, feedResponseFrames("own-first", forkOwnFirstAnswer)[1])
+		}
+	}
+	childShim.PushAgentFrameIn(mainAgent, "parent-turn-last", feedResponseFrames("inherited-last", inheritedText(cuts))[1])
+	childShim.PushAgentFrameIn(mainAgent, own, feedResponseFrames("own-last", forkOwnLastAnswer)[1])
+
+	// Assert (the push): everything the reader was pushed up to the fork's
+	// last answer is the fork's own.
+	var pushed []*frontendv1.FeedRow
+	awaitRow(t, kid, tail, "the fork's last answer on the push", func(r *frontendv1.FeedRow) bool {
+		pushed = append(pushed, r)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == forkOwnLastAnswer
+	})
+	for _, r := range pushed {
+		prose := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
+		if r.GetSeparation() != nil || strings.HasPrefix(prose, inheritedPrefix) {
+			t.Fatalf("the reader was pushed an inherited row %q: the inherited past is served by pages only", r.GetId().GetValue())
+		}
+	}
+
+	// Assert (the page): the newest inherited divider, the inherited turn
+	// after it, then the fork's question and both its answers, contiguous.
+	page, _ := kid.openFeedOnceCarrying("the inherited turn after the newest cut", func(p *frontendv1.FeedPage) bool {
+		return forkIndexOf(forkFeedTexts(p), inheritedText(cuts)) >= 0
+	})
+	var got []string
+	for _, r := range page.GetSuccess().GetRows() {
+		switch {
+		case r.GetSeparation() != nil:
+			got = append(got, "divider: "+r.GetSeparation().GetCompacted().GetSummary().GetMarkdown())
+		case r.GetUserPrompt() != nil && promptText(r) == forkParentQuestion:
+			// The ported question stands above the store's copy by the ported
+			// plane's own rule; it is not what this case is about.
+		case r.GetUserPrompt() != nil:
+			got = append(got, promptText(r))
+		case r.GetActivity().GetResponse() != nil:
+			got = append(got, r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown())
+		}
+	}
+	want := []string{
+		"divider: inherited summary " + itoa(cuts-1), inheritedText(cuts),
+		forkOwnQuestion, forkOwnFirstAnswer, forkOwnLastAnswer,
+	}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("the fork's feed reads %v, want %v", got, want)
+	}
+}
+
+// inheritedPrefix marks every sentence of the fork's inherited past.
+const inheritedPrefix = "inherited work "
+
+// inheritedText is the Ith inherited response's sentence.
+func inheritedText(i int) string { return inheritedPrefix + itoa(i) }
+
+// The fork's own two answers in the long-history case.
+const (
+	forkOwnFirstAnswer = "the fork's first answer"
+	forkOwnLastAnswer  = "the fork's last answer"
+)
+
 // The three sentences the fork tests read back off the feed. They are
 // distinctive so a substring match cannot confuse one for another.
 const (

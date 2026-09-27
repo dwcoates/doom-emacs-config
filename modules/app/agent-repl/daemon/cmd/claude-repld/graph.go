@@ -400,6 +400,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A REPLAYED TURN WHOSE PAGE CARRIES NO TERMINAL is ended from its
 		// durable close, the record the prompt queue's door wrote.
 		TurnCloses: p.DB.TurnCloses,
+		// A FORK'S OWN TURNS are the ones its workspace recorded; every other
+		// main-agent entry of its book is the conversation it inherited.
+		OwnedTurns: p.DB.RecordedTurns,
 		Faults:     p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
