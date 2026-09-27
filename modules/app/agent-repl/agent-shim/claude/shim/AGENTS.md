@@ -902,6 +902,49 @@ a constant-size join, and these are its invariants:
   capture's terminals, and after a mixed fake-SDK workload, it is empty
   (`test/convert/fold.test.ts`).
 
+## A detached shell's lifecycle is the shim's to write (2026-09-27)
+
+`convert/detached.ts` (`shellRunStartEntry`, `shellRunTerminalEntry`),
+`engine/detached.ts` (`ShellRunStarts`), `engine/turn.ts` (`watchBash`).
+Paid for by task `bfa5s1wjd`: a hand-backgrounded shell that concluded in
+eleven seconds got no store row at all (its rows came only from the sidecar
+tailing the spool, and none were written), so `WatchBash` stood open, SILENT,
+forever, and the run's announcement stayed open in the record.
+
+- **THE SHIM WRITES A RUN'S START AND ITS TERMINAL; THE SIDECAR WRITES ITS
+  OUTPUT.** The start (`bash:<run>:start`) rides AHEAD of every announcement of
+  the run in the one ordered buffer — the `Bash` result that says it moved, and
+  a by-hand backgrounding's `task_updated` — and is restated at the conclusion.
+  The terminal (`bash:<run>:terminal`) is written from the task's
+  `task_notification`, the moment the engine retires the run: `completed` and
+  `failed` settle `completed` (a non-zero exit is the command's own verdict),
+  `stopped` settles `interrupted.by_user` (no cause for `worker_restart`), and
+  the output is `not_observed`, because every byte of it is the spool's.
+- **ONE WRITE IDENTITY PER RUN AND ARM.** The source coordinate is the run
+  itself (`shell-run:<run>`), so every restatement of a start mints the same
+  write id and the store's ledger absorbs all but the first.
+- **THE KEYS ARE THE CROSS-PLANE ONES**, the sidecar's `BashStartKey` /
+  `BashTerminalKey` spellings, so a sidecar row for the same fact lands on the
+  same row and a run has ONE start and ONE terminal. A sidecar terminal written
+  later supersedes the shim's whole and carries the spool's evidence (the exit
+  status, the output). Nothing written after a terminal reopens the run: the
+  store only ever ENDS a `detached_work` row, and a late tail is an upsert of
+  its own row, served on the next replay and never re-listed as live.
+- **`WatchBash` NEVER WAITS.** The stream is opened only after the run's
+  remembered start is made DURABLE (`writeDurable` of the same entry — absorbed
+  if it already landed, landed behind the original if not), so its first frame
+  is `start` at once; a concluded run replays and closes on its terminal; a run
+  the store holds no row for is refused `NotFound` (`unknown_work`), which is
+  the contract's "not a live shell: refused". There is no recheck cadence and
+  no standing predicate any more. A start that cannot be made durable refuses
+  the watch rather than opening it.
+- **WHAT IT DOES NOT COVER.** A run whose call this fold never saw open has no
+  start to write (the command is unknown); its terminal is still written, with
+  the command unset. Precedence between the planes is last-writer-wins on the
+  terminal key, exactly as `StopBash`'s own terminal already was: a shim
+  terminal landing after a sidecar `EXIT=` row replaces the spool's evidence on
+  that row (the tail row keeps the output).
+
 ## The store writer: it never drops a row
 
 `src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
@@ -1021,8 +1064,8 @@ through (`write`, `writeDurable`). Its invariants:
     races the first write and loses on every fresh bring-up, and refusing there
     reached the daemon as `link_fault` → `open_fault{link_severed}`.
   - **THE PRODUCER IS THE ARBITER** (`SessionContext.knowsAgent`). It rides down
-    into the record plane as `openAgentPage`'s `known` predicate, the exact
-    counterpart of `openBashRun`'s `stillLive`:
+    into the record plane as `openAgentPage`'s `known` predicate (a shell
+    run needs no such predicate: its start is written before it is announced):
     - vouched for → the refusal is WAITED OUT: an empty opening page now, and
       the tail stood on the book's first row (woken by the write that lands it,
       `Reader.noteAgentRows`). `ReadHistory` answers the same empty page rather
