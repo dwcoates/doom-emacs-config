@@ -143,14 +143,17 @@ store_probe_metadata() {
 
 # store_probe_body_key FILE — reads a Connect JSON response body and prints the
 # response's single top-level key on the first line ("success" or "failure";
-# "?multi" when the object carries more than one key) and, on the second line,
-# that arm's `detail` string when it has one.
+# "?multi" when the object carries more than one key), that arm's `detail`
+# string on the second line when it has one, the failure arm's `kind` oneof
+# field name (snake_case, e.g. "invalid_request") on the third line, and — for
+# an invalid_request kind only — the offending `field` name on the fourth
+# line. The last two lines are empty for a success arm or any other kind.
 #
 # Exit 0  the body is a JSON object and the key was printed.
 # Exit 3  the body is not a JSON object (malformed or a JSON non-object).
 store_probe_body_key() {
   python3 - "$1" <<'PY'
-import json, sys
+import json, re, sys
 
 try:
     with open(sys.argv[1]) as fh:
@@ -163,25 +166,51 @@ keys = list(doc)
 if len(keys) != 1:
     print("?multi")
     print("")
+    print("")
+    print("")
     sys.exit(0)
 key = keys[0]
 arm = doc[key]
 detail = arm.get("detail", "") if isinstance(arm, dict) else ""
+kind = ""
+field = ""
+if isinstance(arm, dict):
+    # The failure arm's oneof `kind` serializes as whichever sub-message key
+    # is present besides `detail`; protojson spells it camelCase.
+    for k, v in arm.items():
+        if k == "detail":
+            continue
+        kind = re.sub(r"(?<!^)(?=[A-Z])", "_", k).lower()
+        if isinstance(v, dict):
+            field = v.get("field", "") if isinstance(v.get("field", ""), str) else ""
+        break
 print(key)
 print(detail if isinstance(detail, str) else "")
+print(kind)
+print(field)
 PY
 }
 
-# check_store_connect_rpc RPC CHECK_SUFFIX — probe one store.v1.ShimStore
-# endpoint over the store's UDS. STRICTLY READ-ONLY: both probed rpcs are pure
-# reads and the request body is the empty message, so the probe can never
-# mutate store state.
+# check_store_connect_rpc RPC CHECK_SUFFIX [EXPECTED_REFUSAL_FIELD] — probe one
+# store.v1.ShimStore endpoint over the store's UDS. STRICTLY READ-ONLY: both
+# probed rpcs are pure reads and the request body is the empty message, so the
+# probe can never mutate store state.
+#
+# EXPECTED_REFUSAL_FIELD, when non-empty, names a field whose invalid_request
+# failure arm is the HEALTHY answer for an intentionally-unscoped probe (e.g.
+# GetLiveWork always refuses an empty request with invalid_request naming
+# "session" — see shim-store/AGENTS.md, "GetLiveWork IS SCOPED TO ONE
+# SESSION"). That exact refusal PASSes: it proves the store is serving and
+# enforcing its contract. Any OTHER failure — a different field, a different
+# kind (storage_failure), a transport error, a non-200, a malformed body —
+# still FAILs; this never weakens detection of a genuinely unhealthy store.
 check_store_connect_rpc() {
   local rpc="$1"
   local name="store-connect-$2"
+  local expected_refusal_field="${3:-}"
   local procedure="store.v1.ShimStore/$rpc"
   local request_id url body err out rc http_status latency_ms
-  local failure_class reason hint key detail instr http_status_json
+  local failure_class reason hint key detail kind field instr http_status_json
 
   request_id="doctor-$(date +%s)-$$-$RANDOM"
   url="http://store/$procedure"
@@ -292,6 +321,8 @@ check_store_connect_rpc() {
   fi
   key="$(printf '%s\n' "$out" | sed -n '1p')"
   detail="$(printf '%s\n' "$out" | sed -n '2p')"
+  kind="$(printf '%s\n' "$out" | sed -n '3p')"
+  field="$(printf '%s\n' "$out" | sed -n '4p')"
   rm -f "$body" "$err"
 
   case "$key" in
@@ -304,11 +335,19 @@ check_store_connect_rpc() {
       ;;
     failure)
       [ -n "$detail" ] || detail="the store returned the failure arm with no detail"
-      record "$name" "FAIL" \
-        "$procedure answered the failure arm (request_id=$request_id; latency_ms=$latency_ms; detail=$detail)" \
-        "the store is serving but REFUSED this read; its detail names the cause — inspect $LOG_DIR/shim-store.log for the matching refusal record" \
-        "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "failure_arm" "$detail" "$http_status_json")" \
-        "$instr"
+      if [ -n "$expected_refusal_field" ] && [ "$kind" = "invalid_request" ] && [ "$field" = "$expected_refusal_field" ]; then
+        record "$name" "PASS" \
+          "$procedure answered the expected scoped refusal (request_id=$request_id; latency_ms=$latency_ms; field=$field; detail=$detail)" \
+          "" \
+          "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" true "" "store correctly refused an unscoped request naming $field" "$http_status_json")" \
+          "$instr"
+      else
+        record "$name" "FAIL" \
+          "$procedure answered the failure arm (request_id=$request_id; latency_ms=$latency_ms; kind=$kind; field=$field; detail=$detail)" \
+          "the store is serving but REFUSED this read; its detail names the cause — inspect $LOG_DIR/shim-store.log for the matching refusal record" \
+          "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "failure_arm" "$detail" "$http_status_json")" \
+          "$instr"
+      fi
       ;;
     *)
       record "$name" "FAIL" \
@@ -514,7 +553,7 @@ done
 # --- Run ----------------------------------------------------------------
 
 check_store_socket_present
-check_store_connect_rpc GetLiveWork get-live-work
+check_store_connect_rpc GetLiveWork get-live-work session
 check_store_connect_rpc GetSidecarCursors get-sidecar-cursors
 check_launchd_service "$STORE_LABEL"
 check_launchd_service "$SIDECAR_LABEL"
