@@ -91,10 +91,36 @@ type wsState struct {
 	// stands, so a judge that was already in flight when the content changed
 	// can never stamp — or interject — the new content with the old verdict.
 	// Lock order: drain, then verdicts; nothing holding verdicts takes drain.
-	verdicts        sync.Mutex
-	epochs          map[ids.TurnID]uint64
-	uninterruptible conversationv1.SessionCommand
-	acts            []Act
+	verdicts sync.Mutex
+	epochs   map[ids.TurnID]uint64
+	// cut is the context cut — /clear or /compact — that is the running
+	// turn, nil when none is. It is THE QUEUE'S KNOWLEDGE THAT THE RUNNING
+	// TURN IS A SESSION ACT: every path that could interrupt or overtake the
+	// running turn (a verdict, an interjection, a release, the turn end's
+	// pop) reads it. Guarded by q.mu; set by runContextCut, retired by the
+	// turn's end or a refused start.
+	cut  *runningCut
+	acts []Act
+}
+
+// runningCut is a context cut running as the session's turn.
+type runningCut struct {
+	// turn is the cut's own turn.
+	turn ids.TurnID
+	// command is /clear or /compact.
+	command conversationv1.SessionCommand
+}
+
+// runningCut answers the context cut that is the workspace's running turn. It
+// takes q.mu alone and waits on nothing else.
+func (q *queue) runningCut(ws ids.WorkspaceID) (runningCut, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	state, ok := q.states[ws]
+	if !ok || state.cut == nil {
+		return runningCut{}, false
+	}
+	return *state.cut, true
 }
 
 // queue is the one delivery path.

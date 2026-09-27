@@ -453,3 +453,68 @@ func TestDeliverSurfacesATurnAlreadyOpenWithoutRetrying(t *testing.T) {
 		t.Fatalf("footer turns = %+v, want the submitting turn cleared after the refusal", turns)
 	}
 }
+
+// --- a context cut's text is delivered as a context cut --------------------
+
+func TestAHeldCompactIsDeliveredAsTheRunningSessionAct(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact keep the plan")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	cut, ok := h.q.runningCut(theWorkspace)
+	if !ok || cut.turn != "t1" || cut.command != conversationv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Fatalf("running cut = (%+v, %v), want t1 recorded as the running /compact", cut, ok)
+	}
+}
+
+func TestAHeldCompactIsSentWithItsInstructions(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact\nkeep the plan")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if got := saidText(h.sender.said[0]); got != "/compact keep the plan" {
+		t.Fatalf("text = %q, want the literal and its instructions", got)
+	}
+}
+
+func TestAHeldCompactIsRetiredFromTheTrayOnceDelivered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if tomb := h.db.retired("t1"); tomb == nil || tomb.Kind != tombstoneDelivered {
+		t.Fatalf("tombstone = %+v, want the hold retired as delivered", tomb)
+	}
+}
+
+func TestAClearSubmittedWithNothingRunningIsRunAsTheSessionAct(t *testing.T) {
+	// Arrange: a caller that never went through the handler's recognition.
+	h := newHarness(t)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/clear")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	cut, ok := h.q.runningCut(theWorkspace)
+	if !ok || cut.turn != "t1" || cut.command != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR {
+		t.Fatalf("running cut = (%+v, %v), want t1 recorded as the running /clear", cut, ok)
+	}
+}

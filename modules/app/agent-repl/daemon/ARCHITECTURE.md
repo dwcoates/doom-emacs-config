@@ -70,6 +70,8 @@ daemon/
       topbar/      topbar resolver
       sidebar/     sidebar (roster) resolver
       holds/       hold-tray resolver
+    sessioncommand/ the ONE parse of text as a slash command (the SessionCommand enum's spec
+                   option) and the context-cut predicate; prompthandler and promptqueue both use it
     prompthandler/ SubmitPrompt body (command recognition, mirror, forward to queue)
     promptqueue/   the one delivery path; holds; classifier call; interject; parked ledger; drain on turn end
     classifier/    the routing question, asked through headless/ + -fake keyword heuristic
@@ -100,7 +102,7 @@ daemon/
 
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
-feedid, prompts, publish, apiresponses, flock, clock  <  wsm, sessionlock, shimclient, gitclient,
+feedid, prompts, publish, apiresponses, flock, clock, sessioncommand  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
 health, commandfile, worktreereap  <  server, boot  <  cmd. The shim client and git

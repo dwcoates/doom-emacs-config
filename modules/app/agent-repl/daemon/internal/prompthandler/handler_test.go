@@ -338,6 +338,38 @@ func TestSubmitSendsAContextCutDownTheQueuesPath(t *testing.T) {
 	}
 }
 
+// TestSubmitNeverForwardsAContextCutAsAPrompt pins the handler's half of the
+// owner's ruling: /compact, /compact <text> and /clear never reach the queue's
+// Submit, whose running-turn path is the one that asks the routing classifier.
+func TestSubmitNeverForwardsAContextCutAsAPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		kind string
+	}{
+		{name: "a bare /compact", text: "/compact", kind: promptqueue.ActCompact},
+		{name: "/compact with instructions", text: "/compact foo bar", kind: promptqueue.ActCompact},
+		{name: "a bare /clear", text: "/clear", kind: promptqueue.ActClear},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			if _, err := h.submit(tt.text); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			// Assert
+			if got := h.queue.forwarded(); len(got) != 0 {
+				t.Fatalf("forwarded = %v, want nothing on the prompt path", got)
+			}
+			if acts := h.queue.sessionActs(); len(acts) != 1 || acts[0].Kind != tt.kind {
+				t.Fatalf("acts = %v, want the %s act", acts, tt.kind)
+			}
+		})
+	}
+}
+
 func TestSubmitSendsAModelChangeDownTheQueuesPathWithNoTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

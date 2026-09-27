@@ -88,6 +88,13 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if running := watcher.TurnInFlight(); running != nil {
 		return q.hold(ctx, sub, *running, nil, log)
 	}
+	// A RECORDED CONTEXT CUT IS A RUNNING TURN even in the instant before the
+	// watcher learns of it: runContextCut records the cut before it tells the
+	// watcher or asks the shim, so a submission landing between the two is
+	// held behind the act, never started beside it.
+	if cut, ok := q.runningCut(sub.WS); ok {
+		return q.hold(ctx, sub, cut.turn, nil, log)
+	}
 	// A SUBMISSION GOING STRAIGHT TO THE SHIM IS A DELIVERY DECISION, taken
 	// under the delivery lock held since the bounce check above, where a
 	// standing edit is read: a prompt submitted while an edit stands is queued

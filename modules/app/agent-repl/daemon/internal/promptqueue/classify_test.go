@@ -102,7 +102,7 @@ func TestEveryVerdictIsLoggedAtInfoWithItsReason(t *testing.T) {
 func TestAContextCutVerdictIsLoggedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.q.state(theWorkspace).uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.q.state(theWorkspace).cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR}
 	h.watcher.running("t-running")
 	// Act.
 	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
@@ -548,7 +548,7 @@ func TestAFailedInterruptLeavesNoQueueJumpBehind(t *testing.T) {
 func TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush(t *testing.T) {
 	// Arrange: a context cut is the running turn.
 	h := newHarness(t)
-	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.q.state("ws-1").cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR}
 	h.watcher.running("t-running")
 
 	// Act.
@@ -572,7 +572,7 @@ func TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush(t *testing
 func TestAHoldBehindAContextCutAsksNoClassifier(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_COMPACT
+	h.q.state("ws-1").cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT}
 	h.watcher.running("t-running")
 
 	// Act.
@@ -651,6 +651,219 @@ func TestArmNameRendersEveryClassificationArm(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("armName(%v) = %q, want %q", tc.arm, got, tc.want)
+			}
+		})
+	}
+}
+
+// --- a running session act cannot be interjected ---------------------------
+//
+// The refusal is on interject itself, the one path every interjection takes,
+// so a verdict that was already in flight when a /clear or /compact began
+// cannot interrupt it.
+
+// verdictSettlesUnderACut holds an interjecting verdict in flight against an
+// ordinary running turn, begins a context cut underneath it, then lets the
+// verdict settle.
+func verdictSettlesUnderACut(t *testing.T, h *harness, command conversationv1.SessionCommand) {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	release := h.judge.hold()
+	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-h.judge.asking()
+	h.beginCut("cut-1", command)
+	release()
+	h.q.waitForClassifications()
+}
+
+func TestAnInterjectingVerdictSettlingUnderAContextCutSendsNoInterrupt(t *testing.T) {
+	tests := []struct {
+		name    string
+		command conversationv1.SessionCommand
+	}{
+		{name: "under /compact", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT},
+		{name: "under /clear", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			verdictSettlesUnderACut(t, h, tt.command)
+			// Assert
+			if killed := h.sender.killed(); len(killed) != 0 {
+				t.Fatalf("killed = %v, want no interrupt while a session act runs", killed)
+			}
+		})
+	}
+}
+
+func TestAnInterjectingVerdictSettlingUnderAContextCutInstallsNoQueueJump(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	verdictSettlesUnderACut(t, h, conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	// Assert
+	h.q.mu.Lock()
+	head := h.q.states[theWorkspace].head
+	h.q.mu.Unlock()
+	if head != nil {
+		t.Fatalf("head = %s, want no queue jump past a running session act", *head)
+	}
+}
+
+func TestAnInterjectingVerdictSettlingUnderAContextCutIsStampedUninterruptible(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	verdictSettlesUnderACut(t, h, conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	// Assert
+	held := h.db.hold("t1")
+	if held.Classification.Arm != wsm.ArmUninterruptibleTurn ||
+		held.Classification.Command != conversationv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Fatalf("classification = %+v, want uninterruptible_turn naming /compact", held.Classification)
+	}
+}
+
+func TestAPromptKeptFromInterjectingByASessionActIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	verdictSettlesUnderACut(t, h, conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opInterject &&
+			r.Context["session_act_turn"] == "cut-1" &&
+			r.Context["session_act"] == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT.String() &&
+			r.Context["held_turn"] == "t1" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want one info naming the act's turn, the act and the held prompt's turn", h.log.Records())
+}
+
+func TestAnInterjectingVerdictStillInterruptsAnOrdinaryTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	if killed := h.sender.killed(); len(killed) != 1 || killed[0] != "running-turn" {
+		t.Fatalf("killed = %v, want the ordinary running turn interrupted", killed)
+	}
+}
+
+// --- a prompt that IS a session act is queued, never classified ------------
+
+func TestASessionActPromptNeverReachesTheClassifierWhileATurnRuns(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "a bare /compact", text: "/compact"},
+		{name: "/compact with instructions", text: "/compact foo bar"},
+		{name: "/compact with instructions on the next line", text: "/compact\nfoo bar"},
+		{name: "a bare /clear", text: "/clear"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert
+			if asked := h.judge.questions(); len(asked) != 0 {
+				t.Fatalf("classifier asked %v, want a session act never classified", asked)
+			}
+		})
+	}
+}
+
+func TestASessionActPromptIsHeldForTheRunningTurnsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "/compact foo bar"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("classification = %+v, want hold_for_turn_end with no classifier", got.Classification)
+	}
+}
+
+func TestASessionActPromptNeverInterruptsTheRunningTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want no routing verdict and so no interrupt", killed)
+	}
+}
+
+func TestASessionActPromptKeptFromTheClassifierIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opClassify && r.Context["held_turn"] == "t1" &&
+			r.Context["session_act"] == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT.String() &&
+			r.Context["running_turn"] == "running-turn" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want one info naming the held turn, the act and the running turn", h.log.Records())
+}
+
+func TestANearMissOfASessionActIsClassifiedAsBefore(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "a longer word that begins with the literal", text: "/compacting"},
+		{name: "the literal not at the start", text: "please /compact"},
+		{name: "/clear with trailing text, which the schema says it does not take", text: "/clear the table"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert
+			if asked := h.judge.questions(); len(asked) != 1 || asked[0][1] != tt.text {
+				t.Fatalf("classifier asked %v, want the prompt routed as today", asked)
 			}
 		})
 	}
