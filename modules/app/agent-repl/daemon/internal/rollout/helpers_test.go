@@ -524,6 +524,8 @@ type fakeFleet struct {
 	resumeCold   map[ids.WorkspaceID]*conversationv1.SessionCold
 	// handOverErr is what HandOver answers for a workspace with a session.
 	handOverErr map[ids.WorkspaceID]error
+	// onAdopt, when set, runs as each Adopt arrives, before it answers.
+	onAdopt func(ws ids.WorkspaceID)
 
 	installs  []ids.WorkspaceID
 	adoptions []ids.WorkspaceID
@@ -587,6 +589,9 @@ func (f *fakeFleet) Install(_ context.Context, ws ids.WorkspaceID, c shimclient.
 
 func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
 	f.order.record("adopt")
+	if f.onAdopt != nil {
+		f.onAdopt(ws)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.adoptErr[ws]; err != nil {
