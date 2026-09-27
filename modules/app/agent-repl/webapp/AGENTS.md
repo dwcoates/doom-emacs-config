@@ -380,6 +380,21 @@ hand any more:
   reconnect, reload, compaction replay — snapshots them by row `FeedId` across
   the teardown (`snapshotExpanded`/`retainRows` in src/expand.ts, spent in
   `feed-view.ts`), the expanded bubble's own 50vh scroll box included.
+- **AN OPEN SECTION CLOSES WHEN THE READER LEAVES IT** (2026-09-27). The one
+  `AutoCollapse` owner in `src/expand.ts` (one per document; every
+  `installClickExpand` host registers with it) closes every open capped section
+  through the same `collapseSection` a click uses, on: a `wheel` whose target
+  is outside that section, a `pointerdown` on another box's classic scrollbar,
+  the window's own `blur`, or `visibilitychange` to hidden. It never listens to
+  `scroll`, so no layout change (the expand, the collapse, a follow) can trip
+  it. Each close is a DEBUG `expand.auto-collapse` with `trigger` and `kind`.
+  Known gap: a keyboard-only Emacs window or workspace switch made while the
+  WKWebView still holds first responder fires no DOM signal at all.
+  Its twin: A WHEEL INSIDE AN OPEN SECTION NEVER MOVES THE FEED. The open box
+  wears `overscroll-behavior: contain`, and `installIntentScroll` (scroll.ts),
+  told which section is open by `expandedSectionAt`, never redirects that
+  wheel and consumes it (`preventDefault`) once no box up to the section can
+  move further (`sectionTakesDelta`). A collapsed box's wheel is the feed's.
 - **EVERY CLICK IS AN RPC**, and its refusal renders AT the clicked control,
   never as pushed state. Domain outcomes (deny, nothing-running, empty) are
   SUCCESS arms.

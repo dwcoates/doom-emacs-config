@@ -457,6 +457,30 @@ describe("the collapse/expand height model", () => {
     expect(expanded).toMatch(/overflow-y:\s*auto/);
   });
 
+  it.each([".expanded", ".bubble > .bubble-scroll.expanded", ".tool-fold.expanded > .tool-output"])(
+    "contains the overscroll of the open box %s, so it never chains to the feed",
+    (selector) => {
+      // Arrange / Act
+      const containing = rulesOf(stylesheet).filter(
+        (rule) => rule.selectors.includes(selector) && /overscroll-behavior:\s*contain/.test(rule.declarations),
+      );
+
+      // Assert
+      expect(containing).toHaveLength(1);
+    },
+  );
+
+  it("contains no collapsed box's overscroll, whose wheel stays the feed's", () => {
+    // Arrange / Act
+    const containing = rulesOf(stylesheet)
+      .filter((rule) => /overscroll-behavior/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => !selector.includes(".expanded"));
+
+    // Assert
+    expect(containing).toEqual([]);
+  });
+
   it("retires the old expand-to-full-length model, which never revealed a bar", () => {
     // Arrange / Act
     const expanded = declarationsOf(".expanded");
@@ -2199,6 +2223,136 @@ describe("the warning chip as the one error surface", () => {
  * THE BORDER LADDER (owner ruling, 2026-09-23): a settled mid-turn response is
  * pear and the turn's answer stays green; thinking wears no border at all.
  */
+describe("the expanded response's eggshell border", () => {
+  /** The one rule that paints it. */
+  const EGGSHELL_SELECTOR = '.bubble[data-role="response"]:has(> .bubble-scroll.expanded)';
+
+  /** A bubble wearing ATTRS and HOOKS, its scroll box open when OPEN. */
+  function bubbleOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[], open: boolean): HTMLElement {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    const box = document.createElement("div");
+    box.className = open ? "bubble-scroll expanded" : "bubble-scroll";
+    el.append(box);
+    return el;
+  }
+
+  /**
+   * The border color an `!important` rule matching EL forces, or null when no
+   * such rule matches and the ladder's own cascade decides. jsdom's cascade
+   * cannot answer this directly: it neither honors `!important` nor expands a
+   * `border-color: var(...)` shorthand into the longhands it reports. An
+   * important declaration outranks every normal one by the CSS cascade itself,
+   * and the uniqueness test below keeps it the only one, so this is the paint.
+   */
+  function borderOf(el: HTMLElement): string | null {
+    for (const rule of rulesOf(stylesheet)) {
+      const forced = /(?:^|;)\s*border-color\s*:\s*([^;!]*?)\s*!important/.exec(rule.declarations);
+      if (forced !== null && rule.selectors.some((sel) => el.matches(sel))) return forced[1];
+    }
+    return null;
+  }
+
+  const RESPONSES = [
+    ["a streaming response", { "data-role": "response", "data-variant": "response" }, []],
+    ["a thinking bubble (yellow)", { "data-role": "response", "data-variant": "thinking" }, []],
+    ["an interim response (pear)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
+    ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
+    ["the selected answer (blue)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response", "entry-selected"]],
+    ["a selected interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["entry-selected"]],
+    ["a turn that ended (red)", { "data-role": "response", "data-variant": "turn-ended" }, []],
+    ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
+    ["a compaction summary", { "data-role": "response", "data-variant": "compaction" }, []],
+  ] as const;
+
+  it.each(RESPONSES)("borders %s eggshell while its box is open", (_label, attrs, hooks) => {
+    // Arrange
+    const el = bubbleOf(attrs, hooks, true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBe("var(--expanded-response-border)");
+  });
+
+  const PROMPTS = [
+    ["a user prompt", { "data-role": "prompt", "data-variant": "user" }, ["user"]],
+    ["an agent-addressed prompt", { "data-role": "prompt", "data-variant": "agent" }, ["user", "prompt-agent"]],
+    ["a peer message", { "data-role": "prompt", "data-variant": "peer" }, ["peer"]],
+    ["a held prompt", { "data-role": "prompt", "data-variant": "held" }, ["held-right"]],
+  ] as const;
+
+  it.each(PROMPTS)("never borders %s eggshell, open or not", (_label, attrs, hooks) => {
+    // Arrange
+    const el = bubbleOf(attrs, hooks, true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it("never borders an open tool card eggshell", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "tool-card tool-fold expanded";
+    // Act
+    const border = borderOf(card);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it("keys on the bubble's OWN box, not an open section nested deeper inside it", () => {
+    // Arrange — a closed response holding an open box further down.
+    const el = bubbleOf({ "data-role": "response", "data-variant": "response" }, [], false);
+    const nested = document.createElement("div");
+    nested.className = "bubble-scroll expanded";
+    el.querySelector(".bubble-scroll")?.append(nested);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it.each([
+    ["the answer's green", ["final-response"], '.bubble.final-response:not([data-variant="thinking"])'],
+    ["the selected answer's blue", ["final-response", "entry-selected"], ".bubble.final-response.entry-selected"],
+  ] as const)("hands back %s once the box closes", (_label, hooks, prior) => {
+    // Arrange — opened, then closed through the one collapse's class change.
+    const el = bubbleOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, hooks, true);
+    el.querySelector(".bubble-scroll")?.classList.remove("expanded");
+    // Act — nothing forces a color any more, and the ladder's rule still applies.
+    const state = [borderOf(el), el.matches(prior)];
+    // Assert
+    expect(state).toEqual([null, true]);
+  });
+
+  it("recolors the reserved hairline only, so opening a response never reflows it", () => {
+    // Arrange / Act
+    const rule = declarationsOf(EGGSHELL_SELECTOR) ?? "";
+    // Assert
+    expect(rule.trim()).toBe("border-color: var(--expanded-response-border) !important;");
+  });
+
+  it("is the one !important border in the sheet, so it outranks every other by construction", () => {
+    // Arrange / Act
+    const important = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*border[\w-]*\s*:[^;]*!important/.test(rule.declarations))
+      .map((rule) => rule.selectors.join(", "));
+    // Assert
+    expect(important).toEqual([EGGSHELL_SELECTOR]);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", darkThemeBlock],
+  ] as const)("defines the eggshell token in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const declared = block();
+    // Assert
+    expect(declared).toMatch(/--expanded-response-border:\s*#[0-9a-fA-F]{6}/);
+  });
+});
+
 describe("the response border ladder", () => {
   /** The hue, in degrees, of every `NAME: #rrggbb` declaration, in sheet order (light, then dark). */
   function huesOf(name: string): number[] {
