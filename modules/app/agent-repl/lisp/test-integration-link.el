@@ -1003,6 +1003,11 @@ out of the dolist would leave the reconnect loop never armed."
               (should (string-match-p "consumer=agent-repl-itest-link--boom-down-hook"
                                       (alist-get 'message entry))))
             ;; Assert: the reconnect still stands on the daemon that returns.
+            ;; The abort drops only the stream: PRIMARY is still alive and
+            ;; still owns `daemon.addr', so a reconnect tick landing before
+            ;; the successor publishes would re-attach to PRIMARY.  Stop it
+            ;; first so the restart is the only daemon the loop can find.
+            (agent-repl-itest--stop-daemon primary t)
             (let ((successor (agent-repl-itest--start-daemon state-dir)))
               (unwind-protect
                   (progn
@@ -1094,7 +1099,10 @@ fanout §6: \"run `agent-repl-link-up-functions' with CONN\"."
           (agent-repl-itest--wait-until (lambda () down-args) nil "the down hook")
           ;; Assert: the down arg is the connection that died.
           (should (eq (car down-args) primary-conn))
-          ;; Act: reconnect.
+          ;; Act: reconnect.  PRIMARY survives the abort and still owns
+          ;; `daemon.addr'; stop it so the restart is the only daemon the
+          ;; reconnect loop can find.
+          (agent-repl-itest--stop-daemon primary t)
           (let ((successor (agent-repl-itest--start-daemon state-dir)))
             (unwind-protect
                 (progn
