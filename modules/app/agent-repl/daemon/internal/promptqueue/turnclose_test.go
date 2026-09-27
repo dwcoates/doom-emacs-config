@@ -31,6 +31,23 @@ func TestTheDoorTellsTheFeedTheCloseItRecorded(t *testing.T) {
 	}
 }
 
+// TestTheDoorRecordsTheDurableClose pins the record that says the row IS
+// closed: the session watcher's `turn_ended` is written before the stamp, so
+// an observer that must not cut a turn's close (a SIGKILL in a test, an
+// investigation) waits on this one.
+func TestTheDoorRecordsTheDurableClose(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "turn-1", wsm.CloseCompleted)
+
+	// Assert
+	if !recordWith(h.log.Records(), "debug", opTurnEnded, "stamped the turn's close") {
+		t.Fatalf("records = %+v, want the durable close recorded", h.log.Records())
+	}
+}
+
 func TestTheDoorDrawsTheEndingWhenTheDurableWriteFails(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
