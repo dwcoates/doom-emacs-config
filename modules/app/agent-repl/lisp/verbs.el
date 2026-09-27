@@ -1351,9 +1351,15 @@ and a doctor reading only the pull would miss them."
   (agent-repl-verb-close (agent-repl-verbs--target-ws ws "Close workspace: ")))
 
 (defun agent-repl-kill-workspace (&optional ws)
-  "Kill the current workspace's session by force."
+  "Kill the current workspace's session by force (`SPC j x').
+Confirms first with a y/n question (owner ruling, 2026-09-27): the kill
+ends the session and closes the workspace's tab, so a stray keypress must
+not do it."
   (interactive)
-  (agent-repl-verb-kill (agent-repl-verbs--target-ws ws "Kill workspace: ")))
+  (let ((ws (agent-repl-verbs--target-ws ws "Kill workspace: ")))
+    (if (y-or-n-p (format "Kill workspace %s? " ws))
+        (agent-repl-verb-kill ws)
+      (agent-repl--info ws "elisp.verbs.kill-declined ws=%s" ws))))
 
 (defun agent-repl-nuke-workspace (&optional ws)
   "Destroy the current workspace, its worktree and its branch.
