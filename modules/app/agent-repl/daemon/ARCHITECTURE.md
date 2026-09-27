@@ -349,7 +349,10 @@ the sink interfaces above plus daemon-fact setters:
   cannot disagree about it. A compaction's surviving account rides the divider
   row itself (`FeedContextCutCompacted.summary`), which is why the bound keeps
   the summary without keeping the conversation. `compaction_failed` cut nothing
-  and the worktree arms cut no context, so neither bounds anything. The mirror of an accepted prompt is a `user_prompt` row
+  and the worktree arms cut no context, so neither bounds anything. A history
+  replay holds its publications until its page is placed, and a fork's
+  inherited past rides its own plane and is never pushed (see AGENTS.md, "The
+  feed never serves a row the newest cut withholds"). The mirror of an accepted prompt is a `user_prompt` row
   stamped with the minted TurnId, drawn with the metaprompt sentinel spans
   stripped (the full text stays on the record).
 - footer: status tree resolution + R1 dwell retirement of `interrupted`/
