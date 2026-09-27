@@ -197,12 +197,18 @@ message FeedRow {
     // and draws nothing. A fresh page never carries this arm — a removed row
     // is simply omitted from the page — so it exists solely as a tail event.
     FeedRowRemoved removed = 18;
-    // A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message or a
-    // subagent hand-back. It is NOT a prompt: it is a low-priority,
-    // abbreviated aside, drawn RIGHT-ALIGNED (the prompt side) but PURPLE
-    // rather than the blue prompt fill, COLLAPSED to the sender's label and a
-    // chevron, and expandable to reveal the body. See FeedPeerMessage.
+    // A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message. It is
+    // NOT a prompt: it is a low-priority, abbreviated aside, drawn
+    // RIGHT-ALIGNED (the prompt side) but PURPLE rather than the blue prompt
+    // fill, COLLAPSED to the sender's label and a chevron, and expandable to
+    // reveal the body. See FeedPeerMessage. A subagent's hand-back is NOT
+    // drawn here: it is `subagent_handback`.
     FeedPeerMessage peer_message = 19;
+    // A SUBAGENT REPORTED BACK: a small inline badge marking where in the
+    // conversation a subagent's hand-back reached this agent. Never a bubble
+    // or a card, and never the report itself — the report is drawn once, as
+    // the result inside the subagent's own card.
+    FeedSubagentHandbackBadge subagent_handback = 20;
   }
 }
 
@@ -211,7 +217,7 @@ message FeedRow {
 message FeedRowRemoved {}
 
 // A message another Claude session sent into this conversation: an
-// inter-session peer message, or a returning subagent's hand-back. The client
+// inter-session peer message. The client
 // draws it as a distinct, abbreviated, expandable bubble — right-aligned like a
 // prompt but purple, not blue — whose COLLAPSED form is just the sender label
 // and a chevron (no body), and whose EXPANDED form reveals the body via the
@@ -225,6 +231,21 @@ message FeedPeerMessage {
   // The message body as markdown, drawn only when the bubble is EXPANDED.
   // Rendered with the same markdown machinery a response bubble uses.
   string body = 2;
+}
+
+// The marker a subagent's hand-back leaves in the conversation: a small
+// inline badge, drawn in the flow of the feed where the hand-back arrived. It
+// states only THAT a subagent reported back; what it reported is the subagent
+// card's business, so the report is never drawn twice.
+message FeedSubagentHandbackBadge {
+  // The badge's text, daemon-composed (e.g. "agent Explore reported back").
+  FeedSubagentHandbackBadgeLabel label = 1;
+}
+
+// The badge's text element.
+message FeedSubagentHandbackBadgeLabel {
+  // Drawn verbatim.
+  string text = 1;
 }
 
 // A recognized command's resolved panel, as a feed row. THE ARM IS WHICH
