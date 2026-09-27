@@ -350,8 +350,9 @@
        still register. Still kept just under the dark sidebar's black, so the
        bottom edge stays the subtler shade. */
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
-    /* The iMessage dark-mode blue (owner ruling, 2026-09-27). */
-    --user: #0a84ff;
+    /* The iMessage dark-mode blue (owner ruling, 2026-09-27), taken a notch
+       darker the same day because #0a84ff read a tad bright. */
+    --user: #0978ea;
     --held-prompt-bg: #25282e;
     /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
        lifted a notch, so a response sits lighter than the tool cards. */
