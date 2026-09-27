@@ -413,8 +413,9 @@ the shim. A watch open waits for the stream's first frame
 (an `openTicket`), MADE on its own goroutine under the ticket's context, and
 INSTALLED under the mutex only if the ticket is still the watch's, the watch
 was not reaped and the generation did not move; a stale open's stream is
-closed. A superseded or reaped ticket is cancelled, and `Close` cancels and
-joins every open in flight. A new open path goes through `decideOpenLocked`;
+closed. A superseded or reaped ticket is cancelled (an item's conclusion
+cancels its open, so a hung open is reaped then and not only at `Close`), and
+`Close` cancels and joins every open in flight. A new open path goes through `decideOpenLocked`;
 `TestAHungWatchOpenHoldsNoLock` holds each kind of open forever and requires
 the watcher to keep answering.
 
@@ -467,8 +468,7 @@ around anything.
 liveness on both surfaces: `publishLiveWorkLocked` hands the same value to the
 roster (`SidebarSink.OnLiveWorkChanged`, which retires `idle_async`) and to the
 footer (`FooterSink.OnLiveWorkChanged`, which retires a chip row and the
-`background` arm). The watcher reaps each item's watch at its own terminal and
-is the only party that knows an item has ENDED.
+`background` arm). The watcher is the only party that knows an item has ENDED.
 
 NEITHER SURFACE MAY COUNT LIVENESS FOR ITSELF. The footer's frames supply a
 chip row's DESCRIPTION — label, command, tokens, start instant — and never its
@@ -483,6 +483,44 @@ THE SAME SET IS WHERE A LAUNCH IS SEEN. `FooterView.focus` is minted in
 ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
 adoption takes) and ids already retired (a replay). A re-take of the same set
 mints nothing, and crons, tasks and workflows are never in the set.
+
+### Live work follows the SHIM's conclusion, never a watch
+
+The set is read from a LEDGER (`sessionwatcher/livework.go`) that is separate
+from the watches. An item is ADMITTED at its announcement and leaves only
+through `concludeLocked`, at a conclusion the shim states:
+
+- subagent: its spawn unit's terminal arm (`AgentSubagent` success/failure),
+  by HANDLE on whichever book carries it (the unit==handle equality covers a
+  `created` origin), or its own stream's terminal;
+- shell: its run's `AgentBash` terminal on WatchBash;
+- monitor: its activity's terminal arm;
+- every kind: `query_died`, and a WatchSession re-announcement whose
+  `live_work` no longer names it.
+
+A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
+retire an item: a shell stays live with a stream-less entry its next
+announcement or the fleet re-open retries. A subagent that names no agent is
+still COUNTED (by its handle, unwatched; the announcement defect stays an
+ERROR). `concludeLocked` retires the handle, cancels an open in flight, closes
+an open stream off the lock, and records `daemon.sessionwatcher.live_work_retired`
+at INFO with the conclusion and the watch state it found. The republish is the
+freeness edge (`OnFree`), which is what a registered bounce waits on:
+2026-09-27 a hand-backgrounded shell's never-answered WatchBash held a
+concluded shell live, and a handover waited on it forever.
+
+RECONCILIATION. Every re-announcement's live membership is reconciled, not only
+the first: an item the ledger holds that the shim no longer names is an
+invariant violation, recorded at ERROR (`daemon.sessionwatcher.live_work_stale`)
+and retired. Only items admitted before that session watch's open was DECIDED
+(`openTicket.liveSeq`) are judged, because an announcement on an agent stream
+may postdate the membership the shim read. Nothing is admitted by it.
+
+KNOWN GAP (wire). A shell's conclusion reaches the daemon only as its run's
+terminal on WatchBash, and that is store-backed: a run with no store row
+(hand-backgrounded, 2026-09-27) never delivers one, and the re-announcement is
+the store's membership too. The shim's own `task_notification` conclusion has
+no daemon-visible arm for a shell.
 
 ### A footer jump names the entry THE FEED drew
 

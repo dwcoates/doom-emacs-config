@@ -485,6 +485,14 @@ func (s *ShimControl) ExpectWatchSession() *shimv1.WatchSessionRequest {
 	return msg
 }
 
+// ExpectWatchBash pops the next WatchBash open.
+func (s *ShimControl) ExpectWatchBash() *shimv1.WatchBashRequest {
+	s.t.Helper()
+	msg := &shimv1.WatchBashRequest{}
+	s.expect(RPCWatchBash, msg)
+	return msg
+}
+
 // ExpectStartTurn pops the next StartTurn request.
 func (s *ShimControl) ExpectStartTurn() *shimv1.StartTurnRequest {
 	s.t.Helper()
@@ -573,6 +581,20 @@ func (s *ShimControl) ExpectStopBash() *shimv1.StopBashRequest {
 func (s *ShimControl) DropStream(name string) {
 	s.t.Helper()
 	s.send(controlCommand{Op: "drop_stream", Stream: name})
+}
+
+// SetLiveWork states the live membership every later WatchSession
+// re-announcement carries, as the real shim recomputes what is live now.
+func (s *ShimControl) SetLiveWork(live ...*conversationv1.AgentDetachedWork) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "set_live_work", Payload: encode(s.t, &conversationv1.SessionStarted{LiveWork: live})})
+}
+
+// SilenceBash makes every later WatchBash open for work go unanswered: no
+// opening frame, ever, as the real shim's WatchBash on a run with no row.
+func (s *ShimControl) SilenceBash(work string) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "silence_bash", Work: work})
 }
 
 // Hang stops the fake answering anything.

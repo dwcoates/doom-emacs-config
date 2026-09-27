@@ -513,3 +513,57 @@ func TestAKilledTurnIsNoLongerReannouncedInFlight(t *testing.T) {
 		t.Fatalf("re-announced turn_in_flight after the kill = %v, want none", got)
 	}
 }
+
+// TestTheReannouncementStatesTheLiveWorkSetLast covers set_live_work: once a
+// membership is stated, every later re-announcement carries it, as the real
+// shim's reannounceStart recomputes what is live now.
+func TestTheReannouncementStatesTheLiveWorkSetLast(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	shell := &conversationv1.AgentDetachedWork{Work: &conversationv1.DetachedWorkId{Value: "w-1"}}
+	srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+		Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1", LiveWork: []*conversationv1.AgentDetachedWork{shell}},
+	}}})
+
+	// Act
+	srv.setLiveWork(nil)
+
+	// Assert
+	if got := srv.startedSession().GetLiveWork(); len(got) != 0 {
+		t.Fatalf("re-announced live_work = %v, want the empty membership last stated", got)
+	}
+}
+
+// TestTheReannouncementStatesTheAnsweredLiveWorkUntilOneIsSet covers the
+// default: with no membership stated, the re-announcement carries what
+// StartSession answered with.
+func TestTheReannouncementStatesTheAnsweredLiveWorkUntilOneIsSet(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	shell := &conversationv1.AgentDetachedWork{Work: &conversationv1.DetachedWorkId{Value: "w-1"}}
+
+	// Act
+	srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+		Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1", LiveWork: []*conversationv1.AgentDetachedWork{shell}},
+	}}})
+
+	// Assert
+	if got := srv.startedSession().GetLiveWork(); len(got) != 1 || got[0].GetWork().GetValue() != "w-1" {
+		t.Fatalf("re-announced live_work = %v, want the answered w-1", got)
+	}
+}
+
+// TestASilencedBashIsSilencedForItsWorkAlone covers silence_bash's keying: one
+// handle's WatchBash goes unanswered, and every other handle's is served.
+func TestASilencedBashIsSilencedForItsWorkAlone(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+
+	// Act
+	srv.silenceBash("w-1")
+
+	// Assert
+	if !srv.bashSilenced("w-1") || srv.bashSilenced("w-2") {
+		t.Fatalf("silenced(w-1) = %v, silenced(w-2) = %v, want true and false", srv.bashSilenced("w-1"), srv.bashSilenced("w-2"))
+	}
+}
