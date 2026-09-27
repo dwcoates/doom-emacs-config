@@ -20,7 +20,13 @@ import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
-import { BUBBLE_CAP_LINES, BUBBLE_EXPAND_ONLY_CLASS } from "../src/bubble/draw.js";
+import {
+  BUBBLE_CAP_LINES,
+  BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_UNCAPPED,
+  drawBubble,
+  type BubbleCapLines,
+} from "../src/bubble/draw.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 
@@ -2633,6 +2639,70 @@ describe("the one bubble rule set", () => {
     );
   });
 
+});
+
+/**
+ * THE UNCAPPED BUBBLE (owner request, 2026-09-27): an interim or final
+ * response, and the ended-turn notice, show their full height, always. The
+ * mode is `BUBBLE_UNCAPPED` in src/bubble/draw.ts, and its box wears only
+ * `.bubble-box`; these hold the stylesheet to leaving that box alone.
+ */
+describe("the uncapped bubble", () => {
+  /** A drawn bubble of CAPLINES, the answer's hooks and state, mounted. */
+  function boxOf(capLines: BubbleCapLines): HTMLElement {
+    const { bubble } = drawBubble(
+      capLines === BUBBLE_UNCAPPED
+        ? { role: "response", variant: "response", state: "success", hooks: ["assistant", "final-response"], content: [], capLines }
+        : { role: "response", variant: "thinking", state: "success", hooks: ["assistant"], content: [], capLines },
+    );
+    document.body.append(bubble);
+    return bubble.firstElementChild as HTMLElement;
+  }
+
+  /** The selectors of every rule that caps, clips, scrolls, reserves a gutter or sets a cursor, matching EL. */
+  function limitingSelectorsOn(el: HTMLElement): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*(?:max-height|overflow-y|overflow|scrollbar-gutter|cursor|overscroll-behavior)\s*:/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => !sel.includes("::") && el.matches(sel));
+  }
+
+  it("maps no line count for the uncapped mode", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf(`.bubble[data-cap-lines="${BUBBLE_UNCAPPED}"]`)).toBeUndefined();
+  });
+
+  it("lets no cap, clip, scroll, gutter or cursor rule reach an uncapped bubble's box", () => {
+    // Arrange
+    const box = boxOf(BUBBLE_UNCAPPED);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toEqual([]);
+  });
+
+  it("still caps a capped bubble's box through the same rules", () => {
+    // Arrange
+    const box = boxOf(THINKING_CAP_LINES);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toContain(".bubble > .bubble-scroll");
+  });
+
+  it("gives the structural box rules nothing but structure", () => {
+    // Arrange
+    const structural = new Set(["padding-left", "padding-right", "min-width", "overflow-x", "position"]);
+    // Act
+    const props = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.includes(".bubble-box")))
+      .flatMap((rule) => rule.declarations.split(";").map((decl) => decl.split(":")[0]?.trim() ?? ""))
+      .filter((prop) => prop !== "" && !structural.has(prop));
+    // Assert
+    expect(props).toEqual([]);
+  });
 });
 
 /** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */

@@ -28,6 +28,8 @@ import {
   onVerticalScrollbar,
 } from "../src/expand.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
+import { BUBBLE_UNCAPPED, drawBubble, type BubbleCapLines } from "../src/bubble/draw.js";
+import { BUBBLE_BOX_CLASS } from "../src/feed/bubble-scroll.js";
 
 /** A section carrying CLASSES, with a live classList the toggle can drive. */
 function section(...classes: string[]): Section & { classes: Set<string> } {
@@ -1192,5 +1194,117 @@ describe("AutoCollapse", () => {
     first.click();
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+});
+
+/**
+ * THE UNCAPPED BUBBLE IS NO SECTION (owner request, 2026-09-27). A bubble drawn
+ * with `BUBBLE_UNCAPPED` shows its full height always: its box wears no
+ * `.bubble-scroll`, so no path of the one toggle, the carried folds or the
+ * auto-collapse owner can reach it.
+ */
+describe("an uncapped bubble", () => {
+  let uninstall: Array<() => void> = [];
+  let mounted: HTMLElement[] = [];
+
+  afterEach(() => {
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    for (const el of mounted) el.remove();
+    mounted = [];
+  });
+
+  /** A mounted, click-armed feed holding one bubble of CAP with a header strip. */
+  function feedWith(cap: BubbleCapLines): { feed: HTMLElement; box: HTMLElement; strip: HTMLElement; text: HTMLElement } {
+    const feed = document.createElement("div");
+    document.body.appendChild(feed);
+    mounted.push(feed);
+    const strip = document.createElement("div");
+    const text = document.createElement("p");
+    text.textContent = "words";
+    const { bubble } = drawBubble(
+      cap === BUBBLE_UNCAPPED
+        ? { role: "response", variant: "response", strip: [strip], content: [text], capLines: cap }
+        : { role: "response", variant: "thinking", strip: [strip], content: [text], capLines: cap },
+    );
+    feed.append(bubble);
+    uninstall.push(installClickExpand(feed, () => ""));
+    return { feed, box: bubble.querySelector(`:scope > .${BUBBLE_BOX_CLASS}`) as HTMLElement, strip, text };
+  }
+
+  it("stays unexpanded under a click on its text", () => {
+    // Arrange
+    const { box, text } = feedWith(BUBBLE_UNCAPPED);
+    // Act
+    text.click();
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("stays unexpanded under a click on its header strip", () => {
+    // Arrange
+    const { box, strip } = feedWith(BUBBLE_UNCAPPED);
+    // Act
+    strip.click();
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("resolves no section for a click anywhere in it", () => {
+    // Arrange
+    const { feed, text } = feedWith(BUBBLE_UNCAPPED);
+    // Act / Assert
+    expect(sectionAt(text, feed)).toBeNull();
+  });
+
+  it("is refused, loudly, by a direct toggle", () => {
+    // Arrange
+    const { box } = feedWith(BUBBLE_UNCAPPED);
+    // Act / Assert
+    expect(() => toggleSection(box)).toThrow(/only a capped section/);
+  });
+
+  it("records the refused toggle at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { box } = feedWith(BUBBLE_UNCAPPED);
+    // Act
+    expect(() => toggleSection(box)).toThrow();
+    // Assert
+    expect((await forwardedRecord(capture, "expand.toggle-uncapped")).level.case).toBe("error");
+  });
+
+  it("offers no section to the carried folds or the auto-collapse owner", () => {
+    // Arrange
+    const { feed } = feedWith(BUBBLE_UNCAPPED);
+    // Act / Assert
+    expect(cappedSectionsOf(feed)).toEqual([]);
+  });
+
+  it("takes no fold carried from a capped draw of the same row", () => {
+    // Arrange — a capped draw the reader opened, then an uncapped successor.
+    const { box: open, feed } = feedWith("feed");
+    open.click();
+    const next = drawBubble({
+      role: "response",
+      variant: "response",
+      content: [document.createElement("p")],
+      capLines: BUBBLE_UNCAPPED,
+    }).bubble;
+    // Act
+    carryExpanded(feed, next);
+    // Assert
+    expect(next.querySelector(`.${EXPANDED_CLASS}`)).toBeNull();
+  });
+
+  it("does not hold an open capped section open under a wheel inside it", () => {
+    // Arrange — an open thinking bubble, then an uncapped response elsewhere.
+    const { box: open } = feedWith("feed");
+    open.click();
+    const { text } = feedWith(BUBBLE_UNCAPPED);
+    // Act
+    text.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
+    // Assert
+    expect(open.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 });
