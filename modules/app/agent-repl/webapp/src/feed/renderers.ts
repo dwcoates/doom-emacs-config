@@ -26,6 +26,7 @@ import { drawFeedPlan } from "./cards/plan.js";
 import { drawFeedResponse } from "./cards/response.js";
 import { drawFeedShellBody, drawFeedShellHead } from "./cards/shell.js";
 import { drawFeedSkill } from "./cards/skill.js";
+import { drawFeedSubagentResult } from "./cards/subagent-result.js";
 import { drawFeedSimpleToolCall } from "./cards/tool-call.js";
 import { drawFeedColdGate } from "./asks/cold-gate.js";
 import { drawFeedPermission } from "./asks/permission.js";
@@ -61,6 +62,7 @@ import type {
   FeedShell,
   FeedSimpleToolCall,
   FeedSkill,
+  FeedSubagentResult,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 export type { Handle };
@@ -106,6 +108,8 @@ export interface RowRenderers {
   artifact(unit: FeedArtifact, rc: RowContext): HTMLElement;
   plan(unit: FeedPlan, rc: RowContext): HTMLElement;
   findings(unit: FeedFindings, rc: RowContext): HTMLElement;
+  /** A subagent's returned result, drawn inside its own card (its feed). */
+  subagentResult(unit: FeedSubagentResult, rc: RowContext): HTMLElement;
   /** The detached shell bubble's spool BODY (on its sub-feed); the head is `shellHead`. */
   shell(unit: FeedShell, rc: RowContext): HTMLElement;
   /** The detached shell bubble's collapsed HEAD line; its body is `shell`. */
@@ -182,6 +186,7 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     artifact: drawFeedArtifact,
     plan: drawFeedPlan,
     findings: drawFeedFindings,
+    subagentResult: drawFeedSubagentResult,
     shell: drawFeedShellBody,
     shellHead: drawFeedShellHead,
     permission: drawFeedPermission,

@@ -1870,6 +1870,7 @@ describe("createFeedController: every activity unit reaches its own renderer", (
     ["artifact", { case: "artifact", value: {} }, ".stub-artifact"],
     ["plan", { case: "plan", value: {} }, ".stub-plan"],
     ["findings", { case: "findings", value: {} }, ".stub-findings"],
+    ["subagentResult", { case: "subagentResult", value: {} }, ".stub-subagentResult"],
   ];
 
   it.each(UNITS)("draws the %s unit", (name, unit, mark) => {
