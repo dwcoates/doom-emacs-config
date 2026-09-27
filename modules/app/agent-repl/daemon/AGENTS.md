@@ -124,6 +124,37 @@ calls, and calling a busy link a lost answer would put an ERROR record, and a
 warning-sweep failure, against a healthy run. FALSE means one thing: nothing at
 all was written since the mark.
 
+### Every exit ends each standing stream with its end frame
+
+No client stream ends without an end frame, on ANY exit path: a handover's
+last transfer, a layout restart's stand-down, a drain, a signal, a state-root
+loss. `serve` (cmd/claude-repld/run.go), once the owed answers
+(`AwaitQuiet`) and the last pushes (`AwaitWritesQuiet`) have left, calls
+`Serving.EndStreams` with the surface's `Close` (idempotent), which ends every
+`WatchHostWorkspace`, `WatchWorkspaceRoster`, `WatchDaemon`, `WatchPage` and
+every other standing stream, then `Serving.AwaitStreamsEnded(streamsEndBound)`:
+each stream the exit ended is counted until the socket has written past the
+moment its handler returned (its end frame; see `WriteBarrier`). A stream its
+client ended is uncounted at once. Only then does `http.Server.Shutdown` run.
+
+Regression, 2026-09-27: the streams were left to `Shutdown`, which waits out
+its grace on an HTTP/1.1 stream that never goes idle and then closes the
+connection, and closes nothing on a hijacked h2c one; the surface's `Close`
+ran only as a deferred call the process exit raced. Emacs, which speaks
+HTTP/1.1, read `producer closed without an end frame` on every host stream no
+transfer notice had reached and on its roster.
+`integration/exit_streams_test.go` holds all four stream kinds over HTTP/1.1
+and h2c through a real exit.
+
+| window | value | why |
+| --- | --- | --- |
+| `streamsEndBound` (cmd/claude-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
+
+The end frame is Connect's plain end-of-stream: the contract has no terminal
+ARM for a stand-down on these streams (a transfer is announced by the
+`transferred` push BEFORE it, never as a terminal frame), so a client reads a
+clean end and re-resolves the live daemon itself.
+
 ### The shim link's requests own the bytes they promise
 
 `shimclient.ownedRequestBody` (`internal/shimclient/transport.go`) copies a
@@ -234,8 +265,9 @@ environment. Every flag is optional.
     while it still names THIS daemon's address, so a handover successor's
     advertisement survives its predecessor's exit; recorded at INFO either
     way, and a boot that finds an address nobody answers records the stale one
-    at WARN before overwriting it), the
-    streams are closed, the BACKGROUND LOOPS and the PROMPT QUEUE's own
+    at WARN before overwriting it), every standing stream is ENDED WITH ITS
+    END FRAME and the end frames are awaited on the socket (see "Every exit
+    ends each standing stream with its end frame"), the BACKGROUND LOOPS and the PROMPT QUEUE's own
     goroutines are joined (both bounded by `loopJoinBound`, 2s, and an overrun
     is reported, never waited on), and then
     the state client and the log sinks are closed. The join is registered last
@@ -663,6 +695,24 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   workspace's `adoption_window_expired` fault, all at ERROR. A transfer that
   fails after its quiesce is taken back the same way. A handover with any
   reclaimed or failed workspace does not exit.
+
+## A coalesced bounce runs every kind it was asked, never one in place of another
+
+The prompt queue's bounce registry (`internal/promptqueue/bounce.go`) keeps
+up to TWO stages per workspace: the shim REPLACEMENT (a stale build, the
+restart verb, a log at its ceiling) and the MOVE off this daemon (a handover
+transfer, a restart's stand-down: `KeepDraining`). Requests of the same kind
+coalesce and the newest action wins; requests of different kinds both run,
+the replacement first, then the move, and each requester's `Done` is told its
+OWN stage's outcome. A move asked while a replacement runs is queued behind
+it; a failed or departure-unregistered replacement still leaves the move to
+run; a request against a workspace a kept move already took away is answered
+`ErrUnregistered`.
+
+Regression, 2026-09-27: a transfer registered behind a busy workspace was
+replaced by the restart verb that joined it, the restart ran on the outgoing
+daemon, the transfer's requester was told it had finished, and the daemon
+exited without ever pushing that workspace's transfer notice.
 
 ## A state layout change is rolled out stop-then-start, never handed over
 
