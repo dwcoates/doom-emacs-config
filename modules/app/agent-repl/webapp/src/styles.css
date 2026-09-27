@@ -154,19 +154,11 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
-  /* The border around a THINKING response bubble: yellow (owner ruling,
-     2026-09-23; was light orange), worn by the
-     agent's intermediate reasoning bubbles (never a final answer, partial or
-     whole). Distinct from the green --final-response an answer wears and from
-     the deep-orange --compact-rule and amber --async, so an in-progress
-     reasoning card reads as its own state. Same 0.3px thickness the base bubble
-     reserves; only the color lands here. */
-  --thinking-border: #e3a008;
   /* The border around a FINISHED response the agent wrote MID-TURN (prose
      between tool calls: settled, but not the turn's answer): pear, the step
-     between thinking's yellow and an answer's green (owner ruling,
-     2026-09-23), so the border ladder runs monotonic toward done: yellow
-     (reasoning) -> pear (said, not concluded) -> green (the answer). */
+     before an answer's green (owner ruling, 2026-09-23), so the border ladder
+     runs monotonic toward done: pear (said, not concluded) -> green (the
+     answer). A thinking bubble wears no border at all. */
   --interim-response-border: #b0b00c;
   /* THE SELECTED ENTRY's color: the ring on a card a footer detached-work
      jump landed on, and the border of the response the reader has SELECTED to
@@ -361,9 +353,6 @@
     --clear-divider: #ef4444;
     --compact-rule: #f97316;
     --final-response: #4ade80;
-    /* Lighter yellow for the dark theme, as the other state borders lift, so
-       the thinking hairline still reads against the dark purple fill. */
-    --thinking-border: #f9c21b;
     --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
@@ -1681,9 +1670,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* THE BORDER LADDER. The state or variant sets the BORDER and nothing else,
    and only its color where the 0.3px the base reserves is enough, so a state
    change recolors a laid-out hairline and never reflows the feed.
-   THE THINKING BUBBLE: the agent's intermediate reasoning, yellow (owner
-   ruling 2026-09-15). It can never take the green answer border below. */
-.bubble[data-variant="thinking"] { border-color: var(--thinking-border); }
+   THE THINKING BUBBLE: the agent's intermediate reasoning wears NO border.
+   No rule here colors it, so it keeps the base's transparent 0.3px box, still
+   reserved, and nothing reflows; it can never take the pear or green below. */
 /* A settled response that is neither the turn's answer nor thinking: the pear
    step of the ladder. Keyed on the daemon's settled state, so a response still
    streaming keeps the base border until it settles. */

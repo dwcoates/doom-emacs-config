@@ -117,7 +117,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 
   // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
   // the prose is intermediate reasoning is orthogonal to whether it is still
-  // arriving. The class draws the bubble's thinking border and keeps the green
+  // arriving. The variant draws the bubble unbordered and keeps the green
   // final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
   const hooks = ["assistant"];
   if (u.thinking) hooks.push(THINKING_BUBBLE_CLASS);
