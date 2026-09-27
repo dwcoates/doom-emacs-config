@@ -784,3 +784,57 @@ func TestSubmitHoldsBehindACutTheWatcherHasNotYetSeenAsUninterruptible(t *testin
 		t.Fatalf("classification = %+v, want uninterruptible_turn", got.Classification)
 	}
 }
+
+// TestSubmitOfTheTurnAlreadyInFlightStartsNothing pins the re-drive of a claim
+// whose original DID reach the shim: the retry comes back under the same turn
+// id, finds that turn running, and is answered as the delivery the original
+// was -- never held behind itself, never started a second time -- with the
+// repeat recorded at ERROR.
+func TestSubmitOfTheTurnAlreadyInFlightStartsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "t1", "hello")
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !got.Delivered || got.Parked() {
+		t.Fatalf("disposition = %+v, want delivered and not held", got)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing started again", started)
+	}
+	held, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if len(held) != 0 {
+		t.Fatalf("held = %+v, want the turn never queued behind itself", held)
+	}
+	if !logged(h.log.Records(), "error", opSubmit, repeatedStartMessage) {
+		t.Fatalf("the repeated start was not recorded at error: %v", h.log.Records())
+	}
+}
+
+// repeatedStartMessage is the record a submission of the turn in flight
+// writes.
+const repeatedStartMessage = "a submission repeated the turn already in flight; it is answered as the delivery the original was and nothing is started again"
+
+// TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn pins that the
+// guidance is started under the submission's turn, never one minted
+// downstream, so a re-driven retry of it is the start the shim already took.
+func TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if len(h.parkedTurns) != 1 || h.parkedTurns[0] != "t1" {
+		t.Fatalf("parked route turns = %v, want the submission's own t1", h.parkedTurns)
+	}
+}

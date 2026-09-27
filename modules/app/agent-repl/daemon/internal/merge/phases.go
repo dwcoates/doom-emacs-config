@@ -9,6 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -272,7 +273,7 @@ func short(sha string) string {
 //
 // It blocks until guidance arrives or the context ends. The bool is false when
 // the run should stop holding on.
-func (r *run) park(ctx context.Context, line string) (*conversationv1.UserSaid, bool) {
+func (r *run) park(ctx context.Context, line string) (guidance, bool) {
 	if err := r.o.deps.DB.SetLeasePolicy(ctx, r.lease.ID, wsm.PolicyParked); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.park", "could not move the lease to parked",
 			dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
@@ -283,18 +284,25 @@ func (r *run) park(ctx context.Context, line string) (*conversationv1.UserSaid, 
 		r.o.onPark(r.ws)
 	}
 	select {
-	case said := <-r.guidance:
-		return said, true
+	case g := <-r.guidance:
+		return g, true
 	case <-ctx.Done():
-		return nil, false
+		return guidance{}, false
 	}
 }
 
+// guidance is one parked submission on its way to the resolution agent: what
+// was said, and the submission's own turn, which the guidance runs under.
+type guidance struct {
+	turn ids.TurnID
+	said *conversationv1.UserSaid
+}
+
 // deliverGuidance hands one parked submission to the resolution agent and waits
-// for the turn it runs as. The answer travels back to RouteParked, so a caller
+// for its turn to end. The answer travels back to RouteParked, so a caller
 // learns whether its guidance was accepted.
-func (r *run) deliverGuidance(ctx context.Context, said *conversationv1.UserSaid) error {
-	turn, err := r.o.deps.ParkedRoute(ctx, r.ws, said)
+func (r *run) deliverGuidance(ctx context.Context, g guidance) error {
+	err := r.o.deps.ParkedRoute(ctx, r.ws, g.turn, g.said)
 	r.answered <- err
 	if err != nil {
 		return nil
@@ -304,7 +312,7 @@ func (r *run) deliverGuidance(ctx context.Context, said *conversationv1.UserSaid
 	}
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
 	r.facts(StateMerging, "")
-	_, err = r.o.deps.AwaitTurnEnd(ctx, r.ws, turn)
+	_, err = r.o.deps.AwaitTurnEnd(ctx, r.ws, g.turn)
 	return err
 }
 

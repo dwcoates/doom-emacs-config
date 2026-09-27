@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -357,7 +358,7 @@ func TestParkedSubmissionRoutesToTheResolutionAgent(t *testing.T) {
 	waitForParked(t, h)
 
 	// Act.
-	err := h.o.RouteParked(ctx, theWorkspace, saidText("try resolving it this way"))
+	err := h.o.RouteParked(ctx, theWorkspace, "guidance-turn", saidText("try resolving it this way"))
 
 	// Assert.
 	if err != nil {
@@ -371,6 +372,42 @@ func TestParkedSubmissionRoutesToTheResolutionAgent(t *testing.T) {
 	}
 }
 
+// TestParkedGuidanceRunsUnderTheSubmissionsTurn pins that the guidance is
+// routed under the turn RouteParked was handed and the run resumes on THAT
+// turn's end, so a re-driven retry of the submission is the start the shim
+// already took.
+func TestParkedGuidanceRunsUnderTheSubmissionsTurn(t *testing.T) {
+	// Arrange: a parked merge.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {}}
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := admitAsync(h, ctx)
+	waitForParked(t, h)
+
+	// Act.
+	err := h.o.RouteParked(ctx, theWorkspace, "submitted-turn", saidText("try resolving it this way"))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RouteParked failed: %v", err)
+	}
+	<-done
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.parkedTurns) != 1 || h.parkedTurns[0] != "submitted-turn" {
+		t.Fatalf("guidance routed under %v, want the submission's own turn", h.parkedTurns)
+	}
+	if !slices.Contains(h.awaitedTurns, "submitted-turn") {
+		t.Fatalf("awaited turns = %v, want the run to resume on the guidance turn's end", h.awaitedTurns)
+	}
+}
+
 // TestRouteParkedRefusesAWorkspaceWithNoRun covers the seam's own guard: a route
 // without a run in flight means the caller lost track of the merge.
 func TestRouteParkedRefusesAWorkspaceWithNoRun(t *testing.T) {
@@ -378,7 +415,7 @@ func TestRouteParkedRefusesAWorkspaceWithNoRun(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	err := h.o.RouteParked(context.Background(), theWorkspace, saidText("hello"))
+	err := h.o.RouteParked(context.Background(), theWorkspace, "guidance-turn", saidText("hello"))
 
 	// Assert.
 	if err != errNoRun {

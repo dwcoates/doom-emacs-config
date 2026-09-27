@@ -85,7 +85,7 @@ type run struct {
 	// guidance carries a parked submission from RouteParked into the waiting
 	// phase. It is unbuffered: guidance is delivered to a phase that is waiting
 	// for it, never queued behind one that is not.
-	guidance chan *conversationv1.UserSaid
+	guidance chan guidance
 	// answered carries the delivery's answer back to RouteParked.
 	answered chan error
 	// conflictBriefed records the conflict the agent has already been handed,
@@ -209,7 +209,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		startedMS:       o.deps.Now().UnixMilli(),
 		rounds:          map[string]int{},
 		opened:          map[string]time.Time{},
-		guidance:        make(chan *conversationv1.UserSaid),
+		guidance:        make(chan guidance),
 		answered:        make(chan error),
 		conflictBriefed: map[string]bool{},
 	}

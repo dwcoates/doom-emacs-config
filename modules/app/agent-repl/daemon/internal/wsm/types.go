@@ -502,8 +502,9 @@ const (
 	ClaimAccepted
 	// ClaimRedriven is a key whose earlier submission never reached
 	// acceptance: its handler blocked, errored, was cancelled, or its process
-	// died mid-submit. The claim is REBOUND to the offered turn, and the retry
-	// is driven under it.
+	// died mid-submit. The retry is driven under the turn the claim was
+	// ALREADY bound to, never the offered one, so a shim that did accept that
+	// turn answers the repeat as a no-op.
 	ClaimRedriven
 )
 
@@ -526,13 +527,25 @@ type IdempotencyClaim struct {
 	// Standing says which of the three answers this is.
 	Standing ClaimStanding
 	// Turn is the turn the key is bound to once the claim commits: the offered
-	// turn for ClaimMinted and ClaimRedriven, the accepted submission's turn
-	// for ClaimAccepted.
+	// turn for ClaimMinted, the first submission's turn for ClaimRedriven and
+	// ClaimAccepted.
 	Turn TurnID
-	// Abandoned is the turn an unaccepted claim was bound to before a
-	// ClaimRedriven rebound it; empty otherwise.
-	Abandoned TurnID
+	// Evidence names the durable record that made an unstamped claim
+	// ClaimAccepted in this transaction (EvidenceHeld, EvidenceTerminal);
+	// empty for a claim that was already stamped, and for the other standings.
+	Evidence string
+	// Reopened reports that a ClaimRedriven cleared the turn's orphaned or
+	// agent-died close, so the retry runs it as an open turn again.
+	Reopened bool
 }
+
+// The durable evidence that makes an unstamped claim accepted.
+const (
+	// EvidenceHeld is a held_prompts row under the claimed turn.
+	EvidenceHeld = "held_prompt"
+	// EvidenceTerminal is the claimed turn's row closed by a vendor terminal.
+	EvidenceTerminal = "turn_terminal"
+)
 
 // OrphanReport is what CloseOrphans closed, in one transaction.
 type OrphanReport struct {

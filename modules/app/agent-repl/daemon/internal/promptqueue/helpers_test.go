@@ -943,9 +943,11 @@ type harness struct {
 	drain   *noteRecorder
 	log     *dlog.TestSurfaces
 
-	// parked records every parked route, and parkedErr fails it.
-	parked    []*conversationv1.UserSaid
-	parkedErr error
+	// parked records every parked route, parkedTurns the turn each was routed
+	// under, and parkedErr fails it.
+	parked      []*conversationv1.UserSaid
+	parkedTurns []ids.TurnID
+	parkedErr   error
 
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
@@ -1012,9 +1014,10 @@ func newHarness(t *testing.T) *harness {
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},
-		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
+		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 			h.parked = append(h.parked, said)
-			return "guidance-turn", h.parkedErr
+			h.parkedTurns = append(h.parkedTurns, turn)
+			return h.parkedErr
 		},
 		DrainRefusals: h.drain,
 		PublishHost: func(ids.WorkspaceID) {
