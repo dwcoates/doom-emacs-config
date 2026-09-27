@@ -36,7 +36,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	q.mu.Lock()
 	if state, ok := q.states[ws]; ok {
 		state.interrupting = false
-		state.uninterruptible = 0
+		state.cut = nil
 		// A TURN ENDED, so whatever serves the workspace held a session long
 		// enough to finish one: a later death is not a crash loop.
 		state.unattendedRevival = false

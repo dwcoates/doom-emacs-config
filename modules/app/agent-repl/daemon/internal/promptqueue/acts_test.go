@@ -185,8 +185,8 @@ func TestARefusedContextCutClearsTheUninterruptibleMark(t *testing.T) {
 	if err == nil {
 		t.Fatal("a refused context cut must be surfaced")
 	}
-	if got := h.q.state(theWorkspace).uninterruptible; got != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		t.Fatalf("uninterruptible = %s, want it cleared", got)
+	if cut, ok := h.q.runningCut(theWorkspace); ok {
+		t.Fatalf("running cut = %+v, want it retired", cut)
 	}
 }
 
