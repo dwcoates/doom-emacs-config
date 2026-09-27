@@ -659,6 +659,7 @@ func detachedShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Owner: &conversationv1.AgentId{Value: mainAgent},
+		Kind:  bashKind(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Bash{Bash: &conversationv1.AgentBash{
 				Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
@@ -676,6 +677,7 @@ func detachedShell(work, command string) *conversationv1.AgentDetachedWork {
 func movedShell(unit string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Kind: bashKind(),
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
 			Cause: &conversationv1.DetachedWorkDetached_TimedOut{TimedOut: &conversationv1.DetachedCauseTimedOut{
@@ -692,6 +694,7 @@ func detachedSubagent(work, agent, label string) *conversationv1.AgentDetachedWo
 	return &conversationv1.AgentDetachedWork{
 		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Owner: &conversationv1.AgentId{Value: mainAgent},
+		Kind:  subagentKind(agent),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
 				Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
@@ -700,6 +703,32 @@ func detachedSubagent(work, agent, label string) *conversationv1.AgentDetachedWo
 					StartedAt:      startedAt(1_700_000_000_000),
 				}},
 			}}},
+		}},
+	}
+}
+
+// subagentKind and bashKind are the kinds a producer states on an
+// announcement; a subagent's names the agent that is running.
+func subagentKind(agent string) *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Subagent{
+		Subagent: &conversationv1.DetachedWorkKindSubagent{AgentId: &conversationv1.AgentId{Value: agent}},
+	}}
+}
+
+func bashKind() *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Bash{Bash: &conversationv1.DetachedWorkKindBash{}}}
+}
+
+// resumedSubagent announces a subagent RESUMED BY SENDMESSAGE: detached from
+// the send's own unit, running the agent its original spawn created.
+func resumedSubagent(work, sendUnit, agent string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: &conversationv1.AgentId{Value: mainAgent},
+		Kind:  subagentKind(agent),
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: sendUnit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
 		}},
 	}
 }
