@@ -28,7 +28,7 @@ import {
   FeedShellSchema,
   FeedSimpleToolCallSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
 import { drawFeedShellBody } from "../../src/feed/cards/shell.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
@@ -122,7 +122,7 @@ describe("bubbleScroll: the shared scroll box", () => {
     const scroll = bubbleScroll(body);
 
     // Assert
-    expect(scroll.className).toBe(BUBBLE_SCROLL_CLASS);
+    expect(scroll.className).toBe(`${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`);
   });
 
   it("holds the body as its only child, so the box's edge is not the text's", () => {
@@ -190,7 +190,7 @@ describe("the agentic bubbles: the same box as the response they copy", () => {
     if (body === null) throw new Error("no body");
 
     // Assert
-    expect(body.parentElement?.className).toBe(BUBBLE_SCROLL_CLASS);
+    expect(body.parentElement?.className).toBe(`${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`);
     expect(bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`)).toBe(body.parentElement);
   });
 });

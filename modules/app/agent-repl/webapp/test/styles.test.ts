@@ -260,9 +260,9 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     expect(column).toMatch(/--bubble-scroll-gap:\s*2px/);
   });
 
-  it("gives the bubble's scroll box no horizontal padding of its own", () => {
+  it("gives every bubble box no horizontal padding of its own", () => {
     // Arrange / Act
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    const scroll = declarationsOf(".bubble > .bubble-box");
 
     // Assert
     expect(scroll).toMatch(/padding-left:\s*0\s*;[\s\S]*padding-right:\s*0\s*;/);
@@ -270,7 +270,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
 
   it("clips the bubble's horizontal axis so a bubble never side-scrolls", () => {
     // Arrange / Act
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    const scroll = declarationsOf(".bubble > .bubble-box");
 
     // Assert — overflow-x is pinned to clip (not left unset, which the CSS
     // overflow spec would promote to auto once overflow-y is hidden/auto).
@@ -278,8 +278,12 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
   });
 
   it("never lets the bubble scroll box compute a horizontal scrollbar", () => {
-    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box.
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box,
+    // capped or not.
+    const scroll = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => /^\.bubble > \.bubble-(?:box|scroll)$/.test(sel)))
+      .map((rule) => rule.declarations)
+      .join(";");
 
     // Assert
     expect(scroll).not.toMatch(/overflow-x:\s*(auto|scroll)/);
@@ -607,7 +611,7 @@ describe("the 'more below' affordance", () => {
 
   it("makes the box the affordance's containing block whether or not it wears has-more", () => {
     // Arrange
-    const boxes = [".bubble > .bubble-scroll", ".title-fold"];
+    const boxes = [".bubble > .bubble-box", ".title-fold"];
 
     // Act — whether any rule on the bare box (no has-more) makes it relative.
     const relative = boxes.map((box) =>
