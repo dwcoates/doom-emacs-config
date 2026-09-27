@@ -246,7 +246,7 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary
 		})
 		return "", false
 	}
-	question, err := brief.Splice(map[string]string{"digest": composeDigest(summary, prompts)})
+	question, err := brief.Splice(map[string]string{"digest": ComposeDigest(summary, prompts)})
 	if err != nil {
 		s.deps.Log.Error(opSynth, "the synthesized-title brief could not be spliced", dlog.Context{
 			"workspace": string(ws), "brief": BriefTitle, "cause": err.Error(),
@@ -311,9 +311,41 @@ func loadBrief(dir string) (prompts.Prompt, error) {
 	return prompts.Load(dir, BriefTitle)
 }
 
-// composeDigest renders the digest material the brief summarizes: the
+// ComposeDigest renders the digest material the brief summarizes: the
 // compaction summary when there is one, then the most recent prompts, each
 // bounded so one conversation cannot grow the model prompt without limit.
+//
+// It is the ONE composition of "what this conversation has been about", read
+// by the title synthesizer and by the workspace naming call a fork makes
+// (internal/workspace), so the two cannot drift into two notions of it.
+//
+// THE DIGEST IS QUOTED EVIDENCE, NEVER A TEMPLATE. prompts.Prompt.Splice
+// refuses any `{{...}}` token surviving in its output — its guard against a
+// malformed brief — and a conversation that merely TALKS about templates (this
+// repository's own briefs spell `{{prompt}}`) was refused wholesale. So a
+// "{{" or "}}" the user typed is opened to "{ {" / "} }" here, where the text
+// becomes a splice value, and the brief guard stays whole.
+func ComposeDigest(summary string, all []string) string {
+	return quoteTemplateBraces(composeDigest(summary, all))
+}
+
+// templateBraces opens every template-token delimiter a user typed.
+var templateBraces = strings.NewReplacer("{{", "{ {", "}}", "} }")
+
+// quoteTemplateBraces opens the template delimiters in s until no substring of
+// it reads as a `{{...}}` token. A run of three braces needs a second pass,
+// because one replacement leaves a delimiter where the run's tail meets it.
+func quoteTemplateBraces(s string) string {
+	for {
+		opened := templateBraces.Replace(s)
+		if opened == s {
+			return s
+		}
+		s = opened
+	}
+}
+
+// composeDigest is ComposeDigest's text before its braces are opened.
 func composeDigest(summary string, all []string) string {
 	var b strings.Builder
 	if strings.TrimSpace(summary) != "" {

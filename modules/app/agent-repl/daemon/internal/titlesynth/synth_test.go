@@ -341,11 +341,49 @@ func TestCleanTitleTakesTheFirstLineAndStripsQuotes(t *testing.T) {
 
 func TestComposeDigestIncludesTheCompactionSummary(t *testing.T) {
 	// Arrange, Act.
-	got := composeDigest("earlier we discussed backoff", []string{"now add jitter"})
+	got := ComposeDigest("earlier we discussed backoff", []string{"now add jitter"})
 
 	// Assert.
 	if !containsAll(got, "earlier we discussed backoff", "now add jitter") {
-		t.Fatalf("composeDigest = %q, want the summary and the prompt", got)
+		t.Fatalf("ComposeDigest = %q, want the summary and the prompt", got)
+	}
+}
+
+func TestComposeDigestOpensTemplateDelimitersAUserTyped(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+	}{
+		{name: "a placeholder token", prompt: "why does {{prompt}} not splice"},
+		{name: "a run of three braces", prompt: "a {{{ b }}} c"},
+		{name: "an unclosed opener", prompt: "a {{ b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := ComposeDigest("", []string{tc.prompt})
+
+			// Assert — no substring reads as a template delimiter any more.
+			if strings.Contains(got, "{{") || strings.Contains(got, "}}") {
+				t.Fatalf("ComposeDigest = %q, want no template delimiter left", got)
+			}
+		})
+	}
+}
+
+func TestTheShippedBriefSplicesADigestThatTalksAboutTemplates(t *testing.T) {
+	// Arrange — the real brief, and a conversation that names a placeholder.
+	brief, err := loadBrief(filepath.Join("..", "..", "..", "prompts"))
+	if err != nil {
+		t.Fatalf("loadBrief: %v", err)
+	}
+
+	// Act.
+	_, err = brief.Splice(map[string]string{"digest": ComposeDigest("", []string{"rename {{prompt}}"})})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Splice = %v, want a conversation about templates accepted", err)
 	}
 }
 
