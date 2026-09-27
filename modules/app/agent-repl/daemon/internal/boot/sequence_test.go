@@ -1598,3 +1598,116 @@ func TestNewRefusesASequenceWithNoViewBinder(t *testing.T) {
 		t.Fatalf("New accepted a sequence that cannot bind the views")
 	}
 }
+
+// TestTheBootReleasesALeaseItsOwnerLeftBehind pins invariant A's boot half: a
+// lease a previous daemon took and never released -- it died without the
+// orderly close that releases what it holds -- has no living owner once an
+// incumbent holds the boot claim, and is released at ERROR with the queue
+// told. Measured 2026-09-27: five quiesce leases of a failed handover
+// survived a fresh boot and refused every prompt of their workspaces.
+func TestTheBootReleasesALeaseItsOwnerLeftBehind(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	orphan := h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, held, err := h.db.Lease(context.Background(), ws.ID); err != nil || held {
+		t.Fatalf("Lease after the boot = (held %v, %v), want the orphan released", held, err)
+	}
+	if len(report.OrphanLeases) != 1 || report.OrphanLeases[0].ID != orphan.ID {
+		t.Fatalf("report.OrphanLeases = %+v, want exactly %s", report.OrphanLeases, orphan.ID)
+	}
+	if changes := h.queue.leaseChanges(); len(changes) != 1 || changes[0] != ws.ID {
+		t.Fatalf("the queue was told of lease changes %v, want [%s]", changes, ws.ID)
+	}
+	if !h.hasRecord("error", "daemon.boot.orphan_leases") {
+		t.Fatalf("the orphan's release was not stated at ERROR: %v", h.log.Records())
+	}
+}
+
+// TestTheBootKeepsALeaseItsOwnLiveOperationHolds pins the other side: a lease
+// THIS process's handle took belongs to an operation that is still running,
+// and the sweep leaves it standing.
+func TestTheBootKeepsALeaseItsOwnLiveOperationHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	own, err := h.db.AcquireLease(context.Background(), ws.ID, wsm.HolderRestart, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got, held, err := h.db.Lease(context.Background(), ws.ID)
+	if err != nil || !held || got.ID != own.ID {
+		t.Fatalf("Lease after the boot = (%+v, held %v, %v), want this process's own %s kept", got, held, err, own.ID)
+	}
+	if len(report.OrphanLeases) != 0 || h.hasRecord("error", "daemon.boot.orphan_leases") {
+		t.Fatalf("the boot released a live operation's lease: %+v", report.OrphanLeases)
+	}
+}
+
+// TestAJoiningBootReleasesNoLease pins that a joining successor never sweeps:
+// the incumbent that spawned it is alive and owns its leases.
+func TestAJoiningBootReleasesNoLease(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	incumbents := h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got, held, err := h.db.Lease(context.Background(), ws.ID)
+	if err != nil || !held || got.ID != incumbents.ID {
+		t.Fatalf("Lease after a joining boot = (%+v, held %v, %v), want the incumbent's %s kept", got, held, err, incumbents.ID)
+	}
+	if len(report.OrphanLeases) != 0 {
+		t.Fatalf("a joining boot released leases: %+v", report.OrphanLeases)
+	}
+}
+
+func TestTheBootFailsWhenAnOrphanLeaseCannotBeReleased(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.DB = failingRelease{DB: d.DB, err: errBoom} })
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run = %v, want the release failure", err)
+	}
+}
+
+func TestTheBootFailsWhenTheLeasesCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.DB = failingForeign{DB: d.DB, err: errBoom} })
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run = %v, want the read failure", err)
+	}
+}

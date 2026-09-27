@@ -2,10 +2,12 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -33,6 +35,22 @@ type handoverPlan struct {
 	snapshot       map[ids.WorkspaceID]Participants
 	forced         bool
 	fields         dlog.Context
+	// restart marks a STOP-THEN-START rollout (Restart): no successor is
+	// listening, so a workspace's serving stands down with no transfer notice
+	// and no adoption window, and the end spawns a replacement and exits.
+	restart bool
+	// slot is the rollout slot a restart claimed, released if it abandons.
+	slot *handoverSlot
+	// mu guards moved.
+	mu sync.Mutex
+	// moved is what each of a restart's stand-downs took, so an abandoned
+	// restart takes every one of them back.
+	moved map[ids.WorkspaceID]movedWorkspace
+	// reclaimed counts the workspaces this daemon took BACK after handing
+	// them toward the successor: an adoption window that expired, or a
+	// transfer that failed after its quiesce. A reclaimed workspace is served
+	// here again, so a handover with any cannot finish and does not exit.
+	reclaimed atomic.Int32
 }
 
 // ErrAlreadyRollingOut refuses a second handover while one is in flight.
@@ -164,8 +182,24 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
 	address := successor.Address()
-	fields = merge(fields, dlog.Context{"successor": address})
-	c.log.Info(opHandover, "the successor is up in joining mode", fields)
+	fields = merge(fields, dlog.Context{"successor": address, "successor_pid": successor.PID()})
+	// NOTHING IS ANNOUNCED, QUIESCED OR TRANSFERRED TO A SUCCESSOR THAT HAS
+	// NOT ANSWERED. Its address report only says its listener is bound; the
+	// 2026-09-27 successor bound, reported, and died 3ms later on a state
+	// layout it could not read, and every workspace handed to it was left
+	// held with no daemon serving it. So the handover stops here, before a
+	// single workspace is touched, unless the successor answers a health
+	// probe -- and a successor that dies first is named with its exit.
+	ready, cancelReady := context.WithTimeout(ctx, c.deps.ReadyBound)
+	err = successor.Ready(ready)
+	cancelReady()
+	if err != nil {
+		c.log.Error(opHandover, "the successor never proved it was serving; the handover is abandoned before any workspace was quiesced or announced, and this daemon keeps serving",
+			withCause(merge(fields, dlog.Context{"ready_bound": c.deps.ReadyBound.String()}), err))
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, fmt.Errorf("rollout: handover: the successor never proved it was serving: %w", err)
+	}
+	c.log.Info(opHandover, "the successor answered its health probe; it is serving in joining mode", fields)
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
@@ -251,7 +285,7 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 			Force:        plan.forced,
 			KeepDraining: true,
 			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
-				return c.transfer(runCtx, ws, plan.successor, plan.snapshot[id], &windows)
+				return c.transfer(runCtx, ws, plan, plan.snapshot[id], &windows)
 			},
 			Done: func(err error) { outcomes <- transferOutcome{ws: ws.ID, err: err} },
 		}
@@ -328,6 +362,17 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 	// the accountability record get written at all.
 	windows.Wait()
 
+	if plan.restart {
+		c.finishRestart(ctx, plan, failed)
+		return
+	}
+	if reclaimed := plan.reclaimed.Load(); reclaimed > 0 {
+		// THE RECLAIMED ARE SERVED HERE AGAIN, so exiting would abandon them
+		// exactly as a failed transfer would.
+		c.log.Error(opHandover, "the handover cannot finish: workspaces whose adoption never landed were reclaimed and are served here again; not exiting",
+			merge(fields, dlog.Context{"reclaimed": reclaimed, "untransferred": failed}))
+		return
+	}
 	if failed > 0 {
 		// A WORKSPACE THIS DAEMON STILL SERVES IS NOT ABANDONED. Exiting would
 		// leave it with no daemon at all; staying leaves the two-daemon steady
@@ -351,17 +396,26 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 // transfer moves one workspace to the successor. It is the bounce registry's
 // action for a handover: the registry has already decided the workspace is
 // free (or the handover is forced) and drained its dispatch.
-func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor string, expected Participants, windows *sync.WaitGroup) error {
+//
+// EVERY FAILURE PAST THE QUIESCE TAKES THE WORKSPACE BACK (reclaim): the hold
+// it took is released and, if the shim was already detached, the running shim
+// is re-adopted, so a transfer that failed leaves the workspace served HERE --
+// never held by a lease nobody will release.
+func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, expected Participants, windows *sync.WaitGroup) error {
+	successor := plan.successor
 	fields := dlog.Context{"workspace": string(ws.ID), "successor": successor}
 
 	// QUIESCE FIRST. From here on this daemon does NO work for the workspace:
 	// every arrival is held rather than served, so nothing the successor is
 	// about to own is still moving under it.
-	if err := c.deps.Quiesce(ctx, ws.ID); err != nil {
+	lease, err := c.deps.Quiesce(ctx, ws.ID)
+	if err != nil {
 		c.log.Error(opTransfer, "could not quiesce the workspace's intake", withCause(fields, err))
 		return fmt.Errorf("rollout: transfer %q: quiesce: %w", ws.ID, err)
 	}
+	fields["lease"] = string(lease)
 	c.log.Debug(opTransfer, "quiesced the workspace's intake", fields)
+	_, hadShim := c.deps.Shims.Client(ws.ID)
 
 	// DETACH, NEVER KILL. The shim keeps running and KEEPS its kernel lock
 	// through the whole handover; the lock is the shim's, and the successor
@@ -371,8 +425,9 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 	handed, err := c.deps.Shims.HandOver(ws.ID)
 	switch {
 	case err != nil:
-		c.log.Error(opTransfer, "could not hand the workspace's shim over", withCause(fields, err))
-		return fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err)
+		c.log.Error(opTransfer, "could not hand the workspace's shim over; taking the workspace back", withCause(fields, err))
+		return errors.Join(fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err),
+			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
 	case handed:
 		c.log.Debug(opTransfer, "detached from the workspace's shim, leaving it running", fields)
 	default:
@@ -380,7 +435,19 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 	}
 
 	if err := c.releaseServing(ctx, ws.ID, fields); err != nil {
-		return fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err)
+		return errors.Join(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
+			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
+	}
+
+	if plan.restart {
+		// A RESTART HAS NO SUCCESSOR TO NAME: the workspace stays this
+		// daemon's, its intake held, until the process exits and the
+		// replacement adopts its shim at boot.
+		plan.mu.Lock()
+		plan.moved[ws.ID] = movedWorkspace{lease: lease, detached: handed}
+		plan.mu.Unlock()
+		c.log.Info(opTransfer, "stood the workspace's serving down for the restart; its shim keeps running for the replacement", fields)
+		return nil
 	}
 
 	c.recordTransfer(ws.ID, successor)
@@ -391,8 +458,100 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 	windows.Add(1)
 	go func() {
 		defer windows.Done()
-		c.timeAdoption(ctx, ws.ID, fields)
+		if c.timeAdoption(ctx, ws.ID, lease, handed, fields) {
+			plan.reclaimed.Add(1)
+		}
 	}()
+	return nil
+}
+
+// takeBack is a failed transfer's reclaim: the workspace never reached the
+// successor, so it is served here again. Its answer is the reclaim's own
+// failure, joined onto the transfer's.
+func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, hadShim bool, fields dlog.Context) error {
+	// The transfer's bounce is still running here and FAILS, which is what
+	// resumes the registry's dispatch; there is no kept drain to end.
+	_, err := c.reclaim(ctx, ws, lease, hadShim, false, fields)
+	return err
+}
+
+// reclaim takes a workspace this daemon handed toward the successor BACK and
+// serves it again. It answers whether the workspace is this daemon's again:
+// false when the successor already owns it, which is not a failure.
+//
+// THE SERVING ROW ARBITRATES. The successor's adoption and this reclaim race
+// for the same released row, and ClaimUnownedServing lets exactly one of them
+// win; only the winner dials the shim. A successor that won has adopted the
+// workspace, and there is nothing to take back.
+//
+// THE HOLD IS RELEASED ON EVERY PATH PAST A WON CLAIM, the shim re-attach's
+// failure included: a workspace served here with its quiesce hold standing is
+// the 2026-09-27 defect -- `restarting` drawn forever, every prompt refused.
+// A shim that will not re-attach leaves the workspace served without a
+// session, which its next prompt's revival adopts or replaces.
+//
+// It runs on a context the handover's own cancellation cannot refuse: the
+// release it owes is exactly what must not be skipped.
+//
+// endDrain is set once the transfer's bounce has FINISHED: the registry then
+// keeps the workspace drained for its new owner, and that drain is ended here
+// so dispatch resumes on this daemon.
+func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, reattach, endDrain bool, fields dlog.Context) (bool, error) {
+	ctx = context.WithoutCancel(ctx)
+	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
+	if err != nil {
+		c.log.Error(opTransfer, "could not take the workspace back: its serving ownership could not be claimed; its hold stays until this daemon's state handle closes",
+			withCause(fields, err))
+		return false, fmt.Errorf("rollout: reclaim %q: claim serving: %w", ws, err)
+	}
+	if !claimed {
+		c.log.Info(opTransfer, "the successor already owns the workspace; nothing to take back",
+			merge(fields, dlog.Context{"owner": string(holder)}))
+		return false, nil
+	}
+	c.untransfer(ws)
+	var failures []error
+	if _, live := c.deps.Shims.Client(ws); reattach && !live {
+		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
+			c.log.Error(opTransfer, "the taken-back workspace's running shim could not be re-attached; it is served without a session until its next prompt revives one",
+				withCause(fields, err))
+			failures = append(failures, fmt.Errorf("rollout: reclaim %q: re-attach the shim: %w", ws, err))
+		}
+	}
+	if err := c.releaseHold(ctx, ws, lease, fields); err != nil {
+		failures = append(failures, err)
+	}
+	if endDrain {
+		c.deps.Bounces.EndKeptDrain(ws)
+	}
+	if c.deps.PublishViews != nil {
+		if err := c.deps.PublishViews(ctx, ws); err != nil {
+			c.log.Error(opTransfer, "the taken-back workspace's views could not be republished", withCause(fields, err))
+			failures = append(failures, fmt.Errorf("rollout: reclaim %q: publish views: %w", ws, err))
+		}
+	}
+	c.log.Info(opTransfer, "took the workspace back; this daemon serves it again", fields)
+	return true, errors.Join(failures...)
+}
+
+// releaseHold releases the quiesce hold a transfer took -- by its own id, never
+// another holder's -- and tells the queue, which is what drains the intake it
+// held, and the host view, whose composer arm the hold is.
+func (c *controller) releaseHold(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) error {
+	if lease == "" {
+		c.log.Debug(opTransfer, "the transfer took no hold of its own; another holder's lease is left as it stands", fields)
+		c.deps.LeaseChanged(ws)
+		c.publishHost(ws)
+		return nil
+	}
+	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
+		c.log.Error(opTransfer, "could not release the transfer's hold; it stays until this daemon's state handle closes",
+			withCause(fields, err))
+		return fmt.Errorf("rollout: release the hold %s of %q: %w", lease, ws, err)
+	}
+	c.deps.LeaseChanged(ws)
+	c.publishHost(ws)
+	c.log.Debug(opTransfer, "released the transfer's hold", fields)
 	return nil
 }
 
@@ -424,14 +583,22 @@ func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fie
 	return nil
 }
 
-// timeAdoption gives the successor its window and records the workspace's OWN
-// fault when it expires. There is deliberately no abort and no retry
-// machinery: expiry is remediated as it comes up.
-func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
+// timeAdoption gives the successor its window, and TAKES THE WORKSPACE BACK
+// when it expires. It answers whether it did.
+//
+// AN EXPIRED WINDOW RECLAIMS; it does not merely record. Before this, expiry
+// only opened the workspace's fault and left it quiesced, detached and
+// released -- served by no daemon, its hold standing -- until a later boot
+// (2026-09-27: five workspaces, then every prompt refused for hours). Now the
+// workspace is reclaimed through the serving row's arbitration: a successor
+// that adopted in the last instant keeps it, and otherwise this daemon serves
+// it again with its hold released. The fault is still opened, as the record
+// of an adoption that never landed.
+func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, detached bool, fields dlog.Context) bool {
 	// An adoption that already landed needs no window: the headless case claims
 	// serving inside Join, before the push it is answering was even read.
 	if c.adopted(ctx, ws, fields) {
-		return
+		return false
 	}
 	// THE WINDOW IS A DEADLINE, NOT A DELAY. The rendezvous closes the moment
 	// every expected participant has adopted, and waiting on it is what lets
@@ -454,35 +621,49 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, field
 		select {
 		case <-ctx.Done():
 			c.log.Debug(opAdoption, "the adoption window ended with its context", fields)
-			return
+			return false
 		case <-done:
 			c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
-			return
+			return false
 		case <-look.C:
 			if c.adopted(ctx, ws, fields) {
-				return
+				return false
 			}
 		case <-expired:
 			waiting = false
 		}
 	}
-	if c.adopted(ctx, ws, fields) {
-		return
+	window := dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}
+	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, merge(fields, window))
+	if !reclaimed {
+		if err == nil {
+			// The arbitration answered for the successor: it adopted in the
+			// window's last instant.
+			return false
+		}
+		c.log.Error(opAdoption, "the adoption window expired and the workspace could not be taken back",
+			withCause(merge(fields, window), err))
+		return false
 	}
 	workspace := ws
-	if _, err := c.deps.DB.OpenFault(ctx, wsm.Fault{
+	if _, faultErr := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
 		Workspace: &workspace,
 		Kind:      FaultAdoptionExpired,
-		Detail: fmt.Sprintf("the successor did not claim this workspace within the %s adoption window",
+		Detail: fmt.Sprintf("the successor did not claim this workspace within the %s adoption window; this daemon took it back",
 			c.deps.AdoptionWindow),
 		Evidence: map[string]string{"adoption_window": c.deps.AdoptionWindow.String()},
 		OpenedAt: c.deps.Clock.Now(),
-	}); err != nil {
-		c.log.Error(opAdoption, "could not record the expired adoption window", withCause(fields, err))
-		return
+	}); faultErr != nil {
+		c.log.Error(opAdoption, "could not record the expired adoption window", withCause(fields, faultErr))
 	}
-	c.log.Warn(opAdoption, "the adoption window expired; recorded the workspace's own fault",
-		merge(fields, dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}))
+	if err != nil {
+		c.log.Error(opAdoption, "the adoption window expired; the workspace was taken back, but not cleanly",
+			withCause(merge(fields, window), err))
+		return true
+	}
+	c.log.Error(opAdoption, "the adoption window expired; the successor never adopted the workspace, so this daemon took it back and serves it again",
+		merge(fields, window))
+	return true
 }
 
 // rendezvousDone answers the channel that closes when this workspace's

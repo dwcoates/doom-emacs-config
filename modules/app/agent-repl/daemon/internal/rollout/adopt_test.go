@@ -12,6 +12,7 @@ import (
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/wsm"
 )
 
 // writeHandoverManifest writes the incumbent's intent manifest naming one
@@ -325,18 +326,78 @@ func TestAdoptionDrainsTheHeldIntakeBeforePublishingViews(t *testing.T) {
 	}
 }
 
-func TestAdoptionAdoptsTheRunningShimBeforeClaimingServing(t *testing.T) {
+// TestAdoptionClaimsServingBeforeDialingTheShim pins the arbitration order
+// (invariant D): the incumbent's reclaim of an expired window and this
+// adoption race for one released row, and only the side whose claim stood may
+// dial the shim -- so the claim is taken first. It replaces the earlier pin
+// of the opposite order, which let both daemons hold a client for one shim.
+func TestAdoptionClaimsServingBeforeDialingTheShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	var ownerAtDial *ids.InstanceID
+	h.fleet.onAdopt = func(adopted ids.WorkspaceID) {
+		owner, err := h.db.Serving(context.Background(), adopted)
+		if err != nil {
+			t.Errorf("Serving: %v", err)
+		}
+		ownerAtDial = owner
+	}
 
 	// Act
 	arm(t, h, ws, Participants{})
 
 	// Assert
-	taken := h.order.Taken()
-	if adopt := indexOf(taken, "adopt"); adopt != 0 {
-		t.Fatalf("steps = %v, want the running shim adopted first", taken)
+	if ownerAtDial == nil || *ownerAtDial != selfInstance {
+		t.Fatalf("serving owner when the shim was dialed = %v, want this daemon's claim already standing", ownerAtDial)
+	}
+}
+
+// servingBlindDB answers every serving read as released, so an adoption
+// passes its wait for the incumbent's release while the row itself names the
+// incumbent: the instant between that wait and the claim, frozen.
+type servingBlindDB struct{ wsm.DB }
+
+func (servingBlindDB) Serving(context.Context, wsm.WorkspaceID) (*wsm.InstanceID, error) {
+	return nil, nil
+}
+
+func TestAnAdoptionTheIncumbentTookBackDialsNothing(t *testing.T) {
+	// Arrange: the incumbent took the workspace back after the adoption saw
+	// it released.
+	h := newHarness(t, func(d *Deps) { d.DB = servingBlindDB{DB: d.DB} })
+	ws, _ := h.workspace(t)
+	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-outgoing-previous")); err != nil {
+		t.Fatalf("ClaimServing(incumbent): %v", err)
+	}
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want no dial of a shim the incumbent took back", got)
+	}
+	if got := h.Drained(); len(got) != 0 {
+		t.Fatalf("drained = %v, want the incumbent's hold left to the incumbent", got)
+	}
+	if !loggedError(h.log, opAdopt, "the incumbent took the workspace back") {
+		t.Fatalf("records = %+v, want the lost claim at ERROR", h.log.Records())
+	}
+}
+
+func TestAnAdoptionWhoseShimWillNotAnswerStillDrainsTheIntake(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.adoptErr[ws] = errFake
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Drained(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("drained = %v, want the claimed workspace's hold drained though its shim did not answer", got)
 	}
 }
 

@@ -136,6 +136,7 @@ func TestHandOverCompletesOnceTheWorkspaceFallsFree(t *testing.T) {
 	// Act
 	h.registry.free(ws)
 	h.clock.awaitArmed(t, adoptionWindow)
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 
@@ -158,6 +159,7 @@ func TestHandOverSurvivesTheCallerGivingUp(t *testing.T) {
 	}
 	cancel()
 	h.clock.awaitArmed(t, adoptionWindow)
+	h.successorAdopts(t)
 	h.clock.Fire(adoptionWindow)
 
 	// Assert

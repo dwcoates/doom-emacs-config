@@ -230,6 +230,10 @@ type fakeStand struct {
 	// absence rather than every presence.
 	notServing map[ids.WorkspaceID]bool
 
+	// onHibernate, when set, runs as each directive arrives: a test's way to
+	// act at exactly that instant, never after a delay.
+	onHibernate func()
+
 	hibernated []ids.WorkspaceID
 	killed     []killCall
 	// kills announces every stand-down, so a test synchronizes on one having
@@ -271,6 +275,9 @@ func (s *fakeStand) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hibernated = append(s.hibernated, ws)
+	if s.onHibernate != nil {
+		s.onHibernate()
+	}
 	if s.wedge {
 		<-ctx.Done()
 		return nil, ctx.Err()

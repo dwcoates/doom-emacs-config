@@ -107,6 +107,10 @@ type DB interface {
 	// Lease loads a workspace's current lease; the bool reports whether one is
 	// held.
 	Lease(ctx context.Context, id WorkspaceID) (Lease, bool, error)
+	// ForeignLeases lists every held lease THIS HANDLE did not acquire. A
+	// daemon holds one handle for its whole life, so on an incumbent's boot
+	// each of them is an orphan whose owning process is gone.
+	ForeignLeases(ctx context.Context) ([]Lease, error)
 	// SetLeasePolicy changes what a held lease projects onto new submissions
 	// (a merge moving from refusing to parked).
 	SetLeasePolicy(ctx context.Context, leaseID LeaseID, p LeasePolicy) error
@@ -259,6 +263,11 @@ type DB interface {
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.
 	ClaimServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error
+	// ClaimUnownedServing claims serving ownership only when no other
+	// instance holds it, answering whether the claim stood and, when it did
+	// not, who holds the workspace. It is the arbitration between an
+	// incumbent reclaiming a workspace and the successor adopting it.
+	ClaimUnownedServing(ctx context.Context, id WorkspaceID, daemon InstanceID) (bool, InstanceID, error)
 	// Serving reports which daemon instance serves a workspace, nil when none
 	// does.
 	Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error)

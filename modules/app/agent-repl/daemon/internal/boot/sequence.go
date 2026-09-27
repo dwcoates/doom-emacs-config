@@ -105,6 +105,11 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.recoverMerges(ctx, log, workspaces, &report); err != nil {
 			return Report{}, err
 		}
+		// THE ORPHANED LEASES GO LAST, after the merge recovery has resolved
+		// the merge leases it owns the reading of.
+		if err := s.releaseOrphanLeases(ctx, log, &report); err != nil {
+			return Report{}, err
+		}
 		// THE BRING-UP IS ONLY NAMED HERE, and it is named LAST for the same
 		// reason it used to RUN last: the sessions it starts would race every
 		// reconciliation above it — the orphaned turns are closed, the holds
@@ -121,6 +126,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
 		"adopted":            len(report.Adopted),
 		"pending_bring_up":   len(report.PendingBringUp),
+		"orphan_leases":      len(report.OrphanLeases),
 		"undetermined":       len(report.Undetermined),
 		"orphans_closed":     len(report.Orphaned),
 		"missing_dir_closed": len(report.MissingDirClosed),
@@ -526,6 +532,58 @@ func (s *sequence) recoverMerges(ctx context.Context, log dlog.Logger, workspace
 		"merges": len(inFlight),
 	})
 	report.MergesRecovered = inFlight
+	return nil
+}
+
+// releaseOrphanLeases releases every lease a previous process left behind.
+//
+// NO LEASE OUTLIVES ITS OWNER. A lease is owned by the process whose state
+// handle took it, and that handle's orderly close releases it (wsm Close).
+// This boot is an INCUMBENT'S -- it holds the boot claim, which the kernel
+// releases only when the previous incumbent's process ends, and a joining
+// successor never reaches this step -- so a lease its own handle did not
+// take has no living owner. Left standing it is read as a live hold for
+// ever: after the 2026-09-27 handover whose successor died at boot, five
+// workspaces kept the handover's quiesce leases through a later fresh boot,
+// the composer drew `restarting` from them, and Emacs refused every prompt.
+//
+// IT RUNS AFTER THE MERGE RECOVERY, which reads and releases the merge
+// leases a crash left (and re-admits each merge under a lease of its own,
+// which this handle owns and so is not foreign). Whatever is still foreign
+// after it is an orphan of any holder.
+//
+// EACH RELEASE IS AN INVARIANT VIOLATION REPAIRED, stated once at ERROR with
+// the lease, its holder and its workspace, and the prompt queue is told so the
+// intake the lease held drains. A release that fails fails the boot: a daemon
+// that cannot clear a hold nobody owns would serve a workspace that refuses
+// every prompt.
+func (s *sequence) releaseOrphanLeases(ctx context.Context, log dlog.Logger, report *Report) error {
+	const op = "daemon.boot.orphan_leases"
+	foreign, err := s.deps.DB.ForeignLeases(ctx)
+	if err != nil {
+		log.Error(op, "the leases a previous process may have left could not be read", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("boot: read the leases a previous process left: %w", err)
+	}
+	for _, lease := range foreign {
+		fields := dlog.Context{
+			"workspace_id": string(lease.Workspace),
+			"lease":        string(lease.ID),
+			"holder":       lease.Holder.String(),
+			"policy":       lease.Policy.String(),
+			"acquired_at":  lease.AcquiredAt,
+		}
+		if err := s.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
+			fields["error"] = err.Error()
+			log.Error(op, "a lease whose owning process is gone could not be released", fields)
+			return fmt.Errorf("boot: release the orphaned lease %s of %s: %w", lease.ID, lease.Workspace, err)
+		}
+		log.Error(op, "released a lease that outlived the process that took it; that process died without releasing it", fields)
+		s.deps.Queue.OnLeaseChanged(lease.Workspace)
+		report.OrphanLeases = append(report.OrphanLeases, lease)
+	}
+	log.Debug(op, "no lease is left without a living owner", dlog.Context{"released": len(foreign)})
 	return nil
 }
 

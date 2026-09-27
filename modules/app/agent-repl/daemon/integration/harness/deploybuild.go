@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"agentrepl/logging/buildreport"
 
 	"claude-repld/internal/buildid"
+	"claude-repld/internal/wsm"
 )
 
 // THE DEPLOY'S FAKE BUILD.
@@ -43,9 +45,15 @@ const (
 	// DeployFails fails the build, so the deploy installs and restarts
 	// nothing, and says so loudly.
 	DeployFails DeployBuild = "fails"
-	// DeployStaleDaemon stages a daemon binary that is not the running one,
-	// so the deploy hands the daemon over.
+	// DeployStaleDaemon stages a daemon binary that is not the running one
+	// and writes the running state layout, so the deploy hands the daemon
+	// over. The staged binary is a stand-in that answers `-layout-version`,
+	// the one question a deploy asks of it.
 	DeployStaleDaemon DeployBuild = "stale-daemon"
+	// DeployStaleDaemonNewLayout stages a daemon binary that writes the NEXT
+	// state layout, so the deploy restarts the daemon rather than handing it
+	// over (a joining successor cannot open an older layout).
+	DeployStaleDaemonNewLayout DeployBuild = "stale-daemon-new-layout"
 	// DeployStaleWebapp stages a webapp whose entry bundle is not the one the
 	// webviews report, so the deploy pushes them the reload.
 	DeployStaleWebapp DeployBuild = "stale-webapp"
@@ -118,7 +126,11 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
   cp ` + shellQuote(src.ShimMain) + ` "$out/agent-shim/claude/shim/dist/main.js"
   cp -R ` + shellQuote(src.WebappDist) + `/. "$out/webapp/dist/"
   if [ "$mode" = "` + string(DeployStaleDaemon) + `" ]; then
-    printf 'a harness daemon build\n' > "$out/daemon/bin/claude-repld"
+    printf '#!/bin/sh\n# a harness daemon build\necho ` + strconv.Itoa(wsm.LayoutVersion) + `\n' > "$out/daemon/bin/claude-repld"
+    chmod +x "$out/daemon/bin/claude-repld"
+  elif [ "$mode" = "` + string(DeployStaleDaemonNewLayout) + `" ]; then
+    printf '#!/bin/sh\n# a harness daemon build on the next layout\necho ` + strconv.Itoa(wsm.LayoutVersion+1) + `\n' > "$out/daemon/bin/claude-repld"
+    chmod +x "$out/daemon/bin/claude-repld"
   else
     cp ` + shellQuote(daemonBinary) + ` "$out/daemon/bin/claude-repld"
   fi

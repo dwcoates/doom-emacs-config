@@ -101,6 +101,11 @@ type Report struct {
 	// Dispositions is the intent manifest's reconciliation, one record per
 	// session. PRESERVED, ROLLED, DIED and UNKNOWN are never collapsed.
 	Dispositions []rollout.Disposition
+	// OrphanLeases are the leases this boot RELEASED because the process that
+	// took them is gone: a previous daemon that died without the orderly close
+	// that releases what it holds. Each one is an invariant violation this
+	// boot repaired, and was stated at ERROR.
+	OrphanLeases []wsm.Lease
 }
 
 // BringUpReport is what the bring-up step did. It is separate from Report

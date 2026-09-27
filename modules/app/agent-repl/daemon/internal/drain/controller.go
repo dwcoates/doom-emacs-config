@@ -167,7 +167,7 @@ func (c *controller) releaseScheduleHolds(ctx context.Context, operation string,
 	c.scheduled = nil
 	c.mu.Unlock()
 	for ws, lease := range taken {
-		if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
+		if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease); err != nil {
 			c.log.Warn(operation, "could not release a schedule's drain hold",
 				merge(fields, dlog.Context{"workspace": string(ws), "lease": string(lease), "cause": err.Error()}))
 			continue
@@ -468,6 +468,21 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 			merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease.ID)}))
 	}
 
+	// THE HOLDS TAKEN HERE LIVE AS LONG AS THIS FIRE AND NO LONGER. A freeness
+	// wait that ends early (the daemon leaving under it) returns without
+	// reaching the ordinary release below, so the deferred one covers it, on a
+	// context that cancellation cannot refuse.
+	releaseHeld := func() {
+		for _, lease := range held {
+			if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease.ID); err != nil {
+				c.log.Warn(opFire, "could not release a drain hold before exiting",
+					merge(fields, dlog.Context{"lease": string(lease.ID), "cause": err.Error()}))
+			}
+		}
+		held = nil
+	}
+	defer releaseHeld()
+
 	for _, ws := range workspaces {
 		if c.deps.Freeness.Free(ws.ID) {
 			c.log.Debug(opFire, "a workspace was already free",
@@ -483,12 +498,7 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 		}
 	}
 
-	for _, lease := range held {
-		if err := c.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
-			c.log.Warn(opFire, "could not release a drain hold before exiting",
-				merge(fields, dlog.Context{"lease": string(lease.ID), "cause": err.Error()}))
-		}
-	}
+	releaseHeld()
 
 	// NO ADDRESS: a scheduled drain has no successor. Clients read the absent
 	// address as a plain bounce and wait the outage out.
