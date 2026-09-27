@@ -1,6 +1,12 @@
 package feed
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -9,6 +15,71 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 )
+
+// TestInterruptedArmSetsTheInterruptedOutcome covers the one interruption
+// setter itself.
+func TestInterruptedArmSetsTheInterruptedOutcome(t *testing.T) {
+	// Arrange
+	ended := &frontendv1.FeedTurnEnded{}
+
+	// Act
+	interruptedArm()(ended)
+
+	// Assert
+	if ended.GetInterrupted() == nil {
+		t.Fatalf("outcome = %T, want interrupted", ended.GetOutcome())
+	}
+}
+
+// TestOnlyInterruptedArmBuildsTheInterruptedOutcome pins that both paths that
+// draw a stopped turn's ending — the terminal's and the daemon-built close's —
+// go through interruptedArm: no other production function in this package
+// spells the interrupted outcome, so the two cannot drift apart.
+func TestOnlyInterruptedArmBuildsTheInterruptedOutcome(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	fset := token.NewFileSet()
+
+	// Act
+	var builders []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		parsed, err := parser.ParseFile(fset, name, source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				literal, ok := node.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				if selector, ok := literal.Type.(*ast.SelectorExpr); ok && selector.Sel.Name == "FeedTurnEnded_Interrupted" {
+					builders = append(builders, name+":"+function.Name.Name)
+				}
+				return true
+			})
+		}
+	}
+
+	// Assert
+	if len(builders) != 1 || builders[0] != "turnended.go:interruptedArm" {
+		t.Fatalf("interrupted outcome built in %v, want only turnended.go:interruptedArm", builders)
+	}
+}
 
 // THE TERMINAL ROW is the liveness anchor: its ABSENCE for the current turn is
 // what "the turn is live" means. Every arm carries a daemon-composed headline,

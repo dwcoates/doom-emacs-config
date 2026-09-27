@@ -102,7 +102,7 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 	case wsm.CloseCompleted:
 		concludedArm(&frontendv1.FeedTurnEndedConcluded{})(ended)
 	case wsm.CloseKilled:
-		ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{Interrupted: &frontendv1.FeedTurnEndedInterrupted{}}
+		interruptedArm()(ended)
 	case wsm.CloseAgentDied:
 		errored(func(e *frontendv1.FeedTurnEndedErrored) {
 			e.Error = &frontendv1.FeedTurnEndedErrored_AgentProcessDied{
