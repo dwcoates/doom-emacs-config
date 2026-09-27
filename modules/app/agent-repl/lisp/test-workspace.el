@@ -1826,6 +1826,69 @@ left the workspace's tab on the bar."
             (should (equal retired (list owned))))
         (kill-buffer owned)))))
 
+;;;; ---- Tests: --ws-shared-unowned-buffer-p ----
+
+(ert-deftest agent-repl-test-ws-shared-unowned-buffer-p-answers-t-for-a-buffer-another-persp-holds ()
+  "An unowned buffer that another live persp also holds is shared."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *shared*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                     (lambda (&rest _) (list 'keeper-persp))))
+            ;; Act / Assert
+            (should (agent-repl--ws-shared-unowned-buffer-p buf "doomed")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-ws-shared-unowned-buffer-p-answers-nil-for-a-buffer-only-this-persp-holds ()
+  "An unowned buffer no other persp holds belongs to the dying workspace alone."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *solo*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                     (lambda (&rest _) nil)))
+            ;; Act / Assert
+            (should-not (agent-repl--ws-shared-unowned-buffer-p buf "doomed")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-ws-shared-unowned-buffer-p-answers-nil-for-an-owned-buffer ()
+  "A buffer an agent-repl workspace owns is answered by ownership, not sharing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *owned*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (setq-local agent-repl--owning-workspace "doomed"))
+            (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                      ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                       (lambda (&rest _) (list 'keeper-persp))))
+              ;; Act / Assert
+              (should-not (agent-repl--ws-shared-unowned-buffer-p buf "doomed"))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-ws-retire-persp-windows-skips-a-shared-buffer ()
+  "An unowned buffer another persp also holds keeps its windows: they may be
+the landing workspace's."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((shared (generate-new-buffer " *retire-shared*"))
+          (retired nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) (list shared)))
+                    ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                     (lambda (&rest _) (list 'keeper-persp)))
+                    ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                     (lambda (buf &rest _) (push buf retired))))
+            ;; Act
+            (agent-repl--ws-retire-persp-windows "doomed")
+            ;; Assert
+            (should-not retired))
+        (kill-buffer shared)))))
+
 ;;;; ---- Tests: --ws-remove-buffer ----
 
 (ert-deftest agent-repl-test-ws-remove-buffer-delegates-when-bound ()

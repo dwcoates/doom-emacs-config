@@ -89,6 +89,7 @@
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
 (declare-function +workspace--protected-p "ext:persp-mode" (name))
 (declare-function persp-frames-with-persp "ext:persp-mode" (&optional persp))
+(declare-function persp-other-persps-with-buffer-except-nil "ext:persp-mode" (&optional buff-or-name persp phash del-weak))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
 (declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
 (declare-function persp-add-new "ext:persp-mode" (name))
@@ -1918,6 +1919,29 @@ explicit close in a workspace the teardown was not about."
     (agent-repl--log target "arm-landing-panels: ws=%s" target)
     (agent-repl--ws-put target :pending-show-panels t)))
 
+(defun agent-repl--ws-shared-unowned-buffer-p (buf ws)
+  "Return non-nil when BUF is no workspace's own and belongs to a persp besides WS.
+
+A TEARDOWN OF WS MUST CHANGE NOTHING ABOUT ANY OTHER WORKSPACE.  A file,
+magit or scratch buffer owned by no agent-repl workspace
+\(`agent-repl--buffer-owner' nil) can sit in several perspectives at
+once, and when another live perspective holds it -- the workspace the
+teardown lands on among them -- it is that workspace's buffer too:
+killing it, or retiring its windows, would reach into a bystander.
+Agent buffers are answered by ownership instead
+\(`agent-repl--foreign-owned-buffer-p'), so a buffer WS owns is never
+spared here even if persp-mode drifted it elsewhere.
+
+Asks persp-mode's `persp-other-persps-with-buffer-except-nil', which
+leaves out WS's own persp and persp-mode's nil perspective.  nil when
+persp-mode is not loaded or WS has no live persp.  Part of the persp-mode
+integration boundary owned by `workspace.el'."
+  (and (buffer-live-p buf)
+       (null (agent-repl--buffer-owner buf))
+       (fboundp 'persp-other-persps-with-buffer-except-nil)
+       (when-let ((persp (agent-repl--ws-resolve-persp ws)))
+         (and (persp-other-persps-with-buffer-except-nil buf persp) t))))
+
 (defun agent-repl--ws-retire-persp-windows (ws)
   "Retire every window displaying a buffer of perspective WS.
 
@@ -1943,8 +1967,10 @@ Agent buffers owned by a different workspace (see
 `agent-repl--foreign-owned-buffer-p') are skipped, not retired: persp-mode
 can drift another workspace's live panel into this persp, and retiring it
 here would delete that neighbor's on-screen panel window across all frames
--- closing a bystander workspace's panels.  This mirrors the same skip in
-`agent-repl--kill-workspace-buffers'.
+-- closing a bystander workspace's panels.  An unowned buffer another
+live perspective also holds is skipped for the same reason
+\(`agent-repl--ws-shared-unowned-buffer-p').  This mirrors the same skips
+in `agent-repl--kill-workspace-buffers'.
 
 No-op when persp-mode is not loaded or WS has no live persp."
   (when-let* ((persp (agent-repl--ws-resolve-persp ws))
@@ -1952,11 +1978,15 @@ No-op when persp-mode is not loaded or WS has no live persp."
     (agent-repl--log ws "ws-retire-persp-windows: ws=%s buffers=%d" ws (length bufs))
     (dolist (buf bufs)
       (when (buffer-live-p buf)
-        (if (agent-repl--foreign-owned-buffer-p buf ws)
-            (agent-repl--log ws "ws-retire-persp-windows: SKIP foreign buf=%s owner=%s"
-                              (agent-repl--safe-buffer-name buf)
-                              (agent-repl--buffer-owner buf))
-          (agent-repl-window--delete-buffer-windows buf :ws ws))))))
+        (cond
+         ((agent-repl--foreign-owned-buffer-p buf ws)
+          (agent-repl--log ws "ws-retire-persp-windows: SKIP foreign buf=%s owner=%s"
+                           (agent-repl--safe-buffer-name buf)
+                           (agent-repl--buffer-owner buf)))
+         ((agent-repl--ws-shared-unowned-buffer-p buf ws)
+          (agent-repl--log ws "ws-retire-persp-windows: SKIP shared buf=%s"
+                           (agent-repl--safe-buffer-name buf)))
+         (t (agent-repl-window--delete-buffer-windows buf :ws ws)))))))
 
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.
