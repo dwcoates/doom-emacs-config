@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
@@ -332,6 +333,12 @@ type Deps struct {
 	PublishHost func(ws ids.WorkspaceID)
 	// Log is the queue's logger.
 	Log dlog.Surfaces
+	// Stalls is the lock stall watchdog. OPTIONAL: nil leaves the queue's
+	// locks unwatched, which is what every test that does not exercise it
+	// leaves it. Production always wires it, because Submit takes the queue's
+	// mutex and then the workspace's delivery lock, so a hold past Emacs's
+	// unary timeout on either is a SubmitPrompt that never answers.
+	Stalls lockwatch.Registry
 }
 
 // ColdGateRefusal is ErrColdGate carrying the GATE'S OWN sentence, which is
