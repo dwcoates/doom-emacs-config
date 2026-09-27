@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -15,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
@@ -32,7 +32,7 @@ var errNotARow = errors.New("feed: this frame draws no row")
 type resolver struct {
 	deps Deps
 
-	mu         sync.Mutex
+	mu         lockwatch.Mutex
 	workspaces map[ids.WorkspaceID]*wsState
 	// tokens is the whole watch-token table: minting here is what makes a
 	// token opaque, foreign tokens detectable, and pinning exact.
@@ -444,13 +444,22 @@ func newResolver(deps Deps) (*resolver, error) {
 	if deps.TailRetention <= 0 {
 		deps.TailRetention = DefaultTailRetention
 	}
-	return &resolver{
+	r := &resolver{
 		deps:       deps,
 		workspaces: map[ids.WorkspaceID]*wsState{},
 		tokens:     map[string]*watchToken{},
 		loggers:    map[ids.WorkspaceID]dlog.Logger{},
-	}, nil
+	}
+	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
+	// record. It lives as long as the process and is never unwatched.
+	if deps.Stalls != nil {
+		deps.Stalls.Watch(&r.mu, stallLock, "", deps.Log.Global())
+	}
+	return r, nil
 }
+
+// stallLock is how the stall watchdog names the resolver's mutex.
+const stallLock = "feed.resolver"
 
 // logger resolves a workspace's durable logger. Failing to resolve the
 // workspace is an INVARIANT VIOLATION, recorded once at ERROR against the
