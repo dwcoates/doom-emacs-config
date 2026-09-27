@@ -838,16 +838,24 @@ Two mutations report stages today and they do NOT work the same way:
 
 Each verb takes its reporter as a proto-free interface (`CreateProgress`,
 `OpenProgress`) so the verb layer never names a wire type; the server maps the
-verb's own stage vocabulary onto the enum, and an unmapped stage is logged at
-ERROR and NOT relayed rather than sent as UNSPECIFIED. A stage is reported
+verb's own stage vocabulary onto the wire (a create's onto its own
+`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto the
+`WorkspaceOpenStage` enum), and an unmapped stage is logged at ERROR and NOT
+relayed rather than sent unset or as UNSPECIFIED. A stage is reported
 only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
 
-The create's stage enum today is `DERIVING_NAME` and `CREATING_WORKTREE`;
-there is no stage for the session bring-up or the initial prompt that follow
-the worktree, so a client shows the worktree line until `succeeded` lands.
-Adding one is a proto change (`WorkspaceCreateStage`).
+A create's stages, in order, are `deriving_name` (only when the daemon mints
+the name), `creating_worktree`, and `starting_session`. EVERY create that gets
+past the worktree enters `starting_session`, with or without an initial
+prompt: it is reported the moment `worktree add` returns, before
+registration, and covers registration, a fork's transcript copy, the shim
+spawn and vendor bring-up, and the initial prompt's submission to the queue.
+It ends at the terminal step -- `succeeded` once the session is up and any
+initial prompt is accepted, or `failed` for anything that went wrong inside
+it. A create that fails at the worktree never enters it. Adding a stage is a
+proto change (a new `WorkspaceCreateStage` arm).
 
 ## Workspace naming: one call, and a fork brings its conversation
 
