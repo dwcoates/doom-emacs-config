@@ -196,7 +196,8 @@ type DB interface {
   HeldPrompts(id WorkspaceID) ([]HeldPrompt, error); AllHeldPrompts() ([]HeldPrompt, error)  // corrupt row => error, nothing loaded
   // turns (durable origin, displaced capture, idempotency)
   PutTurn(Turn) error; CloseTurn(turn TurnID, at time.Time, how TurnClose) error; OpenTurns(id WorkspaceID) ([]Turn, error)
-  ClaimIdempotencyKey(id WorkspaceID, key string, turn TurnID) (existing *TurnID, err error)
+  ClaimIdempotencyKey(id WorkspaceID, key string, turn TurnID) (IdempotencyClaim, error)  // minted | accepted (duplicate) | redriven (unaccepted claim rebound to turn)
+  AcceptIdempotencyKey(id WorkspaceID, key string, turn TurnID) error  // the queue took the bound turn's submission
   // orphan close: everything without a terminal, one transaction
   CloseOrphans(id WorkspaceID, at time.Time) (OrphanReport, error)
   // tasks
