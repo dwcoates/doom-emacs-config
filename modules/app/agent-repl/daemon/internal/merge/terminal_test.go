@@ -1057,3 +1057,89 @@ func TestAMergeAbortingAfterTheDrainIsNotRecordedAsAFailure(t *testing.T) {
 		t.Fatal("the merge that ended when the daemon exited wrote no INFO stop record")
 	}
 }
+
+// TestTheDrainWaitsForAnAdmissionStepInFlight pins the check-then-act the
+// drain used to lose: the pump read `draining` as false, the drain began and
+// the exit closed the state client, and the pump's next store read hit the
+// closed handle (`daemon.wsm.merge_queue: refused the read ... sql: database
+// is closed`). A step that began before the drain now holds it.
+func TestTheDrainWaitsForAnAdmissionStepInFlight(t *testing.T) {
+	// Arrange: an admission step held inside its first store read.
+	h := newHarness(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	h.db.onPausedRead = func() {
+		close(entered)
+		<-release
+	}
+	done := admitAsync(h, context.Background())
+	<-entered
+
+	// Act
+	drained := make(chan struct{})
+	go func() {
+		h.o.Drain(context.Background())
+		close(drained)
+	}()
+
+	// Assert: the drain holds while the step reads, and returns once it left.
+	select {
+	case <-drained:
+		t.Fatal("the drain returned while an admission step was still reading the store")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-drained
+	if err := <-done; err != nil {
+		t.Fatalf("the admission step failed: %v", err)
+	}
+}
+
+// TestAnAdmissionStepOutlivingTheDrainsBoundIsAnError pins the loud half: the
+// drain is bounded, and a step still reading when the bound expires is about
+// to read a closed store, which is said at ERROR.
+func TestAnAdmissionStepOutlivingTheDrainsBoundIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.o.drainBound = 20 * time.Millisecond
+	entered, release := make(chan struct{}), make(chan struct{})
+	h.db.onPausedRead = func() {
+		close(entered)
+		<-release
+	}
+	done := admitAsync(h, context.Background())
+	<-entered
+
+	// Act
+	h.o.Drain(context.Background())
+	close(release)
+	<-done
+
+	// Assert
+	if _, found := recordWith(h, "error", "daemon.merge.drain"); !found {
+		t.Fatal("the drain gave up on an admission step in flight without an ERROR record")
+	}
+}
+
+// TestNoAdmissionStepBeginsOnceTheDrainHasBegun pins the other half: the
+// registration and the drain's flag are one lock, so a step that starts after
+// the drain reads nothing at all.
+func TestNoAdmissionStepBeginsOnceTheDrainHasBegun(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+	h.o.Drain(context.Background())
+	h.db.mu.Lock()
+	before := h.db.pausedReads
+	h.db.mu.Unlock()
+
+	// Act
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert
+	h.db.mu.Lock()
+	after := h.db.pausedReads
+	h.db.mu.Unlock()
+	if ran || err != nil || after != before {
+		t.Fatalf("pumpOnce after the drain = (%v, %v) with %d store reads, want nothing admitted and nothing read", ran, err, after-before)
+	}
+}

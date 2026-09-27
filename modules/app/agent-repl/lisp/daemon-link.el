@@ -258,6 +258,19 @@ has to WAIT for the acceptance rather than be reported as a breach."
        (agent-repl-connect-connection-alive-p agent-repl-link--primary)
        t))
 
+(defun agent-repl-link-live ()
+  "Return the connection to the LIVE daemon, or nil when no link stands.
+THE ONE ANSWER TO \"which daemon serves Emacs now\".  The primary is
+resolved from `daemon.addr' (`agent-repl-link-connect', the reconnect
+loop) or promoted from a successor the old daemon announced, and it is
+the primary only once its `WatchDaemon' was ACCEPTED -- so a per-workspace
+stream or call that lost its own daemon follows THIS, never an address it
+remembers.  Nil while the link is down: the caller waits on
+`agent-repl-link-up-functions' rather than polling.  A primary whose
+connection is closed is never answered."
+  (let ((primary agent-repl-link--primary))
+    (and primary (agent-repl-connect-connection-alive-p primary) primary)))
+
 (defun agent-repl-link--now-ms ()
   "Return the current instant as epoch milliseconds.
 The wire carries instants, never durations-since-now, so every comparison
