@@ -190,7 +190,9 @@ func (s *server) watchWorkspaceRoster(
 ) error {
 	return serveTopic(s, ctx, "WatchWorkspaceRoster", s.log, s.deps.Sidebar.Topic(), out,
 		func(roster *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
-			return &agentreplv1.WatchWorkspaceRosterResponse{Roster: roster}
+			return &agentreplv1.WatchWorkspaceRosterResponse{
+				Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: roster},
+			}
 		})
 }
 
