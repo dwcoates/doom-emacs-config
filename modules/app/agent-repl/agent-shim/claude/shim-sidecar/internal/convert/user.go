@@ -146,8 +146,11 @@ func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, 
 // turn id and the upsert key (PromptKey, the shim's own space). Re-ingesting the
 // same record mints the identical turn id, the identical upsert key and the
 // identical write id, so it supersedes its own row instead of appending a
-// second bubble. The recipient is the frame's agent (the main agent for a
-// session transcript), which the store requires to match the book.
+// second bubble. AN EDITED OR RE-SENT VERSION of a still-unanswered prompt is
+// the one exception: it takes the FIRST version's uuid, so it supersedes that
+// row rather than drawing beside it (resend.go). The recipient is the frame's
+// agent (the main agent for a session transcript), which the store requires to
+// match the book.
 //
 // THE ORIGIN IS LEFT UNSPECIFIED, which the daemon draws as the plain "You"
 // author label — the same bubble a person's own prompt gets. The closed
@@ -156,17 +159,26 @@ func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, 
 // design decision left to the owner; UNSPECIFIED is the honest "not from an
 // agent-repl send site" and renders identically to a human prompt.
 func (c *Converter) externalPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	turn := env.uuid
+	said := userSaid(message)
+	// AN EDITED OR RE-SENT VERSION IS EMITTED ON ITS SET'S ROW (resend.go): the
+	// first version's uuid names the turn and the key, so this write supersedes
+	// the words the row held instead of drawing a second bubble.
+	turn, joined := c.joinPromptSet(env.uuid, str(record["parentUuid"]), agent, said)
 	// THIS RECORD OPENS THE TURN, and every record of it is stamped with it.
 	c.openedTurn = turn
 	prompt := &conversationv1.AgentPrompt{
 		Id:     &conversationv1.TurnId{Value: turn},
 		Agent:  agentID(agent),
-		Said:   userSaid(message),
+		Said:   said,
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
 	}
-	c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
-		LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own sdk-cli)", str(record["entrypoint"]))
+	if joined {
+		c.log.With(at.ctxFor("prompt-resend")).With(logging.Context{UpsertKey: PromptKey(turn)}).
+			Log("an edited or re-sent prompt shares an unanswered version's parent; it supersedes that version's row instead of drawing a second one")
+	} else {
+		c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
+			LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own sdk-cli)", str(record["entrypoint"]))
+	}
 	return c.landPrompt(at, agent, PromptKey(turn), "agent_prompt", prompt)
 }
 
