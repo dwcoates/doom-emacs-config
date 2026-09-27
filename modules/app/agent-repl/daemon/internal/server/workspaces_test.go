@@ -464,6 +464,7 @@ func TestCreateWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	h.Verbs.createStages = []workspace.CreateStage{
 		workspace.CreateStageDerivingName,
 		workspace.CreateStageCreatingWorktree,
+		workspace.CreateStageStartingSession,
 	}
 	stream := proveDaemonSubscription(t, h)
 
@@ -477,11 +478,8 @@ func TestCreateWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
 	}
 
-	// Assert: the two stages arrive in order, then the terminal success.
-	wantStages := []agentreplv1.WorkspaceCreateStage{
-		agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME,
-		agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_CREATING_WORKTREE,
-	}
+	// Assert: the three stages arrive in order, then the terminal success.
+	wantStages := []string{"deriving_name", "creating_worktree", "starting_session"}
 	for i, want := range wantStages {
 		if !stream.Receive() {
 			t.Fatalf("receive stage %d: %v", i, stream.Err())
@@ -490,8 +488,8 @@ func TestCreateWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 		if prog.GetOpId() != "op-order" {
 			t.Fatalf("stage %d op_id = %q, want op-order", i, prog.GetOpId())
 		}
-		if got := prog.GetCreate().GetStage(); got != want {
-			t.Fatalf("stage %d = %v, want %v", i, got, want)
+		if got := createStageArm(prog.GetCreate().GetEnteredStage()); got != want {
+			t.Fatalf("stage %d = %q, want %q", i, got, want)
 		}
 	}
 	if !stream.Receive() {
@@ -500,6 +498,106 @@ func TestCreateWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	if stream.Msg().GetMutationProgress().GetCreate().GetSucceeded() == nil {
 		t.Fatalf("terminal step = %v, want succeeded",
 			stream.Msg().GetMutationProgress().GetCreate().GetStep())
+	}
+}
+
+// createStageArm names the arm set on an entered_stage, so a test compares the
+// stage a push carried by name. An unset or unknown arm names itself as such.
+func createStageArm(stage *agentreplv1.WorkspaceCreateStage) string {
+	switch stage.GetStage().(type) {
+	case *agentreplv1.WorkspaceCreateStage_DerivingName:
+		return "deriving_name"
+	case *agentreplv1.WorkspaceCreateStage_CreatingWorktree:
+		return "creating_worktree"
+	case *agentreplv1.WorkspaceCreateStage_StartingSession:
+		return "starting_session"
+	case nil:
+		return "<unset>"
+	default:
+		return "<unknown>"
+	}
+}
+
+// TestCreateProgressReporterMapsEachStageToItsArm pins that every stage the
+// verb reports reaches the wire on entered_stage with its own oneof arm set.
+func TestCreateProgressReporterMapsEachStageToItsArm(t *testing.T) {
+	cases := []struct {
+		name  string
+		stage workspace.CreateStage
+		want  string
+	}{
+		{"deriving name", workspace.CreateStageDerivingName, "deriving_name"},
+		{"creating worktree", workspace.CreateStageCreatingWorktree, "creating_worktree"},
+		{"starting session", workspace.CreateStageStartingSession, "starting_session"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			stream := proveDaemonSubscription(t, h)
+			reporter := createProgressReporter{server: h.Server.(*server), opID: "op-arm"}
+
+			// Act.
+			reporter.Stage(tc.stage)
+
+			// Assert.
+			if !stream.Receive() {
+				t.Fatalf("receive the stage: %v", stream.Err())
+			}
+			prog := stream.Msg().GetMutationProgress()
+			if prog.GetOpId() != "op-arm" {
+				t.Fatalf("op_id = %q, want op-arm", prog.GetOpId())
+			}
+			if got := createStageArm(prog.GetCreate().GetEnteredStage()); got != tc.want {
+				t.Fatalf("arm = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCreateWorkspaceEndsInFailedWhenTheSessionStageFails pins that a create
+// failing during its session bring-up, after it entered starting_session,
+// still reaches the client as the terminal failed step.
+func TestCreateWorkspaceEndsInFailedWhenTheSessionStageFails(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createStages = []workspace.CreateStage{
+		workspace.CreateStageCreatingWorktree,
+		workspace.CreateStageStartingSession,
+	}
+	h.Verbs.createErr = errors.New("start the session: the shim never answered")
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "op-bringup")))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if resp.Msg.GetAccepted() == nil {
+		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
+	}
+
+	// Assert: both stages, then the terminal failure carrying the cause.
+	for i, want := range []string{"creating_worktree", "starting_session"} {
+		if !stream.Receive() {
+			t.Fatalf("receive stage %d: %v", i, stream.Err())
+		}
+		if got := createStageArm(stream.Msg().GetMutationProgress().GetCreate().GetEnteredStage()); got != want {
+			t.Fatalf("stage %d = %q, want %q", i, got, want)
+		}
+	}
+	if !stream.Receive() {
+		t.Fatalf("receive the terminal outcome: %v", stream.Err())
+	}
+	failed := stream.Msg().GetMutationProgress().GetCreate().GetFailed()
+	if failed == nil {
+		t.Fatalf("terminal step = %v, want failed",
+			stream.Msg().GetMutationProgress().GetCreate().GetStep())
+	}
+	if got := failed.GetInternal(); !strings.Contains(got, "the shim never answered") {
+		t.Fatalf("internal failure = %q, want it to carry the cause", got)
 	}
 }
 
