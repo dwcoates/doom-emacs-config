@@ -916,12 +916,30 @@ dropped."
                          (length entries) (length order))
         order))))
 
-(defun agent-repl-roster-on-push (push)
-  "Handle one decoded WatchWorkspaceRoster PUSH."
-  (let ((request-id (agent-repl--next-log-request-id)))
-    (agent-repl--with-log-context
-     agent-repl--global-log-scope request-id
-     (lambda () (agent-repl-roster-apply (plist-get push :roster))))))
+(defvar agent-repl-roster--ending-stream nil
+  "The roster stream that carried the planned ending, or nil.
+Its daemon is standing down in a PLANNED exit and the frame was the
+stream\='s last (`DaemonStreamEnding'), so the clean end that follows is
+recorded at INFO rather than as a stream the producer dropped.")
+
+(defun agent-repl-roster-on-push (push &optional stream)
+  "Handle one decoded WatchWorkspaceRoster PUSH received on STREAM.
+THE ARM IS WHAT THE FRAME CARRIES: `:roster' is applied whole, and
+`:ending' marks STREAM (nil: the standing one) as ending on purpose.
+Any other arm is a contract breach, recorded at ERROR and not applied."
+  (pcase (plist-get push :arm)
+    (:roster
+     (let ((request-id (agent-repl--next-log-request-id)))
+       (agent-repl--with-log-context
+        agent-repl--global-log-scope request-id
+        (lambda () (agent-repl-roster-apply (plist-get push :value))))))
+    (:ending
+     (setq agent-repl-roster--ending-stream (or stream agent-repl-roster--stream))
+     (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                       "elisp.roster.stream-ending"))
+    (arm
+     (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.unknown-push arm=%S push=%S" arm push))))
 
 (defvar agent-repl-roster--accepted nil
   "The roster stream whose subscription the daemon ACCEPTED, or nil.
@@ -932,9 +950,12 @@ edge said so.")
 
 (defun agent-repl-roster-on-close (reason &optional stream)
   "Handle the roster STREAM closing for REASON.
-A cancel is Emacs's own graceful close.  Anything else is the producer
-dropping a STANDING stream: it is recorded at ERROR, and the roster
-FOLLOWS THE LIVE DAEMON (`agent-repl-roster--follow-live-daemon').
+A cancel is Emacs's own graceful close.  A clean end after the stream
+carried the planned ending (`agent-repl-roster--ending-stream') is the
+daemon standing down on purpose: it is recorded at INFO and the roster
+follows the live daemon.  Anything else is the producer dropping a
+STANDING stream: it is recorded at ERROR, and the roster FOLLOWS THE
+LIVE DAEMON (`agent-repl-roster--follow-live-daemon').
 
 A close of a stream that is no longer the standing one is STALE: a
 re-subscription already replaced it, and forgetting the stream that
@@ -945,16 +966,25 @@ the caller did not name the stream."
     (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
                      "elisp.roster.stale-stream-close: reason=%S" reason))
    (t
-    (setq agent-repl-roster--stream nil)
-    (pcase (car-safe reason)
-      (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
-                                    "elisp.roster.stream-close: reason=cancelled"))
-      (:ended (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                                  "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended")
-              (agent-repl-roster--follow-live-daemon stream))
-      (_ (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                             "elisp.roster.stream-close: reason=%S" reason)
-         (agent-repl-roster--follow-live-daemon stream))))))
+    (let ((closing (or stream agent-repl-roster--stream)))
+      (setq agent-repl-roster--stream nil)
+      (pcase (car-safe reason)
+        (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
+                                      "elisp.roster.stream-close: reason=cancelled"))
+        ((and :ended (guard (and closing (eq closing agent-repl-roster--ending-stream))))
+         ;; THE DAEMON SAID SO FIRST: the stream's last frame was the planned
+         ;; ending, so this is a stand-down, not a fault -- INFO, and the same
+         ;; follow of the live daemon a loss takes.
+         (setq agent-repl-roster--ending-stream nil)
+         (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                           "elisp.roster.stream-close: reason=planned-ending")
+         (agent-repl-roster--follow-live-daemon stream))
+        (:ended (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
+                                    "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended")
+                (agent-repl-roster--follow-live-daemon stream))
+        (_ (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
+                               "elisp.roster.stream-close: reason=%S" reason)
+           (agent-repl-roster--follow-live-daemon stream)))))))
 
 (defun agent-repl-roster--follow-live-daemon (lost)
   "Re-subscribe the roster on the LIVE daemon after the stream LOST died.
@@ -1001,7 +1031,7 @@ deliver the tabs."
   (let (stream)
     (setq stream
           (agent-repl-rpc-watch-workspace-roster
-           conn #'agent-repl-roster-on-push
+           conn (lambda (push) (agent-repl-roster-on-push push stream))
            (lambda (reason) (agent-repl-roster-on-close reason stream))
            (lambda ()
              (setq agent-repl-roster--accepted stream)
