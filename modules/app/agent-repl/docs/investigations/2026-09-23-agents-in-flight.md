@@ -16,6 +16,11 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `style/held-prompt-quiet-one-line` | `~/.config/doom-worktrees/held-prompt-quiet-one-line` | The held prompt's fill is 5% tint over 95% of the feed background. Collapsed, it shows one line with an ellipsis when there's more, and no fade. ADDED: thinking bubbles use the same ellipsis instead of a fade, keeping their line limit (this replaces the lead's half-line fade). | `a8caa5c6cbc418cb1` | 09-27 |
 
 
+## Deferred (owner, to pick up once the small items are out)
+
+- Footer fault lifetimes: every fault kind declares its closing edge, because `bounce_unknown` and `adoption_window_expired` never close today. Plan: `2026-09-27-footer-fault-lifetimes-plan.md`.
+- Feed row order: a late row is placed by a daemon-minted order key. Plan: `2026-09-27-feed-row-order-plan.md` (the owner asked for the plan written; implementation not yet requested).
+
 ## Still waiting on the owner
 
 - Store profiling stays on per the owner; the lead watches its results this session.
