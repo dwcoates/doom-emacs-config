@@ -2255,8 +2255,8 @@ func permissionModeName(mode *conversationv1.AgentPermissionMode) string {
 // what keeps every verb testable against a fake instead of a whole process.
 type shimAdapter struct{ client shimclient.Client }
 
-func (a *shimAdapter) KillTurn(ctx context.Context, turn ids.TurnID, force bool) error {
-	return killTurn(ctx, a.client, turn, force)
+func (a *shimAdapter) KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
+	return killTurn(ctx, a.client, turn, force, commandedBy)
 }
 
 func (a *shimAdapter) StopAgent(ctx context.Context, agent *conversationv1.AgentId) error {

@@ -287,7 +287,7 @@ func TestSenderKillTurnCarriesTheNotTheOpenTurnRefusal(t *testing.T) {
 	}}}
 
 	// Act
-	err := s.KillTurn(context.Background(), "turn-1", false)
+	err := s.KillTurn(context.Background(), "turn-1", false, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -377,21 +377,44 @@ func killTurnKilled() *shimv1.KillTurnResponse {
 }
 
 // TestKillTurnBuildsTheRequestFromItsArguments covers the one request builder:
-// the turn and the force travel exactly as the caller stated them.
+// the turn, the force and the commanded_by travel exactly as the caller stated
+// them, an unstated command included.
 func TestKillTurnBuildsTheRequestFromItsArguments(t *testing.T) {
-	// Arrange
-	client := &fakeSenderClient{killTurn: killTurnKilled()}
-	want := &shimv1.KillTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-1"}, Force: true}
-
-	// Act
-	err := killTurn(context.Background(), client, "turn-1", true)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("killTurn = %v, want nil", err)
+	interjection := &conversationv1.AgentInterruptedByUser{
+		Command: &conversationv1.AgentInterruptedByUser_Interjection{
+			Interjection: &conversationv1.AgentInterruptedByUserInterjection{},
+		},
 	}
-	if !proto.Equal(client.killTurnReq, want) {
-		t.Fatalf("request = %v, want %v", client.killTurnReq, want)
+	tests := []struct {
+		name        string
+		force       bool
+		commandedBy *conversationv1.AgentInterruptedByUser
+	}{
+		{name: "a forced kill with no command stated", force: true},
+		{name: "a direct stop", commandedBy: directCommand()},
+		{name: "an interjection", commandedBy: interjection},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeSenderClient{killTurn: killTurnKilled()}
+			want := &shimv1.KillTurnRequest{
+				Turn:        &conversationv1.TurnId{Value: "turn-1"},
+				Force:       tt.force,
+				CommandedBy: tt.commandedBy,
+			}
+
+			// Act
+			err := killTurn(context.Background(), client, "turn-1", tt.force, tt.commandedBy)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("killTurn = %v, want nil", err)
+			}
+			if !proto.Equal(client.killTurnReq, want) {
+				t.Fatalf("request = %v, want %v", client.killTurnReq, want)
+			}
+		})
 	}
 }
 
@@ -406,7 +429,7 @@ func TestKillTurnRelaysTheRefusalArm(t *testing.T) {
 	}}
 
 	// Act
-	err := killTurn(context.Background(), client, "turn-1", false)
+	err := killTurn(context.Background(), client, "turn-1", false, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -423,7 +446,7 @@ func TestKillTurnReturnsTheTransportError(t *testing.T) {
 	client := &fakeSenderClient{killTurnErr: transport}
 
 	// Act
-	err := killTurn(context.Background(), client, "turn-1", false)
+	err := killTurn(context.Background(), client, "turn-1", false, nil)
 
 	// Assert
 	if !errors.Is(err, transport) {
@@ -442,13 +465,13 @@ func TestBothKillTurnCallersSendTheSharedRequest(t *testing.T) {
 		{
 			name: "the queue's sender",
 			kill: func(client *fakeClient) error {
-				return (&sender{client: client}).KillTurn(context.Background(), "turn-1", true)
+				return (&sender{client: client}).KillTurn(context.Background(), "turn-1", true, directCommand())
 			},
 		},
 		{
 			name: "the verbs' shim adapter",
 			kill: func(client *fakeClient) error {
-				return (&shimAdapter{client: client}).KillTurn(context.Background(), "turn-1", true)
+				return (&shimAdapter{client: client}).KillTurn(context.Background(), "turn-1", true, directCommand())
 			},
 		},
 	}
@@ -456,7 +479,7 @@ func TestBothKillTurnCallersSendTheSharedRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			client := &fakeClient{}
-			want := &shimv1.KillTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-1"}, Force: true}
+			want := &shimv1.KillTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-1"}, Force: true, CommandedBy: directCommand()}
 
 			// Act
 			err := tt.kill(client)

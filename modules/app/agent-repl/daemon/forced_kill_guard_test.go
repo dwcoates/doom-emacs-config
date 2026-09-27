@@ -96,6 +96,12 @@ func TestTheForcedKillScanFindsEveryForcedShape(t *testing.T) {
 			want: []string{"internal/x/x.go|f|KillTurn"},
 		},
 		{
+			name: "a literal true beside a stated command is forced",
+			file: "internal/x/x.go",
+			body: "func f(s S) { s.KillTurn(nil, \"t\", true, nil) }",
+			want: []string{"internal/x/x.go|f|KillTurn"},
+		},
+		{
 			name: "a literal false is an interrupt",
 			file: "internal/x/x.go",
 			body: "func f(s S) { s.KillTurn(nil, \"t\", false) }",
@@ -218,7 +224,7 @@ func forcedKillIn(node ast.Node) (string, bool) {
 	switch n := node.(type) {
 	case *ast.CallExpr:
 		selector, ok := n.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "KillTurn" || len(n.Args) != 3 {
+		if !ok || selector.Sel.Name != "KillTurn" || len(n.Args) < 3 {
 			return "", false
 		}
 		return "KillTurn", !isFalse(n.Args[2])
