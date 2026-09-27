@@ -155,6 +155,11 @@ type DB interface {
 	// an open or unknown turn is absent. It is what a feed replay draws a
 	// turn's ending from when the turn's own terminal was never stored.
 	TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]RecordedClose, error)
+	// RecordedTurns answers which of the named turns this workspace recorded,
+	// open or closed: the durable statement of which turns are the
+	// workspace's OWN work. A fork's feed reads it to tell the conversation it
+	// inherited from the turns it ran itself.
+	RecordedTurns(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]bool, error)
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
 	// HasTurns reports whether a workspace has EVER recorded a turn, open or
