@@ -265,3 +265,27 @@ func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
 		t.Fatalf("reason = %q, want the conclusion the sweep reached", got)
 	}
 }
+
+func TestLostForAConcludedRunIsRefusedLoudly(t *testing.T) {
+	// Arrange: the run's transcript already settled it, yet a sweep concluded it.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "a1refused", "work\n")
+	handler := &lostCapable{}
+	watchWith(h, spool, handler)
+	h.sc.concluded["a1refused"] = struct{}{}
+
+	// Act.
+	got := h.sc.lostEntries([]stale.Lost{{
+		Work:   stale.Work{Path: spool, TaskID: "a1refused", RunActivityID: "call-1", Kind: tail.KindShellSpool},
+		Reason: stale.ReasonWentSilent,
+	}})
+
+	// Assert.
+	if len(got) != 0 || len(handler.calls) != 0 {
+		t.Fatalf("entries=%d calls=%v, want no LOST terminal over a concluded run", len(got), handler.calls)
+	}
+	rec := h.requireOnce(t, "lost-terminal-refused", "error")
+	if got := ctxString(t, rec, "task_id"); got != "a1refused" {
+		t.Fatalf("task_id = %q, want the concluded run", got)
+	}
+}
