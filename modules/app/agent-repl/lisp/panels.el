@@ -49,6 +49,7 @@
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-remove-buffer "workspace")
 (declare-function agent-repl--ws-resolve-persp "workspace")
+(declare-function agent-repl--ws-shared-unowned-buffer-p "workspace" (buf ws))
 (declare-function agent-repl--ws-switch "workspace")
 (declare-function agent-repl--ws-system-available-p "workspace")
 (declare-function agent-repl--ws-update-names-cache "workspace")
@@ -1495,7 +1496,12 @@ the user has already confirmed the destructive kill.
 Agent buffers owned by a different workspace (see
 `agent-repl--foreign-owned-buffer-p') are skipped, not killed: persp-mode
 can drift another workspace's live panel into this persp, and nuking it
-would wipe that workspace's running session."
+would wipe that workspace's running session.  A buffer owned by no
+workspace that another live perspective also holds -- the workspace a
+teardown lands on among them -- is skipped too
+\(`agent-repl--ws-shared-unowned-buffer-p'): it is that workspace's
+buffer as well, and a teardown must change nothing about another
+workspace."
   (when (agent-repl--ws-system-available-p)
     (when-let ((persp (agent-repl--ws-resolve-persp ws)))
       (let ((bufs (agent-repl--ws-buffers persp))
@@ -1503,10 +1509,15 @@ would wipe that workspace's running session."
         (agent-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
         (dolist (buf bufs)
           (condition-case err
-              (if (agent-repl--foreign-owned-buffer-p buf ws)
-                  (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
-                                    (agent-repl--safe-buffer-name buf)
-                                    (agent-repl--buffer-owner buf))
+              (cond
+               ((agent-repl--foreign-owned-buffer-p buf ws)
+                (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
+                                  (agent-repl--safe-buffer-name buf)
+                                  (agent-repl--buffer-owner buf)))
+               ((agent-repl--ws-shared-unowned-buffer-p buf ws)
+                (agent-repl--log ws "kill-workspace-buffers: SKIP shared buf=%s"
+                                  (agent-repl--safe-buffer-name buf)))
+               (t
                 (let* ((buf-name (agent-repl--safe-buffer-name buf))
                        (live (buffer-live-p buf))
                        (proc (and live (get-buffer-process buf)))
@@ -1523,7 +1534,7 @@ would wipe that workspace's running session."
                       (set-buffer-modified-p nil))
                     (kill-buffer buf))
                   (agent-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
-                                    buf-name (- (float-time) t-buf))))
+                                    buf-name (- (float-time) t-buf)))))
             (error
              (agent-repl--warn ws "kill-workspace-buffers: error on %s: %S"
                                (agent-repl--safe-buffer-name buf) err))))
