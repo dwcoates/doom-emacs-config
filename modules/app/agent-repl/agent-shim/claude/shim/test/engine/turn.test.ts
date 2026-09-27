@@ -13,7 +13,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
-import { logRecordsSince, logSinkMark } from "../log-records.js";
+import { logRecordsSince, logSinkMark, type LogRecord } from "../log-records.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { PersistenceError, type AgentPageSession } from "../../src/store/persistence.js";
 import { ForegroundUnitTable } from "../../src/engine/foreground.js";
@@ -837,8 +837,8 @@ const REPEAT_MESSAGE =
   "a StartTurn repeated a turn id this shim already started; nothing is started again and the original's success is answered";
 
 /** The repeated-start record written since `before`, if any. */
-function repeatRecord(before: number): Record<string, unknown> | undefined {
-  return recordsSince(before).find((record) => record.message === REPEAT_MESSAGE);
+function repeatRecord(before: number): LogRecord | undefined {
+  return logRecordsSince(before).find((record) => record.message === REPEAT_MESSAGE);
 }
 
 describe("a repeated StartTurn of a turn id the shim already started", () => {
@@ -967,7 +967,7 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
     // Arrange
     const h = await harness();
     await h.turns.startTurn(startTurn());
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
@@ -992,7 +992,7 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.open = undefined;
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
@@ -1050,7 +1050,7 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
     const h = await harness();
     h.persistence.writeDurable = () => new Promise<void>(() => {});
     void h.turns.startTurn(startTurn());
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     void h.turns.startTurn(startTurn());
@@ -1097,7 +1097,7 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
     h.submitRejects = new Error("the binary said no");
     await h.turns.startTurn(startTurn());
     h.submitRejects = undefined;
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
