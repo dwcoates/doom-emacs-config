@@ -66,8 +66,7 @@
 (declare-function agent-repl--ws-create "workspace" (ws &optional project-dir))
 (declare-function agent-repl--ws-del "workspace" (ws))
 (declare-function agent-repl--ws-revive "workspace" (ws))
-(declare-function agent-repl--ws-persp-kill "workspace" (ws))
-(declare-function agent-repl--land-after-teardown "workspace" (ws))
+(declare-function agent-repl--ws-land-then-kill "workspace" (ws))
 (declare-function agent-repl--ws-rename-state "workspace" (old new dir))
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
@@ -475,31 +474,26 @@ daemon either way, and a tab whose persp outlived its kill must not also
 keep its registry entry.
 
 A TEARDOWN THAT TAKES THE WORKSPACE THE USER IS STANDING ON MUST NAME
-WHERE THEY END UP, and it does so through the one landing every teardown
-uses (`agent-repl--land-after-teardown'), the same one
-`agent-repl--kill-one-workspace' calls -- never a second landing of its
-own.  Without it a roster push that closed the current tab left the frame
-wherever persp-mode dropped it, with nothing arming the surviving
-workspace's panels: the main area came up on the fallback buffer,
-observed as `*scratch*' in playbook B.16 after a merged child's tab was
-torn down.  The landing is a no-op when the current perspective survives,
-so a teardown of some OTHER tab does not move the user.
+WHERE THEY END UP, and it names it BEFORE the kill, through the one
+teardown order every teardown uses (`agent-repl--ws-land-then-kill'), the
+same one `agent-repl--kill-one-workspace' calls -- never a second order of
+its own.  Killing first dropped the frame wherever persp-mode left it and
+landed afterwards; landing first means the persp killed is no longer
+current, so the kill cannot reach the landing workspace's windows.  The
+landing is a no-op when the user stands on some other live workspace, so
+a teardown of some OTHER tab does not move the user.
 
-Its own errors are contained here for the same reason the kill's are: an
-escape would abort the reconcile walk mid-list."
+A refused kill or a failed landing signals out of that function and is
+contained here for the same reason a failing kill is: an escape would
+abort the reconcile walk mid-list."
   (when (fboundp 'agent-repl-host-unsubscribe)
     (agent-repl-host-unsubscribe name))
   (condition-case err
-      (agent-repl--ws-persp-kill name)
+      (agent-repl--ws-land-then-kill name)
     (error
      (agent-repl--error name "elisp.roster.tab-teardown-persp-kill-failed: ws=%s error=%s"
                         name (error-message-string err))))
   (agent-repl--ws-del name)
-  (condition-case err
-      (agent-repl--land-after-teardown name)
-    (error
-     (agent-repl--error name "elisp.roster.tab-teardown-landing-failed: ws=%s error=%s"
-                        name (error-message-string err))))
   (agent-repl--info name "elisp.roster.tab-teardown: ws=%s" name))
 
 (defun agent-repl-roster--roster-owned-names ()

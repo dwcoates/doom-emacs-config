@@ -2136,6 +2136,23 @@ loop is skipped entirely."
           (should-not (buffer-live-p live)))
       (when (buffer-live-p live) (kill-buffer live)))))
 
+(ert-deftest agent-repl-test-panels-kill-workspace-buffers/spares-a-buffer-the-landing-persp-holds ()
+  "An unowned buffer another live persp also holds -- the landing workspace's
+among them -- survives the teardown."
+  ;; Arrange
+  (let ((persp-mode t)
+        (shared (get-buffer-create "*kwb-shared*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list shared)))
+                  ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                   (lambda (&rest _) (list 'keeper-persp))))
+          ;; Act
+          (agent-repl--kill-workspace-buffers "live-ws")
+          ;; Assert
+          (should (buffer-live-p shared)))
+      (when (buffer-live-p shared) (kill-buffer shared)))))
+
 (ert-deftest agent-repl-test-panels-kill-workspace-buffers/spares-foreign-owned ()
   "kill-workspace-buffers does NOT kill a buffer owned by a different workspace.
 Regression guard: persp-mode can drift another workspace's live agent panel
@@ -3032,6 +3049,91 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
                 (should (equal shown-ws "my-ws"))))
           (kill-buffer frontend-buf)
           (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-re-show ()
+  "The panel-restore decision is recorded at INFO: decision=re-show reason=default-open-now-missing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((infos nil)
+          (frontend-buf (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "my-ws" :frontend-buffer frontend-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                      ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                      ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                      ((symbol-function 'agent-repl--info)
+                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+              ;; Act
+              (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+              ;; Assert
+              (should (member "elisp.panels.restore-decision: ws=my-ws decision=re-show reason=default-open-now-missing" infos))))
+        (kill-buffer frontend-buf)))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-already-visible ()
+  "The panel-restore decision is recorded at INFO: decision=no-show reason=already-visible."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((infos nil)
+          (frontend-buf (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "my-ws" :frontend-buffer frontend-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                      ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                      ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                      ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                      ((symbol-function 'agent-repl--info)
+                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+              ;; Act
+              (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+              ;; Assert
+              (should (member "elisp.panels.restore-decision: ws=my-ws decision=no-show reason=already-visible" infos))))
+        (kill-buffer frontend-buf)))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-closed-by-user ()
+  "The panel-restore decision is recorded at INFO: decision=no-show reason=closed-by-user."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((infos nil)
+          (frontend-buf (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "my-ws" :frontend-buffer frontend-buf)
+            (agent-repl--ws-put "my-ws" :panels-closed-by-user t)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                      ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                      ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                      ((symbol-function 'agent-repl--info)
+                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+              ;; Act
+              (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+              ;; Assert
+              (should (member "elisp.panels.restore-decision: ws=my-ws decision=no-show reason=closed-by-user" infos))))
+        (kill-buffer frontend-buf)))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-no-live-view ()
+  "The panel-restore decision is recorded at INFO: decision=no-show reason=no-live-view."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((infos nil)
+          (frontend-buf (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (progn
+            nil
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                      ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                      ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                      ((symbol-function 'agent-repl--info)
+                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+              ;; Act
+              (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+              ;; Assert
+              (should (member "elisp.panels.restore-decision: ws=my-ws decision=no-show reason=no-live-view" infos))))
+        (kill-buffer frontend-buf)))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-noop-when-panels-already-visible ()
   "ensure-own-panels-on-persp-switch does not re-show if panels are already visible."
