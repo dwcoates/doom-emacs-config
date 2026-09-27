@@ -385,6 +385,9 @@ type envelope struct {
 	// Empty when the vendor states none, in which case the record's own text is
 	// the body instead.
 	peerBody string
+	// peerHandback is the vendor's `origin.handback`: set exactly when a peer
+	// message is a subagent handing its final report back.
+	peerHandback bool
 }
 
 func readEnvelope(rec map[string]any) envelope {
@@ -403,6 +406,7 @@ func readEnvelope(rec map[string]any) envelope {
 		originKind:       str(origin["kind"]),
 		peerSender:       sender,
 		peerBody:         str(origin["body"]),
+		peerHandback:     boolean(origin["handback"]),
 	}
 }
 
