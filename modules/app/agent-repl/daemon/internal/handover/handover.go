@@ -67,27 +67,31 @@ func NewIntake(db wsm.DB, queue promptqueue.Queue, log dlog.Logger) (*Intake, er
 // A lease already held is SUCCESS, not a refusal: the workspace is already
 // quiet, which is the state the caller asked for, and a merge or a relaunch
 // that got there first holds it for its own reason.
-func (i *Intake) Quiesce(ctx context.Context, ws ids.WorkspaceID) error {
+//
+// IT ANSWERS THE LEASE IT TOOK, empty when another holder's lease already
+// held the intake: the caller owns exactly what it took, and a transfer that
+// fails or is reclaimed releases THAT lease and never another holder's.
+func (i *Intake) Quiesce(ctx context.Context, ws ids.WorkspaceID) (wsm.LeaseID, error) {
 	fields := dlog.Context{"workspace": string(ws)}
 	if _, held, err := i.db.Lease(ctx, ws); err != nil {
 		i.log.Error(opQuiesce, "could not read the workspace's lease", withCause(fields, err))
-		return fmt.Errorf("handover: quiesce %q: read the lease: %w", ws, err)
+		return "", fmt.Errorf("handover: quiesce %q: read the lease: %w", ws, err)
 	} else if held {
 		i.log.Debug(opQuiesce, "a lease already holds this workspace's intake", fields)
 		i.queue.OnLeaseChanged(ws)
-		return nil
+		return "", nil
 	}
 	lease, err := i.db.AcquireLease(ctx, ws, QuiesceHolder, wsm.PolicyHold)
 	if err != nil {
 		i.log.Error(opQuiesce, "could not take the handover hold", withCause(fields, err))
-		return fmt.Errorf("handover: quiesce %q: take the hold: %w", ws, err)
+		return "", fmt.Errorf("handover: quiesce %q: take the hold: %w", ws, err)
 	}
 	fields["lease"] = string(lease.ID)
 	// THE QUEUE IS TOLD, not left to notice: the hold's effect on standing
 	// submissions is a re-evaluation, and nothing else triggers one.
 	i.queue.OnLeaseChanged(ws)
 	i.log.Info(opQuiesce, "held the workspace's intake for the handover", fields)
-	return nil
+	return lease.ID, nil
 }
 
 // DrainIntake releases the held intake IN ORDER once the successor owns the

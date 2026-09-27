@@ -615,6 +615,12 @@ func (f *fakeFleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 		return true, err
 	}
 	shim.Detach()
+	// The detached shim leaves the fleet with the detach, as the real one's does.
+	f.mu.Lock()
+	if f.live[ws] == shim {
+		delete(f.live, ws)
+	}
+	f.mu.Unlock()
 	return true, nil
 }
 
@@ -773,8 +779,10 @@ type harness struct {
 	log          *dlog.TestSurfaces
 	state        string
 
-	mu           sync.Mutex
-	quiesced     []ids.WorkspaceID
+	mu       sync.Mutex
+	quiesced []ids.WorkspaceID
+	// quiesceErr fails every quiesce.
+	quiesceErr   error
 	drained      []ids.WorkspaceID
 	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
@@ -836,12 +844,27 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Announcer:      h.announcer,
 		Pusher:         h.pusher,
 		Participants:   h.participants,
-		Quiesce: func(_ context.Context, ws ids.WorkspaceID) error {
+		// THE HOLD IS REAL: it is taken in the harness's state, exactly as
+		// handover.Intake takes it, so a test reads what a failed transfer
+		// or a reclaim left behind. A lease already standing is another
+		// holder's, and the transfer is handed none of its own.
+		Quiesce: func(ctx context.Context, ws ids.WorkspaceID) (ids.LeaseID, error) {
 			order.record("quiesce")
 			h.mu.Lock()
 			h.quiesced = append(h.quiesced, ws)
+			quiesceErr := h.quiesceErr
 			h.mu.Unlock()
-			return nil
+			if quiesceErr != nil {
+				return "", quiesceErr
+			}
+			if _, held, err := db.Lease(ctx, ws); err != nil || held {
+				return "", err
+			}
+			lease, err := db.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
+			if err != nil {
+				return "", err
+			}
+			return lease.ID, nil
 		},
 		DrainIntake: func(_ context.Context, ws ids.WorkspaceID) error {
 			order.record("drain_intake")
@@ -1020,4 +1043,23 @@ func (h *harness) joiningHandle(t *testing.T) {
 		}
 	})
 	h.c.deps.DB = ro
+}
+
+// successorAdopts completes the rendezvous of every workspace the handover has
+// transferred so far, as the participants' adoption calls on the successor
+// would: each adoption window then ends as adopted rather than expired.
+func (h *harness) successorAdopts(t *testing.T) {
+	t.Helper()
+	for _, call := range h.pusher.Calls() {
+		if call.Kind != "transferred" {
+			continue
+		}
+		h.c.mu.Lock()
+		e := h.c.rendezvous[call.WS]
+		h.c.mu.Unlock()
+		if e == nil {
+			t.Fatalf("no rendezvous is armed for the transferred workspace %s", call.WS)
+		}
+		e.settle(nil)
+	}
 }

@@ -72,7 +72,7 @@ func TestQuiesceTakesTheHold(t *testing.T) {
 	intake, _, db, ws := newIntake(t)
 
 	// Act
-	if err := intake.Quiesce(context.Background(), ws); err != nil {
+	if _, err := intake.Quiesce(context.Background(), ws); err != nil {
 		t.Fatalf("Quiesce: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestQuiesceTellsTheQueue(t *testing.T) {
 	intake, queue, _, ws := newIntake(t)
 
 	// Act
-	if err := intake.Quiesce(context.Background(), ws); err != nil {
+	if _, err := intake.Quiesce(context.Background(), ws); err != nil {
 		t.Fatalf("Quiesce: %v", err)
 	}
 
@@ -115,11 +115,46 @@ func TestQuiesceOnAnAlreadyHeldWorkspaceSucceeds(t *testing.T) {
 	}
 
 	// Act
-	err := intake.Quiesce(context.Background(), ws)
+	_, err := intake.Quiesce(context.Background(), ws)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Quiesce over an existing lease = %v, want success", err)
+	}
+}
+
+func TestQuiesceAnswersTheLeaseItTook(t *testing.T) {
+	// Arrange
+	intake, _, db, ws := newIntake(t)
+
+	// Act
+	taken, err := intake.Quiesce(context.Background(), ws)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	lease, held, err := db.Lease(context.Background(), ws)
+	if err != nil || !held || lease.ID != taken {
+		t.Fatalf("Quiesce answered %q, want the held lease %+v (held %v, %v)", taken, lease, held, err)
+	}
+}
+
+// TestQuiesceOverAnotherHoldersLeaseAnswersNoLease pins that the caller is
+// never handed another holder's lease to release.
+func TestQuiesceOverAnotherHoldersLeaseAnswersNoLease(t *testing.T) {
+	// Arrange
+	intake, _, db, ws := newIntake(t)
+	if _, err := db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	taken, err := intake.Quiesce(context.Background(), ws)
+
+	// Assert
+	if err != nil || taken != "" {
+		t.Fatalf("Quiesce = (%q, %v), want no lease of its own", taken, err)
 	}
 }
 
@@ -128,7 +163,7 @@ func TestQuiesceOnAnAlreadyHeldWorkspaceSucceeds(t *testing.T) {
 func TestDrainIntakeReleasesTheHandoverHold(t *testing.T) {
 	// Arrange
 	intake, _, db, ws := newIntake(t)
-	if err := intake.Quiesce(context.Background(), ws); err != nil {
+	if _, err := intake.Quiesce(context.Background(), ws); err != nil {
 		t.Fatalf("Quiesce: %v", err)
 	}
 
