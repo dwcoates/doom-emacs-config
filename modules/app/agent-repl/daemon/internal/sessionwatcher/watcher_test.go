@@ -351,8 +351,8 @@ func TestAMalformedAnnouncementIsRefused(t *testing.T) {
 			operation: "daemon.sessionwatcher.detached_kind_unknown",
 		},
 		{
-			name:      "a subagent kind naming no agent",
-			work:      detachedWork("w-1", "act-1", subagentKind("")),
+			name:      "a subagent kind naming neither an agent nor a handle",
+			work:      detachedWork("", "act-1", subagentKind("")),
 			operation: "daemon.sessionwatcher.detached_subagent_unaddressable",
 		},
 		{

@@ -440,6 +440,18 @@ func (p *process) apply(line []byte) Reply {
 		}
 		return Reply{OK: true}
 
+	case OpSetLiveWork:
+		started := &conversationv1.SessionStarted{}
+		if err := proto.Unmarshal(payload, started); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: decode live membership: %v", err)}
+		}
+		p.srv.setLiveWork(started.GetLiveWork())
+		return Reply{OK: true}
+
+	case OpSilenceBash:
+		p.srv.silenceBash(cmd.Work)
+		return Reply{OK: true}
+
 	case OpHang:
 		p.srv.hang()
 		return Reply{OK: true}

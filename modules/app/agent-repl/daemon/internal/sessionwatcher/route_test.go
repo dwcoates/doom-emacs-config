@@ -1165,10 +1165,12 @@ func TestPromotedWatchIsNotOpenedTwice(t *testing.T) {
 	h.client.noAgentOpen(t)
 }
 
-// TestRefusedShellWatchIsNotKept covers the refusal: an entry carrying no
-// stream would answer every repeated announcement "already watched", so it must
-// never persist.
-func TestRefusedShellWatchIsNotKept(t *testing.T) {
+// TestARefusedShellWatchOpenKeepsTheShellLive covers the refusal: a watch the
+// shim would not open says nothing about whether the shell has ENDED, which
+// only the shim's conclusion may say, so the shell stays in the live set. (Its
+// stream-less entry is what the next announcement re-opens:
+// TestRepeatedAnnouncementReopensARefusedShellWatch.)
+func TestARefusedShellWatchOpenKeepsTheShellLive(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
@@ -1177,14 +1179,10 @@ func TestRefusedShellWatchIsNotKept(t *testing.T) {
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
 	h.client.awaitRefusedOpen(t, "WatchBash")
+	h.client.settleOpens()
 
 	// Assert.
-	h.w.mu.Lock()
-	kept := len(h.w.shells)
-	h.w.mu.Unlock()
-	if kept != 0 {
-		t.Fatalf("shell watches = %d, want none: a stream-less entry was kept", kept)
-	}
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{workID("w-1")}})
 }
 
 // TestARefusedShellWatchOpenNeverSeversTheLink pins the classification for a
