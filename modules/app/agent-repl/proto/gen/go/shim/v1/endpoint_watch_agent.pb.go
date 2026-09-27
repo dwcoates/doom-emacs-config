@@ -106,6 +106,7 @@ type WatchAgentResponse struct {
 	//
 	//	*WatchAgentResponse_Page
 	//	*WatchAgentResponse_Entry
+	//	*WatchAgentResponse_Retired
 	Frame         isWatchAgentResponse_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -166,6 +167,15 @@ func (x *WatchAgentResponse) GetEntry() *v1.HistoryEntryAt {
 	return nil
 }
 
+func (x *WatchAgentResponse) GetRetired() *v1.HistoryEntryAt {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchAgentResponse_Retired); ok {
+			return x.Retired
+		}
+	}
+	return nil
+}
+
 type isWatchAgentResponse_Frame interface {
 	isWatchAgentResponse_Frame()
 }
@@ -181,9 +191,20 @@ type WatchAgentResponse_Entry struct {
 	Entry *v1.HistoryEntryAt `protobuf:"bytes,2,opt,name=entry,proto3,oneof"`
 }
 
+type WatchAgentResponse_Retired struct {
+	// An entry the store RETIRED: a re-derivation of the record behind it
+	// found the record no longer converts to it, so it is no longer part of
+	// this agent's history and no page serves it again. It carries the entry
+	// as last served, at its own pointer, so the caller removes whatever it
+	// drew for it. The pointer stays a valid known_through.
+	Retired *v1.HistoryEntryAt `protobuf:"bytes,3,opt,name=retired,proto3,oneof"`
+}
+
 func (*WatchAgentResponse_Page) isWatchAgentResponse_Frame() {}
 
 func (*WatchAgentResponse_Entry) isWatchAgentResponse_Frame() {}
+
+func (*WatchAgentResponse_Retired) isWatchAgentResponse_Frame() {}
 
 var File_shim_v1_endpoint_watch_agent_proto protoreflect.FileDescriptor
 
@@ -195,10 +216,11 @@ const file_shim_v1_endpoint_watch_agent_proto_rawDesc = "" +
 	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x12I\n" +
 	"\rknown_through\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x01R\fknownThrough\x88\x01\x01B\t\n" +
 	"\a_targetB\x10\n" +
-	"\x0e_known_through\"\x8a\x01\n" +
+	"\x0e_known_through\"\xc7\x01\n" +
 	"\x12WatchAgentResponse\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1c.conversation.v1.HistoryPageH\x00R\x04page\x127\n" +
-	"\x05entry\x18\x02 \x01(\v2\x1f.conversation.v1.HistoryEntryAtH\x00R\x05entryB\a\n" +
+	"\x05entry\x18\x02 \x01(\v2\x1f.conversation.v1.HistoryEntryAtH\x00R\x05entry\x12;\n" +
+	"\aretired\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryEntryAtH\x00R\aretiredB\a\n" +
 	"\x05frameB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
@@ -227,11 +249,12 @@ var file_shim_v1_endpoint_watch_agent_proto_depIdxs = []int32{
 	3, // 1: shim.v1.WatchAgentRequest.known_through:type_name -> conversation.v1.HistoryPointer
 	4, // 2: shim.v1.WatchAgentResponse.page:type_name -> conversation.v1.HistoryPage
 	5, // 3: shim.v1.WatchAgentResponse.entry:type_name -> conversation.v1.HistoryEntryAt
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: shim.v1.WatchAgentResponse.retired:type_name -> conversation.v1.HistoryEntryAt
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_agent_proto_init() }
@@ -243,6 +266,7 @@ func file_shim_v1_endpoint_watch_agent_proto_init() {
 	file_shim_v1_endpoint_watch_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchAgentResponse_Page)(nil),
 		(*WatchAgentResponse_Entry)(nil),
+		(*WatchAgentResponse_Retired)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

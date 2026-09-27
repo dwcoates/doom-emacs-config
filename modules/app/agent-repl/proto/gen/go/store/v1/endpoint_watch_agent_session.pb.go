@@ -76,8 +76,13 @@ func (x *WatchAgentSessionRequest) GetWatch() *AgentSessionToken {
 // and terminal facts ride the lines themselves.
 type WatchAgentSessionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The line, with its pointer — the caller's next high-water mark.
-	Line          *StoreLineAt `protobuf:"bytes,1,opt,name=line,proto3" json:"line,omitempty"`
+	// THE ARM IS WHAT HAPPENED TO THE LINE.
+	//
+	// Types that are valid to be assigned to Frame:
+	//
+	//	*WatchAgentSessionResponse_Line
+	//	*WatchAgentSessionResponse_Retired
+	Frame         isWatchAgentSessionResponse_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -112,12 +117,51 @@ func (*WatchAgentSessionResponse) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_watch_agent_session_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *WatchAgentSessionResponse) GetLine() *StoreLineAt {
+func (x *WatchAgentSessionResponse) GetFrame() isWatchAgentSessionResponse_Frame {
 	if x != nil {
-		return x.Line
+		return x.Frame
 	}
 	return nil
 }
+
+func (x *WatchAgentSessionResponse) GetLine() *StoreLineAt {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchAgentSessionResponse_Line); ok {
+			return x.Line
+		}
+	}
+	return nil
+}
+
+func (x *WatchAgentSessionResponse) GetRetired() *StoreLineAt {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchAgentSessionResponse_Retired); ok {
+			return x.Retired
+		}
+	}
+	return nil
+}
+
+type isWatchAgentSessionResponse_Frame interface {
+	isWatchAgentSessionResponse_Frame()
+}
+
+type WatchAgentSessionResponse_Line struct {
+	// The line, with its pointer — the caller's next high-water mark.
+	Line *StoreLineAt `protobuf:"bytes,1,opt,name=line,proto3,oneof"`
+}
+
+type WatchAgentSessionResponse_Retired struct {
+	// A line the store RETIRED (StoreRetirement): the record behind it no
+	// longer converts to it. It carries the line as it was last served, at its
+	// own pointer, so the caller finds what it drew for it and removes it. No
+	// page serves the line again; its pointer stays valid in its book.
+	Retired *StoreLineAt `protobuf:"bytes,2,opt,name=retired,proto3,oneof"`
+}
+
+func (*WatchAgentSessionResponse_Line) isWatchAgentSessionResponse_Frame() {}
+
+func (*WatchAgentSessionResponse_Retired) isWatchAgentSessionResponse_Frame() {}
 
 var File_store_v1_endpoint_watch_agent_session_proto protoreflect.FileDescriptor
 
@@ -125,9 +169,11 @@ const file_store_v1_endpoint_watch_agent_session_proto_rawDesc = "" +
 	"\n" +
 	"+store/v1/endpoint_watch_agent_session.proto\x12\bstore.v1\x1a\x14store/v1/store.proto\"M\n" +
 	"\x18WatchAgentSessionRequest\x121\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\"F\n" +
-	"\x19WatchAgentSessionResponse\x12)\n" +
-	"\x04line\x18\x01 \x01(\v2\x15.store.v1.StoreLineAtR\x04lineB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x05watch\x18\x01 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\"\x84\x01\n" +
+	"\x19WatchAgentSessionResponse\x12+\n" +
+	"\x04line\x18\x01 \x01(\v2\x15.store.v1.StoreLineAtH\x00R\x04line\x121\n" +
+	"\aretired\x18\x02 \x01(\v2\x15.store.v1.StoreLineAtH\x00R\aretiredB\a\n" +
+	"\x05frameB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_watch_agent_session_proto_rawDescOnce sync.Once
@@ -151,11 +197,12 @@ var file_store_v1_endpoint_watch_agent_session_proto_goTypes = []any{
 var file_store_v1_endpoint_watch_agent_session_proto_depIdxs = []int32{
 	2, // 0: store.v1.WatchAgentSessionRequest.watch:type_name -> store.v1.AgentSessionToken
 	3, // 1: store.v1.WatchAgentSessionResponse.line:type_name -> store.v1.StoreLineAt
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 2: store.v1.WatchAgentSessionResponse.retired:type_name -> store.v1.StoreLineAt
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_watch_agent_session_proto_init() }
@@ -164,6 +211,10 @@ func file_store_v1_endpoint_watch_agent_session_proto_init() {
 		return
 	}
 	file_store_v1_store_proto_init()
+	file_store_v1_endpoint_watch_agent_session_proto_msgTypes[1].OneofWrappers = []any{
+		(*WatchAgentSessionResponse_Line)(nil),
+		(*WatchAgentSessionResponse_Retired)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

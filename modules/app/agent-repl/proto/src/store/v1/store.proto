@@ -69,6 +69,21 @@ message StoreEntry {
   // last. Present with an empty value is refused — absence is expressed by
   // absence.
   optional conversation.v1.TurnId turn = 6;
+
+  // THE FILE-PLANE CONVERSION VERSION THAT PRODUCED THIS WRITE. The sidecar
+  // stamps its one conversion version on EVERY entry it writes, at the one
+  // door it writes through; the stream plane converts nothing from a file and
+  // leaves it UNSET. The store refuses a file-plane entry without it (or with
+  // zero) and a stream-plane entry with it.
+  //
+  // IT IS HOW A CONVERSION CHANGE HEALS THE STORE. When the sidecar's
+  // conversion advances, a transcript whose rows predate it is re-read from
+  // its start (CursorConversion), every row it still converts to is
+  // re-derived at the new version, and every row a record NO LONGER converts
+  // to is retired (EntryBatch.retirements) — which the store does only for a
+  // row last written by the file plane under a LOWER version than the
+  // re-read's. A row stored before this field existed reads as version 0.
+  optional uint32 conversion_version = 7;
 }
 
 // A fact about an agent's work, and whether it may ever be served.
@@ -230,6 +245,39 @@ message EntryBatch {
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.
   optional CursorState cursor_advance = 2;
+
+  // STORED ROWS THIS BATCH'S RECORDS NO LONGER CONVERT TO. Only the sidecar
+  // sends any, and only while it re-reads a transcript whose rows an older
+  // conversion produced (CursorConversionHealing): for each re-read record it
+  // names the rows that record alone could ever have produced and that the
+  // current conversion no longer produces. They commit in the SAME
+  // transaction as the cursor advance, and a batch carrying any must carry
+  // one, so a re-read cut short never retires past the position it resumes
+  // from.
+  repeated StoreRetirement retirements = 3;
+}
+
+// One stored row a re-read record no longer converts to.
+//
+// A RETIRED ROW LEAVES EVERY BOOK. No page, replay or watch serves it as a line
+// again; every standing watch of its book is sent it once on the `retired` arm
+// (WatchAgentSessionResponse) so a consumer that already drew it removes it.
+// Its position stays a valid pointer into its book, so a caller whose
+// high-water mark was that row is not sent to repaint. A later write of a real
+// record under the same key takes the row back at the same position.
+//
+// THE STORE DECIDES NOTHING ABOUT CONTENT. It retires the row only when the
+// row is a page line last written by the FILE plane under a conversion version
+// strictly below `conversion_version`; a row the stream plane wrote last, a
+// row this version produced, an already-retired row and an absent key are all
+// left exactly as they are, and none of those is a refusal — a re-read names
+// every candidate and most name nothing.
+message StoreRetirement {
+  // The row's upsert_key, in the producer's own key space.
+  string upsert_key = 1;
+  // The conversion version the record was re-read under: the version that no
+  // longer converts it to this row. Zero is refused.
+  uint32 conversion_version = 2;
 }
 
 // ---- The sidecar's file cursor: where each tailed file has been read to ----
@@ -252,6 +300,50 @@ message CursorState {
   // A bounded partial-line carry: the bytes of an incomplete final line, so
   // a line split across two reads is parsed once and whole.
   bytes carry = 4;
+  // WHICH CONVERSION READ THIS FILE. REQUIRED on every cursor_advance. A
+  // served cursor stored before conversion versions existed carries it UNSET,
+  // which the reader treats as version 0 — so the whole file, up to the
+  // offset, predates the current conversion.
+  optional CursorConversion conversion = 5;
+}
+
+// The conversion bookkeeping of one file's cursor: the version its bytes were
+// converted under, and whether a re-derivation of them is in progress.
+//
+// A TRANSCRIPT WHOSE ROWS PREDATE THE CURRENT CONVERSION IS RE-READ FROM ITS
+// START. The reader restarts it at offset 0 under the current version with
+// `healing.through` set to where the older conversion had read to; every batch
+// of the re-read advances the offset under the current version, and the batch
+// that reaches `through` states `current`. The bookkeeping rides the cursor
+// advance, in the same transaction as the rows re-derived at it, so a restart
+// in the middle resumes the re-read at the last committed offset rather than
+// starting it again or forgetting it.
+message CursorConversion {
+  // The conversion version every byte below CursorState.offset was converted
+  // under. Zero is refused on a cursor_advance.
+  uint32 version = 1;
+  // Whether bytes past CursorState.offset were converted by an OLDER version.
+  // THE ARM IS THE STATE.
+  oneof state {
+    // No byte past the offset was converted under an older version: the file
+    // is read under `version` from here on like any other.
+    CursorConversionCurrent current = 2;
+    // The file is being re-read from its start under `version`, and the bytes
+    // from the offset up to `through` still stand as an older version
+    // converted them.
+    CursorConversionHealing healing = 3;
+  }
+}
+
+// Nothing past the offset was converted under an older version.
+message CursorConversionCurrent {}
+
+// A re-derivation of the file under CursorConversion.version is in progress.
+message CursorConversionHealing {
+  // The offset the older conversion had read the file to when the re-read
+  // began. Strictly greater than CursorState.offset: a re-read that reaches
+  // it is over and states `current` instead.
+  int64 through = 1;
 }
 
 // ---- Page vocabulary shared across the read endpoints ----
