@@ -219,6 +219,45 @@ func (q *queue) retireCut(ws ids.WorkspaceID) {
 	}
 }
 
+// retireCutIf retires the running-cut record when TURN is the cut's own turn,
+// and records the retirement on LOG. Every close of a turn row comes through
+// turnclose.go's door, and the door calls this, so the record's lifetime is
+// its turn's: a /compact whose turn was closed as an orphan by a teardown or a
+// boot reconciliation, never reaching OnTurnEnded, cannot leave the queue
+// holding every later prompt behind an act that is no longer running.
+//
+// LOG is resolved only when a cut is retired: the door's orphan closes run
+// at teardown and boot, where resolving a workspace for nothing is a record
+// with nothing to say.
+func (q *queue) retireCutIf(ws ids.WorkspaceID, turn ids.TurnID, log func() (dlog.Logger, bool)) {
+	q.mu.Lock()
+	state, ok := q.states[ws]
+	if !ok || state.cut == nil || state.cut.turn != turn {
+		q.mu.Unlock()
+		return
+	}
+	cut := *state.cut
+	state.cut = nil
+	q.mu.Unlock()
+	logger, ok := log()
+	if !ok {
+		return
+	}
+	logger.Info(opAct, "the session act's turn closed; the queue no longer holds prompts behind it", dlog.Context{
+		"session_act_turn": string(cut.turn), "session_act": cut.command.String(),
+	})
+}
+
+// workspaceLog answers a lazy resolution of a workspace's logger for
+// retireCutIf. A workspace that cannot be resolved is recorded at ERROR by
+// q.logger itself.
+func (q *queue) workspaceLog(ctx context.Context, ws ids.WorkspaceID) func() (dlog.Logger, bool) {
+	return func() (dlog.Logger, bool) {
+		log, err := q.logger(ctx, ws)
+		return log, err == nil
+	}
+}
+
 // contextCutOf reports whether a session-addressed submission's text IS a
 // context cut, and which, with its argument. A bubble-addressed prompt goes to
 // a subagent's own composer and is never a session act.

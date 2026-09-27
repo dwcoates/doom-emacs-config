@@ -35,6 +35,7 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 		err = fmt.Errorf("close turn %q on %q: %w", turn, ws, err)
 	}
 	q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: how, At: at})
+	q.retireCutIf(ws, turn, func() (dlog.Logger, bool) { return log, true })
 	return err
 }
 
@@ -50,6 +51,7 @@ func (q *queue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Ti
 	}
 	for _, turn := range report.Turns {
 		q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: report.At})
+		q.retireCutIf(ws, turn, q.workspaceLog(ctx, ws))
 	}
 	return report, nil
 }
@@ -65,6 +67,7 @@ func (q *queue) ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn
 	}
 	if claim.Closed {
 		q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: at})
+		q.retireCutIf(ws, turn, q.workspaceLog(ctx, ws))
 	}
 	return claim.Claimed, nil
 }
