@@ -642,6 +642,16 @@ and not something this change touches.
   do. Producers key the rows (`bash:<run>:start`, `bash:<run>:tail`,
   `bash:<run>:terminal`); **the store never parses a key.** It is still not a
   page line: a run has no book, and its reader is `WatchBashRun`.
+- **A BASH RUN'S FILE-PLANE TERMINAL OUTRANKS ITS STREAM-PLANE TERMINAL**
+  (owner ruling 2026-09-27, `fileTerminalHeld`). The one exception to "the last
+  write supersedes whole": a stream-plane write whose bash frame is terminal
+  (`success`/`failure`) landing on a row that holds a FILE-plane terminal is
+  absorbed — counted in `Absorbed`, no upsert, no ledger row, no watcher row —
+  and recorded ONCE per refused write at INFO. The sidecar's terminal carries
+  the spool's exit code and output; the shim's says only that the run ended.
+  A file-plane terminal still supersedes a stream-plane one, file supersedes
+  file, stream supersedes stream, and every non-terminal or non-bash row is
+  unchanged.
 - **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
   is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
   tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one
