@@ -160,19 +160,6 @@ export function isExpanded(section: Section): boolean {
   return section.classList.contains(EXPANDED_CLASS);
 }
 
-/**
- * Flip the section between its capped preview and full length,
- * answering the state it lands in.
- */
-export function toggleExpanded(section: Section): boolean {
-  if (isExpanded(section)) {
-    section.classList.remove(EXPANDED_CLASS);
-    return false;
-  }
-  section.classList.add(EXPANDED_CLASS);
-  return true;
-}
-
 /** The class a section is keyed by: its first CAPPED_CLASSES entry. */
 function primaryClass(section: Section): string {
   return CAPPED_CLASSES.find((c) => section.classList.contains(c)) ?? "";
@@ -264,6 +251,43 @@ export function ownsSection<
 }
 
 /**
+ * What a host runs after every toggle of one of its sections, with the section
+ * and the state it landed in (see `installClickExpand`).
+ */
+export type AfterToggle = (section: HTMLElement, expanded: boolean) => void;
+
+/**
+ * THE ONE COLLAPSE. Every way a section returns to its capped preview goes
+ * through here, so every side effect of a collapse stays in step whatever
+ * asked for it: the class comes off, the preview shows from the top, and the
+ * host's `afterToggle` re-measures what it draws (the "more below" fade, the
+ * title folds).
+ *
+ * FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the top.
+ * The reader's own gesture is what moves the box, so the write lives in
+ * scroll.ts with every other scroll write (`collapseClicked`).
+ */
+export function collapseSection(section: HTMLElement, afterToggle?: AfterToggle): void {
+  section.classList.remove(EXPANDED_CLASS);
+  collapseClicked(section);
+  afterToggle?.(section, false);
+}
+
+/**
+ * Flip SECTION through the one expand and the one collapse
+ * (`collapseSection`), answering the state it lands in.
+ */
+export function toggleSection(section: HTMLElement, afterToggle?: AfterToggle): boolean {
+  if (isExpanded(section)) {
+    collapseSection(section, afterToggle);
+    return false;
+  }
+  section.classList.add(EXPANDED_CLASS);
+  afterToggle?.(section, true);
+  return true;
+}
+
+/**
  * Arm click-to-expand on `feed`: a click on a capped section lifts its
  * height cap, and the next click on it restores the capped preview.
  *
@@ -275,7 +299,7 @@ export function ownsSection<
 export function installClickExpand(
   feed: HTMLElement,
   selection: () => string = () => window.getSelection()?.toString() ?? "",
-  afterToggle?: (section: HTMLElement, expanded: boolean) => void,
+  afterToggle?: AfterToggle,
 ): void {
   feed.addEventListener("click", (e: MouseEvent) => {
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -285,12 +309,7 @@ export function installClickExpand(
       selectedText: selection(),
     });
     if (section === null) return;
-    const expanded = toggleExpanded(section);
-    // FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the
-    // top. The reader's own click is what moves the box, so the write lives in
-    // scroll.ts with every other scroll write (`collapseClicked`).
-    if (!expanded) collapseClicked(section);
-    afterToggle?.(section, expanded);
+    toggleSection(section, afterToggle);
   });
 }
 
