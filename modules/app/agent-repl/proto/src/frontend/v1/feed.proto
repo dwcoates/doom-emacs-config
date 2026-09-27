@@ -403,7 +403,52 @@ message FeedTurnActivity {
     // The findings bubble — a review's typed defect list, purple
     // response-styled.
     FeedFindings findings = 10;
+    // A SUBAGENT'S RETURNED RESULT: the final report a subagent handed back
+    // to the agent that started it. Drawn ONCE, on the subagent's OWN feed
+    // (inside its card), never as an ordinary tool card; the parent's feed
+    // carries only the FeedRow.subagent_handback badge.
+    FeedSubagentResult subagent_result = 11;
   }
+}
+
+// A subagent's returned result, as the subagent's own feed draws it.
+message FeedSubagentResult {
+  // The report, drawn through the same markdown pipeline a response uses.
+  FeedSubagentResultReport report = 1;
+  // Where the hand-back stands; the set arm picks the treatment. The report
+  // is drawn in every state, since it is the result either way.
+  oneof state {
+    // The hand-back was issued and has not settled.
+    FeedSubagentResultDelivering delivering = 2;
+    // The report reached the parent.
+    FeedSubagentResultDelivered delivered = 3;
+    // The report could not be handed back.
+    FeedSubagentResultUndelivered undelivered = 4;
+  }
+}
+
+// The report element.
+message FeedSubagentResultReport {
+  // The report as markdown, drawn verbatim through the markdown pipeline.
+  string text = 1;
+}
+
+// The hand-back is still in flight.
+message FeedSubagentResultDelivering {}
+
+// The report reached the parent.
+message FeedSubagentResultDelivered {}
+
+// The report could not be handed back.
+message FeedSubagentResultUndelivered {
+  // Why, as the vendor stated it. UNSET when it stated nothing.
+  optional FeedSubagentResultUndeliveredReason reason = 1;
+}
+
+// The refusal element.
+message FeedSubagentResultUndeliveredReason {
+  // The vendor's refusal prose, drawn verbatim.
+  string text = 1;
 }
 
 // The plan bubble: the agent's plan document, response-styled (purple),
