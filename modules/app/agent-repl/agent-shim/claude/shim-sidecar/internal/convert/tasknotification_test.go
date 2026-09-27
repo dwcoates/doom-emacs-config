@@ -236,3 +236,33 @@ func TestSdkCliNotificationSettlesTheSpawnToo(t *testing.T) {
 		t.Fatal("an sdk-cli notification must settle its backgrounded spawn")
 	}
 }
+
+func TestASettlingNotificationReportsTheRunConcluded(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		want   []string
+	}{
+		{name: "completed", status: "completed", want: []string{notifiedTask}},
+		{name: "failed", status: "failed", want: []string{notifiedTask}},
+		{name: "stopped", status: "stopped", want: []string{notifiedTask}},
+		{name: "a status no arm settles", status: "paused", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			var stopped, concluded []string
+			c.SetObserver(recordingObserver{stopped: &stopped, concluded: &concluded})
+			lines := append(agentLaunchLines(), notificationWithStatus(t, tt.status))
+
+			// Act.
+			convertLines(t, c, lines...)
+
+			// Assert.
+			if strings.Join(concluded, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("conclusions reported = %v, want %v", concluded, tt.want)
+			}
+		})
+	}
+}
