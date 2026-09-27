@@ -470,12 +470,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user the interrupt left the turn running")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
-    ("verbs.el" agent-repl-verbs--create-naming-refusal
-     "create refused: the workspace could not be named (%s, %s attempt%s)%s"
-     "tells the user why the workspace could not be named and what the model last said")
-    ("verbs.el" agent-repl-verbs--create-policy-refusal
-     "create refused: %s states no one-shot policy -- write %s"
-     "tells the user which repository states no one-shot policy and what to write")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

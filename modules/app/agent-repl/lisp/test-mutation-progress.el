@@ -225,6 +225,15 @@ as progress."
   (dolist (stage '(:deriving-name :creating-worktree))
     (should (alist-get stage (alist-get :create agent-repl-workspace-progress-phases)))))
 
+(ert-deftest agent-repl-test-mp-create-states-the-daemon-s-acceptance ()
+  "A create's option-B ack has a sentence, so the whole sequence -- accepted,
+the daemon's stages, created or FAILED -- reaches the minibuffer."
+  ;; Arrange / Act.
+  (let ((said (agent-repl-test-mp--echoed
+               (lambda () (agent-repl-workspace-progress-report :create :accepted)))))
+    ;; Assert.
+    (should (equal said '("the daemon accepted the workspace create…")))))
+
 (provide 'test-mutation-progress)
 
 ;;; test-mutation-progress.el ends here
