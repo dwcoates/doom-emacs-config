@@ -104,7 +104,7 @@ import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, underColdG
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
 import { ForegroundUnitTable } from "./foreground.js";
-import { LiveWorkTable, type LiveWorkEntry } from "./detached.js";
+import { LiveWorkTable, ShellRunStarts, type LiveWorkEntry } from "./detached.js";
 import {
   createAgentIdentityStore,
   mintVendorSessionId,
@@ -522,6 +522,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   const live = new LiveWorkTable();
+  /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
+  const shellRunStarts = new ShellRunStarts();
   const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
   /**
@@ -1723,6 +1725,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const entries = [...output.entries];
     noteForegroundUnits(entries);
+    shellRunStarts.note(entries);
     if (entries.length > 0) deps.persistence.write(entries);
     serveSessionUpdates(entries);
     // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
@@ -3998,6 +4001,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     concludeStoppedRuns: (entries) => {
       concludeStoppedRuns(entries);
     },
+    shellRunStart: (work) => shellRunStarts.get(work),
     bashWatcherOpened: (work) => {
       let settle: () => void = () => undefined;
       const entry: OpenBashWatcher = {

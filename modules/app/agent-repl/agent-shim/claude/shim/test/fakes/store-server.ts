@@ -42,6 +42,15 @@
  *     `ON CONFLICT(upsert_key)` does — then follows every write, and ENDS
  *     after the terminal row. A run with no stored row is a
  *     refused open — closed at the transport, like every other watch here.
+ *   - A WRITE ID IS APPLIED ONCE. A batch entry whose `write_id` already
+ *     landed is ABSORBED — it lands nothing, supersedes nothing and reaches no
+ *     watcher — as the real store's write ledger absorbs it. A producer that
+ *     re-sends a write (the shim re-writes a shell run's start to make it
+ *     durable) must not regress a row another write has since superseded.
+ *   - A RUN, ONCE ENDED, STAYS ENDED. `GetLiveWork` stops listing detached
+ *     work the moment any terminal bash row lands for its run, and a later
+ *     non-terminal row (a sidecar tail landing late) does not list it again,
+ *     as the real store's `detached_work.ended_at_ms` is only ever set.
  *   - WRITES CAN BE MADE TO FAIL ON DEMAND ({@link FakeStore.failWrites}), which
  *     is how the writer's retry buffer is testable at all.
  */
@@ -254,8 +263,10 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
    * newest window, never every window the run passed through.
    */
   const bashRowsByRun = new Map<string, Array<{ readonly key: string; row: storev1.StoreAgentBash }>>();
-  /** The newest bash write per run, whatever its key: what `GetLiveWork` reads. */
-  const bashNewestByRun = new Map<string, storev1.StoreAgentBash>();
+  /** Runs a terminal bash row has ENDED — what `GetLiveWork` reads; never cleared. */
+  const bashEndedRuns = new Set<string>();
+  /** Every write id an accepted batch APPLIED: the store's write ledger. */
+  const appliedWriteIds = new Set<string>();
   /** Tails following one run's rows. */
   const bashWatchers = new Set<{
     readonly run: string;
@@ -440,7 +451,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         if (held !== undefined) held.row = info.value;
         else rows.push({ key: entry.upsertKey, row: info.value });
         bashRowsByRun.set(run, rows);
-        bashNewestByRun.set(run, info.value);
+        const arm = info.value.frame.result.case;
+        if (arm === "success" || arm === "failure") bashEndedRuns.add(run);
         for (const watcher of bashWatchers) {
           if (watcher.run !== run || watcher.closed) continue;
           const waiter = watcher.waiters.shift();
@@ -786,8 +798,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         for (const [workId, runId] of detachedAnnounced) {
           const owner = detachedOwner.get(workId);
           if (owner === undefined || !lineage.has(owner)) continue;
-          const newest = runId === undefined ? undefined : bashNewestByRun.get(runId)?.frame;
-          const ended = newest?.result.case === "success" || newest?.result.case === "failure";
+          const ended = runId !== undefined && bashEndedRuns.has(runId);
           if (!ended) {
             liveDetached.push(create(conversationv1.DetachedWorkIdSchema, { value: workId }));
           }
@@ -854,6 +865,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           });
         }
         for (const entry of request.batch?.entries ?? []) {
+          // ABSORBED, as the real store's ledger absorbs it: nothing lands.
+          if (entry.writeId !== "" && appliedWriteIds.has(entry.writeId)) continue;
+          if (entry.writeId !== "") appliedWriteIds.add(entry.writeId);
           landEntry(entry);
           landedEntries.push(entry);
           for (const wake of [...landedWaiters]) wake(entry);

@@ -26,7 +26,6 @@
 import type { conversationv1, storev1 } from "../proto.js";
 import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
-import type { BashRunStanding } from "./reader.js";
 
 // ---------------------------------------------------------------------------
 // What one write is
@@ -364,19 +363,15 @@ export interface Persistence {
    */
   liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess>;
   /**
-   * One detached shell run's lifecycle frames: the announced start, then the tail.
+   * One detached shell run's lifecycle frames: its start, its tail, its
+   * terminal.
    *
-   * `announcement` is the CALLER'S standing belief about the run — the live
-   * table's own answer, `live` / `concluded` / `unknown`. The store refuses a
-   * run it holds no row for, and an eager watcher routinely beats the first row
-   * there, so that refusal is waited out while the run is live AND through the
-   * concluded-but-unwritten window that follows, and surfaced as `unknown_work`
-   * only for a handle nothing was ever announced under.
+   * NEVER A WAIT. A run the store holds no row for is refused as
+   * `unknown_work` at once: the shim writes a run's start ahead of its
+   * announcement, so an announced run always has its first row, and there is
+   * no producer left to wait for.
    */
-  openBashRun(
-    work: conversationv1.DetachedWorkId,
-    announcement?: () => BashRunStanding,
-  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe faults the record plane raises. Returns an unsubscribe. */
   onFault(listener: (fault: conversationv1.SessionFault) => void): () => void;
   /** Observe degraded windows the record plane opens and closes. */

@@ -271,6 +271,21 @@ describe("WriteBatch", () => {
     expect(fake.book("a")).toHaveLength(1);
   });
 
+  it("ABSORBS a write id that already landed, leaving the newer write standing", async () => {
+    // Arrange: w1 lands, then w2 supersedes the same row.
+    const { store: fake, client } = await store();
+    const first = pageLineEntry("a", "prompt:t1", "first");
+    await write(client, first);
+    await write(client, pageLineEntry("a", "prompt:t1", "second"));
+
+    // Act: w1 is re-sent.
+    await write(client, first);
+
+    // Assert.
+    const line = fake.book("a")[0]?.line?.agentItem?.item;
+    expect(line?.case === "agentPrompt" ? line.value.id?.value : undefined).toBe("second");
+  });
+
   it("UPSERTS by key: a re-sent row replaces rather than appends", async () => {
     // Arrange.
     const { store: fake, client } = await store();
@@ -803,6 +818,43 @@ describe("GetLiveWork", () => {
     const { client } = await store();
     await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
     await write(client, bashTerminalEntry("run1"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveDetached : [],
+    ).toEqual([]);
+  });
+
+  it("keeps detached work ended when a row of its run lands AFTER the terminal", async () => {
+    // Arrange: the run ends, then a late sidecar tail lands on it.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
+    await write(client, bashTerminalEntry("run1"));
+    await write(
+      client,
+      create(storev1.StoreEntrySchema, {
+        plane: streamPlane(),
+        writeId: "w-bash-run1-late-tail",
+        upsertKey: "bash:run1:tail",
+        entry: {
+          case: "agentUpdate",
+          value: create(storev1.StoreAgentUpdateSchema, {
+            agentInfo: {
+              case: "bash",
+              value: create(storev1.StoreAgentBashSchema, {
+                run: create(conversationv1.AgentActivityIdSchema, { value: "run1" }),
+                frame: create(conversationv1.AgentBashSchema, {
+                  result: { case: "tail", value: create(conversationv1.AgentBashTailSchema, { text: "late" }) },
+                }),
+              }),
+            },
+          }),
+        },
+      }),
+    );
 
     // Act.
     const response = await client.getLiveWork(liveWorkFor("main"));

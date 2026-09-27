@@ -523,10 +523,12 @@ describe("the shell that moved rather than ended", () => {
       foldContext(),
     );
 
+    // The run's START row rides ahead of the announcement (the shim writes a
+    // detached shell's lifecycle); nothing settles the unit itself.
     const frame =
-      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+      output.entries[1]?.item.kind === "frame" ? output.entries[1].item.frame : undefined;
     expect(frame?.result.case).toBe("detachedWork");
-    expect(output.entries).toHaveLength(1);
+    expect(output.entries.map((entry) => entry.item.kind)).toEqual(["bash_run", "frame"]);
   });
 
   it("harvests the cause from the BASH TOOL RESULT, not from the task stream", () => {
@@ -549,8 +551,9 @@ describe("the shell that moved rather than ended", () => {
       foldContext(),
     );
 
-    const frame =
-      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const frame = output.entries.flatMap((entry) =>
+      entry.item.kind === "frame" ? [entry.item.frame] : [],
+    )[0];
     const detached = frame?.result.value as conversationv1.AgentDetachedWork;
     const origin = detached.origin.value as conversationv1.DetachedWorkDetached;
     expect(origin.cause.case).toBe("timedOut");
