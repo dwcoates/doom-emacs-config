@@ -576,14 +576,24 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
     ;; honored and not fought.  The re-show dispatches through WS's own
     ;; frontend, which lays out the webview and input panel together from
     ;; scratch, so there is no separate half-shown repair to make.
-    (when (and (agent-repl--ws-panels-open-preferred-p ws)
-               (not (agent-repl--panels-visible-p))
-               ;; Eligibility is a live VIEW buffer only: the mount
-               ;; recreates a dead/nil input buffer itself
-               ;; (`agent-repl--ensure-input-buffer').
-               (agent-repl-window--panels-restorable-p ws))
-      (agent-repl--log log-ws "ensure-own-panels: ws=%s re-showing panels (default-open, now missing)" ws)
-      (agent-repl--frontend-dispatch-show ws))
+    ;;
+    ;; The decision is recorded at INFO, whichever way it goes: which
+    ;; panels an arrival puts on the frame is the user-visible outcome of
+    ;; every switch and every teardown landing, and an invisible decision
+    ;; is a logging defect.
+    (let ((reason
+           (cond ((not (agent-repl--ws-panels-open-preferred-p ws)) 'closed-by-user)
+                 ((agent-repl--panels-visible-p) 'already-visible)
+                 ;; Eligibility is a live VIEW buffer only: the mount
+                 ;; recreates a dead/nil input buffer itself
+                 ;; (`agent-repl--ensure-input-buffer').
+                 ((not (agent-repl-window--panels-restorable-p ws)) 'no-live-view)
+                 (t 'default-open-now-missing))))
+      (agent-repl--info log-ws "elisp.panels.restore-decision: ws=%s decision=%s reason=%s"
+                        ws (if (eq reason 'default-open-now-missing) "re-show" "no-show")
+                        reason)
+      (when (eq reason 'default-open-now-missing)
+        (agent-repl--frontend-dispatch-show ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.
