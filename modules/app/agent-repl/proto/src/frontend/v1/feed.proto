@@ -1168,7 +1168,30 @@ message FeedTurnErrorQueryIteratorFailure {}
 
 // The user stopped the turn — directly, or by a prompt that interrupted.
 // An accusation with evidence: stated only on the acknowledged stop.
-message FeedTurnEndedInterrupted {}
+message FeedTurnEndedInterrupted {
+  // HOW the user stopped it, which decides whether the row draws anything.
+  // Resolved by the daemon from the recorded cause on every draw, live and
+  // rebuilt alike. UNSET when the recorded cause did not say how; the client
+  // draws it as a direct stop.
+  oneof command {
+    // The user stopped the turn itself: the client draws the interruption
+    // bubble.
+    FeedTurnEndedInterruptedDirect direct = 1;
+    // A prompt the user sent superseded the turn: the client draws NOTHING
+    // for this row. The superseding prompt, drawn as the active prompt, is the
+    // whole account of the stop, and an interruption bubble here would read as
+    // an error it is not. The row is still sent, because its existence is the
+    // turn's liveness anchor.
+    FeedTurnEndedInterruptedInterjection interjection = 2;
+  }
+}
+
+// The user stopped the turn itself.
+message FeedTurnEndedInterruptedDirect {}
+
+// A prompt the user sent superseded the turn, which was stopped so that
+// prompt could run next.
+message FeedTurnEndedInterruptedInterjection {}
 
 // ==========================================================================
 // ASYNC WORK — one wrapper per kind, adjacent to activity because it

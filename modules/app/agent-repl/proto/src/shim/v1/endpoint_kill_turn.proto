@@ -10,6 +10,7 @@ syntax = "proto3";
 
 package shim.v1;
 
+import "conversation/v1/agent.proto";
 import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
@@ -26,6 +27,13 @@ message KillTurnRequest {
   // synchronous part, so an unforced kill of one answers `no_turn_open`
   // whatever it left running.
   bool force = 2;
+  // HOW the person commanded this stop, stated by the caller because only
+  // the caller knows it: an interjection is decided by the daemon's prompt
+  // queue, invisibly to the shim. The shim records it verbatim as the
+  // `by_user` cause of the interrupted terminal, so the account survives a
+  // rebuild from the store. UNSET when the caller stated none; the shim then
+  // records `by_user` with no command, which a consumer reads as a direct stop.
+  optional conversation.v1.AgentInterruptedByUser commanded_by = 3;
 }
 
 // THE ARM IS THE OUTCOME.
