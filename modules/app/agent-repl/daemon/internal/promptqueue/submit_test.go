@@ -748,3 +748,39 @@ func TestSubmitDoesNotReviveAColdGatedWorkspace(t *testing.T) {
 		t.Fatalf("revivals = %d, want none for a gated workspace", h.revivals)
 	}
 }
+
+// cutRecordedBeforeTheWatcherKnows records a context cut as runContextCut does
+// in its first step, before the watcher has been told of the turn.
+func cutRecordedBeforeTheWatcherKnows(h *harness) {
+	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	h.watcher.idle()
+}
+
+func TestSubmitStartsNothingBesideACutTheWatcherHasNotYetSeen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cutRecordedBeforeTheWatcherKnows(h)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want the prompt held behind the recorded act", started)
+	}
+}
+
+func TestSubmitHoldsBehindACutTheWatcherHasNotYetSeenAsUninterruptible(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cutRecordedBeforeTheWatcherKnows(h)
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "a follow-up"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmUninterruptibleTurn {
+		t.Fatalf("classification = %+v, want uninterruptible_turn", got.Classification)
+	}
+}
