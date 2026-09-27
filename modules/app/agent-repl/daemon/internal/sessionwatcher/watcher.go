@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -92,6 +93,9 @@ const shellReopenLimit = 3
 // failure, so exhausting it never severs the link.
 const openRefusalLimit = 3
 
+// stallLockName is how the stall watchdog names the watcher's mutex.
+const stallLockName = "sessionwatcher.watcher"
+
 // watcher is one live workspace's watch fleet: every shim watch the session
 // owns, the daemon-to-shim hop of connectivity truth, and the routing of every
 // frame into the resolvers' sinks.
@@ -120,7 +124,10 @@ type watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu sync.Mutex
+	mu lockwatch.Mutex
+	// unwatch retires mu from the stall watchdog; Close calls it. A no-op
+	// when no watchdog was wired.
+	unwatch func()
 
 	// gen is the fleet's generation. A re-open bumps it, so a goroutine whose
 	// stream was torn down under it recognizes its own error as stale and
@@ -383,6 +390,10 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		openAtAttach: session.OpenAtAttach,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
+	w.unwatch = func() {}
+	if sinks.Stalls != nil {
+		w.unwatch = sinks.Stalls.Watch(&w.mu, stallLockName, ws, w.log)
+	}
 	// A RESUME STARTS FROM ITS PREDECESSOR'S POINTERS, so every watch it opens
 	// is a catch-up; a replay starts from none, so every watch opens on its
 	// first page. Nothing else seeds the map: see opening.go.
@@ -788,6 +799,9 @@ func (w *watcher) Close() error {
 	// reads the state client, and the daemon closes that client once every
 	// watcher is closed.
 	w.dispatching.Wait()
+	// The watchdog stops watching only now: every hold Close itself took is
+	// over, and the next tick settles a stall this watcher was reported for.
+	w.unwatch()
 	return nil
 }
 

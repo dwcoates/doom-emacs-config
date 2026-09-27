@@ -17,6 +17,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -409,6 +410,13 @@ type Sinks struct {
 	// dispatches its own goroutine), so it rides the watcher's stream goroutine
 	// without holding it up.
 	Title TitleSink
+	// Stalls is the lock stall watchdog the watcher registers its mutex with
+	// for as long as it is open. OPTIONAL: nil leaves the mutex unwatched,
+	// which is what every test that does not exercise it leaves it.
+	// Production always wires it: this mutex is what Submit reads the turn in
+	// flight under, and it is the lock that held a workspace for eighteen
+	// minutes on 2026-09-27 without a record.
+	Stalls lockwatch.Registry
 }
 
 // TitleSink is the synthesized-title synthesizer, seen from the watcher: the

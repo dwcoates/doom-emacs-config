@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -13,7 +14,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -2651,5 +2654,108 @@ func TestAReapedWatchReleasesItsHungOpen(t *testing.T) {
 	withinDeadline(t, "the reaped watch's open", h.client.settleOpens)
 	if !h.hasRecord("info", "daemon.sessionwatcher.open_discarded") {
 		t.Fatalf("the reaped watch's open logged %v, want an info discard record", h.log.Records())
+	}
+}
+
+// fakeStalls is a lockwatch.Registry that records what it was asked.
+type fakeStalls struct {
+	mu        sync.Mutex
+	watched   []watchedLock
+	unwatched int
+}
+
+type watchedLock struct {
+	m    *lockwatch.Mutex
+	lock string
+	ws   ids.WorkspaceID
+}
+
+func (f *fakeStalls) Watch(m *lockwatch.Mutex, lock string, ws ids.WorkspaceID, _ dlog.Logger) func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.watched = append(f.watched, watchedLock{m: m, lock: lock, ws: ws})
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.unwatched++
+	}
+}
+
+// TestStartWatchesTheWatcherMutex pins that an open watcher's mutex is
+// registered with the stall watchdog under its name and its workspace.
+func TestStartWatchesTheWatcherMutex(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+
+	// Act.
+	h := startHarnessWatched(t, Session{}, nil, stalls)
+
+	// Assert.
+	want := []watchedLock{{m: &h.w.mu, lock: "sessionwatcher.watcher", ws: "ws-1"}}
+	if !reflect.DeepEqual(stalls.watched, want) {
+		t.Fatalf("watched = %+v, want %+v", stalls.watched, want)
+	}
+}
+
+// TestCloseUnwatchesTheWatcherMutex pins unregistration when the workspace's
+// watcher is retired, so a closed workspace is not watched forever.
+func TestCloseUnwatchesTheWatcherMutex(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+	h := startHarnessWatched(t, Session{}, nil, stalls)
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if stalls.unwatched != 1 {
+		t.Fatalf("unwatched = %d, want 1", stalls.unwatched)
+	}
+}
+
+// TestAWedgedWatcherMutexIsReportedInTheWorkspaceLog pins the incident end to
+// end: the watcher's mutex held past the threshold is ONE ERROR in the
+// workspace's own log, naming the lock and the workspace.
+func TestAWedgedWatcherMutexIsReportedInTheWorkspaceLog(t *testing.T) {
+	// Arrange.
+	ticks := make(chan time.Time)
+	dog, err := lockwatch.New(lockwatch.Deps{
+		Log: dlog.NewTestLogger(), Threshold: 2 * time.Second, Every: time.Second, Ticks: ticks,
+		Dump: func() (string, int) { return "goroutine 1 [sync.Mutex.Lock]:", 1 },
+	})
+	if err != nil {
+		t.Fatalf("lockwatch.New: %v", err)
+	}
+	h := startHarnessWatched(t, Session{}, nil, dog)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- dog.Run(ctx) }()
+	h.w.mu.Lock()
+	start := time.Date(2026, 9, 27, 14, 0, 44, 0, time.UTC)
+
+	// Act.
+	for i := range 4 {
+		ticks <- start.Add(time.Duration(i) * time.Second)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the watchdog did not stop within 1s")
+	}
+	h.w.mu.Unlock()
+
+	// Assert.
+	var stalls []dlog.Record
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.lockwatch.stall" {
+			stalls = append(stalls, r)
+		}
+	}
+	if len(stalls) != 1 || stalls[0].Level != dlog.LevelError ||
+		stalls[0].Context["lock"] != "sessionwatcher.watcher" || stalls[0].Context["workspace_id"] != "ws-1" {
+		t.Fatalf("stall records = %+v, want one ERROR naming the watcher's lock in ws-1", stalls)
 	}
 }

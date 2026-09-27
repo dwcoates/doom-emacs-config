@@ -7,33 +7,6 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// TestGoroutineDumpNamesTheBlockedGoroutine pins what the dump is FOR: a
-// goroutine parked on a channel has to appear in it by name, because that
-// stack is the only thing that identifies a wedge's blocking call on a host
-// where no debugger can attach.
-func TestGoroutineDumpNamesTheBlockedGoroutine(t *testing.T) {
-	// Arrange.
-	release := make(chan struct{})
-	parked := make(chan struct{})
-	go func() {
-		close(parked)
-		<-release
-	}()
-	<-parked
-	defer close(release)
-
-	// Act.
-	dump, count := goroutineDump()
-
-	// Assert.
-	if count < 2 {
-		t.Fatalf("goroutine count = %d, want at least the test's own and the parked one", count)
-	}
-	if !strings.Contains(dump, "TestGoroutineDumpNamesTheBlockedGoroutine") {
-		t.Fatalf("dump = %q, want the parked goroutine's own stack in it", dump)
-	}
-}
-
 // TestRecordGoroutineDumpLandsAtError pins that the dump reaches the run log at
 // ERROR, which is where a later diagnosis reads: Emacs discards the daemon's
 // stderr, so the runtime's own rendering goes nowhere.

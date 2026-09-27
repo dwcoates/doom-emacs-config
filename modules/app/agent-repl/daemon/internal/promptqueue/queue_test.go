@@ -2,12 +2,15 @@ package promptqueue
 
 import (
 	"context"
+	"reflect"
+	"sync"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 )
 
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
@@ -106,5 +109,118 @@ func TestStandingHoldReportsAnUnknownTurn(t *testing.T) {
 	// Assert
 	if err != ErrNoSuchHold {
 		t.Fatalf("err = %v, want ErrNoSuchHold", err)
+	}
+}
+
+// fakeStalls is a lockwatch.Registry that records what it was asked.
+type fakeStalls struct {
+	mu      sync.Mutex
+	watched []watchedLock
+}
+
+type watchedLock struct {
+	m    *lockwatch.Mutex
+	lock string
+	ws   ids.WorkspaceID
+}
+
+func (f *fakeStalls) Watch(m *lockwatch.Mutex, lock string, ws ids.WorkspaceID, _ dlog.Logger) func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.watched = append(f.watched, watchedLock{m: m, lock: lock, ws: ws})
+	return func() {}
+}
+
+// newWatchedHarness is the harness with its queue rebuilt on stalls.
+func newWatchedHarness(t *testing.T, stalls *fakeStalls) *harness {
+	t.Helper()
+	h := newHarness(t)
+	deps := h.q.deps
+	deps.Stalls = stalls
+	q, err := newQueue(deps)
+	if err != nil {
+		t.Fatalf("newQueue: %v", err)
+	}
+	h.q = q
+	return h
+}
+
+// TestNewWatchesTheQueueMutex pins that the daemon-wide mutex every Submit
+// takes is watched, under no workspace.
+func TestNewWatchesTheQueueMutex(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+
+	// Act.
+	h := newWatchedHarness(t, stalls)
+
+	// Assert.
+	want := []watchedLock{{m: &h.q.mu, lock: "promptqueue.queue"}}
+	if !reflect.DeepEqual(stalls.watched, want) {
+		t.Fatalf("watched = %+v, want %+v", stalls.watched, want)
+	}
+}
+
+// TestResolvingAWorkspaceWatchesItsLocks pins that a workspace's delivery and
+// verdict locks are watched, under that workspace, once its logger is known.
+func TestResolvingAWorkspaceWatchesItsLocks(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+	h := newWatchedHarness(t, stalls)
+
+	// Act.
+	if _, err := h.q.logger(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+
+	// Assert.
+	s := h.q.state(theWorkspace)
+	want := []watchedLock{
+		{m: &h.q.mu, lock: "promptqueue.queue"},
+		{m: &s.drain, lock: "promptqueue.drain", ws: theWorkspace},
+		{m: &s.verdicts, lock: "promptqueue.verdicts", ws: theWorkspace},
+	}
+	if !reflect.DeepEqual(stalls.watched, want) {
+		t.Fatalf("watched = %+v, want %+v", stalls.watched, want)
+	}
+}
+
+// TestAWorkspacesLocksAreWatchedOnce pins that every later resolution of the
+// same workspace registers nothing more.
+func TestAWorkspacesLocksAreWatchedOnce(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+	h := newWatchedHarness(t, stalls)
+	if _, err := h.q.logger(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+
+	// Act.
+	if _, err := h.q.logger(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+
+	// Assert.
+	if n := len(stalls.watched); n != 3 {
+		t.Fatalf("registrations = %d (%+v), want 3", n, stalls.watched)
+	}
+}
+
+// TestAnUnresolvedWorkspaceIsNotWatched pins that a workspace whose logger
+// cannot be resolved registers nothing: its record would have nowhere to go.
+func TestAnUnresolvedWorkspaceIsNotWatched(t *testing.T) {
+	// Arrange.
+	stalls := &fakeStalls{}
+	h := newWatchedHarness(t, stalls)
+
+	// Act.
+	_, err := h.q.logger(context.Background(), "no-such-workspace")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("logger resolved a workspace the state client does not hold")
+	}
+	if n := len(stalls.watched); n != 1 {
+		t.Fatalf("registrations = %d (%+v), want only the queue's own mutex", n, stalls.watched)
 	}
 }

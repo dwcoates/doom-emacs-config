@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/wsm"
 )
 
@@ -51,7 +52,7 @@ type wsState struct {
 	//
 	// It is NOT q.mu: a delivery is an rpc to the shim, and holding the
 	// queue's own mutex across it would wedge every other workspace.
-	drain sync.Mutex
+	drain lockwatch.Mutex
 
 	// reviving reports that a BACKGROUND revival goroutine is already running,
 	// so a second submission joins it rather than spawning a second one.
@@ -84,6 +85,9 @@ type wsState struct {
 	// so a reader that decides nothing (the host view, the tray) takes mu
 	// alone. See edit.go.
 	edit *editClaim
+	// watched reports that drain and verdicts are registered with the stall
+	// watchdog. Guarded by q.mu.
+	watched bool
 	// verdicts serializes a classifier verdict's SETTLING (its record and, on
 	// an interject, the interrupt) against an edit's commit replacing the
 	// content it judged; epochs counts each turn's content replacements under
@@ -91,7 +95,7 @@ type wsState struct {
 	// stands, so a judge that was already in flight when the content changed
 	// can never stamp — or interject — the new content with the old verdict.
 	// Lock order: drain, then verdicts; nothing holding verdicts takes drain.
-	verdicts sync.Mutex
+	verdicts lockwatch.Mutex
 	epochs   map[ids.TurnID]uint64
 	// cut is the context cut — /clear or /compact — that is the running
 	// turn, nil when none is. It is THE QUEUE'S KNOWLEDGE THAT THE RUNNING
@@ -127,7 +131,7 @@ func (q *queue) runningCut(ws ids.WorkspaceID) (runningCut, bool) {
 type queue struct {
 	deps Deps
 
-	mu     sync.Mutex
+	mu     lockwatch.Mutex
 	states map[ids.WorkspaceID]*wsState
 
 	// classifying tracks the in-flight classification goroutines. It is a
@@ -194,20 +198,61 @@ func newQueue(deps Deps) (*queue, error) {
 		deps:   deps,
 		states: make(map[ids.WorkspaceID]*wsState),
 	}
+	// THE QUEUE'S OWN MUTEX IS DAEMON-WIDE: every workspace's Submit takes
+	// it, so its stall is recorded in the run log. It lives as long as the
+	// process, so it is never unwatched.
+	if deps.Stalls != nil {
+		deps.Stalls.Watch(&q.mu, stallQueueLock, "", deps.Log.Global())
+	}
 	deps.Log.Global().Debug(opNew, "the prompt queue is wired", nil)
 	return q, nil
 }
+
+// The names the stall watchdog records the queue's locks under.
+const (
+	stallQueueLock    = "promptqueue.queue"
+	stallDrainLock    = "promptqueue.drain"
+	stallVerdictsLock = "promptqueue.verdicts"
+)
 
 // state returns a workspace's memory, minting it on first sight.
 func (q *queue) state(ws ids.WorkspaceID) *wsState {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.stateLocked(ws)
+}
+
+// stateLocked is state with q.mu held.
+func (q *queue) stateLocked(ws ids.WorkspaceID) *wsState {
 	s, ok := q.states[ws]
 	if !ok {
 		s = &wsState{}
 		q.states[ws] = s
 	}
 	return s
+}
+
+// watchLocks registers a workspace's delivery and verdict locks with the stall
+// watchdog, once, with the workspace's own logger: a stall on them is the
+// workspace's record. It runs where that logger is first resolved, because
+// the memory is minted under q.mu where no logger can be (resolving one reads
+// the state client). Every entry point resolves the logger before it takes
+// drain; the one that does not, a departure's decision, acts only on a bounce
+// RequestBounce registered, which did. The memory lives as long as the process, so the locks are never unwatched.
+func (q *queue) watchLocks(ws ids.WorkspaceID, log dlog.Logger) {
+	if q.deps.Stalls == nil {
+		return
+	}
+	q.mu.Lock()
+	s := q.stateLocked(ws)
+	first := !s.watched
+	s.watched = true
+	q.mu.Unlock()
+	if !first {
+		return
+	}
+	q.deps.Stalls.Watch(&s.drain, stallDrainLock, ws, log)
+	q.deps.Stalls.Watch(&s.verdicts, stallVerdictsLock, ws, log)
 }
 
 // logger resolves a workspace's durable logger. Failing to resolve the
@@ -224,8 +269,9 @@ func (q *queue) logger(ctx context.Context, ws ids.WorkspaceID) (dlog.Logger, er
 	// never lost over WHERE its narration is written. A directory that cannot
 	// host a durable sink routes to the central sink carrying
 	// `unroutable_workspace'; only the WORKSPACE READ above can refuse.
-	log := q.deps.Log.WorkspaceOrCentral(record.Dir)
-	return log.With(dlog.Context{"workspace": string(ws)}), nil
+	log := q.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)})
+	q.watchLocks(ws, log)
+	return log, nil
 }
 
 // pushTray republishes a workspace's standing holds, whole. The queue is the
