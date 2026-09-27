@@ -125,8 +125,8 @@ Name the reason for what provoked it; it lands in the sweep's own records.
    before it. Resolve the paths through
    `modules/app/agent-repl/scripts/agent-repl-log-discovery.sh` per
    `structured-logs.md` rather than hardcoding them; today they resolve to the
-   daemon's `~/.claude-emacs/claude-repld.log` and the Emacs-side
-   `doom-agent-repl.log` under the UID-qualified `$TMPDIR/doom-agent-repl-<uid>/`.
+   daemon's `~/.claude-emacs/claude-repld.log` and the Emacs-side central
+   sink `~/.claude-emacs/logs/emacs.central.log`.
 
    ```sh
    truncate -s 0 "$DAEMON_LOG" "$EMACS_LOG"
