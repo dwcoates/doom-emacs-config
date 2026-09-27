@@ -90,6 +90,12 @@ export const REVEALED_ATTRIBUTE = "data-revealed";
 export const THINKING_BUBBLE_CLASS = "thinking-bubble";
 
 /**
+ * A landed thinking bubble's collapsed line limit: ONE line, its own value in
+ * `BubbleCapLines`, distinct from the held prompt's two.
+ */
+export const THINKING_CAP_LINES = 1 satisfies BubbleCapLines;
+
+/**
  * How many prose blocks one response row draws.
  *
  * The daemon folds every fragment of a response into ONE bubble row and
@@ -226,13 +232,13 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * A THINKING BUBBLE IS SHOWN IN FULL WHILE IT IS THE LATEST AGENT RESPONSE
  * (owner rule, 2026-09-23): the ordinary response cap until the daemon states
  * that a later response landed in the same feed (`FeedResponse.superseded`),
- * and the two-line thinking cap from then on. Whether it is superseded is the
+ * and the one-line thinking cap from then on. Whether it is superseded is the
  * daemon's fact; nothing here looks at the rows around it. Only the DEFAULT
  * limit changes: a bubble the reader expanded wears `.expanded` on its scroll
  * box, which the in-place redraw keeps (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
-  return u.thinking && u.superseded ? 2 : "feed";
+  return u.thinking && u.superseded ? THINKING_CAP_LINES : "feed";
 }
 
 /**

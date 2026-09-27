@@ -63,15 +63,17 @@ export const BUBBLE_VARIANTS = {
 } as const satisfies Record<ResponseVariant | PromptVariant, BubbleRole>;
 
 /**
- * The collapsed line limit: the shared feed cap, two lines (a thinking bubble,
- * a held prompt), or none past the header strip (a peer message). A closed set,
+ * The collapsed line limit: the shared feed cap, two lines (a held prompt), one
+ * line (a thinking bubble), or none past the header strip (a peer message). Each
+ * kind's limit is its own value, never a shared one, so changing one kind's cap
+ * never moves another's. A closed set,
  * because the stylesheet maps each value to its line count
  * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
  */
-export type BubbleCapLines = "feed" | 2 | 0;
+export type BubbleCapLines = "feed" | 2 | 1 | 0;
 
 /** Every cap value the stylesheet must carry a rule for. */
-export const BUBBLE_CAP_LINES: readonly BubbleCapLines[] = ["feed", 2, 0];
+export const BUBBLE_CAP_LINES: readonly BubbleCapLines[] = ["feed", 2, 1, 0];
 
 /** The attributes the stylesheet keys a bubble's look on. */
 export const BUBBLE_ROLE_ATTRIBUTE = "data-role";

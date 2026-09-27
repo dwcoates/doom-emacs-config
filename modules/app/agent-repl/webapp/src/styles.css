@@ -2180,13 +2180,14 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* THE COLLAPSED LINE LIMIT (owner ruling, 2026-09-23), one entry per
    `BubbleCapLines` value (src/bubble/draw.ts; styles.test.ts holds the two
-   together): the shared feed cap for most bubbles, two lines for a thinking
-   bubble and a held prompt, and NONE past the header strip for a peer message,
-   whose label is the whole of its collapsed face. The cap rides the SCROLL
-   BOX, so the strip above it never scrolls away from the text it labels, and
-   it is counted in the one bubble leading. */
+   together): the shared feed cap for most bubbles, two lines for a held
+   prompt, one line for a thinking bubble, and NONE past the header strip for a
+   peer message, whose label is the whole of its collapsed face. The cap rides
+   the SCROLL BOX, so the strip above it never scrolls away from the text it
+   labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
 .bubble[data-cap-lines="2"] { --bubble-cap-lines: 2; }
+.bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
