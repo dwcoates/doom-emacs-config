@@ -6,9 +6,9 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince } from "../log-records.js";
 import { join } from "node:path";
-import { writeSync } from "node:fs";
 
 import {
   createFakeQuery,
@@ -929,11 +929,7 @@ describe("streamInput and close", () => {
  * by how loaded the machine is.
  */
 async function untilParked(): Promise<void> {
-  const parked = (): boolean =>
-    (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>).some(
-      ([, bytes, offset, length]) =>
-        bytes.subarray(offset, offset + length).toString("utf8").includes("PARKED on its gate"),
-    );
+  const parked = (): boolean => logRecordsSince(0).some((record) => record.message.includes("PARKED on its gate"));
   for (let i = 0; i < 1_000; i++) {
     if (parked()) return;
     await new Promise((resolve) => setImmediate(resolve));

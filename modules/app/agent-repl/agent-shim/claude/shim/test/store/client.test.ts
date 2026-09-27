@@ -4,10 +4,11 @@
  * over a unix socket.
  */
 import { create } from "@bufbuild/protobuf";
-import { mkdtempSync, writeSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { conversationv1, storev1 } from "../../src/proto.js";
 
 /** The stream plane every shim-written entry lands on. */
@@ -20,15 +21,6 @@ import { STORE_BASE_URL, createStoreClient } from "../../src/store/client.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 
 const running: FakeStore[] = [];
-const mockedWriteSync = vi.mocked(writeSync);
-
-function logRecordsSince(before: number): Array<Record<string, unknown>> {
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
-}
-
 afterEach(async () => {
   for (const store of running.splice(0)) await store.close();
 });
@@ -83,7 +75,7 @@ describe("createStoreClient", () => {
   it("records both boundaries of a successful unary store round-trip at debug", async () => {
     // Arrange.
     const client = createStoreClient(await fakeStore());
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await client.getLiveWork(
@@ -95,8 +87,8 @@ describe("createStoreClient", () => {
     // Assert.
     expect(
       logRecordsSince(before)
-        .filter((record) => record.context !== undefined && (record.context as Record<string, unknown>).rpc === "GetLiveWork")
-        .map((record) => ({ level: record.level, boundary: (record.context as Record<string, unknown>).boundary })),
+        .filter((record) => record.context !== undefined && record.context.rpc === "GetLiveWork")
+        .map((record) => ({ level: record.level, boundary: record.context.boundary })),
     ).toEqual([
       { level: "debug", boundary: "entered" },
       { level: "debug", boundary: "completed" },

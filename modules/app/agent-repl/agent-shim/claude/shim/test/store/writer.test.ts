@@ -6,8 +6,8 @@
  * absorption — are the STORE's semantics, and a hand-rolled double would be
  * asserting our own beliefs about them rather than the contract.
  */
-import { writeSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -92,15 +92,6 @@ async function persistence(
       retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
     }),
   };
-}
-
-/** Every canonical log record written since `before` calls to the log sink. */
-const mockedWriteSync = vi.mocked(writeSync);
-function logRecordsSince(before: number): Array<Record<string, unknown>> {
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
 }
 
 describe("PersistEntry → StoreEntry routing", () => {
@@ -381,7 +372,7 @@ describe("the bounded retry buffer", () => {
     // Arrange.
     const { store: fake, persistence: plane } = await persistence("exhausted-error");
     fake.failWrites("the store is down");
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
@@ -391,7 +382,7 @@ describe("the bounded retry buffer", () => {
     const record = logRecordsSince(before).find(
       (entry) => entry.level === "error" && String(entry.message).includes("whole retry schedule"),
     );
-    expect((record?.context as Record<string, unknown> | undefined)?.held_upsert_keys).toEqual([
+    expect((record?.context)?.held_upsert_keys).toEqual([
       "activity:unit-1",
     ]);
   });
@@ -402,7 +393,7 @@ describe("the bounded retry buffer", () => {
     fake.failWrites("the store is down");
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
     await plane.flush();
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     fake.failWrites(null);
@@ -637,7 +628,7 @@ describe("a keep-alive turn's entries", () => {
 
   it("are each stated at debug, naming no upsert key", async () => {
     const { persistence: plane } = await persistence("keepalive-log");
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true })]);
     await plane.flush();
@@ -645,7 +636,7 @@ describe("a keep-alive turn's entries", () => {
     const drops = logRecordsSince(before).filter(
       (record) => record.message === "a keep-alive turn's entry is never stored; dropped before the batch",
     );
-    expect(drops.map((record) => [record.level, (record.context as Record<string, unknown>).upsert_key])).toEqual([
+    expect(drops.map((record) => [record.level, record.context.upsert_key])).toEqual([
       ["debug", undefined],
     ]);
   });
@@ -969,7 +960,7 @@ describe("a WriteBatch the store answers badly", () => {
           },
         }),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
@@ -979,7 +970,7 @@ describe("a WriteBatch the store answers badly", () => {
     const records = logRecordsSince(before).filter((record) => typeof record.message === "string" && record.message.startsWith("the store skipped a row"));
     expect(
       records.map((record) => {
-        const context = record.context as Record<string, unknown>;
+        const context = record.context;
         return [record.level, context.upsert_key, context.from_book, context.to_book];
       }),
     ).toEqual([["error", "activity:msg_1:1", "rotated-book", "book-1"]]);
@@ -993,7 +984,7 @@ describe("a WriteBatch the store answers badly", () => {
           result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, {}) },
         }),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
@@ -1449,7 +1440,7 @@ describe("backpressure, never eviction", () => {
     const gated = gatedStore();
     gated.hold();
     const plane = boundedPlane(gated.client, MARKS);
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     for (let index = 0; index < 12; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
@@ -1469,7 +1460,7 @@ describe("backpressure, never eviction", () => {
     gated.hold();
     const plane = boundedPlane(gated.client, MARKS);
     for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     gated.open();
@@ -1489,7 +1480,7 @@ describe("backpressure, never eviction", () => {
     gated.hold();
     const plane = boundedPlane(gated.client, MARKS);
     for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     gated.open();
@@ -1575,7 +1566,7 @@ describe("bounded batches", () => {
       { maxBatchRows: 4, batchTimeBudgetMs: 500 },
       () => now,
     );
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write(Array.from({ length: 6 }, (_, index) => readEntry(MAIN, `unit-${index}`, "/tmp/a")));
@@ -1784,7 +1775,7 @@ describe("a multi-row batch the store refuses as malformed", () => {
     // Arrange.
     const picky = pickyStore();
     const plane = boundedPlane(picky.client);
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a")]);
@@ -1794,7 +1785,7 @@ describe("a multi-row batch the store refuses as malformed", () => {
     const refused = logRecordsSince(before).filter(
       (entry) => entry.level === "error" && String(entry.message).includes("refused a row as malformed"),
     );
-    expect(refused.map((entry) => (entry.context as Record<string, unknown>).lost_upsert_keys)).toEqual([
+    expect(refused.map((entry) => entry.context.lost_upsert_keys)).toEqual([
       ["activity:bad"],
     ]);
   });
@@ -1803,7 +1794,7 @@ describe("a multi-row batch the store refuses as malformed", () => {
     // Arrange.
     const picky = pickyStore();
     const plane = boundedPlane(picky.client);
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a")]);
@@ -1953,7 +1944,7 @@ describe("a held batch past the retry schedule", () => {
     fake.failWrites("the store is down");
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
     await plane.flush();
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act. One more attempt fails, and the flush answers on it.
     release();
