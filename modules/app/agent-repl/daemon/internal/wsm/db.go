@@ -184,8 +184,9 @@ type DB interface {
 	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
 	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
 	// binds nothing; a key claimed for a submission that never reached
-	// acceptance is REBOUND to the offered turn (ClaimRedriven), so the retry
-	// is delivered rather than refused.
+	// acceptance answers ClaimRedriven with the turn it was ALREADY bound to
+	// (reopening an orphaned or agent-died close on it), so the retry is
+	// delivered under the same turn id rather than refused.
 	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (IdempotencyClaim, error)
 	// AcceptIdempotencyKey records that the queue accepted the submission the
 	// key is bound to under turn. It refuses a key not bound to that turn, or

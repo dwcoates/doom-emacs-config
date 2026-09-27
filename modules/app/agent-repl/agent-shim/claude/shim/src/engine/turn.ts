@@ -8,6 +8,14 @@
  * queued. Queuing it here would create a second queue nobody can see, and the
  * daemon's model of what is pending would silently stop being true.
  *
+ * A TURN ID IS STARTED ONCE. A `StartTurn` repeating a turn id this shim
+ * already accepted is NOT a second turn: it starts nothing, delivers nothing,
+ * and is answered with the success the original got, so a daemon that died
+ * after this shim accepted a turn and before it recorded that acceptance
+ * re-drives the submission under the same id and proceeds without the prompt
+ * reaching the vendor twice. The repeat is an invariant violation, recorded at
+ * ERROR. See {@link TurnEngine.repeatedStart}.
+ *
  * THE ONE WAIT IS BEHIND THE SHIM'S OWN KEEP-ALIVE (2026-09-23). A keep-alive
  * is this process's housekeeping, invisible outside it, so a `StartTurn` that
  * lands while one runs is not refused: it WAITS for the keep-alive to leave the
@@ -306,6 +314,25 @@ export const KEEPALIVE_YIELD_BUDGET_MS = 120_000;
 /** How a wait behind the shim's own keep-alive ended. */
 type KeepaliveWait = "free" | "expired" | "abandoned";
 
+/**
+ * How many accepted turn ids the shim remembers, newest last.
+ *
+ * CONSTANT-SIZE, per the shim's statelessness: each entry is a turn id and an
+ * origin, never the prompt. The window a repeat arrives in is a daemon's death
+ * and the client's retry of the one submission whose acceptance it lost; turns
+ * are strictly one at a time, so only the turns the successor daemon starts
+ * before that retry lands can push the original out. Sixty-four is far past any
+ * such interleaving (a restored tray is a handful of holds). A repeat of an id
+ * already pushed out is started as a first `StartTurn`.
+ */
+export const STARTED_TURNS_REMEMBERED = 64;
+
+/** What the shim remembers of a turn it accepted. */
+interface StartedTurn {
+  /** The ORIGINAL start's origin, which a repeat is answered with. */
+  readonly origin: conversationv1.PromptOrigin;
+}
+
 /** The turn verbs, over one session. */
 export class TurnEngine {
   constructor(private readonly session: SessionContext) {}
@@ -334,6 +361,13 @@ export class TurnEngine {
   private starting: { turn: string; settled: Promise<void>; behindKeepalive: boolean } | undefined;
 
   /**
+   * The turn ids this shim accepted, oldest first, bounded by
+   * {@link STARTED_TURNS_REMEMBERED}. A refused start is never recorded: it
+   * started nothing, so its retry is a first start.
+   */
+  private readonly started = new Map<string, StartedTurn>();
+
+  /**
    * Whether a `StartTurn` is being processed right now.
    *
    * The keep-alive cadence reads it: a beat taken while a real start is in
@@ -347,6 +381,11 @@ export class TurnEngine {
   // -- StartTurn ------------------------------------------------------------
 
   async startTurn(request: shimv1.StartTurnRequest, signal?: AbortSignal): Promise<shimv1.StartTurnResponse> {
+    // A REPEAT OF A TURN ID THIS SHIM ALREADY TOOK IS JUDGED FIRST, before the
+    // double-submit and open-turn refusals below: those are about a DIFFERENT
+    // turn, and a repeat must never wait behind a keep-alive either.
+    const repeat = this.repeatedStart(request, signal);
+    if (repeat !== undefined) return repeat;
     // A START WHILE ANOTHER IS BEING STARTED IS A DOUBLE-SUBMIT. The first may
     // be waiting behind a keep-alive with no turn open yet, so without this
     // refusal both would pass the open-turn check below and both be delivered.
@@ -379,6 +418,96 @@ export class TurnEngine {
     } finally {
       if (this.starting === starting) this.starting = undefined;
       settle();
+    }
+  }
+
+  /**
+   * The answer to a `StartTurn` repeating a turn id this shim already took, or
+   * absence for a first start.
+   *
+   * THE REPEAT STARTS NOTHING. It is answered with the success the original
+   * got -- the prompt under the same turn id and the original's origin, and
+   * the opening page THIS request asks for -- so the daemon re-driving a
+   * submission whose acceptance it lost proceeds exactly as if its first call
+   * had answered. A repeat racing its original, still being started, waits
+   * for that start to settle: an accepted original answers the repeat as
+   * above, and a refused one leaves the repeat a first start.
+   *
+   * Recorded at ERROR every time: the daemon starts a turn id once, and only
+   * losing its own record of an acceptance brings one back.
+   */
+  private repeatedStart(
+    request: shimv1.StartTurnRequest,
+    signal: AbortSignal | undefined,
+  ): Promise<shimv1.StartTurnResponse> | undefined {
+    const requested = request.turn?.value ?? "";
+    if (requested === "") return undefined;
+    const original = this.started.get(requested);
+    if (original !== undefined) {
+      const state = this.session.openTurn()?.id.value === requested ? "open" : "ended";
+      this.recordRepeat(request, state, original.origin);
+      return this.answerRepeat(request, original);
+    }
+    const inFlight = this.starting;
+    if (inFlight === undefined || inFlight.turn !== requested) return undefined;
+    this.recordRepeat(request, "starting", undefined);
+    return inFlight.settled.then(() => {
+      const settled = this.started.get(requested);
+      if (settled !== undefined) return this.answerRepeat(request, settled);
+      LOGGER.info(
+        { turn_id: requested },
+        "the repeated StartTurn's original was refused; the repeat is started as a first StartTurn",
+      );
+      return this.startTurn(request, signal);
+    });
+  }
+
+  /** Record a repeated start of `request.turn` at ERROR, with what the original is. */
+  private recordRepeat(
+    request: shimv1.StartTurnRequest,
+    originalState: "open" | "ended" | "starting",
+    originalOrigin: conversationv1.PromptOrigin | undefined,
+  ): void {
+    const identity = this.session.identity();
+    LOGGER.error(
+      {
+        turn_id: request.turn?.value ?? "",
+        verb: "StartTurn",
+        original_state: originalState,
+        original_origin: originalOrigin === undefined ? "" : conversationv1.PromptOrigin[originalOrigin],
+        requested_origin: conversationv1.PromptOrigin[request.origin],
+        agent_id: identity?.agentId.value ?? "",
+        vendor_session_id: identity?.originalVendorSessionId ?? "",
+        detail: "the daemon starts a turn id once; only a daemon that lost its record of this acceptance re-drives it",
+      },
+      "a StartTurn repeated a turn id this shim already started; nothing is started again and the original's success is answered",
+    );
+  }
+
+  /** The success a repeat is answered with. See {@link repeatedStart}. */
+  private async answerRepeat(
+    request: shimv1.StartTurnRequest,
+    original: StartedTurn,
+  ): Promise<shimv1.StartTurnResponse> {
+    const identity = this.session.identity();
+    const turn = request.turn;
+    const said = request.said;
+    if (identity === undefined || turn === undefined || said === undefined) {
+      // A turn this shim accepted had a session, and validate/ refuses a
+      // request without a turn id or a prompt at the wire.
+      throw new Error("shim turn: a repeated StartTurn reached the engine without a session, a turn id or a prompt");
+    }
+    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
+    return startTurnAccepted(buildPrompt(turn, identity.agentId, said, original.origin), page);
+  }
+
+  /** Remember an accepted turn id, forgetting the oldest past the bound. */
+  private rememberStarted(turn: string, origin: conversationv1.PromptOrigin): void {
+    this.started.set(turn, { origin });
+    while (this.started.size > STARTED_TURNS_REMEMBERED) {
+      const oldest = this.started.keys().next();
+      if (oldest.done === true) break;
+      this.started.delete(oldest.value);
     }
   }
 
@@ -478,6 +607,7 @@ export class TurnEngine {
       LOGGER.error({ turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }
+    this.rememberStarted(turn.value, request.origin);
     LOGGER.info(
       { turn_id: turn.value, origin: request.origin, page_entries: page.entries.length },
       "opened a turn, delivered its prompt, and painted the opening page",
