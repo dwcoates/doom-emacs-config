@@ -19,6 +19,8 @@ func TestIsContextCutDirectiveRecognisesTheCommandLiterals(t *testing.T) {
 		{name: "a bare /clear", text: "/clear", want: true},
 		{name: "a bare /compact", text: "/compact", want: true},
 		{name: "a /compact with instructions", text: "/compact focus on the tests", want: true},
+		{name: "a /clear with trailing text", text: "/clear foo", want: true},
+		{name: "a /compact with instructions on the next line", text: "/compact\nfocus on the tests", want: true},
 		{name: "an ordinary prompt", text: "clear the build please", want: false},
 		{name: "a prompt merely containing the word", text: "please /clear it", want: false},
 		{name: "a look-alike command", text: "/clearing", want: false},

@@ -222,7 +222,14 @@ type SessionCommandSpec struct {
 	// none as taking some is the one way this table can swallow something a user
 	// genuinely meant to say to the agent — an unrecoverable loss, since a
 	// suppressed prompt is never recovered later.
-	TakesArgs     bool `protobuf:"varint,2,opt,name=takes_args,json=takesArgs,proto3" json:"takes_args,omitempty"`
+	TakesArgs bool `protobuf:"varint,2,opt,name=takes_args,json=takesArgs,proto3" json:"takes_args,omitempty"`
+	// Other spellings the vendor's CLI reads as this SAME command, leading slash
+	// included — the CLI's own `aliases` (it answers `/reset` and `/new` as
+	// `/clear`). A recognizer matches an alias exactly as it matches `literal`
+	// and takes the same `takes_args`; the command is always SENT and SHOWN as
+	// `literal`. Carried here so the aliases have one definition, like the
+	// literal they stand for.
+	Aliases       []string `protobuf:"bytes,3,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -269,6 +276,13 @@ func (x *SessionCommandSpec) GetTakesArgs() bool {
 		return x.TakesArgs
 	}
 	return false
+}
+
+func (x *SessionCommandSpec) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
 }
 
 // The conversation was cut here, and the reader must see where.
@@ -743,11 +757,12 @@ var File_conversation_v1_slash_command_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/slash_command.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a google/protobuf/descriptor.proto\"M\n" +
+	"#conversation/v1/slash_command.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a google/protobuf/descriptor.proto\"g\n" +
 	"\x12SessionCommandSpec\x12\x18\n" +
 	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
 	"\n" +
-	"takes_args\x18\x02 \x01(\bR\ttakesArgs\"\xec\x01\n" +
+	"takes_args\x18\x02 \x01(\bR\ttakesArgs\x12\x18\n" +
+	"\aaliases\x18\x03 \x03(\tR\aaliases\"\xec\x01\n" +
 	"\n" +
 	"ContextCut\x12;\n" +
 	"\acleared\x18\x01 \x01(\v2\x1f.conversation.v1.ContextClearedH\x00R\acleared\x12A\n" +
@@ -769,12 +784,11 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"durationMsB\t\n" +
 	"\atrigger\"\x1c\n" +
 	"\x1aContextCompactionRequested\"\x1c\n" +
-	"\x1aContextCompactionAutomatic*\xf3\n" +
-	"\n" +
+	"\x1aContextCompactionAutomatic*\x81\v\n" +
 	"\x0eSessionCommand\x12\x1f\n" +
-	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x12'\n" +
-	"\x15SESSION_COMMAND_CLEAR\x10\x01\x1a\f\x92\xa6\x1d\b\n" +
-	"\x06/clear\x12-\n" +
+	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x125\n" +
+	"\x15SESSION_COMMAND_CLEAR\x10\x01\x1a\x1a\x92\xa6\x1d\x16\n" +
+	"\x06/clear\x1a\x06/reset\x1a\x04/new\x12-\n" +
 	"\x17SESSION_COMMAND_COMPACT\x10\x02\x1a\x10\x92\xa6\x1d\f\n" +
 	"\b/compact\x10\x01\x12)\n" +
 	"\x15SESSION_COMMAND_MODEL\x10\x03\x1a\x0e\x92\xa6\x1d\n" +

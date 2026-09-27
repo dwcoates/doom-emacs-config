@@ -76,6 +76,10 @@ func TestRecognizeMakesActsOfTheContextCuts(t *testing.T) {
 	}{
 		{"/clear", promptqueue.ActClear},
 		{"/compact", promptqueue.ActCompact},
+		{"/clear foo", promptqueue.ActClear},
+		{"/reset", promptqueue.ActClear},
+		{"/new", promptqueue.ActClear},
+		{"/reset foo", promptqueue.ActClear},
 	}
 	for _, tc := range tests {
 		t.Run(tc.text, func(t *testing.T) {
@@ -172,5 +176,18 @@ func TestPanelCommandsAreExactlyTheFeedsPanelArms(t *testing.T) {
 		if !PanelCommands[command] {
 			t.Fatalf("%s must be a panel command", command)
 		}
+	}
+}
+
+func TestRecognizeLeavesANearMissOfAClearAliasAPrompt(t *testing.T) {
+	for _, text := range []string{"/newer", "/resetting", "please /new"} {
+		t.Run(text, func(t *testing.T) {
+			// Arrange / Act
+			got := recognize(text)
+			// Assert
+			if got.kind != RecognizedNone {
+				t.Fatalf("recognition = %s, want an ordinary prompt", recognitionName(got.kind))
+			}
+		})
 	}
 }
