@@ -40,6 +40,7 @@ import {
 import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
+import { isAgentTaskType } from "../convert/detached.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
@@ -4546,7 +4547,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // states `local_agent` for a spawned agent and `local_bash` for a shell,
       // and an UNSTATED kind is an agent. Only a stated non-agent kind is a
       // shell run, and only a shell run's terminal is ours to write.
-      if (entry.taskType === undefined || entry.taskType === "" || entry.taskType === "local_agent") {
+      if (isAgentTaskType(entry.taskType)) {
         continue;
       }
       closing.push(
