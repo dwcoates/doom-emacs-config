@@ -69,6 +69,21 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			line: `{"op":"info"}`,
 			want: Command{Op: OpInfo},
 		},
+		{
+			name: "set_live_work carries a membership",
+			line: `{"op":"set_live_work","payload":"` + payload + `"}`,
+			want: Command{Op: OpSetLiveWork, Payload: payload},
+		},
+		{
+			name: "set_live_work may state an empty membership",
+			line: `{"op":"set_live_work"}`,
+			want: Command{Op: OpSetLiveWork},
+		},
+		{
+			name: "silence_bash addresses a detached work id",
+			line: `{"op":"silence_bash","work":"w-1"}`,
+			want: Command{Op: OpSilenceBash, Work: "w-1"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -106,6 +121,7 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "expect an unknown verb", line: `{"op":"expect","rpc":"Teleport"}`, wantSub: "unknown rpc"},
 		{name: "drop an unknown stream", line: `{"op":"drop_stream","stream":"webapp"}`, wantSub: "unknown stream"},
 		{name: "exit out of range", line: `{"op":"exit","code":900}`, wantSub: "out of range"},
+		{name: "silence_bash without work", line: `{"op":"silence_bash"}`, wantSub: "work is required"},
 	}
 
 	for _, tc := range tests {
