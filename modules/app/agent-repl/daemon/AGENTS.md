@@ -398,6 +398,22 @@ topbar resolver's context tree) and `/status` (the daemon's build stamp plus
 the resolver's spliced account/model/mode facts) and fails loudly for every
 other recognized panel command.
 
+### The session watcher performs no shim I/O under its lock
+
+`sessionwatcher`'s mutex is held across every sink call and taken by
+`TurnInFlight` (the prompt queue's Submit), so it NEVER spans a round trip to
+the shim. A watch open waits for the stream's first frame
+(`shimclient.openStream`), and a shim that never sends one held the lock for
+18 minutes on 2026-09-27. Every open (`openSessionLocked`,
+`openAgentStreamLocked`, `openShellStreamLocked`) is DECIDED under the mutex
+(an `openTicket`), MADE on its own goroutine under the ticket's context, and
+INSTALLED under the mutex only if the ticket is still the watch's, the watch
+was not reaped and the generation did not move; a stale open's stream is
+closed. A superseded or reaped ticket is cancelled, and `Close` cancels and
+joins every open in flight. A new open path goes through `decideOpenLocked`;
+`TestAHungWatchOpenHoldsNoLock` holds each kind of open forever and requires
+the watcher to keep answering.
+
 ### The footer and the roster take ONE live-work set
 
 `sessionwatcher`'s `LiveWorkSet` is the SINGLE AUTHORITY for detached-work
