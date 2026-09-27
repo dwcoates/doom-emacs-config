@@ -86,6 +86,10 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return Disposition{}, ErrNoSession
 	}
 	if running := watcher.TurnInFlight(); running != nil {
+		if *running == sub.Turn {
+			q.logRepeatedStart(log, "submit", sub.Turn)
+			return Disposition{Delivered: true}, nil
+		}
 		return q.hold(ctx, sub, *running, nil, log)
 	}
 	// A SUBMISSION GOING STRAIGHT TO THE SHIM IS A DELIVERY DECISION, taken

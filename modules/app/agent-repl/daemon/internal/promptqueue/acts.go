@@ -32,6 +32,15 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 		return fmt.Errorf("session act %q on %q is not a kind the queue carries", act.Kind, ws)
 	}
 
+	if act.Turn != "" {
+		if watcher, ok := q.deps.Watcher(ws); ok {
+			if running := watcher.TurnInFlight(); running != nil && *running == act.Turn {
+				q.logRepeatedStart(log, "session_act", act.Turn)
+				return nil
+			}
+		}
+	}
+
 	queued, err := q.somethingIsAhead(ctx, ws)
 	if err != nil {
 		log.Error(opAct, "could not tell whether anything is ahead of the act",
