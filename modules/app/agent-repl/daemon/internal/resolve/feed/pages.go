@@ -198,12 +198,21 @@ func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]strin
 // on screen (a reconnect's replayed post-cut conversation) and is kept, so the
 // bound move never blanks the feed. A later-plane row is unambiguously after the
 // cut and is always kept.
+//
+// THE PAST A FORK INHERITED PRECEDES EVERY CUT THE FORK MAKES. A ported or
+// inherited row is the parent's conversation, older than anything the fork
+// produced by construction (lineage.go), so a cut in any of the fork's own
+// planes hides it however late it was drawn: there is no reconnect ambiguity
+// to resolve, because conversation order is known.
 func boundHides(row, bound rowRank) bool {
 	if row.plane == bound.plane {
 		return row.seq < bound.seq
 	}
 	if row.plane > bound.plane {
 		return false
+	}
+	if row.plane.inheritedPast() && !bound.plane.inheritedPast() {
+		return true
 	}
 	return row.seq > bound.seq
 }
