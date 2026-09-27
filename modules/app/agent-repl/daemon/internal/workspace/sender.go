@@ -160,7 +160,21 @@ func (s *sender) PromptAgent(ctx context.Context, agent *conversationv1.AgentId,
 
 // KillTurn interrupts the open turn for an interjection.
 func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool) error {
-	response, err := s.client.KillTurn(ctx, &shimv1.KillTurnRequest{
+	return killTurn(ctx, s.client, turn, force)
+}
+
+// turnKiller is the one shim call killTurn needs, satisfied by both the queue's
+// narrowed client and the verbs' whole one.
+type turnKiller interface {
+	KillTurn(ctx context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error)
+}
+
+// killTurn is THE ONE BUILDER of a KillTurn request and the one reading of its
+// answer, shared by the queue's sender and the verbs' shim adapter. The two
+// were line-for-line copies; one of them growing a field the other forgot
+// would make the same stop say different things depending on who asked.
+func killTurn(ctx context.Context, client turnKiller, turn ids.TurnID, force bool) error {
+	response, err := client.KillTurn(ctx, &shimv1.KillTurnRequest{
 		Turn:  &conversationv1.TurnId{Value: string(turn)},
 		Force: force,
 	})
