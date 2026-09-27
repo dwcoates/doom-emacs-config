@@ -577,6 +577,69 @@ func TestRetireRowRemovesItFromTheFeed(t *testing.T) {
 	}
 }
 
+// A HELD REPLAY IS PUBLISHED ONCE ITS PAGE IS PLACED, judged against the order
+// as it then stands. Each case is what happened to one row while the hold
+// stood; the assertion is what a following reader was pushed for it.
+func TestAHeldPublicationIsJudgedAtRelease(t *testing.T) {
+	cases := []struct {
+		name string
+		// during acts on the row (already upserted under the hold).
+		during func(r *resolver, s *wsState, id string)
+		want   func(id string) []string
+	}{
+		{
+			name:   "a row that still stands is pushed at release",
+			during: func(*resolver, *wsState, string) {},
+			want:   func(id string) []string { return []string{id} },
+		},
+		{
+			name: "a row retired under the hold is not re-published, only its removal",
+			during: func(r *resolver, s *wsState, id string) {
+				r.retire(s, rootFeed(), id)
+			},
+			want: func(id string) []string { return []string{id + " (removed)"} },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a reader following the root feed.
+			h := newHarness(t)
+			rows := h.follow(rootFeed(), "reader-1")
+			id := h.promptRowID("turn-held")
+
+			// Act: under the hold, upsert the row and act on it; then release.
+			h.resolver.mu.Lock()
+			s := h.resolver.state(testWorkspace)
+			release := h.resolver.holdPushes(s)
+			h.resolver.upsert(s, placement{feed: rootFeed()}, &frontendv1.FeedRow{
+				Id:  &frontendv1.FeedId{Value: id},
+				Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
+			}, true)
+			tc.during(h.resolver, s, id)
+			release()
+			h.resolver.mu.Unlock()
+			sentinel := h.sendSentinel()
+
+			// Assert.
+			var got []string
+			for {
+				row := <-rows
+				value := row.GetId().GetValue()
+				if value == sentinel {
+					break
+				}
+				if row.GetRemoved() != nil {
+					value += " (removed)"
+				}
+				got = append(got, value)
+			}
+			if want := tc.want(id); !equalIDs(got, want) {
+				t.Fatalf("pushed = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestOutputAddressPlacesEveryRowOnTheAddressedFeed(t *testing.T) {
 	// Arrange: a merge lease's output address.
 	h := newHarness(t)
