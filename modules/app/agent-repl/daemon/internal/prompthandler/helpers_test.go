@@ -71,7 +71,7 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 }
 
 // ClaimIdempotencyKey models wsm's three standings: minted, accepted, and
-// re-driven (rebound to the offered turn).
+// re-driven (kept on the turn the key was first bound to).
 func (d *fakeDB) ClaimIdempotencyKey(_ context.Context, _ ids.WorkspaceID, key string, turn ids.TurnID) (wsm.IdempotencyClaim, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -89,9 +89,7 @@ func (d *fakeDB) ClaimIdempotencyKey(_ context.Context, _ ids.WorkspaceID, key s
 	case existing.accepted:
 		return wsm.IdempotencyClaim{Standing: wsm.ClaimAccepted, Turn: existing.turn}, nil
 	default:
-		abandoned := existing.turn
-		existing.turn = turn
-		return wsm.IdempotencyClaim{Standing: wsm.ClaimRedriven, Turn: turn, Abandoned: abandoned}, nil
+		return wsm.IdempotencyClaim{Standing: wsm.ClaimRedriven, Turn: existing.turn}, nil
 	}
 }
 

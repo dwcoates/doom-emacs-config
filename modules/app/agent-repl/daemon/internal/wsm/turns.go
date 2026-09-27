@@ -259,15 +259,32 @@ func openTurns(ctx context.Context, q querier, id WorkspaceID) ([]Turn, error) {
 //
 //   - no row: the key is bound to the offered turn, unaccepted (ClaimMinted);
 //   - an ACCEPTED row: the accepted turn, and nothing is bound (ClaimAccepted);
-//   - an UNACCEPTED row: the claim is REBOUND to the offered turn and the retry
-//     is driven under it (ClaimRedriven), naming the abandoned turn.
+//   - an UNACCEPTED row: the retry is re-driven under the turn the claim was
+//     ALREADY bound to (ClaimRedriven); the offered turn is never used.
 //
-// An unaccepted row whose turn nonetheless stands in held_prompts is ACCEPTED:
-// the hold is the queue's acceptance record, it is never deleted (only
-// tombstoned), and a crash between writing it and stamping the claim must not
-// re-drive a prompt the tray already carries. The stamp is written here, in
-// the same transaction as the read, so the evidence and the claim cannot
-// disagree afterwards.
+// THE RETRY KEEPS THE ORIGINAL TURN ID. The one window the stamp cannot close
+// is a process death after the shim accepted the turn and before the stamp
+// committed; the shim answers a repeated start of a turn id it already
+// accepted as a no-op, so re-driving under the SAME id is what makes that
+// window deliver once. A fresh id would be a second turn the shim cannot
+// recognize.
+//
+// DURABLE EVIDENCE THE QUEUE TOOK IT MAKES AN UNSTAMPED CLAIM ACCEPTED, and
+// the stamp is written here, in the same transaction as the read, so the
+// evidence and the claim cannot disagree afterwards:
+//
+//   - a row in held_prompts under the claimed turn: the hold is the queue's
+//     acceptance record, never deleted (only tombstoned);
+//   - the claimed turn's row closed by a vendor terminal (completed, failed,
+//     killed): only a turn the shim accepted ever ends through one.
+//
+// A turn row closed as ORPHANED or AGENT-DIED is no such evidence -- a boot,
+// an adoption or a dying shim writes those closes for a turn nobody saw end,
+// accepted or not -- so it is REOPENED here (its close cleared) before the
+// retry re-drives it: the turn is about to run again under the same id, and a
+// row reading closed would hide it from every open-turn read. An open turn row
+// is re-driven as it stands; the queue answers a submission whose turn is
+// already in flight without delivering it again.
 //
 // The claim lives in its own table rather than on the turn row because a key is
 // claimed at submission, before the turn row exists.
@@ -302,26 +319,29 @@ func (s *store) ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key str
 			claim = IdempotencyClaim{Standing: ClaimAccepted, Turn: claimed}
 			return nil
 		}
-		var held int
-		if err := tx.QueryRowContext(ctx,
-			`SELECT count(*) FROM held_prompts WHERE turn_id = ? AND workspace_id = ?`, claimed, id).Scan(&held); err != nil {
+		evidence, err := acceptanceEvidence(ctx, tx, id, claimed)
+		if err != nil {
 			return err
 		}
-		if held > 0 {
+		if evidence != "" {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE idempotency_keys SET accepted_at = ? WHERE workspace_id = ? AND idempotency_key = ?`,
 				nanos(time.Now().UTC()), id, key); err != nil {
 				return err
 			}
-			claim = IdempotencyClaim{Standing: ClaimAccepted, Turn: claimed}
+			claim = IdempotencyClaim{Standing: ClaimAccepted, Turn: claimed, Evidence: evidence}
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE idempotency_keys SET turn_id = ?, claimed_at = ? WHERE workspace_id = ? AND idempotency_key = ?`,
-			turn, nanos(time.Now().UTC()), id, key); err != nil {
+		reopened, err := reopenAmbiguousClose(ctx, tx, id, claimed)
+		if err != nil {
 			return err
 		}
-		claim = IdempotencyClaim{Standing: ClaimRedriven, Turn: turn, Abandoned: claimed}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE idempotency_keys SET claimed_at = ? WHERE workspace_id = ? AND idempotency_key = ?`,
+			nanos(time.Now().UTC()), id, key); err != nil {
+			return err
+		}
+		claim = IdempotencyClaim{Standing: ClaimRedriven, Turn: claimed, Reopened: reopened}
 		return nil
 	})
 	if err != nil {
@@ -329,9 +349,52 @@ func (s *store) ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key str
 	}
 	s.log.Debug(op, "claimed the idempotency key", dlog.Context{
 		"workspace": string(id), "idempotency_key": key, "offered_turn": string(turn),
-		"standing": claim.Standing.String(), "turn": string(claim.Turn), "abandoned_turn": string(claim.Abandoned),
+		"standing": claim.Standing.String(), "turn": string(claim.Turn),
+		"evidence": claim.Evidence, "reopened": claim.Reopened,
 	})
 	return claim, nil
+}
+
+// acceptanceEvidence names the durable record proving the queue accepted the
+// submission bound to turn, read in the claim's transaction; empty when there
+// is none. See ClaimIdempotencyKey for what counts.
+func acceptanceEvidence(ctx context.Context, tx *sql.Tx, id WorkspaceID, turn TurnID) (string, error) {
+	var held int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM held_prompts WHERE turn_id = ? AND workspace_id = ?`, turn, id).Scan(&held); err != nil {
+		return "", err
+	}
+	if held > 0 {
+		return EvidenceHeld, nil
+	}
+	var ended int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM turns WHERE id = ? AND workspace_id = ? AND close_kind IN (?, ?, ?)`,
+		turn, id, int(CloseCompleted), int(CloseFailed), int(CloseKilled)).Scan(&ended); err != nil {
+		return "", err
+	}
+	if ended > 0 {
+		return EvidenceTerminal, nil
+	}
+	return "", nil
+}
+
+// reopenAmbiguousClose clears an orphaned or agent-died close on turn, in the
+// claim's transaction, and reports whether it did. A turn row with no close,
+// one closed by a vendor terminal (acceptanceEvidence answered those first),
+// and a turn with no row at all are left exactly as they are.
+func reopenAmbiguousClose(ctx context.Context, tx *sql.Tx, id WorkspaceID, turn TurnID) (bool, error) {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE turns SET closed_at = NULL, close_kind = NULL WHERE id = ? AND workspace_id = ? AND close_kind IN (?, ?)`,
+		turn, id, int(CloseOrphaned), int(CloseAgentDied))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 // AcceptIdempotencyKey stamps the claim on key accepted: the queue took the

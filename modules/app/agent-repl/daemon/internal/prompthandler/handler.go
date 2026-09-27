@@ -197,11 +197,16 @@ func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyK
 	case wsm.ClaimAccepted:
 		release()
 		log.Warn(opSubmit, "the idempotency key already claimed a turn",
-			dlog.Context{"existing_turn": string(got.Turn)})
+			dlog.Context{"existing_turn": string(got.Turn), "evidence": got.Evidence})
 		return claim{}, ErrDuplicateSubmission
 	case wsm.ClaimRedriven:
-		log.Info(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under a fresh turn",
-			dlog.Context{"turn": string(got.Turn), "abandoned_turn": string(got.Abandoned)})
+		// THE RETRY KEEPS THE FIRST SUBMISSION'S TURN ID. A process that died
+		// after the shim accepted that turn and before the stamp committed left
+		// exactly this claim, and the shim answers a repeated start of a turn
+		// id it already accepted as a no-op; a fresh id would start the prompt
+		// a second time.
+		log.Info(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn",
+			dlog.Context{"turn": string(got.Turn), "offered_turn": string(turn), "reopened": got.Reopened})
 	case wsm.ClaimMinted:
 		log.Debug(opSubmit, "claimed the idempotency key", dlog.Context{"turn": string(got.Turn)})
 	default:
