@@ -1349,80 +1349,64 @@ describe("the arriving response indicator", () => {
 });
 
 describe("the thinking bubble", () => {
-  /** The raw text of the `@media (prefers-color-scheme: dark)` block, found by
-   * balancing braces from its opening `{` (see the same helper on the prompt
-   * border suite). */
-  function darkBlock(): string {
-    const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
-    if (start === -1) throw new Error("no dark-theme media query found");
-    const openBrace = stylesheet.indexOf("{", start);
-    let depth = 0;
-    let i = openBrace;
-    for (; i < stylesheet.length; i++) {
-      if (stylesheet[i] === "{") depth++;
-      else if (stylesheet[i] === "}") {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
-    return stylesheet.slice(openBrace + 1, i);
+  /** A response bubble's attributes: its variant and its daemon-stated state. */
+  function responseBubble(variant: string, state: string): Record<string, string> {
+    return { "data-role": "response", "data-variant": variant, "data-state": state };
   }
 
-  it("gives the thinking bubble a light-orange border", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="thinking"]');
+  it.each([
+    ["arriving", "update"],
+    ["settled", "success"],
+    ["cut short", "error"],
+  ] as const)("gives a %s thinking bubble no border", (_label, state) => {
+    // Arrange / Act — every border rule a thinking bubble, as response.ts marks it, matches.
+    const borders = bordersOn(responseBubble("thinking", state), ["assistant", "thinking-bubble"]);
 
-    // Assert — the border is the light-orange thinking token (owner ruling
-    // 2026-09-15), never green and never transparent.
-    expect(rule).toMatch(/border-color:\s*var\(--thinking-border\)/);
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
   });
 
-  it("borders the thinking bubble at the SAME thickness as the green final border", () => {
-    // Arrange / Act — neither the thinking rule nor the green final-response
-    // rule sets a border width or a `border` shorthand; both change only the
-    // COLOR and inherit the base `.bubble { border: 0.3px solid transparent }`.
-    const thinking = declarationsOf('.bubble[data-variant="thinking"]') ?? "";
+  it("keeps the green off a thinking bubble even were it marked the answer", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("thinking", "success"), ["assistant", "thinking-bubble", "final-response"]);
+
+    // Assert
+    expect(borders).toEqual([]);
+  });
+
+  it("keeps the pear on a settled mid-turn response", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("response", "success"), ["assistant"]);
+
+    // Assert
+    expect(borders).toEqual(["border-color: var(--interim-response-border)"]);
+  });
+
+  it("keeps the green on the turn's answer", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("response", "success"), ["assistant", "final-response"]);
+
+    // Assert
+    expect(borders).toEqual(["border-color: var(--final-response)"]);
+  });
+
+  it("keeps the pear and green at the base's reserved thickness", () => {
+    // Arrange / Act — neither rule sets a width or a `border` shorthand; both
+    // change only the COLOR of the base `.bubble { border: 0.3px solid transparent }`.
+    const pear = declarationsOf('.bubble[data-variant="response"][data-state="success"]:not(.final-response)') ?? "";
     const green = declarationsOf('.bubble.final-response:not([data-variant="thinking"])') ?? "";
 
-    // Assert — same reserved thickness, only the color differs.
-    for (const decls of [thinking, green]) {
+    // Assert
+    for (const decls of [pear, green]) {
       expect(decls).not.toMatch(/border-width/);
       expect(decls).not.toMatch(/(?:^|[\s;])border\s*:/);
       expect(decls).toMatch(/border-color/);
     }
   });
 
-  it("defines the light-orange token in the light theme", () => {
-    // Arrange / Act — the top-level (light) :root palette.
-    const root = declarationsOf(":root");
-
-    // Assert
-    expect(root).toMatch(/--thinking-border:\s*#[0-9a-fA-F]{3,6}/);
-  });
-
-  it("redefines the light-orange token for the dark theme", () => {
-    // Arrange / Act
-    const dark = darkBlock();
-
-    // Assert — the dark palette lifts the token like every other state border.
-    expect(dark).toMatch(/--thinking-border:\s*#[0-9a-fA-F]{3,6}/);
-  });
-
-  it("puts the orange only on thinking bubbles, never on a partial-final bubble", () => {
-    // Arrange — every rule that paints the thinking-border color.
-    const orangeRules = rulesOf(stylesheet).filter((r) =>
-      /border-color:\s*var\(--thinking-border\)/.test(r.declarations),
-    );
-
-    // Assert — at least one such rule, and EVERY selector that wears it is the
-    // thinking variant's, so a partial-final response (not thinking, not final)
-    // can never match it and stays borderless.
-    expect(orangeRules.length).toBeGreaterThan(0);
-    for (const rule of orangeRules) {
-      for (const selector of rule.selectors) {
-        expect(selector).toContain('[data-variant="thinking"]');
-      }
-    }
+  it("carries no thinking-border token any more", () => {
+    // Arrange / Act / Assert — the retired yellow is defined in neither theme.
+    expect(stylesheet).not.toMatch(/--thinking-border\s*:/);
   });
 
   it("caps a thinking bubble at one line and sets nothing else", () => {
@@ -2067,17 +2051,10 @@ describe("the warning chip as the one error surface", () => {
 });
 
 /**
- * THE BORDER LADDER (owner ruling, 2026-09-23): thinking is yellow, a settled
- * mid-turn response is pear, and the turn's answer stays green.
+ * THE BORDER LADDER (owner ruling, 2026-09-23): a settled mid-turn response is
+ * pear and the turn's answer stays green; thinking wears no border at all.
  */
 describe("the response border ladder", () => {
-  it("paints thinking bubbles a red-leaning yellow", () => {
-    // Arrange / Act
-    const root = declarationsOf(":root") ?? "";
-    // Assert
-    expect(root).toMatch(/--thinking-border:\s*#e3a008/);
-  });
-
   /** The hue, in degrees, of every `NAME: #rrggbb` declaration, in sheet order (light, then dark). */
   function huesOf(name: string): number[] {
     const re = new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`, "g");
@@ -2090,16 +2067,14 @@ describe("the response border ladder", () => {
     });
   }
 
-  it("runs monotonically toward green in both themes: thinking, then interim, then the answer", () => {
+  it("runs monotonically toward green in both themes: interim, then the answer", () => {
     // Arrange / Act
-    const thinking = huesOf("thinking-border");
     const interim = huesOf("interim-response-border");
     const answer = huesOf("final-response");
     // Assert — one light and one dark value each, and the hue climbs from
-    // red-leaning yellow through yellow-leaning pear to green in each theme.
-    expect([thinking.length, interim.length, answer.length]).toEqual([2, 2, 2]);
+    // yellow-leaning pear to green in each theme.
+    expect([interim.length, answer.length]).toEqual([2, 2]);
     for (const theme of [0, 1]) {
-      expect(thinking[theme]).toBeLessThan(interim[theme]);
       expect(interim[theme]).toBeLessThan(answer[theme]);
     }
   });
