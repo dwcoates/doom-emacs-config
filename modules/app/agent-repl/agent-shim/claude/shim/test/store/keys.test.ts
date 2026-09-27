@@ -133,13 +133,14 @@ describe("terminalUpsertKey", () => {
   });
 });
 
-describe("bashUpsertKey", () => {
-  it("keys a detached shell's START row by the RUN's activity id", () => {
+describe("bashStartUpsertKey", () => {
+  it("keys a detached shell's START row by the RUN's activity id, in the sidecar's spelling", () => {
     // Arrange, Act.
-    const key = keys.bashUpsertKey(activityId("toolu_bash1"));
+    const key = keys.bashStartUpsertKey(activityId("toolu_bash1"));
 
-    // Assert.
-    expect(key).toBe("bash:toolu_bash1");
+    // Assert. `bash:<run>:start` is the sidecar's `BashStartKey`: one fact,
+    // one key, whichever plane writes it.
+    expect(key).toBe("bash:toolu_bash1:start");
   });
 
   it("does not collide with the same run's page-line key", () => {
@@ -147,7 +148,7 @@ describe("bashUpsertKey", () => {
     const run = activityId("toolu_bash1");
 
     // Act, Assert.
-    expect(keys.bashUpsertKey(run)).not.toBe(keys.activityUpsertKey(run));
+    expect(keys.bashStartUpsertKey(run)).not.toBe(keys.activityUpsertKey(run));
   });
 
   it("keys the run's rendered tail as ONE row every write supersedes", () => {
@@ -169,7 +170,7 @@ describe("bashUpsertKey", () => {
 
     // Act.
     const minted = new Set([
-      keys.bashUpsertKey(run),
+      keys.bashStartUpsertKey(run),
       keys.bashTailUpsertKey(run),
       keys.bashTerminalUpsertKey(run),
     ]);
