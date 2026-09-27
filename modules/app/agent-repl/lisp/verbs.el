@@ -744,12 +744,21 @@ and the new workspace\'s tab arrives through the roster push."
   ;; channel open before this workspace exists.  The callbacks that render them
   ;; are registered BEFORE the send, so a progress event never outruns them.
   (let ((op-id (agent-repl-mutation-progress-new-op-id))
-        (arrival-reason (if fork "forked" "created")))
+        (arrival-reason (if fork "forked" "created"))
+        ;; THE ACK AND THE PROGRESS STREAM ARE TWO CHANNELS, so the daemon's
+        ;; first stage push can overtake the rpc's own ack.  Once anything
+        ;; later in the sequence has been shown, the ack has nothing left to
+        ;; say and would only put an older line over a newer one.
+        (progressed nil))
     (agent-repl-mutation-progress-register
      op-id
-     :on-stage #'agent-repl-verbs--create-stage-message
+     :on-stage
+     (lambda (stage)
+       (setq progressed t)
+       (agent-repl-verbs--create-stage-message stage))
      :on-succeeded
      (lambda (value)
+       (setq progressed t)
        (let ((ref (plist-get value :workspace))
              (name (plist-get value :name)))
          (agent-repl-workspace-progress-report :create :completed name)
@@ -759,7 +768,10 @@ and the new workspace\'s tab arrives through the roster push."
          (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)
          (when select
            (agent-repl-verbs-select-minted ref))))
-     :on-failed #'agent-repl-verbs--create-failure)
+     :on-failed
+     (lambda (arm detail)
+       (setq progressed t)
+       (agent-repl-verbs--create-failure arm detail)))
     ;; THE ACK UX IS IMMEDIATE: the minibuffer reflects the create the instant
     ;; the command runs, not when the slow work finishes -- the owner's rule
     ;; that phases are messages, not only a mode line.
@@ -781,12 +793,20 @@ and the new workspace\'s tab arrives through the roster push."
      :on-accepted
      (lambda (_accepted)
        (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-                         "elisp.verbs.create-accepted op-id=%s" op-id))
+                         "elisp.verbs.create-accepted op-id=%s" op-id)
+       ;; THE WHOLE SEQUENCE IS SHOWN (owner ruling, 2026-09-27): accepted,
+       ;; then every stage the daemon pushes, then created or FAILED.
+       (unless progressed
+         (agent-repl-workspace-progress-report :create :accepted)))
      :on-success
      ;; A daemon that answered success synchronously (an op_id it did not
      ;; honor) still landed the workspace: run the terminal and drop the op.
+     ;; Its completion is said exactly as the stream's is; the answer carries
+     ;; the minted ref and no name, so the line names the minted directory.
      (lambda (success)
        (agent-repl-mutation-progress-forget op-id)
+       (agent-repl-workspace-progress-report
+        :create :completed (plist-get (plist-get success :workspace) :dir))
        (agent-repl--panels-note-arrival-reason
         (plist-get (plist-get success :workspace) :id) arrival-reason)
        (when select
@@ -833,61 +853,72 @@ the daemon log)."
      (agent-repl-workspace-progress-report :create :failed "the daemon named no cause"))))
 
 (defun agent-repl-verbs--create-refusal (value)
-  "Draw the create refusals Emacs words itself, from VALUE.
-Answers non-nil when one of them claimed the arm, so every other arm
-still falls through to the generic refusal handling."
-  (or (agent-repl-verbs--create-policy-refusal value)
-      (agent-repl-verbs--create-naming-refusal value)))
+  "Surface a daemon refusal of a create, from VALUE, as the create\='s FAILURE.
+Answers non-nil when it claimed the arm.  It claims every arm except the
+two handover arms (`agent-repl-verbs--handover-arms\='), which are the
+rollout\='s ordering rather than a failure and fall through to the
+generic refusal handling that routes them to the handover.
 
-(defun agent-repl-verbs--create-naming-refusal (value)
-  "Draw a `naming_failed\=' refusal of a create from VALUE.
-Answers non-nil when it claimed the arm.
+A REFUSED CREATE IS A FAILED CREATE, AND IT IS SAID AS ONE (owner ruling,
+2026-09-27).  A synchronous refusal and one that arrives later on the
+progress stream both reach the user through the SAME
+`agent-repl-workspace-progress-report\=' `:failed\=' phase every other
+create failure uses: an ERROR record and the minibuffer line
+\"agent-repl: workspace creation FAILED: ...\".  A refusal drawn only as a
+WARNING in *Messages* arrived after the user had moved on and read as
+nothing having happened."
+  (when-let ((sentence (agent-repl-verbs--create-refusal-sentence value)))
+    (agent-repl-workspace-progress-report :create :failed sentence)
+    t))
+
+(defun agent-repl-verbs--create-refusal-sentence (value)
+  "Word the refusal VALUE of a create, or answer nil for a handover arm.
+The create-specific arms are worded by their own functions; every other
+arm is named by its keyword and its own fields."
+  (let* ((refusal (agent-repl-verbs--refusal-arm value))
+         (keyword (plist-get refusal :arm)))
+    (cond
+     ((memq keyword agent-repl-verbs--handover-arms) nil)
+     ((eq keyword :naming-failed)
+      (agent-repl-verbs--create-naming-refusal-sentence (plist-get refusal :value)))
+     ((eq keyword :one-shot-policy-missing)
+      (agent-repl-verbs--create-policy-refusal-sentence (plist-get refusal :value)))
+     (t
+      (format "the daemon refused it: %s%s"
+              (if keyword (substring (symbol-name keyword) 1) "unstated")
+              (agent-repl-verbs--refusal-fields refusal))))))
+
+(defun agent-repl-verbs--create-naming-refusal-sentence (failed)
+  "Word a `naming_failed\=' refusal whose fields are FAILED.
 
 EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL, and this one
 could not be: there is no truncation fallback, so the create is refused
-rather than given a name nobody chose.  It is drawn as the WARNING it
-is, naming the cause and what the model last said, because those are
-what say whether to retry or to supply a name by hand."
-  (let ((refusal (agent-repl-verbs--refusal-arm value)))
-    (when (eq (plist-get refusal :arm) :naming-failed)
-      (let* ((failed (plist-get refusal :value))
-             (cause (plist-get failed :cause))
-             (answer (plist-get failed :answer))
-             (attempts (plist-get failed :attempts)))
-        (agent-repl--warn
-         '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-         "elisp.verbs.create-refused arm=%S fields=%S" :naming-failed failed)
-        (message "create refused: the workspace could not be named (%s, %s attempt%s)%s"
-                 cause attempts (if (eql attempts 1) "" "s")
-                 (if (and answer (not (string-empty-p answer)))
-                     (format " -- the model answered %S" answer)
-                   "")))
-      t)))
+rather than given a name nobody chose.  The sentence names the cause and
+what the model last said, because those are what say whether to retry or
+to supply a name by hand."
+  (let ((cause (plist-get failed :cause))
+        (answer (plist-get failed :answer))
+        (attempts (plist-get failed :attempts)))
+    (format "the workspace could not be named (%s, %s attempt%s)%s"
+            cause attempts (if (eql attempts 1) "" "s")
+            (if (and answer (not (string-empty-p answer)))
+                (format " -- the model answered %S" answer)
+              ""))))
 
-(defun agent-repl-verbs--create-policy-refusal (value)
-  "Draw a `one_shot_policy_missing\=' refusal of a create from VALUE.
-Answers non-nil when it claimed the arm, so every other arm still falls
-through to the generic refusal handling.
+(defun agent-repl-verbs--create-policy-refusal-sentence (missing)
+  "Word a `one_shot_policy_missing\=' refusal whose fields are MISSING.
 
 A ONE-SHOT RUNS ITS REPOSITORY\='S OWN POLICY, and the daemon detects a
 repository that states none -- Emacs never looks at the filesystem for
-this.  The refusal is drawn as the WARNING it is, naming the directory
-the user must write and the files it needs, because the user\='s next
-move is to write exactly those."
-  (let ((refusal (agent-repl-verbs--refusal-arm value)))
-    (when (eq (plist-get refusal :arm) :one-shot-policy-missing)
-      (let* ((missing (plist-get refusal :value))
-             (dir (plist-get missing :policy-dir))
-             (files (plist-get missing :missing-files)))
-        (agent-repl--warn
-         '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-         "elisp.verbs.create-refused arm=%S fields=%S" :one-shot-policy-missing missing)
-        (message "create refused: %s states no one-shot policy -- write %s"
-                 (plist-get missing :repository-root)
-                 (if files
-                     (format "%s in %s" (string-join files ", ") dir)
-                   dir)))
-      t)))
+this.  The sentence names the directory the user must write and the
+files it needs, because the user\='s next move is to write exactly those."
+  (let ((dir (plist-get missing :policy-dir))
+        (files (plist-get missing :missing-files)))
+    (format "%s states no one-shot policy -- write %s"
+            (plist-get missing :repository-root)
+            (if files
+                (format "%s in %s" (string-join files ", ") dir)
+              dir))))
 
 (defun agent-repl-verbs-select-minted (ref &optional lander)
   "Stand on the workspace REF names, once the daemon has minted it.

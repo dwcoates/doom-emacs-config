@@ -844,6 +844,29 @@ only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
 
+The create's stage enum today is `DERIVING_NAME` and `CREATING_WORKTREE`;
+there is no stage for the session bring-up or the initial prompt that follow
+the worktree, so a client shows the worktree line until `succeeded` lands.
+Adding one is a proto change (`WorkspaceCreateStage`).
+
+## Workspace naming: one call, and a fork brings its conversation
+
+A create with no supplied name is named by ONE headless Haiku call
+(`mintName`, brief `prompts/workspace-name-from-prompt.md`), validated by
+`ValidateSlug` and never repaired: an answer that is not a name is retried
+once and then REFUSED on `naming_failed`; no generic name is ever
+substituted. A FORK is named by that same call, handed its prompt (possibly
+blank) PLUS the conversation it continues as the brief's `{{conversation}}`
+(owner ruling, 2026-09-27). The conversation is the daemon's own record of
+the parent's requests -- `ConversationPrompts`, exactly what the fork ports
+-- composed by `titlesynth.ComposeDigest`, so it needs no live parent shim
+and "what the conversation is about" has one spelling. A fork of a parent
+with no conversation is refused on `fork_parent_has_no_conversation` before
+the naming call is paid for (`forkableParentSession`, shared with the
+transcript port). Only a create with neither a prompt nor a recorded
+conversation is named after its minted id (`workspace-<id>`); that is the
+"nothing to name from" rule, not a fallback from a failed call.
+
 ## Final answer: landed, not landed, not timely
 
 A turn's terminal NAMES the response that answered it, and the feed draws that

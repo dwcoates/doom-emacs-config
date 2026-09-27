@@ -981,3 +981,164 @@ func TestCreateDoesNotReportDerivingNameForASuppliedName(t *testing.T) {
 		t.Fatalf("stages = %v, want [CreatingWorktree] only", rec.stages)
 	}
 }
+
+// ---- a fork is named from its prompt plus the conversation it continues ----
+
+// namingForkFixture arranges a fork of a parent whose recorded conversation is
+// SAID, with the fork's own prompt set to PROMPT.
+func namingForkFixture(t *testing.T, prompt string, said ...string) (*fixture, CreateSpec) {
+	t.Helper()
+	rows := make([]wsm.PortedPrompt, 0, len(said))
+	for i, text := range said {
+		rows = append(rows, wsm.PortedPrompt{
+			Turn: ids.TurnID("turn-" + string(rune('a'+i))), Ordinal: int64(i), Text: text, Origin: "webapp",
+		})
+	}
+	f, _, spec := forkFixture(t, rows)
+	t.Setenv(PrefixEnv, "")
+	t.Setenv(LegacyPrefixEnv, "")
+	spec.InitialPrompt = prompt
+	return f, spec
+}
+
+func TestCreateNamesABlankPromptForkByTheModel(t *testing.T) {
+	// Arrange: the incident's shape — a fork with no prompt of its own.
+	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: the model named it, never the minted-id rule.
+	if f.git.created[0].Branch != FixtureMintedName {
+		t.Fatalf("branch = %q, want the model's name %q", f.git.created[0].Branch, FixtureMintedName)
+	}
+}
+
+func TestCreateHandsAForksNamingCallTheParentConversation(t *testing.T) {
+	// Arrange.
+	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.headless.calls) != 1 || !strings.Contains(f.headless.calls[0].Prompt, "wire the iterm2 integration") {
+		t.Fatalf("naming calls = %+v, want one carrying the parent's conversation", f.headless.calls)
+	}
+}
+
+func TestCreateHandsAForksNamingCallItsOwnPrompt(t *testing.T) {
+	// Arrange.
+	f, spec := namingForkFixture(t, "now port it to kitty", "wire the iterm2 integration")
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(f.headless.calls[0].Prompt, "now port it to kitty") {
+		t.Fatalf("naming prompt = %q, want the fork's own prompt in it", f.headless.calls[0].Prompt)
+	}
+}
+
+func TestCreateReportsDerivingNameForABlankPromptFork(t *testing.T) {
+	// Arrange.
+	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
+	rec := &recordingProgress{}
+	spec.Progress = rec
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(rec.stages) == 0 || rec.stages[0] != CreateStageDerivingName {
+		t.Fatalf("stages = %v, want DerivingName first", rec.stages)
+	}
+}
+
+func TestCreateRefusesAForkWhoseNamingAnswerIsNotAName(t *testing.T) {
+	// Arrange: the incident's answer, twice — a sentence, not a name.
+	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
+	script(f,
+		headlessAnswer{text: "Describe the work you want to do in the workspace."},
+		headlessAnswer{text: "Describe the work you want to do in the workspace."})
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: a failure, never a generic fallback name.
+	asRefusal(t, err, ArmNamingFailed)
+}
+
+func TestCreateRefusesAForkOfAConversationlessParentBeforeTheNamingCall(t *testing.T) {
+	// Arrange: a parent with no session at all.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.ForkFrom = &id
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmForkParentHasNoConversation)
+	if len(f.headless.calls) != 0 {
+		t.Fatalf("naming calls = %+v, want none paid for a fork that cannot happen", f.headless.calls)
+	}
+}
+
+func TestCreateNamesABlankForkOfAParentWithNoRecordedRequestAfterItsId(t *testing.T) {
+	// Arrange: nothing to name from — no prompt and no recorded request.
+	f, spec := namingForkFixture(t, "")
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if !strings.HasPrefix(created.Name, UnnamedSlugPrefix) || len(f.headless.calls) != 0 {
+		t.Fatalf("name = %q, calls = %d, want the minted-id rule and no naming call", created.Name, len(f.headless.calls))
+	}
+}
+
+func TestCreateFailsAForkWhoseParentConversationCannotBeRead(t *testing.T) {
+	// Arrange.
+	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
+	f.db.conversationErr = errors.New("disk on fire")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "disk on fire") {
+		t.Fatalf("Create = %v, want the conversation read failure surfaced", err)
+	}
+}
+
+func TestCreateHandsAPlainCreatesNamingCallNoConversation(t *testing.T) {
+	// Arrange: the fixture brief brackets the conversation placeholder with
+	// spaces, so an empty conversation splices to two adjacent spaces.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.InitialPrompt = "fix the login bug"
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(f.headless.calls[0].Prompt, "fix the login bug  ") {
+		t.Fatalf("naming prompt = %q, want an empty conversation", f.headless.calls[0].Prompt)
+	}
+}

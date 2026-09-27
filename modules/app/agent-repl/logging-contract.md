@@ -78,6 +78,19 @@ rotation before the append that would cross the cap, a record larger than the
 cap kept whole in the active generation); no runtime truncates and loses the
 only copy of earlier records.
 
+The Emacs central sink is `<state>/logs/emacs.central.log`
+(`~/.claude-emacs/logs/emacs.central.log`), beside `daemon.run.log`, in the
+same JSONL record shape as a workspace `emacs.log` minus the workspace
+fields. It carries every record Emacs writes under the `:agent-repl-central`
+scope -- workspace creation and fork, kill, teardown, daemon administration --
+so those records survive the session rather than living only in *Messages*.
+It is written through Emacs's one logging function, never a second writer, and
+it rotates by the global generation rule below. Its two earlier defaults
+(`<state>/doom-agent-repl.log`, then `$TMPDIR/doom-agent-repl-<uid>/doom-agent-repl.log`)
+are redirected to it on reload and hold only historical records.
+`bin/logs.sh --central` and `scripts/agent-repl-log-discovery.sh --global`
+resolve it by default; `AGENT_REPL_EMACS_GLOBAL_LOG` names a customized path.
+
 Global service records use the runtime's canonical global log only when the
 record genuinely has no conceptual workspace or agent association. A
 workspace-owned record whose call site named NO workspace is a routing

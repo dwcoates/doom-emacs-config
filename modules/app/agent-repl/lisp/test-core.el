@@ -470,12 +470,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user the interrupt left the turn running")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
-    ("verbs.el" agent-repl-verbs--create-naming-refusal
-     "create refused: the workspace could not be named (%s, %s attempt%s)%s"
-     "tells the user why the workspace could not be named and what the model last said")
-    ("verbs.el" agent-repl-verbs--create-policy-refusal
-     "create refused: %s states no one-shot policy -- write %s"
-     "tells the user which repository states no one-shot policy and what to write")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")
@@ -1418,6 +1412,55 @@ one to its caller.  A caller that must abort signals for itself."
    (equal (agent-repl--normalize-log-file-name
            agent-repl--retired-state-log-file-name)
           agent-repl--default-log-file-name)))
+
+(ert-deftest agent-repl-test-default-log-file-name-is-the-durable-central-sink ()
+  "The central sink lives in the state root's `logs/', beside the daemon's
+own run log, never in the OS temporary root the system may sweep."
+  ;; Arrange / Act / Assert.
+  (should (equal agent-repl--default-log-file-name
+                 (expand-file-name "logs/emacs.central.log"
+                                   (agent-repl--global-state-dir)))))
+
+(ert-deftest agent-repl-test-normalize-log-file-name-redirects-retired-temp-default ()
+  "A reload redirects the retired OS-temporary default to the durable sink."
+  ;; Arrange / Act / Assert.
+  (should
+   (equal (agent-repl--normalize-log-file-name
+           agent-repl--retired-temp-log-file-name)
+          agent-repl--default-log-file-name)))
+
+(ert-deftest agent-repl-test-logfile-path-creates-the-state-logs-directory ()
+  "The durable central sink's directory is created on demand."
+  ;; Arrange.
+  (let* ((state (make-temp-file "test-log-state-" t))
+         (process-environment (cons (concat agent-repl--state-dir-env "=" state)
+                                    process-environment))
+         (agent-repl-log-file-name
+          (expand-file-name "logs/emacs.central.log" state)))
+    (unwind-protect
+        (progn
+          ;; Act.
+          (agent-repl--logfile-path)
+          ;; Assert.
+          (should (file-directory-p (expand-file-name "logs" state))))
+      (delete-directory state t))))
+
+(ert-deftest agent-repl-test-logfile-path-rejects-a-symlinked-state-logs-directory ()
+  "The state `logs/' holding the central sink is never followed through a symlink."
+  ;; Arrange.
+  (let* ((state (make-temp-file "test-log-state-" t))
+         (process-environment (cons (concat agent-repl--state-dir-env "=" state)
+                                    process-environment))
+         (elsewhere (expand-file-name "elsewhere" state))
+         (agent-repl-log-file-name
+          (expand-file-name "logs/emacs.central.log" state)))
+    (unwind-protect
+        (progn
+          (make-directory elsewhere)
+          (make-symbolic-link elsewhere (expand-file-name "logs" state))
+          ;; Act / Assert.
+          (should-error (agent-repl--logfile-path) :type 'error))
+      (delete-directory state t))))
 
 (ert-deftest agent-repl-test-normalize-log-file-name-preserves-explicit-path ()
   "An explicitly different logfile path should remain untouched."

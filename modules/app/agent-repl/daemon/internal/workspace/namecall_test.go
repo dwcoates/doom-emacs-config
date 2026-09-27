@@ -2,10 +2,12 @@ package workspace
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"claude-repld/internal/headless"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -13,6 +15,27 @@ import (
 // attempt.
 func script(f *fixture, answers ...headlessAnswer) {
 	f.headless.answers = answers
+}
+
+// TestTheShippedNamingBriefTakesTheConversation pins the brief the daemon
+// ships against the values mintName splices: the prompt, the conversation a
+// fork continues, and the retry's correction — no more, no fewer.
+func TestTheShippedNamingBriefTakesTheConversation(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceName)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Act.
+	got, err := brief.Splice(map[string]string{
+		"prompt": "", "conversation": "The user's requests:\n- wire iterm2\n", "correction": "",
+	})
+
+	// Assert.
+	if err != nil || !strings.Contains(got, "wire iterm2") {
+		t.Fatalf("Splice = %q, %v; want the conversation spliced in", got, err)
+	}
 }
 
 func TestCreateUsesTheModelsName(t *testing.T) {

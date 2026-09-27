@@ -376,7 +376,7 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	// a registry holding two. It bootstraps its own instead, below, once there
 	// is an editor to register through (bootstrap.go).
 
-	env := RealEnv(home, os.TempDir(), os.Getuid(), openWorkspaces)
+	env := RealEnv(home, openWorkspaces)
 	sources, err := EnumerateSources(env)
 	if err != nil {
 		t.Fatalf("enumerate the logs to harvest: %v", err)
@@ -404,7 +404,7 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	// editor, so there has to be one answering first.
 	openWorkspaces = rt4BootstrapWorkspaces(ctx, t, client, dbPath, runDir, openWorkspaces, &manifest)
 	manifest.Workspaces = openWorkspaces
-	sources, err = EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), openWorkspaces))
+	sources, err = EnumerateSources(RealEnv(home, openWorkspaces))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs now that the run has bootstrapped its own workspaces: %v", err)
 	}

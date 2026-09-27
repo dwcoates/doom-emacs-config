@@ -724,9 +724,10 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 (advice-add 'yes-or-no-p :override #'agent-repl-e2e--refuse-prompt)
 
 ;; THE MODULE'S OWN LOG GETS A PER-SCENARIO ROOT.
-;; The agent-repl-log-file-name default is
+;; The agent-repl-log-file-name default was once
 ;; <temporary-file-directory>/doom-agent-repl-<uid>/doom-agent-repl.log --
-;; ONE file, keyed by uid and nothing else.  Every scenario in this container
+;; ONE file, keyed by uid and nothing else (it is now the state root's
+;; logs/emacs.central.log, and this override still pins it per scenario).  Every scenario in this container
 ;; runs as the same uid, so in a parallel run every Emacs appended to that
 ;; one file and rotated it out from under the others: the records a failure
 ;; needed were interleaved with three unrelated scenarios' and then truncated
