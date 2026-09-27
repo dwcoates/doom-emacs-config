@@ -5902,6 +5902,14 @@ describe("the live detached table, driven by the vendor's own messages", () => {
     await started(h);
     await h.engine.onSdkMessage(taskStarted());
 
+    expect(h.fold.contexts.at(-1)?.liveTask("t01")).toEqual({ toolUseId: "toolu_run", taskType: "local_bash" });
+  });
+
+  it("tells the fold no kind for a live task whose start stated none", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted({ task_type: undefined }));
+
     expect(h.fold.contexts.at(-1)?.liveTask("t01")).toEqual({ toolUseId: "toolu_run" });
   });
 
@@ -8114,7 +8122,7 @@ describe("what the fold is told about a live task", () => {
 
     await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000103"));
 
-    expect(h.fold.contexts.at(-1)?.liveTask("t20")).toEqual({ toolUseId: "" });
+    expect(h.fold.contexts.at(-1)?.liveTask("t20")).toEqual({ toolUseId: "", taskType: "local_bash" });
   });
 
   it("names the turn a task started inside", async () => {

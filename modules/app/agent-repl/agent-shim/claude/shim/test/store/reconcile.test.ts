@@ -754,6 +754,14 @@ describe("announceLiveWork", () => {
 
   const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
 
+  it("states the bash kind for a recorded shell run", () => {
+    // Arrange, Act.
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced[0]?.kind?.kind.case).toBe("bash");
+  });
+
   it("uses the CREATED arm: a restarted daemon has no element to continue", () => {
     const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
 
@@ -1023,7 +1031,9 @@ describe("announceLiveWork for the non-shell kinds", () => {
       value: create(conversationv1.AgentSubagentSchema, {
         result: {
           case: "start",
-          value: create(conversationv1.AgentSubagentStartSchema, {}),
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: create(conversationv1.AgentIdSchema, { value: HANDLE.value }),
+          }),
         },
       }),
     });
@@ -1054,6 +1064,63 @@ describe("announceLiveWork for the non-shell kinds", () => {
     // Assert.
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
     expect(created.workCreated?.work.case).toBe("monitor");
+  });
+
+  it("states the subagent kind, running the agent the recorded start created", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }),
+          }),
+        },
+      }),
+    });
+
+    // Act.
+    const kind = announceLiveWork([entry], [HANDLE], BOOK)[0]?.kind?.kind;
+
+    // Assert.
+    expect(kind?.case === "subagent" ? kind.value.agentId?.value : "").toBe("toolu_spawn");
+  });
+
+  it("states the monitor kind for a recorded monitor", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "monitor",
+      value: create(conversationv1.AgentMonitorSchema, {
+        result: { case: "start", value: create(conversationv1.AgentMonitorStartSchema, {}) },
+      }),
+    });
+
+    // Act, Assert.
+    expect(announceLiveWork([entry], [HANDLE], BOOK)[0]?.kind?.kind.case).toBe("monitor");
+  });
+
+  it("refuses a recorded spawn start that names no created agent, at ERROR", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: { case: "start", value: create(conversationv1.AgentSubagentStartSchema, {}) },
+      }),
+    });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    const announced = announceLiveWork([entry], [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced).toEqual([]);
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the recorded start of this live work states no announceable kind; it is not announced",
+      }),
+    );
   });
 
   it("omits a subagent the record holds no start for, rather than inventing one", () => {
