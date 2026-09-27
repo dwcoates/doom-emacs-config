@@ -1448,12 +1448,13 @@ pre {
    #login-overlay, #composer, the sidebar panes and the create forms); this
    one was missed. */
 .bubble[hidden] { display: none; }
-/* THE SCROLL BOX. It is the bubble's own child, its right edge IS the bubble's
+/* THE BOX. It is the bubble's own child, its right edge IS the bubble's
    inner edge, and it carries no horizontal padding of its own — the two facts
-   that put the scrollbar on the bubble's right-hand side. The N-line cap rides
-   it (see the shared cap rule below), which is what gives it something to
-   scroll. */
-.bubble > .bubble-scroll {
+   that put the scrollbar on the bubble's right-hand side. Every bubble's box
+   wears `.bubble-box`, and these structural rules key on it; a CAPPED box also
+   wears `.bubble-scroll`, which the N-line cap, the scroll, the fold and the
+   gutter ride (see the shared cap rule below). */
+.bubble > .bubble-box {
   padding-left: 0;
   padding-right: 0;
   min-width: 0;
@@ -1469,9 +1470,11 @@ pre {
      expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees wrap
      rather than scroll, so nothing inside the clipped box is cut off. */
   overflow-x: clip;
-  /* THE GUTTER IS THE SYSTEM BAR (owner ruling, 2026-09-24): reserved in the
-     collapsed `overflow-y: hidden` state too, so prose never re-flows when an
-     expanded bubble's bar appears (see "bubble scrollbars"). */
+}
+/* THE GUTTER IS THE SYSTEM BAR (owner ruling, 2026-09-24): reserved on a capped
+   box in the collapsed `overflow-y: hidden` state too, so prose never re-flows
+   when an expanded bubble's bar appears (see "bubble scrollbars"). */
+.bubble > .bubble-scroll {
   scrollbar-gutter: stable;
 }
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
@@ -1755,7 +1758,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
-   wears — thinking, interim, answer, selected, turn-ended. ONE rule keyed on
+   wears. Only a CAPPED response has a scroll box to open — a thinking bubble,
+   an agentic card, a compaction summary — since interim, final and ended-turn
+   responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
    the role and the open box (`.expanded` lives on the box, the border on the
    bubble, so the bubble is keyed through `:has`), last on the ladder and the
    one `!important` border in the sheet, so it outranks every other border rule
@@ -2227,9 +2232,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
 }
-/* THE COLLAPSED LINE LIMIT (owner ruling, 2026-09-23), one entry per
-   `BubbleCapLines` value (src/bubble/draw.ts; styles.test.ts holds the two
-   together): the shared feed cap for most bubbles, two lines for a held
+/* THE COLLAPSED LINE LIMIT (owner ruling, 2026-09-23), one entry per CAPPED
+   `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
+   holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
+   entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
+   reach it. The shared feed cap for most capped bubbles, two lines for a held
    prompt, one line for a thinking bubble, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
@@ -2398,7 +2405,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    (`position: relative` on the box itself, not on `.has-more`), and the fade
    is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
-.bubble > .bubble-scroll,
+.bubble > .bubble-box,
 .title-fold {
   position: relative;
 }
