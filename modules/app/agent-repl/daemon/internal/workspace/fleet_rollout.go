@@ -869,17 +869,22 @@ func (a *fleetFreeness) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error
 // so routing the orchestrator's own delivery back through the queue would loop
 // on the lease that produced it.
 //
-// The turn is minted here and handed to the watcher, so the orchestrator
-// resumes on that turn's REAL end rather than on a timer.
-func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (ids.TurnID, error) {
+// The turn is the SUBMISSION'S OWN, minted at submission and never here: a
+// retry of the submission re-driven under the same turn id is then the start
+// the shim already took, which it answers as a no-op rather than starting the
+// guidance twice. It is handed to the watcher, so the orchestrator resumes on
+// that turn's REAL end rather than on a timer.
+func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) error {
 	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
-		return "", fmt.Errorf("workspace: route guidance on %q: an unspecified prompt origin is never delivered", ws)
+		return fmt.Errorf("workspace: route guidance on %q: an unspecified prompt origin is never delivered", ws)
+	}
+	if turn == "" {
+		return fmt.Errorf("workspace: route guidance on %q: the guidance names no turn", ws)
 	}
 	sender, ok := f.Sender(ws)
 	if !ok {
-		return "", fmt.Errorf("workspace: route guidance on %q: the workspace has no live session", ws)
+		return fmt.Errorf("workspace: route guidance on %q: the workspace has no live session", ws)
 	}
-	turn := wsm.NewTurnID()
 	// The watcher learns the turn before the shim does: a terminal on the
 	// agent stream can beat StartTurn's response back, and one routed with no
 	// turn in flight ends nothing.
@@ -892,7 +897,7 @@ func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, said *con
 		if live {
 			watcher.OnTurnOpenFailed(ws, turn)
 		}
-		return "", fmt.Errorf("workspace: route guidance on %q: %w", ws, err)
+		return fmt.Errorf("workspace: route guidance on %q: %w", ws, err)
 	}
 	// The watcher is handed the accepted turn the same way the queue hands one
 	// over: it names the main agent and feeds the opening page through the
@@ -904,7 +909,7 @@ func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, said *con
 	f.deps.Log.Global().Debug(opFleetRollout, "routed guidance into the session as its own turn", dlog.Context{
 		"workspace": string(ws), "turn": string(turn), "origin": origin.String(),
 	})
-	return turn, nil
+	return nil
 }
 
 // RaiseColdGate draws the ordinary cold gate for a workspace whose resume
