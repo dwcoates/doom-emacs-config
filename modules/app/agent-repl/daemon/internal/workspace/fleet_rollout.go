@@ -819,6 +819,20 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 		}
 	}
 	session.client.Detach()
+	// A DETACHED CLIENT IS NO LONGER THIS FLEET'S, so it leaves the session
+	// map with the detach. Left in it, Client answered a link that was
+	// already closed, and Adopt returned that dead link instead of dialing:
+	// an incumbent taking a handed-over workspace BACK (its adoption window
+	// expired) re-attached nothing and served it through a closed client.
+	f.mu.Lock()
+	if f.sessions[ws] == session {
+		delete(f.sessions, ws)
+		delete(f.coldGates, ws)
+		delete(f.lastCold, ws)
+	}
+	f.mu.Unlock()
+	f.logTransition(ws, "session_live", true, false,
+		dlog.Context{"reason": "handed_over", "shim_pid": session.client.PID()})
 	f.deps.Log.Global().Info(opFleetRollout, "handed the workspace's shim over; its watches are closed and the process keeps running", dlog.Context{
 		"workspace": string(ws), "shim_pid": session.client.PID(), "watched": watcher != nil,
 	})
