@@ -115,6 +115,8 @@ whose calls are the observation."
                     ws))
                  ((symbol-function 'agent-repl--ws-persp-kill)
                   (lambda (ws) (push ws agent-repl-test-roster--killed) t))
+                 ((symbol-function 'agent-repl--ws-persp-exists-p)
+                  (lambda (_ws) t))
                  ((symbol-function 'agent-repl--ws-rename-persp)
                   (lambda (_old _new) t))
                  ((symbol-function 'agent-repl--ws-switch)
@@ -492,8 +494,8 @@ reading."
 
 (ert-deftest agent-repl-test-roster-teardown-of-the-current-tab-lands-on-a-survivor ()
   "A roster teardown of the workspace the user STANDS ON lands them on a
-survivor, with that workspace armed to show its panels -- through the one
-landing every teardown uses, not a second one of the roster's own.
+survivor -- through the one teardown order every teardown uses, not a
+second one of the roster's own.
 Without it the frame kept whatever persp-mode dropped it in and the main
 area came up on the fallback buffer."
   ;; Arrange
@@ -515,9 +517,31 @@ area came up on the fallback buffer."
     ;; Assert
     (should (equal (car agent-repl-test-roster--switched) "second"))))
 
-(ert-deftest agent-repl-test-roster-teardown-of-the-current-tab-arms-the-survivor ()
-  "The workspace landed on is armed to SHOW ITSELF on arrival, so the
-landing has panels on it rather than the fallback buffer."
+(ert-deftest agent-repl-test-roster-teardown-goes-through-land-then-kill ()
+  "The roster's tab teardown uses the ONE teardown order
+\(`agent-repl--ws-land-then-kill'), the same one
+`agent-repl--kill-one-workspace' uses -- never an order of its own."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    (let (torn-down)
+      (cl-letf (((symbol-function 'agent-repl--ws-land-then-kill)
+                 (lambda (ws) (push ws torn-down) t)))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
+      ;; Assert
+      (should (equal torn-down '("first"))))))
+
+(ert-deftest agent-repl-test-roster-teardown-of-the-current-tab-lands-before-the-kill ()
+  "A roster teardown of the tab the user STANDS ON switches to the survivor
+BEFORE the persp is killed, so the kill never runs on the current persp."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
@@ -526,16 +550,21 @@ landing has panels on it rather than the fallback buffer."
                        "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
                                     (agent-repl-test-roster--row "b" "second" :ready))))))
     (setq agent-repl-test-roster--current-name "first")
-    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
-              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("second")))
-              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("second"))))
-      ;; Act
-      (agent-repl-roster-apply
-       (agent-repl-test-roster--roster
-        :sections (list (agent-repl-test-roster--section
-                         "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
-    ;; Assert
-    (should (agent-repl--ws-get "second" :pending-show-panels))))
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("first" "second")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("first" "second")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (push (list :switch ws) order)))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push (list :kill ws) order) t)))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
+      ;; Assert
+      (should (equal (nreverse order) '((:switch "second") (:kill "first")))))))
 
 (ert-deftest agent-repl-test-roster-teardown-of-another-tab-does-not-move-the-user ()
   "Tearing down a tab the user is NOT standing on leaves them where they are:
