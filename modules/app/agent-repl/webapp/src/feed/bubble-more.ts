@@ -18,6 +18,13 @@
  * wears the SAME fade when it overflows them. It is the one other
  * kind in MORE_KINDS; an output section still never wears the affordance.
  *
+ * THE ELLIPSIS (owner rulings, 2026-09-27): a bubble whose spec chooses it
+ * (`data-more="ellipsis"`: a held prompt, a landed thinking bubble) shows no
+ * fade. Its collapsed body is clamped to its one line by the stylesheet,
+ * which ends that line in `…` exactly when anything follows it; the measurer
+ * still decides `has-more` for it, from the body's lines (see
+ * `hidesContentBeyondCap`), and the class draws nothing on it.
+ *
  * Nothing here draws the fade: it is pure CSS keyed on
  * `has-more` (styles.css). This module only MEASURES the overflow and toggles
  * the class, at the three moments it can change: on draw and on width re-wrap
@@ -33,6 +40,17 @@ import { onDiscard } from "./ticking.js";
 
 /** The class the stylesheet turns into the bottom fade. */
 export const HAS_MORE_CLASS = "has-more";
+
+/**
+ * The attribute a capped bubble states its MORE SIGNAL on (src/bubble/draw.ts
+ * `BubbleMore`), and its two values: the shared bottom fade, or the one-line
+ * ellipsis. Declared HERE, beside the measurer that reads it, because
+ * draw.ts reaches this module through bubble-scroll.ts and the reverse import
+ * would be a module cycle; draw.ts re-exports them.
+ */
+export const BUBBLE_MORE_ATTRIBUTE = "data-more";
+export const BUBBLE_MORE_FADE = "fade";
+export const BUBBLE_MORE_ELLIPSIS = "ellipsis";
 
 /**
  * The bubble scroll boxes the "more below" affordance serves: EVERY bubble's
@@ -114,6 +132,13 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * against the cap: a bubble at or under its cap never wears the fade, whatever
  * decoration its box carries.
  *
+ * THE ELLIPSIS CLAMPS THE BODY ITSELF. On a bubble in the ellipsis mode the
+ * collapsed body is the line clamp's container, so its own box ends at its
+ * one line whatever it holds, and its `offsetHeight` can no longer say what
+ * it hides. Its rendered lines are then its `scrollHeight`: the lines past the
+ * clamp are still laid out, only clipped, and the body holds nothing but those
+ * lines (the usage corner floats in the box, beside it, never in it).
+ *
  * A bubble box with no body is not a bubble this app drew: an invariant
  * violation, recorded once and thrown, never read as "nothing hidden".
  */
@@ -126,7 +151,13 @@ export function hidesContentBeyondCap(box: HTMLElement): boolean {
     });
     throw new Error("has-more unmeasurable: the bubble's scroll box holds no body");
   }
-  return body.offsetHeight > box.clientHeight;
+  return renderedLinesHeight(box, body) > box.clientHeight;
+}
+
+/** The height of BODY's rendered lines, clamped or not (see `hidesContentBeyondCap`). */
+function renderedLinesHeight(box: HTMLElement, body: HTMLElement): number {
+  const clamped = box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS;
+  return clamped ? body.scrollHeight : body.offsetHeight;
 }
 
 /**
