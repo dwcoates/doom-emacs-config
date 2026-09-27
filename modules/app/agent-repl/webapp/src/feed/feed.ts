@@ -152,7 +152,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // pointermove writes; calling it here on EXPAND ONLY (never on collapse)
   // arms the just-expanded section immediately, so the wheel scrolls it
   // without requiring the cursor to move first.
-  installClickExpand(host, undefined, (section, expanded) => {
+  //
+  // The same hook runs when the page's AutoCollapse owner (expand.ts) closes an
+  // open section the reader scrolled away from or left, since that close goes
+  // through the one collapse a click uses.
+  const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
     refreshHasMore(section);
     // A card's title fold follows the card's fold (title-fold.ts), so a toggle
     // re-measures the titles it owns as well as the section itself.
@@ -556,6 +560,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     watch?.cancel();
     unobserve?.();
     intentScroll?.uninstall();
+    uninstallExpand();
     uninstallClear?.();
     overscan?.dispose();
     root.dispose();
