@@ -150,10 +150,20 @@ and h2c through a real exit.
 | --- | --- | --- |
 | `streamsEndBound` (cmd/claude-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
 
-The end frame is Connect's plain end-of-stream: the contract has no terminal
-ARM for a stand-down on these streams (a transfer is announced by the
-`transferred` push BEFORE it, never as a terminal frame), so a client reads a
-clean end and re-resolves the live daemon itself.
+The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
+`WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
+`ending` arm (`DaemonStreamEnding`, daemon_stream_ending.proto), which says the
+end is PLANNED. The dedicated rpc handler sends it (`endStandingStream`,
+internal/server/streams.go) when its body returned because the surface's
+lifetime ended — and the lifetime ends only in `Close`, which only the planned
+exit runs — so every stand-down path above sends it and an unplanned death
+never does; a stream its client ended is sent nothing. It carries no address:
+a client re-resolves the live daemon itself (a transfer is still announced by
+the `transferred` push, never by the ending). A page's mux carries no ending on
+its roster or daemon subscriptions: those sinks end with the page's own stream
+at the same lifetime edge, and `WatchPage` has no ending arm.
+`integration/exit_streams_test.go` pins the ending then the clean end on each
+of the three.
 
 ### The shim link's requests own the bytes they promise
 
