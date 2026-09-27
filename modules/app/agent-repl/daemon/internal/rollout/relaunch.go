@@ -451,9 +451,21 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 		return check, nil
 	}
 	c.log.Info(opStaleness, "the shim runs an older build than the installed one; bouncing it", fields)
-	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, func(err error) { c.settleStaleBounce(ws, err) })
-	if err != nil {
+	// THE BOUNCE'S SETTLE IS PART OF THIS JUDGEMENT, and staleChecks counts
+	// it from here until it has settled. The settle re-judges on a fresh
+	// counted goroutine; counted only from THERE, the count could fall to zero
+	// between this judgement's end and the re-judge's Add, and a join already
+	// waiting would race the Add (the WaitGroup contract; -race reported it on
+	// three tests).
+	c.staleChecks.Add(1)
+	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, func(err error) {
+		defer c.staleChecks.Done()
 		c.settleStaleBounce(ws, err)
+	})
+	if err != nil {
+		// A refused request never calls its Done, so the count is ended here.
+		c.settleStaleBounce(ws, err)
+		c.staleChecks.Done()
 		return check, err
 	}
 	check.Bounce = decision
