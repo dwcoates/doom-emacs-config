@@ -20,29 +20,51 @@ import (
 // SENDER's feed as the outgoing send and on the RECIPIENT's as the delivered
 // prompt: one kind, both ends, differing only in the composed address line.
 func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, addr sessionwatcher.OutputAddress) {
+	turn := ids.TurnID(prompt.GetId().GetValue())
+	r.learnLineage(ws, turn)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	r.drawAgentPrompt(s, agent, prompt)
+	recipient := prompt.GetAgent()
+	if recipient.GetValue() == "" {
+		recipient = agent
+	}
+	r.drawEntry(s, recipient, turn, func() { r.drawAgentPrompt(s, agent, prompt) })
+}
+
+// drawEntry draws one LIVE entry of AGENT stamped TURN ("" when unstamped): in
+// the inherited plane and stance when it is a fork's inherited past arriving
+// late (lineage.go), and as the conversation happening otherwise. Called with
+// the resolver's mutex held, after learnLineage.
+func (r *resolver) drawEntry(s *wsState, agent *conversationv1.AgentId, turn ids.TurnID, draw func()) {
+	if r.inherits(s, agent, turn) {
+		r.drawInherited(s, draw)
+		return
+	}
+	draw()
 }
 
 // OnPeerMessage draws a message another Claude session sent into this
 // conversation as the abbreviated peer bubble on the recipient's feed.
 func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawPeerMessage(s, peer)
+	r.drawEntry(s, peer.GetAgent(), stamp, func() { r.drawPeerMessage(s, peer) })
 }
 
 // OnActivity draws one unit of a turn's synchronous progress.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawActivity(s, agent, act, nil)
+	r.drawEntry(s, agent, stamp, func() { r.drawActivity(s, agent, act, nil) })
 }
 
 // drawActivity routes one activity to its family. turn, when set, is the turn
@@ -267,39 +289,57 @@ func (r *resolver) publishedTurn(s *wsState, id string) *conversationv1.TurnId {
 
 // OnQuestion draws the agent blocking on a choice.
 func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawQuestion(s, agent, q)
+	r.drawEntry(s, agent, stamp, func() { r.drawQuestion(s, agent, q) })
 }
 
 // OnPermission draws the agent blocking on consent.
 func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawPermission(s, agent, p)
+	r.drawEntry(s, agent, stamp, func() { r.drawPermission(s, agent, p) })
 }
 
 // OnContextCut draws the separation divider a context cut leaves.
 func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawContextCut(s, agent, cut, at)
+	r.drawEntry(s, agent, stamp, func() { r.drawContextCut(s, agent, cut, at) })
 }
 
 // OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is
 // never a terminal and never its own row: the turn's end is the frame-level
 // failure arm and nothing else.
 func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
+	if r.inherits(s, agent, stamp) {
+		// A FAILURE OF THE FORK'S INHERITED PAST happened in the parent, long
+		// ago: it is that turn's evidence, replayed as a page replays it, and
+		// nothing is failing now.
+		r.drawInherited(s, func() { r.addEvidence(s, apiErrorEvidence(failed.GetMessage())) })
+		r.logger(ws).Debug("daemon.feed.inherited_api_error",
+			"a vendor request failure of a fork's inherited past was recorded as that turn's evidence",
+			dlog.Context{"agent": agent.GetValue(), "turn": string(stamp)})
+		return
+	}
 	r.addEvidence(s, apiErrorEvidence(failed.GetMessage()))
 	r.logger(ws).Warn("daemon.feed.api_error",
 		"a mid-turn vendor request failure was recorded as the turn's evidence",
@@ -349,11 +389,22 @@ func (r *resolver) addEvidence(s *wsState, line turnEvidenceLine) {
 }
 
 // OnAgentTerminal draws how one agent's stream ended.
+//
+// A TERMINAL THE WATCHER CHARGED TO NO TURN is drawn as it always was (it ends
+// no turn); one charged to a turn is judged like any entry, so a fork's
+// inherited terminal ends only its inherited turn, in the inherited plane.
 func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, addr sessionwatcher.OutputAddress) {
+	if turn == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.drawTerminal(r.state(ws), agent, nil, success, failure)
+		return
+	}
+	r.learnLineage(ws, *turn)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	r.drawTerminal(s, agent, turn, success, failure)
+	r.drawEntry(s, agent, *turn, func() { r.drawTerminal(s, agent, turn, success, failure) })
 }
 
 // OnMainAgent records the session's main agent: the one agent whose rows are
@@ -376,11 +427,13 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 
 // OnDetachedWork draws the bubble of work that left the stream.
 func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+	stamp := ids.TurnID(turn.GetValue())
+	r.learnLineage(ws, stamp)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	defer s.drawingEntry(turn)()
-	r.drawDetachedWork(s, agent, work)
+	r.drawEntry(s, agent, stamp, func() { r.drawDetachedWork(s, agent, work) })
 }
 
 // OnLiveWorkChanged settles every detached shell, and every monitor's card,
@@ -405,6 +458,9 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 // prompt queue's own mirror draws the user_prompt row, and this is only the
 // fact of which turn is running -- the fact drawQueryDied terminates against.
 func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
+	// The turn the daemon opened is the workspace's own by construction, so
+	// its entries are never asked about.
+	r.ownTurn(ws, turn)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
