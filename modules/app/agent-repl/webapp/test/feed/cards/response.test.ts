@@ -37,6 +37,8 @@ import stylesheet from "../../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
+import { BUBBLE_CAP_ATTRIBUTE, BUBBLE_UNCAPPED } from "../../../src/bubble/draw.js";
+import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -247,7 +249,7 @@ describe("the usage stamp", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".bubble-scroll .usage-stamp")?.textContent).toBe("2.1k");
+    expect(el.querySelector(".bubble-box .usage-stamp")?.textContent).toBe("2.1k");
   });
 
   it("draws no stamp at all when no usage has been observed", () => {
@@ -272,7 +274,7 @@ describe("the usage corner's hover timestamp", () => {
     // Arrange, Act
     const el = drawFeedResponse(settled(1_000n), rowContext());
     // Assert: both elements sit in the one corner.
-    const corner = el.querySelector(".bubble-scroll .usage-corner");
+    const corner = el.querySelector(".bubble-box .usage-corner");
     expect([
       corner?.querySelector(".usage-stamp")?.textContent,
       corner?.querySelector(".usage-ago") !== null,
@@ -731,7 +733,7 @@ describe("the usage corner's first-line float", () => {
     const el = drawFeedResponse(settled(1_000n), rowContext());
     // Assert — the corner is the scroll box's FIRST child and the body follows
     // it, the DOM order a `float: right` needs to shorten the body's first line.
-    const scroll = el.querySelector(".bubble-scroll") as HTMLElement;
+    const scroll = el.querySelector(".bubble-box") as HTMLElement;
     const corner = scroll.querySelector(".usage-corner") as HTMLElement;
     const body = scroll.querySelector(".bubble-body") as HTMLElement;
     expect([scroll.firstElementChild === corner, corner.nextElementSibling === body]).toEqual([
@@ -847,7 +849,7 @@ describe("the notice register", () => {
     // bubble's children IS that box's position.
     const children = [...el.children];
     const heading = children.findIndex((c) => c.classList.contains("response-notice-heading"));
-    const body = children.findIndex((c) => c.classList.contains("bubble-scroll"));
+    const body = children.findIndex((c) => c.classList.contains("bubble-box"));
     expect(heading).toBeLessThan(body);
   });
 
@@ -938,7 +940,7 @@ describe("the notice register", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".bubble-scroll .usage-stamp")?.textContent).toBe("2.1k");
+    expect(el.querySelector(".bubble-box .usage-stamp")?.textContent).toBe("2.1k");
   });
 });
 
@@ -1044,7 +1046,7 @@ const SHOWCASE_TREE = [
 ].join("\n");
 
 describe("the wrapped tree a settled response carries", () => {
-  const staged = useTreeLayout();
+  useTreeLayout();
 
   it("wraps a too-wide branch onto continuation lines with real ancestor rails", () => {
     // Arrange
@@ -1237,13 +1239,10 @@ describe("the wrapped tree a settled response carries", () => {
     mount(el);
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
-    const tree = el.querySelector(".mp-tree");
-    // Act — the column narrows, but the resize is delivered for the body alone.
-    staged.layout.containingPx = 500;
-    fireResize(body);
-    vi.runOnlyPendingTimers();
-    // Assert — no re-wrap: the very same tree node.
-    expect(el.querySelector(".mp-tree")).toBe(tree);
+    // Act / Assert — the tree painter observes the column, never the body; and
+    // an uncapped response arms no has-more measurer either, so NOTHING
+    // observes the body (the stub throws on a resize nothing observes).
+    expect(() => fireResize(body)).toThrow();
   });
 
   it("tears the containing block's observer down with the bubble", () => {
@@ -1292,7 +1291,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     // Assert — it wrapped, and no line is wider than the budget.
     const widths = lineWidths(el);
     expect(widths.length).toBeGreaterThan(4);
-    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout, "uncapped"));
   });
 
   it("never wraps a tree whose lines fit under the cap's budget", () => {
@@ -1324,7 +1323,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     // Act
     mount(el);
     // Assert
-    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout, "uncapped"));
   });
 
   it("draws plain prose at once, detached, since it needs no width", () => {
@@ -1351,7 +1350,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     vi.runOnlyPendingTimers();
     // Assert — more lines, none past the narrower budget.
     expect(lineWidths(el).length).toBeGreaterThan(before);
-    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout, "uncapped"));
   });
 
   it("does not repaint when the column resizes without moving the budget", () => {
@@ -1611,7 +1610,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Drive the type-out to completion so no reveal frame is left pending; the
     // resize is then the only work the timers run.
     vi.advanceTimersByTime(5000);
-    const before = stagedCols(staged.layout);
+    const before = stagedCols(staged.layout, "uncapped");
     // Act — the column narrows: the observer re-measures and repaints.
     staged.layout.containingPx = 600;
     fireResize(column);
@@ -1619,7 +1618,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Assert — the re-wrapped prose equals the whole render at the NEW width,
     // and is no longer the render at the width it first drew at.
     const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-    const after = stagedCols(staged.layout);
+    const after = stagedCols(staged.layout, "uncapped");
     expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => after));
     expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => before));
   });
@@ -1948,30 +1947,103 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 
-  it("leaves a normal response bubble on the shared feed cap", () => {
+});
+
+/**
+ * A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27). Every
+ * non-thinking response bubble — arriving, interim (pear) and the turn's answer
+ * (green) — is drawn `BUBBLE_UNCAPPED`: its full height, no fade, no scroll box,
+ * no click-to-expand. A thinking bubble keeps its cap (above).
+ */
+describe("the response bubble at its full height", () => {
+  /** A response in ARM carrying MARKDOWN, the turn's answer when FINAL. */
+  function said(arm: "update" | "success" | "error", final = false, markdown = "an answer"): FeedResponse {
+    return response({ finalAnswer: final, result: { case: arm, value: { prose: { markdown } } } as never });
+  }
+
+  /** A drawn bubble in a feed host armed with click-to-expand, as feed.ts arms it. */
+  function mounted(u: FeedResponse): { bubble: HTMLElement; box: HTMLElement } {
+    const host = document.createElement("div");
+    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    const bubble = drawFeedResponse(u, rowContext());
+    host.append(bubble);
+    document.body.append(host);
+    return { bubble, box: bubble.querySelector(`:scope > .${BUBBLE_BOX_CLASS}`) as HTMLElement };
+  }
+
+  /** Whether BUBBLE is drawn uncapped: the mode stamped, and no scroll box built. */
+  function uncapped(bubble: HTMLElement): [string | null, boolean] {
+    return [bubble.getAttribute(BUBBLE_CAP_ATTRIBUTE), bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`) === null];
+  }
+
+  it("draws an interim (pear) response uncapped", () => {
+    // Arrange / Act
+    const { bubble } = mounted(said("success"));
+    // Assert
+    expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
+  });
+
+  it("draws the turn's answer (green) uncapped", () => {
+    // Arrange / Act
+    const { bubble } = mounted(said("success", true));
+    // Assert
+    expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
+  });
+
+  it("draws an arriving response uncapped", () => {
+    // Arrange / Act
+    const { bubble } = mounted(said("update"));
+    // Assert
+    expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
+  });
+
+  it("draws a response the turn's death cut short uncapped", () => {
+    // Arrange / Act
+    const { bubble } = mounted(said("error"));
+    // Assert
+    expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
+  });
+
+  it("gives the box no height limit from the stylesheet", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const scroll = mounted(
-        response({ result: { case: "success", value: { prose: { markdown: "an answer" } } } }),
-        3,
-      );
-      // Assert — the shared budget, so three lines fit with no fade.
-      expect([
-        cascadedValue(scroll, "--bubble-cap-lines"),
-        scroll.classList.contains(HAS_MORE_CLASS),
-      ]).toEqual(["var(--feed-cap-lines)", false]);
+      const { box } = mounted(said("success", true));
+      // Assert
+      expect(["", "none"]).toContain(cascadedValue(box, "max-height"));
     } finally {
       teardown();
     }
+  });
+
+  it("never wears the fade, however far its text runs", () => {
+    // Arrange — a body far taller than any cap.
+    const { box } = mounted(said("success", false, "a line\n\n".repeat(100)));
+    const body = box.querySelector<HTMLElement>(".bubble-body") as HTMLElement;
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: 4000 });
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: 540 });
+    // Act
+    refreshHasMore(box);
+    // Assert
+    expect(box.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("does not expand under a click", () => {
+    // Arrange
+    const { box } = mounted(said("success", true));
+    // Act
+    box.click();
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 });
 
 describe("responseCapLines", () => {
   it.each([
-    { name: "a settled ordinary response", thinking: false, superseded: false, state: "success", want: "feed" },
-    { name: "an arriving ordinary response", thinking: false, superseded: false, state: "update", want: "feed" },
+    { name: "a settled ordinary response", thinking: false, superseded: false, state: "success", want: BUBBLE_UNCAPPED },
+    { name: "an arriving ordinary response", thinking: false, superseded: false, state: "update", want: BUBBLE_UNCAPPED },
+    { name: "an ordinary response cut short", thinking: false, superseded: false, state: "error", want: BUBBLE_UNCAPPED },
     { name: "an arriving thinking bubble", thinking: true, superseded: false, state: "update", want: "feed" },
     { name: "a thinking bubble whose text landed", thinking: true, superseded: false, state: "success", want: 1 },
     { name: "a thinking bubble cut short", thinking: true, superseded: false, state: "error", want: 1 },
@@ -2256,24 +2328,27 @@ describe("a re-push updates the bubble in place", () => {
   });
 
   it("keeps the scroll box, so its position survives a streaming push", () => {
-    // Arrange -- the reader scrolled 120px inside the expanded bubble.
-    const before = drawFeedResponse(arriving("hello"), rowContext());
+    // Arrange -- the reader scrolled 120px inside an expanded thinking bubble
+    // (a thinking bubble is the response kind that keeps a scroll box).
+    const thinkingArriving = (markdown: string) =>
+      response({ thinking: true, result: { case: "update", value: { prose: { markdown } } } });
+    const before = drawFeedResponse(thinkingArriving("hello"), rowContext());
     mount(before);
     vi.advanceTimersByTime(2000);
     const box = before.querySelector<HTMLElement>(".bubble-scroll");
     if (box === null) throw new Error("the bubble drew no scroll box");
     box.scrollTop = 120;
     // Act
-    const after = drawFeedResponse(arriving("hello world"), rowContext(before));
+    const after = drawFeedResponse(thinkingArriving("hello world"), rowContext(before));
     // Assert
     expect([after.querySelector(".bubble-scroll") === box, box.scrollTop]).toEqual([true, 120]);
   });
 
-  it("keeps the scroll box when the response settles", () => {
+  it("keeps the box when the response settles, so settling reflows nothing", () => {
     // Arrange + Act
     const { before, after } = redraw(arriving("hello"), settledAs("hello"));
     // Assert
-    expect(after.querySelector(".bubble-scroll")).toBe(before.querySelector(".bubble-scroll"));
+    expect(after.querySelector(".bubble-box")).toBe(before.querySelector(".bubble-box"));
   });
 
   it("keeps an unchanged paragraph's node when the prose grows", () => {
