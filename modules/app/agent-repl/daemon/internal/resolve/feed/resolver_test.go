@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
@@ -376,6 +377,40 @@ func TestNewRefusesWithoutALogSurface(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("New succeeded with no log surface, want a refusal")
+	}
+}
+
+// recordingStalls is a lockwatch.Registry that records the locks it was given.
+type recordingStalls struct {
+	locks []*lockwatch.Mutex
+	names []string
+}
+
+func (s *recordingStalls) Watch(m *lockwatch.Mutex, lock string, _ ids.WorkspaceID, _ dlog.Logger) func() {
+	s.locks = append(s.locks, m)
+	s.names = append(s.names, lock)
+	return func() {}
+}
+
+// TestNewWatchesTheResolverMutex pins that the one mutex every workspace's
+// feed takes is registered with the stall watchdog.
+func TestNewWatchesTheResolverMutex(t *testing.T) {
+	// Arrange.
+	stalls := &recordingStalls{}
+
+	// Act.
+	r, err := newResolver(Deps{
+		Log:          &fakeSurfaces{log: dlog.NewTestLogger()},
+		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", nil },
+		Stalls:       stalls,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
+	}
+	if len(stalls.locks) != 1 || stalls.locks[0] != &r.mu || stalls.names[0] != "feed.resolver" {
+		t.Fatalf("watched %v %v, want the resolver's mutex as feed.resolver", stalls.locks, stalls.names)
 	}
 }
 
