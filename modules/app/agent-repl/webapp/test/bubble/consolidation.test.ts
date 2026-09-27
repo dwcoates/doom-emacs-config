@@ -43,6 +43,7 @@ function sourcesMatching(pattern: RegExp): string[] {
 const KINDS = [
   "feed/cards/response.ts",
   "feed/cards/controls.ts",
+  "feed/cards/subagent-result.ts",
   "feed/rows/user-prompt.ts",
   "feed/rows/agent-prompt.ts",
   "feed/rows/peer-message.ts",

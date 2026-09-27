@@ -1870,6 +1870,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* A subagent's hand-back marker: the plain pill, quiet, since the report it
    marks is drawn in the subagent's own card (owner ruling, 2026-09-27). */
 .badge.subagent-handback-badge { color: var(--muted); }
+/* An undelivered subagent result's reason: one quiet line under the report. */
+.subagent-result-reason { color: var(--muted); }
 .badge.run { color: var(--thinking); display: inline-flex; align-items: center; gap: 0.3rem; }
 /* Every tool card's chip sits on the card grey, so the async teal cannot
    tint it: done/running reads identically on a Bash card and an Agent

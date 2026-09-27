@@ -527,6 +527,23 @@ export const FINDINGS_LOCATION = { text: "feed.ts:42", path: "/repo/src/feed.ts"
 /** The third row's location has NO line — the client must omit it from the rpc. */
 export const FINDINGS_LOCATION_NO_LINE = { text: "row.ts", path: "/repo/src/row.ts" } as const;
 
+/**
+ * A subagent's RETURNED RESULT — `FeedTurnActivity.subagent_result`: the report
+ * it handed back, drawn once inside its own card, in STATE.
+ */
+export const subagentResultUnit = (
+  state: "delivering" | "delivered" | "undelivered" = "delivered",
+): ActivityUnit => ({
+  case: "subagentResult",
+  value: {
+    report: { text: "**all four items done**" },
+    state:
+      state === "undelivered"
+        ? { case: "undelivered", value: { reason: { text: "the parent is gone" } } }
+        : { case: state, value: {} },
+  },
+});
+
 export const findingsUnit = (): ActivityUnit => ({
   case: "findings",
   value: {

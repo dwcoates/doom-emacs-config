@@ -1016,6 +1016,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         return opts.renderers.plan(unit.value, rc);
       case "findings":
         return opts.renderers.findings(unit.value, rc);
+      case "subagentResult":
+        return opts.renderers.subagentResult(unit.value, rc);
       case "merge":
       case "subagent":
         throw new MalformedView(
