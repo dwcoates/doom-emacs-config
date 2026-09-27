@@ -48,6 +48,7 @@
      (:accepted . "the daemon accepted the workspace create…")
      (:deriving-name . "deriving the workspace's name…")
      (:creating-worktree . "creating the workspace's git worktree…")
+     (:starting-session . "starting the workspace's session…")
      (:completed . "workspace created: %s")
      (:failed . "workspace creation FAILED: %s"))
     (:open
@@ -165,7 +166,7 @@ CREATE is `(:arm STEP :value V)'."
   (let ((step (plist-get create :arm))
         (value (plist-get create :value)))
     (pcase step
-      (:stage
+      (:entered-stage
        (when-let ((fn (plist-get callbacks :on-stage)))
          (funcall fn value)))
       (:succeeded

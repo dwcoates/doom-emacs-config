@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -936,49 +937,127 @@ type recordingProgress struct{ stages []CreateStage }
 
 func (r *recordingProgress) Stage(stage CreateStage) { r.stages = append(r.stages, stage) }
 
-// TestCreateReportsDerivingNameThenCreatingWorktreeWhenItMintsTheName pins the
-// stage set a derived-name create reports, at the real points: the naming call
-// (DerivingName) then the worktree materialization (CreatingWorktree), in order.
-func TestCreateReportsDerivingNameThenCreatingWorktreeWhenItMintsTheName(t *testing.T) {
-	// Arrange: a create with an initial prompt and no name, so it mints one.
-	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
-	spec := standardSpec(t, f)
-	rec := &recordingProgress{}
-	spec.Progress = rec
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
+// TestCreateReportsItsStageSequencePerForm pins the stages each create form
+// reports, at the real points and in order: DerivingName only when the daemon
+// mints the name, CreatingWorktree always, and StartingSession for every create
+// that gets past the worktree, with or without an initial prompt.
+func TestCreateReportsItsStageSequencePerForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T) (*fixture, CreateSpec)
+		want    []CreateStage
+	}{
+		{
+			name: "unnamed with an initial prompt",
+			arrange: func(t *testing.T) (*fixture, CreateSpec) {
+				f := newFixture(t)
+				return f, standardSpec(t, f)
+			},
+			want: []CreateStage{CreateStageDerivingName, CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
+		{
+			name: "named with an initial prompt",
+			arrange: func(t *testing.T) (*fixture, CreateSpec) {
+				f := newFixture(t)
+				spec := standardSpec(t, f)
+				spec.Name = "chosen-name"
+				return f, spec
+			},
+			want: []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
+		{
+			name: "named without an initial prompt",
+			arrange: func(t *testing.T) (*fixture, CreateSpec) {
+				f := newFixture(t)
+				return f, CreateSpec{RepoDir: mainWorktree(t, f), Name: "promptless"}
+			},
+			want: []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
+		{
+			name: "unnamed without an initial prompt",
+			arrange: func(t *testing.T) (*fixture, CreateSpec) {
+				f := newFixture(t)
+				return f, CreateSpec{RepoDir: mainWorktree(t, f)}
+			},
+			want: []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
+		{
+			name: "unnamed fork",
+			arrange: func(t *testing.T) (*fixture, CreateSpec) {
+				return namingForkFixture(t, "", "wire the iterm2 integration")
+			},
+			want: []CreateStage{CreateStageDerivingName, CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv(PrefixEnv, "DWC")
+			f, spec := tc.arrange(t)
+			rec := &recordingProgress{}
+			spec.Progress = rec
 
-	// Assert.
-	if len(rec.stages) != 2 ||
-		rec.stages[0] != CreateStageDerivingName ||
-		rec.stages[1] != CreateStageCreatingWorktree {
-		t.Fatalf("stages = %v, want [DerivingName CreatingWorktree]", rec.stages)
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(rec.stages, tc.want) {
+				t.Fatalf("stages = %v, want %v", rec.stages, tc.want)
+			}
+		})
 	}
 }
 
-// TestCreateDoesNotReportDerivingNameForASuppliedName pins that a create which
-// supplies its own name mints none, so it reports only the worktree stage.
-func TestCreateDoesNotReportDerivingNameForASuppliedName(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
-	spec := standardSpec(t, f)
-	spec.Name = "chosen-name"
-	rec := &recordingProgress{}
-	spec.Progress = rec
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
+// TestCreateEndsItsStagesAtTheFailingStep pins that a create failing at a step
+// reports every stage up to and including the one it failed in, and none after:
+// the failure itself is the verb's returned error, which the caller maps to the
+// terminal failed step.
+func TestCreateEndsItsStagesAtTheFailingStep(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(f *fixture)
+		want    []CreateStage
+	}{
+		{
+			name:    "the worktree cannot be materialized",
+			arrange: func(f *fixture) { f.git.createErr = errors.New("branch already checked out") },
+			want:    []CreateStage{CreateStageCreatingWorktree},
+		},
+		{
+			name:    "the session does not come up",
+			arrange: func(f *fixture) { f.fleet.startErr = errors.New("the shim died during bring-up") },
+			want:    []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
+		{
+			name:    "the initial prompt is not accepted by the queue",
+			arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue refused the submission") },
+			want:    []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "DWC")
+			spec := standardSpec(t, f)
+			spec.Name = "chosen-name"
+			rec := &recordingProgress{}
+			spec.Progress = rec
+			tc.arrange(f)
 
-	// Assert.
-	if len(rec.stages) != 1 || rec.stages[0] != CreateStageCreatingWorktree {
-		t.Fatalf("stages = %v, want [CreatingWorktree] only", rec.stages)
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Create() = nil error, want the failure surfaced")
+			}
+			if !slices.Equal(rec.stages, tc.want) {
+				t.Fatalf("stages = %v, want %v", rec.stages, tc.want)
+			}
+		})
 	}
 }
 
@@ -1043,23 +1122,6 @@ func TestCreateHandsAForksNamingCallItsOwnPrompt(t *testing.T) {
 	// Assert.
 	if !strings.Contains(f.headless.calls[0].Prompt, "now port it to kitty") {
 		t.Fatalf("naming prompt = %q, want the fork's own prompt in it", f.headless.calls[0].Prompt)
-	}
-}
-
-func TestCreateReportsDerivingNameForABlankPromptFork(t *testing.T) {
-	// Arrange.
-	f, spec := namingForkFixture(t, "", "wire the iterm2 integration")
-	rec := &recordingProgress{}
-	spec.Progress = rec
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	if len(rec.stages) == 0 || rec.stages[0] != CreateStageDerivingName {
-		t.Fatalf("stages = %v, want DerivingName first", rec.stages)
 	}
 }
 

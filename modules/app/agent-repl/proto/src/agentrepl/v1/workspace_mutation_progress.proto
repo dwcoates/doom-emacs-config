@@ -75,11 +75,18 @@ enum WorkspaceOpenStage {
 // outcome. THE ARM IS THE STEP: a stage while the work runs, or exactly one of
 // the two terminal steps.
 message WorkspaceCreateProgress {
+  // Field 1 carried the stage as an enum; the stage is now a message on its own
+  // field, so a reader built against either shape never misreads the other.
+  reserved 1;
+  reserved "stage";
+
+  // Which step the create is on. Exactly one arm is set per progress push.
   oneof step {
     // An intermediate stage the create has just entered. Emitted only for the
-    // stages the create actually reaches: a create with a supplied name never
-    // emits `DERIVING_NAME`, because the daemon mints no name for it.
-    WorkspaceCreateStage stage = 1;
+    // stages the create actually reaches, in order: a create with a supplied
+    // name never enters `deriving_name`, because the daemon mints no name for
+    // it.
+    WorkspaceCreateStage entered_stage = 4;
     // TERMINAL: the workspace was created. Carries the minted identity (the
     // ref the legacy synchronous form returned in `CreateWorkspaceSuccess`)
     // and its name, for the completion message.
@@ -87,8 +94,9 @@ message WorkspaceCreateProgress {
     // TERMINAL: the create failed. Mirrors the two ways the synchronous form
     // fails — a typed refusal or an internal error — so a client surfaces the
     // failure identically whichever form it used. Only the failures that can
-    // arrive after the ack ride here — naming, worktree, spawn; the pre-detach
-    // refusals stay on the rpc's own `error` arm.
+    // arrive after the ack ride here — naming, worktree, spawn, the initial
+    // prompt's submission; the pre-detach refusals stay on the rpc's own
+    // `error` arm.
     WorkspaceCreateFailed failed = 3;
   }
 }
@@ -109,17 +117,42 @@ message WorkspaceCreateFailed {
   }
 }
 
-// The stages a create passes through between the ack and the terminal outcome.
-// The "creating workspace" phase is the ack itself (CreateWorkspaceAccepted),
-// and "created" is the `succeeded` step, so neither is a stage here.
-enum WorkspaceCreateStage {
-  WORKSPACE_CREATE_STAGE_UNSPECIFIED = 0;
-  // The daemon is deriving the workspace's name from its initial prompt with a
-  // headless naming call. Emitted only when the create supplied no name.
-  WORKSPACE_CREATE_STAGE_DERIVING_NAME = 1;
-  // The daemon is materializing the workspace's git worktree (`worktree add`).
-  WORKSPACE_CREATE_STAGE_CREATING_WORKTREE = 2;
+// A stage a create passes through between the ack and its terminal outcome.
+// THE SET ARM IS THE STAGE. The "creating workspace" phase is the ack itself
+// (CreateWorkspaceAccepted), and "created" is the `succeeded` step, so neither
+// is a stage here. A client words each arm as one minibuffer line; a stage
+// that is entered replaces the line of the one before it.
+message WorkspaceCreateStage {
+  // The stage just entered. Stages arrive in the order declared here, and a
+  // create skips only the stages its form does not need.
+  oneof stage {
+    // The daemon is deriving the workspace's name with a headless naming call —
+    // from the initial prompt, plus the parent conversation's digest for a
+    // fork. Entered only when the create supplied no name.
+    WorkspaceCreateStageDerivingName deriving_name = 1;
+    // The daemon is materializing the workspace's git worktree
+    // (`worktree add`).
+    WorkspaceCreateStageCreatingWorktree creating_worktree = 2;
+    // The daemon is starting the workspace's session: registering the
+    // workspace, spawning its shim and bringing the vendor session up — for a
+    // fork, after copying the parent's transcript — then submitting the
+    // initial prompt when there is one. Entered by every create that gets past
+    // the worktree, and usually the longest stage. It ends at the create's
+    // terminal step: `succeeded` once the session is up and any initial prompt
+    // is accepted by the queue, or `failed` naming what went wrong.
+    WorkspaceCreateStageStartingSession starting_session = 3;
+  }
 }
+
+// The naming stage. It carries nothing: the arm being set is the whole fact.
+message WorkspaceCreateStageDerivingName {}
+
+// The worktree stage. It carries nothing: the arm being set is the whole fact.
+message WorkspaceCreateStageCreatingWorktree {}
+
+// The session bring-up stage. It carries nothing: the arm being set is the
+// whole fact, and a failure inside it arrives as the create's `failed` step.
+message WorkspaceCreateStageStartingSession {}
 
 // The terminal success of a create, on the progress channel.
 message WorkspaceCreateSucceeded {

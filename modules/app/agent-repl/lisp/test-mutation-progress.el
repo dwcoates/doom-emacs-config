@@ -36,7 +36,7 @@
     (agent-repl-mutation-progress-register "op-1" :on-stage (lambda (s) (setq got s)))
     ;; Act.
     (agent-repl-mutation-progress-handle
-     (agent-repl-test-mp--progress "op-1" :stage :deriving-name))
+     (agent-repl-test-mp--progress "op-1" :entered-stage :deriving-name))
     ;; Assert.
     (should (eq got :deriving-name))))
 
@@ -75,7 +75,7 @@
   (agent-repl-test-mp--reset)
   ;; Act / Assert: handling does not signal, and registers nothing.
   (agent-repl-mutation-progress-handle
-   (agent-repl-test-mp--progress "op-x" :stage :deriving-name))
+   (agent-repl-test-mp--progress "op-x" :entered-stage :deriving-name))
   (should-not (gethash "op-x" agent-repl-mutation-progress--pending)))
 
 (ert-deftest agent-repl-test-mp-new-op-id-is-unique ()
@@ -222,7 +222,7 @@ as progress."
 (ert-deftest agent-repl-test-mp-create-states-every-daemon-stage ()
   "Every stage the daemon's WorkspaceCreateStage enum can push has a sentence."
   ;; Arrange / Act / Assert.
-  (dolist (stage '(:deriving-name :creating-worktree))
+  (dolist (stage '(:deriving-name :creating-worktree :starting-session))
     (should (alist-get stage (alist-get :create agent-repl-workspace-progress-phases)))))
 
 (ert-deftest agent-repl-test-mp-create-states-the-daemon-s-acceptance ()
@@ -233,6 +233,14 @@ the daemon's stages, created or FAILED -- reaches the minibuffer."
                (lambda () (agent-repl-workspace-progress-report :create :accepted)))))
     ;; Assert.
     (should (equal said '("the daemon accepted the workspace create…")))))
+
+(ert-deftest agent-repl-test-mp-create-echoes-starting-the-session ()
+  "A create's starting_session stage reaches the minibuffer in its own words."
+  ;; Arrange / Act.
+  (let ((said (agent-repl-test-mp--echoed
+               (lambda () (agent-repl-workspace-progress-report :create :starting-session)))))
+    ;; Assert.
+    (should (equal said '("starting the workspace's session…")))))
 
 (provide 'test-mutation-progress)
 
