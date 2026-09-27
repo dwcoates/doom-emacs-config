@@ -1,15 +1,10 @@
 package prompthandler
 
 import (
-	"strings"
-	"sync"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/descriptorpb"
-
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/sessioncommand"
 )
 
 // PanelCommands are the four commands the daemon answers ITSELF with a panel.
@@ -30,55 +25,11 @@ var ActCommands = map[conversationv1.SessionCommand]string{
 	conversationv1.SessionCommand_SESSION_COMMAND_MODEL:   promptqueue.ActSetModel,
 }
 
-// spec is one command's schema-carried facts, read back from the enum value's
-// session_command_spec option. NOTHING here is hand-written: a corrected
-// spelling in the proto is a corrected spelling in the recognizer.
-type spec struct {
-	command   conversationv1.SessionCommand
-	literal   string
-	takesArgs bool
-}
-
-var (
-	specsOnce sync.Once
-	specs     map[string]spec
-)
-
-// commandSpecs reads the recognition table off the SessionCommand enum's
-// descriptor, once. The option is the ONE definition of every literal and of
-// whether trailing text is an argument.
-func commandSpecs() map[string]spec {
-	specsOnce.Do(func() {
-		specs = make(map[string]spec)
-		values := conversationv1.SessionCommand(0).Descriptor().Values()
-		for i := 0; i < values.Len(); i++ {
-			value := values.Get(i)
-			options, ok := value.Options().(*descriptorpb.EnumValueOptions)
-			if !ok {
-				continue
-			}
-			ext := proto.GetExtension(options, conversationv1.E_SessionCommandSpec)
-			carried, ok := ext.(*conversationv1.SessionCommandSpec)
-			if !ok || carried == nil || carried.GetLiteral() == "" {
-				// SESSION_COMMAND_UNSPECIFIED carries no spec, deliberately: it
-				// names no command, so there is nothing to match it against.
-				continue
-			}
-			specs[carried.GetLiteral()] = spec{
-				command:   conversationv1.SessionCommand(value.Number()),
-				literal:   carried.GetLiteral(),
-				takesArgs: carried.GetTakesArgs(),
-			}
-		}
-	})
-	return specs
-}
-
 // recognized is the whole of what recognition made of a submission.
 type recognized struct {
 	kind Recognition
 	// spec is the matched command, zero when the text is not a command.
-	spec spec
+	spec sessioncommand.Spec
 	// literal is the command as TYPED, which is what a refusal card draws and
 	// what RequestCommandSupport is called with.
 	literal string
@@ -93,15 +44,13 @@ type recognized struct {
 // and keeps its user message. Suppressing a prompt a user genuinely meant is
 // unrecoverable; forwarding a command is not.
 func recognize(text string) recognized {
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, "/") {
+	parsed := sessioncommand.Parse(text)
+	if !parsed.Slash {
 		return recognized{kind: RecognizedNone}
 	}
-	name, rest, _ := strings.Cut(trimmed, " ")
-	rest = strings.TrimSpace(rest)
+	name, rest, matched := parsed.Name, parsed.Arg, parsed.Spec
 
-	matched, known := commandSpecs()[name]
-	if !known {
+	if !parsed.Known {
 		// A command the closed set does not name FALLS THROUGH TO THE VENDOR
 		// like any other text, per endpoint_submit_prompt.proto: the retired
 		// /cost and /usage arms say so in as many words ("the commands fall
@@ -111,19 +60,19 @@ func recognize(text string) recognized {
 		// user-authored slash command the enum has not been taught.
 		return recognized{kind: RecognizedNone}
 	}
-	if rest != "" && !matched.takesArgs {
+	if rest != "" && !matched.TakesArgs {
 		return recognized{kind: RecognizedNone}
 	}
 
 	switch {
-	case PanelCommands[matched.command]:
+	case PanelCommands[matched.Command]:
 		return recognized{kind: RecognizedPanel, spec: matched, literal: name, arg: rest}
-	case matched.command == conversationv1.SessionCommand_SESSION_COMMAND_MODEL && rest == "":
+	case matched.Command == conversationv1.SessionCommand_SESSION_COMMAND_MODEL && rest == "":
 		// BARE /model is refused daemon-side: the vendor's own picker is
 		// unreachable through us, and the topbar's picker is the only
 		// argument-less path to a model change.
 		return recognized{kind: RecognizedRefused, spec: matched, literal: name}
-	case ActCommands[matched.command] != "":
+	case ActCommands[matched.Command] != "":
 		return recognized{kind: RecognizedAct, spec: matched, literal: name, arg: rest}
 	default:
 		// Every other command the CLI answers itself — /agents, /help, /cost,

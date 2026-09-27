@@ -115,7 +115,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 // answerPanel resolves a recognized panel and MIRRORS it into the root feed as
 // a non-durable row, so the answer is both returned and drawn.
 func (h *handler) answerPanel(ctx context.Context, ws ids.WorkspaceID, got recognized, log dlog.Logger) (Outcome, error) {
-	panel, err := h.deps.Panels(ctx, ws, got.spec.command)
+	panel, err := h.deps.Panels(ctx, ws, got.spec.Command)
 	if err != nil {
 		log.Error(opPanel, "the panel could not be resolved", dlog.Context{
 			"command": got.literal, "cause": err.Error(),
@@ -144,7 +144,7 @@ func (h *handler) refuse(ws ids.WorkspaceID, got recognized, log dlog.Logger) Ou
 // two context cuts run as turns, so they mint one and the answer carries it; a
 // model change does not.
 func (h *handler) act(ctx context.Context, ws ids.WorkspaceID, got recognized, idempotencyKey string, origin conversationv1.PromptOrigin, log dlog.Logger) (Outcome, error) {
-	act := promptqueue.Act{Kind: ActCommands[got.spec.command], Value: got.arg, Origin: origin}
+	act := promptqueue.Act{Kind: ActCommands[got.spec.Command], Value: got.arg, Origin: origin}
 	var c claim
 	if act.Kind != promptqueue.ActSetModel {
 		minted, err := h.mintTurn(ctx, ws, idempotencyKey, log)
