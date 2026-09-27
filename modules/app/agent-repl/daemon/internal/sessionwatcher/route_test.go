@@ -1343,6 +1343,53 @@ func TestOpeningPageOpensAWatchForADetachedAnnouncedSubagent(t *testing.T) {
 	}
 }
 
+// A SPAWN ABOVE THE PAGE'S NEWEST CUT opens no watch: the feed begins at the
+// cut, so its bubble is withheld and its child's book has no reader. Each case
+// is one cut standing between the spawn and the page's head.
+func TestOpeningPageSpawnAboveItsNewestCutOpensNoWatch(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+	}{
+		{name: "above a compaction", cut: compactedCut()},
+		{name: "above a clear", cut: clearedCut()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+
+			// Act: newest first — the cut, then the older spawn behind it.
+			h.route(h.main, pageFrame(
+				frameEntryAt("ptr-2", frameUpdate("main-1", cutUpdate(tc.cut))),
+				frameEntryAt("ptr-1", frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))),
+			))
+
+			// Assert.
+			h.client.noAgentOpen(t)
+		})
+	}
+}
+
+func TestOpeningPageSpawnBelowItsNewestCutStillOpensAWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: newest first — the spawn AFTER the cut.
+	h.route(h.main, pageFrame(
+		frameEntryAt("ptr-2", frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))),
+		frameEntryAt("ptr-1", frameUpdate("main-1", cutUpdate(compactedCut()))),
+	))
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the page opened a watch on %q, want sub-1", open.req.GetTarget().GetValue())
+	}
+}
+
 // TestOpeningPageDoesNotReopenAnAlreadyWatchedSubagent covers idempotency: a
 // spawn already watched — here by a live frame that arrived before the page —
 // opens no second stream when the page restates the same spawn.

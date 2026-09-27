@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -281,5 +282,94 @@ func TestAnIdenticalUpsertIsNotPublishedTwice(t *testing.T) {
 	if first.GetId().GetValue() != h.promptRowID("turn-2") {
 		t.Fatalf("first streamed row = %q, want turn-2's: an identical upsert must not publish",
 			first.GetId().GetValue())
+	}
+}
+
+// tailWait bounds one read of a tail this package's tests follow. Every row it
+// waits for is published synchronously under the resolver's mutex before the
+// read begins, so the wait covers only the pump goroutine's hand-off; it is a
+// failure bound, never a synchronization.
+const tailWait = 2 * time.Second
+
+// follow opens a reader's page on a feed and the tail its token pins, and
+// answers the tail's row stream. The tail ends with the test.
+func (h *harness) follow(feed feedid.Feed, reader ReaderID) <-chan *frontendv1.FeedRow {
+	h.t.Helper()
+	_, token := h.openPage(feed, reader)
+	return h.tailFrom(feed, token)
+}
+
+// tailFrom opens the tail a token pins, ending it with the test.
+func (h *harness) tailFrom(feed feedid.Feed, token *agentreplv1.FeedWatchToken) <-chan *frontendv1.FeedRow {
+	h.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	h.t.Cleanup(cancel)
+	tail, err := h.resolver.Tail(ctx, testWorkspace, feed, token)
+	if err != nil {
+		h.t.Fatalf("Tail: %v", err)
+	}
+	return tail.Rows(ctx)
+}
+
+// pushedBefore drains a tail until the SENTINEL row arrives and answers the id
+// of every row pushed before it, in order. A row that must NOT reach the wire
+// is proven absent by a sentinel that must, published after it: deliveries
+// are FIFO per reader.
+func pushedBefore(t *testing.T, rows <-chan *frontendv1.FeedRow, sentinel string) []string {
+	t.Helper()
+	var got []string
+	for {
+		select {
+		case row := <-rows:
+			id := row.GetId().GetValue()
+			if id == sentinel {
+				return got
+			}
+			got = append(got, id)
+		case <-time.After(tailWait):
+			t.Fatalf("the sentinel %q never reached the tail; pushed so far: %v", sentinel, got)
+		}
+	}
+}
+
+// sendSentinel delivers the live prompt pushedBefore waits for, and answers
+// its row id.
+func (h *harness) sendSentinel() string {
+	h.t.Helper()
+	h.deliverPrompt("turn-sentinel", "sentinel")
+	return h.promptRowID("turn-sentinel")
+}
+
+// equalIDs reports whether two id lists match in order.
+func equalIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestATailOpenedAgainstAPinBeforeAReplayIsNotReplayedWhatItsCutWithholds(t *testing.T) {
+	// Arrange: a page served (and its token pinned) BEFORE a history page with
+	// two cuts is replayed; the tail opens after the replay, so it is served
+	// the replay out of the retained log.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	page := newMultiCutPage(2)
+	h.replay(page.page)
+
+	// Act.
+	rows := h.tailFrom(rootFeed(), token)
+	got := pushedBefore(t, rows, h.sendSentinel())
+
+	// Assert: the log replay carries the newest cut and what follows it, and
+	// nothing from above it.
+	want := []string{h.separationRowID(page.newestCut()), h.promptRowID(page.newestTurn())}
+	if !equalIDs(got, want) {
+		t.Fatalf("log-replayed rows = %v, want %v", got, want)
 	}
 }

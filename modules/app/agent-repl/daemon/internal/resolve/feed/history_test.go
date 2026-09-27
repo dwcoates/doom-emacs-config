@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -68,6 +70,237 @@ func frameEntry(agent *conversationv1.AgentId, result any) *conversationv1.Histo
 func (h *harness) replay(page *conversationv1.HistoryPage) {
 	h.t.Helper()
 	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), page, noAddress())
+}
+
+// cutEntry is a replayed context cut.
+func cutEntry(cut *conversationv1.ContextCut) *conversationv1.HistoryEntry {
+	return frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: cut},
+	})
+}
+
+// multiCutPage is a replayed history carrying N compactions — turn-0, cut-1,
+// turn-1, …, cut-N, turn-N, oldest first — served NEWEST FIRST as a page is,
+// every entry at a pointer of its own ("p-<oldest-first index>").
+type multiCutPage struct {
+	page *conversationv1.HistoryPage
+	cuts int
+}
+
+// newMultiCutPage builds the page for N cuts.
+func newMultiCutPage(cuts int) multiCutPage {
+	var oldestFirst []*conversationv1.HistoryEntryAt
+	add := func(entry *conversationv1.HistoryEntry) {
+		oldestFirst = append(oldestFirst, &conversationv1.HistoryEntryAt{
+			At:    &conversationv1.HistoryPointer{Value: fmt.Sprintf("p-%d", len(oldestFirst))},
+			Entry: entry,
+		})
+	}
+	add(promptEntry("turn-0", "before every cut"))
+	for i := 1; i <= cuts; i++ {
+		add(cutEntry(compactedCut(fmt.Sprintf("summary %d", i))))
+		add(promptEntry(fmt.Sprintf("turn-%d", i), fmt.Sprintf("after cut %d", i)))
+	}
+	page := &conversationv1.HistoryPage{Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}}
+	for i := len(oldestFirst) - 1; i >= 0; i-- {
+		page.Entries = append(page.Entries, oldestFirst[i])
+	}
+	return multiCutPage{page: page, cuts: cuts}
+}
+
+// cutPointer is the pointer the Ith cut (1-based) sits at.
+func (m multiCutPage) cutPointer(i int) string { return fmt.Sprintf("p-%d", 2*i-1) }
+
+// newestCut is the pointer of the page's newest cut.
+func (m multiCutPage) newestCut() string { return m.cutPointer(m.cuts) }
+
+// newestTurn is the one turn after the newest cut.
+func (m multiCutPage) newestTurn() string { return fmt.Sprintf("turn-%d", m.cuts) }
+
+// aboveNewestCut is the id of every row the newest cut withholds: each older
+// turn's prompt and each older cut's divider.
+func (m multiCutPage) aboveNewestCut(h *harness) []string {
+	var out []string
+	for i := 0; i < m.cuts; i++ {
+		out = append(out, h.promptRowID(fmt.Sprintf("turn-%d", i)))
+	}
+	for i := 1; i < m.cuts; i++ {
+		out = append(out, h.separationRowID(m.cutPointer(i)))
+	}
+	return out
+}
+
+// THE PAGE'S NEWEST CUT IS ESTABLISHED BEFORE ANY OF ITS ROWS IS SERVED. A page
+// is drawn oldest first, so published as drawn every row above its newest cut
+// reached a following reader before that cut did, and the reader drew it and
+// then truncated it at the cut. Each case is one history; the assertion is the
+// exact push a reader following the feed receives.
+func TestAReplayPushesOnlyWhatFollowsItsNewestCut(t *testing.T) {
+	cases := []struct {
+		name string
+		cuts int
+	}{
+		{name: "one cut", cuts: 1},
+		{name: "two cuts", cuts: 2},
+		{name: "sixteen cuts", cuts: 16},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a reader following the feed before the replay.
+			h := newHarness(t)
+			rows := h.follow(rootFeed(), "reader-1")
+			page := newMultiCutPage(tc.cuts)
+
+			// Act.
+			h.replay(page.page)
+			got := pushedBefore(t, rows, h.sendSentinel())
+
+			// Assert: the newest divider first — so a reader truncates nothing —
+			// and then the one turn after it.
+			want := []string{h.separationRowID(page.newestCut()), h.promptRowID(page.newestTurn())}
+			if !equalIDs(got, want) {
+				t.Fatalf("pushed = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestAReplayWithManyCutsServesNothingAboveItsNewestCutOnTheFirstPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	page := newMultiCutPage(16)
+	h.replay(page.page)
+
+	// Act.
+	served, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	withheld := map[string]bool{}
+	for _, id := range page.aboveNewestCut(h) {
+		withheld[id] = true
+	}
+	for _, id := range rowIDs(pageRows(t, served)) {
+		if withheld[id] {
+			t.Fatalf("the first page served %q from above the newest cut", id)
+		}
+	}
+}
+
+func TestPagingBackThroughAReplayedHistoryWalksEveryPostCutRowAndEndsAtTheCut(t *testing.T) {
+	// Arrange: one cut, then more turns than a page holds (the harness page
+	// size is 3), so reaching the cut takes a walk.
+	h := newHarness(t)
+	oldestFirst := []*conversationv1.HistoryEntry{
+		promptEntry("turn-old", "above the cut"),
+		cutEntry(compactedCut("what survived")),
+	}
+	for i := 1; i <= 5; i++ {
+		oldestFirst = append(oldestFirst, promptEntry(fmt.Sprintf("turn-%d", i), "after the cut"))
+	}
+	var newestFirst []*conversationv1.HistoryEntry
+	for i := len(oldestFirst) - 1; i >= 0; i-- {
+		newestFirst = append(newestFirst, oldestFirst[i])
+	}
+	page := historyPage(&conversationv1.HistoryFloor{}, newestFirst...)
+	h.replay(page)
+	cutPointer := page.Entries[len(newestFirst)-2].GetAt().GetValue()
+
+	// Act: the first page, then every older page until the walk stands at the
+	// start.
+	first, _ := h.openPage(rootFeed(), "reader-1")
+	served := rowIDs(pageRows(t, first))
+	edge := first.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge()
+	for walks := 0; ; walks++ {
+		if _, atStart := edge.(*frontendv1.FeedPageSuccess_AtStart); atStart {
+			break
+		}
+		if walks > 3 {
+			t.Fatalf("the walk never reached the start; served %v", served)
+		}
+		older, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+		if err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+		served = append(rowIDs(pageRows(t, older)), served...)
+		edge = older.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge()
+	}
+
+	// Assert: the divider and every turn after it, oldest first, and nothing
+	// from above the cut.
+	want := []string{h.separationRowID(cutPointer)}
+	for i := 1; i <= 5; i++ {
+		want = append(want, h.promptRowID(fmt.Sprintf("turn-%d", i)))
+	}
+	if !equalIDs(served, want) {
+		t.Fatalf("walked rows = %v, want %v", served, want)
+	}
+}
+
+func TestAReplayedCompactionThatFailedWithholdsNothingFromThePush(t *testing.T) {
+	// Arrange: a reader following the feed.
+	h := newHarness(t)
+	rows := h.follow(rootFeed(), "reader-1")
+	page := historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-2", "after"),
+		cutEntry(&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+		}}),
+		promptEntry("turn-1", "before"),
+	)
+
+	// Act.
+	h.replay(page)
+	got := pushedBefore(t, rows, h.sendSentinel())
+
+	// Assert: the turn above the failed compaction reaches the reader.
+	pushed := false
+	for _, id := range got {
+		if id == h.promptRowID("turn-1") {
+			pushed = true
+		}
+	}
+	if !pushed {
+		t.Fatalf("pushed = %v, want the turn above a compaction that cut nothing", got)
+	}
+}
+
+func TestAReplayedPostCutConversationIsPushedWhole(t *testing.T) {
+	// Arrange: a reconnect's catch-up page carries only the conversation AFTER
+	// a compaction whose cut is not on the page; a reader is following.
+	h := newHarness(t)
+	rows := h.follow(rootFeed(), "reader-1")
+
+	// Act.
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-7", "after two"),
+		promptEntry("turn-6", "after one"),
+	))
+	got := pushedBefore(t, rows, h.sendSentinel())
+
+	// Assert: holding the page back until it is placed withholds nothing the
+	// bound keeps.
+	want := []string{h.promptRowID("turn-6"), h.promptRowID("turn-7")}
+	if !equalIDs(got, want) {
+		t.Fatalf("pushed = %v, want %v", got, want)
+	}
+}
+
+func TestALiveCutAfterAReplayIsPushedAtOnce(t *testing.T) {
+	// Arrange: a replayed conversation, a reader following, and then a live
+	// compaction — the replay's hold must have ended with its page.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "replayed")))
+	rows := h.follow(rootFeed(), "reader-1")
+
+	// Act.
+	h.cutAt("entry-live", compactedCut("what survived"))
+	got := pushedBefore(t, rows, h.sendSentinel())
+
+	// Assert.
+	want := []string{h.separationRowID("entry-live")}
+	if !equalIDs(got, want) {
+		t.Fatalf("pushed = %v, want the live divider alone", got)
+	}
 }
 
 func TestAReplayLandsRowsOldestFirstEvenThoughThePageIsNewestFirst(t *testing.T) {

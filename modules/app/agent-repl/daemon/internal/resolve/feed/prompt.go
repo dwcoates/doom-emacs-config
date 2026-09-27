@@ -46,7 +46,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			// THE REPLAY LEAVES THE TURN IT STOOD IN, and a turn its page never
 			// ended is ended from its durable close BEFORE this prompt's row, so
 			// the ending lands under the turn it ends.
-			if s.plane == planeHistory {
+			if s.plane.replayed() {
 				r.endReplayedTurn(s, running)
 			}
 			s.turnInFlight = &running
@@ -54,15 +54,23 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			s.knowTurn(running)
 			// A replayed prompt is also the turn its page's next UNSTAMPED
 			// terminal ends, and the page has now drawn a prompt.
-			if s.plane == planeHistory {
+			if s.plane.replayed() {
 				s.replayTurn = &running
 				s.replayPromptDrawn = true
 			}
-			// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and
-			// the next turn beginning is what retires it. Both turn-start sites
-			// call it: a prompt drawn from history replay opens a turn here
-			// without ever passing OnTurnOpened.
-			r.turnStarted(s, running)
+			if s.plane == planeInherited {
+				// A FORK'S INHERITED TURN RAN IN ITS PARENT and ended there: no
+				// terminal of it is owed to this feed, so its prompt is drawn
+				// settled — the same as a ported prompt — and it retires no fault
+				// of the fork's own, because it starts no turn here.
+				s.endedTurns[running] = true
+			} else {
+				// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and
+				// the next turn beginning is what retires it. Both turn-start
+				// sites call it: a prompt drawn from history replay opens a turn
+				// here without ever passing OnTurnOpened.
+				r.turnStarted(s, running)
+			}
 			// THE PROMPT ITSELF MARKS ITS TURN A DIRECTIVE. The prompt is the
 			// turn's FIRST frame on every path, so recognising the /clear or
 			// /compact literal here registers the turn before its response and

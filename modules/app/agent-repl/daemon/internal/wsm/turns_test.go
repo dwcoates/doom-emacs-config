@@ -828,6 +828,87 @@ func TestTurnClosesOmitsAnotherWorkspacesTurn(t *testing.T) {
 	}
 }
 
+// RecordedTurns answers which turns are the workspace's own. Each case is one
+// turn's standing; the assertion is whether the answer names it.
+func TestRecordedTurnsNamesOnlyTheWorkspacesOwnTurns(t *testing.T) {
+	cases := []struct {
+		name string
+		// arrange records (or does not record) the turn the case asks about.
+		arrange func(t *testing.T, s *store, ws, other WorkspaceID) TurnID
+		want    bool
+	}{
+		{
+			name: "an open turn the workspace recorded is its own",
+			arrange: func(t *testing.T, s *store, ws, _ WorkspaceID) TurnID {
+				return openTurn(t, s, ws)
+			},
+			want: true,
+		},
+		{
+			name: "a closed turn the workspace recorded is still its own",
+			arrange: func(t *testing.T, s *store, ws, _ WorkspaceID) TurnID {
+				turn := openTurn(t, s, ws)
+				if err := s.CloseTurn(context.Background(), turn, instant, CloseCompleted); err != nil {
+					t.Fatalf("CloseTurn: %v", err)
+				}
+				return turn
+			},
+			want: true,
+		},
+		{
+			name: "another workspace's turn is not this workspace's own",
+			arrange: func(t *testing.T, s *store, _, other WorkspaceID) TurnID {
+				return openTurn(t, s, other)
+			},
+			want: false,
+		},
+		{
+			name: "a turn no workspace recorded is not its own",
+			arrange: func(*testing.T, *store, WorkspaceID, WorkspaceID) TurnID {
+				return TurnID("b0e99f51-559e-4ebd-8c09-74f989f11490")
+			},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			other := testWorkspaceNamed(t, s, "other")
+			turn := tc.arrange(t, s, ws.ID, other.ID)
+
+			// Act
+			got, err := s.RecordedTurns(context.Background(), ws.ID, []TurnID{turn})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RecordedTurns: %v", err)
+			}
+			if got[turn] != tc.want {
+				t.Fatalf("RecordedTurns = %+v, want %s owned = %v", got, turn, tc.want)
+			}
+		})
+	}
+}
+
+func TestRecordedTurnsOfNoTurnsIsAnEmptyAnswer(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	got, err := s.RecordedTurns(context.Background(), ws.ID, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RecordedTurns: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("RecordedTurns = %+v, want empty", got)
+	}
+}
+
 func TestClaimDisplacedTurnReportsItClosedAnOpenTurnAsOrphaned(t *testing.T) {
 	// Arrange: the turn's kill never landed, so its record is still open.
 	s, _ := testStore(t)

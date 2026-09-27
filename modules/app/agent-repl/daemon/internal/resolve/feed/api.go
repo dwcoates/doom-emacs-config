@@ -269,6 +269,15 @@ type Deps struct {
 	// nil draws no ending from a record, which is what a test that is not
 	// about replayed closes wants.
 	TurnCloses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]wsm.RecordedClose, error)
+	// OwnedTurns answers which of the named turns the workspace recorded as
+	// its own (wsm.DB.RecordedTurns). On a FORK it is what tells the
+	// conversation the fork inherited from the turns it ran itself: a
+	// main-agent entry of any other turn, or of none, is the inherited past
+	// and is drawn in the inherited plane (lineage.go).
+	//
+	// nil treats every entry as the workspace's own, which is what a test
+	// that is not about forking wants.
+	OwnedTurns func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]bool, error)
 	// Now is the resolver's clock, injected so tests never sleep. Defaults to
 	// time.Now.
 	Now func() time.Time

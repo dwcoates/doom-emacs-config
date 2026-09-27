@@ -170,6 +170,39 @@ func (s *store) TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) 
 	return out, nil
 }
 
+// RecordedTurns answers which of the named turns this workspace RECORDED,
+// open or closed, all-or-nothing. A turn another workspace recorded, and a
+// turn no workspace ever recorded, is simply absent.
+//
+// It is the durable statement of "this workspace opened this turn": every turn
+// the daemon delivers is recorded against its workspace before it is
+// delivered, so a turn stamp the answer names is the workspace's own work, and
+// one it omits is a turn the workspace never ran (a fork's inherited past).
+func (s *store) RecordedTurns(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]bool, error) {
+	out := make(map[TurnID]bool, len(turns))
+	if len(turns) == 0 {
+		return out, nil
+	}
+	err := s.read(ctx, "daemon.wsm.recorded_turns", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
+		for _, turn := range turns {
+			var one int
+			err := s.db().QueryRowContext(ctx, `SELECT 1 FROM turns WHERE id = ? AND workspace_id = ?`, turn, id).Scan(&one)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			out[turn] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OpenTurns loads a workspace's turns that have no terminal, all-or-nothing.
 func (s *store) OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error) {
 	var out []Turn
