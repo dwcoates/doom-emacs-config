@@ -350,6 +350,10 @@ func TestSubmitNeverForwardsAContextCutAsAPrompt(t *testing.T) {
 		{name: "a bare /compact", text: "/compact", kind: promptqueue.ActCompact},
 		{name: "/compact with instructions", text: "/compact foo bar", kind: promptqueue.ActCompact},
 		{name: "a bare /clear", text: "/clear", kind: promptqueue.ActClear},
+		{name: "/clear with trailing text", text: "/clear foo", kind: promptqueue.ActClear},
+		{name: "the /reset alias", text: "/reset", kind: promptqueue.ActClear},
+		{name: "the /new alias", text: "/new", kind: promptqueue.ActClear},
+		{name: "the /reset alias with trailing text", text: "/reset foo", kind: promptqueue.ActClear},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
