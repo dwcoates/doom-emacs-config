@@ -23,6 +23,11 @@ function streamPlane(): storev1.Plane {
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { startFakeStore, type FakeStore } from "./store-server.js";
 
+/** The pushed line, when the push is on the `line` arm. */
+function lineOf(push: storev1.WatchAgentSessionResponse): storev1.StoreLineAt | undefined {
+  return push.frame.case === "line" ? push.frame.value : undefined;
+}
+
 const running: FakeStore[] = [];
 
 afterEach(async () => {
@@ -530,7 +535,7 @@ describe("WatchAgentSession", () => {
     const first = await nextPush(tail);
 
     // Assert.
-    const item = first.line?.line?.agentItem?.item;
+    const item = lineOf(first)?.line?.agentItem?.item;
     expect(item?.case === "agentPrompt" ? item.value.id?.value : undefined).toBe("after-open");
   });
 
@@ -548,7 +553,7 @@ describe("WatchAgentSession", () => {
     const first = await nextPush(tail);
 
     // Assert.
-    expect(first.line?.at?.value).toBe("2");
+    expect(lineOf(first)?.at?.value).toBe("2");
   });
 
   it("delivers an UPSERT OF A ROW THE OPENING PAGE ALREADY CARRIED", async () => {
@@ -569,7 +574,7 @@ describe("WatchAgentSession", () => {
     const first = await nextPush(tail);
 
     // Assert.
-    expect(first.line?.at?.value).toBe("1");
+    expect(lineOf(first)?.at?.value).toBe("1");
   });
 
   it("serves an upserted row at its ORIGINAL pointer, not a fresh one", async () => {
@@ -587,10 +592,10 @@ describe("WatchAgentSession", () => {
     const first = await nextPush(tail);
 
     // Assert.
-    expect(first.line?.at?.value).toBe("1");
+    expect(lineOf(first)?.at?.value).toBe("1");
     // Narrowed on the arm, not read through it: only an `agentPrompt` carries an id,
     // and reading one off an unchecked value is what the `any` here used to allow.
-    const settled = first.line?.line?.agentItem?.item;
+    const settled = lineOf(first)?.line?.agentItem?.item;
     expect(settled?.case === "agentPrompt" ? settled.value.id?.value : undefined).toBe("settled");
   });
 
@@ -608,7 +613,7 @@ describe("WatchAgentSession", () => {
     const first = await nextPush(tail);
 
     // Assert.
-    expect(first.line?.at?.value).toBe("2");
+    expect(lineOf(first)?.at?.value).toBe("2");
   });
 
   it("refuses an unknown token with NotFound, since a stream cannot say it otherwise", async () => {
