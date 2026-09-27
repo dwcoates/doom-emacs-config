@@ -3074,3 +3074,28 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(rule?.declarations).toMatch(/background:\s*var\(--tool-card-bg\)/);
   });
 });
+
+describe("a link in a prompt bubble (owner ruling, 2026-09-27)", () => {
+  it("is darker than the dark theme's prompt blue", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    // Act
+    const [link, fill] = [luminance(rgbOf(block, "--prompt-link")), luminance(rgbOf(block, "--user"))];
+    // Assert
+    expect(link).toBeLessThan(fill);
+  });
+
+  it("is the accent in the light theme", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--prompt-link:\s*var\(--accent\)/);
+  });
+
+  it("colors links in every prompt but a held one", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]) a') ?? "";
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--prompt-link\)/);
+  });
+});
