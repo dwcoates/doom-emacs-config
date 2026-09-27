@@ -665,6 +665,7 @@ describe("disposition", () => {
       "Task",
       "Skill",
       "SendMessage",
+      "SubagentHandback",
       "TaskCreate",
       "TaskUpdate",
       "WebFetch",
