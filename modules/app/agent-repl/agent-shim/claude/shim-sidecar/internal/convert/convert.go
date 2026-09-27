@@ -191,6 +191,10 @@ type Converter struct {
 	turnScope  turnScope
 	openedTurn string
 
+	// promptSet is the newest external prompt's versions while none of them has
+	// been answered (resend.go). Nil when no set is undecided.
+	promptSet *siblingSet
+
 	// joined records WHERE IN THE FILE this converter started reading, and
 	// whether it has started at all. ONE OFFSET, written once.
 	//
@@ -276,6 +280,10 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// so the joins it opens or settles stay exactly as warm as any other's.
 	c.openedTurn = ""
 	entries := c.lineEntries(record, at, next)
+	// AN ANSWER DECIDES WHICH VERSION OF A RE-SENT PROMPT ITS ROW HOLDS
+	// (resend.go), read off the record's own parent link after the conversion
+	// that may have opened or joined a set.
+	entries = append(entries, c.followPromptBranch(facts, at)...)
 	// THE TURN IS ASKED ONCE PER RECORD, after the conversion that may have
 	// opened one, and stamped on every entry the record produced (turn.go).
 	stampTurn(entries, c.turnScope.resolve(facts, c.openedTurn))

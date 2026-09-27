@@ -22,8 +22,9 @@ the file plane writes no part of it (`internal/convert/streamowned.go`). Both wr
 upsert-key space, over one write path.
 
 THE TURN STAMP (`StoreEntry.turn`) is set only for a turn the vendor's own
-records name — an adopted external prompt's uuid, followed by `promptId` and
-`parentUuid` (`internal/convert/turn.go`). An agent-repl turn's id is in no
+records name — an adopted external prompt's uuid (the FIRST version's, for an
+edited or re-sent one — `internal/convert/resend.go`), followed by `promptId`
+and `parentUuid` (`internal/convert/turn.go`). An agent-repl turn's id is in no
 vendor record, so its rows stay unstamped here and the store keeps the stream
 plane's stamp.
 
@@ -1448,6 +1449,38 @@ the suite rather than quietly shrinking what the feed can show.
 - An ORPHAN tool_result (its call is behind the cursor) lands as
   `vendor_specific{kind:"orphan_tool_result"}` with a WARNING. It is a genuinely
   lost settle after a restart, so it is loud, not verbose.
+
+### An edited or re-sent prompt is ONE row (owner ruling 2026-09-27)
+
+The feed shows ONLY the version of a prompt that got the answer
+(`internal/convert/resend.go`). When a person edits or re-sends a prompt
+before it is answered, the CLI writes a NEW user record (own uuid, promptId,
+timestamp) on the SAME `parentUuid` and keeps the abandoned version in the
+file. Drawing each record as its own prompt put every abandoned version in the
+feed; one observed book held 24 such sets.
+
+- The newest emitted EXTERNAL prompt is an UNDECIDED SIBLING SET until an
+  `assistant` record descends from one of its members. Attachments, local
+  commands and other bookkeeping land under abandoned versions too, so only an
+  answer decides.
+- A new external prompt on the undecided set's parent JOINS it and is written on
+  the set's ROW — the first member's `prompt:<uuid>` key and turn — so it
+  supersedes that row's words. There is never a second row: a LIVE re-send
+  replaces the pending bubble in place, and a replay reads one row.
+- When the answer descends from a member OTHER than the one the row holds, the
+  row is written again with that member's words, on the answer record's file
+  coordinates (discriminator `answered_prompt`).
+- A prompt on another parent, one written after the set was decided (an edit of
+  an ANSWERED prompt), and a PARENTLESS prompt each keep a row of their own.
+- Nothing is deleted: every version's record is read and every write is
+  ledgered; only one row's content is superseded. The records under a re-sent
+  version are stamped with the row's turn.
+- Memory is one set, from its first prompt to its answer. A restart's boot
+  rewind re-reads from the newest prompt, so an undecided set's newest member is
+  re-remembered; an earlier member the rewind stopped short of is not, and an
+  answer to it then leaves the row holding the newest member's words.
+- Scope: external prompts only. Agent-repl's own `sdk-cli` prompts are drawn by
+  the stream plane, and a keep-alive or a task notification is never a member.
 
 ### Deliberate departures worth knowing
 
