@@ -56,6 +56,13 @@ type taskStopSink interface {
 	SetTaskStopObserver(func(taskID string))
 }
 
+// taskConclusionSink is implemented by a handler whose converter reports the
+// backgrounded agent runs it SETTLED itself (a task notification, an agent
+// TaskStop). The reader turns that into "this run can never be concluded LOST".
+type taskConclusionSink interface {
+	SetTaskConclusionObserver(func(taskID string))
+}
+
 // terminalReadSink is implemented by a handler that can tell the reader it READ
 // a detached run's own terminal off the file (a spool's EXIT marker). The reader
 // is what turns that into "this run can no longer be concluded LOST".
@@ -92,6 +99,7 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 	}
 	s.plumbObserver(kind, built, handlerLog)
 	s.plumbTaskStops(kind, built, handlerLog)
+	s.plumbTaskConclusions(kind, built, handlerLog)
 	s.plumbTerminals(kind, built, handlerLog)
 	return built
 }
@@ -117,6 +125,26 @@ func (s *sidecar) plumbTaskStops(kind tail.Kind, built tail.Handler, log *loggin
 	}
 	sink.SetTaskStopObserver(s.TaskStopped)
 	log.With(logging.Context{Operation: "plumb-task-stop"}).LogVerbose("task stops plumbed for kind=%s", kind)
+}
+
+// plumbTaskConclusions hands the converter the reader's run-concluded callback.
+//
+// ONLY A TRANSCRIPT SETTLES A BACKGROUNDED AGENT RUN, so a transcript converter
+// that reports none leaves every notified run to be overwritten LOST — a defect.
+func (s *sidecar) plumbTaskConclusions(kind tail.Kind, built tail.Handler, log *logging.Bound) {
+	sink, ok := built.(taskConclusionSink)
+	if !ok {
+		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
+			log.With(logging.Context{Operation: "plumb-task-conclusion"}).LogVerbose(
+				"the %s converter reports no run conclusions; only a transcript settles a backgrounded agent run", kind)
+			return
+		}
+		log.With(logging.Context{Operation: "plumb-task-conclusion", Level: "error"}).Log(
+			"the %s converter reports no run conclusions (it implements no SetTaskConclusionObserver): a notified agent run can later be concluded LOST over its terminal", kind)
+		return
+	}
+	sink.SetTaskConclusionObserver(s.TaskConcluded)
+	log.With(logging.Context{Operation: "plumb-task-conclusion"}).LogVerbose("run conclusions plumbed for kind=%s", kind)
 }
 
 // plumbTerminals hands the converter the reader's terminal-read callback.
@@ -200,6 +228,15 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 				s.log.With(logging.Context{Operation: "lost-terminal-tailer-dropped", Path: path}).
 					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated")
 			}(lost.Path)
+		}
+		// A RUN THE STORE ALREADY HOLDS A TERMINAL FOR IS NEVER RESTATED LOST.
+		// Its conclusion settles the tracker, so reaching here means a path
+		// escaped that settle; the LOST write would supersede the real terminal.
+		if _, concluded := s.concluded[lost.TaskID]; concluded && lost.TaskID != "" {
+			bound.With(logging.Context{Operation: "lost-terminal-refused", Level: "error"}).Log(
+				"LOST refused: the run already concluded (task notification or stop) and a LOST terminal would supersede it (reason=%s)", lost.Reason)
+			s.tracker.Settle(lost.Path)
+			continue
 		}
 		if lost.Kind == tail.KindResidueSpool {
 			// A RESIDUE SPOOL NAMES NO RUN. Its task-id prefix failed
