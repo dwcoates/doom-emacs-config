@@ -1064,6 +1064,18 @@ func unmodeledActivity(activityID, tool string) *conversationv1.AgentActivity {
 	}
 }
 
+// handbackActivity is a subagent handing its final report back.
+func handbackActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_SubagentHandback{SubagentHandback: &conversationv1.AgentSubagentHandback{
+			Result: &conversationv1.AgentSubagentHandback_Start{Start: &conversationv1.AgentSubagentHandbackStart{
+				Report: &conversationv1.AgentSubagentHandbackReport{Text: "the report"},
+			}},
+		}},
+	}
+}
+
 // mcpActivity is an MCP server's tool call announcing itself.
 func mcpActivity(activityID, tool string) *conversationv1.AgentActivity {
 	return &conversationv1.AgentActivity{

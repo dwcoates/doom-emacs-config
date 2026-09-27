@@ -78,6 +78,36 @@ func TestRouteMcpToolCallIsNeverWarnedAboutAsUnmodeled(t *testing.T) {
 	}
 }
 
+// TestRouteSubagentHandbackIsNeverWarnedAboutAsUnmodeled covers the WARN that
+// used to fire once per finished subagent: the hand-back is modeled now.
+func TestRouteSubagentHandbackIsNeverWarnedAboutAsUnmodeled(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(handbackActivity("act-1")))))
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.sessionwatcher.unmodeled_activity") {
+		t.Fatal("a subagent hand-back was warned about as unmodeled")
+	}
+}
+
+// TestRouteSubagentHandbackRoutesAsAnOrdinaryActivity covers the hand-back
+// reaching every activity sink.
+func TestRouteSubagentHandbackRoutesAsAnOrdinaryActivity(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(handbackActivity("act-1")))))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+}
+
 // TestRouteContextInjectedActivity covers a FILE-PLANE-ONLY fact: injected
 // context reaches the daemon only through an agent watch's replay or follow,
 // never on the session stream, and it must route as any other activity does
@@ -1003,6 +1033,11 @@ func TestActivityToolName(t *testing.T) {
 			name: "an MCP call is named by the tool as the agent named it",
 			act:  mcpActivity("act-1", "mcp__claude-in-chrome__navigate"),
 			want: "mcp__claude-in-chrome__navigate",
+		},
+		{
+			name: "a subagent hand-back is named by its vendor tool",
+			act:  handbackActivity("act-1"),
+			want: "SubagentHandback",
 		},
 		{
 			name: "prose is not a tool call and has no name",
