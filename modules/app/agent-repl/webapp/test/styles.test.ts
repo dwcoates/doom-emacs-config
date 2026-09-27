@@ -457,6 +457,30 @@ describe("the collapse/expand height model", () => {
     expect(expanded).toMatch(/overflow-y:\s*auto/);
   });
 
+  it.each([".expanded", ".bubble > .bubble-scroll.expanded", ".tool-fold.expanded > .tool-output"])(
+    "contains the overscroll of the open box %s, so it never chains to the feed",
+    (selector) => {
+      // Arrange / Act
+      const containing = rulesOf(stylesheet).filter(
+        (rule) => rule.selectors.includes(selector) && /overscroll-behavior:\s*contain/.test(rule.declarations),
+      );
+
+      // Assert
+      expect(containing).toHaveLength(1);
+    },
+  );
+
+  it("contains no collapsed box's overscroll, whose wheel stays the feed's", () => {
+    // Arrange / Act
+    const containing = rulesOf(stylesheet)
+      .filter((rule) => /overscroll-behavior/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => !selector.includes(".expanded"));
+
+    // Assert
+    expect(containing).toEqual([]);
+  });
+
   it("retires the old expand-to-full-length model, which never revealed a bar", () => {
     // Arrange / Act
     const expanded = declarationsOf(".expanded");
