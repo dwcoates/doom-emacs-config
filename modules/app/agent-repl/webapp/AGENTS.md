@@ -115,7 +115,21 @@ npm test                   the unit suites (vitest + jsdom)
 npm run typecheck          tsc over src/ AND test/, integration suite included
 npm run build              typecheck plus vite build
 npm run test:integration   the whole app against a loopback fake daemon
+npm run test:webkit        real headless WebKit over the real stylesheet (test/webkit/)
 ```
+
+`npm run test:webkit` (`vitest.webkit.config.ts`) is the suite for behavior
+jsdom cannot lay out, run in Playwright's headless WebKit, the Emacs webview's
+engine. `playwright-core` is a pinned devDependency (1.48.2, whose WebKit build
+is `webkit-2083`); a machine without that build fetches it once with
+`npx playwright-core install webkit`. Each test bundles a page entry
+(`test/webkit/*-page.ts`) into one classic script with vite and loads it with
+`src/styles.css` through `setContent`, with no server and no network. It is out
+of `npm test` because it takes seconds. Today it holds one file:
+`anchoring.webkit.test.ts`, which scrolls a fresh 400-row feed up 120 steps and
+asserts that no PAINTED frame moves the content under the reader. It samples in
+a ResizeObserver created after the feed's own, so it reads the layout the
+feed's corrections left, not a between-frames state no frame ever shows.
 
 The test and coverage scripts (and their `pre*` hooks) run through
 `../bin/background.sh`, at background priority; every vitest config imports
@@ -373,7 +387,18 @@ hand any more:
   viewport top-aligned, clamped at the feed's edges), and a reveal opens only
   the containers selecting the row requires. `prependCompensation` also covers
   a bubble whose sub-feed lies wholly above the viewport collapsing (a
-  negative shift). The expanded footer's section is capped at
+  negative shift). THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27): WebKit has
+  no native CSS scroll anchoring, and every `.feed-item` is
+  `content-visibility: auto`, so a row above the reader changes height when it
+  is first laid out. `TailFollow` holds one anchor, the first root row that
+  starts in view (`feedAnchorRows`), at its top in content coordinates. On every
+  size change and scroll event it measures that anchor BEFORE re-taking it, and
+  shifts by however far it moved (`prependCompensation`). The prepend,
+  sub-feed-collapse and thinking-collapse compensations are the same pass
+  (`compensate`), and a tail-following reader holds no anchor. Each correction
+  is DEBUG `scroll.anchor-corrected` (cause, trigger, delta, anchor). A height
+  change off the tail with no row to anchor on is ERROR `scroll.anchor-missing`.
+  `npm run test:webkit` is its regression test. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.
@@ -467,6 +492,7 @@ npm run lint             # eslint, type-aware, over src/, test/ and the root con
 npm run typecheck        # tsc over src/ and test/
 npm test                 # the unit suite (un-isolated; see vitest.config.ts)
 npm run test:integration # the whole app under jsdom against the fake daemon
+npm run test:webkit      # real headless WebKit: scroll anchoring (see Commands)
 npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```
@@ -554,6 +580,7 @@ duration actually observed, never left at a tool default. Measured against
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
 | `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
+| webkit `hookTimeout` (`vitest.webkit.config.ts`) | 10000ms (default) | 90000ms | 29.4s (bundle, launch and the 120-step pass, all in `beforeAll`) | a real browser pass; the tests only read its result, so `testTimeout` stays 850ms |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
 **Every integration file that boots the app calls `bootColdOnce()` at its top
