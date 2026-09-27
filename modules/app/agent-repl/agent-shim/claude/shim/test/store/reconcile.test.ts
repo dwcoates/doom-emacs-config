@@ -6,8 +6,8 @@
  * ARM a reconciled ending takes, because the arm is what a reader is told
  * happened.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -72,17 +72,6 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     writeBatch: refuse,
     ...overrides,
   };
-}
-
-/** Every structured record the logger wrote since `before`. */
-function recordsSince(before: number): Record<string, unknown>[] {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
-  return calls.slice(before).map(([, bytes, offset, length]) => {
-    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  });
 }
 
 /** One recorded bash start, as it would come back from the agent's own book. */
@@ -239,7 +228,7 @@ describe("liveWork", () => {
   it("logs the refusal of an empty session at error", async () => {
     // Arrange.
     const client = stubClient({});
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await createReconciler({ client, sleep: instantly })
@@ -247,7 +236,7 @@ describe("liveWork", () => {
       .catch(() => undefined);
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "refusing an open-obligation read that names no session",
@@ -329,7 +318,7 @@ describe("liveWork", () => {
           },
         }),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await createReconciler({ client, sleep: instantly })
@@ -337,7 +326,7 @@ describe("liveWork", () => {
       .catch(() => undefined);
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the store refused the open-obligation read as malformed",
@@ -754,6 +743,14 @@ describe("announceLiveWork", () => {
 
   const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
 
+  it("states the bash kind for a recorded shell run", () => {
+    // Arrange, Act.
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced[0]?.kind?.kind.case).toBe("bash");
+  });
+
   it("uses the CREATED arm: a restarted daemon has no element to continue", () => {
     const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
 
@@ -1023,7 +1020,9 @@ describe("announceLiveWork for the non-shell kinds", () => {
       value: create(conversationv1.AgentSubagentSchema, {
         result: {
           case: "start",
-          value: create(conversationv1.AgentSubagentStartSchema, {}),
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: create(conversationv1.AgentIdSchema, { value: HANDLE.value }),
+          }),
         },
       }),
     });
@@ -1054,6 +1053,63 @@ describe("announceLiveWork for the non-shell kinds", () => {
     // Assert.
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
     expect(created.workCreated?.work.case).toBe("monitor");
+  });
+
+  it("states the subagent kind, running the agent the recorded start created", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }),
+          }),
+        },
+      }),
+    });
+
+    // Act.
+    const kind = announceLiveWork([entry], [HANDLE], BOOK)[0]?.kind?.kind;
+
+    // Assert.
+    expect(kind?.case === "subagent" ? kind.value.agentId?.value : "").toBe("toolu_spawn");
+  });
+
+  it("states the monitor kind for a recorded monitor", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "monitor",
+      value: create(conversationv1.AgentMonitorSchema, {
+        result: { case: "start", value: create(conversationv1.AgentMonitorStartSchema, {}) },
+      }),
+    });
+
+    // Act, Assert.
+    expect(announceLiveWork([entry], [HANDLE], BOOK)[0]?.kind?.kind.case).toBe("monitor");
+  });
+
+  it("refuses a recorded spawn start that names no created agent, at ERROR", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: { case: "start", value: create(conversationv1.AgentSubagentStartSchema, {}) },
+      }),
+    });
+    const before = logSinkMark();
+
+    // Act.
+    const announced = announceLiveWork([entry], [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced).toEqual([]);
+    expect(logRecordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the recorded start of this live work states no announceable kind; it is not announced",
+      }),
+    );
   });
 
   it("omits a subagent the record holds no start for, rather than inventing one", () => {

@@ -9,8 +9,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { keepalivePromptText } from "../../src/engine/keepalive.js";
 import {
   CACHE_TTL_1H_MS,
@@ -314,21 +314,6 @@ describe("judging the cache", () => {
   });
 });
 
-/** The durable log records written since `before`, parsed. */
-function logRecordsSince(before: number): Array<{ level: string; message: string; context: Record<string, unknown> }> {
-  const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<
-    [number, Buffer, number, number]
-  >;
-  return calls.map(
-    ([, bytes, offset, length]) =>
-      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-        level: string;
-        message: string;
-        context: Record<string, unknown>;
-      },
-  );
-}
-
 /** The one record the floor writes when it lets a continuation through. */
 function floorRecord(before: number): { level: string; context: Record<string, unknown> } | undefined {
   return logRecordsSince(before).find((record) => record.message.includes("under the cold-gate floor"));
@@ -399,7 +384,7 @@ describe("the cold-gate floor", () => {
 
   it("records ONE info line naming the context, the lapse and the rule when it lets a lapse through", () => {
     // Arrange: a lapsed conversation one token under the floor.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     judgeCold({ ...FACTS, contextTokens: 69_999 }, LAPSED_AT, "claude-opus-5");
@@ -417,7 +402,7 @@ describe("the cold-gate floor", () => {
 
   it("records NOTHING when the conversation was warm anyway, so the floor is not credited for it", () => {
     // Arrange: inside the tier, and far under the floor.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     judgeCold({ ...FACTS, contextTokens: 1_000 }, 1_000_000 + 1, "claude-opus-5");

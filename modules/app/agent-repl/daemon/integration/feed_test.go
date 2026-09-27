@@ -1962,23 +1962,81 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 
 func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-detachsub", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-sub-1", "sub-detached-1", "roam free")))
-
-	// Assert: the fake saw WatchAgent for the detached subagent BEFORE this
-	// test ever calls OpenFeed on its bubble.
-	watched := f.shim.ExpectWatchAgentFor("sub-detached-1")
-	if watched.GetTarget().GetValue() != "sub-detached-1" {
-		t.Fatalf("the eager WatchAgent named %q, want the detached subagent's id %q", watched.GetTarget().GetValue(), "sub-detached-1")
+	tests := []struct {
+		name string
+		// detach pushes the frames that make the subagent detached work.
+		detach func(f *fixture)
+		// agent is the running agent the announcement names.
+		agent string
+		// work is the announcement's handle.
+		work string
+	}{
+		{
+			name: "a subagent spawned in the background by the Agent tool",
+			detach: func(f *fixture) {
+				f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-sub-1", "sub-detached-1", "roam free")))
+			},
+			agent: "sub-detached-1",
+			work:  "work-sub-1",
+		},
+		{
+			// 2026-09-27: the resumed agent is detached from the SEND, whose
+			// unit teaches the daemon no kind and no agent; the announcement's
+			// own kind is what routes it.
+			name: "a subagent resumed by SendMessage",
+			detach: func(f *fixture) {
+				f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+					ActivityId: activityID("send-resume-1"),
+					Item: &conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{Result: &conversationv1.AgentSendMessage_Start{
+						Start: &conversationv1.AgentSendMessageStart{AddressedTo: "a5583c88f8f4d5a90", StartedAt: startedAt(1)},
+					}}},
+				}))
+				f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, resumedSubagent("send-resume-1", "send-resume-1", "sub-resumed-1")))
+				// The resumed run's running beat rides the send's unit and
+				// names no agent of its own.
+				f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+					ActivityId: activityID("send-resume-1"),
+					Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+						Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+							Prompt:   &conversationv1.AgentSubagentPrompt{Text: "resume the sweep"},
+							Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 1_200},
+						}},
+					}},
+				}))
+			},
+			agent: "sub-resumed-1",
+			work:  "send-resume-1",
+		},
 	}
-	row := awaitRow(t, f, tail, "the detached_subagent row", func(r *frontendv1.FeedRow) bool { return r.GetDetachedSubagent() != nil })
-	if row.GetDetachedSubagent().GetSubagent().GetLabel().GetText() == "" && row.GetDetachedSubagent().GetSubagent().GetDescription().GetText() != "roam free" {
-		t.Fatalf("the detached bubble = %v, want the commission drawn", row.GetDetachedSubagent().GetSubagent())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newOpened(t, harness.Opts{})
+			f.submit("go", "k-detachsub", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+			tail := f.watchRootFeed()
+			footer := f.d.WatchFooter(f.ws)
+
+			// Act
+			tt.detach(f)
+
+			// Assert: the fake saw WatchAgent for the running agent BEFORE
+			// this test ever calls OpenFeed on its bubble.
+			watched := f.shim.ExpectWatchAgentFor(tt.agent)
+			if watched.GetTarget().GetValue() != tt.agent {
+				t.Fatalf("the eager WatchAgent named %q, want the detached subagent's id %q", watched.GetTarget().GetValue(), tt.agent)
+			}
+			row := awaitRow(t, f, tail, "the detached_subagent row", func(r *frontendv1.FeedRow) bool { return r.GetDetachedSubagent() != nil })
+			if got := row.GetDetachedSubagent().GetSubagent().GetWorkId().GetText(); got != tt.work {
+				t.Fatalf("the detached bubble's work id = %q, want %q", got, tt.work)
+			}
+			// The footer is handed the agent as live work, which is what its
+			// expanded section lists.
+			awaitFooter(t, f, footer, "the running agent on the live-work chip", func(v *frontendv1.FooterView) bool {
+				return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+			})
+		})
 	}
 }
 

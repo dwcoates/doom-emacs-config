@@ -32,6 +32,16 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		state = &subagentState{}
 		s.subagents[unitID] = state
+		// AN ANNOUNCEMENT ALREADY NAMED THIS UNIT'S AGENT: the bubble is born
+		// addressing its sub-feed rather than held for a start that, for a
+		// subagent resumed by SendMessage, never comes.
+		if named, announced := s.announcedAgents[unitID]; announced {
+			state.created = named
+			delete(s.announcedAgents, unitID)
+			r.logger(s.id).Debug("daemon.feed.subagent_named_by_announcement",
+				"a spawn's first frame took the agent its detachment announcement named",
+				dlog.Context{"unit": unitID, "agent": named.GetValue()})
+		}
 	}
 	// A SPAWN HAS ONE HOME: the feed its first frame was drawn in. A later frame
 	// of the same unit carried on another agent's book (the task stream's
@@ -411,23 +421,32 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 				"a spawn's pre-contract frames name no created agent and no start was held; its bubble is drawn but addresses no sub-feed",
 				dlog.Context{"unit": unitID, "kind": "subagent", "field": "created_agent_id", "frames": len(held), "occasion": occasion})
 		}
-		var commission *conversationv1.AgentSubagentPrompt
-		for _, frame := range held {
-			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
-				log.Error("daemon.feed.subagent_held_frame_undrawable",
-					"a held spawn frame could not be folded at its retirement",
-					dlog.Context{"unit": unitID, "cause": err.Error()})
-				continue
-			}
-			if p := commissionOf(frame); p != nil {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "p := commissionOf(frame); p != nil"})
-				commission = p
-			}
-		}
-		row := r.composeSubagent(s, state.feed, unitID, state, commission)
-		r.stampTurn(s, row, nil)
-		r.upsert(s, state.feed, row, true)
+		r.drawReleasedSpawn(s, unitID, state, held, "at its retirement")
 	}
+}
+
+// drawReleasedSpawn draws a spawn whose held frames were released from the
+// hold: each is folded in arrival order, a frame that cannot be folded is
+// reported rather than dropped, and the bubble is composed and pushed from
+// what folded. ONE PLACE, for every occasion a hold is released without a
+// naming frame of its own to fold beside it.
+func (r *resolver) drawReleasedSpawn(s *wsState, unitID string, state *subagentState, held []*conversationv1.AgentSubagent, occasion string) {
+	var commission *conversationv1.AgentSubagentPrompt
+	for _, frame := range held {
+		if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+			r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
+				"a held spawn frame could not be folded "+occasion,
+				dlog.Context{"unit": unitID, "cause": err.Error()})
+			continue
+		}
+		if p := commissionOf(frame); p != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "p := commissionOf(frame); p != nil"})
+			commission = p
+		}
+	}
+	row := r.composeSubagent(s, state.feed, unitID, state, commission)
+	r.stampTurn(s, row, nil)
+	r.upsert(s, state.feed, row, true)
 }
 
 // applyPrompt folds the commission's label and description onto the head. The
@@ -606,9 +625,17 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
+		unitID := origin.Detached.GetDetachedFromId().GetValue()
+		// THE ANNOUNCED AGENT NAMES THE BUBBLE'S SUB-FEED. A subagent resumed
+		// by SendMessage detaches from the SEND, whose frames never name the
+		// agent, so without this its bubble addressed no sub-feed
+		// (daemon.feed.subagent_without_start, 2026-09-27).
+		if agent := work.GetKind().GetSubagent().GetAgentId(); agent.GetValue() != "" {
+			r.nameAnnouncedAgent(s, unitID, agent)
+		}
 		// ONE IDENTITY SPANS THE MOVE: the element already on screen continues
 		// as a detached one rather than being replaced by a second drawing.
-		r.detachUnit(s, announcer, origin.Detached.GetDetachedFromId().GetValue(), workID, stated)
+		r.detachUnit(s, announcer, unitID, workID, stated)
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
 		case *conversationv1.DetachableWork_Subagent:
@@ -633,6 +660,78 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 				"a detached-work kind draws no feed row", dlog.Context{"work": workID})
 		}
 	}
+}
+
+// nameAnnouncedAgent takes the agent a subagent detachment announced as the
+// created agent of the unit it detached from:
+//
+//   - no bubble, the unit's own row drawn (a SendMessage's): the bubble is
+//     drawn now, beside that row (drawAnnouncedBubble);
+//   - no bubble and no row yet: the name is kept, for whichever draws first;
+//   - a bubble holding frames that named no agent: they are released now,
+//     drawn addressing the announced agent's sub-feed;
+//   - a bubble whose start already named an agent: the start stands, and an
+//     announcement naming a DIFFERENT one is a producer contract violation,
+//     recorded at ERROR.
+func (r *resolver) nameAnnouncedAgent(s *wsState, unitID string, agent *conversationv1.AgentId) {
+	state, ok := s.subagents[unitID]
+	if !ok {
+		if u, drawn := s.units[unitID]; drawn && u.carrier != "" {
+			r.drawAnnouncedBubble(s, unitID, agent, u)
+			return
+		}
+		s.announcedAgents[unitID] = agent
+		r.logger(s.id).Debug("daemon.feed.announced_agent_held",
+			"a subagent detachment named its agent before the unit drew; the bubble takes it when it does",
+			dlog.Context{"unit": unitID, "agent": agent.GetValue()})
+		return
+	}
+	if created := state.created.GetValue(); created != "" {
+		if created != agent.GetValue() {
+			r.logger(s.id).Error("daemon.feed.announced_agent_conflict",
+				"a subagent detachment named a different agent than the spawn's own start; the start's agent stands",
+				dlog.Context{"unit": unitID, "created": created, "announced": agent.GetValue()})
+		}
+		return
+	}
+	state.created = agent
+	held := state.held
+	if len(held) == 0 {
+		return
+	}
+	state.held = nil
+	state.heldBound = false
+	r.logger(s.id).Debug("daemon.feed.subagent_named_by_announcement",
+		"a spawn's held frames are drawn under the agent its detachment announcement named",
+		dlog.Context{"unit": unitID, "agent": agent.GetValue(), "frames": len(held)})
+	r.drawReleasedSpawn(s, unitID, state, held, "when its detachment named the agent")
+}
+
+// drawAnnouncedBubble draws the bubble of a subagent an announcement named from
+// a unit that is not its spawn -- the SendMessage that resumed it -- at that
+// unit's own placement, addressing the announced agent's sub-feed.
+//
+// DRAWN AT THE ANNOUNCEMENT, NOT AT THE RUN'S FIRST FRAME. The session watcher
+// opens the agent's own watch only AFTER this resolver took the announcement,
+// so drawing here mints the sub-feed before the agent's first page can arrive;
+// a bubble left for the run's first beat raced that page, and a page that
+// lands first has no feed to go to.
+func (r *resolver) drawAnnouncedBubble(s *wsState, unitID string, agent *conversationv1.AgentId, u *unitState) {
+	state := &subagentState{
+		created: agent,
+		carrier: u.carrier,
+		bubble: &frontendv1.FeedSubagent{State: &frontendv1.FeedSubagent_Live{
+			Live: &frontendv1.FeedSubagentLive{},
+		}},
+	}
+	s.subagents[unitID] = state
+	delete(s.announcedAgents, unitID)
+	row := r.composeSubagent(s, u.at, unitID, state, nil)
+	r.stampTurn(s, row, nil)
+	r.upsert(s, u.at, row, true)
+	r.logger(s.id).Debug("daemon.feed.subagent_named_by_announcement",
+		"a subagent resumed from a unit that is not its spawn was drawn at the announcement, addressing its sub-feed",
+		dlog.Context{"unit": unitID, "agent": agent.GetValue(), "owner": u.carrier})
 }
 
 // detachUnit moves the unit a detachment names to its detached drawing, in its
@@ -836,6 +935,16 @@ func (r *resolver) detachForegroundShell(s *wsState, unitID, workID string) bool
 // exists — in the feed of the agent that carried it, provided that agent is
 // the owner the announcement stated.
 func (r *resolver) applyHeldDetachment(s *wsState, unitID string) {
+	// A SUBAGENT NAMED BY AN ANNOUNCEMENT THAT PRECEDED ITS UNIT'S ROW is drawn
+	// now that the row stands, exactly as it would have been had the row come
+	// first (nameAnnouncedAgent).
+	if agent, named := s.announcedAgents[unitID]; named {
+		if _, bubbled := s.subagents[unitID]; !bubbled {
+			if u, drawn := s.units[unitID]; drawn && u.carrier != "" {
+				r.drawAnnouncedBubble(s, unitID, agent, u)
+			}
+		}
+	}
 	work, held := s.claimDetached(unitID)
 	if !held {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!held"})
@@ -860,6 +969,17 @@ func (r *resolver) applyHeldDetachment(s *wsState, unitID string) {
 				dlog.Context{"unit": unitID, "work": work})
 			return
 		}
+	}
+	// THE BUBBLE drawAnnouncedBubble JUST DREW beside the unit's row takes the
+	// held detachment: it is the detached run's head.
+	if state, ok := s.subagents[unitID]; ok {
+		state.detached = true
+		state.work = work
+		r.republishSubagent(s, unitID, state)
+		r.logger(s.id).Debug("daemon.feed.detached_subagent",
+			"a held subagent detachment moved the announced bubble to its detached placement",
+			dlog.Context{"unit": unitID, "work": work})
+		return
 	}
 	if r.detachForegroundShell(s, unitID, work) {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, unitID, work)"})

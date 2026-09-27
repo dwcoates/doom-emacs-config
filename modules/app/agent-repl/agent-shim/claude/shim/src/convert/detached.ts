@@ -38,7 +38,8 @@ import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
-import { subagentPrompt } from "./tools/subagent.js";
+import { TOOL_CONVERTERS } from "./tools/registry.js";
+import { subagentConverter, subagentPrompt } from "./tools/subagent.js";
 import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
@@ -131,8 +132,209 @@ function detachedOutput(path: string, readable: boolean): conversationv1.Detache
   });
 }
 
+// ---------------------------------------------------------------------------
+// WHAT KIND OF WORK IT IS — the vendor's own word, and nothing else.
+// ---------------------------------------------------------------------------
+//
+// Every announcement states its kind (`AgentDetachedWork.kind`), and the
+// vendor's `task_type` is the authority for it. The unit the work detached
+// from is NOT: a subagent RESUMED BY `SendMessage` is detached from the send,
+// and a consumer that read the kind off that unit found no kind at all
+// (daemon.sessionwatcher.detached_kind_unknown, 2026-09-27, the agent never
+// reached the live set or the footer).
+
+/** The kinds a detached-work announcement can name. */
+export type DetachedKindName = "subagent" | "bash" | "workflow" | "monitor";
+
+/**
+ * The vendor's `task_type` words this shim can announce, and the kind each is.
+ *
+ * A CLOSED TABLE. A word absent here is a task this shim does not know how to
+ * describe, and its announcement is refused rather than given a kind.
+ */
+const VENDOR_TASK_KINDS: ReadonlyMap<string, DetachedKindName> = new Map<string, DetachedKindName>([
+  ["local_agent", "subagent"],
+  ["local_bash", "bash"],
+  ["local_workflow", "workflow"],
+  ["monitor", "monitor"],
+]);
+
+/** The kind a vendor `task_type` names, or `undefined` for a word this shim does not know. */
+export function taskKindOf(taskType: string | undefined): DetachedKindName | undefined {
+  return taskType === undefined ? undefined : VENDOR_TASK_KINDS.get(taskType);
+}
+
+/**
+ * Whether a task is an AGENT run by its vendor `task_type`: one that names the
+ * subagent kind, or one whose kind was never stated.
+ *
+ * THE UNSTATED CASE IS AN AGENT, and that is a standing rule rather than a
+ * default this helper invents: the subagent terminal is the long-standing
+ * behavior for an untyped task, and only a task the vendor NAMED as something
+ * else is refused one. ONE PLACE for every caller that asks it.
+ */
+export function isAgentTaskType(taskType: string | undefined): boolean {
+  return taskType === undefined || taskType === "" || taskKindOf(taskType) === "subagent";
+}
+
+/**
+ * The kind one announcement states. A subagent's carries the agent that is
+ * running, so a subagent kind with no agent cannot be built.
+ */
+export type AnnouncedKind =
+  | { readonly kind: "subagent"; readonly agent: conversationv1.AgentId }
+  | { readonly kind: "bash" | "workflow" | "monitor" };
+
+/** The wire form of one announced kind. */
+export function detachedWorkKind(announced: AnnouncedKind): conversationv1.DetachedWorkKind {
+  switch (announced.kind) {
+    case "subagent":
+      return create(conversationv1.DetachedWorkKindSchema, {
+        kind: {
+          case: "subagent",
+          value: create(conversationv1.DetachedWorkKindSubagentSchema, { agentId: announced.agent }),
+        },
+      });
+    case "bash":
+      return create(conversationv1.DetachedWorkKindSchema, {
+        kind: { case: "bash", value: create(conversationv1.DetachedWorkKindBashSchema, {}) },
+      });
+    case "workflow":
+      return create(conversationv1.DetachedWorkKindSchema, {
+        kind: { case: "workflow", value: create(conversationv1.DetachedWorkKindWorkflowSchema, {}) },
+      });
+    case "monitor":
+      return create(conversationv1.DetachedWorkKindSchema, {
+        kind: { case: "monitor", value: create(conversationv1.DetachedWorkKindMonitorSchema, {}) },
+      });
+  }
+}
+
+/**
+ * The kind a RECORDED description of detached work states — for the `created`
+ * announcements a restarted consumer is sent, where no task record survives and
+ * the recorded start is the one statement of what the work is.
+ *
+ * `undefined` for a description with no kind arm, or a subagent start that
+ * names no created agent: neither can be announced, and the caller refuses it.
+ */
+export function detachableKind(work: conversationv1.DetachableWork): AnnouncedKind | undefined {
+  switch (work.work.case) {
+    case "subagent": {
+      const result = work.work.value.result;
+      const agent = result.case === "start" ? result.value.createdAgentId : undefined;
+      return agent === undefined || agent.value === "" ? undefined : { kind: "subagent", agent };
+    }
+    case "bash":
+      return { kind: "bash" };
+    case "workflow":
+      return { kind: "workflow" };
+    case "monitor":
+      return { kind: "monitor" };
+    case undefined:
+      return undefined;
+  }
+}
+
+/** Whether a call is a subagent SPAWN — the one call whose id IS the created agent. */
+function isSpawnCall(call: PendingCall): boolean {
+  return TOOL_CONVERTERS.get(call.toolName) === subagentConverter;
+}
+
+/** One task's facts, as an announcement is being built from them. */
+interface TaskFacts {
+  readonly uuid: string;
+  readonly taskId: string;
+  readonly toolUseId: string;
+  /** The vendor's `task_type`, as stated now or remembered from the start. */
+  readonly taskType: string | undefined;
+  /** The task's own call, when this fold saw it open. */
+  readonly call: PendingCall | undefined;
+}
+
+/**
+ * THE AGENT A SUBAGENT TASK IS RUNNING, under the cross-plane minting rule: the
+ * `tool_use_id` of the call that SPAWNED it, which is what every plane books
+ * the agent under.
+ *
+ * THE TASK'S OWN CALL IS NOT ALWAYS THAT SPAWN. The vendor's task id for a
+ * subagent is the agent's own locator and stays the same across a resume, but
+ * the call a resume's `task_started` names is the `SendMessage` that woke it.
+ * So the spawn is learned once, when a task starts from a spawn call, and every
+ * later start of the same task id is resolved through that join.
+ *
+ * - The call is a spawn: its id is the agent, and the join is recorded.
+ * - The join already names the agent: that is the agent, whatever the call.
+ * - The call was never seen here (a backgrounded subagent's own spawn does not
+ *   reach this stream): the task's call is taken as its spawn, as the minting
+ *   rule reads a task's `tool_use_id`, and the join is recorded.
+ * - Otherwise the call is known NOT to be a spawn and no join names the agent —
+ *   a resume of an agent this process never saw spawn. Refused, at ERROR: the
+ *   send's id is not the agent, and naming it as one would address a book
+ *   nobody writes.
+ */
+function runningAgent(facts: TaskFacts, taskKinds: TaskKindRegistry): conversationv1.AgentId | undefined {
+  if (facts.call !== undefined && isSpawnCall(facts.call)) {
+    const agent = subagentId(facts.toolUseId);
+    taskKinds.rememberAgent(facts.taskId, agent);
+    return agent;
+  }
+  const joined = taskKinds.agentOf(facts.taskId);
+  if (joined !== undefined) {
+    LOGGER.debug(
+      { uuid: facts.uuid, task_id: facts.taskId, tool_use_id: facts.toolUseId, agent: joined.value },
+      "a subagent task started from a call that is not its spawn; the agent is the one its spawn created",
+    );
+    return joined;
+  }
+  if (facts.call === undefined) {
+    const agent = subagentId(facts.toolUseId);
+    taskKinds.rememberAgent(facts.taskId, agent);
+    return agent;
+  }
+  const detail = `the task's call ${facts.toolUseId} is a ${facts.call.toolName}, not a spawn, and no spawn of task ${facts.taskId} was seen by this process`;
+  LOGGER.error(
+    {
+      uuid: facts.uuid,
+      task_id: facts.taskId,
+      tool_use_id: facts.toolUseId,
+      tool: facts.call.toolName,
+      detail,
+    },
+    "a subagent task started from a call that is not its spawn, and this process never saw the spawn; the running agent cannot be named and the announcement is refused",
+  );
+  return undefined;
+}
+
+/**
+ * The kind an announcement about this task states, or `undefined` — logged at
+ * ERROR — when the task names no kind this shim knows, or a subagent whose
+ * running agent cannot be named. Never a default.
+ */
+function announcedKind(facts: TaskFacts, taskKinds: TaskKindRegistry): AnnouncedKind | undefined {
+  const kind = taskKindOf(facts.taskType);
+  if (kind === undefined) {
+    LOGGER.error(
+      {
+        uuid: facts.uuid,
+        task_id: facts.taskId,
+        tool_use_id: facts.toolUseId,
+        task_type: facts.taskType ?? "",
+        detail: `task_type ${JSON.stringify(facts.taskType ?? null)} is not one of ${[...VENDOR_TASK_KINDS.keys()].join(", ")}`,
+      },
+      "a task names no kind this shim knows; its announcement is malformed and is refused",
+    );
+    return undefined;
+  }
+  if (kind !== "subagent") return { kind };
+  const agent = runningAgent(facts, taskKinds);
+  return agent === undefined ? undefined : { kind, agent };
+}
+
 /** What one detachment announcement says. */
 interface DetachmentFacts {
+  /** What kind of work it is. */
+  readonly kind: AnnouncedKind;
   /**
    * The in-turn unit it detached FROM — and, by the same bytes, the HANDLE the
    * work is addressed by.
@@ -178,6 +380,7 @@ function detachmentEntry(
   const announcement = create(conversationv1.AgentDetachedWorkSchema, {
     work,
     owner: facts.owner,
+    kind: detachedWorkKind(facts.kind),
     output:
       facts.outputPath === undefined
         ? undefined
@@ -247,6 +450,9 @@ export function bashDetachmentEntry(
   // `requested` when it upserts the same row to add the output path.
   taskKinds?.rememberCause(vendorTaskId, cause);
   return detachmentEntry(context, agentId, vendorUuid, {
+    // A SHELL, BY THE VENDOR'S OWN TOOL: this is the `Bash` call's own result
+    // saying its work moved to the background.
+    kind: { kind: "bash" },
     detachedFromToolUseId: toolUseId,
     cause,
     // THE CALL'S OWN AGENT OWNS IT: this result settles a call the fold
@@ -354,6 +560,18 @@ export const TASK_KIND_CAPACITY = 512;
 export interface TaskKindRegistry {
   /** Remember one task's kind, forgetting the oldest when the cap is reached. */
   remember(taskId: string, taskType: string): void;
+  /** The vendor `task_type` remembered for a task, or `undefined` if none was stated. */
+  kindOf(taskId: string): string | undefined;
+  /**
+   * Remember WHICH AGENT a subagent task is running (see `runningAgent`).
+   *
+   * OUTLIVES THE TASK'S SETTLE, unlike every other fact here: a subagent's task
+   * id is the agent's own locator and comes back when the agent is RESUMED, and
+   * the resume's own call is the send, not the spawn. Bounded all the same.
+   */
+  rememberAgent(taskId: string, agent: conversationv1.AgentId): void;
+  /** The agent remembered for a task, or `undefined` if this process never named one. */
+  agentOf(taskId: string): conversationv1.AgentId | undefined;
   /**
    * Remember WHY a task's work left the turn.
    *
@@ -444,45 +662,65 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
-  const reserve = (): void => {
-    if (facts.size < TASK_KIND_CAPACITY) return;
-    const [oldest] = facts.keys();
+  /** The agents subagent tasks run, by task id; kept past each task's settle. */
+  const agents = new Map<string, conversationv1.AgentId>();
+  /**
+   * Make room for one more entry in either table, forgetting the oldest when
+   * the cap is hit. ONE BOUND, ONE RECORD for both tables: what is lost differs
+   * (a notification's type and cause, or a later resume's agent), and the
+   * record names which.
+   */
+  const reserve = (table: Map<string, unknown>, lost: string): void => {
+    if (table.size < TASK_KIND_CAPACITY) return;
+    const [oldest] = table.keys();
     if (oldest === undefined) return;
-    facts.delete(oldest);
-    // warn: a defect because bounded task bookkeeping discarded facts needed to type a later notification.
+    table.delete(oldest);
+    // warn: a defect because bounded task bookkeeping discarded facts a later message of that task needs.
     LOGGER.warn(
-      { task_id: oldest },
-      "the task-facts table is full; the oldest task's kind and cause are forgotten and its notification cannot be typed",
+      { task_id: oldest, lost },
+      "a bounded task table is full; the oldest task's entry is forgotten",
     );
   };
+  const FACTS_LOST = "its kind and cause, so its notification cannot be typed";
   return {
     remember(taskId, taskType) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), kind: taskType });
     },
+    kindOf(taskId) {
+      return facts.get(taskId)?.kind;
+    },
+    rememberAgent(taskId, agent) {
+      agents.delete(taskId);
+      reserve(agents, "the agent it ran, so a resume of that agent cannot be named");
+      agents.set(taskId, agent);
+    },
+    agentOf(taskId) {
+      return agents.get(taskId);
+    },
     rememberCause(taskId, cause) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), cause });
     },
     causeOf(taskId) {
       return facts.get(taskId)?.cause;
     },
     rememberToolUse(taskId, toolUseId) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), toolUseId });
     },
     toolUseFor(taskId) {
       return facts.get(taskId)?.toolUseId;
     },
     rememberOwner(taskId, owner) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), owner });
     },
     ownerOf(taskId) {
       return facts.get(taskId)?.owner;
     },
     rememberCall(taskId, call) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), call });
     },
     callOf(taskId) {
@@ -491,10 +729,10 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
       facts.delete(taskId);
-      return kind === undefined || kind === "local_agent";
+      return isAgentTaskType(kind);
     },
     rememberForeground(taskId) {
-      reserve();
+      reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), foreground: true });
     },
     concludesInForeground(taskId) {
@@ -565,6 +803,11 @@ export function convertDetached(
   const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
   // Read NOW, before a settling notification forgets the task's facts.
   const spawnCall = openCall ?? taskKinds.callOf(taskId);
+  // THE VENDOR'S WORD FOR WHAT THE TASK IS: stated on this message, or on the
+  // task's start, or on the vendor's live level (which is all a process that
+  // started after the task has).
+  const taskType = raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType;
+  const taskFacts = (call: string): TaskFacts => ({ uuid, taskId, toolUseId: call, taskType, call: spawnCall });
 
   switch (raw.subtype) {
     case "task_started": {
@@ -622,20 +865,32 @@ export function convertDetached(
       // which already refuses to settle a shell task's unit for the same
       // reason. (No real capture carries a `task` message at all; the ctrl-b
       // and timeout captures announce from the result.)
-      if (raw.task_type === "local_bash") {
+      if (taskKindOf(raw.task_type) === "bash") {
         LOGGER.debug(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
           "a shell task started; its own tool result announces the detachment and states the cause",
         );
         return [];
       }
+      // REFUSED, NOT RESIDUE: the refusal is already recorded at ERROR with
+      // the task's whole context, and a residue row would record it twice.
+      const kind = announcedKind(taskFacts(toolUseId), taskKinds);
+      if (kind === undefined) return [];
       taskKinds.rememberCause(taskId, "requested");
       LOGGER.info(
-        { uuid, task_id: taskId, tool_use_id: toolUseId, task_type: raw.task_type ?? "" },
+        {
+          uuid,
+          task_id: taskId,
+          tool_use_id: toolUseId,
+          task_type: raw.task_type ?? "",
+          kind: kind.kind,
+          agent: kind.kind === "subagent" ? kind.agent.value : "",
+        },
         "work left the turn",
       );
       return [
         detachmentEntry(context, agentId, uuid, {
+          kind,
           detachedFromToolUseId: toolUseId,
           cause: "requested",
           owner,
@@ -665,8 +920,13 @@ export function convertDetached(
       LOGGER.info({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
       calls.detach(toolUseId);
       taskKinds.rememberCause(taskId, "by_user");
+      // THE WORK STILL LEFT THE TURN when its kind cannot be named: the call is
+      // handed off and the cause kept above. Only the announcement is refused.
+      const kind = announcedKind(taskFacts(toolUseId), taskKinds);
+      if (kind === undefined) return [];
       return [
         detachmentEntry(context, agentId, uuid, {
+          kind,
           detachedFromToolUseId: toolUseId,
           cause: "by_user",
           owner,
@@ -710,9 +970,16 @@ export function convertDetached(
         return [];
       }
       const entries: PersistEntry[] = [];
-      if (toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined) {
+      // THE ANNOUNCEMENT'S KIND IS READ BEFORE THE SETTLE BELOW FORGETS IT, and
+      // an upsert that cannot state one is refused like any other.
+      const kind =
+        toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined
+          ? announcedKind(taskFacts(toolUseId), taskKinds)
+          : undefined;
+      if (toolUseId !== undefined && toolUseId !== "" && kind !== undefined) {
         entries.push(
           detachmentEntry(context, agentId, uuid, {
+            kind,
             detachedFromToolUseId: toolUseId,
             // THE REMEMBERED CAUSE, never a fresh `requested`: this row is an
             // UPSERT of the announcement already made, and the notification
@@ -743,7 +1010,14 @@ export function convertDetached(
         );
         return entries;
       }
-      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw, spawnCall));
+      // THE AGENT THE TASK RAN, which for a subagent RESUMED BY A SEND is not
+      // the send's id: the join its spawn recorded names it. A task this
+      // process never named an agent for keeps the minting rule's reading of
+      // its own call.
+      const createdAgent = taskKinds.agentOf(taskId) ?? subagentId(toolUseId);
+      entries.push(
+        ...subagentTerminalEntries(context, agentId, uuid, toolUseId, createdAgent, raw, spawnCall),
+      );
       return entries;
     }
 
@@ -850,6 +1124,7 @@ function subagentTerminalEntries(
   agentId: conversationv1.AgentId,
   vendorUuid: string,
   toolUseId: string,
+  createdAgent: conversationv1.AgentId,
   raw: RawTask,
   spawnCall: PendingCall | undefined,
 ): readonly PersistEntry[] {
@@ -884,7 +1159,7 @@ function subagentTerminalEntries(
                 // draws its label and addresses its sub-feed: the spawning
                 // call's prompt, and the created agent the minting rule names.
                 prompt: spawnPrompt(spawnCall),
-                createdAgentId: subagentId(toolUseId),
+                createdAgentId: createdAgent,
               }),
             },
           }),
@@ -921,7 +1196,7 @@ function subagentTerminalEntries(
                   settledAt: settled,
                 }),
                 prompt: spawnPrompt(spawnCall),
-                createdAgentId: subagentId(toolUseId),
+                createdAgentId: createdAgent,
               }),
             },
           }),
@@ -948,7 +1223,7 @@ function subagentTerminalEntries(
               // the launch's own start rides the tool result, on a delivery
               // this one need not share — so the id is restated here from the
               // spawning call, which the minting rule makes the same value.
-              createdAgentId: subagentId(toolUseId),
+              createdAgentId: createdAgent,
               prompt: spawnPrompt(spawnCall),
               report: create(conversationv1.AgentSubagentReportSchema, {
                 prose: prose(raw.summary ?? ""),

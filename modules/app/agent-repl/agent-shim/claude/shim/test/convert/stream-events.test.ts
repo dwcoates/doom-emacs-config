@@ -11,8 +11,8 @@
  * nothing at all.
  */
 import { create } from "@bufbuild/protobuf";
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsDuring, type LogRecord } from "../log-records.js";
 import { createFold } from "../../src/convert/fold.js";
 import { convertAssistantMessage, StreamBlocks } from "../../src/convert/stream-events.js";
 import { createCallRegistry } from "../../src/convert/tool-calls.js";
@@ -961,30 +961,11 @@ describe("a stream's block state", () => {
 // The log records these invariants are reported through.
 // ---------------------------------------------------------------------------
 
-const mockedWriteSync = vi.mocked(writeSync);
-
-/** A persisted log record, as the canonical logger writes one. */
-interface LogRecord {
-  readonly level: string;
-  readonly message: string;
-  readonly context: Record<string, unknown>;
-}
-
-/** The records the canonical logger persisted while `act` ran. */
-function recordsDuring(act: () => void): LogRecord[] {
-  const before = mockedWriteSync.mock.calls.length;
-  act();
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as LogRecord,
-  );
-}
-
 const UNSETTLED = "invariant violated: a streamed unit was started and never settled; its row stays unsettled";
 
 /** The unsettled-unit error records folding `messages` wrote. */
 function unsettledReports(messages: readonly SdkMessage[]): LogRecord[] {
-  return recordsDuring(() => foldAll(messages)).filter((record) => record.message === UNSETTLED);
+  return logRecordsDuring(() => foldAll(messages)).filter((record) => record.message === UNSETTLED);
 }
 
 describe("a streamed unit its stream started and never settled", () => {
@@ -1082,7 +1063,7 @@ describe("a streamed unit its stream started and never settled", () => {
 
   it("is NOT reported for a subagent message_start interleaved into an open main block", () => {
     // Arrange, Act.
-    const reports = recordsDuring(() => foldSubagentMidMainBlock("text")).filter((r) => r.level === "error");
+    const reports = logRecordsDuring(() => foldSubagentMidMainBlock("text")).filter((r) => r.level === "error");
 
     // Assert.
     expect(reports).toEqual([]);
@@ -1090,7 +1071,7 @@ describe("a streamed unit its stream started and never settled", () => {
 
   it("is NOT reported for a response whose every unit settled", () => {
     // Arrange, Act.
-    const reports = recordsDuring(() => foldStreamedResponse()).filter((r) => r.message === UNSETTLED);
+    const reports = logRecordsDuring(() => foldStreamedResponse()).filter((r) => r.message === UNSETTLED);
 
     // Assert.
     expect(reports).toEqual([]);
@@ -1100,7 +1081,7 @@ describe("a streamed unit its stream started and never settled", () => {
 describe("the warnings a stream with no identity still raises", () => {
   it("warns when a message_start names no message id", () => {
     // Arrange, Act.
-    const records = recordsDuring(() => foldAll([eventOn(null, { type: "message_start", message: {} }, "u-noid")]));
+    const records = logRecordsDuring(() => foldAll([eventOn(null, { type: "message_start", message: {} }, "u-noid")]));
 
     // Assert.
     expect(
@@ -1112,7 +1093,7 @@ describe("the warnings a stream with no identity still raises", () => {
 
   it("warns when a content block opens with no message_start on its stream", () => {
     // Arrange, Act.
-    const records = recordsDuring(() => foldAll([eventOn(SPAWN, blockStart(0, "text"), "u-orphan")]));
+    const records = logRecordsDuring(() => foldAll([eventOn(SPAWN, blockStart(0, "text"), "u-orphan")]));
 
     // Assert.
     expect(

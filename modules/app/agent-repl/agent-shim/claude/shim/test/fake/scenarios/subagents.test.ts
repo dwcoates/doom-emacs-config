@@ -3,8 +3,8 @@
  * stream cannot: the `.meta.json` is the only source of a subagent's type,
  * description, spawning call and spawn depth.
  */
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../../log-records.js";
 import { createFold } from "../../../src/convert/fold.js";
 import type { PersistEntry } from "../../../src/store/persistence.js";
 import { activityOf, foldContext, MAIN_AGENT } from "../../convert/fold-harness.js";
@@ -522,15 +522,11 @@ describe("a detached subagent streaming INTO the main agent's open blocks", () =
     const driven = await driveScenario(["!subagent-interleaved"]);
     const fold = createFold();
     const context = foldContext();
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
     const entries = driven.messages.flatMap((message) => [
       ...fold.onSdkMessage(message, context).entries,
     ]);
-    const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-    const logs = calls.map(
-      ([, bytes, offset, length]) =>
-        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { message: string },
-    );
+    const logs = logRecordsSince(before);
     return { entries, logs };
   }
 

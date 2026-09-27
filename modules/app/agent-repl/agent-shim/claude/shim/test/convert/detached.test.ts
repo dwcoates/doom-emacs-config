@@ -8,8 +8,11 @@
  * arm a reader is told, which is the whole point of `lost` — and the ruling
  * itself belongs to whoever holds the live set.
  */
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
@@ -18,6 +21,10 @@ import {
   bashDetachmentEntry,
   convertDetached,
   createTaskKindRegistry,
+  detachableKind,
+  detachedWorkKind,
+  isAgentTaskType,
+  taskKindOf,
   TASK_KIND_CAPACITY,
   lostAgentEntry,
   lostBashEntry,
@@ -553,15 +560,13 @@ describe("convertDetached: task_started", () => {
     expect(entries[0]?.agentId.value).toBe("sub-1");
   });
 
-  it("announces an agent task whose kind the vendor left unstated", () => {
-    const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" });
-
-    expect(entries[0]?.source.discriminator).toBe("agent_frame.detached_work.detached.requested");
-  });
-
   it("remembers `requested` for an agent task, so its notification upserts that cause", () => {
     const registry = createTaskKindRegistry();
-    convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" }, {}, registry);
+    convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent" },
+      {},
+      registry,
+    );
 
     expect(registry.causeOf("t1")).toBe("requested");
   });
@@ -581,12 +586,14 @@ describe("convertDetached: task_updated", () => {
   });
 
   it("announces `by_user` when a person backgrounded running work by hand", () => {
-    const entries = convert({
-      subtype: "task_updated",
-      task_id: "t1",
-      tool_use_id: "toolu_1",
-      patch: { is_backgrounded: true },
-    });
+    // The patch states no kind; the task's start did.
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+    const entries = convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
 
     expect(detachedOrigin(entries[0]).cause.case).toBe("byUser");
   });
@@ -722,6 +729,7 @@ describe("convertDetached: task_progress", () => {
 describe("convertDetached: task_notification", () => {
   it("upserts the announcement with the REMEMBERED cause, never a fresh requested", () => {
     const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
     registry.rememberCause("t1", "timed_out");
     const entries = convert(
       {
@@ -739,13 +747,19 @@ describe("convertDetached: task_notification", () => {
   });
 
   it("falls back to `requested` when no cause was ever stated for the task", () => {
-    const entries = convert({
-      subtype: "task_notification",
-      task_id: "t1",
-      tool_use_id: "toolu_1",
-      output_file: "/tmp/t1.output",
-      status: "completed",
-    });
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+    const entries = convert(
+      {
+        subtype: "task_notification",
+        task_id: "t1",
+        tool_use_id: "toolu_1",
+        output_file: "/tmp/t1.output",
+        status: "completed",
+      },
+      {},
+      registry,
+    );
 
     expect(detachedOrigin(entries[0]).cause.case).toBe("requested");
   });
@@ -1050,19 +1064,15 @@ describe("convertDetached: foreground work", () => {
 
   it("records a foreground start at debug, naming the task", () => {
     // Arrange.
-    const written = vi.mocked(writeSync);
-    const before = written.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     convert(foregroundStart("local_bash"));
 
     // Assert.
-    const records = (written.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>)
-      .map(([, bytes, offset, length]) =>
-        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-      )
+    const records = logRecordsSince(before)
       .filter((record) => record.message === "a task started in the foreground; it is not detached work and nothing is announced")
-      .map((record) => ({ level: record.level, task: (record.context as Record<string, unknown>).task_id }));
+      .map((record) => ({ level: record.level, task: record.context.task_id }));
     expect(records).toEqual([{ level: "debug", task: "t1" }]);
   });
 
@@ -1260,5 +1270,479 @@ describe("convertDetached: the call's handoff", () => {
 
     // Assert
     expect(calls.isDetached("toolu_1")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WHAT KIND OF WORK IT IS: the vendor's `task_type`, on every announcement
+// ---------------------------------------------------------------------------
+
+/** The ERROR records written since `before`, by message. */
+function errorsSince(before: number): string[] {
+  return logRecordsSince(before)
+    .filter((record) => record.level === "error")
+    .map((record) => String(record.message));
+}
+
+/** An open call of `toolName`, made by the main agent. */
+function openCall(calls: CallRegistry, toolUseId: string, toolName: string): void {
+  calls.remember({ toolUseId, toolName, input: {}, startedAtMs: 1, agentId: MAIN_AGENT });
+}
+
+/** The kind arm one announcement row states. */
+function kindOf(entry: PersistEntry | undefined): conversationv1.DetachedWorkKind["kind"] {
+  return announcement(entry).kind?.kind ?? { case: undefined };
+}
+
+/** The agent a subagent announcement names. */
+function subagentOf(entry: PersistEntry | undefined): string {
+  const kind = kindOf(entry);
+  return kind.case === "subagent" ? (kind.value.agentId?.value ?? "") : "";
+}
+
+describe("taskKindOf", () => {
+  it.each([
+    { taskType: "local_agent", kind: "subagent" },
+    { taskType: "local_bash", kind: "bash" },
+    { taskType: "local_workflow", kind: "workflow" },
+    { taskType: "monitor", kind: "monitor" },
+  ])("maps the vendor's $taskType to $kind", ({ taskType, kind }) => {
+    // Arrange, Act, Assert.
+    expect(taskKindOf(taskType)).toBe(kind);
+  });
+
+  it("names no kind for a task_type this shim does not know", () => {
+    // Arrange, Act, Assert.
+    expect(taskKindOf("mcp_task")).toBeUndefined();
+  });
+
+  it("names no kind for a task_type the vendor left unstated", () => {
+    // Arrange, Act, Assert.
+    expect(taskKindOf(undefined)).toBeUndefined();
+  });
+});
+
+describe("detachedWorkKind", () => {
+  it.each([
+    { kind: "bash" as const },
+    { kind: "workflow" as const },
+    { kind: "monitor" as const },
+  ])("builds the $kind arm", ({ kind }) => {
+    // Arrange, Act, Assert.
+    expect(detachedWorkKind({ kind }).kind.case).toBe(kind);
+  });
+
+  it("builds the subagent arm carrying the running agent", () => {
+    // Arrange.
+    const agent = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+
+    // Act.
+    const built = detachedWorkKind({ kind: "subagent", agent });
+
+    // Assert.
+    expect(built.kind.case === "subagent" ? built.kind.value.agentId?.value : "").toBe("toolu_spawn");
+  });
+});
+
+describe("detachableKind", () => {
+  const spawn = (createdAgentId?: string): conversationv1.DetachableWork =>
+    create(conversationv1.DetachableWorkSchema, {
+      work: {
+        case: "subagent",
+        value: create(conversationv1.AgentSubagentSchema, {
+          result: {
+            case: "start",
+            value: create(conversationv1.AgentSubagentStartSchema, {
+              ...(createdAgentId === undefined
+                ? {}
+                : { createdAgentId: create(conversationv1.AgentIdSchema, { value: createdAgentId }) }),
+            }),
+          },
+        }),
+      },
+    });
+
+  it("reads a recorded spawn start as a subagent running its created agent", () => {
+    // Arrange, Act.
+    const kind = detachableKind(spawn("toolu_spawn"));
+
+    // Assert.
+    expect(kind?.kind === "subagent" ? kind.agent.value : "").toBe("toolu_spawn");
+  });
+
+  it("refuses a recorded spawn start that names no created agent", () => {
+    // Arrange, Act, Assert.
+    expect(detachableKind(spawn())).toBeUndefined();
+  });
+
+  it.each([
+    { arm: "bash" as const, value: create(conversationv1.AgentBashSchema, {}) },
+    { arm: "monitor" as const, value: create(conversationv1.AgentMonitorSchema, {}) },
+    { arm: "workflow" as const, value: create(conversationv1.AgentWorkflowStartSchema, {}) },
+  ])("reads a recorded $arm as the $arm kind", ({ arm, value }) => {
+    // Arrange.
+    const work = create(conversationv1.DetachableWorkSchema, {
+      work: { case: arm, value } as conversationv1.DetachableWork["work"],
+    });
+
+    // Act, Assert.
+    expect(detachableKind(work)?.kind).toBe(arm);
+  });
+
+  it("refuses a description with no kind arm", () => {
+    // Arrange, Act, Assert.
+    expect(detachableKind(create(conversationv1.DetachableWorkSchema, {}))).toBeUndefined();
+  });
+});
+
+describe("convertDetached: the announcement's kind", () => {
+  it.each([
+    { taskType: "local_workflow", kind: "workflow" },
+    { taskType: "monitor", kind: "monitor" },
+  ])("states the $kind kind for a $taskType task", ({ taskType, kind }) => {
+    // Arrange, Act.
+    const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: taskType });
+
+    // Assert.
+    expect(kindOf(entries[0]).case).toBe(kind);
+  });
+
+  it("names the SPAWN CALL's agent for a subagent spawned by an Agent call", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_spawn", "Agent");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert.
+    expect(subagentOf(entries[0])).toBe("toolu_spawn");
+  });
+
+  it("names the task's own call as the agent when this fold never saw that call", () => {
+    // A backgrounded subagent's own spawn does not reach this stream.
+    // Arrange, Act.
+    const entries = convert({
+      subtype: "task_started",
+      task_id: "a5583",
+      tool_use_id: "toolu_nested",
+      task_type: "local_agent",
+    });
+
+    // Assert.
+    expect(subagentOf(entries[0])).toBe("toolu_nested");
+  });
+
+  it("names the ORIGINAL spawn's agent for a subagent resumed by SendMessage", () => {
+    // Arrange: the spawn, then the resume under the same task id.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_spawn", "Agent");
+    convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" },
+      {},
+      registry,
+      calls,
+    );
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert.
+    expect(subagentOf(entries[0])).toBe("toolu_spawn");
+  });
+
+  it("detaches a resumed subagent FROM THE SEND that woke it", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert.
+    expect(detachedOrigin(entries[0]).detachedFromId?.value).toBe("toolu_send");
+  });
+
+  it("refuses a resume whose spawn this process never saw, at ERROR", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert.
+    expect(entries).toEqual([]);
+    expect(errorsSince(before)).toEqual([
+      "a subagent task started from a call that is not its spawn, and this process never saw the spawn; the running agent cannot be named and the announcement is refused",
+    ]);
+  });
+
+  it("refuses a task whose kind the vendor left unstated, at ERROR", () => {
+    // Arrange.
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" });
+
+    // Assert.
+    expect(entries).toEqual([]);
+    expect(errorsSince(before)).toEqual([
+      "a task names no kind this shim knows; its announcement is malformed and is refused",
+    ]);
+  });
+
+  it("refuses a task whose kind this shim does not know, at ERROR", () => {
+    // Arrange.
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "mcp_task" });
+
+    // Assert.
+    expect(entries).toEqual([]);
+    expect(errorsSince(before)).toEqual([
+      "a task names no kind this shim knows; its announcement is malformed and is refused",
+    ]);
+  });
+
+  it("does not remember a cause for a task whose announcement was refused", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+
+    // Act.
+    convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "mcp_task" }, {}, registry);
+
+    // Assert.
+    expect(registry.causeOf("t1")).toBeUndefined();
+  });
+
+  it("states the kind a task's START named on a by-hand backgrounding", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_bash");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    // Assert.
+    expect(kindOf(entries[0]).case).toBe("bash");
+  });
+
+  it("states the kind the vendor's LIVE LEVEL named when the start was never seen", () => {
+    // Arrange, Act.
+    const entries = convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      { liveTask: () => ({ toolUseId: "toolu_1", taskType: "local_bash" }) },
+    );
+
+    // Assert.
+    expect(kindOf(entries[0]).case).toBe("bash");
+  });
+
+  it("announces nothing for a by-hand backgrounding of a task of no known kind, at ERROR", () => {
+    // Arrange.
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert({
+      subtype: "task_updated",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      patch: { is_backgrounded: true },
+    });
+
+    // Assert.
+    expect(entries).toEqual([]);
+    expect(errorsSince(before)).toEqual([
+      "a task names no kind this shim knows; its announcement is malformed and is refused",
+    ]);
+  });
+
+  it("still hands the call off when a by-hand backgrounding cannot be announced", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_1", "Bash");
+
+    // Act.
+    convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert.
+    expect(calls.isDetached("toolu_1")).toBe(true);
+  });
+
+  it("states the kind on a notification's output upsert", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_bash");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", output_file: "/tmp/t1.output", status: "completed" },
+      {},
+      registry,
+    );
+
+    // Assert.
+    expect(kindOf(entries[0]).case).toBe("bash");
+  });
+
+  it("upserts no announcement for a notification of a task of no known kind, at ERROR", () => {
+    // Arrange.
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      output_file: "/tmp/t1.output",
+      status: "completed",
+    });
+
+    // Assert.
+    expect(entries.map((entry) => entry.source.discriminator)).toEqual(["activity.subagent.success"]);
+    expect(errorsSince(before)).toEqual([
+      "a task names no kind this shim knows; its announcement is malformed and is refused",
+    ]);
+  });
+
+  it("settles a RESUMED subagent's run naming the agent its spawn created", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("a5583", "local_agent");
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_send", status: "completed" },
+      {},
+      registry,
+    );
+
+    // Assert.
+    const subagent = activityOf(entries.at(-1))?.item.value as conversationv1.AgentSubagent;
+    const success = subagent.result.value as conversationv1.AgentSubagentSuccess;
+    expect(success.createdAgentId?.value).toBe("toolu_spawn");
+  });
+});
+
+describe("bashDetachmentEntry: the announcement's kind", () => {
+  it("states the bash kind, by the vendor's own Bash result", () => {
+    // Arrange, Act.
+    const entry = bashDetachment({ backgroundTaskId: "b1" });
+
+    // Assert.
+    expect(kindOf(entry).case).toBe("bash");
+  });
+});
+
+describe("the task registry's agent join", () => {
+  it("keeps a task's agent past the task's settle, so a resume can name it", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("a5583", "local_agent");
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act.
+    registry.settlesAsSubagent("a5583");
+
+    // Assert.
+    expect(registry.agentOf("a5583")?.value).toBe("toolu_spawn");
+  });
+
+  it("forgets the oldest agent when the cap is reached", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("oldest", create(conversationv1.AgentIdSchema, { value: "toolu_old" }));
+
+    // Act.
+    for (let index = 0; index < TASK_KIND_CAPACITY; index += 1) {
+      registry.rememberAgent(`task-${index}`, create(conversationv1.AgentIdSchema, { value: `toolu_${index}` }));
+    }
+
+    // Assert.
+    expect(registry.agentOf("oldest")).toBeUndefined();
+  });
+
+  it("records the forgotten agent at warn, naming what was lost", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    for (let index = 0; index < TASK_KIND_CAPACITY; index += 1) {
+      registry.rememberAgent(`task-${index}`, create(conversationv1.AgentIdSchema, { value: `toolu_${index}` }));
+    }
+    const before = logSinkMark();
+
+    // Act.
+    registry.rememberAgent("newest", create(conversationv1.AgentIdSchema, { value: "toolu_new" }));
+
+    // Assert.
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect(warned.map((record) => record.context.task_id)).toEqual(["task-0"]);
+  });
+});
+
+describe("isAgentTaskType", () => {
+  it.each([
+    { taskType: "local_agent", agent: true },
+    { taskType: undefined, agent: true },
+    { taskType: "", agent: true },
+    { taskType: "local_bash", agent: false },
+    { taskType: "monitor", agent: false },
+    { taskType: "mcp_task", agent: false },
+  ])("answers $agent for task_type $taskType", ({ taskType, agent }) => {
+    // Arrange, Act, Assert.
+    expect(isAgentTaskType(taskType)).toBe(agent);
+  });
+
+  it("is the one reader of the vendor's task_type words outside the table", () => {
+    // Arrange: every authored source file but the mock vendor, which WRITES them.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../../src");
+    const files = readdirSync(root, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".ts") && !file.startsWith("fake"));
+
+    // Act.
+    const readers = files.flatMap((file) => {
+      const text = readFileSync(join(root, file), "utf8");
+      const hits = text.match(/"local_(agent|bash|workflow)"/g) ?? [];
+      return file === join("convert", "detached.ts") ? hits.slice(3) : hits.map(() => file);
+    });
+
+    // Assert: the words appear only in VENDOR_TASK_KINDS.
+    expect(readers).toEqual([]);
   });
 });

@@ -40,6 +40,7 @@
  * walking the agent's own book for the unit — the one place the fact still is.
  */
 import { create } from "@bufbuild/protobuf";
+import { detachableKind, detachedWorkKind } from "../convert/detached.js";
 import { agentActivity } from "../convert/entries.js";
 import { subagentId } from "../convert/ids.js";
 import { bindLog } from "../log.js";
@@ -565,12 +566,28 @@ export function announceLiveWork(
       );
       continue;
     }
+    // THE KIND IS THE RECORDED START'S, and every announcement states one. A
+    // recorded spawn that names no created agent is a record-plane defect: it
+    // is refused rather than announced as a subagent nobody can address.
+    const kind = detachableKind(described);
+    if (kind === undefined) {
+      LOGGER.error(
+        {
+          work: handle.value,
+          described: described.work.case ?? "",
+          detail: "the recorded start names no kind arm, or a spawn with no created agent",
+        },
+        "the recorded start of this live work states no announceable kind; it is not announced",
+      );
+      continue;
+    }
     announcements.push(
       create(conversationv1.AgentDetachedWorkSchema, {
         work: handle,
         // THE BOOK THE START WAS FOUND IN IS THE OWNER'S: `entries` is one
         // agent's book, and a unit described from it is that agent's call.
         owner,
+        kind: detachedWorkKind(kind),
         origin: {
           case: "created",
           value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),
