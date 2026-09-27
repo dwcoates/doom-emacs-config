@@ -61,6 +61,8 @@ export interface ContextOverrides {
   readonly claudeConfigDir?: string;
   /** The model the diagnostic api-failure record names. */
   readonly model?: string;
+  /** HOW the held stop was commanded, as the engine hands it to the fold. */
+  readonly stopCommand?: conversationv1.AgentInterruptedByUser;
 }
 
 /** A fold context with the engine's knowledge stubbed to nothing by default. */
@@ -81,6 +83,7 @@ export function foldContext(overrides: ContextOverrides = {}): FoldContext {
     ...(overrides.reportFault === undefined ? {} : { reportFault: overrides.reportFault }),
     ...(overrides.claudeConfigDir === undefined ? {} : { claudeConfigDir: overrides.claudeConfigDir }),
     ...(overrides.model === undefined ? {} : { model: overrides.model }),
+    ...(overrides.stopCommand === undefined ? {} : { stopCommand: overrides.stopCommand }),
   };
 }
 
