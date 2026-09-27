@@ -18,6 +18,8 @@ import {
 } from "../../../src/feed/rows/turn-ended.js";
 import { countingTicker, feedId, harness, rowContext, userPromptRow } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { BUBBLE_CAP_ATTRIBUTE, BUBBLE_UNCAPPED } from "../../../src/bubble/draw.js";
+import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -653,6 +655,17 @@ describe("drawFeedTurnEnded: the ended-turn bubble (owner ruling 2026-09-24)", (
     expect([bubble?.getAttribute("data-role"), bubble?.getAttribute("data-variant")]).toEqual([
       "response",
       "turn-ended",
+    ]);
+  });
+
+  it("draws the bubble uncapped, at its full height with no scroll box", () => {
+    // ACT
+    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
+    // ASSERT
+    const bubble = el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
+    expect([bubble?.getAttribute(BUBBLE_CAP_ATTRIBUTE), bubble?.querySelector(`.${BUBBLE_SCROLL_CLASS}`)]).toEqual([
+      BUBBLE_UNCAPPED,
+      null,
     ]);
   });
 

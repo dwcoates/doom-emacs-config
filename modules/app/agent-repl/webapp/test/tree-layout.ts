@@ -155,14 +155,16 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
 
 /**
  * The column budget a staged LAYOUT yields, computed the way the measure is
- * specified to: the cap less the body's padding and the expanded scrollbar's
- * gutter, in whole columns.
+ * specified to: the cap less the body's padding and, in a CAPPED bubble's
+ * scroll box, the scrollbar's gutter, in whole columns. An UNCAPPED bubble's
+ * box (src/bubble/draw.ts `BUBBLE_UNCAPPED`) reserves no gutter.
  */
-export function stagedCols(layout: TreeLayout): number {
+export function stagedCols(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): number {
   const pct = /^([\d.]+)%$/.exec(layout.maxWidth);
   const capPx =
     pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
-  return Math.floor((capPx - 2 * layout.bodyPaddingPx - layout.scrollbarPx) / layout.charPx);
+  const gutterPx = box === "capped" ? layout.scrollbarPx : 0;
+  return Math.floor((capPx - 2 * layout.bodyPaddingPx - gutterPx) / layout.charPx);
 }
 
 /**
