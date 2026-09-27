@@ -60,6 +60,24 @@ export function peerFacts(record: Record<string, unknown>, fallbackBody: string)
   return { sender, body };
 }
 
+/**
+ * WHAT KIND of peer message a record is, from the vendor's own marking:
+ * `origin.handback === true` is a subagent handing its final report back, and
+ * anything else is another session's message. The sidecar reads the same field
+ * the same way (`shim-sidecar/internal/convert/user.go`), so both planes state
+ * one kind for one record.
+ */
+function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage["kind"] {
+  const origin = record.origin as RawPeerOrigin | undefined;
+  if (origin?.handback === true) {
+    return {
+      case: "subagentHandback",
+      value: create(conversationv1.PeerMessageSubagentHandbackSchema, {}),
+    };
+  }
+  return { case: "interSession", value: create(conversationv1.PeerMessageInterSessionSchema, {}) };
+}
+
 /** The first text of a user message's content, whether a string or a block list. */
 export function userRecordText(message: { content?: unknown } | undefined): string {
   const content = message?.content;
@@ -109,9 +127,10 @@ export function convertPeerMessage(
     sender: facts.sender,
     body: facts.body,
     id: uuid,
+    kind: peerKindOf(record),
   });
   LOGGER.logVerbose(
-    { uuid, sender: facts.sender, agent: book.value },
+    { uuid, sender: facts.sender, agent: book.value, kind: peer.kind.case },
     "a peer message (origin.kind=peer) emitted as its own row rather than a prompt",
   );
   return {
