@@ -3,59 +3,11 @@ package main
 import (
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/pprof"
-	"strings"
 	"syscall"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/goroutinedump"
 )
-
-// dumpCap bounds how much of a goroutine dump goes into ONE run-log record.
-//
-// The record is JSON on one line and the run log is read by tooling that reads
-// it a line at a time, so an unbounded dump from a daemon with thousands of
-// goroutines would be a single multi-megabyte line. A megabyte is far past
-// every dump this daemon has produced — a wedged boot's is a few kilobytes —
-// and the truncation says so in the record rather than silently.
-const dumpCap = 1 << 20
-
-// goroutineDump renders every goroutine's stack and says how many there were.
-//
-// debug=2 is the same rendering the runtime writes on an uncaught panic or on
-// an unhandled SIGQUIT: every goroutine, with its state and its full stack,
-// which is what tells a wedged boot's blocking call from an idle one.
-func goroutineDump() (string, int) {
-	count := runtime.NumGoroutine()
-	var out strings.Builder
-	if err := pprof.Lookup("goroutine").WriteTo(&out, 2); err != nil {
-		// THE ERROR IS THE DUMP. A profile that cannot be rendered is itself
-		// the diagnostic, and returning an empty string would report a daemon
-		// with no goroutines.
-		return "the goroutine profile could not be rendered: " + err.Error(), count
-	}
-	text := out.String()
-	if len(text) > dumpCap {
-		text = text[:dumpCap] + "\n... the goroutine dump was truncated at " + itoa(dumpCap) + " bytes"
-	}
-	return text, count
-}
-
-// itoa spells a whole number without pulling strconv into this file's imports
-// for one call.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits [20]byte
-	i := len(digits)
-	for n > 0 {
-		i--
-		digits[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(digits[i:])
-}
 
 // recordGoroutineDump puts a goroutine dump into the run log at ERROR.
 //
@@ -65,7 +17,7 @@ func itoa(n int) string {
 // went nowhere. The run log is the daemon's narrative and it is the only place
 // a later diagnosis can read.
 func recordGoroutineDump(log dlog.Logger, operation, message string, context dlog.Context) {
-	dump, count := goroutineDump()
+	dump, count := goroutinedump.Render()
 	if context == nil {
 		context = dlog.Context{}
 	}
