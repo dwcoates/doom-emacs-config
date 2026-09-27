@@ -2296,6 +2296,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   max-height: 50vh;
   overflow-y: auto;
   cursor: zoom-out;
+  /* AN OPEN BOX NEVER CHAINS ITS SCROLL TO THE FEED (owner ruling,
+     2026-09-27): a gesture's overshoot stops at the box's own top and bottom
+     edges. The native half of the containment; installIntentScroll
+     (scroll.ts) consumes the wheel a box that cannot move any further would
+     otherwise hand on. The card-level fold's section below does the same. */
+  overscroll-behavior: contain;
 }
 /* THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
    bubble's scroll box that the reader sees only once the bubble is opened (a
@@ -2335,6 +2341,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-fold.expanded > .tool-output {
   max-height: 50vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---- title fold (src/feed/title-fold.ts) ---- */

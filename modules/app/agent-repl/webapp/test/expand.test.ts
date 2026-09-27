@@ -23,6 +23,7 @@ import {
   toggleSection,
   collapseSection,
   autoCollapseFor,
+  expandedSectionAt,
   expandedSectionsOf,
   onVerticalScrollbar,
 } from "../src/expand.js";
@@ -850,6 +851,32 @@ describe("sectionAt: a bubble's header strip opens its scroll box", () => {
 
 // THE AUTO-COLLAPSE OWNER: an open section closes on its own when the reader
 // scrolls somewhere else or focus leaves the page, through the one collapse.
+
+describe("expandedSectionAt", () => {
+  /** A feed holding an open box around TEXT, and a closed card. */
+  function feedOf(): HTMLElement {
+    const feed = document.createElement("div");
+    feed.innerHTML =
+      `<div class="bubble-scroll expanded" id="open"><p id="text">t</p></div>` +
+      `<div class="tool-fold" id="closed"><span id="card">c</span></div>`;
+    return feed;
+  }
+
+  it("answers the open section a point inside it lands in", () => {
+    const feed = feedOf();
+    expect(expandedSectionAt(feed.querySelector("#text") as HTMLElement, feed)?.id).toBe("open");
+  });
+
+  it("answers null inside a closed section", () => {
+    const feed = feedOf();
+    expect(expandedSectionAt(feed.querySelector("#card") as HTMLElement, feed)).toBeNull();
+  });
+
+  it("answers null on the feed itself", () => {
+    const feed = feedOf();
+    expect(expandedSectionAt(feed, feed)).toBeNull();
+  });
+});
 
 describe("expandedSectionsOf", () => {
   it("answers only the open sections under the host", () => {

@@ -390,6 +390,11 @@ hand any more:
   it. Each close is a DEBUG `expand.auto-collapse` with `trigger` and `kind`.
   Known gap: a keyboard-only Emacs window or workspace switch made while the
   WKWebView still holds first responder fires no DOM signal at all.
+  Its twin: A WHEEL INSIDE AN OPEN SECTION NEVER MOVES THE FEED. The open box
+  wears `overscroll-behavior: contain`, and `installIntentScroll` (scroll.ts),
+  told which section is open by `expandedSectionAt`, never redirects that
+  wheel and consumes it (`preventDefault`) once no box up to the section can
+  move further (`sectionTakesDelta`). A collapsed box's wheel is the feed's.
 - **EVERY CLICK IS AN RPC**, and its refusal renders AT the clicked control,
   never as pushed state. Domain outcomes (deny, nothing-running, empty) are
   SUCCESS arms.

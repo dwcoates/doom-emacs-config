@@ -109,6 +109,15 @@ export function cappedSectionAt<
 }
 
 /**
+ * The innermost OPEN (expanded) capped section at or above `start`, stopping
+ * below `feed` — the section a wheel there must stay inside (scroll.ts's
+ * `installIntentScroll` contains it).
+ */
+export function expandedSectionAt(start: HTMLElement, feed: HTMLElement): HTMLElement | null {
+  return ancestorMatching(start, feed, (node) => isCappedSection(node.classList) && isExpanded(node));
+}
+
+/**
  * The class every element of a bubble's HEADER STRIP wears (src/bubble/draw.ts
  * stamps it). The strip is the bubble's collapsed face as much as its capped
  * box is — a peer message's collapsed face is nothing BUT its strip — so a
