@@ -71,7 +71,7 @@ describe("installTreeLayout", () => {
     const { uninstall } = installTreeLayout({ scrollbarPx: 6 });
     const { bubble, body } = stage(attached);
     const scroll = document.createElement("div");
-    scroll.className = "bubble-scroll";
+    scroll.className = "bubble-scroll bubble-box";
     bubble.append(scroll);
     scroll.append(body);
     try {

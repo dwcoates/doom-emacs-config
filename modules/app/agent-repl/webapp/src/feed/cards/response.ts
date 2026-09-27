@@ -65,7 +65,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
+import { BUBBLE_UNCAPPED, SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -229,6 +229,12 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 /**
  * The bubble's collapsed line limit, drawn verbatim from the row's own state.
  *
+ * A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
+ * non-thinking response — arriving, interim (pear) or the turn's answer
+ * (green) — is `BUBBLE_UNCAPPED`, shown at its full height with no fade, no
+ * scroll and no fold. It is uncapped from its first fragment, so settling
+ * changes nothing about its box and reflows nothing.
+ *
  * A THINKING BUBBLE IS SHOWN IN FULL WHILE ITS OWN TEXT IS STILL ARRIVING, and
  * collapses to the one-line thinking cap the moment it LANDS: when the daemon
  * re-pushes the row in a terminal arm (`thinkingLanded`), which is exactly when
@@ -238,6 +244,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
+  if (!u.thinking) return BUBBLE_UNCAPPED;
   return thinkingLanded(u) ? THINKING_CAP_LINES : "feed";
 }
 
