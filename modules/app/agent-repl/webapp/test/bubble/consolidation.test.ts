@@ -63,7 +63,7 @@ describe("every blue and purple bubble is built by drawBubble", () => {
   });
 
   it("hangs a scroll box only there", () => {
-    expect(sourcesMatching(/\bbubbleScroll\(/)).toEqual(["bubble/draw.ts", "feed/bubble-scroll.ts"]);
+    expect(sourcesMatching(/\bbubbleBox\(/)).toEqual(["bubble/draw.ts", "feed/bubble-scroll.ts"]);
   });
 
   it("makes a bubble body only there", () => {

@@ -24,7 +24,7 @@ import {
 } from "../../src/feed/bubble-more.js";
 import { BUBBLE_BODY_CLASS } from "../../src/bubble/body.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
+import { BUBBLE_SCROLL_CLASS, bubbleBox as sharedBubbleBox } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
@@ -162,6 +162,21 @@ describe("shouldShowMore: the four conditions", () => {
     expect(shouldShowMore(box)).toBe(false);
   });
 
+  it("never shows on an uncapped bubble's box, however far its body runs", () => {
+    // Arrange — the box an uncapped bubble is drawn with, its body far taller.
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const body = document.createElement("div");
+    body.className = BUBBLE_BODY_CLASS;
+    const box = sharedBubbleBox(body, false);
+    bubble.append(box);
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: 540 });
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: 900 });
+
+    // Act / Assert
+    expect(shouldShowMore(box)).toBe(false);
+  });
+
   it("never shows on a box that is not a bubble's", () => {
     // Arrange — a tool-call section overflows but does not match the selector.
     const section = document.createElement("div");
@@ -205,7 +220,7 @@ function bubble(kind: "assistant" | "user", overflow: boolean): HTMLElement {
   el.className = `bubble ${kind}`;
   const body = document.createElement("div");
   body.className = BUBBLE_BODY_CLASS;
-  const scroll = bubbleScroll(body);
+  const scroll = sharedBubbleBox(body, true);
   el.append(scroll);
   Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 540 });
   Object.defineProperty(body, "offsetHeight", { configurable: true, value: overflow ? 900 : 540 });
@@ -214,7 +229,7 @@ function bubble(kind: "assistant" | "user", overflow: boolean): HTMLElement {
 
 describe("installHasMore: the box tracks its own overflow", () => {
   it("adds has-more to a collapsed, overflowing assistant bubble on resize", () => {
-    // Arrange — the observer is armed by bubbleScroll.
+    // Arrange — the observer is armed by sharedBubbleBox.
     const el = bubble("assistant", true);
     const scroll = el.firstElementChild as HTMLElement;
 
@@ -223,6 +238,16 @@ describe("installHasMore: the box tracks its own overflow", () => {
 
     // Assert
     expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("arms no measurer on an uncapped bubble's box", () => {
+    // Arrange — an uncapped box has nothing hidden to point at.
+    const body = document.createElement("div");
+    body.className = BUBBLE_BODY_CLASS;
+    const box = sharedBubbleBox(body, false);
+
+    // Act / Assert — the stub throws on a resize nothing observes.
+    expect(() => fireResize(box)).toThrow();
   });
 
   it("keeps has-more off a bubble whose content fits, on resize", () => {
