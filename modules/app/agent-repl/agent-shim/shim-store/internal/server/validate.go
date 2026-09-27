@@ -42,6 +42,7 @@ const (
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
 	SiteStreamNotFlushable     = "stream_not_flushable"
 	SiteRunEmpty               = "run_empty"
+	SiteVendorTaskEmpty        = "vendor_task_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 )
@@ -300,8 +301,8 @@ func validateEntryBatch(b *storev1.EntryBatch, carriesShapes bool) *refusal {
 	if b == nil {
 		return refuse(SiteBatchMissing, "batch", "batch: the request carries no EntryBatch")
 	}
-	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && !carriesShapes {
-		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance, and the request carries no shape observation either")
+	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && len(b.GetAgentLocators()) == 0 && !carriesShapes {
+		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance nor an agent locator, and the request carries no shape observation either")
 	}
 	for i, entry := range b.GetEntries() {
 		if ref := validateStoreEntry(entry, i); ref != nil {
@@ -425,6 +426,20 @@ func validateWatchBashRunRequest(req *storev1.WatchBashRunRequest) *refusal {
 func validateGetLiveWorkRequest(req *storev1.GetLiveWorkRequest) *refusal {
 	if req.GetSession() == nil || req.GetSession().GetValue() == "" {
 		return refuse(SiteSessionEmpty, "session", "session: GetLiveWork names no session, and the store never answers it unscoped")
+	}
+	return nil
+}
+
+// validateGetAgentByVendorTaskRequest is the use site for GetAgentByVendorTask:
+// `session` is REQUIRED for the same reason GetLiveWork's is — an unscoped
+// answer could name another session's agent — and the locator is what the
+// lookup resolves.
+func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskRequest) *refusal {
+	if req.GetSession() == nil || req.GetSession().GetValue() == "" {
+		return refuse(SiteSessionEmpty, "session", "session: GetAgentByVendorTask names no session, and the store never answers it unscoped")
+	}
+	if req.GetVendorTaskId() == "" {
+		return refuse(SiteVendorTaskEmpty, "vendor_task_id", "vendor_task_id: the lookup names no vendor task locator")
 	}
 	return nil
 }

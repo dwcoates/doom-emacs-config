@@ -151,6 +151,17 @@ overwrites their real `shim-store.build.json`.
   announced (the spool, its readability, the detach cause, the timeout);
   unpacking any of that here too would give one fact two homes that can disagree.
 - `workflow` — the table exists and **NOTHING routes into it this wave**.
+- `vendor_task` — one row per (vendor task locator, agent): the `<id>` of a
+  subagent's `agent-<id>.jsonl` (the stream's `task_id`) paired with the agent
+  it names (the spawning call's `tool_use_id`). The sidecar states it on every
+  batch of a subagent transcript (`EntryBatch.agent_locators`), it commits in
+  the FIRST transaction of that batch, and a re-statement is absorbed.
+  `GetAgentByVendorTask` reads it scoped to the caller's lineage, exactly as
+  `GetLiveWork` is: not-found is an answer recorded at info (only the shim knows
+  whether it expected one), and a locator paired with two agents of one lineage
+  is refused as a storage failure at ERROR rather than chosen between. It exists
+  because a SendMessage resume names the send, not the spawn, and a shim that
+  restarted since the spawn has nothing else to name the running agent by.
 
 `agent`/`workflow`/`detached_work` are UNPACKED to columns because the store
 filters and joins on them; `entry`'s frame stays a BLOB because activity
