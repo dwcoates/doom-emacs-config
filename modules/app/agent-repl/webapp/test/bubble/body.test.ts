@@ -46,7 +46,7 @@ function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTM
   const bubble = document.createElement("div");
   bubble.className = opts.bubbleClass ?? "bubble assistant md";
   const scroll = document.createElement("div");
-  scroll.className = "bubble-scroll";
+  scroll.className = "bubble-scroll bubble-box";
   const body = document.createElement("div");
   body.className = "bubble-body";
   scroll.append(body);

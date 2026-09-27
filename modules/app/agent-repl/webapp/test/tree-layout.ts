@@ -23,10 +23,11 @@
  *   - `getComputedStyle` answers the bubble's `max-width` as MAXWIDTH, the
  *     body's horizontal padding as BODYPADDINGPX a side, every other
  *     horizontal padding, border and margin as `0px`;
- *   - a `.bubble-scroll` element reports SCROLLBOXPX as its `offsetWidth` and
- *     SCROLLBOXPX less SCROLLBARPX as its `clientWidth`, so the measured
- *     scrollbar gutter is SCROLLBARPX (a negative one stages an impossible
- *     measurement).
+ *   - a `.bubble-box` element reports SCROLLBOXPX as its `offsetWidth` and,
+ *     when it is a capped `.bubble-scroll` (the only box the stylesheet gives
+ *     a gutter), SCROLLBOXPX less SCROLLBARPX as its `clientWidth`, so the
+ *     measured scrollbar gutter is SCROLLBARPX (a negative one stages an
+ *     impossible measurement); an uncapped box measures no gutter.
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
@@ -105,7 +106,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     configurable: true,
     get(this: HTMLElement): number {
       if (this.isConnected && this.querySelector(":scope > .bubble") !== null) return layout.containingPx;
-      if (this.isConnected && this.classList.contains("bubble-scroll")) return layout.scrollBoxPx - layout.scrollbarPx;
+      if (this.isConnected && this.classList.contains("bubble-box")) return layout.scrollBoxPx - (this.classList.contains("bubble-scroll") ? layout.scrollbarPx : 0);
       return (clientWidth?.get?.call(this) as number | undefined) ?? 0;
     },
   });
@@ -114,7 +115,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
     get(this: HTMLElement): number {
-      if (this.isConnected && this.classList.contains("bubble-scroll")) return layout.scrollBoxPx;
+      if (this.isConnected && this.classList.contains("bubble-box")) return layout.scrollBoxPx;
       return (offsetWidth?.get?.call(this) as number | undefined) ?? 0;
     },
   });

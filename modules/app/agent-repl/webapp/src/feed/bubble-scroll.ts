@@ -32,10 +32,18 @@ import { bubbleBodyOf, installHasMore, refreshHasMore } from "./bubble-more.js";
 /** The class the stylesheet caps, scrolls and paints a scrollbar on. */
 export const BUBBLE_SCROLL_CLASS = "bubble-scroll";
 
+/**
+ * The class EVERY bubble's box wears, whatever its cap: the structural half of
+ * the box (it reaches the bubble's inner edge, never side-scrolls, and is the
+ * containing block of anything positioned in it), which the stylesheet keys on
+ * separately from the cap, the scroll and the fold `BUBBLE_SCROLL_CLASS` carries.
+ */
+export const BUBBLE_BOX_CLASS = "bubble-box";
+
 /** Hang one bubble body in its scroll box, and give the box back. */
 export function bubbleScroll(body: HTMLElement): HTMLElement {
   const scroll = document.createElement("div");
-  scroll.className = BUBBLE_SCROLL_CLASS;
+  scroll.className = `${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`;
   scroll.append(body);
   // FIX2 (owner ruling, 2026-09-15): keep the "more below" fade in
   // step with the box's overflow for its whole life. The gate to response/prompt

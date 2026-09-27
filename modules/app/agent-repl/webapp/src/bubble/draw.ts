@@ -30,7 +30,7 @@
 import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS } from "../expand.js";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
 import { stopTicking } from "../feed/ticking.js";
 import {
   BUBBLE_BODY_CLASS,
@@ -216,7 +216,7 @@ interface BubbleParts {
 function reusableParts(previous: HTMLElement | undefined, role: BubbleRole): BubbleParts | null {
   if (previous === undefined || !previous.classList.contains(BUBBLE_CLASS)) return null;
   if (previous.getAttribute(BUBBLE_ROLE_ATTRIBUTE) !== role) return null;
-  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
+  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_BOX_CLASS}`);
   const body = scroll?.querySelector(`:scope > .${BUBBLE_BODY_CLASS}`);
   if (scroll === null || !isBubbleBody(body)) return null;
   return { bubble: previous, scroll, body };
