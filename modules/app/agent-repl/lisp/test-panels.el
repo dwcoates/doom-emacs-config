@@ -2136,6 +2136,23 @@ loop is skipped entirely."
           (should-not (buffer-live-p live)))
       (when (buffer-live-p live) (kill-buffer live)))))
 
+(ert-deftest agent-repl-test-panels-kill-workspace-buffers/spares-a-buffer-the-landing-persp-holds ()
+  "An unowned buffer another live persp also holds -- the landing workspace's
+among them -- survives the teardown."
+  ;; Arrange
+  (let ((persp-mode t)
+        (shared (get-buffer-create "*kwb-shared*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_ws) (list 'persp)))
+                  ((symbol-function 'persp-buffers) (lambda (_p) (list shared)))
+                  ((symbol-function 'persp-other-persps-with-buffer-except-nil)
+                   (lambda (&rest _) (list 'keeper-persp))))
+          ;; Act
+          (agent-repl--kill-workspace-buffers "live-ws")
+          ;; Assert
+          (should (buffer-live-p shared)))
+      (when (buffer-live-p shared) (kill-buffer shared)))))
+
 (ert-deftest agent-repl-test-panels-kill-workspace-buffers/spares-foreign-owned ()
   "kill-workspace-buffers does NOT kill a buffer owned by a different workspace.
 Regression guard: persp-mode can drift another workspace's live agent panel
