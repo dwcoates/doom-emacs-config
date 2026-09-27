@@ -42,7 +42,14 @@ type KillTurnRequest struct {
 	// stays live with its streams open. A turn that has already closed has no
 	// synchronous part, so an unforced kill of one answers `no_turn_open`
 	// whatever it left running.
-	Force         bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	Force bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	// HOW the person commanded this stop, stated by the caller because only
+	// the caller knows it: an interjection is decided by the daemon's prompt
+	// queue, invisibly to the shim. The shim records it verbatim as the
+	// `by_user` cause of the interrupted terminal, so the account survives a
+	// rebuild from the store. UNSET when the caller stated none; the shim then
+	// records `by_user` with no command, which a consumer reads as a direct stop.
+	CommandedBy   *v1.AgentInterruptedByUser `protobuf:"bytes,3,opt,name=commanded_by,json=commandedBy,proto3,oneof" json:"commanded_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,6 +96,13 @@ func (x *KillTurnRequest) GetForce() bool {
 		return x.Force
 	}
 	return false
+}
+
+func (x *KillTurnRequest) GetCommandedBy() *v1.AgentInterruptedByUser {
+	if x != nil {
+		return x.CommandedBy
+	}
+	return nil
 }
 
 // THE ARM IS THE OUTCOME.
@@ -463,10 +477,12 @@ var File_shim_v1_endpoint_kill_turn_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_kill_turn_proto_rawDesc = "" +
 	"\n" +
-	" shim/v1/endpoint_kill_turn.proto\x12\ashim.v1\x1a\x1aconversation/v1/turn.proto\"T\n" +
+	" shim/v1/endpoint_kill_turn.proto\x12\ashim.v1\x1a\x1bconversation/v1/agent.proto\x1a\x1aconversation/v1/turn.proto\"\xb6\x01\n" +
 	"\x0fKillTurnRequest\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\x88\x01\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\x12O\n" +
+	"\fcommanded_by\x18\x03 \x01(\v2'.conversation.v1.AgentInterruptedByUserH\x00R\vcommandedBy\x88\x01\x01B\x0f\n" +
+	"\r_commanded_by\"\x88\x01\n" +
 	"\x10KillTurnResponse\x124\n" +
 	"\asuccess\x18\x01 \x01(\v2\x18.shim.v1.KillTurnSuccessH\x00R\asuccess\x124\n" +
 	"\afailure\x18\x02 \x01(\v2\x18.shim.v1.KillTurnFailureH\x00R\afailureB\b\n" +
@@ -500,31 +516,33 @@ func file_shim_v1_endpoint_kill_turn_proto_rawDescGZIP() []byte {
 
 var file_shim_v1_endpoint_kill_turn_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_shim_v1_endpoint_kill_turn_proto_goTypes = []any{
-	(*KillTurnRequest)(nil),        // 0: shim.v1.KillTurnRequest
-	(*KillTurnResponse)(nil),       // 1: shim.v1.KillTurnResponse
-	(*KillTurnSuccess)(nil),        // 2: shim.v1.KillTurnSuccess
-	(*KillTurnFailure)(nil),        // 3: shim.v1.KillTurnFailure
-	(*KillTurnNotTheOpenTurn)(nil), // 4: shim.v1.KillTurnNotTheOpenTurn
-	(*KillTurnNoTurnOpen)(nil),     // 5: shim.v1.KillTurnNoTurnOpen
-	(*KillTurnNoSession)(nil),      // 6: shim.v1.KillTurnNoSession
-	(*v1.TurnId)(nil),              // 7: conversation.v1.TurnId
-	(*v1.TurnKilled)(nil),          // 8: conversation.v1.TurnKilled
-	(*v1.TurnLive)(nil),            // 9: conversation.v1.TurnLive
+	(*KillTurnRequest)(nil),           // 0: shim.v1.KillTurnRequest
+	(*KillTurnResponse)(nil),          // 1: shim.v1.KillTurnResponse
+	(*KillTurnSuccess)(nil),           // 2: shim.v1.KillTurnSuccess
+	(*KillTurnFailure)(nil),           // 3: shim.v1.KillTurnFailure
+	(*KillTurnNotTheOpenTurn)(nil),    // 4: shim.v1.KillTurnNotTheOpenTurn
+	(*KillTurnNoTurnOpen)(nil),        // 5: shim.v1.KillTurnNoTurnOpen
+	(*KillTurnNoSession)(nil),         // 6: shim.v1.KillTurnNoSession
+	(*v1.TurnId)(nil),                 // 7: conversation.v1.TurnId
+	(*v1.AgentInterruptedByUser)(nil), // 8: conversation.v1.AgentInterruptedByUser
+	(*v1.TurnKilled)(nil),             // 9: conversation.v1.TurnKilled
+	(*v1.TurnLive)(nil),               // 10: conversation.v1.TurnLive
 }
 var file_shim_v1_endpoint_kill_turn_proto_depIdxs = []int32{
-	7, // 0: shim.v1.KillTurnRequest.turn:type_name -> conversation.v1.TurnId
-	2, // 1: shim.v1.KillTurnResponse.success:type_name -> shim.v1.KillTurnSuccess
-	3, // 2: shim.v1.KillTurnResponse.failure:type_name -> shim.v1.KillTurnFailure
-	8, // 3: shim.v1.KillTurnSuccess.killed:type_name -> conversation.v1.TurnKilled
-	9, // 4: shim.v1.KillTurnFailure.live:type_name -> conversation.v1.TurnLive
-	4, // 5: shim.v1.KillTurnFailure.not_the_open_turn:type_name -> shim.v1.KillTurnNotTheOpenTurn
-	5, // 6: shim.v1.KillTurnFailure.no_turn_open:type_name -> shim.v1.KillTurnNoTurnOpen
-	6, // 7: shim.v1.KillTurnFailure.no_session:type_name -> shim.v1.KillTurnNoSession
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	7,  // 0: shim.v1.KillTurnRequest.turn:type_name -> conversation.v1.TurnId
+	8,  // 1: shim.v1.KillTurnRequest.commanded_by:type_name -> conversation.v1.AgentInterruptedByUser
+	2,  // 2: shim.v1.KillTurnResponse.success:type_name -> shim.v1.KillTurnSuccess
+	3,  // 3: shim.v1.KillTurnResponse.failure:type_name -> shim.v1.KillTurnFailure
+	9,  // 4: shim.v1.KillTurnSuccess.killed:type_name -> conversation.v1.TurnKilled
+	10, // 5: shim.v1.KillTurnFailure.live:type_name -> conversation.v1.TurnLive
+	4,  // 6: shim.v1.KillTurnFailure.not_the_open_turn:type_name -> shim.v1.KillTurnNotTheOpenTurn
+	5,  // 7: shim.v1.KillTurnFailure.no_turn_open:type_name -> shim.v1.KillTurnNoTurnOpen
+	6,  // 8: shim.v1.KillTurnFailure.no_session:type_name -> shim.v1.KillTurnNoSession
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_kill_turn_proto_init() }
@@ -532,6 +550,7 @@ func file_shim_v1_endpoint_kill_turn_proto_init() {
 	if File_shim_v1_endpoint_kill_turn_proto != nil {
 		return
 	}
+	file_shim_v1_endpoint_kill_turn_proto_msgTypes[0].OneofWrappers = []any{}
 	file_shim_v1_endpoint_kill_turn_proto_msgTypes[1].OneofWrappers = []any{
 		(*KillTurnResponse_Success)(nil),
 		(*KillTurnResponse_Failure)(nil),

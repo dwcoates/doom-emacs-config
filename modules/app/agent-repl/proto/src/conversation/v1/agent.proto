@@ -195,7 +195,30 @@ message AgentInterrupted {
 }
 
 // A person commanded the stop.
-message AgentInterruptedByUser {}
+message AgentInterruptedByUser {
+  // HOW the person commanded it. UNSET when the producer did not state how,
+  // which a consumer reads as a direct stop.
+  //
+  // Both arms are the person's decision, so recovery treats them alike: the
+  // conversation does not re-drive the stopped work. They differ only in how
+  // the stop is ACCOUNTED FOR to the reader — a direct stop is an act of its
+  // own, while an interjection's stop is a side effect of the prompt that
+  // superseded the turn, and that prompt is its whole account.
+  oneof command {
+    // The person stopped the turn itself (an interrupt key, a stop verb).
+    AgentInterruptedByUserDirect direct = 1;
+    // The person sent a prompt that was judged to supersede the running turn,
+    // and the turn was stopped so that prompt runs next.
+    AgentInterruptedByUserInterjection interjection = 2;
+  }
+}
+
+// The person stopped the turn itself, as an act of its own.
+message AgentInterruptedByUserDirect {}
+
+// The turn was stopped because a prompt the person sent superseded it. The
+// stop exists only to let that prompt run next; it is not a separate act.
+message AgentInterruptedByUserInterjection {}
 
 // The host process went down under the agent.
 message AgentInterruptedByHostShutdown {}
