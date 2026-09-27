@@ -242,6 +242,16 @@
      rules — never the sidebar, topbar, footer or composer — which is what keeps
      the zoom scoped to the feed. Default 1 = 100%. */
   --feed-text-scale: 1;
+  /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
+     space between the conversation and the footer dock. It is NOT padding on
+     the scrolled content, which only showed once the reader reached the end
+     and let cards run up to the dock on the way there; it is a band at the
+     bottom of #feed-scroll's VIEWPORT, held at every scroll position. The
+     band is both the trailing spacer the last card rests on when scrolled to
+     the bottom and the mask that fades content out as it passes into it (see
+     the #feed-scroll rules). Root-relative, so the feed text zoom never moves
+     it, exactly as #feed's own 1rem padding never did. */
+  --feed-bottom-gap: 1rem;
   --async-border: #4fb8a8;
   /* The Merge status card (a merge-failure remediation turn): an amber wash,
      kin to --remediation, so it reads as "needs resolving" and stays distinct
@@ -1289,10 +1299,41 @@ body::after {
      flex leftover of the 100vh column and its width is the stretched column's,
      so neither ever came from its content. */
   container-type: size;
+  /* THE BOTTOM GAP, HELD AT EVERY SCROLL POSITION. The mask fades whatever
+     crosses the viewport's last `--feed-bottom-gap` out to nothing at its
+     edge, so no card ever reads as abutting the dock, scrolled anywhere. A
+     mask is positioned against the element's own box, never its scrolled
+     content, so the band stays put while the feed moves under it. It is pure
+     paint: it is no element, so it intercepts no pointer event (a mask does
+     not take part in hit testing, so a click on a faded card still lands on
+     the card), it changes no layout, and it needs no script. The
+     trailing spacer below fills the band once the reader reaches the end,
+     so the last card then rests fully opaque exactly one gap above the
+     footer's own top padding, as it did when the gap was #feed's padding. */
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--feed-bottom-gap)),
+    transparent 100%
+  );
+}
+
+/* The band's trailing spacer: the scrolled content's last box, one gap tall,
+   after #feed AND the hold tray, so the gap is the same whether or not
+   anything is held. A pseudo-element rather than padding on #feed-scroll:
+   padding would shrink the size container's content box and so every `cqh`
+   measured against it. It is not a DOM child, so the tail follow's child
+   observer and the background-click hit test see exactly what they saw. */
+#feed-scroll::after {
+  content: "";
+  display: block;
+  height: var(--feed-bottom-gap);
+  pointer-events: none;
 }
 
 #feed {
-  padding: 1rem;
+  /* No bottom padding: the gap below the last row is the band's trailing
+     spacer (#feed-scroll::after), which the hold tray also rests on. */
+  padding: 1rem 1rem 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -3934,9 +3975,12 @@ body.draining #composer-input::placeholder {
 /* The held-prompt tray: the feed's TAIL region, inside the scroll zone, so it
    sits after the last row rather than as chrome docked under the feed. It
    shares the feed's horizontal padding so a held prompt lines up with the
-   bubbles above it, and pays no layout at all while nothing is held. */
+   bubbles above it, and pays no layout at all while nothing is held. Its top
+   padding is the 1rem #feed's bottom padding used to put between the last row
+   and the first held prompt; below the last held prompt the gap is the feed's
+   one bottom gap (#feed-scroll::after), never a second copy here. */
 #hold-tray {
-  padding: 0 1rem 1rem;
+  padding: 1rem 1rem 0;
 }
 #hold-tray:empty { display: none; }
 
