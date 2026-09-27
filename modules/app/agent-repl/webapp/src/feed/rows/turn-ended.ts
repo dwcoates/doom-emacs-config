@@ -24,7 +24,7 @@
  * shared clock. An UNSET wait is not zero: the vendor said nothing about when
  * to retry, and the wording says exactly that rather than inventing "now".
  */
-import { drawBubble } from "../../bubble/draw.js";
+import { BUBBLE_UNCAPPED, drawBubble } from "../../bubble/draw.js";
 import { formatDurationCeil } from "../../duration.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -163,7 +163,9 @@ function drawTurnEndedBubble(says: string, previous?: HTMLElement): HTMLElement 
       variant: "turn-ended",
       hooks: [TURN_ENDED_BUBBLE_CLASS],
       content: [text],
-      capLines: "feed",
+      // Never abbreviated (owner request, 2026-09-27): the reader sees why the
+      // turn ended at a glance, with no fold to open.
+      capLines: BUBBLE_UNCAPPED,
     },
     prior,
   ).bubble;
