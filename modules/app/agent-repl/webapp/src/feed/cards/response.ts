@@ -227,18 +227,37 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 }
 
 /**
- * The bubble's collapsed line limit, drawn verbatim from the daemon's flags.
+ * The bubble's collapsed line limit, drawn verbatim from the row's own state.
  *
- * A THINKING BUBBLE IS SHOWN IN FULL WHILE IT IS THE LATEST AGENT RESPONSE
- * (owner rule, 2026-09-23): the ordinary response cap until the daemon states
- * that a later response landed in the same feed (`FeedResponse.superseded`),
- * and the one-line thinking cap from then on. Whether it is superseded is the
- * daemon's fact; nothing here looks at the rows around it. Only the DEFAULT
- * limit changes: a bubble the reader expanded wears `.expanded` on its scroll
- * box, which the in-place redraw keeps (src/bubble/draw.ts), so it stays open.
+ * A THINKING BUBBLE IS SHOWN IN FULL WHILE ITS OWN TEXT IS STILL ARRIVING, and
+ * collapses to the one-line thinking cap the moment it LANDS: when the daemon
+ * re-pushes the row in a terminal arm (`thinkingLanded`), which is exactly when
+ * its final text is whole and painted in full. Nothing here waits on, or looks
+ * at, any other row. Only the DEFAULT limit changes: a bubble the reader
+ * expanded wears `.expanded` on its scroll box, which the in-place redraw keeps
+ * (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
-  return u.thinking && u.superseded ? THINKING_CAP_LINES : "feed";
+  return thinkingLanded(u) ? THINKING_CAP_LINES : "feed";
+}
+
+/**
+ * Whether U is a thinking row whose own final text has arrived: its arm is a
+ * terminal one (`success`, or `error` for reasoning the turn's death cut short,
+ * whose prose is equally final). An arriving `update` has not landed. An unset
+ * arm has not landed either, and is not decided here: the draw refuses that row
+ * as malformed (`drawFeedResponse`'s `requireCase`) before it paints anything.
+ */
+export function thinkingLanded(u: FeedResponse): boolean {
+  if (!u.thinking) return false;
+  switch (u.result.case) {
+    case "success":
+    case "error":
+      return true;
+    case "update":
+    case undefined:
+      return false;
+  }
 }
 
 /**

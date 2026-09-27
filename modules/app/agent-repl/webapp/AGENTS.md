@@ -325,8 +325,8 @@ hand any more:
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
   `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
-  bubble wholly above the reader collapsing when the daemon marks it
-  `superseded`; the view shifts by exactly the height it lost), `latestVisible`
+  bubble wholly above the reader collapsing when its own final text lands,
+  i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
   — each a named `TailFollow` cause, each move recorded at DEBUG as
   `scroll.feed-moved` with its cause. A follow starts from a parking cause, or
   (`latestVisible`, owner rule 2026-09-23) whenever the reader can SEE the feed
