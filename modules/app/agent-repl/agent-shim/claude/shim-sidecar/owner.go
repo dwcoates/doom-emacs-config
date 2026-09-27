@@ -109,6 +109,35 @@ func (s *sidecar) TaskStopped(taskID string) {
 	s.applyStop(taskID)
 }
 
+// TaskConcluded records that a transcript settled a backgrounded agent run
+// itself (its task notification, or an agent TaskStop). A concluded run is
+// never later adjudicated LOST: its spool is settled now if it is being read,
+// and when it is claimed otherwise.
+func (s *sidecar) TaskConcluded(taskID string) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "task-concluded", Level: "error"}).
+			Log("run conclusion reported with no task id; it names no run and cannot be attributed")
+		return
+	}
+	s.concluded[taskID] = struct{}{}
+	s.applyConclusion(taskID)
+}
+
+// applyConclusion untracks a concluded run's spool from the LOST policy, if the
+// spool is being read and still tracked.
+func (s *sidecar) applyConclusion(taskID string) {
+	if _, ok := s.concluded[taskID]; !ok {
+		return
+	}
+	path, watched := s.spoolForTask(taskID)
+	if !watched || !s.tracker.Open(path) {
+		return
+	}
+	s.tracker.Settle(path)
+	s.log.With(logging.Context{Operation: "run-concluded", TaskID: taskID, Path: path}).
+		Log("the run was settled by its transcript; it can no longer be concluded LOST")
+}
+
 // applyStop mints and writes the cancelled terminal for a stopped task, if its
 // spool is being read. A task whose spool is not watched yet keeps its pending
 // stop and is retried when the spool is claimed.

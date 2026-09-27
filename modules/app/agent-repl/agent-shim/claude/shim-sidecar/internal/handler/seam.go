@@ -25,6 +25,7 @@ import (
 type seamObserver struct {
 	spawned         func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
 	stopped         func(taskID string)
+	concluded       func(taskID string)
 	workspaceDir    string
 	workspaceID     string
 	claudeSessionID string
@@ -50,6 +51,26 @@ func (o *seamObserver) TaskStopped(taskID string) {
 		return
 	}
 	o.stopped(taskID)
+}
+
+// TaskConcluded implements convert.Observer.
+func (o *seamObserver) TaskConcluded(taskID string) {
+	if o.concluded == nil {
+		return
+	}
+	o.concluded(taskID)
+}
+
+// SetTaskConclusionObserver adopts the reader's run-concluded sink: a
+// backgrounded agent run this transcript settled itself can never be LOST.
+func (h *SessionTranscriptHandler) SetTaskConclusionObserver(fn func(taskID string)) {
+	h.obs.concluded = fn
+}
+
+// SetTaskConclusionObserver adopts the reader's run-concluded sink. A sidechain
+// settles the agent runs it launched on the same terms as a session.
+func (h *AgentTranscriptHandler) SetTaskConclusionObserver(fn func(taskID string)) {
+	h.obs.concluded = fn
 }
 
 // SetTaskObserver adopts the reader's spawn-observation sink.
