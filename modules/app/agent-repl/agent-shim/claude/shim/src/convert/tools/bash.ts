@@ -61,6 +61,18 @@ function requestedLine(call: PendingCall): string | undefined {
   return str(call.input, "command");
 }
 
+/**
+ * The command a shell call named, as every settled frame restates it, or
+ * `undefined` for a call that named no command line.
+ *
+ * For the detached run's own terminal (`convert/detached.ts`), which settles a
+ * run whose call the registry has long since released.
+ */
+export function shellCommandOf(call: PendingCall): conversationv1.AgentBashCommand | undefined {
+  const line = requestedLine(call);
+  return line === undefined ? undefined : bashCommand(call, line);
+}
+
 /** Where the whole output was spilled, when the producer kept it. */
 function spilled(
   record: Record<string, unknown>,
