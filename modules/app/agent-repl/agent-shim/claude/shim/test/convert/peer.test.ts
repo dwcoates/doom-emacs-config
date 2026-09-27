@@ -159,6 +159,24 @@ describe("convertPeerMessage", () => {
     expect(entry?.item.kind === "peer" ? entry.item.peer.agent?.value : "").toBe(MAIN_AGENT.value);
   });
 
+  it("marks a record with origin.handback as a subagent hand-back", () => {
+    // Arrange
+    const message = peerRecord({ from: "a1d968043b47deee9", handback: true });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("subagentHandback");
+  });
+
+  it("marks a record with no origin.handback as an inter-session message", () => {
+    // Arrange
+    const message = peerRecord({ from: "Explore" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("interSession");
+  });
+
   it("returns undefined for a non-peer user record", () => {
     // Arrange
     const message = userRecord({ message: { role: "user", content: "hello" } });
