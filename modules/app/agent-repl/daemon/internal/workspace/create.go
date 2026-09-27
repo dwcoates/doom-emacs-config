@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/titlesynth"
 	"claude-repld/internal/wsm"
 )
 
@@ -368,21 +369,30 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		}
 		return Name(Prefix(), supplied), nil
 	}
+	// A FORK IS NAMED FROM ITS PROMPT PLUS THE CONVERSATION IT CONTINUES (owner
+	// ruling, 2026-09-27), through the same naming call, so a fork whose prompt
+	// is blank still gets a name that says what it carries on with.
+	conversation, err := v.forkNamingConversation(ctx, log, spec)
+	if err != nil {
+		return "", err
+	}
 	// An initial prompt is OPTIONAL on the standard form: an unset one is an
-	// empty workspace, which is a legal create. With no prompt there is
-	// nothing to name the workspace AFTER, and the naming call is not asked to
-	// invent one, so the branch is named after the workspace's own minted id.
-	if strings.TrimSpace(spec.InitialPrompt) == "" {
+	// empty workspace, which is a legal create. With no prompt and no
+	// conversation there is nothing to name the workspace AFTER, and the
+	// naming call is not asked to invent one, so the branch is named after the
+	// workspace's own minted id.
+	if strings.TrimSpace(spec.InitialPrompt) == "" && conversation == "" {
 		branch := Name(Prefix(), UnnamedSlugPrefix+string(minted))
 		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
 		return branch, nil
 	}
 	// A NAMING CALL IS ABOUT TO RUN — the slow, model-backed step. Reported
 	// before it starts so a watching client shows "deriving name" while it
-	// waits, not after. Reached only on this branch: a supplied name or an
-	// empty prompt never derives one, so neither reports the stage.
+	// waits, not after. Reached only on this branch: a supplied name, or a
+	// create with neither a prompt nor a conversation, never derives one, so
+	// neither reports the stage.
 	reportCreateStage(spec, CreateStageDerivingName)
-	slug, err := v.mintName(ctx, log, repoDir, spec.InitialPrompt)
+	slug, err := v.mintName(ctx, log, repoDir, spec.InitialPrompt, conversation)
 	if err != nil {
 		var failure *namingFailure
 		if errors.As(err, &failure) {
@@ -407,8 +417,71 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		})
 		return "", fmt.Errorf("create: name %q: %w", slug, err)
 	}
-	log.Debug(opCreate, "the model named the workspace from its initial prompt", dlog.Context{"branch": branch})
+	log.Debug(opCreate, "the model named the workspace", dlog.Context{
+		"branch": branch, "fork": spec.ForkFrom != nil,
+	})
 	return branch, nil
+}
+
+// forkNamingConversation answers the summary of the conversation a FORK
+// continues, for the naming call; empty for a create that forks nothing.
+//
+// THE SOURCE IS THE DAEMON'S OWN RECORD OF THE PARENT CONVERSATION: the
+// prompt rows ConversationPrompts answers — the parent's own turns and every
+// row IT inherited from a fork of its own — which is exactly what the fork
+// ports to the child. It needs no live parent shim, so a hibernated parent is
+// named from as readily as a running one. It is composed by the title
+// synthesizer's one digest composition (the most recent requests, each
+// bounded), so "what this conversation is about" has one spelling.
+//
+// A parent with no conversation is REFUSED HERE, before the naming call is
+// paid for, on the same arm the transcript port refuses it with.
+func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spec CreateSpec) (string, error) {
+	if spec.ForkFrom == nil {
+		return "", nil
+	}
+	parent := *spec.ForkFrom
+	if _, err := v.forkableParentSession(ctx, log, parent); err != nil {
+		return "", err
+	}
+	rows, err := v.deps.DB.ConversationPrompts(ctx, parent)
+	if err != nil {
+		log.Error(opCreate, "could not read the parent conversation to name the fork", dlog.Context{
+			"parent": string(parent), "cause": err.Error(),
+		})
+		return "", fmt.Errorf("fork from %q: read the conversation to name it: %w", parent, err)
+	}
+	var said []string
+	for _, row := range rows {
+		if strings.TrimSpace(row.Text) != "" {
+			said = append(said, row.Text)
+		}
+	}
+	if len(said) == 0 {
+		log.Info(opCreate, "the fork's parent holds no recorded request to name the fork from", dlog.Context{
+			"parent": string(parent), "rows": len(rows),
+		})
+		return "", nil
+	}
+	return titlesynth.ComposeDigest("", said), nil
+}
+
+// forkableParentSession answers the parent's session when it holds a
+// conversation to fork, and the ArmForkParentHasNoConversation refusal when it
+// does not. It is the ONE statement of "this workspace can be forked", read by
+// the naming step (before a model call is paid for) and by the transcript port.
+func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID) (wsm.Session, error) {
+	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
+	if err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
+		return wsm.Session{}, fmt.Errorf("fork from %q: read the parent session: %w", parent, err)
+	}
+	if !ok || parentSession.VendorSessionID == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok || parentSession.VendorSessionID == \"\""})
+		return wsm.Session{}, refuse(log, "CreateWorkspace", ArmForkParentHasNoConversation,
+			fmt.Sprintf("workspace %q has no conversation to fork", parent), false)
+	}
+	return parentSession, nil
 }
 
 // mergeTargetDir answers where this workspace's merge will land: the PARENT
@@ -461,15 +534,9 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return "", fmt.Errorf("fork from %q: %w", parent, err)
 	}
-	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
+	parentSession, err := v.forkableParentSession(ctx, log, parent)
 	if err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
-		return "", fmt.Errorf("fork from %q: read the parent session: %w", parent, err)
-	}
-	if !ok || parentSession.VendorSessionID == "" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok || parentSession.VendorSessionID == \"\""})
-		return "", refuse(log, "CreateWorkspace", ArmForkParentHasNoConversation,
-			fmt.Sprintf("workspace %q has no conversation to fork", parent), false)
+		return "", err
 	}
 	transcript, err := v.deps.Accounts.FindTranscript(ctx, parentRecord.Dir, parentSession.VendorSessionID)
 	if err != nil {
