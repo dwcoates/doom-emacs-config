@@ -27,7 +27,7 @@ import {
   type ToolOutcome,
 } from "./tool-calls.js";
 import { skillDocumentSettle } from "./tools/skill-use.js";
-import { bashDetachmentEntry, type TaskKindRegistry } from "./detached.js";
+import { bashDetachmentEntry, shellRunStartEntry, type TaskKindRegistry } from "./detached.js";
 import { activityEntry, agentActivity } from "./entries.js";
 import { convertPeerMessage } from "./peer.js";
 import { toolCallActivityId } from "./ids.js";
@@ -164,7 +164,14 @@ export function convertUserRecord(
         // `task_notification` upserts, rather than a hard-coded `requested`.
         taskKinds,
       );
-      if (detachment !== undefined) entries.push(detachment);
+      if (detachment !== undefined) {
+        // THE RUN'S START RIDES AHEAD OF ITS ANNOUNCEMENT in the one ordered
+        // buffer, so a consumer that learned of the run from the record finds
+        // its stream already open-able, starting with `start`.
+        const start = shellRunStartEntry(context, pending.agentId, toolUseId, pending);
+        if (start !== undefined) entries.push(start);
+        entries.push(detachment);
+      }
     }
     entries.push(
       ...convertToolResult(
