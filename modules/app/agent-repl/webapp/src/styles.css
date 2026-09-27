@@ -75,6 +75,9 @@
      from the same family as --tool-title. */
   --assistant: #ece4fa;
   --accent: #2563eb;
+  /* A link inside a blue prompt bubble. It is --accent in this theme; the dark
+     theme's bright prompt blue swallows --accent, so it sets its own. */
+  --prompt-link: var(--accent);
   --ok: #16a34a;
   --err: #dc2626;
   /* Token figures wear ONE colour wherever a token count is drawn, so a reader
@@ -353,6 +356,9 @@
     /* The iMessage dark-mode blue (owner ruling, 2026-09-27), taken a notch
        darker the same day because #0a84ff read a tad bright. */
     --user: #0978ea;
+    /* A dark navy, so a link stands out on the dark theme's prompt blue
+       (owner ruling, 2026-09-27). */
+    --prompt-link: #0a2a5e;
     --held-prompt-bg: #25282e;
     /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
        lifted a notch, so a response sits lighter than the tool cards. */
@@ -1807,6 +1813,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .md a { color: var(--accent); }
+/* A link in a blue prompt bubble takes the prompt's own link color. A held
+   prompt keeps --accent, since its fill is grey, not blue. */
+.bubble[data-role="prompt"]:not([data-variant="held"]) a { color: var(--prompt-link); }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 /* GFM tables: bordered and compact, their cells wrapping when the table would
    be wider than the bubble instead of forcing the bubble to grow. */
