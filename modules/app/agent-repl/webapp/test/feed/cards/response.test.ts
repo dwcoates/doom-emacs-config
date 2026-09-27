@@ -23,6 +23,7 @@ import {
   USAGE_AGE_RESERVE_LABELS,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
+  responseCap,
   responseCapLines,
   thinkingLanded,
   revealedSoFar,
@@ -37,7 +38,13 @@ import stylesheet from "../../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
-import { BUBBLE_CAP_ATTRIBUTE, BUBBLE_UNCAPPED } from "../../../src/bubble/draw.js";
+import {
+  BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_MORE_ATTRIBUTE,
+  BUBBLE_MORE_ELLIPSIS,
+  BUBBLE_MORE_FADE,
+  BUBBLE_UNCAPPED,
+} from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
@@ -1817,6 +1824,8 @@ describe("the thinking bubble's one-line cap", () => {
     const body = scroll.querySelector(".bubble-body");
     if (body === null) throw new Error("the drawn bubble's box holds no body");
     Object.defineProperty(body, "offsetHeight", { configurable: true, value: lines * LINE_PX });
+    // The ellipsis clamps the body itself; its clipped lines are still laid out.
+    Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
     Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: lines * LINE_PX });
     Object.defineProperty(scroll, "clientHeight", {
       configurable: true,
@@ -1862,7 +1871,7 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 
-  it("wears the response bubble's fade when it runs past one line", () => {
+  it("marks has-more when it runs past one line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1875,7 +1884,7 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 
-  it("expands a capped thinking bubble on a click, dropping the fade", () => {
+  it("expands a capped thinking bubble on a click, dropping has-more", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1896,7 +1905,7 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 
-  it("collapses an expanded thinking bubble on a second click, restoring the fade", () => {
+  it("collapses an expanded thinking bubble on a second click, restoring has-more", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1904,7 +1913,7 @@ describe("the thinking bubble's one-line cap", () => {
       scroll.click();
       // Act
       scroll.click();
-      // Assert — back to one line under the fade.
+      // Assert — back to one line, with more below it.
       expect([
         scroll.classList.contains(EXPANDED_CLASS),
         scroll.clientHeight,
@@ -1915,7 +1924,7 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 
-  it("shows no fade on a thinking bubble that fits in one line", () => {
+  it("marks no has-more on a thinking bubble that fits in one line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1936,7 +1945,7 @@ describe("the thinking bubble's one-line cap", () => {
       const collapsed = scroll.clientHeight;
       // Act
       scroll.click();
-      // Assert — the same height and still no fade: the click reveals nothing,
+      // Assert — the same height and still no more: the click reveals nothing,
       // exactly as it does on a short response bubble.
       expect([scroll.clientHeight, scroll.classList.contains(HAS_MORE_CLASS)]).toEqual([
         collapsed,
@@ -1946,7 +1955,91 @@ describe("the thinking bubble's one-line cap", () => {
       teardown();
     }
   });
+});
 
+/** The selector of the stylesheet rule PATTERN captures, or a loud failure naming WHAT. */
+function selectorOf(pattern: RegExp, what: string): string {
+  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+  const found = pattern.exec(css)?.[1]?.trim();
+  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
+  return found;
+}
+
+/**
+ * A THINKING BUBBLE SAYS "MORE" WITH THE ELLIPSIS, NEVER THE FADE (owner
+ * ruling, 2026-09-27). Landed, its one collapsed line ends in `…` exactly when
+ * anything follows it: the stylesheet clamps the collapsed body to its line,
+ * and the engine writes the `…` when the body's rendered lines run past it
+ * (`has-more`); the fade is hidden. jsdom lays nothing out, so each case states
+ * the geometry the engine would give it. An arriving thinking bubble is under
+ * the shared feed cap, which the ellipsis cannot state, so it keeps the fade.
+ */
+describe("the thinking bubble's ellipsis", () => {
+  const LINE_PX = 20;
+
+  /** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
+  const CLAMPED_BODY = selectorOf(/([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/, "ellipsis clamp");
+
+  /** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
+  const FADE_HIDDEN_ON = selectorOf(/([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/, "hidden fade");
+
+  /** A drawn thinking bubble in ARM whose body renders LINES lines, measured under the cap of CAP lines. */
+  function mounted(arm: "success" | "update", lines: number, cap: number): { box: HTMLElement; body: HTMLElement } {
+    const host = document.createElement("div");
+    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    const bubble = drawFeedResponse(
+      response({ thinking: true, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
+      rowContext(),
+    );
+    host.append(bubble);
+    document.body.append(host);
+    const box = bubble.querySelector(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement;
+    const body = box.querySelector(":scope > .bubble-body") as HTMLElement;
+    const shown = Math.min(lines, cap) * LINE_PX;
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: shown });
+    // A clamped body's own box ends at its cap; an unclamped one holds every line.
+    const own = body.matches(CLAMPED_BODY) ? shown : lines * LINE_PX;
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: own });
+    Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
+    refreshHasMore(box);
+    return { box, body };
+  }
+
+  /** Whether the collapsed line ends in the ellipsis: the clamp holds it, and something follows it. */
+  const ellipsized = ({ box, body }: { box: HTMLElement; body: HTMLElement }): boolean =>
+    body.matches(CLAMPED_BODY) && box.classList.contains(HAS_MORE_CLASS);
+
+  /** Whether the box draws the fade: it has more, and nothing hides the fade. */
+  const faded = ({ box }: { box: HTMLElement }): boolean =>
+    box.classList.contains(HAS_MORE_CLASS) && !box.matches(FADE_HIDDEN_ON);
+
+  it("ends a landed thinking bubble's line in the ellipsis when there is more", () => {
+    // Arrange / Act
+    const drawn = mounted("success", 3, 1);
+    // Assert
+    expect(ellipsized(drawn)).toBe(true);
+  });
+
+  it("draws no fade on a landed thinking bubble with more", () => {
+    // Arrange / Act
+    const drawn = mounted("success", 3, 1);
+    // Assert
+    expect(faded(drawn)).toBe(false);
+  });
+
+  it("draws neither the ellipsis nor the fade on a landed thinking bubble with no more", () => {
+    // Arrange / Act
+    const drawn = mounted("success", 1, 1);
+    // Assert
+    expect([ellipsized(drawn), faded(drawn)]).toEqual([false, false]);
+  });
+
+  it("keeps the fade on an arriving thinking bubble past the feed cap", () => {
+    // Arrange / Act — the feed cap's whole-line part, far under the body.
+    const drawn = mounted("update", 60, 27);
+    // Assert
+    expect([ellipsized(drawn), faded(drawn)]).toEqual([false, true]);
+  });
 });
 
 /**
@@ -2059,6 +2152,35 @@ describe("responseCapLines", () => {
     const u = response({ thinking, superseded, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = responseCapLines(u);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+describe("responseCap", () => {
+  it.each([
+    { name: "a settled ordinary response", thinking: false, state: "success", want: undefined },
+    { name: "an arriving thinking bubble", thinking: true, state: "update", want: undefined },
+    { name: "a thinking bubble whose text landed", thinking: true, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "a thinking bubble cut short", thinking: true, state: "error", want: BUBBLE_MORE_ELLIPSIS },
+  ] as const)("gives $name the more signal $want", ({ thinking, state, want }) => {
+    // Arrange
+    const u = response({ thinking, result: { case: state, value: { prose: { markdown: "x" } } } });
+    // Act
+    const got = responseCap(u).more;
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it.each([
+    { name: "a landed thinking bubble", thinking: true, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "an arriving thinking bubble", thinking: true, state: "update", want: BUBBLE_MORE_FADE },
+    { name: "an ordinary response", thinking: false, state: "success", want: null },
+  ] as const)("stamps $name's bubble data-more $want", ({ thinking, state, want }) => {
+    // Arrange
+    const u = response({ thinking, result: { case: state, value: { prose: { markdown: "x" } } } });
+    // Act
+    const got = drawFeedResponse(u, rowContext()).getAttribute(BUBBLE_MORE_ATTRIBUTE);
     // Assert
     expect(got).toBe(want);
   });
