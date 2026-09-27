@@ -1141,15 +1141,40 @@ one is a contract breach, never a reload to attempt."
 
 ;;;; ---- Workspace-mutation progress ------------------------------------
 
+(defun agent-repl-wire-decode-workspace-create-stage-deriving-name (value)
+  "Decode VALUE as the empty `WorkspaceCreateStageDerivingName'."
+  (agent-repl-wire--decode-empty "WorkspaceCreateStageDerivingName" value))
+
+(defun agent-repl-wire-decode-workspace-create-stage-creating-worktree (value)
+  "Decode VALUE as the empty `WorkspaceCreateStageCreatingWorktree'."
+  (agent-repl-wire--decode-empty "WorkspaceCreateStageCreatingWorktree" value))
+
+(defun agent-repl-wire-decode-workspace-create-stage-starting-session (value)
+  "Decode VALUE as the empty `WorkspaceCreateStageStartingSession'."
+  (agent-repl-wire--decode-empty "WorkspaceCreateStageStartingSession" value))
+
 (defun agent-repl-wire-decode-workspace-create-stage (value)
-  "Decode `WorkspaceCreateStage''s protojson enum-name VALUE into a keyword.
-Enums travel as their string names; an unknown one is a contract breach,
-not a stage to guess at."
-  (pcase value
-    ("WORKSPACE_CREATE_STAGE_DERIVING_NAME" :deriving-name)
-    ("WORKSPACE_CREATE_STAGE_CREATING_WORKTREE" :creating-worktree)
-    (_ (agent-repl-wire--fail "WorkspaceCreateStage" 'stage
-                              (format "unknown enum value %S" value)))))
+  "Decode `WorkspaceCreateStage' from VALUE into the stage keyword.
+THE SET ARM IS THE STAGE, and every arm is an empty message, so the
+keyword is the whole fact: `:deriving-name', `:creating-worktree' or
+`:starting-session'.  An arm this codec does not hold is refused as an
+unknown field by the key check -- logged at ERROR and signalled, never a
+stage guessed at or dropped -- and an unset oneof is refused likewise."
+  (let ((object (agent-repl-wire--object "WorkspaceCreateStage" value)))
+    (agent-repl-wire--check-keys "WorkspaceCreateStage" object
+                                 '(derivingName creatingWorktree startingSession))
+    (agent-repl-wire--decoded
+     "WorkspaceCreateStage"
+     (plist-get
+      (agent-repl-wire--decode-oneof
+       "WorkspaceCreateStage" 'stage object
+       '((derivingName :deriving-name
+                       agent-repl-wire-decode-workspace-create-stage-deriving-name)
+         (creatingWorktree :creating-worktree
+                           agent-repl-wire-decode-workspace-create-stage-creating-worktree)
+         (startingSession :starting-session
+                          agent-repl-wire-decode-workspace-create-stage-starting-session)))
+      :arm))))
 
 (defun agent-repl-wire-decode-workspace-create-succeeded (value)
   "Decode `WorkspaceCreateSucceeded' from VALUE into `(:workspace REF :name N)'.
@@ -1181,13 +1206,16 @@ would answer, or an `internal' sentence it would fail the rpc with."
 
 (defun agent-repl-wire-decode-workspace-create-progress (value)
   "Decode `WorkspaceCreateProgress' from VALUE into `(:arm STEP :value V)'.
-THE ARM IS THE STEP: an intermediate `stage', or a terminal `succeeded' or
-`failed'."
+THE ARM IS THE STEP: an intermediate `entered_stage' (whose value is the
+stage keyword), or a terminal `succeeded' or `failed'.  The retired
+field-1 `stage' enum is not a key this codec holds, so a push in that
+shape is refused as an unknown field rather than misread."
   (let ((object (agent-repl-wire--object "WorkspaceCreateProgress" value)))
-    (agent-repl-wire--check-keys "WorkspaceCreateProgress" object '(stage succeeded failed))
+    (agent-repl-wire--check-keys "WorkspaceCreateProgress" object
+                                 '(enteredStage succeeded failed))
     (agent-repl-wire--decode-oneof
      "WorkspaceCreateProgress" 'step object
-     '((stage :stage agent-repl-wire-decode-workspace-create-stage)
+     '((enteredStage :entered-stage agent-repl-wire-decode-workspace-create-stage)
        (succeeded :succeeded agent-repl-wire-decode-workspace-create-succeeded)
        (failed :failed agent-repl-wire-decode-workspace-create-failed)))))
 
