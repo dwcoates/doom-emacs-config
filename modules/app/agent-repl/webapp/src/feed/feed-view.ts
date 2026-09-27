@@ -71,6 +71,7 @@ import type {
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
 import { keepScrolled } from "./keep-scroll.js";
 import type { Overscan } from "./overscan.js";
+import { thinkingLanded } from "./cards/response.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
@@ -94,14 +95,16 @@ interface CollapseSample {
 }
 
 /**
- * Whether NEXT is the daemon's re-push of a thinking row it has just marked
- * SUPERSEDED (`FeedResponse.superseded`): the flag the row was drawn without,
- * now set. Read off the two pushed rows; nothing here decides it.
+ * Whether NEXT is the daemon's re-push of a thinking row whose own final text
+ * has just LANDED (`thinkingLanded`, cards/response.ts): the row was drawn still
+ * arriving and now arrives in a terminal arm, so its redraw collapses it to the
+ * thinking cap. Read off the two pushed rows of the SAME row; no other row is
+ * consulted.
  */
-function isSupersedeEdge(drawn: FeedRow, next: FeedRow): boolean {
+function isLandingEdge(drawn: FeedRow, next: FeedRow): boolean {
   const before = responseOf(drawn);
   const after = responseOf(next);
-  return before !== null && after !== null && after.thinking && !before.superseded && after.superseded;
+  return before !== null && after !== null && !thinkingLanded(before) && thinkingLanded(after);
 }
 
 /** The response bubble a row carries, or null. */
@@ -465,7 +468,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       operation: known ? "feed.row-replaced" : "feed.row-appended",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
-    const collapsing = held !== undefined && isSupersedeEdge(held.row, row) ? sampleCollapse(id, held) : null;
+    const collapsing = held !== undefined && isLandingEdge(held.row, row) ? sampleCollapse(id, held) : null;
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
@@ -474,7 +477,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
-   * Sample where a row the daemon just marked superseded ends, BEFORE its
+   * Sample where a thinking row that just landed ends, BEFORE its
    * redraw collapses it, with the scroll box's top edge. Null when the feed has
    * no scroll box (a sub-feed; the same standing a prepend has there).
    */
@@ -490,9 +493,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 
   /**
    * KEEP THE READER'S CONTENT IN PLACE WHEN A THINKING BUBBLE ABOVE THEM
-   * COLLAPSES (owner rule, 2026-09-23). The daemon re-pushes a thinking row
-   * superseded once a later response lands, and its redraw drops it from the
-   * response cap to two lines. When it lay wholly above the viewport, everything
+   * COLLAPSES (owner rule, 2026-09-23). The daemon re-pushes a thinking row in
+   * a terminal arm once its own final text has arrived, and its redraw drops it
+   * from the response cap to the one-line thinking cap. When it lay wholly above the viewport, everything
    * the reader sees moved up by exactly the height it lost, so the view shifts
    * by that, through the tail owner (`collapseCompensation`); a following reader
    * was already kept at the tail by `announce`. The row the redraw DETACHED is an
@@ -501,14 +504,14 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function keepPlaceAboveCollapse(sample: CollapseSample | null): void {
     if (opts.scroll === undefined || sample === null) return;
     if (!sample.element.isConnected) {
-      log.error("a superseded row's redraw detached the row its collapse was measured from", {
+      log.error("a landed thinking row's redraw detached the row its collapse was measured from", {
         operation: "feed.collapse-anchor-detached",
         context: { feed: feedName(), row: sample.id },
       });
       return;
     }
     const after = sample.element.getBoundingClientRect().bottom;
-    log.debug(`a superseded row above ${sample.boxTop}px changed by ${after - sample.bottom}px`, {
+    log.debug(`a landed thinking row above ${sample.boxTop}px changed by ${after - sample.bottom}px`, {
       operation: "feed.collapse-kept-place",
       context: { feed: feedName(), row: sample.id, box_top: sample.boxTop, before: sample.bottom, after },
     });
