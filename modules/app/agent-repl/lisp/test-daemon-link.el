@@ -240,6 +240,29 @@ gate is the point, so it is exercised here rather than bypassed."
     ;; Assert
     (should (agent-repl-link-up-p))))
 
+(ert-deftest agent-repl-test-link-live-answers-the-accepted-primary ()
+  "The live daemon a lost workspace follows is the accepted primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act / Assert
+      (should (eq (agent-repl-link-live) conn)))))
+
+(ert-deftest agent-repl-test-link-live-is-nil-with-no-link ()
+  "No link standing is no live daemon: the caller waits on the link-up edge."
+  (agent-repl-test-link--with-harness
+    ;; Act / Assert
+    (should (null (agent-repl-link-live)))))
+
+(ert-deftest agent-repl-test-link-live-is-nil-on-a-closed-primary ()
+  "A primary whose connection is closed is not a daemon anyone may follow."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (setf (agent-repl-connect-connection-alive-p conn) nil)
+      ;; Act / Assert
+      (should (null (agent-repl-link-live))))))
+
 (ert-deftest agent-repl-test-link-connect-is-idempotent-while-up ()
   "A second connect while the link stands opens no second stream."
   (agent-repl-test-link--with-harness
