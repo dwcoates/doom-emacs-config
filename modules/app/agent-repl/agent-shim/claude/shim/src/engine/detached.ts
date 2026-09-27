@@ -51,6 +51,7 @@ import {
 } from "../convert/detached.js";
 import { detachedWorkId } from "../convert/ids.js";
 import type { conversationv1 } from "../proto.js";
+import type { PersistEntry } from "../store/persistence.js";
 import type {
   SdkBackgroundTasksChangedMessage,
   SdkTaskNotificationMessage,
@@ -420,5 +421,54 @@ export class LiveWorkTable {
   /** Nothing is live. */
   get empty(): boolean {
     return this.entries.size === 0;
+  }
+}
+
+/**
+ * How many shell runs' start rows the engine remembers.
+ *
+ * CONSTANT SIZE, like every table here: the live runs plus the retired ring's
+ * worth, with room to spare. A run whose start was forgotten is still served
+ * from the store, which holds the start it was written with; only the
+ * durability barrier below is skipped for it.
+ */
+const SHELL_RUN_STARTS_REMEMBERED = 256;
+
+/**
+ * The START row the fold produced for each detached shell run, by run value.
+ *
+ * WHY THE ENGINE KEEPS IT. A consumer opens `WatchBash` the instant it learns
+ * of a run, and the run's start — written ahead of the announcement — may still
+ * be in the writer's buffer. Re-writing the SAME entry durably is the barrier:
+ * it carries the same write identity, so the store absorbs it if the original
+ * already landed, and the writer's one ordered buffer lands it behind the
+ * original if not. Either way the open that follows finds the run's first row,
+ * so the stream is sent `start` at once rather than waiting on anything.
+ */
+export class ShellRunStarts {
+  private readonly starts = new Map<string, PersistEntry>();
+
+  /** Remember every shell run START among what the fold just produced. */
+  note(entries: readonly PersistEntry[]): void {
+    for (const entry of entries) {
+      if (entry.item.kind !== "bash_run" || entry.item.frame.result.case !== "start") continue;
+      const run = entry.item.run.value;
+      this.starts.delete(run);
+      this.starts.set(run, entry);
+      while (this.starts.size > SHELL_RUN_STARTS_REMEMBERED) {
+        const [oldest] = this.starts.keys();
+        if (oldest === undefined) break;
+        this.starts.delete(oldest);
+        LOGGER.debug(
+          { run: oldest, bound: SHELL_RUN_STARTS_REMEMBERED },
+          "the shell-run start bound was reached; the oldest run's start is forgotten",
+        );
+      }
+    }
+  }
+
+  /** The start row this process produced for a run, if it remembers one. */
+  get(work: conversationv1.DetachedWorkId): PersistEntry | undefined {
+    return this.starts.get(work.value);
   }
 }

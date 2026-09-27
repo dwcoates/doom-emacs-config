@@ -15,7 +15,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark, type LogRecord } from "../log-records.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
-import { PersistenceError, type AgentPageSession } from "../../src/store/persistence.js";
+import { PersistenceError, type AgentPageSession, type PersistEntry } from "../../src/store/persistence.js";
 import { ForegroundUnitTable } from "../../src/engine/foreground.js";
 import { PermissionGate } from "../../src/engine/permission-gate.js";
 import { LiveWorkTable } from "../../src/engine/detached.js";
@@ -70,6 +70,8 @@ interface Harness {
    * is the only handle a test has on the conclusion the handler observes.
    */
   readonly watchers: AgentPageSession[];
+  /** What `SessionContext.shellRunStart` answers, by run value. */
+  readonly shellStarts: Map<string, PersistEntry>;
   /**
    * Every stop command the engine held for a turn's terminal, in order, and
    * whether the vendor interrupt had already been sent when it was held.
@@ -117,6 +119,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     yieldBudgetMs: 60_000,
     watchers: [] as AgentPageSession[],
     stopCommands: [],
+    shellStarts: new Map<string, PersistEntry>(),
   };
   const context: SessionContext = {
     persistence,
@@ -136,6 +139,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
       return () => undefined;
     },
     bashWatcherOpened: () => () => undefined,
+    shellRunStart: (work) => state.shellStarts.get(work.value),
     concludeStoppedRuns: () => undefined,
     knowsAgent: () => state.knows,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
@@ -2331,86 +2335,86 @@ describe("DetachForeground on a live foreground subagent", () => {
 });
 
 /**
- * watchBash's own standing predicate -- the shim's answer to "where does this
- * run stand", used to turn a store refusal into a race worth waiting out
- * (store/reader.ts's awaitFirstRow). RecordingPersistence records the predicate
- * it was handed so it can be invoked directly.
+ * watchBash's durability barrier: a run this shim wrote a start for has that
+ * start made durable BEFORE the store's run is opened, so the first frame is
+ * owed at once and nothing is ever waited for.
  */
-describe("WatchBash's announcement predicate", () => {
-  it("says live while the live table still holds the work", async () => {
-    const h = await harness();
-    h.live.onTaskStarted({
-      type: "system",
-      subtype: "task_started",
-      task_id: "b01",
-      tool_use_id: "t",
-      description: "",
-      uuid: "00000000-0000-4000-8000-000000000000",
-      session_id: "s",
-    });
-    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+describe("WatchBash's durability barrier", () => {
+  const WORK = create(conversationv1.DetachedWorkIdSchema, { value: "t" });
 
-    for await (const response of h.turns.watchBash(
-      create(shimv1.WatchBashRequestSchema, {
-        work: create(conversationv1.DetachedWorkIdSchema, { value: "t" }),
-      }),
-    )) {
+  /** The start row the fold produced for run `t`. */
+  function startRow(): PersistEntry {
+    return {
+      agentId: create(conversationv1.AgentIdSchema, { value: "agent-1" }),
+      upsertKey: "bash:t:start",
+      source: { vendorUuid: "shell-run:t", discriminator: "agent_bash.start" },
+      keepalive: false,
+      turn: undefined,
+      item: {
+        kind: "bash_run",
+        run: create(conversationv1.AgentActivityIdSchema, { value: "t" }),
+        frame: create(conversationv1.AgentBashSchema, {}),
+      },
+    };
+  }
+
+  /** Pull the first frame of one WatchBash, then let it go. */
+  async function openOnce(h: Awaited<ReturnType<typeof harness>>): Promise<void> {
+    for await (const response of h.turns.watchBash(create(shimv1.WatchBashRequestSchema, { work: WORK }))) {
       void response;
       break;
     }
+  }
 
-    expect(h.persistence.lastAnnouncement?.()).toBe("live");
+  it("makes the run's remembered start durable before it opens the run", async () => {
+    // Arrange.
+    const h = await harness();
+    h.shellStarts.set("t", startRow());
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    // Act.
+    await openOnce(h);
+
+    // Assert.
+    expect(h.persistence.bashRunCalls).toEqual(["durable:bash:t:start", "open:t"]);
   });
 
-  it("says concluded for a handle the live table retired", async () => {
+  it("opens a run it remembers no start for without writing anything", async () => {
+    // Arrange: a run adopted from an earlier process, whose start the store holds.
     const h = await harness();
-    h.live.onTaskStarted({
-      type: "system",
-      subtype: "task_started",
-      task_id: "b02",
-      tool_use_id: "t",
-      description: "",
-      uuid: "00000000-0000-4000-8000-000000000000",
-      session_id: "s",
-    });
-    h.live.onTaskNotification({
-      type: "system",
-      subtype: "task_notification",
-      task_id: "b02",
-      status: "completed",
-      output_file: "",
-      summary: "",
-      uuid: "00000000-0000-4000-8000-000000000001",
-      session_id: "s",
-    });
     h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
 
-    for await (const response of h.turns.watchBash(
-      create(shimv1.WatchBashRequestSchema, {
-        work: create(conversationv1.DetachedWorkIdSchema, { value: "t" }),
-      }),
-    )) {
-      void response;
-      break;
-    }
+    // Act.
+    await openOnce(h);
 
-    expect(h.persistence.lastAnnouncement?.()).toBe("concluded");
+    // Assert.
+    expect(h.persistence.bashRunCalls).toEqual(["open:t"]);
   });
 
-  it("says unknown for a handle the live table never held", async () => {
+  it("refuses the watch, loudly, when the start cannot be made durable", async () => {
+    // Arrange.
     const h = await harness();
-    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+    h.shellStarts.set("t", startRow());
+    h.persistence.writeDurableRejects = new PersistenceError("store_unavailable", "the store is down");
 
-    for await (const response of h.turns.watchBash(
-      create(shimv1.WatchBashRequestSchema, {
-        work: create(conversationv1.DetachedWorkIdSchema, { value: "nope" }),
-      }),
-    )) {
-      void response;
-      break;
-    }
+    // Act.
+    const refused = openOnce(h);
 
-    expect(h.persistence.lastAnnouncement?.()).toBe("unknown");
+    // Assert.
+    await expect(refused).rejects.toMatchObject({ code: Code.NotFound });
+  });
+
+  it("never opens the run when the start could not be made durable", async () => {
+    // Arrange.
+    const h = await harness();
+    h.shellStarts.set("t", startRow());
+    h.persistence.writeDurableRejects = new PersistenceError("store_unavailable", "the store is down");
+
+    // Act.
+    await openOnce(h).catch(() => undefined);
+
+    // Assert.
+    expect(h.persistence.bashRunCalls).toEqual(["durable:bash:t:start"]);
   });
 });
 

@@ -738,16 +738,16 @@ store-recovery cadence. Three different 50 ms-adjacent numbers sit near this
 row, so the assertion's doc comment must name **which** one it was measured
 under: `--poll-interval`, from `world_test.go:810`.
 
-**The poll actually on this path is not only the sidecar's.** The shim
-re-asks the store for a detached run's rows on its own cadence:
-`agent-shim/claude/shim/src/store/reader.ts:262 BASH_ROW_RECHECK_MS = 25ms`
-for shell runs and `:294 AGENT_ROW_RECHECK_MS = 250ms` for agents, , the shell recheck doubling to
-`BASH_ROW_RECHECK_CEILING_MS = 250ms` while a run's rows are late (an announced
-run is waited for until its rows land; the old 500ms `BASH_CONCLUDED_WINDOW_MS`
-backstop is gone). **The 250 ms agent recheck dominates a 60/150 ms
-budget outright**, so this row is built for the SHELL case (25 ms recheck) and
-the agent case gets its own, larger, separately-derived budget rather than
-being folded in and quietly failing.
+**The poll actually on this path is the sidecar's alone for a shell.** The
+shim no longer re-asks the store for a detached shell run's rows (2026-09-27):
+it writes the run's start ahead of the announcement and makes it durable
+before opening `WatchBashRun`, so the open is answered at once and every later
+row reaches the watcher through the store's own live fan-out. The agent case
+still re-asks on `agent-shim/claude/shim/src/store/reader.ts
+AGENT_ROW_RECHECK_MS = 250ms`. **The 250 ms agent recheck dominates a 60/150
+ms budget outright**, so this row is built for the SHELL case and the agent
+case gets its own, larger, separately-derived budget rather than being folded
+in and quietly failing.
 
 Go layer, N=20, budget PROVISIONAL 60/150 ms for the detached-shell case, at
 `--poll-interval 50ms` — inherent-floor, per ruling 2.
@@ -986,9 +986,7 @@ and they are cheap, deterministic, and immune to machine load.
 | sidecar | `shim-sidecar/main.go:70` | `DefaultPollInterval` | **1 s compiled-in default** (launchd ships it unchanged); `e2e/world_test.go:810` overrides to 50 ms — the **accepted inherent floor** per ruling 2 |
 | sidecar | `shim-sidecar/main.go:71` | `DefaultRescanInterval` | **30 s compiled-in default**; `e2e/world_test.go:811` overrides to 200 ms |
 | sidecar | `shim-sidecar/cycle.go:83` | `recoverTick` | 50 ms — store-recovery heartbeat, reads no files |
-| shim (TS) | `shim/src/store/reader.ts:262` | `BASH_ROW_RECHECK_MS` | **25 ms** — governs row 19's shell case |
-| shim (TS) | `shim/src/store/reader.ts:294` | `AGENT_ROW_RECHECK_MS` | **250 ms** — dominates any sub-250 ms budget on the detached-agent path |
-| shim (TS) | `shim/src/store/reader.ts` | `BASH_ROW_RECHECK_CEILING_MS` | 250 ms — the shell recheck's backoff ceiling while rows are late; no give-up window |
+| shim (TS) | `shim/src/store/reader.ts` | `AGENT_ROW_RECHECK_MS` | **250 ms** — dominates any sub-250 ms budget on the detached-agent path |
 | webapp | `webapp/src/clock.ts` | `DEFAULT_TICK_MS` | 1000 ms — ONE shared page ticker; `sidebar/row.ts:19`, `lifecycle/lifecycle.ts:37`, `feed/ticking.ts:7`, `rpc/context.ts:36` all declare the invariant that components subscribe to it and never call `setInterval` |
 | webapp | `webapp/src/rpc/streams.ts:210` | reconnect backoff | 250 ms → 5000 ms |
 | webapp | `webapp/src/lifecycle/lifecycle.ts:568` | adopt retry | 250 ms → 5000 ms, 60 s budget |
