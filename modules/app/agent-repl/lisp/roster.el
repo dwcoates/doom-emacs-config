@@ -57,6 +57,7 @@
 (declare-function agent-repl-rpc-watch-workspace-roster "rpc"
                   (conn on-push on-close &optional on-open))
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
+(declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--ws-live-p "workspace" (ws))
@@ -922,19 +923,65 @@ dropped."
      agent-repl--global-log-scope request-id
      (lambda () (agent-repl-roster-apply (plist-get push :roster))))))
 
-(defun agent-repl-roster-on-close (reason)
-  "Handle the roster stream closing for REASON.
-A cancel is Emacs's own graceful close; anything else is the link going
-down, and the reconnect is daemon-link.el's — this file only forgets the
-stream so the next link-up subscribes a fresh one."
-  (setq agent-repl-roster--stream nil)
-  (pcase (car-safe reason)
-    (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
-                                  "elisp.roster.stream-close: reason=cancelled"))
-    (:ended (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                                "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended"))
-    (_ (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                           "elisp.roster.stream-close: reason=%S" reason))))
+(defvar agent-repl-roster--accepted nil
+  "The roster stream whose subscription the daemon ACCEPTED, or nil.
+Only a stream that was accepted and then lost is re-subscribed at once:
+one that died before its acceptance met a daemon that is not answering,
+and re-dialing it from its own close would loop until the link\='s own
+edge said so.")
+
+(defun agent-repl-roster-on-close (reason &optional stream)
+  "Handle the roster STREAM closing for REASON.
+A cancel is Emacs's own graceful close.  Anything else is the producer
+dropping a STANDING stream: it is recorded at ERROR, and the roster
+FOLLOWS THE LIVE DAEMON (`agent-repl-roster--follow-live-daemon').
+
+A close of a stream that is no longer the standing one is STALE: a
+re-subscription already replaced it, and forgetting the stream that
+stands now would leave the tabs with no roster at all.  STREAM nil means
+the caller did not name the stream."
+  (cond
+   ((and stream (not (eq stream agent-repl-roster--stream)))
+    (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
+                     "elisp.roster.stale-stream-close: reason=%S" reason))
+   (t
+    (setq agent-repl-roster--stream nil)
+    (pcase (car-safe reason)
+      (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
+                                    "elisp.roster.stream-close: reason=cancelled"))
+      (:ended (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
+                                  "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended")
+              (agent-repl-roster--follow-live-daemon stream))
+      (_ (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
+                             "elisp.roster.stream-close: reason=%S" reason)
+         (agent-repl-roster--follow-live-daemon stream))))))
+
+(defun agent-repl-roster--follow-live-daemon (lost)
+  "Re-subscribe the roster on the LIVE daemon after the stream LOST died.
+Regression, 2026-09-27: a daemon exited under a standing roster stream
+and nothing re-subscribed it unless the link itself went down or was
+promoted -- the roster was left to those edges alone.  The live daemon is
+the link\='s (`agent-repl-link-live'), never an address this file keeps:
+
+  - no link stands: the link-up edge subscribes the roster
+    (`agent-repl-roster-on-link-up'), and nothing polls meanwhile;
+  - LOST was never accepted: the daemon it dialed is not answering, and
+    the link\='s own edge (down then up, or a promotion) re-subscribes;
+  - otherwise the roster is re-subscribed on the live daemon now."
+  (let ((live (and (fboundp 'agent-repl-link-live) (agent-repl-link-live))))
+    (cond
+     ((null live)
+      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.resubscribe-awaiting-link"))
+     ((not (and lost (eq lost agent-repl-roster--accepted)))
+      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.resubscribe-awaiting-link-edge reason=never-accepted address=%S"
+                        (agent-repl-connect-connection-address live)))
+     (t
+      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.resubscribed-on-loss address=%S"
+                        (agent-repl-connect-connection-address live))
+      (agent-repl-roster-subscribe live)))))
 
 ;;;; ---- The subscription -------------------------------------------------
 
@@ -949,14 +996,20 @@ deliver the tabs."
                      "elisp.roster.subscribe: cancelling prior stream")
     (agent-repl-connect-stream-cancel agent-repl-roster--stream)
     (setq agent-repl-roster--stream nil))
-  (setq agent-repl-roster--stream
-        (agent-repl-rpc-watch-workspace-roster
-         conn #'agent-repl-roster-on-push #'agent-repl-roster-on-close
-         (lambda ()
-           (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                             "elisp.roster.subscribed method=%S address=%S"
-                             "WatchWorkspaceRoster"
-                             (agent-repl-connect-connection-address conn)))))
+  ;; THE CLOSE AND THE ACCEPTANCE NAME THEIR OWN STREAM, so a close that
+  ;; lands after a re-subscription is recognized as stale.
+  (let (stream)
+    (setq stream
+          (agent-repl-rpc-watch-workspace-roster
+           conn #'agent-repl-roster-on-push
+           (lambda (reason) (agent-repl-roster-on-close reason stream))
+           (lambda ()
+             (setq agent-repl-roster--accepted stream)
+             (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                               "elisp.roster.subscribed method=%S address=%S"
+                               "WatchWorkspaceRoster"
+                               (agent-repl-connect-connection-address conn)))))
+    (setq agent-repl-roster--stream stream))
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                     "elisp.roster.subscribe: opened")
   agent-repl-roster--stream)
