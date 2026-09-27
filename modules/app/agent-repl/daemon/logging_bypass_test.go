@@ -25,7 +25,7 @@ func TestProductionDiagnosticsDoNotBypassDlog(t *testing.T) {
 		reason string
 	}
 	allowed := []allowance{
-		{path: "cmd/claude-repld/main.go", fn: "main", callee: "fmt.Fprintln", count: 5, reason: "process bootstrap and final exit reporting exist before or after the durable surfaces; -probe-boot-claim adds two, and it opens no log surfaces at all because its whole answer is its exit status"},
+		{path: "cmd/claude-repld/main.go", fn: "main", callee: "fmt.Fprintln", count: 6, reason: "process bootstrap and final exit reporting exist before or after the durable surfaces; -probe-boot-claim adds two, and it opens no log surfaces at all because its whole answer is its exit status; -layout-version adds one, its whole answer being the layout number on stdout for the deploy that asked"},
 		{path: "internal/dlog/logger.go", fn: "emergency", callee: "os.Stderr.Write", count: 1, reason: "a durable sink cannot record its own write failure; the echo is itself a marshalled record, written raw because dlog is what just failed"},
 		{path: "cmd/claude-repld/deployverb.go", fn: "runDeployVerb", callee: "fmt.Fprintf", count: 8, reason: "the deploy verb is a CLI whose product is its output: every refusal is the verb's injected stderr, and the daemon logs every decision itself"},
 		{path: "cmd/claude-repld/deployverb.go", fn: "runDeployVerb", callee: "fmt.Fprintln", count: 1, reason: "the deploy verb prints each component's decision on its injected stdout"},
