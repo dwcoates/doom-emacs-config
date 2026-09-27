@@ -186,8 +186,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// is held until its process ends, so a replacement is spawned into a window
 	// where the address is gone and the claim is not yet free; exiting on the
 	// first refusal there destroyed the daemon instead of replacing it.
+	claimWait := h.ClaimWait
+	if opts.replacing && claimWait < rollout.ReplacementClaimWait {
+		// A REPLACEMENT WAITS OUT ITS INCUMBENT'S WHOLE ORDERLY EXIT: the
+		// incumbent spawned it just before that exit began, and the claim is
+		// released only when the exit ends.
+		claimWait = rollout.ReplacementClaimWait
+	}
 	bindClaim := func(addrPath string, port int) (daemonaddr.Claim, error) {
-		return daemonaddr.BindWithin(addrPath, port, h.ClaimWait)
+		return daemonaddr.BindWithin(addrPath, port, claimWait)
 	}
 	if joining {
 		bindClaim = daemonaddr.BindJoining
@@ -202,7 +209,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 			// this process exits having written nothing.
 			log.Info("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
 				"addr_path":  layout.DaemonAddr(),
-				"claim_wait": h.ClaimWait.String(),
+				"claim_wait": claimWait.String(),
 			})
 			return err
 		}
