@@ -760,3 +760,111 @@ func TestAnInterjectingVerdictStillInterruptsAnOrdinaryTurn(t *testing.T) {
 		t.Fatalf("killed = %v, want the ordinary running turn interrupted", killed)
 	}
 }
+
+// --- a prompt that IS a session act is queued, never classified ------------
+
+func TestASessionActPromptNeverReachesTheClassifierWhileATurnRuns(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "a bare /compact", text: "/compact"},
+		{name: "/compact with instructions", text: "/compact foo bar"},
+		{name: "/compact with instructions on the next line", text: "/compact\nfoo bar"},
+		{name: "a bare /clear", text: "/clear"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert
+			if asked := h.judge.questions(); len(asked) != 0 {
+				t.Fatalf("classifier asked %v, want a session act never classified", asked)
+			}
+		})
+	}
+}
+
+func TestASessionActPromptIsHeldForTheRunningTurnsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "/compact foo bar"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("classification = %+v, want hold_for_turn_end with no classifier", got.Classification)
+	}
+}
+
+func TestASessionActPromptNeverInterruptsTheRunningTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want no routing verdict and so no interrupt", killed)
+	}
+}
+
+func TestASessionActPromptKeptFromTheClassifierIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opClassify && r.Context["held_turn"] == "t1" &&
+			r.Context["session_act"] == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT.String() &&
+			r.Context["running_turn"] == "running-turn" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want one info naming the held turn, the act and the running turn", h.log.Records())
+}
+
+func TestANearMissOfASessionActIsClassifiedAsBefore(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "a longer word that begins with the literal", text: "/compacting"},
+		{name: "the literal not at the start", text: "please /compact"},
+		{name: "/clear with trailing text, which the schema says it does not take", text: "/clear the table"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert
+			if asked := h.judge.questions(); len(asked) != 1 || asked[0][1] != tt.text {
+				t.Fatalf("classifier asked %v, want the prompt routed as today", asked)
+			}
+		})
+	}
+}
