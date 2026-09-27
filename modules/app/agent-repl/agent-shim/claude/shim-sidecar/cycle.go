@@ -221,6 +221,12 @@ type sidecar struct {
 	// report it again and the map absorbs the repeat.
 	stopped map[string]int64
 
+	// concluded holds the backgrounded agent runs a transcript SETTLED itself
+	// (task notification, agent TaskStop), by task id. Process-scoped like
+	// `stopped`: it is a fact read out of a transcript. A run in it is never
+	// concluded LOST.
+	concluded map[string]struct{}
+
 	// cursors is CYCLE-SCOPED: recovered as the first act of every production
 	// cycle and dropped the moment production is suspended, so a tailer can
 	// never be built from a stale — or absent — recovery.
@@ -400,6 +406,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		watchers:           map[string]*watched{},
 		settling:           map[string]string{},
 		stopped:            map[string]int64{},
+		concluded:          map[string]struct{}{},
 		parked:             map[string]bool{},
 		residueWithheld:    map[string]map[string]int{},
 		shapeCatalogued:    map[string]bool{},
@@ -1553,6 +1560,7 @@ func (s *sidecar) pollAll() {
 		// terminal's write identity is digested from.
 		if w.target.TaskID != "" {
 			s.applyStop(w.target.TaskID)
+			s.applyConclusion(w.target.TaskID)
 		}
 		if w.vanished {
 			// A file that is readable again was a rename race; the tracker
