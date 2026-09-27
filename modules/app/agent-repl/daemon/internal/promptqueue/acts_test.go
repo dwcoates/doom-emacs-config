@@ -308,3 +308,48 @@ func TestAContextCutTellsTheFooterWhatItCarries(t *testing.T) {
 		})
 	}
 }
+
+// TestAContextCutOfTheTurnAlreadyInFlightStartsNothing pins the act path's
+// re-drive: a context cut whose turn is already running is answered as the
+// delivery the original was, never queued to start that turn again at its
+// end, with the repeat recorded at ERROR.
+func TestAContextCutOfTheTurnAlreadyInFlightStartsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "cut-1", "/clear")
+	// Act
+	err := h.q.SubmitSessionAct(context.Background(), theWorkspace,
+		Act{Kind: ActClear, Turn: "cut-1", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT})
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "cut-1", wsm.CloseCompleted)
+	// Assert
+	if err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want the running cut never started again", started)
+	}
+	if !logged(h.log.Records(), "error", opSubmit, repeatedStartMessage) {
+		t.Fatalf("the repeated start was not recorded at error: %v", h.log.Records())
+	}
+}
+
+// TestAContextCutBehindAnotherRunningTurnStillQueues pins that only the SAME
+// turn is answered without delivery: a cut behind a different running turn
+// queues and starts at that turn's end.
+func TestAContextCutBehindAnotherRunningTurnStillQueues(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace,
+		Act{Kind: ActClear, Turn: "cut-1", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "cut-1" {
+		t.Fatalf("started = %v, want the queued cut started once at the turn's end", started)
+	}
+}
