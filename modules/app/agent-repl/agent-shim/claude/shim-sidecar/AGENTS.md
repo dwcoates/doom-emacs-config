@@ -1498,7 +1498,9 @@ CLI bookkeeping and machinery (`mode`, `permission-mode`, `queue-operation`,
 `last-prompt`, `ai-title`, `pr-link`, `frame-link`, `file-history-*`,
 `attribution-snapshot`, `system/local_command`, harness-injected user records
 (`user/meta` — the system reminder and the `<local-command-caveat>` a slash
-command's envelope is preceded by), and the informational /
+command's envelope is preceded by), user-role records no person typed
+(`user/slash_command`, `user/local_command_output`, `user/interrupt`,
+`user/task_notification` — see below), and the informational /
 turn_duration / stop_hook_summary / away_summary / scheduled_task_fire /
 model-refusal / agents_killed system lines); context-cut exclusions and the other
 attachment machinery as `attachment/<type>`; the synthetic
@@ -1511,6 +1513,31 @@ per-agent transcript holds ORDINARY TRANSCRIPT RECORDS rather than the journal's
 two shapes, so running it through the journal converter filed every record as
 `unknown` — "we do not model this", which is false and which buries the real
 modelling gaps that query exists to find.
+
+USER-ROLE RECORDS NO PERSON TYPED ARE NEVER A PROMPT (`internal/convert/
+bookkeeping.go`). The vendor files its own bookkeeping under the user's role,
+and each shape goes where the stream plane sends the same fact:
+
+- a command the CLI answers ITSELF — its expanded envelope, named local either
+  by the `<local-command-caveat>` record it is the child of or by the schema's
+  `SessionCommand` table (`sessioncommand.go`, read off the enum options), and
+  the bare `/compact` line some CLI versions write — is `user/slash_command`.
+  `/clear` keeps its context-cut arm; a /compact's cut is its boundary's row;
+- a local command's printed output (`<local-command-stdout>` /
+  `<local-command-stderr>`, the ANSI "Compacted" notice included) is
+  `user/local_command_output`, as the shim files `local_command_output`;
+- the interrupt marker `[Request interrupted by user…]` is `user/interrupt`;
+- a `<task-notification>` (`origin.kind: "task-notification"`, or that shape
+  on a CLI writing no origin) SETTLES the backgrounded agent spawn it names on
+  `activity:<tool_use_id>`, the frame and key the shim writes from
+  `task_notification` (`tasknotification.go`) — only for a launch THIS stream
+  read; anything else it says is `user/task_notification`;
+- any other non-`human` `origin.kind` is `unknown` residue.
+
+A PROMPT COMMAND (a custom command's envelope: no caveat, not in the table) is
+served as the text the person typed, `/name args`. A prompt carrying
+`<pasted_content …>` stays a prompt verbatim. A record stating
+`origin.kind: "human"` is never reclassified by its shape.
 
 R15: a FILE-PLANE USER PROMPT is `vendor_specific{kind:"user_prompt"}`, never a
 page line. `AgentPrompt` carries a `TurnId` and a `PromptOrigin`, both
