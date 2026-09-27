@@ -13,6 +13,7 @@
  */
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { logRecordsSince, type LogRecord } from "../log-records.js";
 import { containing } from "../expect-shapes.js";
 
 import {
@@ -30,29 +31,13 @@ import { foldContext } from "./fold-harness.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
 
-/** Every JSONL record the shim persisted to fd 3 since the last clear. */
-function persistedRecords(): Array<{
-  operation: string;
-  message: string;
-  context: Record<string, unknown>;
-}> {
-  return (mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>).map(
-    ([, bytes, offset, length]) =>
-      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-        operation: string;
-        message: string;
-        context: Record<string, unknown>;
-      },
-  );
-}
-
 /** Fold an api_error terminal and return the diagnostic record it emitted. */
 function diagnosticRecord(
   apiErrorStatus: number | null,
   errors: readonly string[],
   vendor: VendorApiError,
   overrides: ContextOverrides,
-): { operation: string; context: Record<string, unknown> } | undefined {
+): LogRecord | undefined {
   mockedWriteSync.mockClear();
   const message = {
     type: "result",
@@ -62,8 +47,8 @@ function diagnosticRecord(
     api_error_status: apiErrorStatus,
   } as unknown as Extract<SdkMessage, { type: "result" }>;
   convertResult(message, foldContext(overrides), undefined, vendor);
-  return persistedRecords().find((record) =>
-    record.operation.startsWith("shim.vendor."),
+  return logRecordsSince(0).find((record) =>
+    (record.operation as string).startsWith("shim.vendor."),
   );
 }
 

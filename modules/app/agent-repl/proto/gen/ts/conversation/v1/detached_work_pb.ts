@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/detached_work.proto.
  */
 export const file_conversation_v1_detached_work: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIq4CChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARInCgVvd25lchgFIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjkKCGRldGFjaGVkGAIgASgLMiUuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0RldGFjaGVkSAASNwoHY3JlYXRlZBgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtDcmVhdGVkSABCCAoGb3JpZ2luQgkKB19vdXRwdXQitwEKEkRldGFjaGVkV29ya091dHB1dBIMCgRwYXRoGAEgASgJEj8KCHJlYWRhYmxlGAIgASgLMisuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya091dHB1dFJlYWRhYmxlSAASQwoKdW5yZWFkYWJsZRgDIAEoCzItLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRVbnJlYWRhYmxlSABCDQoLcmVhZGFiaWxpdHkiHAoaRGV0YWNoZWRXb3JrT3V0cHV0UmVhZGFibGUiHgocRGV0YWNoZWRXb3JrT3V0cHV0VW5yZWFkYWJsZSKPAgoURGV0YWNoZWRXb3JrRGV0YWNoZWQSOgoQZGV0YWNoZWRfZnJvbV9pZBgBIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5SWQSPAoJcmVxdWVzdGVkGAIgASgLMicuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VSZXF1ZXN0ZWRIABI3CgdieV91c2VyGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VCeVVzZXJIABI7Cgl0aW1lZF9vdXQYBCABKAsyJi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYXVzZVRpbWVkT3V0SABCBwoFY2F1c2UiGAoWRGV0YWNoZWRDYXVzZVJlcXVlc3RlZCIVChNEZXRhY2hlZENhdXNlQnlVc2VyIisKFURldGFjaGVkQ2F1c2VUaW1lZE91dBISCgp0aW1lb3V0X21zGAEgASgEIkwKE0RldGFjaGVkV29ya0NyZWF0ZWQSNQoMd29ya19jcmVhdGVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGFibGVXb3JrIuMBCg5EZXRhY2hhYmxlV29yaxIyCghzdWJhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50SAASKgoEYmFzaBgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2hIABI3Cgh3b3JrZmxvdxgDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3RhcnRIABIwCgdtb25pdG9yGAQgASgLMh0uY29udmVyc2F0aW9uLnYxLkFnZW50TW9uaXRvckgAQgYKBHdvcmsiHwoORGV0YWNoZWRXb3JrSWQSDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIt8CChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARInCgVvd25lchgFIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi8KBGtpbmQYBiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBI5CghkZXRhY2hlZBgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtEZXRhY2hlZEgAEjcKB2NyZWF0ZWQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrQ3JlYXRlZEgAQggKBm9yaWdpbkIJCgdfb3V0cHV0IrcBChJEZXRhY2hlZFdvcmtPdXRwdXQSDAoEcGF0aBgBIAEoCRI/CghyZWFkYWJsZRgCIAEoCzIrLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRSZWFkYWJsZUgAEkMKCnVucmVhZGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrT3V0cHV0VW5yZWFkYWJsZUgAQg0KC3JlYWRhYmlsaXR5IhwKGkRldGFjaGVkV29ya091dHB1dFJlYWRhYmxlIh4KHERldGFjaGVkV29ya091dHB1dFVucmVhZGFibGUijwIKFERldGFjaGVkV29ya0RldGFjaGVkEjoKEGRldGFjaGVkX2Zyb21faWQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEjwKCXJlcXVlc3RlZBgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlUmVxdWVzdGVkSAASNwoHYnlfdXNlchgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlQnlVc2VySAASOwoJdGltZWRfb3V0GAQgASgLMiYuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VUaW1lZE91dEgAQgcKBWNhdXNlIhgKFkRldGFjaGVkQ2F1c2VSZXF1ZXN0ZWQiFQoTRGV0YWNoZWRDYXVzZUJ5VXNlciIrChVEZXRhY2hlZENhdXNlVGltZWRPdXQSEgoKdGltZW91dF9tcxgBIAEoBCJMChNEZXRhY2hlZFdvcmtDcmVhdGVkEjUKDHdvcmtfY3JlYXRlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hhYmxlV29yayLjAQoORGV0YWNoYWJsZVdvcmsSMgoIc3ViYWdlbnQYASABKAsyHi5jb252ZXJzYXRpb24udjEuQWdlbnRTdWJhZ2VudEgAEioKBGJhc2gYAiABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoSAASNwoId29ya2Zsb3cYAyABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N0YXJ0SAASMAoHbW9uaXRvchgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vbml0b3JIAEIGCgR3b3JrIowCChBEZXRhY2hlZFdvcmtLaW5kEj0KCHN1YmFnZW50GAEgASgLMikuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmRTdWJhZ2VudEgAEjUKBGJhc2gYAiABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZEJhc2hIABI9Cgh3b3JrZmxvdxgDIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtLaW5kV29ya2Zsb3dIABI7Cgdtb25pdG9yGAQgASgLMiguY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmRNb25pdG9ySABCBgoEa2luZCJGChhEZXRhY2hlZFdvcmtLaW5kU3ViYWdlbnQSKgoIYWdlbnRfaWQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCIWChREZXRhY2hlZFdvcmtLaW5kQmFzaCIaChhEZXRhY2hlZFdvcmtLaW5kV29ya2Zsb3ciGQoXRGV0YWNoZWRXb3JrS2luZE1vbml0b3IiHwoORGV0YWNoZWRXb3JrSWQSDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
 
 /**
  * Work that has left the turn. It is announced HERE and nowhere else after
@@ -77,6 +77,30 @@ export type AgentDetachedWork = Message<"conversation.v1.AgentDetachedWork"> & {
    * @generated from field: conversation.v1.AgentId owner = 5;
    */
   owner?: AgentId | undefined;
+
+  /**
+   * WHAT KIND OF WORK THIS IS, as the producer's own record of the work states
+   * it. REQUIRED on every announcement, whichever origin it takes.
+   *
+   * THE VENDOR'S KIND IS THE AUTHORITY, not the unit the work came from. The
+   * `detached` origin names only that unit, and the unit is not always of the
+   * work's kind: a subagent RESUMED BY A MESSAGE is detached from the send that
+   * woke it, which is no spawn at all. A consumer that recovered the kind from
+   * the unit had nothing to recover it from there, and neither does one that
+   * never saw the unit (a restored session). So the kind rides the
+   * announcement itself.
+   *
+   * UNSET IS A MALFORMED ANNOUNCEMENT, never a kind to guess: a consumer
+   * refuses it and reports it. A producer that cannot name the kind does not
+   * announce the work.
+   *
+   * On the `created` origin this restates the kind `DetachableWork` already
+   * names, and the two must agree; a consumer refuses an announcement whose two
+   * statements disagree.
+   *
+   * @generated from field: conversation.v1.DetachedWorkKind kind = 6;
+   */
+  kind?: DetachedWorkKind | undefined;
 
   /**
    * HOW it came to be detached. The two are genuinely different situations for
@@ -407,6 +431,136 @@ export const DetachableWorkSchema: GenMessage<DetachableWork> = /*@__PURE__*/
   messageDesc(file_conversation_v1_detached_work, 9);
 
 /**
+ * WHICH KIND of work an announcement is about. The arms mirror DetachableWork's
+ * one for one, so a kind absent there cannot be announced here either.
+ *
+ * @generated from message conversation.v1.DetachedWorkKind
+ */
+export type DetachedWorkKind = Message<"conversation.v1.DetachedWorkKind"> & {
+  /**
+   * The one kind the work is. The set arm IS the answer.
+   *
+   * @generated from oneof conversation.v1.DetachedWorkKind.kind
+   */
+  kind: {
+    /**
+     * A subagent — spawned in the background, backgrounded by hand, or resumed
+     * by a message sent to it.
+     *
+     * @generated from field: conversation.v1.DetachedWorkKindSubagent subagent = 1;
+     */
+    value: DetachedWorkKindSubagent;
+    case: "subagent";
+  } | {
+    /**
+     * A shell command left running after the turn that started it.
+     *
+     * @generated from field: conversation.v1.DetachedWorkKindBash bash = 2;
+     */
+    value: DetachedWorkKindBash;
+    case: "bash";
+  } | {
+    /**
+     * A workflow run.
+     *
+     * @generated from field: conversation.v1.DetachedWorkKindWorkflow workflow = 3;
+     */
+    value: DetachedWorkKindWorkflow;
+    case: "workflow";
+  } | {
+    /**
+     * A background watcher.
+     *
+     * @generated from field: conversation.v1.DetachedWorkKindMonitor monitor = 4;
+     */
+    value: DetachedWorkKindMonitor;
+    case: "monitor";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkKind.
+ * Use `create(DetachedWorkKindSchema)` to create a new message.
+ */
+export const DetachedWorkKindSchema: GenMessage<DetachedWorkKind> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 10);
+
+/**
+ * The work is a subagent.
+ *
+ * @generated from message conversation.v1.DetachedWorkKindSubagent
+ */
+export type DetachedWorkKindSubagent = Message<"conversation.v1.DetachedWorkKindSubagent"> & {
+  /**
+   * THE AGENT THAT IS RUNNING: the identity its own stream is opened under and
+   * its sub-feed is addressed by. REQUIRED.
+   *
+   * THE SAME IDENTITY EVERY PLANE BOOKS THE AGENT UNDER (the cross-plane
+   * minting rule: the `tool_use_id` of the call that SPAWNED it), and so NOT
+   * always the unit the work detached from. The two coincide for an ordinary
+   * spawn; they differ for a subagent resumed by a message, whose unit is the
+   * send and whose agent is the one that send woke. Stating the agent here is
+   * what lets a consumer address the right stream without deriving one
+   * identity from another.
+   *
+   * @generated from field: conversation.v1.AgentId agent_id = 1;
+   */
+  agentId?: AgentId | undefined;
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkKindSubagent.
+ * Use `create(DetachedWorkKindSubagentSchema)` to create a new message.
+ */
+export const DetachedWorkKindSubagentSchema: GenMessage<DetachedWorkKindSubagent> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 11);
+
+/**
+ * The work is a shell command.
+ *
+ * @generated from message conversation.v1.DetachedWorkKindBash
+ */
+export type DetachedWorkKindBash = Message<"conversation.v1.DetachedWorkKindBash"> & {
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkKindBash.
+ * Use `create(DetachedWorkKindBashSchema)` to create a new message.
+ */
+export const DetachedWorkKindBashSchema: GenMessage<DetachedWorkKindBash> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 12);
+
+/**
+ * The work is a workflow run.
+ *
+ * @generated from message conversation.v1.DetachedWorkKindWorkflow
+ */
+export type DetachedWorkKindWorkflow = Message<"conversation.v1.DetachedWorkKindWorkflow"> & {
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkKindWorkflow.
+ * Use `create(DetachedWorkKindWorkflowSchema)` to create a new message.
+ */
+export const DetachedWorkKindWorkflowSchema: GenMessage<DetachedWorkKindWorkflow> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 13);
+
+/**
+ * The work is a background watcher.
+ *
+ * @generated from message conversation.v1.DetachedWorkKindMonitor
+ */
+export type DetachedWorkKindMonitor = Message<"conversation.v1.DetachedWorkKindMonitor"> & {
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkKindMonitor.
+ * Use `create(DetachedWorkKindMonitorSchema)` to create a new message.
+ */
+export const DetachedWorkKindMonitorSchema: GenMessage<DetachedWorkKindMonitor> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 14);
+
+/**
  * The identity of one unit of detached work, and the handle a stop is aimed at.
  * Opaque; equality is the only question asked of it.
  *
@@ -435,5 +589,5 @@ export type DetachedWorkId = Message<"conversation.v1.DetachedWorkId"> & {
  * Use `create(DetachedWorkIdSchema)` to create a new message.
  */
 export const DetachedWorkIdSchema: GenMessage<DetachedWorkId> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 10);
+  messageDesc(file_conversation_v1_detached_work, 15);
 

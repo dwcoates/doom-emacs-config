@@ -53,6 +53,26 @@ message AgentDetachedWork {
   // defaulted to the main agent.
   AgentId owner = 5;
 
+  // WHAT KIND OF WORK THIS IS, as the producer's own record of the work states
+  // it. REQUIRED on every announcement, whichever origin it takes.
+  //
+  // THE VENDOR'S KIND IS THE AUTHORITY, not the unit the work came from. The
+  // `detached` origin names only that unit, and the unit is not always of the
+  // work's kind: a subagent RESUMED BY A MESSAGE is detached from the send that
+  // woke it, which is no spawn at all. A consumer that recovered the kind from
+  // the unit had nothing to recover it from there, and neither does one that
+  // never saw the unit (a restored session). So the kind rides the
+  // announcement itself.
+  //
+  // UNSET IS A MALFORMED ANNOUNCEMENT, never a kind to guess: a consumer
+  // refuses it and reports it. A producer that cannot name the kind does not
+  // announce the work.
+  //
+  // On the `created` origin this restates the kind `DetachableWork` already
+  // names, and the two must agree; a consumer refuses an announcement whose two
+  // statements disagree.
+  DetachedWorkKind kind = 6;
+
   // HOW it came to be detached. The two are genuinely different situations for
   // a consumer: one continues an element it is already drawing, the other has
   // no element yet and must be told what the work IS.
@@ -176,6 +196,47 @@ message DetachableWork {
     AgentMonitor monitor = 4;
   }
 }
+
+// WHICH KIND of work an announcement is about. The arms mirror DetachableWork's
+// one for one, so a kind absent there cannot be announced here either.
+message DetachedWorkKind {
+  // The one kind the work is. The set arm IS the answer.
+  oneof kind {
+    // A subagent — spawned in the background, backgrounded by hand, or resumed
+    // by a message sent to it.
+    DetachedWorkKindSubagent subagent = 1;
+    // A shell command left running after the turn that started it.
+    DetachedWorkKindBash bash = 2;
+    // A workflow run.
+    DetachedWorkKindWorkflow workflow = 3;
+    // A background watcher.
+    DetachedWorkKindMonitor monitor = 4;
+  }
+}
+
+// The work is a subagent.
+message DetachedWorkKindSubagent {
+  // THE AGENT THAT IS RUNNING: the identity its own stream is opened under and
+  // its sub-feed is addressed by. REQUIRED.
+  //
+  // THE SAME IDENTITY EVERY PLANE BOOKS THE AGENT UNDER (the cross-plane
+  // minting rule: the `tool_use_id` of the call that SPAWNED it), and so NOT
+  // always the unit the work detached from. The two coincide for an ordinary
+  // spawn; they differ for a subagent resumed by a message, whose unit is the
+  // send and whose agent is the one that send woke. Stating the agent here is
+  // what lets a consumer address the right stream without deriving one
+  // identity from another.
+  AgentId agent_id = 1;
+}
+
+// The work is a shell command.
+message DetachedWorkKindBash {}
+
+// The work is a workflow run.
+message DetachedWorkKindWorkflow {}
+
+// The work is a background watcher.
+message DetachedWorkKindMonitor {}
 
 // The identity of one unit of detached work, and the handle a stop is aimed at.
 // Opaque; equality is the only question asked of it.

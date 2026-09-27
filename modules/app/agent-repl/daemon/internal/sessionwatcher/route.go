@@ -1118,12 +1118,20 @@ func turnValue(turn *ids.TurnID) string {
 // and opens the watch it names. The OPEN SET IS THE LIVE SET: opening the
 // watch is what makes the item live, and no start/end edges are ever paired to
 // reconstruct membership.
+//
+// A MALFORMED ANNOUNCEMENT GOES NOWHERE. One that names no kind, a subagent
+// with no agent, or a `created` description that disagrees with its own kind
+// is refused and recorded at ERROR before any view takes it, so no view draws
+// work the live set will never hold.
 func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId) {
+	kind, agent, ok := w.resolveDetachedLocked(work)
+	if !ok {
+		return
+	}
 	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, w.addr)
 	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
 	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
 
-	kind, agent := w.resolveDetachedLocked(work)
 	handle := work.GetWork()
 	w.log.Debug("daemon.sessionwatcher.detached_work", "work left its stream", dlog.Context{
 		"work_id": handle.GetValue(), "kind": kind.String(), "agent_id": agent.GetValue(),
@@ -1141,12 +1149,6 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 
 	switch kind {
 	case kindSubagent:
-		if agent.GetValue() == "" {
-			w.log.Error("daemon.sessionwatcher.detached_subagent_unaddressable", "a detached subagent named no agent to watch", dlog.Context{
-				"work_id": handle.GetValue(),
-			})
-			return
-		}
 		if entry, ok := w.agents[agent.GetValue()]; ok {
 			// THE SYNC WATCH BECOMES THE DETACHED ONE. A spawn watched as the
 			// turn's own progress carries NO handle, and the handle is what
@@ -1242,60 +1244,122 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		})
 
 	default:
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "default"})
-		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named no kind this daemon could resolve", dlog.Context{
-			"work_id": handle.GetValue(),
+		// UNREACHABLE: resolveDetachedLocked refuses every announcement whose
+		// kind it did not name. Reaching here is a defect in that resolution.
+		w.log.Error("daemon.sessionwatcher.detached_kind_unrouted", "a resolved detached kind has no route; the announcement was not routed", dlog.Context{
+			"work_id": handle.GetValue(), "kind": kind.String(),
 		})
 	}
 }
 
 // resolveDetachedLocked answers what KIND of work an announcement names, and
-// for a subagent the agent id its watch is addressed by.
+// for a subagent the agent id its watch is addressed by — or refuses the
+// announcement, recording why at ERROR.
 //
-// The `created` origin states the kind outright. The `detached` origin does
-// NOT: it names only the in-turn unit the work used to be, so the kind is
-// recovered from what that unit's own activity already taught the watcher.
-// That lookup is a unit-to-kind fact, never a placement: nothing here derives
-// who spawned whom.
-func (w *watcher) resolveDetachedLocked(work *conversationv1.AgentDetachedWork) (detachedKind, *conversationv1.AgentId) {
+// THE ANNOUNCEMENT'S OWN KIND IS THE AUTHORITY (AgentDetachedWork.kind, stated
+// by the producer from the vendor's task record), never a fact about the unit
+// the work detached from. That unit is not always of the work's kind: a
+// subagent RESUMED BY `SendMessage` detaches from the send, and a unit this
+// watcher never saw (a restored session) teaches it nothing at all. Reading
+// the kind off the unit left both unrouted
+// (daemon.sessionwatcher.detached_kind_unknown, 2026-09-27): the agent never
+// reached the live set, and the footer never listed it.
+//
+// The unit-to-handle join is still recorded for a `detached` origin: the
+// unit's own terminal is what retires the handle.
+func (w *watcher) resolveDetachedLocked(work *conversationv1.AgentDetachedWork) (detachedKind, *conversationv1.AgentId, bool) {
+	handle := work.GetWork().GetValue()
+	kind, agent := announcedKind(work.GetKind())
+	switch {
+	case kind == kindUnknown:
+		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named no kind; it is refused, never guessed", dlog.Context{
+			"work_id": handle, "origin": detachedOrigin(work),
+		})
+		return kindUnknown, nil, false
+	case kind == kindSubagent && agent.GetValue() == "":
+		w.log.Error("daemon.sessionwatcher.detached_subagent_unaddressable", "a detached subagent named no agent to watch; it is refused", dlog.Context{
+			"work_id": handle, "origin": detachedOrigin(work),
+		})
+		return kindUnknown, nil, false
+	}
 	if created := work.GetCreated(); created != nil {
-		switch item := created.GetWorkCreated(); {
-		case item.GetSubagent() != nil:
-			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetSubagent() != nil"})
-			return kindSubagent, item.GetSubagent().GetStart().GetCreatedAgentId()
-		case item.GetBash() != nil:
-			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetBash() != nil"})
-			return kindBash, nil
-		case item.GetMonitor() != nil:
-			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetMonitor() != nil"})
-			return kindMonitor, nil
-		case item.GetWorkflow() != nil:
-			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetWorkflow() != nil"})
-			return kindWorkflow, nil
-		default:
-			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "default"})
-			return kindUnknown, nil
+		described, describedAgent := createdKind(created.GetWorkCreated())
+		if described != kind || (kind == kindSubagent && describedAgent.GetValue() != agent.GetValue()) {
+			w.log.Error("daemon.sessionwatcher.detached_kind_conflict", "a created announcement describes different work than its own kind names; it is refused", dlog.Context{
+				"work_id": handle, "kind": kind.String(), "agent_id": agent.GetValue(),
+				"described_kind": described.String(), "described_agent_id": describedAgent.GetValue(),
+			})
+			return kindUnknown, nil, false
 		}
 	}
 	if detached := work.GetDetached(); detached != nil {
-		id := detached.GetDetachedFromId().GetValue()
-		if fact, ok := w.facts[id]; ok {
-			w.rememberWorkLocked(id, work.GetWork())
-			return fact.kind, fact.agent
-		}
-		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named a unit this daemon never saw", dlog.Context{
-			"activity_id": id, "work_id": work.GetWork().GetValue(),
-		})
+		w.rememberWorkLocked(detached.GetDetachedFromId().GetValue(), work.GetWork())
 	}
-	return kindUnknown, nil
+	return kind, agent, true
+}
+
+// announcedKind reads the kind an announcement states, and a subagent's agent.
+func announcedKind(kind *conversationv1.DetachedWorkKind) (detachedKind, *conversationv1.AgentId) {
+	switch arm := kind.GetKind().(type) {
+	case *conversationv1.DetachedWorkKind_Subagent:
+		return kindSubagent, arm.Subagent.GetAgentId()
+	case *conversationv1.DetachedWorkKind_Bash:
+		return kindBash, nil
+	case *conversationv1.DetachedWorkKind_Monitor:
+		return kindMonitor, nil
+	case *conversationv1.DetachedWorkKind_Workflow:
+		return kindWorkflow, nil
+	default:
+		return kindUnknown, nil
+	}
+}
+
+// createdKind reads the kind a `created` description names, and a spawn's
+// created agent, so the two statements an announcement makes can be compared.
+func createdKind(item *conversationv1.DetachableWork) (detachedKind, *conversationv1.AgentId) {
+	switch arm := item.GetWork().(type) {
+	case *conversationv1.DetachableWork_Subagent:
+		return kindSubagent, arm.Subagent.GetStart().GetCreatedAgentId()
+	case *conversationv1.DetachableWork_Bash:
+		return kindBash, nil
+	case *conversationv1.DetachableWork_Monitor:
+		return kindMonitor, nil
+	case *conversationv1.DetachableWork_Workflow:
+		return kindWorkflow, nil
+	default:
+		return kindUnknown, nil
+	}
+}
+
+// detachedOrigin names an announcement's origin arm for a log record.
+func detachedOrigin(work *conversationv1.AgentDetachedWork) string {
+	switch {
+	case work.GetDetached() != nil:
+		return "detached:" + work.GetDetached().GetDetachedFromId().GetValue()
+	case work.GetCreated() != nil:
+		return "created"
+	default:
+		return "unset"
+	}
 }
 
 // rememberWorkLocked records the handle a unit detached under, so the unit's
 // own terminal can drop the right item from the live set.
+//
+// A UNIT THIS WATCHER NEVER SAW IS RECORDED TOO. A restored session announces
+// work whose unit's frames never reached this watcher, and the terminal that
+// retires it arrives later on the spawning agent's book; without the join it
+// retired nothing and the work stayed live for the rest of the session.
 func (w *watcher) rememberWorkLocked(activityID string, handle *conversationv1.DetachedWorkId) {
-	if fact, ok := w.facts[activityID]; ok {
-		fact.work = handle
+	if activityID == "" {
+		return
 	}
+	fact, ok := w.facts[activityID]
+	if !ok {
+		fact = &activityFact{}
+		w.facts[activityID] = fact
+	}
+	fact.work = handle
 }
 
 // ---- one detached shell's stream ----
@@ -1398,9 +1462,10 @@ func (w *watcher) reapEndedMonitorLocked(act *conversationv1.AgentActivity) {
 // ---- what an activity teaches the watcher ----
 
 // recordActivityLocked keeps the two facts about a unit that later frames
-// need: the DETACHABLE KIND (and a subagent's created agent id), which is how
-// a `detached`-origin announcement resolves to a watch, and the TOOL NAME,
-// which is what a permission notification names.
+// need: a subagent spawn's CREATED AGENT, which tells a nested spawn's frames
+// apart from the run that carries them, and the TOOL NAME, which is what a
+// permission notification names. The detachable KIND is not among them: an
+// announcement states its own (resolveDetachedLocked).
 func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 	id := act.GetActivityId().GetValue()
 	if id == "" {
@@ -1412,19 +1477,9 @@ func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 		w.facts[id] = fact
 	}
 	fact.tool = activityToolName(act)
-	switch {
-	case act.GetSubagent() != nil:
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetSubagent() != nil"})
-		fact.kind = kindSubagent
-		if start := act.GetSubagent().GetStart(); start != nil {
-			fact.agent = start.GetCreatedAgentId()
-		}
-	case act.GetBash() != nil:
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetBash() != nil"})
-		fact.kind = kindBash
-	case act.GetMonitor() != nil:
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetMonitor() != nil"})
-		fact.kind = kindMonitor
+	if start := act.GetSubagent().GetStart(); start != nil {
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "a subagent start names its created agent"})
+		fact.agent = start.GetCreatedAgentId()
 	}
 }
 

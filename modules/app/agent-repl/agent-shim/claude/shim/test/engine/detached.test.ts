@@ -6,8 +6,8 @@
  * diffed into a retained set — one missed message then wedges an indicator
  * permanently, and no later message can unwedge it.
  */
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { LiveWorkTable } from "../../src/engine/detached.js";
 import type {
   SdkBackgroundTasksChangedMessage,
@@ -15,15 +15,6 @@ import type {
   SdkTaskStartedMessage,
   SdkTaskUpdatedMessage,
 } from "../../src/sdk/types.js";
-
-const mockedWriteSync = vi.mocked(writeSync);
-
-function logRecordsSince(before: number): Array<Record<string, unknown>> {
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
-}
 
 function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStartedMessage {
   return {
@@ -133,7 +124,7 @@ describe("a task update", () => {
     // Arrange.
     const table = new LiveWorkTable();
     table.onTaskStarted(started());
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     table.onTaskUpdated({
@@ -149,7 +140,7 @@ describe("a task update", () => {
     expect(
       logRecordsSince(before)
         .filter((record) => record.message === "applied a detached-work state transition")
-        .map((record) => ({ level: record.level, status: (record.context as Record<string, unknown>).status })),
+        .map((record) => ({ level: record.level, status: record.context.status })),
     ).toEqual([{ level: "debug", status: "running" }]);
   });
 
@@ -389,7 +380,7 @@ describe("foreground work, which is never detached work", () => {
   it.each(KINDS)("records no live detached-work item for a $kind that started in the foreground", ({ kind }) => {
     // Arrange.
     const table = new LiveWorkTable();
-    const before = mockedWriteSync.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     table.onTaskStarted(started({ task_type: kind, is_backgrounded: false }));
