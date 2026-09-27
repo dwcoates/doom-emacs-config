@@ -22,6 +22,7 @@ import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import { BUBBLE_CAP_LINES, BUBBLE_EXPAND_ONLY_CLASS } from "../src/bubble/draw.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
+import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -1419,12 +1420,21 @@ describe("the thinking bubble", () => {
     }
   });
 
-  it("caps a two-line bubble at two lines and sets nothing else", () => {
+  it("caps a thinking bubble at one line and sets nothing else", () => {
     // Arrange / Act — the thinking bubble's cap value (its spec, response.ts).
-    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+    const rule = declarationsOf(`.bubble[data-cap-lines="${THINKING_CAP_LINES}"]`);
 
     // Assert — only the line budget changes; the clip, fade, chevron and
     // expand rules stay every bubble's own.
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("keeps the held prompt's two-line cap at two lines", () => {
+    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts),
+    // which the thinking bubble no longer shares.
+    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+
+    // Assert
     expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
   });
 

@@ -1802,7 +1802,7 @@ describe("the thinking bubble", () => {
  * figure it reads comes from the real stylesheet, so the cap under test is the
  * one the file declares.
  */
-describe("the thinking bubble's two-line cap", () => {
+describe("the thinking bubble's one-line cap", () => {
   const LINE_PX = 20;
 
   /** A `var(--token)` value resolved through `:root`, or the literal itself. */
@@ -1839,7 +1839,7 @@ describe("the thinking bubble's two-line cap", () => {
     return scroll;
   }
 
-  // The two-line form is the SUPERSEDED thinking bubble's: while a thinking
+  // The one-line form is the SUPERSEDED thinking bubble's: while a thinking
   // bubble is the latest response it wears the shared response cap (see "the
   // thinking bubble that is the latest response" below).
   function thinking(state: "update" | "success"): FeedResponse {
@@ -1850,38 +1850,38 @@ describe("the thinking bubble's two-line cap", () => {
     });
   }
 
-  it("caps a thinking bubble's scroll box at two lines", () => {
+  it("caps a thinking bubble's scroll box at one line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
       const scroll = mounted(thinking("success"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("1");
     } finally {
       teardown();
     }
   });
 
-  it("caps a still-streaming thinking bubble at two lines too", () => {
+  it("caps a still-streaming thinking bubble at one line too", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
       const scroll = mounted(thinking("update"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("1");
     } finally {
       teardown();
     }
   });
 
-  it("wears the response bubble's fade when it runs past two lines", () => {
+  it("wears the response bubble's fade when it runs past one line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      // Act — three lines: past the thinking cap, far inside the response cap.
-      const scroll = mounted(thinking("success"), 3);
+      // Act — two lines: past the thinking cap, far inside the response cap.
+      const scroll = mounted(thinking("success"), 2);
       // Assert
       expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(true);
     } finally {
@@ -1897,14 +1897,14 @@ describe("the thinking bubble's two-line cap", () => {
       const collapsed = scroll.clientHeight;
       // Act
       scroll.click();
-      // Assert — grown from two lines to the full content, nothing left below
+      // Assert — grown from one line to the full content, nothing left below
       // the fold.
       expect([
         collapsed,
         scroll.classList.contains(EXPANDED_CLASS),
         scroll.clientHeight,
         scroll.classList.contains(HAS_MORE_CLASS),
-      ]).toEqual([2 * LINE_PX, true, 3 * LINE_PX, false]);
+      ]).toEqual([LINE_PX, true, 3 * LINE_PX, false]);
     } finally {
       teardown();
     }
@@ -1918,23 +1918,23 @@ describe("the thinking bubble's two-line cap", () => {
       scroll.click();
       // Act
       scroll.click();
-      // Assert — back to two lines under the fade.
+      // Assert — back to one line under the fade.
       expect([
         scroll.classList.contains(EXPANDED_CLASS),
         scroll.clientHeight,
         scroll.classList.contains(HAS_MORE_CLASS),
-      ]).toEqual([false, 2 * LINE_PX, true]);
+      ]).toEqual([false, LINE_PX, true]);
     } finally {
       teardown();
     }
   });
 
-  it("shows no fade on a thinking bubble that fits in two lines", () => {
+  it("shows no fade on a thinking bubble that fits in one line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const scroll = mounted(thinking("success"), 2);
+      const scroll = mounted(thinking("success"), 1);
       // Assert
       expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(false);
     } finally {
@@ -1946,7 +1946,7 @@ describe("the thinking bubble's two-line cap", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      const scroll = mounted(thinking("success"), 2);
+      const scroll = mounted(thinking("success"), 1);
       const collapsed = scroll.clientHeight;
       // Act
       scroll.click();
@@ -1985,7 +1985,7 @@ describe("responseCapLines", () => {
   it.each([
     { name: "an ordinary response", thinking: false, superseded: false, want: "feed" },
     { name: "a thinking bubble that is the latest response", thinking: true, superseded: false, want: "feed" },
-    { name: "a superseded thinking bubble", thinking: true, superseded: true, want: 2 },
+    { name: "a superseded thinking bubble", thinking: true, superseded: true, want: 1 },
   ])("draws $name at cap $want", ({ thinking, superseded, want }) => {
     // Arrange
     const u = response({ thinking, superseded, result: { case: "success", value: { prose: { markdown: "x" } } } });
@@ -1999,7 +1999,7 @@ describe("responseCapLines", () => {
 /**
  * THE THINKING BUBBLE THAT IS THE LATEST RESPONSE (owner rule, 2026-09-23). It
  * is shown in full, at the ordinary response cap, until the daemon re-pushes it
- * superseded; then it collapses to two lines, unless the reader expanded it.
+ * superseded; then it collapses to one line, unless the reader expanded it.
  */
 describe("the thinking bubble that is the latest response", () => {
   function thinking(superseded: boolean): FeedResponse {
@@ -2034,7 +2034,7 @@ describe("the thinking bubble that is the latest response", () => {
     }
   });
 
-  it("collapses to two lines when a re-push marks it superseded", () => {
+  it("collapses to one line when a re-push marks it superseded", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -2043,7 +2043,7 @@ describe("the thinking bubble that is the latest response", () => {
       const redrawn = drawFeedResponse(thinking(true), rowContext(bubble));
       // Assert
       const scroll = redrawn.querySelector(".bubble-scroll") as HTMLElement;
-      expect([redrawn === bubble, cascadedValue(scroll, "--bubble-cap-lines")]).toEqual([true, "2"]);
+      expect([redrawn === bubble, cascadedValue(scroll, "--bubble-cap-lines")]).toEqual([true, "1"]);
     } finally {
       teardown();
     }

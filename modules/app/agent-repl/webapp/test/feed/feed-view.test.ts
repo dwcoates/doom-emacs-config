@@ -1272,7 +1272,7 @@ describe("createFeedController: following the tail", () => {
 /**
  * A THINKING BUBBLE ABOVE THE READER COLLAPSES WITHOUT MOVING THEM (owner rule,
  * 2026-09-23). The daemon re-pushes a thinking row superseded once a later
- * response lands; its redraw drops it to two lines. jsdom lays nothing out, so
+ * response lands; its redraw drops it to one line. jsdom lays nothing out, so
  * the row's bottom edge is stubbed from the cap its body was drawn at, and the
  * tail owner is the REAL `TailFollow` over a fake box.
  */
@@ -1305,7 +1305,7 @@ describe("createFeedController: a superseded thinking row collapsing", () => {
    * A feed over a 300px viewport whose top edge sits at 100, scrolled to 500
    * by the READER (so no follow stands) unless FOLLOWING, holding thinking row
    * t1 whose bottom edge is BEFORE while at the response cap and AFTER once
-   * collapsed to two lines.
+   * collapsed to one line.
    */
   function collapsing(opts: { following: boolean; before: number; after: number }) {
     const h = harness();
@@ -1334,7 +1334,7 @@ describe("createFeedController: a superseded thinking row collapsing", () => {
     if (row === null) throw new Error("t1 is not drawn");
     row.getBoundingClientRect = () => {
       const cap = row.querySelector("[data-cap-lines]")?.getAttribute("data-cap-lines");
-      return { bottom: cap === "2" ? opts.after : opts.before } as DOMRect;
+      return { bottom: cap === "1" ? opts.after : opts.before } as DOMRect;
     };
     if (!opts.following) {
       tail.onInput();
