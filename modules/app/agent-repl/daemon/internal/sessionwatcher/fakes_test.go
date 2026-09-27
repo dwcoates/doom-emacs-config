@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/shimclient"
 )
 
@@ -993,6 +994,13 @@ func refusedOpenError(procedure string, code connect.Code, message string) error
 // consumes nothing the start emitted.
 func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harness {
 	t.Helper()
+	return startHarnessWatched(t, session, prep, nil)
+}
+
+// startHarnessWatched is startHarness with the watcher's mutex registered with
+// stalls.
+func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry) *harness {
+	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
 	if prep != nil {
 		prep(h.client)
@@ -1009,6 +1017,7 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 		Topbar:    &topbarSink{rec: h.rec},
 		Sidebar:   &sidebarSink{rec: h.rec},
 		Lifecycle: &lifecycleSink{rec: h.rec},
+		Stalls:    stalls,
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
