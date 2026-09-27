@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -150,5 +152,55 @@ func TestAFailedDisplacedClaimIsHandedBack(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("ClaimDisplacedTurn succeeded over a failed claim")
+	}
+}
+
+// A context cut's record lives exactly as long as its turn: a cut closed
+// through the door by any path — not only OnTurnEnded — no longer holds the
+// queue's prompts behind it.
+func TestTheDoorRetiresARunningCutWhoseTurnItCloses(t *testing.T) {
+	tests := []struct {
+		name  string
+		close func(h *harness) error
+	}{
+		{name: "an orphan close", close: func(h *harness) error {
+			_, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1))
+			return err
+		}},
+		{name: "a displaced claim", close: func(h *harness) error {
+			_, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "cut-1")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.turns["cut-1"] = &wsm.Turn{ID: "cut-1", Workspace: theWorkspace, Displaced: true}
+			h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+			// Act
+			if err := tt.close(h); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			// Assert
+			if cut, ok := h.q.runningCut(theWorkspace); ok {
+				t.Fatalf("running cut = %+v, want it retired with its turn", cut)
+			}
+		})
+	}
+}
+
+func TestTheDoorLeavesARunningCutWhenAnotherTurnCloses(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.turns["turn-1"] = &wsm.Turn{ID: "turn-1", Workspace: theWorkspace, Displaced: true}
+	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	// Act
+	if _, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1"); err != nil {
+		t.Fatalf("ClaimDisplacedTurn: %v", err)
+	}
+	// Assert
+	if _, ok := h.q.runningCut(theWorkspace); !ok {
+		t.Fatal("a close of another turn retired the running cut")
 	}
 }
