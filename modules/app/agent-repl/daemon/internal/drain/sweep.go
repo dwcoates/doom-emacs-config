@@ -143,7 +143,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		return hibernateDeferred
 	}
 	defer func() {
-		if err := c.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
+		if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease.ID); err != nil {
 			log.Warn(opSweep, "could not release the hibernation lease",
 				withCause(merge(fields, dlog.Context{"lease": string(lease.ID)}), err))
 			return
