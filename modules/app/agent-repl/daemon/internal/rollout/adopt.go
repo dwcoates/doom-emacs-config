@@ -555,19 +555,41 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 	}
 
-	if dial {
-		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
-			c.log.Error(opAdopt, "could not adopt the workspace's running shim", withCause(fields, err))
-			return fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
-		}
-	}
-	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
+	// THE ROW IS CLAIMED BEFORE THE SHIM IS DIALED, through the one
+	// arbitration the incumbent's reclaim also goes through. An incumbent
+	// whose adoption window expired takes the workspace back by the same
+	// claim, and exactly one of the two may dial the shim: two daemons each
+	// holding a client for one shim is the state this ordering makes
+	// impossible.
+	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
+	if err != nil {
 		c.log.Error(opAdopt, "could not claim serving ownership", withCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: claim serving: %w", ws, err)
 	}
+	if !claimed {
+		err := fmt.Errorf("rollout: adopt %q: the incumbent %s took the workspace back: %w", ws, holder, ErrReclaimed)
+		c.log.Error(opAdopt, "the incumbent took the workspace back before this adoption claimed it; it is not adopted here",
+			withCause(merge(fields, dlog.Context{"serving_daemon": string(holder)}), err))
+		return err
+	}
+	// FROM THE CLAIM ON, THE HANDOVER HOLD IS THIS DAEMON'S TO DRAIN, and it
+	// is drained whether or not the shim answers: a workspace this daemon
+	// serves with the incumbent's hold still standing refuses every prompt
+	// for as long as the hold stands. A shim that will not answer leaves the
+	// workspace served without a session, which its next prompt revives.
+	var dialErr error
+	if dial {
+		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
+			c.log.Error(opAdopt, "could not adopt the workspace's running shim; its held intake is drained all the same", withCause(fields, err))
+			dialErr = fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
+		}
+	}
 	if err := c.deps.DrainIntake(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not drain the held intake", withCause(fields, err))
-		return fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err)
+		return errors.Join(dialErr, fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err))
+	}
+	if dialErr != nil {
+		return dialErr
 	}
 	if err := c.deps.PublishViews(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not publish the workspace's fresh views", withCause(fields, err))

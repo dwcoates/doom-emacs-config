@@ -1092,6 +1092,26 @@ func TestHandOverClosesTheWatchesBeforeItDetaches(t *testing.T) {
 	}
 }
 
+// TestAHandedOverShimIsNoLongerTheFleets pins that the detached client leaves
+// the session map: a workspace taken back after its adoption window expired
+// is re-dialed by Adopt, never answered with the closed link.
+func TestAHandedOverShimIsNoLongerTheFleets(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: &fakeWatcher{}})
+
+	// Act.
+	if _, err := f.fleet.HandOver(ws.ID); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+
+	// Assert.
+	if client, held := f.fleet.Client(ws.ID); held {
+		t.Fatalf("Client after the handover = %v, want no client: the detached link is not the fleet's", client)
+	}
+}
+
 func TestHandOverAnswersFalseForAWorkspaceWithNoSession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

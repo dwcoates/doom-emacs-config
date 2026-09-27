@@ -24,7 +24,9 @@ import (
 
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/envc"
+	"claude-repld/internal/rollout"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/wsm"
 )
 
 // exitSuccess is the status of a run that ended with nothing wrong -- and of a
@@ -117,6 +119,19 @@ type options struct {
 	// gone" means, because the address is withdrawn at the start of a shutdown
 	// and the claim is released only when the process ends.
 	probeBootClaim bool
+	// layoutVersion asks ONE question and starts no daemon: which state
+	// layout does this binary write? A deploy asks it of the STAGED binary
+	// before it decides between a handover and a restart, because a joining
+	// successor opens the state read-only and cannot carry an older layout
+	// forward (see rollout.Controller.Restart).
+	layoutVersion bool
+	// replacing marks a daemon spawned by an incumbent RESTARTING across a
+	// state layout change: it waits for the incumbent's boot claim for
+	// rollout.ReplacementClaimWait rather than the ordinary bound, because the
+	// incumbent spawns it just before its own orderly exit and that exit --
+	// streams closed, loops joined, the state handle released -- is what
+	// frees the claim.
+	replacing bool
 }
 
 // envStoreSocket is the store socket's environment contract, which the
@@ -140,6 +155,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitFailure)
+	}
+	if opts.layoutVersion {
+		// THE ANSWER IS THE BINARY'S OWN, and it starts nothing: no state is
+		// opened and nothing is logged.
+		fmt.Fprintln(os.Stdout, wsm.LayoutVersion)
+		os.Exit(exitSuccess)
 	}
 	if opts.probeBootClaim {
 		// THE PROBE STARTS NOTHING. No log surfaces, no state root creation, no
@@ -193,8 +214,13 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
 	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
 	fs.BoolVar(&opts.probeBootClaim, "probe-boot-claim", false, "report whether this state root's boot claim is held and exit: 0 free, 3 held, 2 undecided")
+	fs.BoolVar(&opts.layoutVersion, rollout.LayoutVersionFlagName, false, "print the state layout version this binary writes and exit")
+	fs.BoolVar(&opts.replacing, rollout.ReplacingFlagName, false, "this daemon replaces an incumbent restarting across a state layout change: wait longer for its boot claim")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
+	}
+	if opts.replacing && opts.joining != "" {
+		return options{}, fmt.Errorf("%s: -%s and -joining are exclusive: a replacement boots as the incumbent, a successor joins one", program, rollout.ReplacingFlagName)
 	}
 	opts.storeSocket = resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket))
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))

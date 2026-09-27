@@ -3,7 +3,10 @@ package wsm
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"claude-repld/internal/dlog"
 )
 
 func TestAcquireLeaseRoundTripsThePolicyMetadata(t *testing.T) {
@@ -240,5 +243,178 @@ func TestLeaseFailsWholeOnAnUndeclaredStoredHolder(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.lease", "error") {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
+	}
+}
+
+// twoProcesses opens TWO handles on one database file: the first stands for a
+// previous daemon process, the second for the one that booted after it. The
+// first is never closed through Close, which is what a SIGKILLed process
+// looks like; its raw handle is closed at cleanup.
+func twoProcesses(t *testing.T) (previous, current *store, ws Workspace, log *dlog.TestLogger) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	previous = openStoreAt(t, path, dlog.NewTestLogger())
+	t.Cleanup(func() { previous.db().Close() })
+	ws = testWorkspace(t, previous)
+	log = dlog.NewTestLogger()
+	current = openStoreAt(t, path, log)
+	t.Cleanup(func() { current.Close() })
+	return previous, current, ws, log
+}
+
+// openStoreAt opens a handle on path with log.
+func openStoreAt(t *testing.T, path string, log *dlog.TestLogger) *store {
+	t.Helper()
+	handle, err := Open(context.Background(), path, WithLogger(log))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	return handle.(*store)
+}
+
+func TestForeignLeasesListsALeaseAnotherProcessTook(t *testing.T) {
+	// Arrange
+	previous, current, ws, _ := twoProcesses(t)
+	lease, err := previous.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	foreign, err := current.ForeignLeases(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ForeignLeases: %v", err)
+	}
+	if len(foreign) != 1 || foreign[0].ID != lease.ID || foreign[0].Workspace != ws.ID || foreign[0].Holder != HolderRestart {
+		t.Fatalf("ForeignLeases = %+v, want exactly the previous process's %s", foreign, lease.ID)
+	}
+}
+
+func TestForeignLeasesOmitsALeaseThisHandleTook(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	foreign, err := s.ForeignLeases(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ForeignLeases: %v", err)
+	}
+	if len(foreign) != 0 {
+		t.Fatalf("ForeignLeases = %+v, want none: the only lease is this handle's own", foreign)
+	}
+}
+
+func TestCloseReleasesALeaseThisHandleStillOwns(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	log := dlog.NewTestLogger()
+	s := openStoreAt(t, path, log)
+	ws := testWorkspace(t, s)
+	if _, err := s.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	err := s.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	after := openStoreAt(t, path, dlog.NewTestLogger())
+	t.Cleanup(func() { after.Close() })
+	if _, held, err := after.Lease(context.Background(), ws.ID); err != nil || held {
+		t.Fatalf("Lease after Close = (held %v, %v), want no lease left behind", held, err)
+	}
+	if !loggedOperation(log, "daemon.wsm.close", "info") {
+		t.Fatalf("the release at close was not recorded at info: %v", log.Records())
+	}
+}
+
+func TestCloseKeepsAMergeLeaseForTheNextBootsRecovery(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	s := openStoreAt(t, path, dlog.NewTestLogger())
+	ws := testWorkspace(t, s)
+	lease, err := s.AcquireLease(context.Background(), ws.ID, HolderMerge, PolicyRefuse)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	err = s.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	after := openStoreAt(t, path, dlog.NewTestLogger())
+	t.Cleanup(func() { after.Close() })
+	got, held, err := after.Lease(context.Background(), ws.ID)
+	if err != nil || !held || got.ID != lease.ID {
+		t.Fatalf("Lease after Close = (%+v, held %v, %v), want the merge lease %s kept", got, held, err, lease.ID)
+	}
+}
+
+func TestCloseTreatsALeaseAnotherProcessReleasedAsGone(t *testing.T) {
+	// Arrange: this handle took the lease, and the process it was handed to
+	// (a successor that adopted the workspace) released it.
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	log := dlog.NewTestLogger()
+	s := openStoreAt(t, path, log)
+	ws := testWorkspace(t, s)
+	lease, err := s.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	adopter := openStoreAt(t, path, dlog.NewTestLogger())
+	t.Cleanup(func() { adopter.Close() })
+	if err := adopter.ReleaseLease(context.Background(), lease.ID); err != nil {
+		t.Fatalf("ReleaseLease by the adopter: %v", err)
+	}
+
+	// Act
+	err = s.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close = %v, want nil: a lease its adopter released is not a failure", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.close", "debug") || loggedOperation(log, "daemon.wsm.close", "info") {
+		t.Fatalf("the already-released lease was not recorded at debug alone: %v", log.Records())
+	}
+}
+
+func TestCloseDoesNotReleaseALeaseThisHandleAlreadyReleased(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	log := dlog.NewTestLogger()
+	s := openStoreAt(t, path, log)
+	ws := testWorkspace(t, s)
+	lease, err := s.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	if err := s.ReleaseLease(context.Background(), lease.ID); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+
+	// Act
+	err = s.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if loggedOperation(log, "daemon.wsm.close", "debug") || loggedOperation(log, "daemon.wsm.close", "info") {
+		t.Fatalf("Close acted on a lease already released: %v", log.Records())
 	}
 }

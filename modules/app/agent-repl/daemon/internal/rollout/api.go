@@ -66,6 +66,16 @@ type Controller interface {
 	// the daemon's lifetime. It refuses with *ErrAlreadyRollingOut while a
 	// handover is in flight, and with ErrJoining on a joining successor.
 	HandOver(ctx context.Context, force bool) (HandoverAcceptance, error)
+	// Restart rolls a fresh build out STOP-THEN-START, for a build whose
+	// state layout differs from this one's (a joining successor cannot carry
+	// an older layout forward on its read-only handle). Every served
+	// workspace's serving stands down through the bounce registry at its own
+	// freeness (all at once when forced), its shim detached and left running;
+	// then a replacement is spawned on the fresh binary, waiting on the boot
+	// claim, and this daemon exits. A restart that cannot finish takes every
+	// workspace back and keeps serving. It shares HandOver's one slot and
+	// refusals.
+	Restart(ctx context.Context, force bool) (HandoverAcceptance, error)
 	// BounceShim asks the bounce registry to replace one workspace's shim with
 	// a fresh one on the installed bundle: at once when nothing is in flight or
 	// force is set, else when the workspace's work ends. done, when set, is
@@ -244,6 +254,9 @@ type Deps struct {
 	// StandDownWindow is how long a gracefully killed shim has before the
 	// force-kill. Its expiry is a LOUD log, not an invariant.
 	StandDownWindow time.Duration
+	// ReadyBound bounds the wait for a spawned successor to prove it is
+	// serving (Successor.Ready). Zero means DefaultReadyBound.
+	ReadyBound time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock
 	// Lifetime is the daemon's serving lifetime. Work the controller runs past
@@ -259,6 +272,10 @@ type BounceRegistry interface {
 	// RequestBounce asks for one workspace to be bounced; see
 	// promptqueue.Queue.RequestBounce.
 	RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error)
+	// EndKeptDrain ends the drain a handover transfer left standing, once
+	// this daemon has taken the workspace back; see
+	// promptqueue.Queue.EndKeptDrain.
+	EndKeptDrain(ws ids.WorkspaceID)
 }
 
 // ShimBuildFunc answers the installed shim bundle's content hash.
@@ -278,6 +295,12 @@ type SuccessorSpawner interface {
 	// daemon running with nothing holding it. A nil Successor means no process
 	// was started.
 	Spawn(ctx context.Context, incumbentAddress string) (Successor, error)
+	// SpawnReplacement starts `<self exe> --replacing` -- an ORDINARY daemon,
+	// not a joining one -- with this process's environment and answers its
+	// pid once it is started. It waits on the boot claim this process holds,
+	// so it opens the state only after this process has exited. The process
+	// outlives this one by design and is never stopped by it.
+	SpawnReplacement(ctx context.Context) (int, error)
 }
 
 // Successor is one spawned successor daemon: the address it reported, and the
@@ -292,6 +315,15 @@ type Successor interface {
 	// Address is the successor's own `127.0.0.1:<port>`, as it reported it;
 	// empty when it never reported one.
 	Address() string
+	// PID is the successor's process id, for the records that name it.
+	PID() int
+	// Ready answers nil ONLY once the successor has proven it is serving: a
+	// real DaemonHealth round trip on its reported address. A reported
+	// address is not that proof -- it is written the instant the listener is
+	// bound, before the successor has opened its state or reached its server.
+	// It answers *SuccessorExitedError when the process ends first, and an
+	// error wrapping ctx's when the bound runs out first.
+	Ready(ctx context.Context) error
 	// Stop ends the successor and returns nil ONLY once the process is
 	// confirmed gone (reaped). An error means it may still be running, and the
 	// caller must go on treating it as alive.
@@ -351,7 +383,11 @@ func (p Participants) Count() int {
 
 // QuiesceFunc holds ALL intake for one workspace: queue, views, anything. From
 // the transfer notice on the outgoing daemon does no work for it.
-type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) error
+//
+// It answers the lease it TOOK, empty when another holder's lease already held
+// the intake: a transfer that fails, or whose adoption window expires, releases
+// exactly that lease and never another holder's.
+type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) (ids.LeaseID, error)
 
 // LeaseChangedFunc re-evaluates one workspace's standing holds against its new
 // lease set. It is promptqueue.Queue.OnLeaseChanged.
@@ -441,6 +477,9 @@ var (
 	ErrParticipantNotExpected = errors.New("rollout: this participant's stream was not open at announcement")
 	// ErrNotYetAdopted is answered while adoption is still in progress.
 	ErrNotYetAdopted = errors.New("rollout: this workspace is not adopted yet")
+	// ErrReclaimed settles a rendezvous whose workspace the incumbent took
+	// back: its adoption window expired, or its transfer failed.
+	ErrReclaimed = errors.New("rollout: the incumbent took this workspace back; it is not being handed over")
 )
 
 // New builds the controller.
@@ -474,6 +513,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandDownWindow <= 0 {
 		deps.StandDownWindow = DefaultStandDownWindow
+	}
+	if deps.ReadyBound <= 0 {
+		deps.ReadyBound = DefaultReadyBound
 	}
 	c := &controller{
 		deps:          deps,

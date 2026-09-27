@@ -167,6 +167,14 @@ type fakeSpawner struct {
 	// successor is answered, so a test observes what a booting successor
 	// would find.
 	onSpawn func()
+	// readyErr is what every successor's Ready answers; nil proves it serving.
+	readyErr error
+	// replacementErr is what SpawnReplacement answers.
+	replacementErr error
+	// replacements counts the replacements spawned.
+	replacements int
+	// readies counts the Ready calls.
+	readies int
 	mu      sync.Mutex
 	told    []string
 	spawned []*fakeSuccessor
@@ -229,6 +237,46 @@ type fakeSuccessor struct {
 }
 
 func (c *fakeSuccessor) Address() string { return c.address }
+
+// fakeSuccessorPID is the pid every fake successor answers.
+const fakeSuccessorPID = 51345
+
+func (c *fakeSuccessor) PID() int { return fakeSuccessorPID }
+
+func (c *fakeSuccessor) Ready(context.Context) error {
+	c.spawner.mu.Lock()
+	defer c.spawner.mu.Unlock()
+	c.spawner.readies++
+	return c.spawner.readyErr
+}
+
+// SpawnReplacement records a replacement's spawn.
+func (s *fakeSpawner) SpawnReplacement(context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replacementErr != nil {
+		return 0, s.replacementErr
+	}
+	s.replacements++
+	return fakeReplacementPID, nil
+}
+
+// fakeReplacementPID is the pid every fake replacement answers.
+const fakeReplacementPID = 51400
+
+// Replacements counts the replacements spawned.
+func (s *fakeSpawner) Replacements() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.replacements
+}
+
+// Readies counts the readiness waits the handover asked for.
+func (s *fakeSpawner) Readies() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readies
+}
 
 func (c *fakeSuccessor) Stop(context.Context) error {
 	c.spawner.mu.Lock()
@@ -501,6 +549,8 @@ type fakeFleet struct {
 	resumeCold   map[ids.WorkspaceID]*conversationv1.SessionCold
 	// handOverErr is what HandOver answers for a workspace with a session.
 	handOverErr map[ids.WorkspaceID]error
+	// onAdopt, when set, runs as each Adopt arrives, before it answers.
+	onAdopt func(ws ids.WorkspaceID)
 
 	installs  []ids.WorkspaceID
 	adoptions []ids.WorkspaceID
@@ -564,6 +614,9 @@ func (f *fakeFleet) Install(_ context.Context, ws ids.WorkspaceID, c shimclient.
 
 func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
 	f.order.record("adopt")
+	if f.onAdopt != nil {
+		f.onAdopt(ws)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.adoptErr[ws]; err != nil {
@@ -592,6 +645,12 @@ func (f *fakeFleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 		return true, err
 	}
 	shim.Detach()
+	// The detached shim leaves the fleet with the detach, as the real one's does.
+	f.mu.Lock()
+	if f.live[ws] == shim {
+		delete(f.live, ws)
+	}
+	f.mu.Unlock()
 	return true, nil
 }
 
@@ -639,6 +698,11 @@ type fakeRegistry struct {
 	pending  map[ids.WorkspaceID]bounce.Request
 	err      error
 	running  sync.WaitGroup
+	// endedDrains records every EndKeptDrain.
+	endedDrains []ids.WorkspaceID
+	// runCtx is the context each bounce runs on; nil is context.Background(),
+	// which is what the queue's own runs are detached onto.
+	runCtx context.Context
 }
 
 // registryCall is one recorded request.
@@ -670,13 +734,31 @@ func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req 
 	return bounce.Decision{Now: true, Forced: !free}, nil
 }
 
+// EndKeptDrain records the ended drain.
+func (r *fakeRegistry) EndKeptDrain(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.endedDrains = append(r.endedDrains, ws)
+}
+
+// EndedDrains answers the workspaces whose kept drain was ended, in order.
+func (r *fakeRegistry) EndedDrains() []ids.WorkspaceID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), r.endedDrains...)
+}
+
 // run performs one bounce the way the queue does: its own goroutine, then the
 // completion callback.
 func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 	r.running.Add(1)
 	go func() {
 		defer r.running.Done()
-		err := req.Run(context.Background(), ws)
+		ctx := r.runCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		err := req.Run(ctx, ws)
 		if req.Done != nil {
 			req.Done(err)
 		}
@@ -743,8 +825,10 @@ type harness struct {
 	log          *dlog.TestSurfaces
 	state        string
 
-	mu           sync.Mutex
-	quiesced     []ids.WorkspaceID
+	mu       sync.Mutex
+	quiesced []ids.WorkspaceID
+	// quiesceErr fails every quiesce.
+	quiesceErr   error
 	drained      []ids.WorkspaceID
 	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
@@ -806,12 +890,27 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Announcer:      h.announcer,
 		Pusher:         h.pusher,
 		Participants:   h.participants,
-		Quiesce: func(_ context.Context, ws ids.WorkspaceID) error {
+		// THE HOLD IS REAL: it is taken in the harness's state, exactly as
+		// handover.Intake takes it, so a test reads what a failed transfer
+		// or a reclaim left behind. A lease already standing is another
+		// holder's, and the transfer is handed none of its own.
+		Quiesce: func(ctx context.Context, ws ids.WorkspaceID) (ids.LeaseID, error) {
 			order.record("quiesce")
 			h.mu.Lock()
 			h.quiesced = append(h.quiesced, ws)
+			quiesceErr := h.quiesceErr
 			h.mu.Unlock()
-			return nil
+			if quiesceErr != nil {
+				return "", quiesceErr
+			}
+			if _, held, err := db.Lease(ctx, ws); err != nil || held {
+				return "", err
+			}
+			lease, err := db.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
+			if err != nil {
+				return "", err
+			}
+			return lease.ID, nil
 		},
 		DrainIntake: func(_ context.Context, ws ids.WorkspaceID) error {
 			order.record("drain_intake")
@@ -990,4 +1089,23 @@ func (h *harness) joiningHandle(t *testing.T) {
 		}
 	})
 	h.c.deps.DB = ro
+}
+
+// successorAdopts completes the rendezvous of every workspace the handover has
+// transferred so far, as the participants' adoption calls on the successor
+// would: each adoption window then ends as adopted rather than expired.
+func (h *harness) successorAdopts(t *testing.T) {
+	t.Helper()
+	for _, call := range h.pusher.Calls() {
+		if call.Kind != "transferred" {
+			continue
+		}
+		h.c.mu.Lock()
+		e := h.c.rendezvous[call.WS]
+		h.c.mu.Unlock()
+		if e == nil {
+			t.Fatalf("no rendezvous is armed for the transferred workspace %s", call.WS)
+		}
+		e.settle(nil)
+	}
 }

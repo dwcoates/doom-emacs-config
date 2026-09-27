@@ -428,6 +428,48 @@ func TestAKeepDrainingBounceLeavesTheWorkspaceDrained(t *testing.T) {
 	}
 }
 
+// TestEndingAKeptDrainResumesDispatch pins the handover reclaim's queue half:
+// a workspace taken back after its transfer ran leaves draining, and a prompt
+// sent then is delivered here rather than held behind a finished bounce.
+func TestEndingAKeptDrainResumesDispatch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	req := g.request("handover_transfer", false)
+	req.KeepDraining = true
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, req); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+	g.finish(h, nil)
+
+	// Act
+	h.q.EndKeptDrain(theWorkspace)
+	disposition, err := h.q.Submit(context.Background(), submission("after", "sent after the reclaim"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if h.q.isDraining(theWorkspace) || !disposition.Delivered {
+		t.Fatalf("draining=%v disposition=%+v, want dispatch resumed and the prompt delivered", h.q.isDraining(theWorkspace), disposition)
+	}
+}
+
+func TestEndingAKeptDrainWithNoneStandingChangesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.q.EndKeptDrain(theWorkspace)
+	disposition, err := h.q.Submit(context.Background(), submission("free", "sent with no drain"))
+
+	// Assert
+	if err != nil || !disposition.Delivered {
+		t.Fatalf("Submit = (%+v, %v), want an ordinary delivery", disposition, err)
+	}
+}
+
 func TestASecondRequestJoinsThePendingBounce(t *testing.T) {
 	tests := []struct {
 		name        string
