@@ -227,9 +227,13 @@ func contextCutCommand(kind string) (conversationv1.SessionCommand, string) {
 	return conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear"
 }
 
-// drainActs runs every act queued behind the path, in submission order. It is
+// drainActs runs the acts queued behind the path, in submission order. It is
 // called at a turn end, BEFORE the next prompt is popped, so an act the user
 // issued while a turn ran applies to the prompt that follows it.
+//
+// A CONTEXT CUT ENDS THE DRAIN. It runs as the session's turn, so the acts
+// queued after it wait for its end exactly as a prompt does, and are drained
+// then, still in order.
 func (q *queue) drainActs(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	q.mu.Lock()
 	state, ok := q.states[ws]
@@ -241,10 +245,23 @@ func (q *queue) drainActs(ctx context.Context, ws ids.WorkspaceID, log dlog.Logg
 	state.acts = nil
 	q.mu.Unlock()
 
-	for _, act := range pending {
+	for i, act := range pending {
 		if err := q.runAct(ctx, ws, act, log.With(dlog.Context{"act": act.Kind, "value": act.Value})); err != nil {
 			log.Error(opAct, "a queued session act was not delivered at the turn's end",
 				dlog.Context{"act": act.Kind, "cause": err.Error()})
+			continue
 		}
+		cut, running := q.runningCut(ws)
+		if !running || i == len(pending)-1 {
+			continue
+		}
+		rest := pending[i+1:]
+		q.mu.Lock()
+		state.acts = append(append([]Act(nil), rest...), state.acts...)
+		q.mu.Unlock()
+		log.Info(opAct, "a context cut is running; the acts queued after it wait for its end", dlog.Context{
+			"session_act_turn": string(cut.turn), "session_act": cut.command.String(), "queued_acts": len(rest),
+		})
+		return
 	}
 }
