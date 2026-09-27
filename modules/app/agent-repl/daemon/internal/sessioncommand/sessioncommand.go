@@ -12,6 +12,7 @@ package sessioncommand
 import (
 	"strings"
 	"sync"
+	"unicode"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -73,16 +74,21 @@ type Parsed struct {
 	Known bool
 }
 
-// Parse splits text into a command name and its argument: the text is
-// trimmed, a leading `/` marks a command, and the name runs to the first
-// space.
+// Parse splits text into a command name and its argument the way the vendor's
+// CLI does: the text is trimmed, a leading `/` marks a command, and the name
+// runs to the FIRST WHITESPACE of any kind, a newline included. The CLI
+// splits on /\s/, so "/compact\nkeep the plan" IS /compact with an argument
+// there; a daemon splitting on the space alone read it as an unknown command
+// and sent a compaction to the routing classifier as an ordinary prompt.
 func Parse(text string) Parsed {
 	trimmed := strings.TrimSpace(text)
 	if !strings.HasPrefix(trimmed, "/") {
 		return Parsed{}
 	}
-	name, rest, _ := strings.Cut(trimmed, " ")
-	rest = strings.TrimSpace(rest)
+	name, rest := trimmed, ""
+	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
+		name, rest = trimmed[:i], strings.TrimSpace(trimmed[i:])
+	}
 	spec, known := Specs()[name]
 	return Parsed{Slash: true, Name: name, Arg: rest, Spec: spec, Known: known}
 }
