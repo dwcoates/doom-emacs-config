@@ -33,6 +33,13 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 			"turn": string(turn), "close": closeName(how), "cause": err.Error(),
 		})
 		err = fmt.Errorf("close turn %q on %q: %w", turn, ws, err)
+	} else {
+		// THE DURABLE CLOSE IS ON THE RECORD. The session watcher's
+		// `turn_ended` is written when the terminal is routed, before this
+		// write, so it cannot say the row is closed; this one can.
+		log.Debug(opTurnEnded, "stamped the turn's close", dlog.Context{
+			"turn": string(turn), "close": closeName(how),
+		})
 	}
 	q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: how, At: at})
 	q.retireCutIf(ws, turn, func() (dlog.Logger, bool) { return log, true })

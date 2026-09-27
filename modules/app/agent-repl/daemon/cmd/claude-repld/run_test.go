@@ -58,7 +58,7 @@ func newTestHooks() *testHooks {
 			return nil, errServed
 		},
 		Server: func(server.Deps) (server.Server, error) { return nil, errServed },
-		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _ func()) error {
+		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _, _ func()) error {
 			th.served <- struct{}{}
 			return errServed
 		},
@@ -243,7 +243,7 @@ func TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting(t *testing.T) {
 
 	// Act.
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, onShuttingDown) }()
+	go func() { served <- serve(ctx, listener, gate, onShuttingDown, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -646,6 +646,20 @@ func (g *recordingGate) AwaitWritesQuiet(time.Duration) bool {
 	return true
 }
 
+func (g *recordingGate) EndStreams(end func()) {
+	g.mu.Lock()
+	g.calls = append(g.calls, "EndStreams")
+	g.mu.Unlock()
+	end()
+}
+
+func (g *recordingGate) AwaitStreamsEnded(time.Duration) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, "AwaitStreamsEnded")
+	return 0
+}
+
 func (g *recordingGate) Listener(inner net.Listener) net.Listener { return inner }
 
 func (g *recordingGate) recorded() []string {
@@ -670,7 +684,7 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil) }()
+	go func() { served <- serve(ctx, listener, gate, nil, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -681,6 +695,41 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 	want := []string{"AwaitQuiet", "AwaitWritesQuiet"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("the exit's waits = %v, want %v — the answers being written first, then the standing streams' own last push", got, want)
+	}
+}
+
+// TestTheExitEndsEveryStandingStreamBeforeShuttingDown pins the 2026-09-27
+// regression: the standing streams were left to `Shutdown`, which on a hijacked
+// h2c connection closes nothing, so the process exit cut them and every client
+// still watching read "producer closed without an end frame". The exit ends
+// them itself, after the last pushes have left, and waits for their end frames.
+func TestTheExitEndsEveryStandingStreamBeforeShuttingDown(t *testing.T) {
+	// Arrange
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	ctx, cancel := context.WithCancel(context.Background())
+	endStreams := func() {
+		gate.mu.Lock()
+		gate.calls = append(gate.calls, "end")
+		gate.mu.Unlock()
+	}
+
+	// Act
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate, nil, endStreams) }()
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert
+	got := gate.recorded()
+	want := []string{"AwaitQuiet", "AwaitWritesQuiet", "EndStreams", "end", "AwaitStreamsEnded"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("the exit's steps = %v, want %v — the last pushes out, then every stream ended and its end frame awaited", got, want)
 	}
 }
 

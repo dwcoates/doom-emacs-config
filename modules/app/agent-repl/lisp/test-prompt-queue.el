@@ -360,6 +360,34 @@ case is arranged by actually closing it.")
   (should (memq #'agent-repl--prompt-queue-on-link-promote
                 (default-value 'agent-repl-link-promote-functions))))
 
+(ert-deftest agent-repl-pq-reattach-drains-the-workspaces-outage-entries ()
+  "A workspace re-attached on its own walk releases what it held meanwhile."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-reattached "ws-one")
+    ;; Assert
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))))
+
+(ert-deftest agent-repl-pq-reattach-leaves-other-workspaces-held ()
+  "The reattach edge is per-workspace: another workspace's hold stays."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-two" (agent-repl-test-pq--said "b")
+                                   :user-sent "b" "key-10")
+    ;; Act
+    (agent-repl--prompt-queue-on-reattached "ws-one")
+    ;; Assert
+    (should (null agent-repl-test-pq--submitted))))
+
+(ert-deftest agent-repl-pq-registers-on-the-reattach-edge ()
+  "The registration IS the release for a workspace re-attached on its own walk."
+  ;; Act / Assert
+  (should (memq #'agent-repl--prompt-queue-on-reattached
+                (default-value 'agent-repl-host-reattached-functions))))
+
 (ert-deftest agent-repl-pq-registers-on-link-up ()
   "The outage drain is wired to link-up and nothing else."
   (should (memq #'agent-repl--prompt-queue-on-link-up agent-repl-link-up-functions)))

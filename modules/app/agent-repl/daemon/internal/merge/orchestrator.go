@@ -88,6 +88,11 @@ type orchestrator struct {
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
+	// admissions counts the admission steps in flight -- the store reads and
+	// the admission write the pump makes before a run starts. A step is added
+	// only under mu while not draining (enterAdmission), and Drain waits for
+	// them, so no admission read reaches a state client the exit has closed.
+	admissions sync.WaitGroup
 	// async reports whether Enqueue starts the admission pump itself.
 	async bool
 	// draining reports that the daemon is on its way out: the admission pump

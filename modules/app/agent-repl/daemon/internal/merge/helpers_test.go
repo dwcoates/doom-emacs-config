@@ -59,6 +59,11 @@ type fakeDB struct {
 	paused        map[wsm.RepoKey]bool
 	repos         []wsm.Repository
 	seq           int
+	// onPausedRead, when set, runs at the start of every MergeQueuePaused
+	// read, outside the fake's lock, so a test can hold an admission step in
+	// flight; pausedReads counts those reads.
+	onPausedRead func()
+	pausedReads  int
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
@@ -359,6 +364,13 @@ func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused
 }
 
 func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, error) {
+	f.mu.Lock()
+	hook := f.onPausedRead
+	f.pausedReads++
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.paused[repo], nil

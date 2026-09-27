@@ -27,6 +27,14 @@ type RequestGate interface {
 	// and reports whether they did. It covers what AwaitQuiet cannot: the
 	// pushes on the STANDING streams, which are not counted calls.
 	AwaitWritesQuiet(bound time.Duration) bool
+	// EndStreams runs end, which ends every standing stream the daemon
+	// serves, and from then on holds each one that ends until its END FRAME
+	// is on the socket.
+	EndStreams(end func())
+	// AwaitStreamsEnded waits, bounded, for every standing stream to have
+	// ended and written its end frame, and reports how many had not when the
+	// bound expired.
+	AwaitStreamsEnded(bound time.Duration) int
 }
 
 // Serving is the daemon's one serving handler: h2c over the loopback listener,
@@ -46,10 +54,18 @@ type RequestGate interface {
 // every open stream 211 microseconds later, so Emacs read `unexpected EOF`
 // from a stop the daemon had in fact performed.
 //
-// THE STANDING STREAMS ARE NOT COUNTED. A `Watch*` handler returns only when
-// its client goes away, so counting one would make the exit spend its whole
-// grace on every stop and would bound nothing. They are ended by the shutdown
-// that follows, which is what they are for.
+// THE STANDING STREAMS ARE NOT COUNTED AS CALLS. A `Watch*` handler returns
+// only when its client goes away, so counting one in AwaitQuiet would make the
+// exit spend its whole grace on every stop and would bound nothing. They are
+// counted APART (streams), and the exit ENDS them itself -- EndStreams, then
+// AwaitStreamsEnded -- so every client reads its stream's end frame rather
+// than a connection cut under it.
+//
+// Regression, 2026-09-27: the exit let `http.Server.Shutdown` "close" the
+// standing streams, which on a hijacked h2c connection closes nothing, and the
+// server's own close ran as a deferred call the process exit raced. Emacs read
+// `WatchHostWorkspace: producer closed without an end frame` for every
+// workspace still watched, and the same on its roster stream.
 type Serving struct {
 	handler http.Handler
 	log     dlog.Logger
@@ -62,6 +78,15 @@ type Serving struct {
 	// quiet is closed when the count reaches zero. It exists only while
 	// somebody is waiting, so an ordinary call pays one comparison.
 	quiet chan struct{}
+	// streams counts the standing streams still open, or still writing the
+	// end frame the exit ended them with.
+	streams int
+	// streamsGone is closed when streams reaches zero, only while somebody is
+	// waiting.
+	streamsGone chan struct{}
+	// ending is set by EndStreams: from then on a standing stream that ends
+	// was ended by the exit, and is counted until its end frame has left.
+	ending bool
 }
 
 // Listener wraps the listener this handler serves, so the calls it counts are
@@ -113,6 +138,8 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Serving) counted(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if standingStreamPaths[r.URL.Path] {
+			s.enterStream()
+			defer s.leaveStreamOnceEnded(r)
 			inner.ServeHTTP(w, r)
 			return
 		}
@@ -191,6 +218,98 @@ func (s *Serving) AwaitQuiet(bound time.Duration) int {
 		if s.log != nil {
 			s.log.Warn("daemon.server.await_quiet", "the exit's grace expired with calls still being answered; their callers will read a cut connection",
 				dlog.Context{"in_flight": left, "bound_ms": bound.Milliseconds()})
+		}
+		return left
+	}
+}
+
+func (s *Serving) enterStream() {
+	s.mu.Lock()
+	s.streams++
+	s.mu.Unlock()
+}
+
+func (s *Serving) leaveStream() {
+	s.mu.Lock()
+	s.streams--
+	if s.streams == 0 && s.streamsGone != nil {
+		close(s.streamsGone)
+		s.streamsGone = nil
+	}
+	s.mu.Unlock()
+}
+
+// leaveStreamOnceEnded uncounts a standing stream whose handler has returned.
+//
+// A STREAM ITS CLIENT ENDED LEAVES AT ONCE: nothing is owed to a client that
+// went away, and its connection may write nothing more at all. A stream the
+// EXIT ended is held until the socket has written past the moment its handler
+// returned -- its end frame, which http2 produces after the handler returns
+// (see WriteBarrier) -- so AwaitStreamsEnded means "every client has its end
+// frame", not "every handler has returned".
+func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
+	s.mu.Lock()
+	ending := s.ending
+	s.mu.Unlock()
+	answered := r.Context()
+	if !ending || answered.Done() == nil {
+		s.leaveStream()
+		return
+	}
+	mark := s.barrier.Mark()
+	path := r.URL.Path
+	go func() {
+		<-answered.Done()
+		if !s.barrier.AwaitWrittenSince(mark, answerWriteBound) && s.log != nil {
+			s.log.Error("daemon.server.stream_end_unwritten",
+				"a standing stream the exit ended never had its end frame reach the socket within the bound; its client will read a cut connection",
+				dlog.Context{"path": path, "bound_ms": answerWriteBound.Milliseconds()})
+		}
+		s.leaveStream()
+	}()
+}
+
+// EndStreams marks the exit as ending the standing streams, then runs end,
+// which does it. The mark comes FIRST, so no stream end could be read as its
+// client's own.
+func (s *Serving) EndStreams(end func()) {
+	s.mu.Lock()
+	s.ending = true
+	open := s.streams
+	s.mu.Unlock()
+	if s.log != nil {
+		s.log.Info("daemon.server.end_streams", "ending every standing stream with its end frame", dlog.Context{"open": open})
+	}
+	end()
+}
+
+// AwaitStreamsEnded waits for every standing stream to have ended and written
+// its end frame, and says so loudly when the bound expires with some still
+// open: those clients will read a cut connection instead of an end frame.
+func (s *Serving) AwaitStreamsEnded(bound time.Duration) int {
+	s.mu.Lock()
+	if s.streams == 0 {
+		s.mu.Unlock()
+		return 0
+	}
+	if s.streamsGone == nil {
+		s.streamsGone = make(chan struct{})
+	}
+	gone := s.streamsGone
+	s.mu.Unlock()
+
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case <-gone:
+		return 0
+	case <-timer.C:
+		s.mu.Lock()
+		left := s.streams
+		s.mu.Unlock()
+		if s.log != nil {
+			s.log.Error("daemon.server.await_streams_ended", "the exit's stream-end bound expired with standing streams still open; their clients will read a cut connection rather than an end frame",
+				dlog.Context{"open": left, "bound_ms": bound.Milliseconds()})
 		}
 		return left
 	}
