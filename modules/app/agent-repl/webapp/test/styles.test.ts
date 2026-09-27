@@ -3038,11 +3038,11 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
 };
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the iMessage dark-mode blue", () => {
+  it("paints a prompt the iMessage dark-mode blue, a notch darker", () => {
     // Arrange / Act
     const user = rgbOf(darkThemeBlock(), "--user");
     // Assert
-    expect(user).toEqual([0x0a, 0x84, 0xff]);
+    expect(user).toEqual([0x09, 0x78, 0xea]);
   });
 
   it.each([
