@@ -175,6 +175,8 @@ type fakeRollout struct {
 	rolling    []ids.WorkspaceID
 	handovers  []bool
 	handErr    error
+	restarts   []bool
+	restartErr error
 	checks     []bool
 	stale      map[ids.WorkspaceID]bool
 	checkErr   map[ids.WorkspaceID]error
@@ -188,6 +190,15 @@ func (r *fakeRollout) HandOver(_ context.Context, force bool) (rollout.HandoverA
 	acc := r.acceptance
 	acc.Forced = force
 	return acc, r.handErr
+}
+
+func (r *fakeRollout) Restart(_ context.Context, force bool) (rollout.HandoverAcceptance, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.restarts = append(r.restarts, force)
+	acc := r.acceptance
+	acc.Forced = force
+	return acc, r.restartErr
 }
 
 func (r *fakeRollout) CheckStaleness(_ context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error) {
@@ -297,7 +308,15 @@ type harness struct {
 	alive     map[int]bool
 	fresh     artifacts
 	elisp     string
+	// freshLayout is the state layout the staged daemon answers, and
+	// layoutErr fails the question; layoutAsked records the binaries asked.
+	freshLayout int
+	layoutErr   error
+	layoutAsked []string
 }
+
+// runningLayout is the state layout the harness's running daemon writes.
+const runningLayout = 11
 
 // theFresh is the build every harness stages; theOld is what is installed and
 // running before it.
@@ -328,6 +347,8 @@ func newHarness(t *testing.T) *harness {
 		alive:     map[int]bool{},
 		fresh:     theFresh,
 		elisp:     elisp,
+
+		freshLayout: runningLayout,
 	}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -350,6 +371,11 @@ func newHarness(t *testing.T) *harness {
 		},
 		Clock: newStepClock(),
 		Log:   h.log,
+		StateLayout: func(_ context.Context, bin string) (int, error) {
+			h.layoutAsked = append(h.layoutAsked, bin)
+			return h.freshLayout, h.layoutErr
+		},
+		RunningLayout: runningLayout,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
