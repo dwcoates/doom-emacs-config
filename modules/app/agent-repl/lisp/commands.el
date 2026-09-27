@@ -646,8 +646,7 @@ by switching projectile to the minted worktree -- landed the user on an
 EMPTY frame: no webview, no composer, only the tab bar to say the
 workspace existed at all.
 
-The flag is armed BEFORE the switch, exactly as
-`agent-repl--land-after-teardown' arms it, so the panel arrives through
+The flag is armed BEFORE the switch, so the panel arrives through
 the persp activation hook's own drain rather than through a second show
 mechanism.
 

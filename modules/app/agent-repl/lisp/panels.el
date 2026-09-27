@@ -49,6 +49,7 @@
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-remove-buffer "workspace")
 (declare-function agent-repl--ws-resolve-persp "workspace")
+(declare-function agent-repl--ws-shared-unowned-buffer-p "workspace" (buf ws))
 (declare-function agent-repl--ws-switch "workspace")
 (declare-function agent-repl--ws-system-available-p "workspace")
 (declare-function agent-repl--ws-update-names-cache "workspace")
@@ -317,11 +318,13 @@ becomes visible.
 
 WHO ARMS IT: `agent-repl-switch-to-project' for the workspace a
 projectile switch is about to stand on -- which is how a workspace you
-just created comes up showing itself -- and
-`agent-repl--land-after-teardown' for the workspace a teardown moves the
-user to.  Both go through `agent-repl--arm-landing-panels' and both arm
-BEFORE the switch, so the flag is set by the time the persp activation
-hook drains it.  (The old headless birth path armed it too; it went with
+just created comes up showing itself -- through
+`agent-repl--arm-landing-panels', which arms BEFORE the switch, so the
+flag is set by the time the persp activation hook drains it.  A teardown
+landing arms nothing (`agent-repl--land-before-teardown'): arrival
+re-shows panels by default, and an explicit close in the landing
+workspace is not overridden by some other workspace's teardown.  (The
+old headless birth path armed it too; it went with
 `agent-repl--frontend-boot-session', which no longer exists.)"
   (if (not (agent-repl--ws-get ws :pending-show-panels))
       ;; The no-op branch is the one a persp placeholder reaches (it owns no
@@ -574,14 +577,24 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
     ;; honored and not fought.  The re-show dispatches through WS's own
     ;; frontend, which lays out the webview and input panel together from
     ;; scratch, so there is no separate half-shown repair to make.
-    (when (and (agent-repl--ws-panels-open-preferred-p ws)
-               (not (agent-repl--panels-visible-p))
-               ;; Eligibility is a live VIEW buffer only: the mount
-               ;; recreates a dead/nil input buffer itself
-               ;; (`agent-repl--ensure-input-buffer').
-               (agent-repl-window--panels-restorable-p ws))
-      (agent-repl--log log-ws "ensure-own-panels: ws=%s re-showing panels (default-open, now missing)" ws)
-      (agent-repl--frontend-dispatch-show ws))
+    ;;
+    ;; The decision is recorded at INFO, whichever way it goes: which
+    ;; panels an arrival puts on the frame is the user-visible outcome of
+    ;; every switch and every teardown landing, and an invisible decision
+    ;; is a logging defect.
+    (let ((reason
+           (cond ((not (agent-repl--ws-panels-open-preferred-p ws)) 'closed-by-user)
+                 ((agent-repl--panels-visible-p) 'already-visible)
+                 ;; Eligibility is a live VIEW buffer only: the mount
+                 ;; recreates a dead/nil input buffer itself
+                 ;; (`agent-repl--ensure-input-buffer').
+                 ((not (agent-repl-window--panels-restorable-p ws)) 'no-live-view)
+                 (t 'default-open-now-missing))))
+      (agent-repl--info log-ws "elisp.panels.restore-decision: ws=%s decision=%s reason=%s"
+                        ws (if (eq reason 'default-open-now-missing) "re-show" "no-show")
+                        reason)
+      (when (eq reason 'default-open-now-missing)
+        (agent-repl--frontend-dispatch-show ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.
@@ -1483,7 +1496,12 @@ the user has already confirmed the destructive kill.
 Agent buffers owned by a different workspace (see
 `agent-repl--foreign-owned-buffer-p') are skipped, not killed: persp-mode
 can drift another workspace's live panel into this persp, and nuking it
-would wipe that workspace's running session."
+would wipe that workspace's running session.  A buffer owned by no
+workspace that another live perspective also holds -- the workspace a
+teardown lands on among them -- is skipped too
+\(`agent-repl--ws-shared-unowned-buffer-p'): it is that workspace's
+buffer as well, and a teardown must change nothing about another
+workspace."
   (when (agent-repl--ws-system-available-p)
     (when-let ((persp (agent-repl--ws-resolve-persp ws)))
       (let ((bufs (agent-repl--ws-buffers persp))
@@ -1491,10 +1509,15 @@ would wipe that workspace's running session."
         (agent-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
         (dolist (buf bufs)
           (condition-case err
-              (if (agent-repl--foreign-owned-buffer-p buf ws)
-                  (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
-                                    (agent-repl--safe-buffer-name buf)
-                                    (agent-repl--buffer-owner buf))
+              (cond
+               ((agent-repl--foreign-owned-buffer-p buf ws)
+                (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
+                                  (agent-repl--safe-buffer-name buf)
+                                  (agent-repl--buffer-owner buf)))
+               ((agent-repl--ws-shared-unowned-buffer-p buf ws)
+                (agent-repl--log ws "kill-workspace-buffers: SKIP shared buf=%s"
+                                  (agent-repl--safe-buffer-name buf)))
+               (t
                 (let* ((buf-name (agent-repl--safe-buffer-name buf))
                        (live (buffer-live-p buf))
                        (proc (and live (get-buffer-process buf)))
@@ -1511,7 +1534,7 @@ would wipe that workspace's running session."
                       (set-buffer-modified-p nil))
                     (kill-buffer buf))
                   (agent-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
-                                    buf-name (- (float-time) t-buf))))
+                                    buf-name (- (float-time) t-buf)))))
             (error
              (agent-repl--warn ws "kill-workspace-buffers: error on %s: %S"
                                (agent-repl--safe-buffer-name buf) err))))
