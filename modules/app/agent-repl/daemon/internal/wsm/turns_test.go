@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -295,83 +296,6 @@ func TestHasTurnsIsScopedPerWorkspace(t *testing.T) {
 	}
 	if has {
 		t.Fatalf("HasTurns = true, want false for a workspace whose sibling took the turn")
-	}
-}
-
-func TestClaimIdempotencyKeyMintsOnFirstClaim(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := NewTurnID()
-
-	// Act
-	existing, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", turn)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClaimIdempotencyKey: %v", err)
-	}
-	if existing != nil {
-		t.Fatalf("existing = %q on a first claim, want nil", *existing)
-	}
-}
-
-func TestClaimIdempotencyKeyReturnsTheClaimedTurn(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	first := NewTurnID()
-	if _, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", first); err != nil {
-		t.Fatalf("ClaimIdempotencyKey: %v", err)
-	}
-
-	// Act
-	existing, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", NewTurnID())
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClaimIdempotencyKey: %v", err)
-	}
-	if existing == nil || *existing != first {
-		t.Fatalf("existing = %v, want %q", existing, first)
-	}
-}
-
-func TestClaimIdempotencyKeyIsScopedPerWorkspace(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	first := testWorkspace(t, s)
-	second := testWorkspace(t, s)
-	if _, err := s.ClaimIdempotencyKey(context.Background(), first.ID, "key-1", NewTurnID()); err != nil {
-		t.Fatalf("ClaimIdempotencyKey: %v", err)
-	}
-
-	// Act
-	existing, err := s.ClaimIdempotencyKey(context.Background(), second.ID, "key-1", NewTurnID())
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClaimIdempotencyKey: %v", err)
-	}
-	if existing != nil {
-		t.Fatalf("existing = %q across workspaces, want nil", *existing)
-	}
-}
-
-func TestClaimIdempotencyKeyRefusesAnEmptyKey(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	_, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "", NewTurnID())
-
-	// Assert
-	if err == nil {
-		t.Fatalf("ClaimIdempotencyKey with an empty key succeeded")
-	}
-	if !loggedOperation(log, "daemon.wsm.claim_idempotency_key", "error") {
-		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 }
 
@@ -943,5 +867,268 @@ func TestClaimDisplacedTurnReportsItLeftAnExistingCloseStanding(t *testing.T) {
 	// Assert
 	if err != nil || !claim.Claimed || claim.Closed {
 		t.Fatalf("ClaimDisplacedTurn = (%+v, %v), want claimed and not closed by the claim", claim, err)
+	}
+}
+
+// claimArrangement is what stands on a key before the claim under test runs.
+type claimArrangement int
+
+const (
+	// arrangeNothing: the key was never claimed.
+	arrangeNothing claimArrangement = iota
+	// arrangeUnaccepted: the key was claimed and the queue never took it.
+	arrangeUnaccepted
+	// arrangeAccepted: the key was claimed and the queue accepted it.
+	arrangeAccepted
+	// arrangeHeldUnstamped: the key was claimed, the queue durably HELD the
+	// prompt, and the process died before the claim was stamped.
+	arrangeHeldUnstamped
+)
+
+// arrangeClaim puts the named standing on key, bound to turn.
+func arrangeClaim(t *testing.T, s *store, ws WorkspaceID, key string, turn TurnID, arrange claimArrangement) {
+	t.Helper()
+	ctx := context.Background()
+	if arrange == arrangeNothing {
+		return
+	}
+	if _, err := s.ClaimIdempotencyKey(ctx, ws, key, turn); err != nil {
+		t.Fatalf("arrange ClaimIdempotencyKey: %v", err)
+	}
+	switch arrange {
+	case arrangeAccepted:
+		if err := s.AcceptIdempotencyKey(ctx, ws, key, turn); err != nil {
+			t.Fatalf("arrange AcceptIdempotencyKey: %v", err)
+		}
+	case arrangeHeldUnstamped:
+		if err := s.PutHeldPrompt(ctx, HeldPrompt{Workspace: ws, Turn: turn, Said: said("held"), Origin: "emacs", QueuedAt: instant}); err != nil {
+			t.Fatalf("arrange PutHeldPrompt: %v", err)
+		}
+	}
+}
+
+// TestClaimIdempotencyKeyAnswersTheStandingOnTheKey pins the claim's three
+// answers, one edge per row. Only an ACCEPTED submission is a duplicate.
+func TestClaimIdempotencyKeyAnswersTheStandingOnTheKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		arrange      claimArrangement
+		wantStanding ClaimStanding
+		// wantFirstTurn: the claim answers the FIRST submission's turn rather
+		// than the offered one.
+		wantFirstTurn bool
+		// wantAbandoned: the claim names the first submission's turn as
+		// abandoned.
+		wantAbandoned bool
+	}{
+		{name: "a first claim mints", arrange: arrangeNothing, wantStanding: ClaimMinted},
+		{name: "an accepted claim is a duplicate", arrange: arrangeAccepted, wantStanding: ClaimAccepted, wantFirstTurn: true},
+		{name: "an unaccepted claim is re-driven", arrange: arrangeUnaccepted, wantStanding: ClaimRedriven, wantAbandoned: true},
+		{name: "an unstamped claim whose prompt is held is a duplicate", arrange: arrangeHeldUnstamped, wantStanding: ClaimAccepted, wantFirstTurn: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			first, offered := NewTurnID(), NewTurnID()
+			arrangeClaim(t, s, ws.ID, "key-1", first, tc.arrange)
+			wantTurn := offered
+			if tc.wantFirstTurn {
+				wantTurn = first
+			}
+			var wantAbandoned TurnID
+			if tc.wantAbandoned {
+				wantAbandoned = first
+			}
+
+			// Act
+			claim, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", offered)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ClaimIdempotencyKey: %v", err)
+			}
+			if claim.Standing != tc.wantStanding {
+				t.Fatalf("standing = %s, want %s", claim.Standing, tc.wantStanding)
+			}
+			if claim.Turn != wantTurn {
+				t.Fatalf("turn = %q, want %q", claim.Turn, wantTurn)
+			}
+			if claim.Abandoned != wantAbandoned {
+				t.Fatalf("abandoned = %q, want %q", claim.Abandoned, wantAbandoned)
+			}
+		})
+	}
+}
+
+// TestClaimIdempotencyKeyStampsTheHeldEvidence pins that a claim found accepted
+// by its hold is STAMPED in the same transaction, so the claim row itself
+// carries the acceptance afterwards.
+func TestClaimIdempotencyKeyStampsTheHeldEvidence(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	arrangeClaim(t, s, ws.ID, "key-1", NewTurnID(), arrangeHeldUnstamped)
+
+	// Act
+	if _, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", NewTurnID()); err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+
+	// Assert
+	got := scalar[int](t, s, `SELECT count(*) FROM idempotency_keys WHERE idempotency_key = 'key-1' AND accepted_at IS NOT NULL`)
+	if got != 1 {
+		t.Fatalf("%d accepted claims on the key, want 1", got)
+	}
+}
+
+// TestClaimIdempotencyKeyRebindsARedrivenClaim pins that a re-driven claim is
+// bound to the RETRY's turn durably, so accepting the retry stamps it.
+func TestClaimIdempotencyKeyRebindsARedrivenClaim(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	retry := NewTurnID()
+	arrangeClaim(t, s, ws.ID, "key-1", NewTurnID(), arrangeUnaccepted)
+	if _, err := s.ClaimIdempotencyKey(ctx, ws.ID, "key-1", retry); err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+
+	// Act
+	err := s.AcceptIdempotencyKey(ctx, ws.ID, "key-1", retry)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AcceptIdempotencyKey on the re-driven turn: %v", err)
+	}
+}
+
+// TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart pins the crash case: a
+// claim written by a process that died before the queue accepted it is
+// re-driven by the NEXT process's retry, not refused.
+func TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	before, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ws := testWorkspace(t, before.(*store))
+	if _, err := before.ClaimIdempotencyKey(ctx, ws.ID, "key-1", NewTurnID()); err != nil {
+		t.Fatalf("ClaimIdempotencyKey before the restart: %v", err)
+	}
+	if err := before.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	after, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { after.Close() })
+
+	// Act
+	claim, err := after.ClaimIdempotencyKey(ctx, ws.ID, "key-1", NewTurnID())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ClaimIdempotencyKey after the restart: %v", err)
+	}
+	if claim.Standing != ClaimRedriven {
+		t.Fatalf("standing = %s after a restart before acceptance, want %s", claim.Standing, ClaimRedriven)
+	}
+}
+
+func TestClaimIdempotencyKeyIsScopedPerWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	first := testWorkspace(t, s)
+	second := testWorkspaceNamed(t, s, "second")
+	arrangeClaim(t, s, first.ID, "key-1", NewTurnID(), arrangeAccepted)
+
+	// Act
+	claim, err := s.ClaimIdempotencyKey(context.Background(), second.ID, "key-1", NewTurnID())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+	if claim.Standing != ClaimMinted {
+		t.Fatalf("standing = %s across workspaces, want %s", claim.Standing, ClaimMinted)
+	}
+}
+
+func TestClaimIdempotencyKeyRefusesAnEmptyKey(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "", NewTurnID())
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ClaimIdempotencyKey with an empty key succeeded")
+	}
+	if !loggedOperation(log, "daemon.wsm.claim_idempotency_key", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+}
+
+// TestAcceptIdempotencyKeyRefusesAClaimItDoesNotBind pins every stamp that
+// would mark a submission accepted other than the one the queue took.
+func TestAcceptIdempotencyKeyRefusesAClaimItDoesNotBind(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange claimArrangement
+		// otherTurn accepts a turn other than the one the claim is bound to.
+		otherTurn bool
+	}{
+		{name: "an unclaimed key", arrange: arrangeNothing},
+		{name: "an already accepted key", arrange: arrangeAccepted},
+		{name: "a key bound to another turn", arrange: arrangeUnaccepted, otherTurn: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			bound := NewTurnID()
+			arrangeClaim(t, s, ws.ID, "key-1", bound, tc.arrange)
+			accepting := bound
+			if tc.otherTurn {
+				accepting = NewTurnID()
+			}
+
+			// Act
+			err := s.AcceptIdempotencyKey(context.Background(), ws.ID, "key-1", accepting)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("AcceptIdempotencyKey succeeded on %s", tc.name)
+			}
+			if !loggedOperation(log, "daemon.wsm.accept_idempotency_key", "error") {
+				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			}
+		})
+	}
+}
+
+func TestAcceptIdempotencyKeyRefusesAnEmptyKey(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.AcceptIdempotencyKey(context.Background(), ws.ID, "", NewTurnID())
+
+	// Assert
+	if err == nil {
+		t.Fatalf("AcceptIdempotencyKey with an empty key succeeded")
+	}
+	if !loggedOperation(log, "daemon.wsm.accept_idempotency_key", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 }

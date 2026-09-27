@@ -88,6 +88,35 @@ func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T)
 	}
 }
 
+// TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused pins the 2026-09-27
+// prompt loss end to end: a submission whose key was claimed but whose turn the
+// shim never took is NOT a duplicate, so its retry under the SAME key is
+// delivered -- one more StartTurn, and a minted turn -- rather than answered
+// duplicate_submission and dropped by the client.
+func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
+	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
+	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
+	}); err == nil {
+		t.Fatal("the first submission succeeded, want it refused by the shim")
+	}
+
+	// Act
+	retry := f.submit("do the thing", "retried-key", origin)
+
+	// Assert
+	if retry.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("the retry = %v, want it delivered under a minted turn", retry)
+	}
+	if got := f.shim.Count(harness.RPCStartTurn); got != 2 {
+		t.Fatalf("StartTurn count = %d, want 2 (the refused original and the delivered retry)", got)
+	}
+}
+
 func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange

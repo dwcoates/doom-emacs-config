@@ -30,15 +30,38 @@ type fakeDB struct {
 	wsm.DB
 
 	mu sync.Mutex
-	// claimed maps an idempotency key to the turn already bound to it.
-	claimed map[string]ids.TurnID
+	// claimed maps an idempotency key to the claim standing on it. It is the
+	// DURABLE state: a subject simulates a restart by building a second
+	// handler over the same fakeDB.
+	claimed map[string]*fakeClaim
 	// claimErr fails the claim when set.
 	claimErr error
+	// acceptErr fails the acceptance stamp when set.
+	acceptErr error
+	// standing, when set, overrides the standing every claim answers.
+	standing *wsm.ClaimStanding
 	// workspaceErr fails the workspace resolution when set.
 	workspaceErr error
 }
 
-func newFakeDB() *fakeDB { return &fakeDB{claimed: map[string]ids.TurnID{}} }
+// fakeClaim is one key's durable claim: the turn it binds and whether the
+// queue accepted that turn's submission.
+type fakeClaim struct {
+	turn     ids.TurnID
+	accepted bool
+}
+
+func newFakeDB() *fakeDB { return &fakeDB{claimed: map[string]*fakeClaim{}} }
+
+// claimOn reads back the claim standing on key, zero when there is none.
+func (d *fakeDB) claimOn(key string) fakeClaim {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c, ok := d.claimed[key]; ok {
+		return *c
+	}
+	return fakeClaim{}
+}
 
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	if d.workspaceErr != nil {
@@ -47,17 +70,45 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	return wsm.Workspace{ID: id, Dir: "/tmp/ws-1"}, nil
 }
 
-func (d *fakeDB) ClaimIdempotencyKey(_ context.Context, _ ids.WorkspaceID, key string, turn ids.TurnID) (*ids.TurnID, error) {
+// ClaimIdempotencyKey models wsm's three standings: minted, accepted, and
+// re-driven (rebound to the offered turn).
+func (d *fakeDB) ClaimIdempotencyKey(_ context.Context, _ ids.WorkspaceID, key string, turn ids.TurnID) (wsm.IdempotencyClaim, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.claimErr != nil {
-		return nil, d.claimErr
+		return wsm.IdempotencyClaim{}, d.claimErr
 	}
-	if existing, ok := d.claimed[key]; ok {
-		return &existing, nil
+	if d.standing != nil {
+		return wsm.IdempotencyClaim{Standing: *d.standing, Turn: turn}, nil
 	}
-	d.claimed[key] = turn
-	return nil, nil
+	existing, ok := d.claimed[key]
+	switch {
+	case !ok:
+		d.claimed[key] = &fakeClaim{turn: turn}
+		return wsm.IdempotencyClaim{Standing: wsm.ClaimMinted, Turn: turn}, nil
+	case existing.accepted:
+		return wsm.IdempotencyClaim{Standing: wsm.ClaimAccepted, Turn: existing.turn}, nil
+	default:
+		abandoned := existing.turn
+		existing.turn = turn
+		return wsm.IdempotencyClaim{Standing: wsm.ClaimRedriven, Turn: turn, Abandoned: abandoned}, nil
+	}
+}
+
+// AcceptIdempotencyKey stamps the claim bound to turn accepted, refusing a key
+// not bound to it, as wsm does.
+func (d *fakeDB) AcceptIdempotencyKey(_ context.Context, _ ids.WorkspaceID, key string, turn ids.TurnID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.acceptErr != nil {
+		return d.acceptErr
+	}
+	existing, ok := d.claimed[key]
+	if !ok || existing.turn != turn || existing.accepted {
+		return errors.New("fakeDB: no unaccepted claim binds the key to that turn")
+	}
+	existing.accepted = true
+	return nil
 }
 
 // fakeQueue records every forward the handler makes.
@@ -71,9 +122,23 @@ type fakeQueue struct {
 	disposition promptqueue.Disposition
 	submitErr   error
 	actErr      error
+
+	// entered, when set, receives once each time Submit is entered, before
+	// it waits on gate.
+	entered chan struct{}
+	// gate, when set, holds Submit until it is closed: the hang a deadlocked
+	// queue produces. It deliberately ignores the caller's context, as the
+	// deadlock did.
+	gate chan struct{}
 }
 
 func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
+	if q.entered != nil {
+		q.entered <- struct{}{}
+	}
+	if q.gate != nil {
+		<-q.gate
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.submitErr != nil {
@@ -201,6 +266,18 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.h = built
 	return h
+}
+
+// respawn replaces the handler with a fresh one over the SAME durable state and
+// queue, as a daemon killed mid-submit and started again would be: nothing of
+// the old process's in-memory state survives, the claims do.
+func (h *harness) respawn(t *testing.T) {
+	t.Helper()
+	built, err := newHandler(h.h.deps)
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
+	h.h = built
 }
 
 // panelsAsked reads back the panel commands the source was asked for.

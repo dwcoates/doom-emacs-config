@@ -245,39 +245,130 @@ func openTurns(ctx context.Context, q querier, id WorkspaceID) ([]Turn, error) {
 	return loaded, nil
 }
 
-// ClaimIdempotencyKey binds a client's key to a turn. When the key was already
-// claimed for that workspace it returns the EXISTING turn and mints nothing, so
-// a retried submission can never open a second turn.
+// ClaimIdempotencyKey binds a client's key to a turn, in ONE transaction that
+// both reads what stands on the key and decides it.
+//
+// A DUPLICATE IS ONLY EVER A SUBMISSION THE QUEUE ACCEPTED. A key claimed for
+// a submission that never reached acceptance -- its queue call hung, errored,
+// was cancelled, or its process died between the claim and the acceptance --
+// is not a turn anybody delivered, and refusing its retry is how a prompt was
+// lost (2026-09-27: three prompts claimed, never delivered, re-driven under the
+// same keys after a respawn, refused, and dropped by the client).
+//
+// So the claim answers one of three standings:
+//
+//   - no row: the key is bound to the offered turn, unaccepted (ClaimMinted);
+//   - an ACCEPTED row: the accepted turn, and nothing is bound (ClaimAccepted);
+//   - an UNACCEPTED row: the claim is REBOUND to the offered turn and the retry
+//     is driven under it (ClaimRedriven), naming the abandoned turn.
+//
+// An unaccepted row whose turn nonetheless stands in held_prompts is ACCEPTED:
+// the hold is the queue's acceptance record, it is never deleted (only
+// tombstoned), and a crash between writing it and stamping the claim must not
+// re-drive a prompt the tray already carries. The stamp is written here, in
+// the same transaction as the read, so the evidence and the claim cannot
+// disagree afterwards.
 //
 // The claim lives in its own table rather than on the turn row because a key is
 // claimed at submission, before the turn row exists.
-func (s *store) ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (*TurnID, error) {
+func (s *store) ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (IdempotencyClaim, error) {
 	const op = "daemon.wsm.claim_idempotency_key"
 	fields := dlog.Context{"workspace": string(id), "turn": string(turn), "idempotency_key": key}
 	if key == "" {
 		err := errors.New("wsm: empty idempotency key")
 		s.log.Error(op, "refused an empty idempotency key", withError(fields, err))
-		return nil, err
+		return IdempotencyClaim{}, err
 	}
-	var existing *TurnID
+	var claim IdempotencyClaim
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var claimed TurnID
-		err := tx.QueryRowContext(ctx, `SELECT turn_id FROM idempotency_keys WHERE workspace_id = ? AND idempotency_key = ?`, id, key).Scan(&claimed)
-		if err == nil {
-			existing = &claimed
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		var (
+			claimed  TurnID
+			accepted sql.NullInt64
+		)
+		err := tx.QueryRowContext(ctx,
+			`SELECT turn_id, accepted_at FROM idempotency_keys WHERE workspace_id = ? AND idempotency_key = ?`,
+			id, key).Scan(&claimed, &accepted)
+		if errors.Is(err, sql.ErrNoRows) {
+			_, err = tx.ExecContext(ctx,
+				`INSERT INTO idempotency_keys (workspace_id, idempotency_key, turn_id, claimed_at, accepted_at) VALUES (?, ?, ?, ?, NULL)`,
+				id, key, turn, nanos(time.Now().UTC()))
+			claim = IdempotencyClaim{Standing: ClaimMinted, Turn: turn}
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO idempotency_keys (workspace_id, idempotency_key, turn_id, claimed_at) VALUES (?, ?, ?, ?)`,
-			id, key, turn, nanos(time.Now().UTC()))
-		return err
+		if err != nil {
+			return err
+		}
+		if accepted.Valid {
+			claim = IdempotencyClaim{Standing: ClaimAccepted, Turn: claimed}
+			return nil
+		}
+		var held int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT count(*) FROM held_prompts WHERE turn_id = ? AND workspace_id = ?`, claimed, id).Scan(&held); err != nil {
+			return err
+		}
+		if held > 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE idempotency_keys SET accepted_at = ? WHERE workspace_id = ? AND idempotency_key = ?`,
+				nanos(time.Now().UTC()), id, key); err != nil {
+				return err
+			}
+			claim = IdempotencyClaim{Standing: ClaimAccepted, Turn: claimed}
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE idempotency_keys SET turn_id = ?, claimed_at = ? WHERE workspace_id = ? AND idempotency_key = ?`,
+			turn, nanos(time.Now().UTC()), id, key); err != nil {
+			return err
+		}
+		claim = IdempotencyClaim{Standing: ClaimRedriven, Turn: turn, Abandoned: claimed}
+		return nil
 	})
 	if err != nil {
-		return nil, err
+		return IdempotencyClaim{}, err
 	}
-	return existing, nil
+	s.log.Debug(op, "claimed the idempotency key", dlog.Context{
+		"workspace": string(id), "idempotency_key": key, "offered_turn": string(turn),
+		"standing": claim.Standing.String(), "turn": string(claim.Turn), "abandoned_turn": string(claim.Abandoned),
+	})
+	return claim, nil
+}
+
+// AcceptIdempotencyKey stamps the claim on key accepted: the queue took the
+// submission bound to it under turn. A key not bound to that turn -- never
+// claimed, rebound by a later retry, or already accepted -- is refused, because
+// stamping it would mark a DIFFERENT submission accepted than the one the
+// queue took.
+func (s *store) AcceptIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) error {
+	const op = "daemon.wsm.accept_idempotency_key"
+	fields := dlog.Context{"workspace": string(id), "turn": string(turn), "idempotency_key": key}
+	if key == "" {
+		err := errors.New("wsm: empty idempotency key")
+		s.log.Error(op, "refused to accept an empty idempotency key", withError(fields, err))
+		return err
+	}
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE idempotency_keys SET accepted_at = ?
+			 WHERE workspace_id = ? AND idempotency_key = ? AND turn_id = ? AND accepted_at IS NULL`,
+			nanos(time.Now().UTC()), id, key, turn)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("wsm: no unaccepted claim binds key %q to turn %q on %q", key, turn, id)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	s.log.Debug(op, "the idempotency claim is accepted", fields)
+	return nil
 }
 
 // CloseOrphans closes every turn without a terminal in ONE transaction and
