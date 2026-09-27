@@ -121,6 +121,12 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			return fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
 		}
 		fields["lease"] = string(lease.ID)
+		// THE HOLD'S LIFETIME IS THIS BOUNCE'S SCOPE: it is released on every
+		// way out of here, success and each failure alike, and on a context the
+		// caller's cancellation cannot reach -- a stand-down that ended with its
+		// context used to release through that same cancelled context, the
+		// write was refused, and the restart hold outlived the bounce.
+		defer c.release(context.WithoutCancel(ctx), ws, lease.ID, fields)
 		c.deps.LeaseChanged(ws)
 		c.publishHost(ws)
 		c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
@@ -130,12 +136,10 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			// is already dead stops the bounce here, with the old shim still
 			// serving.
 			if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
-				c.release(ctx, ws, lease.ID, fields)
 				return err
 			}
 			if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
 				c.retirePrelaunch(ctx, fresh, reason, fields)
-				c.release(ctx, ws, lease.ID, fields)
 				return err
 			}
 		} else {
@@ -155,7 +159,6 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			fresh, err = c.deps.Shims.Prelaunch(ctx, ws)
 			if err != nil {
 				c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", withCause(fields, err))
-				c.release(ctx, ws, lease.ID, fields)
 				return fmt.Errorf("rollout: relaunch %q: prelaunch after the replacement died: %w", ws, err)
 			}
 		}
@@ -165,14 +168,12 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
 			c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
-			c.release(ctx, ws, lease.ID, fields)
 			return fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
 		}
 
 		resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
 		if err != nil {
 			c.recordRelaunchFault(ctx, ws, err, fields)
-			c.release(ctx, ws, lease.ID, fields)
 			return fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
 		}
 		if resumed.Cold != nil {
@@ -181,7 +182,6 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
 			if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
 				c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
-				c.release(ctx, ws, lease.ID, fields)
 				return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
 			}
 		}
@@ -192,7 +192,6 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			}
 		}
 
-		c.release(ctx, ws, lease.ID, fields)
 		c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
 		return nil
 	}

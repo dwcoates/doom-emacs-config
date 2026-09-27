@@ -639,6 +639,9 @@ type fakeRegistry struct {
 	pending  map[ids.WorkspaceID]bounce.Request
 	err      error
 	running  sync.WaitGroup
+	// runCtx is the context each bounce runs on; nil is context.Background(),
+	// which is what the queue's own runs are detached onto.
+	runCtx context.Context
 }
 
 // registryCall is one recorded request.
@@ -676,7 +679,11 @@ func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 	r.running.Add(1)
 	go func() {
 		defer r.running.Done()
-		err := req.Run(context.Background(), ws)
+		ctx := r.runCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		err := req.Run(ctx, ws)
 		if req.Done != nil {
 			req.Done(err)
 		}
