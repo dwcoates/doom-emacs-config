@@ -558,6 +558,14 @@ describe("the 'more below' affordance", () => {
     expect(fade).toMatch(/pointer-events:\s*none/);
   });
 
+  it("fades a thinking bubble over only the lower half of its last line", () => {
+    // Arrange / Act
+    const fade = declarationsOf('.bubble[data-variant="thinking"] > .bubble-scroll.has-more::after');
+
+    // Assert — half the shared 1.5em line box, so the line's top reads as text.
+    expect(fade).toMatch(/height:\s*0\.75em/);
+  });
+
   it("fades every bubble into its own background token", () => {
     // Arrange / Act — the gradient rule (the selector also names a base ::after
     // rule for geometry, so pick the copy carrying the background).
@@ -602,12 +610,13 @@ describe("the 'more below' affordance", () => {
       const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
-      // A rule that only repaints or re-places a pseudo-element the base rule
-      // already took out of flow (the fade's per-kind gradient).
+      // A rule that only repaints, re-places or re-sizes a pseudo-element the
+      // base rule already took out of flow (the fade's per-kind gradient, the
+      // thinking bubble's half-line fade height).
       const decorative = rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
-        .every((prop) => prop === "" || ["background", "left", "right", "transform"].includes(prop));
+        .every((prop) => prop === "" || ["background", "left", "right", "transform", "height"].includes(prop));
       return !positioned && !decorative;
     });
 
@@ -653,7 +662,7 @@ describe("the 'more below' affordance", () => {
     for (const rule of withHasMore) {
       for (const sel of rule.selectors) {
         expect(sel).toMatch(
-          /^(?:\.bubble(?:\[data-cap-lines="0"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+          /^(?:\.bubble(?:\[data-cap-lines="0"\]|\[data-variant="thinking"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
         );
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
