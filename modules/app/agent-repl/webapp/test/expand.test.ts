@@ -22,7 +22,11 @@ import {
   sectionAt,
   toggleSection,
   collapseSection,
+  autoCollapseFor,
+  expandedSectionsOf,
+  onVerticalScrollbar,
 } from "../src/expand.js";
+import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 /** A section carrying CLASSES, with a live classList the toggle can drive. */
 function section(...classes: string[]): Section & { classes: Set<string> } {
@@ -841,5 +845,325 @@ describe("sectionAt: a bubble's header strip opens its scroll box", () => {
     strip.click();
     // Assert
     expect(scroll.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+});
+
+// THE AUTO-COLLAPSE OWNER: an open section closes on its own when the reader
+// scrolls somewhere else or focus leaves the page, through the one collapse.
+
+describe("expandedSectionsOf", () => {
+  it("answers only the open sections under the host", () => {
+    // Arrange
+    const host = document.createElement("div");
+    host.innerHTML = `<div class="tool-fold expanded" id="a"></div><div class="tool-fold" id="b"></div>`;
+    // Act
+    const open = expandedSectionsOf(host).map((el) => el.id);
+    // Assert
+    expect(open).toEqual(["a"]);
+  });
+
+  it("answers the host itself when it is an open section", () => {
+    // Arrange
+    const host = document.createElement("div");
+    host.className = "tool-fold expanded";
+    // Act
+    const open = expandedSectionsOf(host);
+    // Assert
+    expect(open).toEqual([host]);
+  });
+});
+
+/** Stub EL's layout: WIDTH wide at x=LEFT, with a BAR-px classic vertical scrollbar. */
+function layOut(el: HTMLElement, left: number, width: number, bar: number): void {
+  Object.defineProperty(el, "offsetWidth", { configurable: true, value: width });
+  Object.defineProperty(el, "clientWidth", { configurable: true, value: width - bar });
+  Object.defineProperty(el, "clientLeft", { configurable: true, value: 0 });
+  el.getBoundingClientRect = () => new DOMRect(left, 0, width, 100);
+}
+
+describe("onVerticalScrollbar", () => {
+  /** A 200px-wide box at x=100 with a BAR-px classic bar. */
+  function laidOut(bar: number): HTMLElement {
+    const el = document.createElement("div");
+    layOut(el, 100, 200, bar);
+    return el;
+  }
+
+  it("reads a pointer over the classic bar as on it", () => {
+    expect(onVerticalScrollbar(laidOut(15), 290)).toBe(true);
+  });
+
+  it("reads a pointer over the content as off it", () => {
+    expect(onVerticalScrollbar(laidOut(15), 200)).toBe(false);
+  });
+
+  it("reads an overlay bar, which takes no layout width, as never hit", () => {
+    expect(onVerticalScrollbar(laidOut(0), 299)).toBe(false);
+  });
+
+  it("reads a non-HTML element as having no bar", () => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    expect(onVerticalScrollbar(svg, 0)).toBe(false);
+  });
+});
+
+describe("autoCollapseFor", () => {
+  it("answers one owner per document", () => {
+    expect(autoCollapseFor(document)).toBe(autoCollapseFor(document));
+  });
+
+  it("refuses a document with no window, which has no focus to lose", () => {
+    // Arrange — a detached document: `defaultView` is null.
+    const doc = document.implementation.createHTMLDocument("detached");
+    // Act / Assert
+    expect(() => autoCollapseFor(doc).register(doc.createElement("div"))).toThrow(/needs a document with a window/);
+  });
+});
+
+describe("AutoCollapse", () => {
+  let uninstall: Array<() => void> = [];
+  let mounted: HTMLElement[] = [];
+
+  afterEach(() => {
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    for (const el of mounted) el.remove();
+    mounted = [];
+    delete (document as { visibilityState?: unknown }).visibilityState;
+  });
+
+  /** A feed holding a response bubble's box and a tool card, armed, afterToggle recorded. */
+  function armed(): {
+    feed: HTMLElement;
+    first: HTMLElement;
+    second: HTMLElement;
+    calls: Array<[HTMLElement, boolean]>;
+  } {
+    const feed = document.createElement("div");
+    feed.innerHTML =
+      `<div class="bubble" data-role="response"><div class="bubble-scroll" id="first"><p id="inner">text</p></div></div>` +
+      `<div class="tool-fold" id="second"><span id="card-body">card</span></div>`;
+    document.body.appendChild(feed);
+    mounted.push(feed);
+    const calls: Array<[HTMLElement, boolean]> = [];
+    uninstall.push(installClickExpand(feed, () => "", (s, e) => calls.push([s, e])));
+    return {
+      feed,
+      first: feed.querySelector("#first") as HTMLElement,
+      second: feed.querySelector("#second") as HTMLElement,
+      calls,
+    };
+  }
+
+  /** A wheel gesture landing on TARGET. */
+  function wheel(target: EventTarget): void {
+    target.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
+  }
+
+  /** Flip the shared document's visibility and announce it. */
+  function setVisibility(state: "visible" | "hidden"): void {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  it("keeps an open section open under a wheel inside it", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    // Act
+    wheel(feed.querySelector("#inner") as HTMLElement);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("closes an open section under a wheel on the feed outside it", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    // Act
+    wheel(feed);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("closes an open section under a wheel on another element of the page", () => {
+    // Arrange — the sidebar, say: outside the feed altogether.
+    const { first } = armed();
+    const other = document.createElement("nav");
+    document.body.appendChild(other);
+    mounted.push(other);
+    first.click();
+    // Act
+    wheel(other);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("closes an open section when the window loses focus", () => {
+    // Arrange
+    const { first } = armed();
+    first.click();
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("ignores a blur from an element inside the page", () => {
+    // Arrange — an inner control's blur, dispatched to bubble up to the window.
+    const { feed, first } = armed();
+    const input = document.createElement("input");
+    feed.appendChild(input);
+    first.click();
+    // Act
+    input.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("closes an open section when the page goes hidden", () => {
+    // Arrange
+    const { first } = armed();
+    first.click();
+    // Act
+    setVisibility("hidden");
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("keeps an open section open when the page comes back visible", () => {
+    // Arrange
+    const { first } = armed();
+    first.click();
+    // Act
+    setVisibility("visible");
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("closes an open section under a pointer grab of another box's classic scrollbar", () => {
+    // Arrange — the feed wears a 15px classic bar at its right edge.
+    const { feed, first } = armed();
+    layOut(feed, 0, 200, 15);
+    first.click();
+    // Act
+    feed.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 190 }));
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("keeps an open section open under a pointer press that is not on a scrollbar", () => {
+    // Arrange
+    const { feed, first } = armed();
+    layOut(feed, 0, 200, 15);
+    first.click();
+    // Act
+    feed.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10 }));
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("never closes on a scroll event, which the expand's own layout change fires", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    // Act
+    feed.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("closes once: the collapse's own scroll-to-top does not re-trigger it", () => {
+    // Arrange — the collapse writes scrollTop, and the box announces the move.
+    const { feed, first, calls } = armed();
+    let top = 50;
+    Object.defineProperty(first, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+        first.dispatchEvent(new Event("scroll", { bubbles: true }));
+      },
+    });
+    first.click();
+    // Act
+    wheel(feed);
+    // Assert
+    expect(calls).toEqual([
+      [first, true],
+      [first, false],
+    ]);
+  });
+
+  it("leaves a closed section untouched", () => {
+    // Arrange
+    const { feed, first, second, calls } = armed();
+    first.click();
+    // Act
+    wheel(feed);
+    // Assert
+    expect([second.className, calls.filter(([s]) => s === second)]).toEqual(["tool-fold", []]);
+  });
+
+  it("closes only the open section the wheel is outside of", () => {
+    // Arrange — both open; the wheel lands inside the card.
+    const { feed, first, second } = armed();
+    first.click();
+    second.click();
+    // Act
+    wheel(feed.querySelector("#card-body") as HTMLElement);
+    // Assert
+    expect([first.classList.contains(EXPANDED_CLASS), second.classList.contains(EXPANDED_CLASS)]).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("closes through the one collapse, handing the host's afterToggle the collapsed state", () => {
+    // Arrange
+    const { feed, first, calls } = armed();
+    first.click();
+    // Act
+    wheel(feed);
+    // Assert
+    expect(calls.at(-1)).toEqual([first, false]);
+  });
+
+  it("records the close at DEBUG with its trigger and the section's kind", async () => {
+    // Arrange
+    const { first } = armed();
+    first.click();
+    const capture = captureLogRecords("debug");
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    // Assert
+    const record = await forwardedRecord(capture, "expand.auto-collapse");
+    expect([record.level.case, record.context]).toEqual([
+      "debug",
+      expect.objectContaining({ trigger: "windowBlur", kind: "bubble-scroll", role: "response" }),
+    ]);
+  });
+
+  it("closes nothing of a host that has been uninstalled", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    // Act
+    wheel(feed);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("stops toggling on a click once uninstalled", () => {
+    // Arrange
+    const { first } = armed();
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    // Act
+    first.click();
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 });

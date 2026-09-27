@@ -74,7 +74,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext, deps: HoldTray
   log.debug("mounting the hold tray", { operation: "tray.mount" });
   // The one click-to-expand every bubble opens by, and the has-more refresh a
   // toggle that moved no height needs (bubble-more.ts).
-  installClickExpand(host, undefined, (section) => refreshHasMore(section));
+  const uninstallExpand = installClickExpand(host, undefined, (section) => refreshHasMore(section));
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -124,6 +124,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext, deps: HoldTray
       log.debug("disposing the hold tray", { operation: "tray.dispose" });
       stream.cancel();
       clear();
+      uninstallExpand();
       for (const child of host.children) stopTicking(child);
       host.replaceChildren();
     },
