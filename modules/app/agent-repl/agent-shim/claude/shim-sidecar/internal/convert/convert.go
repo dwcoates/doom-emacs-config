@@ -204,6 +204,11 @@ type Converter struct {
 	// was not the line after the boundary, kept until the summary that names
 	// that boundary arrives (contextcut.go). Nil whenever no cut is waiting.
 	pendingCut *pendingCompaction
+
+	// localCommandCaveat is the uuid of the last `<local-command-caveat>` record
+	// this file showed — the CLI's own statement that the record after it is a
+	// command it answers itself (bookkeeping.go). Empty until one is read.
+	localCommandCaveat string
 }
 
 // New builds a Converter with no observer installed.
