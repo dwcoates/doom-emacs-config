@@ -179,7 +179,7 @@ export function measureTreeCols(body: HTMLElement): number {
 
 /**
  * The width the bubble scroll box's scrollbar gutter takes from its content,
- * in px, MEASURED off the `.bubble-scroll` ancestor of BODY:
+ * in px, MEASURED off the `.bubble-box` ancestor of BODY:
  * `offsetWidth - clientWidth - borderLeft - borderRight`. The box declares
  * `scrollbar-gutter: stable` and styles no bar of its own (owner ruling,
  * 2026-09-24), so this is the SYSTEM bar's width -- 0px overlay, about 14px
@@ -188,7 +188,7 @@ export function measureTreeCols(body: HTMLElement): number {
  * a clamped or guessed width.
  */
 function scrollbarGutterPx(body: HTMLElement, view: Window): number {
-  const scroll = body.closest<HTMLElement>(".bubble-scroll");
+  const scroll = body.closest<HTMLElement>(".bubble-box");
   if (scroll === null) unmeasurable("the bubble body has no scroll box", {});
   const s = view.getComputedStyle(scroll);
   const borderPx = computedPx(scroll, s, "borderLeftWidth") + computedPx(scroll, s, "borderRightWidth");

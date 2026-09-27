@@ -14,16 +14,18 @@ import {
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANTS,
+  BUBBLE_UNCAPPED,
   BUBBLE_VARIANT_ATTRIBUTE,
   SAYS_ATTRIBUTE,
   drawBubble,
+  isCapped,
   type BubbleCapLines,
   type BubbleSpec,
   type PromptVariant,
   type ResponseVariant,
 } from "../../src/bubble/draw.js";
 import { BUBBLE_BODY_TAG } from "../../src/bubble/body.js";
-import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 
 /** A plain element of CLASSNAME holding TEXT. */
@@ -95,6 +97,83 @@ describe("drawBubble: the collapsed line limit", () => {
   );
 });
 
+describe("drawBubble: the uncapped mode", () => {
+  /** The smallest uncapped response spec. */
+  const uncapped = (): BubbleSpec => spec("response", { capLines: BUBBLE_UNCAPPED });
+
+  it("stamps the uncapped mode for the stylesheet to read", () => {
+    // Arrange / Act
+    const { bubble } = drawBubble(uncapped());
+    // Assert
+    expect(bubble.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(BUBBLE_UNCAPPED);
+  });
+
+  it("hangs the body in a box that is not a scroll box", () => {
+    // Arrange / Act
+    const { body } = drawBubble(uncapped());
+    // Assert
+    expect(body.parentElement?.className).toBe(BUBBLE_BOX_CLASS);
+  });
+
+  it("hangs a capped bubble's body in the scroll box", () => {
+    // Arrange / Act
+    const { body } = drawBubble(spec("thinking", { capLines: 1 }));
+    // Assert
+    expect(body.parentElement?.classList.contains(BUBBLE_SCROLL_CLASS)).toBe(true);
+  });
+
+  it("updates an uncapped bubble in place on an uncapped redraw", () => {
+    // Arrange
+    const first = drawBubble(uncapped()).bubble;
+    // Act
+    const again = drawBubble(uncapped(), first).bubble;
+    // Assert
+    expect(again).toBe(first);
+  });
+
+  it("builds a fresh bubble when a capped row is redrawn uncapped", () => {
+    // Arrange
+    const first = drawBubble(spec("response")).bubble;
+    // Act
+    const again = drawBubble(uncapped(), first).bubble;
+    // Assert
+    expect(again).not.toBe(first);
+  });
+
+  it("builds a fresh bubble when an uncapped row is redrawn capped", () => {
+    // Arrange
+    const first = drawBubble(uncapped()).bubble;
+    // Act
+    const again = drawBubble(spec("response"), first).bubble;
+    // Assert
+    expect(again).not.toBe(first);
+  });
+
+  it("cannot be given expand-only chrome, having no open state to show it in", () => {
+    // Arrange / Act — the spec types refuse it; `npm run typecheck` holds the line.
+    // @ts-expect-error an uncapped bubble carries no expand-only chrome
+    const refused: BubbleSpec = {
+      role: "response",
+      variant: "response",
+      content: [],
+      capLines: BUBBLE_UNCAPPED,
+      expandOnly: [el("details")],
+    };
+    // Assert
+    expect(refused.capLines).toBe(BUBBLE_UNCAPPED);
+  });
+
+  it("answers the capped values as capped", () => {
+    // Arrange / Act / Assert
+    expect(BUBBLE_CAP_LINES.every((cap) => isCapped(cap))).toBe(true);
+  });
+
+  it("answers the uncapped mode as not capped", () => {
+    // Arrange / Act / Assert
+    expect(isCapped(BUBBLE_UNCAPPED)).toBe(false);
+  });
+});
+
 describe("drawBubble: the working wave", () => {
   it("waves a working prompt", () => {
     // Arrange / Act
@@ -158,7 +237,7 @@ describe("drawBubble: the structure every kind shares", () => {
     expect([...bubble.children].map((c) => c.className)).toEqual([
       `address ${BUBBLE_STRIP_CLASS}`,
       `delivery ${BUBBLE_STRIP_CLASS}`,
-      BUBBLE_SCROLL_CLASS,
+      `${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`,
     ]);
   });
 
