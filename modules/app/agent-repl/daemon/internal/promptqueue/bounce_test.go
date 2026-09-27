@@ -1079,3 +1079,191 @@ func TestADeathAfterATurnEndedIsBroughtBackAgain(t *testing.T) {
 		t.Fatalf("revivals = %d, want both deaths brought back", h.revivals)
 	}
 }
+
+// ---- a replacement and a move coalesce into two stages, never one ----
+
+// moving is a gate's request marked as moving the workspace off this daemon,
+// which is what a handover's transfer asks.
+func (g *gate) moving(reason string) bounce.Request {
+	req := g.request(reason, false)
+	req.KeepDraining = true
+	return req
+}
+
+// releaseStage lets a gate's action return with an outcome WITHOUT joining the
+// queue's bounce goroutine, which a stage with another behind it keeps alive.
+func (g *gate) releaseStage(err error) { g.release <- err }
+
+// TestACoalescedReplacementAndMoveRunBoth pins the 2026-09-27 regression: a
+// handover's transfer registered behind a busy workspace, the restart verb
+// joined it, and the newest action won -- the restart ran, the transfer's
+// requester was told it had finished, and the daemon exited without the
+// transfer notice. Whichever arrives first, both stages run, the replacement
+// first, and each requester is told its own stage's outcome.
+func TestACoalescedReplacementAndMoveRunBoth(t *testing.T) {
+	tests := []struct {
+		name string
+		// moveFirst registers the move before the replacement joins it.
+		moveFirst bool
+	}{
+		{name: "a restart joining a registered transfer", moveFirst: true},
+		{name: "a transfer joining a registered restart", moveFirst: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			restart, transfer := newGate(), newGate()
+			first, second := transfer.moving("handover_transfer"), restart.relaunching("restart_verb")
+			if !tc.moveFirst {
+				first, second = restart.relaunching("restart_verb"), transfer.moving("handover_transfer")
+			}
+			registerBehindWork(t, h, first)
+			second.Force = true
+
+			// Act
+			decision, err := h.q.RequestBounce(context.Background(), theWorkspace, second)
+
+			// Assert
+			if err != nil || !decision.Now || !decision.AlreadyPending {
+				t.Fatalf("RequestBounce = (%+v, %v), want the forced request to take the joined bounce now", decision, err)
+			}
+			restart.awaitStart(t)
+			if transfer.runs.Load() != 0 {
+				t.Fatalf("the move ran before the replacement finished")
+			}
+			restart.releaseStage(nil)
+			if err := restart.awaitDone(t); err != nil {
+				t.Fatalf("restart done = %v, want its own stage's clean finish", err)
+			}
+			transfer.awaitStart(t)
+			transfer.finish(h, nil)
+			if err := transfer.awaitDone(t); err != nil {
+				t.Fatalf("transfer done = %v, want its own stage's clean finish", err)
+			}
+			if !h.q.isDraining(theWorkspace) {
+				t.Fatalf("the workspace left draining after its move; want it kept for its new owner")
+			}
+		})
+	}
+}
+
+// TestAMoveAskedWhileAReplacementRunsIsQueuedBehindIt pins the running half
+// of the same regression: a transfer that arrives while a restart is already
+// running must not be told the restart's outcome in its place.
+func TestAMoveAskedWhileAReplacementRunsIsQueuedBehindIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.relaunching("restart_verb")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	restart.awaitStart(t)
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.moving("handover_transfer"))
+
+	// Assert
+	if err != nil || !decision.Now || !decision.AlreadyPending {
+		t.Fatalf("RequestBounce = (%+v, %v), want the move queued behind the running bounce", decision, err)
+	}
+	if !recordWith(h.log.Records(), "info", opBounce, "a bounce is already running for the workspace; the request's move runs after it") {
+		t.Fatalf("records = %+v, want the queued move recorded", h.log.Records())
+	}
+	restart.releaseStage(nil)
+	transfer.awaitStart(t)
+	transfer.finish(h, nil)
+	if err := transfer.awaitDone(t); err != nil {
+		t.Fatalf("transfer done = %v, want the move's own clean finish", err)
+	}
+}
+
+// TestAFailedReplacementStillRunsTheMove pins that a move is owed whatever
+// became of the replacement ahead of it: the handover cannot finish while
+// this daemon still serves the workspace.
+func TestAFailedReplacementStillRunsTheMove(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	registerBehindWork(t, h, transfer.moving("handover_transfer"))
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.request("restart_verb", true)); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	restart.awaitStart(t)
+
+	// Act
+	restart.releaseStage(errors.New("the prelaunch failed"))
+
+	// Assert
+	if err := restart.awaitDone(t); err == nil {
+		t.Fatalf("restart done = nil, want its own failure")
+	}
+	transfer.awaitStart(t)
+	transfer.finish(h, nil)
+	if err := transfer.awaitDone(t); err != nil {
+		t.Fatalf("transfer done = %v, want the move's own clean finish", err)
+	}
+	if !recordWith(h.log.Records(), "error", opBounce, "a stage of the bounce failed; the workspace stays draining for the stage after it") {
+		t.Fatalf("records = %+v, want the failed stage at ERROR", h.log.Records())
+	}
+}
+
+// TestARequestAfterAKeptMoveIsUnregistered pins that a workspace moved off
+// this daemon runs nothing more here, and its requester is told so rather
+// than joining a bounce whose requesters were already told.
+func TestARequestAfterAKeptMoveIsUnregistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	transfer, restart := newGate(), newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.moving("handover_transfer")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	transfer.awaitStart(t)
+	transfer.finish(h, nil)
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.relaunching("restart_verb"))
+
+	// Assert
+	if err != nil || decision.Now {
+		t.Fatalf("RequestBounce = (%+v, %v), want nothing started", decision, err)
+	}
+	if err := restart.awaitDone(t); !errors.Is(err, bounce.ErrUnregistered) {
+		t.Fatalf("restart done = %v, want ErrUnregistered", err)
+	}
+	if restart.runs.Load() != 0 {
+		t.Fatalf("a request ran on a workspace this daemon had moved away")
+	}
+}
+
+// TestADepartureDropsTheReplacementButTakesTheMove pins the departure edge on
+// a two-stage bounce: the shim this daemon ended itself needs no replacement,
+// but the workspace still has to leave.
+func TestADepartureDropsTheReplacementButTakesTheMove(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	registerBehindWork(t, h, transfer.moving("handover_transfer"))
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.relaunching("restart_verb")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act
+	depart(h, h.watcher, departedOrdered)
+
+	// Assert
+	if err := restart.awaitDone(t); !errors.Is(err, bounce.ErrUnregistered) {
+		t.Fatalf("restart done = %v, want ErrUnregistered", err)
+	}
+	transfer.awaitStart(t)
+	transfer.finish(h, nil)
+	if err := transfer.awaitDone(t); err != nil {
+		t.Fatalf("transfer done = %v, want the move's own clean finish", err)
+	}
+	if restart.runs.Load() != 0 {
+		t.Fatalf("the unregistered replacement ran")
+	}
+	if !recordWith(h.log.Records(), "info", opBounce, "the shim departed under a registered bounce; its move is taken now without the replacement") {
+		t.Fatalf("records = %+v, want the move taken without the replacement", h.log.Records())
+	}
+}
