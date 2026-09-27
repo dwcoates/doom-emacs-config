@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -287,4 +288,39 @@ func levelForMessage(t *testing.T, sink *bytes.Buffer, substring string) string 
 		t.Fatalf("message mentioning %q: got %d records, want exactly 1; log:\n%s", substring, count, sink.String())
 	}
 	return level
+}
+
+// corpusFixtureDir is the shared golden corpus, relative to this package.
+const corpusFixtureDir = "../../../../../testdata/corpus"
+
+// corpusLine reads the ONE line of a corpus fixture, verbatim. A `tool-inputs`
+// fixture is a bare tool_use block, so the caller wraps it back into its
+// assistant line with assistantWith.
+func corpusLine(t *testing.T, rel string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(corpusFixtureDir, rel))
+	if err != nil {
+		t.Fatalf("read corpus fixture %s: %v", rel, err)
+	}
+	line := strings.TrimSpace(string(raw))
+	if line == "" || strings.Contains(line, "\n") {
+		t.Fatalf("corpus fixture %s must hold exactly one line", rel)
+	}
+	return line
+}
+
+// corpusToolInputField reads one string field of a tool-inputs fixture's input.
+func corpusToolInputField(t *testing.T, rel, field string) string {
+	t.Helper()
+	var block struct {
+		Input map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(corpusLine(t, rel)), &block); err != nil {
+		t.Fatalf("decode corpus fixture %s: %v", rel, err)
+	}
+	value, ok := block.Input[field].(string)
+	if !ok {
+		t.Fatalf("corpus fixture %s carries no string input field %q", rel, field)
+	}
+	return value
 }
