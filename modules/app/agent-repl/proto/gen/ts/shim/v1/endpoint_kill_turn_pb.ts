@@ -12,6 +12,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { AgentInterruptedByUser } from "../../conversation/v1/agent_pb";
+import { file_conversation_v1_agent } from "../../conversation/v1/agent_pb";
 import type { TurnId, TurnKilled, TurnLive } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -20,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_kill_turn.proto.
  */
 export const file_shim_v1_endpoint_kill_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2tpbGxfdHVybi5wcm90bxIHc2hpbS52MSJHCg9LaWxsVHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSDQoFZm9yY2UYAiABKAgidgoQS2lsbFR1cm5SZXNwb25zZRIrCgdzdWNjZXNzGAEgASgLMhguc2hpbS52MS5LaWxsVHVyblN1Y2Nlc3NIABIrCgdmYWlsdXJlGAIgASgLMhguc2hpbS52MS5LaWxsVHVybkZhaWx1cmVIAEIICgZyZXN1bHQiPgoPS2lsbFR1cm5TdWNjZXNzEisKBmtpbGxlZBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5UdXJuS2lsbGVkIvoBCg9LaWxsVHVybkZhaWx1cmUSKQoEbGl2ZRgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5UdXJuTGl2ZUgAEjwKEW5vdF90aGVfb3Blbl90dXJuGAMgASgLMh8uc2hpbS52MS5LaWxsVHVybk5vdFRoZU9wZW5UdXJuSAASMwoMbm9fdHVybl9vcGVuGAQgASgLMhsuc2hpbS52MS5LaWxsVHVybk5vVHVybk9wZW5IABIwCgpub19zZXNzaW9uGAUgASgLMhouc2hpbS52MS5LaWxsVHVybk5vU2Vzc2lvbkgAEg4KBmRldGFpbBgCIAEoCUIHCgVjYXVzZSIYChZLaWxsVHVybk5vdFRoZU9wZW5UdXJuIhQKEktpbGxUdXJuTm9UdXJuT3BlbiITChFLaWxsVHVybk5vU2Vzc2lvbkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_turn]);
+  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2tpbGxfdHVybi5wcm90bxIHc2hpbS52MSKcAQoPS2lsbFR1cm5SZXF1ZXN0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEg0KBWZvcmNlGAIgASgIEkIKDGNvbW1hbmRlZF9ieRgDIAEoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudEludGVycnVwdGVkQnlVc2VySACIAQFCDwoNX2NvbW1hbmRlZF9ieSJ2ChBLaWxsVHVyblJlc3BvbnNlEisKB3N1Y2Nlc3MYASABKAsyGC5zaGltLnYxLktpbGxUdXJuU3VjY2Vzc0gAEisKB2ZhaWx1cmUYAiABKAsyGC5zaGltLnYxLktpbGxUdXJuRmFpbHVyZUgAQggKBnJlc3VsdCI+Cg9LaWxsVHVyblN1Y2Nlc3MSKwoGa2lsbGVkGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLlR1cm5LaWxsZWQi+gEKD0tpbGxUdXJuRmFpbHVyZRIpCgRsaXZlGAEgASgLMhkuY29udmVyc2F0aW9uLnYxLlR1cm5MaXZlSAASPAoRbm90X3RoZV9vcGVuX3R1cm4YAyABKAsyHy5zaGltLnYxLktpbGxUdXJuTm90VGhlT3BlblR1cm5IABIzCgxub190dXJuX29wZW4YBCABKAsyGy5zaGltLnYxLktpbGxUdXJuTm9UdXJuT3BlbkgAEjAKCm5vX3Nlc3Npb24YBSABKAsyGi5zaGltLnYxLktpbGxUdXJuTm9TZXNzaW9uSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIhgKFktpbGxUdXJuTm90VGhlT3BlblR1cm4iFAoSS2lsbFR1cm5Ob1R1cm5PcGVuIhMKEUtpbGxUdXJuTm9TZXNzaW9uQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent, file_conversation_v1_turn]);
 
 /**
  * Which turn, and whether its spawned work may die with it.
@@ -47,6 +49,18 @@ export type KillTurnRequest = Message<"shim.v1.KillTurnRequest"> & {
    * @generated from field: bool force = 2;
    */
   force: boolean;
+
+  /**
+   * HOW the person commanded this stop, stated by the caller because only
+   * the caller knows it: an interjection is decided by the daemon's prompt
+   * queue, invisibly to the shim. The shim records it verbatim as the
+   * `by_user` cause of the interrupted terminal, so the account survives a
+   * rebuild from the store. UNSET when the caller stated none; the shim then
+   * records `by_user` with no command, which a consumer reads as a direct stop.
+   *
+   * @generated from field: optional conversation.v1.AgentInterruptedByUser commanded_by = 3;
+   */
+  commandedBy?: AgentInterruptedByUser | undefined;
 };
 
 /**
