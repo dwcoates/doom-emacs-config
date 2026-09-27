@@ -371,6 +371,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"missing_dir_closed": len(report.MissingDirClosed),
 		"holds_restored":     report.HoldsRestored,
 		"pending_bring_up":   len(report.PendingBringUp),
+		"orphan_leases":      len(report.OrphanLeases),
 	})
 
 	srv, err := h.Server(built.Server)
