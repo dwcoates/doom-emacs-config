@@ -192,6 +192,10 @@ message AgentActivity {
     // The agent calling a tool an MCP server provides. An ordinary tool
     // call, drawn as the ordinary tool card.
     AgentMcpToolCall mcp_tool_call = 34;
+    // A SUBAGENT HANDING ITS FINAL REPORT BACK to the agent that started it.
+    // Arrives on the subagent's own stream, as the last substantive thing the
+    // subagent does.
+    AgentSubagentHandback subagent_handback = 35;
   }
 }
 
@@ -2829,6 +2833,73 @@ message AgentSendMessageFailure {
   // alone. UNSET exactly when the start's was: the caller supplied none, and a
   // surface draws the recipient alone — never the body.
   optional AgentSendMessageSummary summary = 3;
+}
+
+// A subagent handing its final report back to the agent that started it.
+//
+// THIS IS THE SUBAGENT'S RESULT, delivered as a tool call rather than as a
+// closing prose reply: the report text is what the parent receives as the
+// subagent's outcome. A surface draws it as the subagent's returned result,
+// not as an ordinary tool card, and never as a second copy of a result it
+// already draws from elsewhere.
+message AgentSubagentHandback {
+  // Where the hand-back stands. No update arm: a report is handed back once
+  // and either reaches the parent or does not.
+  oneof result {
+    // This stream is now carrying this hand-back. Sent ONCE per stream, at
+    // issue.
+    AgentSubagentHandbackStart start = 1;
+    // The vendor's liveness beat while the call runs. NOT an update — no
+    // growth is reported — and consumed by the daemon into the drawn
+    // last-progress facts; a frame like any other, upserting the unit.
+    AgentToolCallProgress progress = 4;
+    // The report reached the parent.
+    AgentSubagentHandbackSuccess success = 2;
+    // The report could not be handed back. Arms are DERIVED from the
+    // producer's real refusal sites at the implementation wave; empty until
+    // then.
+    AgentSubagentHandbackFailure failure = 3;
+  }
+}
+
+// A hand-back this stream has begun carrying.
+message AgentSubagentHandbackStart {
+  // The report, as the subagent wrote it.
+  AgentSubagentHandbackReport report = 1;
+
+  // When the hand-back was issued.
+  AgentActivityStartedAt started_at = 2;
+}
+
+// A subagent's final report to its parent.
+message AgentSubagentHandbackReport {
+  // The report verbatim, markdown as the subagent wrote it. Drawn: unlike a
+  // relayed message's body, this text IS the result a reader came to see.
+  string text = 1;
+}
+
+// The report reached the parent.
+message AgentSubagentHandbackSuccess {
+  // The report, restated from the start so the settled frame stands alone: a
+  // hand-back's start and its settle upsert ONE unit, so once it settles the
+  // start is gone from any store that keeps the latest frame, and a replay
+  // drawing this frame alone must still draw the result. Same value, same
+  // meaning, as AgentSubagentHandbackStart's.
+  AgentSubagentHandbackReport report = 1;
+
+  // When the hand-back settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 2;
+}
+
+// The report could not be handed back.
+message AgentSubagentHandbackFailure {
+  // What the call said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+
+  // The report, restated from the start so the settled frame stands alone,
+  // for the same reason as on the success arm: a refused hand-back is still
+  // drawn, with the report the subagent tried to deliver.
+  AgentSubagentHandbackReport report = 2;
 }
 
 // ---- The web fetch: one URL's content, read by the agent ----
