@@ -39,8 +39,12 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// the daemon already knows is wrong and then replace it, and a tray that
 	// shows a decision being made when none is being made is a lie the client
 	// has to un-draw.
+	//
+	// A PROMPT THAT IS ITSELF A SESSION ACT is decided here too, for the same
+	// reason: it is queued, never classified (sessionActVerdict).
 	var cut runningCut
 	underCut := false
+	ownAct := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 	if running != "" {
 		if cut, underCut = q.runningCut(sub.WS); underCut {
 			held.Classification = &wsm.Classification{
@@ -49,6 +53,9 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 				Command: cut.command,
 				At:      q.deps.Now(),
 			}
+		} else if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+			ownAct = command
+			held.Classification = &verdict
 		} else {
 			held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
 		}
@@ -72,6 +79,10 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	if underCut {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
 			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
+		return disposition, nil
+	}
+	if ownAct != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		neverClassified(log, sub.Turn, ownAct, running)
 		return disposition, nil
 	}
 
@@ -105,6 +116,11 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		}, log)
 		return
 	}
+	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+		neverClassified(log, sub.Turn, command, running)
+		q.record(ctx, sub, verdict, log)
+		return
+	}
 	q.record(ctx, sub, wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}, log)
 	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
@@ -112,6 +128,33 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		defer q.classifying.Done()
 		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
 	}()
+}
+
+// sessionActVerdict answers the verdict a held prompt earns when its own text
+// IS a session act — /compact, /compact <text>, or /clear, as
+// sessioncommand.ContextCut reads them. Such a prompt is QUEUED AND NEVER
+// CLASSIFIED (owner ruling, 2026-09-27): it waits for the running turn's end
+// and is then delivered as the context cut it is (deliver routes it to
+// runContextCut). The routing classifier is never asked, so it can never earn
+// an interject.
+func (q *queue) sessionActVerdict(sub Submission) (wsm.Classification, conversationv1.SessionCommand, bool) {
+	command, _, ok := contextCutOf(sub)
+	if !ok {
+		return wsm.Classification{}, conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, false
+	}
+	_, literal := contextCutCommand(actKindOf(command))
+	return wsm.Classification{
+		Arm:    wsm.ArmHoldForTurnEnd,
+		Reason: "the prompt is " + literal + ", a session act: it is queued behind the running turn and never classified",
+		At:     q.deps.Now(),
+	}, command, true
+}
+
+// neverClassified records, at INFO, a session act kept from the classifier.
+func neverClassified(log dlog.Logger, held ids.TurnID, command conversationv1.SessionCommand, running ids.TurnID) {
+	log.Info(opClassify, "the prompt is a session act; it is queued behind the running turn and never classified", dlog.Context{
+		"held_turn": string(held), "session_act": command.String(), "running_turn": string(running),
+	})
 }
 
 // judge asks the classifier about one held prompt and records what it said.
@@ -138,6 +181,14 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			Command: cut.command,
 			At:      q.deps.Now(),
 		}, false
+	}
+
+	// A PROMPT THAT IS ITSELF A SESSION ACT never reaches the model. hold and
+	// classifyHeld decide it before any judge starts; this is the classifier
+	// call site's own refusal, so no path to Judge can carry one.
+	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+		neverClassified(log, sub.Turn, command, running)
+		return verdict, false
 	}
 
 	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
