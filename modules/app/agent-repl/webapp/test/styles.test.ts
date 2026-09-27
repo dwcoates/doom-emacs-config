@@ -1830,7 +1830,7 @@ describe("the title fold", () => {
     );
 
     // Assert
-    expect(card?.declarations).toMatch(/--title-fold-bg:\s*var\(--card\)/);
+    expect(card?.declarations).toMatch(/--title-fold-bg:\s*var\(--tool-card-bg\)/);
   });
 });
 
@@ -2856,5 +2856,52 @@ describe("the held status badges' colors", () => {
     );
     // Assert
     expect(retired.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/** An RGB triple's relative luminance (WCAG), enough to order two fills by lightness. */
+const luminance = ([r, g, b]: [number, number, number]): number => {
+  const lin = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+
+describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
+  it("paints a prompt the iMessage dark-mode blue", () => {
+    // Arrange / Act
+    const user = rgbOf(darkThemeBlock(), "--user");
+    // Assert
+    expect(user).toEqual([0x0a, 0x84, 0xff]);
+  });
+
+  it.each([
+    ["the tool card sits lighter than the feed", "--bg", "--tool-card-bg"],
+    ["the tool card sits darker than the old card grey", "--tool-card-bg", "--card"],
+    ["a response sits lighter than the old card grey", "--card", "--assistant"],
+  ])("%s", (_name, darker, lighter) => {
+    // Arrange
+    const block = darkThemeBlock();
+    // Act
+    const [low, high] = [luminance(rgbOf(block, darker)), luminance(rgbOf(block, lighter))];
+    // Assert
+    expect(low).toBeLessThan(high);
+  });
+
+  it("paints a response a neutral grey rather than a hue", () => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(darkThemeBlock(), "--assistant");
+    // Assert — no channel strays far from the others.
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
+  });
+
+  it.each([".tool-card", ".pfooter"])("fills %s with the tool-card token", (selector) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(selector) && /(^|;)\s*background:/.test(r.declarations),
+    );
+    // Assert
+    expect(rule?.declarations).toMatch(/background:\s*var\(--tool-card-bg\)/);
   });
 });

@@ -70,7 +70,7 @@ describe("drawFeedSkill", () => {
   // The async teal wash is RETIRED (owner ruling, 2026-09-14): a skill card is
   // an ordinary grey tool card now. The `tool-skill` class stays (it still
   // marks the row's `data-unit` for nested work), but the sheet no longer
-  // paints it `--async-card` -- it takes the shared `--card` fill instead.
+  // paints it `--async-card` -- it takes the shared tool-card fill (`--tool-card-bg`) instead.
   it("no longer paints the async teal wash, taking the grey card fill", () => {
     // Arrange
     const remove = installStylesheet();
@@ -78,7 +78,7 @@ describe("drawFeedSkill", () => {
       const card = drawFeedSkill(skill({ case: "running", value: {} }), rc());
       document.body.replaceChildren(card);
       // Act / Assert: the shared card fill, never the retired async teal.
-      expect(cascadedValue(card, "background")).toBe("var(--card)");
+      expect(cascadedValue(card, "background")).toBe("var(--tool-card-bg)");
     } finally {
       remove();
     }

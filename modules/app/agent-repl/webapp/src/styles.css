@@ -19,6 +19,9 @@
      near-white #f9fafb, so a card lifts off the feed instead of melting into
      it, while staying above the composer well (--composer-bg) below it. */
   --card: #eef1f4;
+  /* The tool card's and the footer dock's fill. It is --card itself in this
+     theme; the dark theme sets its own (owner ruling, 2026-09-27). */
+  --tool-card-bg: var(--card);
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
      conversation scrolls on. In the light theme --bg is already pure white —
@@ -316,6 +319,10 @@
     --muted: #9ca3af;
     --border: #2a2e37;
     --card: #16191f;
+    /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
+       a notch darker than --card, still lighter than the feed's #111318, so
+       the response grey above it reads as the lighter surface. */
+    --tool-card-bg: #14171c;
     /* Lighter than the feed's #111318, darker than --card, so the rail lifts
        off the conversation while its --card hover/detail washes still lift
        off the rail. */
@@ -341,9 +348,12 @@
        still register. Still kept just under the dark sidebar's black, so the
        bottom edge stays the subtler shade. */
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
-    --user: #1e2a44;
+    /* The iMessage dark-mode blue (owner ruling, 2026-09-27). */
+    --user: #0a84ff;
     --held-prompt-bg: #25282e;
-    --assistant: #292040;
+    /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
+       lifted a notch, so a response sits lighter than the tool cards. */
+    --assistant: #1b1e25;
     --thinking: #fb923c;
     --retry: #a78bfa;
     --info-ws: #4ade80;
@@ -1490,7 +1500,8 @@ pre {
 /* THE ROLE: the side and the background, and nothing else (owner ruling,
    2026-09-23). A prompt hugs the RIGHT rail in blue: its right margin is half
    the column's leftover, so its right edge lands flush with the centered tool
-   cards'. A response hugs the LEFT rail in purple, the mirror image. */
+   cards'. A response hugs the LEFT rail in purple (grey in the dark theme), the mirror
+   image. */
 .bubble[data-role="prompt"] {
   --bubble-bg: var(--user);
   margin-left: auto;
@@ -1836,7 +1847,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-card {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--card);
+  background: var(--tool-card-bg);
   padding: 0.5rem 0.75rem;
   font-size: calc(0.85rem * var(--feed-text-scale));
 }
@@ -2385,7 +2396,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    cursor offers the click only while there is more to reveal. */
 .title-fold-standalone.has-more { cursor: zoom-in; }
 /* Each title's fade blends into its own card's background. */
-.tool-card { --title-fold-bg: var(--card); }
+.tool-card { --title-fold-bg: var(--tool-card-bg); }
 
 /* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
    reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
@@ -3248,7 +3259,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .pfooter {
   max-width: var(--agent-bubble-cap);
   margin: 0 auto;
-  background: var(--card);
+  background: var(--tool-card-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--sidebar-shadow);
