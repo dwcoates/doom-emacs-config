@@ -612,6 +612,7 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "artifact",
   "plan",
   "findings",
+  "subagentResult",
   "shell",
   "shellHead",
   "permission",

@@ -76,6 +76,7 @@ import {
   detachedShellRow,
   shellHeadRow,
   peerMessageRow,
+  subagentResultUnit,
   subagentHandbackRow,
   removedRow,
   detachedSubagentRow,
@@ -165,6 +166,7 @@ describe("arm coverage", () => {
       "artifact",
       "plan",
       "findings",
+      "subagentResult",
     ]);
   });
 
@@ -687,6 +689,29 @@ describe.each(PLAN_STATES)("a %s plan", (state) => {
     const row = await drawRow(activityRow(planUnit(state)));
     // Assert
     expect(row.dataset.state).toBe(state);
+  });
+});
+
+describe("a subagent's returned result", () => {
+  it("draws the report through the markdown pipeline", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit()));
+    // Assert
+    expect(row.querySelector(".subagent-result strong")?.textContent).toBe("all four items done");
+  });
+
+  it("draws uncapped, like a final answer", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit()));
+    // Assert
+    expect(row.querySelector(".subagent-result")?.getAttribute("data-cap-lines")).toBe("none");
+  });
+
+  it("draws an undelivered result's reason in the quiet line", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit("undelivered")));
+    // Assert
+    expect(row.querySelector(".subagent-result-reason")?.textContent).toBe("the parent is gone");
   });
 });
 
