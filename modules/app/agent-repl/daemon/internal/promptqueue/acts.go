@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/sessioncommand"
 	"claude-repld/internal/wsm"
 )
 
@@ -216,6 +217,24 @@ func (q *queue) retireCut(ws ids.WorkspaceID) {
 	if state, ok := q.states[ws]; ok {
 		state.cut = nil
 	}
+}
+
+// contextCutOf reports whether a session-addressed submission's text IS a
+// context cut, and which, with its argument. A bubble-addressed prompt goes to
+// a subagent's own composer and is never a session act.
+func contextCutOf(sub Submission) (conversationv1.SessionCommand, string, bool) {
+	if sub.Target != nil {
+		return conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, "", false
+	}
+	return sessioncommand.ContextCut(saidText(sub.Said))
+}
+
+// actKindOf names the act kind a context-cut command is carried as.
+func actKindOf(command conversationv1.SessionCommand) string {
+	if command == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		return ActCompact
+	}
+	return ActClear
 }
 
 // contextCutCommand names the session command an act kind is, and the literal
