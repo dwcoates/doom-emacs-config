@@ -65,3 +65,36 @@ VERIFICATION EVIDENCE
 
 OBVIATED-DECLARATION SWEEP
 - Nothing obviated: additive.
+
+### 2026-09-27 — hand-backs leave a badge in the main feed, not a bubble
+
+WHAT
+- `conversation.v1.PeerMessage` gains `oneof kind { inter_session = 5; subagent_handback = 6; }`
+  (new empty messages `PeerMessageInterSession`, `PeerMessageSubagentHandback`),
+  set from the vendor's `origin.handback`. UNSET = not stated, read as inter-session.
+- `frontend.v1.FeedRow.row` gains `FeedSubagentHandbackBadge subagent_handback = 20`
+  (with element `FeedSubagentHandbackBadgeLabel`). `FeedPeerMessage`'s comments
+  now say it is inter-session only.
+
+WHY
+- Owner (2026-09-27): "we shouldnt see subagent responses surfaced in the feed";
+  "a little marker in the feed is good, but it shouldnt be a bubble or card, just a little badge".
+- Evidence: in 90 minutes of workspace `3e2d9cadc6794e13` logs, subagent activity
+  rows all landed in per-subagent feeds, but each of the 6 finished subagents
+  produced one root-feed `peer` row (`feed.draw-peer-message` x6) carrying its
+  full report.
+
+WHY THE ALTERNATIVES LOST
+- A flag on `FeedPeerMessage` selecting "draw as badge": a bool selecting how
+  adjacent data is drawn is a two-arm oneof, and a badge is a different UI
+  component from the peer bubble, so under figma-to-idl it is its own row arm
+  with its own element messages.
+- Drawing nothing: the owner wants a small marker.
+
+ARCHITECTURAL CONSEQUENCES
+- Shim and sidecar set `PeerMessage.kind` from `origin.handback` on both planes.
+- The daemon feed resolver emits `subagent_handback` (badge) instead of
+  `peer_message` for a hand-back, keeping the row id minted from `PeerMessage.id`
+  so live/adopted supersession is unchanged.
+- Cost accepted: hand-back records stored before this change have no `kind`
+  and rebuild as peer bubbles.
