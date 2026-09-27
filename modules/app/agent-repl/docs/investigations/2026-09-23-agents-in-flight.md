@@ -12,7 +12,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `style/held-prompt-quiet-one-line` | `~/.config/doom-worktrees/held-prompt-quiet-one-line` | The held prompt's fill is 5% tint over 95% of the feed background. Collapsed, it shows one line with an ellipsis when there's more, and no fade. | `a8caa5c6cbc418cb1` | 09-27 |
+| `style/held-prompt-quiet-one-line` | `~/.config/doom-worktrees/held-prompt-quiet-one-line` | The held prompt's fill is 5% tint over 95% of the feed background. Collapsed, it shows one line with an ellipsis when there's more, and no fade. ADDED: thinking bubbles use the same ellipsis instead of a fade, keeping their line limit (this replaces the lead's half-line fade). | `a8caa5c6cbc418cb1` | 09-27 |
 | `fix/teardown-lands-before-kill` | `~/.config/doom-worktrees/teardown-lands-before-kill` | Closing the current workspace lands on the survivor first, then kills (never Doom's `+workspace/kill`, whose fallback put the splash over the landing workspace's panels). The roster teardown uses the same order, with INFO records and a source-scan guard. | `aba122e666cbbf988` | 09-27 |
 
 
