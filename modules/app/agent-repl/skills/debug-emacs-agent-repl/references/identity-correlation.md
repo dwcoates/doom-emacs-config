@@ -110,23 +110,34 @@ memory-state dump. The store is agent-repl's own durable event record, written
 independently of the vendor's transcript file, so it survives the transcript
 being missing, unwritten, or unreadable.
 
+The schema is documented in `agent-shim/shim-store/AGENTS.md`, "## The tables"
+— read it before writing a new query, rather than trusting a stale copy here.
+The store keys conversation content by `book_agent_id` on `entry` (an agent
+lineage id — the vendor session or subagent that owns the book), never by a
+`session_id` column:
+
 ```sh
 DB=~/.cache/agent-repl/store/events.db
-# Did this conversation ever carry content?
-sqlite3 "$DB" "select count(*) from event where session_id='<claude_session_id>';"
+BOOK=<claude_session_id or book_agent_id>
+# Did this conversation ever carry content? (readonly, LIMIT-free count is
+# fine here because it's a single indexed SEARCH on book_agent_id)
+sqlite3 -readonly "$DB" "select count(*) from entry where book_agent_id='$BOOK';"
 # What, and when?
-sqlite3 "$DB" "select seq, kind, datetime(produced_at/1000,'unixepoch','localtime')
-               from event where session_id='<claude_session_id>' order by seq;"
+sqlite3 -readonly "$DB" "select position, kind,
+               datetime(last_written_at_ms/1000,'unixepoch','localtime')
+               from entry where book_agent_id='$BOOK' order by position LIMIT 200;"
 ```
 
 Read it this way:
 
-- A handful of `ClaudeStreamMessage` records all stamped within the same second
-  as bring-up is a HANDSHAKE, not a conversation. That session ran no turns.
-- Absence of a Claude transcript with substantial store events means the
+- A handful of records all stamped within the same second as bring-up is a
+  HANDSHAKE, not a conversation. That session ran no turns.
+- Absence of a Claude transcript with substantial store entries means the
   transcript was LOST. Absence of both means the conversation never had content.
-- The store is keyed by `claude_session_id` (the vendor conversation), not by
-  the agent-repl session id.
+- The store is keyed by `book_agent_id` (an agent lineage id), not by the
+  daemon's agent-repl session id — see `conversation-investigation.md` for the
+  full bounded-query set (recent entries, kind histogram, live detached work,
+  cursors).
 
 THE TRAPS, each of which has produced a wrong provenance conclusion:
 
