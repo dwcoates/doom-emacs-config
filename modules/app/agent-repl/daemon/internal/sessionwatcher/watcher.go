@@ -48,6 +48,11 @@ type agentWatch struct {
 	// frame. It is BOUNDED: a shim that refuses forever is reported as a
 	// fault rather than retried forever.
 	refusals int
+	// opening is the open IN FLIGHT for this watch, nil when none is. The
+	// open runs OFF mu (see openTicket), and the ticket is what its
+	// completion is judged against: a completion whose ticket is no longer
+	// this field is superseded and discarded.
+	opening *openTicket
 	// paged records that this watch has been served an opening page — its
 	// own, or the one StartTurn's answer carried for the main watch. From then
 	// on, everything a later opening page carries was written after it.
@@ -73,6 +78,8 @@ type shellWatch struct {
 	reopens int
 	// refusals counts refused OPENs, as on agentWatch.
 	refusals int
+	// opening is the open in flight, as on agentWatch.
+	opening *openTicket
 }
 
 // shellReopenLimit is how many times one detached shell's watch is re-opened
@@ -92,7 +99,18 @@ const openRefusalLimit = 3
 // SERIALIZATION: mu guards every field AND is held across every sink call, so
 // the resolvers observe frames in stream order per agent however many streams
 // are being consumed at once. Each stream has its own goroutine; the only work
-// done outside mu is blocking on Recv.
+// done outside mu is blocking on Recv, and every watch OPEN.
+//
+// NO SHIM I/O IS EVER PERFORMED UNDER mu. A watch open is a round trip to the
+// shim that does not return until the shim serves the stream's FIRST frame
+// (shimclient.openStream takes it to surface a refused open), and a shim that
+// never serves one holds the call forever. Made under mu, that call held the
+// lock with it: MEASURED 2026-09-27T14:00:44, a detached shell's WatchBash
+// open never got its first frame, and for eighteen minutes every other stream
+// goroutine, TurnInFlight and so every SubmitPrompt for the workspace waited
+// on this mutex. Every open is therefore DECIDED under mu, MADE on a goroutine
+// of its own, and INSTALLED under mu again only if the fleet still wants it
+// (see openTicket).
 type watcher struct {
 	ws     ids.WorkspaceID
 	client shimclient.Client
@@ -173,6 +191,11 @@ type watcher struct {
 	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
 	// can join it. It is a WaitGroup rather than a sleep.
 	dispatching sync.WaitGroup
+	// opens tracks every watch open in flight (see openTicket), so Close can
+	// join them once it has cancelled them. An open is only ever minted under
+	// mu on a fleet that is not closed, and Close marks the fleet closed under
+	// mu before it waits, so no open is counted after the wait begins.
+	opens sync.WaitGroup
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -215,6 +238,8 @@ type watcher struct {
 	retiredWork map[string]struct{}
 
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
+	// sessionOpening is the session watch's open in flight, as on agentWatch.
+	sessionOpening *openTicket
 	// started records that the session facts have been taken up, from
 	// StartSession's answer or the shim's re-announcement. It is what makes a
 	// repeat re-announcement idempotent.
@@ -754,6 +779,11 @@ func (w *watcher) Close() error {
 
 	w.cancel()
 	closeStreams(closing)
+	// EVERY OPEN STILL IN FLIGHT IS JOINED: the cancel above is its context's
+	// end, so a hung open returns now, finds the fleet closed and discards
+	// what it got. Nothing this watcher started touches the client after
+	// Close returns.
+	w.opens.Wait()
 	// The off-lock sink dispatch is JOINED here: a turn end still being handled
 	// reads the state client, and the daemon closes that client once every
 	// watcher is closed.
@@ -1126,23 +1156,150 @@ func (w *watcher) reopenLocked(reason string) {
 		w.openAgentStreamLocked(a)
 	}
 	for _, s := range w.shells {
-		w.openShellStreamLocked(s)
+		w.openShellStreamLocked(s, shellKeptOnFailure)
 	}
 }
 
 // ---- opening watches ----
 
-// openSessionLocked opens WatchSession, the session's standing stream.
-func (w *watcher) openSessionLocked() {
-	gen := w.gen
-	stream, err := w.client.WatchSession(w.ctx)
+// ---- the off-lock open ----
+
+// openTicket is ONE watch open in flight. The open is DECIDED under mu, which
+// mints the ticket and records it on the watch it is for; it is MADE on a
+// goroutine of its own, off mu, under the ticket's context; and its result is
+// INSTALLED under mu again only when the ticket is still the one the watch
+// records, the watch was not reaped meanwhile and the fleet's generation has
+// not moved. Anything else is a STALE open, and its stream is closed rather
+// than installed.
+//
+// The ticket's context is the watcher's own, so Close cancels every open still
+// in flight, and a ticket superseded or reaped while its open hangs is
+// cancelled at once. A successful open's context lives exactly as long as its
+// stream: the installed stream is wrapped so its Close ends the context too.
+type openTicket struct {
+	gen    uint64
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// decideOpenLocked mints the ticket for one open of the watch whose open in
+// flight is `current`, or answers false when no open is to be made: the fleet
+// is closed (it opens nothing more), or an open of this generation is already
+// in flight (a second would duplicate it). A ticket it supersedes -- an open
+// of an older generation no completion will ever install -- is cancelled, so
+// a hung one is released at once. Every minted open is counted in w.opens,
+// which Close joins.
+func (w *watcher) decideOpenLocked(stream, key string, current *openTicket) (*openTicket, bool) {
+	if w.closed {
+		w.log.Debug("daemon.sessionwatcher.open_skipped", "a closed fleet opens no watch", dlog.Context{
+			"stream": stream, "key": key,
+		})
+		return nil, false
+	}
+	if w.inFlightLocked(current) {
+		w.log.Debug("daemon.sessionwatcher.open_skipped", "an open of this watch is already in flight", dlog.Context{
+			"stream": stream, "key": key,
+		})
+		return nil, false
+	}
+	current.abandon()
+	ctx, cancel := context.WithCancel(w.ctx)
+	w.opens.Add(1)
+	return &openTicket{gen: w.gen, ctx: ctx, cancel: cancel}, true
+}
+
+// abandon cancels an open nobody will install. It is nil-safe, because a
+// watch with no open in flight records none.
+func (t *openTicket) abandon() {
+	if t != nil {
+		t.cancel()
+	}
+}
+
+// inFlightLocked reports whether t is an open of the CURRENT generation still
+// in flight, which a second open of the same watch must not duplicate.
+func (w *watcher) inFlightLocked(t *openTicket) bool {
+	return t != nil && !w.closed && t.gen == w.gen
+}
+
+// ticketedStream is an installed stream whose Close also ends the context its
+// open ran under, so a stream's open context never outlives the stream.
+type ticketedStream[T any] struct {
+	shimclient.Stream[T]
+	cancel context.CancelFunc
+}
+
+// Close ends the stream, then its open's context.
+func (s *ticketedStream[T]) Close() {
+	s.Stream.Close()
+	s.cancel()
+}
+
+// discardOpenLocked records an open whose completion the fleet no longer
+// wants. A refusal or a transport failure on it is STILL RECORDED, with the
+// error, rather than dropped: it is no longer anyone's fault to act on, but it
+// is a fact about the shim. The caller closes the stream (discardStream) once
+// mu is released.
+func (w *watcher) discardOpenLocked(stream, key string, t *openTicket, err error) {
+	ctx := dlog.Context{
+		"stream": stream, "key": key,
+		"open_generation": t.gen, "generation": w.gen, "closed": w.closed,
+	}
 	if err != nil {
-		w.severedLocked("watch_session", "WatchSession could not be opened", err)
+		ctx["error"] = err.Error()
+		w.log.Info("daemon.sessionwatcher.open_discarded",
+			"a watch open the fleet no longer wants failed; its failure is not acted on", ctx)
 		return
 	}
-	w.sessionStream = stream
+	w.log.Debug("daemon.sessionwatcher.open_discarded",
+		"a watch open the fleet no longer wants completed; its stream is closed, not installed", ctx)
+}
+
+// discardStream closes a stale open's stream and ends its context. It runs OFF
+// mu: a real stream's Close drains its response body until the server ends it.
+func discardStream[T any](t *openTicket, stream shimclient.Stream[T]) {
+	t.cancel()
+	if stream != nil {
+		stream.Close()
+	}
+}
+
+// openSessionLocked DECIDES the WatchSession open, the session's standing
+// stream; openSession makes it off mu.
+func (w *watcher) openSessionLocked() {
+	t, ok := w.decideOpenLocked("session", "", w.sessionOpening)
+	if !ok {
+		return
+	}
+	w.sessionOpening = t
+	go w.openSession(t)
+}
+
+// openSession makes one decided WatchSession open OFF mu and installs it.
+func (w *watcher) openSession(t *openTicket) {
+	defer w.opens.Done()
+	stream, err := w.client.WatchSession(t.ctx)
+	w.mu.Lock()
+	if w.sessionOpening != t || w.stale(t.gen) {
+		w.discardOpenLocked("session", "", t, err)
+		w.mu.Unlock()
+		discardStream(t, stream)
+		return
+	}
+	w.sessionOpening = nil
+	if err != nil {
+		w.severedLocked("watch_session", "WatchSession could not be opened", err)
+		w.mu.Unlock()
+		t.cancel()
+		w.flushTurnEnds()
+		return
+	}
+	installed := &ticketedStream[*shimv1.WatchSessionResponse]{Stream: stream, cancel: t.cancel}
+	w.sessionStream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_session", "session watch opened", nil)
-	go w.runSession(gen, stream)
+	go w.runSession(t.gen, installed)
+	w.mu.Unlock()
+	w.flushTurnEnds()
 }
 
 // openMainAfterFactsLocked opens the main agent's watch ONLY ONCE THE SESSION
@@ -1180,56 +1337,130 @@ func (w *watcher) openMainLocked() {
 	w.openAgentStreamLocked(w.main)
 }
 
-// openAgentStreamLocked opens (or re-opens) one agent watch, catching up from
-// the newest pointer that watch was served.
+// openAgentStreamLocked DECIDES the open (or re-open) of one agent watch,
+// catching up from the newest pointer that watch was served; openAgent makes
+// it off mu. A watch whose open of this generation is already in flight is
+// left to it.
 func (w *watcher) openAgentStreamLocked(a *agentWatch) {
-	gen := w.gen
+	t, ok := w.decideOpenLocked("agent", watchKey(a.id), a.opening)
+	if !ok {
+		return
+	}
 	req := &shimv1.WatchAgentRequest{Target: a.id, PageSize: openingPageSize}
 	if ptr := w.known[watchKey(a.id)]; ptr != nil {
 		req.KnownThrough = ptr
 	}
-	stream, err := w.client.WatchAgent(w.ctx, req)
+	// WHAT THE OPEN ASKS FOR IS DECIDED WITH IT: the page it will be served
+	// answers this request, whatever is routed while it is in flight.
+	catchUp := req.KnownThrough != nil || a.paged
+	a.opening = t
+	go w.openAgent(t, a, req, catchUp)
+}
+
+// openAgent makes one decided WatchAgent open OFF mu and installs it.
+func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgentRequest, catchUp bool) {
+	defer w.opens.Done()
+	stream, err := w.client.WatchAgent(t.ctx, req)
+	w.mu.Lock()
+	if a.opening != t || a.done || w.stale(t.gen) {
+		w.discardOpenLocked("agent", watchKey(a.id), t, err)
+		w.mu.Unlock()
+		discardStream(t, stream)
+		return
+	}
+	a.opening = nil
 	if err != nil {
 		a.stream = nil
 		if refusedOpen(err) {
 			w.openRefusedLocked("watch_agent", watchKey(a.id), w.agentExpectedLocked(a), &a.refusals, err)
-			return
+		} else {
+			w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
 		}
-		w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
+		w.mu.Unlock()
+		t.cancel()
+		w.flushTurnEnds()
 		return
 	}
+	installed := &ticketedStream[*shimv1.WatchAgentResponse]{Stream: stream, cancel: t.cancel}
 	a.refusals = 0
-	a.stream = stream
-	a.catchUp = req.KnownThrough != nil || a.paged
+	a.stream = installed
+	a.catchUp = catchUp
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
 		"agent_id": a.id.GetValue(), "catch_up": a.catchUp,
 	})
-	go w.runAgent(gen, a, stream)
+	go w.runAgent(t.gen, a, installed)
+	w.mu.Unlock()
+	w.flushTurnEnds()
 }
 
-// openShellStreamLocked opens (or re-opens) one detached shell's watch,
-// reporting whether a stream is now open. A false answer has ALREADY been
-// surfaced as a severed link; the answer exists so the caller can decide
-// whether an entry with no stream is worth keeping.
-func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
-	gen := w.gen
-	stream, err := w.client.WatchBash(w.ctx, s.work)
+// shellOpenFailure is what a detached shell's FAILED open does to its entry.
+type shellOpenFailure int
+
+const (
+	// shellKeptOnFailure leaves the entry registered with no stream: the
+	// fleet re-open's case, where the entry was already live and its next
+	// announcement or the next re-open is what retries it.
+	shellKeptOnFailure shellOpenFailure = iota
+	// shellForgottenOnFailure forgets the entry and republishes the live set.
+	// A NIL-STREAM ENTRY OPENED BY AN ANNOUNCEMENT NEVER PERSISTS: while one
+	// sits in the map every repeated announcement would be answered "already
+	// watched", so the refusal would be permanent. Forgetting it makes the next
+	// announcement open the watch afresh.
+	shellForgottenOnFailure
+)
+
+// openShellStreamLocked DECIDES the open (or re-open) of one detached shell's
+// watch; openShell makes it off mu. A failed open is surfaced (a refusal, or a
+// severed link) when it completes, and onFailure says what then happens to
+// the entry. A shell whose open of this generation is already in flight is
+// left to it.
+func (w *watcher) openShellStreamLocked(s *shellWatch, onFailure shellOpenFailure) {
+	t, ok := w.decideOpenLocked("shell", s.work.GetValue(), s.opening)
+	if !ok {
+		return
+	}
+	s.opening = t
+	go w.openShell(t, s, onFailure)
+}
+
+// openShell makes one decided WatchBash open OFF mu and installs it.
+func (w *watcher) openShell(t *openTicket, s *shellWatch, onFailure shellOpenFailure) {
+	defer w.opens.Done()
+	stream, err := w.client.WatchBash(t.ctx, s.work)
+	w.mu.Lock()
+	key := s.work.GetValue()
+	if s.opening != t || s.done || w.stale(t.gen) {
+		w.discardOpenLocked("shell", key, t, err)
+		w.mu.Unlock()
+		discardStream(t, stream)
+		return
+	}
+	s.opening = nil
 	if err != nil {
 		s.stream = nil
 		if refusedOpen(err) {
-			w.openRefusedLocked("watch_bash", s.work.GetValue(), w.shells[s.work.GetValue()] == s, &s.refusals, err)
-			return false
+			w.openRefusedLocked("watch_bash", key, w.shells[key] == s, &s.refusals, err)
+		} else {
+			w.severedLocked("watch_bash", "WatchBash could not be opened", err)
 		}
-		w.severedLocked("watch_bash", "WatchBash could not be opened", err)
-		return false
+		if onFailure == shellForgottenOnFailure && w.shells[key] == s {
+			delete(w.shells, key)
+			w.publishLiveWorkLocked()
+		}
+		w.mu.Unlock()
+		t.cancel()
+		w.flushTurnEnds()
+		return
 	}
+	installed := &ticketedStream[*conversationv1.AgentBash]{Stream: stream, cancel: t.cancel}
 	s.refusals = 0
-	s.stream = stream
+	s.stream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_bash", "shell watch opened", dlog.Context{
-		"work_id": s.work.GetValue(),
+		"work_id": key,
 	})
-	go w.runShell(gen, s, stream)
-	return true
+	go w.runShell(t.gen, s, installed)
+	w.mu.Unlock()
+	w.flushTurnEnds()
 }
 
 // refusedOpen reports whether err is a watch OPEN the shim REFUSED, as opposed
@@ -1298,7 +1529,7 @@ func (w *watcher) openRefusedLocked(operation, handle string, expected bool, ref
 // occasion: a frame on it proves the shim is serving this session, and by then
 // the book the refusal was about is the one the shim is writing.
 func (w *watcher) retryRefusedMainLocked() {
-	if w.main == nil || w.main.stream != nil || w.main.refusals == 0 {
+	if w.main == nil || w.main.stream != nil || w.main.refusals == 0 || w.inFlightLocked(w.main.opening) {
 		return
 	}
 	if w.main.refusals > openRefusalLimit {
@@ -1636,8 +1867,5 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	}
 	w.log.Warn("daemon.sessionwatcher.watch_bash",
 		"a detached shell's stream ended before the shell settled; re-opening it", ctx)
-	if !w.openShellStreamLocked(s) {
-		delete(w.shells, key)
-		w.publishLiveWorkLocked()
-	}
+	w.openShellStreamLocked(s, shellForgottenOnFailure)
 }
