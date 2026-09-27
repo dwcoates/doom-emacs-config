@@ -172,6 +172,7 @@ func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
 		{name: "a failed worktree call", kind: kindWorktree, failed: true},
 		{name: "a failed cron call", kind: kindCron, failed: true},
 		{name: "a failed push", kind: kindPushNotification, failed: true},
+		{name: "a failed hand-back", kind: kindSubagentHandback, input: map[string]any{"message": "r"}, failed: true},
 		{name: "a failed wakeup", kind: kindScheduleWakeup, failed: true},
 		{name: "a failed monitor", kind: kindMonitor, failed: true},
 		{
@@ -185,6 +186,11 @@ func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
 			kind:   kindBash,
 			input:  map[string]any{"command": "true"},
 			result: map[string]any{"stdout": "", "stderr": "", "exitCode": 0.0},
+		},
+		{
+			name:  "a hand-back that was delivered",
+			kind:  kindSubagentHandback,
+			input: map[string]any{"message": "r"},
 		},
 		{
 			name:   "a send that was delivered",
@@ -266,5 +272,61 @@ func TestAFailedArtifactCallRestatesItsAct(t *testing.T) {
 				t.Fatalf("restated = %q, want %q", restated, tt.want)
 			}
 		})
+	}
+}
+
+// The corpus hand-back's acknowledgement settles it as delivered, RESTATING
+// the report: the result carries no report of its own.
+func TestAHandbackAcknowledgementSettlesAsSuccessRestatingTheReport(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, corpusLine(t, "tool-inputs/subagent_handback.jsonl"))
+	result := corpusLine(t, "tool-results/subagent_handback.jsonl")
+	want := corpusToolInputField(t, "tool-inputs/subagent_handback.jsonl", "message")
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	success := activityOf(lastEntryByKey(t, entries, ActivityKey("toolu_01XimbQmvHTszbgRxyRy5VEf"))).GetSubagentHandback().GetSuccess()
+	if success == nil {
+		t.Fatal("the corpus acknowledgement did not settle the hand-back on its success arm")
+	}
+	if success.GetReport().GetText() != want {
+		t.Fatalf("report = %q, want the corpus message verbatim", success.GetReport().GetText())
+	}
+}
+
+// A hand-back the vendor marked an error settles on the failure arm, still
+// carrying the report the subagent tried to deliver.
+func TestAFailedHandbackRestatesTheReport(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"message": "the report"}, startedAt: 1000}
+	block := map[string]any{"content": "Error: refused"}
+
+	// Act.
+	got := c.settledItem(kindSubagentHandback, call, nil, block, true, 4000, Attribution{})
+
+	// Assert.
+	if text := got.GetSubagentHandback().GetFailure().GetReport().GetText(); text != "the report" {
+		t.Fatalf("restated report = %q, want %q", text, "the report")
+	}
+}
+
+// A failed hand-back carries the vendor's refusal content as its error.
+func TestAFailedHandbackCarriesTheRefusalContent(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"message": "the report"}, startedAt: 1000}
+	block := map[string]any{"content": "Error: refused"}
+
+	// Act.
+	got := c.settledItem(kindSubagentHandback, call, nil, block, true, 4000, Attribution{})
+
+	// Assert.
+	text := got.GetSubagentHandback().GetFailure().GetError().GetContent().GetBlocks()[0].GetText().GetText()
+	if text != "Error: refused" {
+		t.Fatalf("error content = %q, want the vendor's refusal", text)
 	}
 }

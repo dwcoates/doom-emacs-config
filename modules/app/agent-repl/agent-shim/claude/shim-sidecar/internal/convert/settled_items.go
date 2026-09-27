@@ -153,6 +153,24 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		return item(&conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{
 			Result: &conversationv1.AgentSendMessage_Success{Success: sendMessageSuccess(call, result, ts)},
 		}})
+	case kindSubagentHandback:
+		// THE REPORT IS RESTATED on both arms, read off the call: the result is
+		// a bare acknowledgement, and the start this upserts over is gone once
+		// it lands.
+		if failed {
+			return item(&conversationv1.AgentActivity_SubagentHandback{SubagentHandback: &conversationv1.AgentSubagentHandback{
+				Result: &conversationv1.AgentSubagentHandback_Failure{Failure: &conversationv1.AgentSubagentHandbackFailure{
+					Error:  failure,
+					Report: handbackReport(call.input),
+				}},
+			}})
+		}
+		return item(&conversationv1.AgentActivity_SubagentHandback{SubagentHandback: &conversationv1.AgentSubagentHandback{
+			Result: &conversationv1.AgentSubagentHandback_Success{Success: &conversationv1.AgentSubagentHandbackSuccess{
+				Report:    handbackReport(call.input),
+				SettledAt: settledAt(ts, call.startedAt),
+			}},
+		}})
 	case kindTaskAct:
 		return taskActSettled(call, result, failed, failure)
 	case kindWebFetch:

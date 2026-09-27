@@ -76,6 +76,8 @@ import {
   detachedShellRow,
   shellHeadRow,
   peerMessageRow,
+  subagentResultUnit,
+  subagentHandbackRow,
   removedRow,
   detachedSubagentRow,
   feedId,
@@ -141,6 +143,7 @@ describe("arm coverage", () => {
       "detachedShell",
       "shellHead",
       "peerMessage",
+      "subagentHandback",
       "removed",
       "permission",
       "question",
@@ -163,6 +166,7 @@ describe("arm coverage", () => {
       "artifact",
       "plan",
       "findings",
+      "subagentResult",
     ]);
   });
 
@@ -688,6 +692,29 @@ describe.each(PLAN_STATES)("a %s plan", (state) => {
   });
 });
 
+describe("a subagent's returned result", () => {
+  it("draws the report through the markdown pipeline", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit()));
+    // Assert
+    expect(row.querySelector(".subagent-result strong")?.textContent).toBe("all four items done");
+  });
+
+  it("draws uncapped, like a final answer", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit()));
+    // Assert
+    expect(row.querySelector(".subagent-result")?.getAttribute("data-cap-lines")).toBe("none");
+  });
+
+  it("draws an undelivered result's reason in the quiet line", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentResultUnit("undelivered")));
+    // Assert
+    expect(row.querySelector(".subagent-result-reason")?.textContent).toBe("the parent is gone");
+  });
+});
+
 describe("findings", () => {
   it("draws every findings row", async () => {
     // Arrange / Act
@@ -824,6 +851,29 @@ describe("a peer message", () => {
     expect(
       harness.$('[data-feed-row="peer-1"] .bubble.peer > .bubble-scroll')?.classList.contains("expanded"),
     ).toBe(true);
+  });
+});
+
+describe("a subagent hand-back", () => {
+  it("draws the label the daemon composed, verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".subagent-handback-badge")?.textContent).toBe("agent Explore reported back");
+  });
+
+  it("is a badge, never a bubble", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".bubble")).toBeNull();
+  });
+
+  it("carries no body: the report is not drawn in the main feed", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".subagent-handback-badge")?.children.length).toBe(0);
   });
 });
 

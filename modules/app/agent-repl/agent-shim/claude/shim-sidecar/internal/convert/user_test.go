@@ -233,6 +233,32 @@ func TestSubagentHandbackIsAPeerMessageToo(t *testing.T) {
 	}
 }
 
+func TestAHandbackPeerMessageStatesTheSubagentHandbackKind(t *testing.T) {
+	// Arrange. origin.handback marks a subagent's hand-back.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "child", "done", "envelope", true))
+
+	// Assert.
+	if peerLineOf(entries[0]).GetSubagentHandback() == nil {
+		t.Fatalf("kind = %v, want subagent_handback", peerLineOf(entries[0]).GetKind())
+	}
+}
+
+func TestAPeerMessageWithoutHandbackStatesTheInterSessionKind(t *testing.T) {
+	// Arrange. No origin.handback: another session's message.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Explore", "hi", "envelope", false))
+
+	// Assert.
+	if peerLineOf(entries[0]).GetInterSession() == nil {
+		t.Fatalf("kind = %v, want inter_session", peerLineOf(entries[0]).GetKind())
+	}
+}
+
 func TestPeerMessageIdentityIsDerivedFromTheRecordUUID(t *testing.T) {
 	// Arrange. The stream and file planes both key the same vendor record
 	// peer:<uuid> and spell the uuid into PeerMessage.id, so their rows collapse.

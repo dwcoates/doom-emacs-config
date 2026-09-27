@@ -39,6 +39,7 @@ func TestRecognizedBuiltinsReachTheirOwnArm(t *testing.T) {
 		{tool: "CronDelete", input: `{"job_id":"j"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetCron() != nil }},
 		{tool: "CronList", input: `{}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetCron() != nil }},
 		{tool: "PushNotification", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetPushNotification() != nil }},
+		{tool: "SubagentHandback", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetSubagentHandback() != nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -274,5 +275,23 @@ func TestAnArtifactListingLandsOnTheListArmWithItsOwnFields(t *testing.T) {
 	}
 	if listing.GetScope() != "shared" {
 		t.Fatalf("scope = %q, want %q", listing.GetScope(), "shared")
+	}
+}
+
+// A subagent's hand-back announces the REPORT it carries, read off the real
+// corpus call: the call's input is the only place the report exists.
+func TestAHandbackStartCarriesTheCorpusReportVerbatim(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, corpusLine(t, "tool-inputs/subagent_handback.jsonl"))
+	want := corpusToolInputField(t, "tool-inputs/subagent_handback.jsonl", "message")
+
+	// Act.
+	entries := convertLines(t, c, call)
+
+	// Assert.
+	start := activityOf(entryByKey(t, entries, ActivityKey("toolu_01XimbQmvHTszbgRxyRy5VEf"))).GetSubagentHandback().GetStart()
+	if start.GetReport().GetText() != want {
+		t.Fatalf("report = %q, want the corpus message verbatim", start.GetReport().GetText())
 	}
 }

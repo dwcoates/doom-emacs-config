@@ -183,6 +183,13 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 				StartedAt:   startedAt(ts),
 			}},
 		}})
+	case kindSubagentHandback:
+		return item(&conversationv1.AgentActivity_SubagentHandback{SubagentHandback: &conversationv1.AgentSubagentHandback{
+			Result: &conversationv1.AgentSubagentHandback_Start{Start: &conversationv1.AgentSubagentHandbackStart{
+				Report:    handbackReport(input),
+				StartedAt: startedAt(ts),
+			}},
+		}})
 	case kindTaskAct:
 		// A task act is INSTANTANEOUS at this tier: what the tracker did and
 		// where it left the task both come from the RESULT, so the announcement
@@ -312,6 +319,14 @@ func sendMessageSummary(input map[string]any) *conversationv1.AgentSendMessageSu
 		return nil
 	}
 	return &conversationv1.AgentSendMessageSummary{Text: text}
+}
+
+// handbackReport is a subagent's final report, read off the CALL: the call's
+// own result is a bare acknowledgement, so the input is the only place the
+// report exists. Read by the start and by both settle arms, so the restated
+// report cannot drift from the announced one.
+func handbackReport(input map[string]any) *conversationv1.AgentSubagentHandbackReport {
+	return &conversationv1.AgentSubagentHandbackReport{Text: str(input["message"])}
 }
 
 // monitorStart reads a watcher's arming. The lifetime arms are exclusive by the
@@ -478,6 +493,8 @@ func item(arm any) *conversationv1.AgentActivity {
 	case *conversationv1.AgentActivity_SkillUse:
 		activity.Item = a
 	case *conversationv1.AgentActivity_SendMessage:
+		activity.Item = a
+	case *conversationv1.AgentActivity_SubagentHandback:
 		activity.Item = a
 	case *conversationv1.AgentActivity_WebFetch:
 		activity.Item = a
