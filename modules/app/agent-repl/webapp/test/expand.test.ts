@@ -20,7 +20,8 @@ import {
   isExpanded,
   ownsSection,
   sectionAt,
-  toggleExpanded,
+  toggleSection,
+  collapseSection,
 } from "../src/expand.js";
 
 /** A section carrying CLASSES, with a live classList the toggle can drive. */
@@ -185,35 +186,101 @@ describe("expandAction", () => {
   });
 });
 
-describe("toggleExpanded", () => {
-  it("expands a capped section on the first click", () => {
+/** A real element carrying CLASSES, with an observable scrollTop. */
+function sectionElement(...classes: string[]): HTMLElement & { scrollTop: number } {
+  const el = document.createElement("div");
+  el.className = classes.join(" ");
+  let top = 0;
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => top,
+    set: (v: number) => {
+      top = v;
+    },
+  });
+  return el;
+}
+
+describe("toggleSection", () => {
+  it("expands a capped section on the first toggle", () => {
     // Arrange
-    const sec = section("tool-output", "bash-output");
+    const sec = sectionElement("tool-fold");
     // Act
-    const expanded = toggleExpanded(sec);
+    const expanded = toggleSection(sec);
     // Assert
     expect(expanded).toBe(true);
-    expect(sec.classes.has(EXPANDED_CLASS)).toBe(true);
+    expect(sec.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("re-caps an expanded section on the second click", () => {
+  it("re-caps an expanded section on the second toggle", () => {
     // Arrange
-    const sec = section("tool-output", EXPANDED_CLASS);
+    const sec = sectionElement("tool-fold", EXPANDED_CLASS);
     // Act
-    const expanded = toggleExpanded(sec);
+    const expanded = toggleSection(sec);
     // Assert
     expect(expanded).toBe(false);
-    expect(sec.classes.has(EXPANDED_CLASS)).toBe(false);
+    expect(sec.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 
   it("leaves the section's own classes intact across a toggle", () => {
     // Arrange
-    const sec = section("tool-output", "bash-output");
+    const sec = sectionElement("tool-fold", "tool-card");
     // Act
-    toggleExpanded(sec);
-    toggleExpanded(sec);
+    toggleSection(sec);
+    toggleSection(sec);
     // Assert
-    expect([...sec.classes]).toEqual(["tool-output", "bash-output"]);
+    expect([...sec.classList]).toEqual(["tool-fold", "tool-card"]);
+  });
+
+  it("hands afterToggle the expanded state on expand", () => {
+    // Arrange
+    const sec = sectionElement("tool-fold");
+    const calls: Array<[HTMLElement, boolean]> = [];
+    // Act
+    toggleSection(sec, (s, e) => calls.push([s, e]));
+    // Assert
+    expect(calls).toEqual([[sec, true]]);
+  });
+
+  it("collapses through the one collapse, so the preview shows from the top", () => {
+    // Arrange — an expanded box the reader scrolled partway down.
+    const sec = sectionElement("bubble-scroll", EXPANDED_CLASS);
+    sec.scrollTop = 80;
+    // Act
+    toggleSection(sec);
+    // Assert
+    expect(sec.scrollTop).toBe(0);
+  });
+});
+
+describe("collapseSection", () => {
+  it("takes the expanded class off", () => {
+    // Arrange
+    const sec = sectionElement("tool-fold", EXPANDED_CLASS);
+    // Act
+    collapseSection(sec);
+    // Assert
+    expect(sec.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("shows the collapsed preview from the top", () => {
+    // Arrange
+    const sec = sectionElement("bubble-scroll", EXPANDED_CLASS);
+    sec.scrollTop = 120;
+    // Act
+    collapseSection(sec);
+    // Assert
+    expect(sec.scrollTop).toBe(0);
+  });
+
+  it("hands afterToggle the collapsed state", () => {
+    // Arrange
+    const sec = sectionElement("tool-fold", EXPANDED_CLASS);
+    const calls: Array<[HTMLElement, boolean]> = [];
+    // Act
+    collapseSection(sec, (s, e) => calls.push([s, e]));
+    // Assert
+    expect(calls).toEqual([[sec, false]]);
   });
 });
 
