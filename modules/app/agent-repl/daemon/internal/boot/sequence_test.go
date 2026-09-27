@@ -189,6 +189,60 @@ func TestAClosedWorkspaceIsSkipped(t *testing.T) {
 	}
 }
 
+// TestBootReleasesAClosedWorkspacesServing pins the boot heal: a closed row
+// still naming a serving instance (498b3b658c074bf4, 2026-09-27) is released
+// and stated at ERROR, while an open served row is left untouched.
+func TestBootReleasesAClosedWorkspacesServing(t *testing.T) {
+	tests := []struct {
+		name        string
+		closed      bool
+		wantServed  bool
+		wantHealed  bool
+		wantErrLine bool
+	}{
+		{name: "a closed but served row is released and logged", closed: true, wantServed: false, wantHealed: true, wantErrLine: true},
+		{name: "an open served row is untouched", closed: false, wantServed: true, wantHealed: false, wantErrLine: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			h := newHarness(t)
+			ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+			if tt.closed {
+				if err := h.db.SetClosed(ctx, ws.ID, true); err != nil {
+					t.Fatalf("SetClosed: %v", err)
+				}
+			}
+			// The stale claim a leaked close path left behind.
+			if err := h.db.ClaimServing(ctx, ws.ID, wsm.NewInstanceID()); err != nil {
+				t.Fatalf("ClaimServing: %v", err)
+			}
+
+			// Act.
+			report, err := h.seq.Run(ctx)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			owner, err := h.db.Serving(ctx, ws.ID)
+			if err != nil {
+				t.Fatalf("Serving: %v", err)
+			}
+			if (owner != nil) != tt.wantServed {
+				t.Fatalf("serving owner = %v, want present=%v", owner, tt.wantServed)
+			}
+			if healed := len(report.ClosedServingReleased) == 1; healed != tt.wantHealed {
+				t.Fatalf("report.ClosedServingReleased = %v, want healed=%v", report.ClosedServingReleased, tt.wantHealed)
+			}
+			if got := h.hasRecord("error", "daemon.boot.release_closed_serving"); got != tt.wantErrLine {
+				t.Fatalf("error record = %v, want %v", got, tt.wantErrLine)
+			}
+		})
+	}
+}
+
 // TestEveryManifestDispositionIsCarriedWhole pins the bounce accounting: the
 // four dispositions ride the report as values, so nothing downstream can
 // collapse a DIED into a count of survivors.
