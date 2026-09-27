@@ -43,4 +43,24 @@ message PeerMessage {
   // so the live row and the adopted row for one message supersede each other on
   // ONE bubble rather than drawing two. Echoed, never parsed.
   string id = 4;
+  // WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record
+  // (`origin.handback`). A consumer draws the two differently: an inter-session
+  // message is an aside worth reading in place, while a hand-back's report is
+  // the returning subagent's result and belongs with that subagent. UNSET when
+  // the producer did not state the kind; a consumer treats it as an
+  // inter-session message.
+  oneof kind {
+    // Another Claude session sent this agent a message.
+    PeerMessageInterSession inter_session = 5;
+    // A subagent this agent started handed its final report back.
+    PeerMessageSubagentHandback subagent_handback = 6;
+  }
 }
+
+// Another Claude session sent this agent a message.
+message PeerMessageInterSession {}
+
+// A subagent this agent started handed its final report back. The report is
+// this record's `body`; the same text is the subagent's own
+// AgentSubagentHandback on its stream.
+message PeerMessageSubagentHandback {}
