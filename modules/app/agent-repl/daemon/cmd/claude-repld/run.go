@@ -277,7 +277,16 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	// THE CLOSE RELEASES EVERY LEASE THIS PROCESS STILL OWNS (wsm Close), so
+	// its failure is a lease left behind and is said at ERROR, never dropped.
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Error("daemon.cmd.state", "the state client did not close cleanly; a lease this process held may be left behind", dlog.Context{
+				"path":  layout.DB(),
+				"error": err.Error(),
+			})
+		}
+	}()
 
 	// THE LOG SURFACES LEARN THE MINTED WORKSPACE IDS HERE, the moment the
 	// roster is readable and before any workspace-owned record can be
