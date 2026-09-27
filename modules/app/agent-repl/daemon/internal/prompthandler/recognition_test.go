@@ -123,6 +123,18 @@ func TestRecognizeAcceptsAnArgumentOnACommandThatTakesOne(t *testing.T) {
 	}
 }
 
+// TestRecognizeReadsAnArgumentAfterANewline pins the vendor's split: the CLI
+// ends a command's name at the first whitespace of any kind, so a /compact
+// whose instructions start on the next line is still a compaction.
+func TestRecognizeReadsAnArgumentAfterANewline(t *testing.T) {
+	// Arrange / Act
+	got := recognize("/compact\nfocus on the tests")
+	// Assert
+	if got.kind != RecognizedAct || got.arg != "focus on the tests" {
+		t.Fatalf("recognition = %s arg = %q, want a session act carrying its argument", recognitionName(got.kind), got.arg)
+	}
+}
+
 func TestRecognizeIgnoresSurroundingWhitespace(t *testing.T) {
 	// Arrange / Act
 	got := recognize("  /status  ")
