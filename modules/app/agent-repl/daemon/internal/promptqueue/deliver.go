@@ -19,7 +19,22 @@ import (
 // deliver sends a submission to the shim as the session's turn: the durable
 // turn record first (so the origin survives a restart even if the daemon dies
 // mid-call), then StartTurn, then the handover to the watcher.
+//
+// A SUBMISSION WHOSE TEXT IS A CONTEXT CUT IS DELIVERED AS ONE, whatever path
+// it came by (a held /compact, an edit that became one, a caller that never
+// went through recognition): runContextCut runs it, so the queue records it as
+// the running session act and nothing can interject it or be popped into it.
 func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) (Disposition, error) {
+	if command, arg, ok := contextCutOf(sub); ok {
+		act := Act{Kind: actKindOf(command), Value: arg, Turn: sub.Turn, Origin: sub.Origin}
+		log.Info(opDeliver, "the prompt is a session act; it is delivered as one", dlog.Context{
+			"session_act": command.String(),
+		})
+		if err := q.runContextCut(ctx, sub.WS, act, sender, log); err != nil {
+			return Disposition{}, err
+		}
+		return Disposition{Delivered: true}, nil
+	}
 	record := wsm.Turn{
 		ID:        sub.Turn,
 		Workspace: sub.WS,

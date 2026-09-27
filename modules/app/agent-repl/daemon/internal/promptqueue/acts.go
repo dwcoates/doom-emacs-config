@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/sessioncommand"
 	"claude-repld/internal/wsm"
 )
 
@@ -135,7 +136,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		state = &wsState{}
 		q.states[ws] = state
 	}
-	state.uninterruptible = command
+	state.cut = &runningCut{turn: turn, command: command}
 	q.mu.Unlock()
 
 	// THE FOOTER IS TOLD WHAT THE TURN CARRIES, BEFORE THE TURN EXISTS. Nothing
@@ -176,7 +177,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		q.deps.Feed.OnContextCutAborted(ws, turn)
 		q.deps.Footer.SetTurn(ws, nil)
 		q.deps.Sidebar.SetTurn(ws, nil)
-		q.clearUninterruptible(ws)
+		q.retireCut(ws)
 		log.Error(opAct, "the shim refused the context cut", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("deliver the context cut on %q: %w", ws, err)
 	}
@@ -209,13 +210,70 @@ func footerAct(command conversationv1.SessionCommand) footer.SessionAct {
 	}
 }
 
-// clearUninterruptible releases the uninterruptible mark a context cut set.
-func (q *queue) clearUninterruptible(ws ids.WorkspaceID) {
+// retireCut releases the running-cut record a context cut set.
+func (q *queue) retireCut(ws ids.WorkspaceID) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if state, ok := q.states[ws]; ok {
-		state.uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+		state.cut = nil
 	}
+}
+
+// retireCutIf retires the running-cut record when TURN is the cut's own turn,
+// and records the retirement on LOG. Every close of a turn row comes through
+// turnclose.go's door, and the door calls this, so the record's lifetime is
+// its turn's: a /compact whose turn was closed as an orphan by a teardown or a
+// boot reconciliation, never reaching OnTurnEnded, cannot leave the queue
+// holding every later prompt behind an act that is no longer running.
+//
+// LOG is resolved only when a cut is retired: the door's orphan closes run
+// at teardown and boot, where resolving a workspace for nothing is a record
+// with nothing to say.
+func (q *queue) retireCutIf(ws ids.WorkspaceID, turn ids.TurnID, log func() (dlog.Logger, bool)) {
+	q.mu.Lock()
+	state, ok := q.states[ws]
+	if !ok || state.cut == nil || state.cut.turn != turn {
+		q.mu.Unlock()
+		return
+	}
+	cut := *state.cut
+	state.cut = nil
+	q.mu.Unlock()
+	logger, ok := log()
+	if !ok {
+		return
+	}
+	logger.Info(opAct, "the session act's turn closed; the queue no longer holds prompts behind it", dlog.Context{
+		"session_act_turn": string(cut.turn), "session_act": cut.command.String(),
+	})
+}
+
+// workspaceLog answers a lazy resolution of a workspace's logger for
+// retireCutIf. A workspace that cannot be resolved is recorded at ERROR by
+// q.logger itself.
+func (q *queue) workspaceLog(ctx context.Context, ws ids.WorkspaceID) func() (dlog.Logger, bool) {
+	return func() (dlog.Logger, bool) {
+		log, err := q.logger(ctx, ws)
+		return log, err == nil
+	}
+}
+
+// contextCutOf reports whether a session-addressed submission's text IS a
+// context cut, and which, with its argument. A bubble-addressed prompt goes to
+// a subagent's own composer and is never a session act.
+func contextCutOf(sub Submission) (conversationv1.SessionCommand, string, bool) {
+	if sub.Target != nil {
+		return conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, "", false
+	}
+	return sessioncommand.ContextCut(saidText(sub.Said))
+}
+
+// actKindOf names the act kind a context-cut command is carried as.
+func actKindOf(command conversationv1.SessionCommand) string {
+	if command == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		return ActCompact
+	}
+	return ActClear
 }
 
 // contextCutCommand names the session command an act kind is, and the literal
@@ -227,9 +285,13 @@ func contextCutCommand(kind string) (conversationv1.SessionCommand, string) {
 	return conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear"
 }
 
-// drainActs runs every act queued behind the path, in submission order. It is
+// drainActs runs the acts queued behind the path, in submission order. It is
 // called at a turn end, BEFORE the next prompt is popped, so an act the user
 // issued while a turn ran applies to the prompt that follows it.
+//
+// A CONTEXT CUT ENDS THE DRAIN. It runs as the session's turn, so the acts
+// queued after it wait for its end exactly as a prompt does, and are drained
+// then, still in order.
 func (q *queue) drainActs(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	q.mu.Lock()
 	state, ok := q.states[ws]
@@ -241,10 +303,23 @@ func (q *queue) drainActs(ctx context.Context, ws ids.WorkspaceID, log dlog.Logg
 	state.acts = nil
 	q.mu.Unlock()
 
-	for _, act := range pending {
+	for i, act := range pending {
 		if err := q.runAct(ctx, ws, act, log.With(dlog.Context{"act": act.Kind, "value": act.Value})); err != nil {
 			log.Error(opAct, "a queued session act was not delivered at the turn's end",
 				dlog.Context{"act": act.Kind, "cause": err.Error()})
+			continue
 		}
+		cut, running := q.runningCut(ws)
+		if !running || i == len(pending)-1 {
+			continue
+		}
+		rest := pending[i+1:]
+		q.mu.Lock()
+		state.acts = append(append([]Act(nil), rest...), state.acts...)
+		q.mu.Unlock()
+		log.Info(opAct, "a context cut is running; the acts queued after it wait for its end", dlog.Context{
+			"session_act_turn": string(cut.turn), "session_act": cut.command.String(), "queued_acts": len(rest),
+		})
+		return
 	}
 }

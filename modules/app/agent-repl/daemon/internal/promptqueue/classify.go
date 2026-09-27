@@ -39,16 +39,23 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// the daemon already knows is wrong and then replace it, and a tray that
 	// shows a decision being made when none is being made is a lie the client
 	// has to un-draw.
-	uninterruptible := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	//
+	// A PROMPT THAT IS ITSELF A SESSION ACT is decided here too, for the same
+	// reason: it is queued, never classified (sessionActVerdict).
+	var cut runningCut
+	underCut := false
+	ownAct := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 	if running != "" {
-		uninterruptible = q.state(sub.WS).uninterruptible
-		if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		if cut, underCut = q.runningCut(sub.WS); underCut {
 			held.Classification = &wsm.Classification{
 				Arm:     wsm.ArmUninterruptibleTurn,
 				Reason:  "the running turn is a context cut and cannot be interrupted",
-				Command: uninterruptible,
+				Command: cut.command,
 				At:      q.deps.Now(),
 			}
+		} else if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+			ownAct = command
+			held.Classification = &verdict
 		} else {
 			held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
 		}
@@ -69,10 +76,13 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	if running == "" {
 		return disposition, nil
 	}
-	if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		log.Info(opClassify, "the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs", dlog.Context{
-			"command": uninterruptible.String(),
-		})
+	if underCut {
+		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
+			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
+		return disposition, nil
+	}
+	if ownAct != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		neverClassified(log, sub.Turn, ownAct, running)
 		return disposition, nil
 	}
 
@@ -95,16 +105,20 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 // asynchronously, and the verdict's own mechanics (an interject included) are
 // the ordinary ones.
 func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
-	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		log.Info(opClassify, "the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs", dlog.Context{
-			"command": command.String(),
-		})
+	if cut, ok := q.runningCut(sub.WS); ok {
+		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
+			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
 		q.record(ctx, sub, wsm.Classification{
 			Arm:     wsm.ArmUninterruptibleTurn,
 			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: command,
+			Command: cut.command,
 			At:      q.deps.Now(),
 		}, log)
+		return
+	}
+	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+		neverClassified(log, sub.Turn, command, running)
+		q.record(ctx, sub, verdict, log)
 		return
 	}
 	q.record(ctx, sub, wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}, log)
@@ -114,6 +128,33 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		defer q.classifying.Done()
 		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
 	}()
+}
+
+// sessionActVerdict answers the verdict a held prompt earns when its own text
+// IS a session act — /compact, /compact <text>, or /clear, as
+// sessioncommand.ContextCut reads them. Such a prompt is QUEUED AND NEVER
+// CLASSIFIED (owner ruling, 2026-09-27): it waits for the running turn's end
+// and is then delivered as the context cut it is (deliver routes it to
+// runContextCut). The routing classifier is never asked, so it can never earn
+// an interject.
+func (q *queue) sessionActVerdict(sub Submission) (wsm.Classification, conversationv1.SessionCommand, bool) {
+	command, _, ok := contextCutOf(sub)
+	if !ok {
+		return wsm.Classification{}, conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, false
+	}
+	_, literal := contextCutCommand(actKindOf(command))
+	return wsm.Classification{
+		Arm:    wsm.ArmHoldForTurnEnd,
+		Reason: "the prompt is " + literal + ", a session act: it is queued behind the running turn and never classified",
+		At:     q.deps.Now(),
+	}, command, true
+}
+
+// neverClassified records, at INFO, a session act kept from the classifier.
+func neverClassified(log dlog.Logger, held ids.TurnID, command conversationv1.SessionCommand, running ids.TurnID) {
+	log.Info(opClassify, "the prompt is a session act; it is queued behind the running turn and never classified", dlog.Context{
+		"held_turn": string(held), "session_act": command.String(), "running_turn": string(running),
+	})
 }
 
 // judge asks the classifier about one held prompt and records what it said.
@@ -131,13 +172,23 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, e
 func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) (wsm.Classification, bool) {
 	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
 	// context cut cannot be interrupted, so there is nothing to judge.
-	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+	if cut, ok := q.runningCut(sub.WS); ok {
+		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
+			"a context cut began while the prompt waited for its verdict; it is stamped uninterruptible and the model is not asked")
 		return wsm.Classification{
 			Arm:     wsm.ArmUninterruptibleTurn,
 			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: command,
+			Command: cut.command,
 			At:      q.deps.Now(),
 		}, false
+	}
+
+	// A PROMPT THAT IS ITSELF A SESSION ACT never reaches the model. hold and
+	// classifyHeld decide it before any judge starts; this is the classifier
+	// call site's own refusal, so no path to Judge can carry one.
+	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+		neverClassified(log, sub.Turn, command, running)
+		return verdict, false
 	}
 
 	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
@@ -215,6 +266,8 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 	}
 	q.record(ctx, sub, c, log)
 	if interject {
+		// A verdict kept from interjecting by a running session act is
+		// re-stamped and recorded by interject itself.
 		q.interject(ctx, sub, running, log)
 	}
 }
@@ -287,13 +340,36 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 // SEMANTIC HEAD before teardown begins, the footer's waiting-interrupting fires
 // the MOMENT the interrupt registers, and delivery waits for the turn's REAL
 // end. A refused interrupt strips the jump and returns the prompt to held.
-func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
+//
+// A RUNNING SESSION ACT CANNOT BE INTERJECTED, AND THE REFUSAL IS HERE, on the
+// one path every interjection takes (a verdict's and a release's alike), not
+// at any caller. The running-cut record is read under the same q.mu hold that
+// installs the head, so no interjection can register against a /clear or a
+// /compact the queue knows is running: the prompt keeps its place, is stamped
+// uninterruptible_turn, and is delivered in order once the act ends. A user's
+// explicit interrupt is not an interjection and never comes through here.
+//
+// It reports whether the interrupt was registered.
+func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) bool {
 	head := sub.Turn
 	q.mu.Lock()
 	state, ok := q.states[sub.WS]
 	if !ok {
 		state = &wsState{}
 		q.states[sub.WS] = state
+	}
+	if state.cut != nil {
+		cut := *state.cut
+		q.mu.Unlock()
+		keptBehindSessionAct(log, opInterject, cut, sub.Turn,
+			"a session act is running; the held prompt is kept from interjecting and waits for the act to end")
+		q.record(ctx, sub, wsm.Classification{
+			Arm:     wsm.ArmUninterruptibleTurn,
+			Reason:  "the running turn is a context cut and cannot be interrupted",
+			Command: cut.command,
+			At:      q.deps.Now(),
+		}, log)
+		return false
 	}
 	state.head = &head
 	state.interrupting = true
@@ -305,16 +381,27 @@ func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnI
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		q.stripJump(ctx, sub, running, errors.New("the workspace lost its session before the interrupt could be sent"), log)
-		return
+		return true
 	}
 	// THE STOP IS THE PROMPT'S SIDE EFFECT, NOT AN ACT OF ITS OWN, and the
 	// record says so: the feed draws no interruption bubble for it, because
 	// the superseding prompt is the whole account of the stop.
 	if err := sender.KillTurn(ctx, running, false, interjectionCommand()); err != nil {
 		q.stripJump(ctx, sub, running, err, log)
-		return
+		return true
 	}
 	log.Debug(opInterject, "the interrupt was sent; delivery waits for the turn's real end", nil)
+	return true
+}
+
+// keptBehindSessionAct records, at INFO, a held prompt a running session act
+// kept from interjecting: the act's turn, the act, and the held prompt's turn.
+func keptBehindSessionAct(log dlog.Logger, op string, cut runningCut, held ids.TurnID, message string) {
+	log.Info(op, message, dlog.Context{
+		"session_act_turn": string(cut.turn),
+		"session_act":      cut.command.String(),
+		"held_turn":        string(held),
+	})
 }
 
 // interjectionCommand is an interjection's HOW: the person sent a prompt that

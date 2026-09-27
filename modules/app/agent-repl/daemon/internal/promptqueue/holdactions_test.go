@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/wsm"
 )
@@ -307,5 +309,44 @@ func TestReleasingDuringTheBringUpALeaseEndingStartedIsRefused(t *testing.T) {
 	h.waitRevivals()
 	if !errors.Is(err, ErrReleaseRefused) {
 		t.Fatalf("Release during the bring-up = %v, want ErrReleaseRefused", err)
+	}
+}
+
+// TestReleaseIsRefusedWhileASessionActRuns pins that a force-through takes the
+// interject path, and that path cannot target a running /compact: a prompt
+// held before the act began keeps its place and no interrupt is sent.
+func TestReleaseIsRefusedWhileASessionActRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	// Act
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+	// Assert
+	if !errors.Is(err, ErrReleaseRefused) {
+		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
+	}
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want no interrupt of the running session act", killed)
+	}
+}
+
+func TestReleaseIsRefusedWhileACutTheWatcherHasNotYetSeenRuns(t *testing.T) {
+	// Arrange: the prompt was held by the drain lease, which has since lifted.
+	h := newHarness(t)
+	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
+	h.lease(wsm.HolderDrain, wsm.PolicyHold)
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.clearLease()
+	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+	h.watcher.idle()
+	// Act
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+	// Assert
+	if !errors.Is(err, ErrReleaseRefused) {
+		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
 	}
 }

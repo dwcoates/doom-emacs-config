@@ -906,6 +906,15 @@ N callers, exactly one Start), and the request-order landing by
 - **A COMMIT REPLACES IN PLACE** (`ReplaceHeldPromptSaid` keeps `queued_at`, clears the verdict and the acceptance), retires the claim and reclassifies through `classifyHeld`, so an interject then runs the ordinary interject. A content EPOCH bumped under `wsState.verdicts` makes a verdict judged about the replaced words settle as a discard; lock order is `drain`, then `verdicts`.
 - **THE CLAIM IS SCOPED TO THE EDITOR'S HOST STREAM, never a timer.** A begin with no `WatchHostWorkspace` stream is `no_editor`; the last one closing calls `Queue.EditorGone`, which retires the claim as a cancel would. The claim is in-memory, so a restart retires it with the stream.
 
+## A /clear or /compact is queued, never classified, and nothing overtakes it
+
+Owner rulings, 2026-09-27 (`internal/sessioncommand`, `internal/promptqueue/acts.go`, `classify.go`, `lifecycle.go`).
+
+- **ONE PARSE.** `sessioncommand.Parse` is the only reading of text as a slash command (literals and `takes_args` off the `SessionCommand` enum's spec option; the name ends at the first whitespace of any kind, as the vendor's CLI splits it). `prompthandler.recognize` and the queue's `sessioncommand.ContextCut` predicate both use it.
+- **A CONTEXT CUT'S TEXT IS NEVER CLASSIFIED.** `/compact`, `/compact <text>` and `/clear` are session acts whatever path they take: the handler sends them to `SubmitSessionAct`; a held prompt, an edit's commit, or a caller that skipped recognition is stamped `hold_for_turn_end` by `sessionActVerdict` in `hold`, `classifyHeld` and `verdictFor` (the classifier call site itself), recorded at INFO, and `deliver` runs it through `runContextCut`.
+- **THE QUEUE KNOWS THE RUNNING TURN IS A SESSION ACT.** `wsState.cut` (turn + command, under `q.mu`) is set by `runContextCut` before the watcher or shim hear of the turn, and retired by the turn-close door (`turnclose.go`, every close path) or a refused start.
+- **NOTHING INTERJECTS OR OVERTAKES A RUNNING CUT.** `interject` refuses under the same `q.mu` hold that installs the head, so a verdict or a Release cannot target it (INFO record: `session_act_turn`, `session_act`, `held_turn`); `popAndDeliver` delivers nothing while it runs; `drainActs` stops after a cut opens; `Submit` and `Release` treat a recorded cut as running before the watcher learns of it. Held prompts stay held rows and are delivered in order at the act's end. A user's explicit interrupt (`workspace/interrupt.go`) never goes through the queue and still ends the act.
+
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
 Every standing watch a webview holds is a SUBSCRIPTION on that page's single

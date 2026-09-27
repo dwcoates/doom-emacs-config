@@ -631,3 +631,21 @@ func TestBeginEditThatCannotReadTheHoldIsLoggedAtError(t *testing.T) {
 
 // firstTextOf answers an edit's content as text.
 func firstTextOf(e Edit) string { return saidText(e.Said) }
+
+func TestCommitEditIntoASessionActNeverReachesTheClassifier(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	queuedBehind(t, h, "t1")
+	beginEdit(t, h, "t1")
+	asked := len(h.judge.questions())
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "a correction"}
+	// Act
+	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("/compact keep the plan")); err != nil {
+		t.Fatalf("CommitEdit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	if now := len(h.judge.questions()); now != asked {
+		t.Fatalf("classifier asked %d more times, want an edited-in /compact never classified", now-asked)
+	}
+}

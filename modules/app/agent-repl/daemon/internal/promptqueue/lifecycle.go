@@ -36,7 +36,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	q.mu.Lock()
 	if state, ok := q.states[ws]; ok {
 		state.interrupting = false
-		state.uninterruptible = 0
+		state.cut = nil
 		// A TURN ENDED, so whatever serves the workspace held a session long
 		// enough to finish one: a later death is not a crash loop.
 		state.unattendedRevival = false
@@ -109,6 +109,17 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 	// shim, and the bounce's own finish delivers what is held.
 	if q.isDraining(ws) {
 		log.Debug(opTurnEnded, "the workspace is draining for a bounce; the held prompts wait for the new shim", nil)
+		return false, nil
+	}
+	// A RUNNING SESSION ACT IS OVERTAKEN BY NOTHING. A turn end that drained a
+	// queued /clear or /compact has just started it as the session's turn, and
+	// every prompt held behind it — a still-classifying one included — waits
+	// for ITS end, which pops them in order. The running-cut record is the
+	// queue's own fact, read under q.mu, so this holds whichever caller pops.
+	if cut, ok := q.runningCut(ws); ok {
+		log.Info(opTurnEnded, "a session act is running; the held prompts wait for it to end", dlog.Context{
+			"session_act_turn": string(cut.turn), "session_act": cut.command.String(),
+		})
 		return false, nil
 	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
