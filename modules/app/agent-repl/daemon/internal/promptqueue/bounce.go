@@ -426,6 +426,35 @@ func (q *queue) finishBounce(ws ids.WorkspaceID, req bounce.Request, runErr erro
 	}
 }
 
+// EndKeptDrain implements Queue.
+//
+// A KEPT DRAIN IS THE HANDOVER'S: the workspace's intake became its new
+// owner's the moment the transfer ran. When the new owner never took it and
+// this daemon took the workspace back, the drain would otherwise stand for the
+// rest of this process's life -- nothing dispatched, every prompt queued
+// behind a bounce that finished long ago.
+func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
+	log := q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	state := q.state(ws)
+	state.drain.Lock()
+	defer state.drain.Unlock()
+	q.mu.Lock()
+	pending := state.bounce
+	kept := pending != nil && pending.draining && pending.req.KeepDraining
+	if kept {
+		state.bounce = nil
+	}
+	q.mu.Unlock()
+	if !kept {
+		log.Debug(opBounce, "no kept drain stands on the workspace; nothing to end", nil)
+		return
+	}
+	log.Info(opBounce, "ended the handover's kept drain; the workspace was taken back and dispatch resumes here", dlog.Context{
+		"reason": pending.req.Reason, "state": "draining", "before": true, "after": false,
+	})
+	q.resumeDispatchLocked(context.Background(), ws, log)
+}
+
 // resumeDispatchLocked delivers what the drain held: the queued acts first, then
 // the next prompt, exactly as a turn end would. The caller holds the delivery
 // lock.
