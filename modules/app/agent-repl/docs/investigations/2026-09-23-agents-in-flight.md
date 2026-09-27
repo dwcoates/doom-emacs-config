@@ -14,7 +14,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 |---|---|---|---|---|
 | `fix/teardown-lands-before-kill` | `~/.config/doom-worktrees/teardown-lands-before-kill` | Closing the current workspace lands on the survivor first, then kills (never Doom's `+workspace/kill`, whose fallback put the splash over the landing workspace's panels). The roster teardown uses the same order, with INFO records and a source-scan guard. | `aba122e666cbbf988` | 09-27 |
 
-Nothing is running. The full bounce (a forced `claude-repld deploy`, then Emacs restarted) was scheduled on 09-25 after the index landing.
 
 ## Still waiting on the owner
 
