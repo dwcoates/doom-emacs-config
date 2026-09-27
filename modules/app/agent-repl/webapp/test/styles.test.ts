@@ -23,10 +23,14 @@ import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
+  ELLIPSIS_CAP_LINES,
   drawBubble,
   type BubbleCapLines,
 } from "../src/bubble/draw.js";
+import { EXPANDED_CLASS } from "../src/expand.js";
+import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 
@@ -667,6 +671,116 @@ describe("the 'more below' affordance", () => {
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
+ * spec chooses it (`data-more="ellipsis"`) clamps its collapsed body to its one
+ * line, which the engine ends in `…` exactly when anything follows, and draws
+ * no fade; a bubble under the fade keeps it.
+ */
+describe("the ellipsis instead of the fade", () => {
+  const CLAMP = '.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body';
+  const NO_FADE = '.bubble[data-role][data-more="ellipsis"] > .bubble-scroll::after';
+  const FADE = ".bubble > .bubble-scroll.has-more::after";
+
+  /** A mounted, collapsed bubble wearing has-more, under the ellipsis or the fade. */
+  function drawnBox(ellipsis: boolean): { box: HTMLElement; body: HTMLElement; remove: () => void } {
+    const { bubble, body } = drawBubble(
+      ellipsis
+        ? { role: "prompt", variant: "held", working: false, content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
+        : { role: "prompt", variant: "user", working: false, content: [], capLines: "feed" },
+    );
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    return { box, body, remove: () => bubble.remove() };
+  }
+
+  /** The number of classes, attributes and pseudo-classes in SELECTOR. */
+  const weight = (selector: string): number => (selector.match(/\.[\w-]+|\[[^\]]+\]|:not\(/g) ?? []).length;
+
+  it("clamps the collapsed body as a vertical box", () => {
+    // Arrange / Act
+    const rule = declarationsOf(CLAMP) ?? "";
+    // Assert
+    expect([/display:\s*-webkit-box\s*;/.test(rule), /-webkit-box-orient:\s*vertical\s*;/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("clamps it at the bubble's own line cap", () => {
+    // Arrange / Act
+    const rule = declarationsOf(CLAMP) ?? "";
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*var\(--bubble-cap-lines\)\s*;/);
+  });
+
+  it("maps the ellipsis's one-line cap to one line", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.bubble[data-cap-lines="${ELLIPSIS_CAP_LINES}"]`) ?? "";
+    // Assert
+    expect(rule.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("clamps a collapsed ellipsis bubble's body", () => {
+    // Arrange
+    const { body, remove } = drawnBox(true);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(true);
+  });
+
+  it("lifts the clamp once the bubble is expanded, so everything shows", () => {
+    // Arrange
+    const { box, body, remove } = drawnBox(true);
+    box.classList.add(EXPANDED_CLASS);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("never clamps a bubble under the fade", () => {
+    // Arrange
+    const { body, remove } = drawnBox(false);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("hides the fade on an ellipsis bubble", () => {
+    // Arrange
+    const { box, remove } = drawnBox(true);
+    // Act
+    const hidden = box.matches(NO_FADE.replace("::after", "")) && /display:\s*none/.test(declarationsOf(NO_FADE) ?? "");
+    remove();
+    // Assert
+    expect(hidden).toBe(true);
+  });
+
+  it("outranks the fade's own selector, whatever the order", () => {
+    // Arrange / Act / Assert
+    expect(weight(NO_FADE)).toBeGreaterThan(weight(FADE));
+  });
+
+  it("keeps the fade on a bubble under the fade", () => {
+    // Arrange
+    const { box, remove } = drawnBox(false);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", ""))];
+    remove();
+    // Assert
+    expect(faded).toEqual([true, false]);
+  });
+
+  it("keys neither the clamp nor the hidden fade on has-more, so the measurer moves nothing", () => {
+    // Arrange / Act / Assert
+    expect([CLAMP, NO_FADE].filter((sel) => sel.includes(".has-more"))).toEqual([]);
   });
 });
 

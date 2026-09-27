@@ -19,6 +19,8 @@
  *   - its COLLAPSED LINE LIMIT, the lines shown before the has-more fade, or
  *     the UNCAPPED mode (`BUBBLE_UNCAPPED`): always at full height, never a
  *     fade, a scroll or a fold;
+ *   - its MORE SIGNAL, how a collapsed bubble says there is more: the shared
+ *     bottom fade, or the one-line ELLIPSIS (`BUBBLE_MORE_ELLIPSIS`);
  *   - its EXPAND-ONLY chrome: what the reader sees only once the bubble is
  *     opened (a held prompt's details and actions), hidden while collapsed;
  *   - the WORKING wave, which only a prompt can carry: the spec types make a
@@ -33,6 +35,7 @@
 import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS } from "../expand.js";
+import { BUBBLE_MORE_ATTRIBUTE, BUBBLE_MORE_ELLIPSIS, BUBBLE_MORE_FADE } from "../feed/bubble-more.js";
 import { BUBBLE_BOX_CLASS, bubbleBox, isCappedBox } from "../feed/bubble-scroll.js";
 import { stopTicking } from "../feed/ticking.js";
 import {
@@ -68,10 +71,10 @@ export const BUBBLE_VARIANTS = {
 /**
  * A CAPPED bubble's collapsed line limit: the shared feed cap, two lines (a held
  * prompt), one line (a thinking bubble), or none past the header strip (a peer
- * message). Each kind's limit is its own value, never a shared one, so changing
- * one kind's cap never moves another's. A closed set, because the stylesheet
- * maps each value to its line count (`.bubble[data-cap-lines=…]`) and
- * styles.test.ts holds the two together.
+ * message). Each kind states its limit itself, never through another kind's
+ * constant, so changing one kind's cap never moves another's. A closed set,
+ * because the stylesheet maps each value to its line count
+ * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
  */
 export type CappedLines = "feed" | 2 | 1 | 0;
 
@@ -101,6 +104,25 @@ export function isCapped(cap: BubbleCapLines): cap is CappedLines {
 export const BUBBLE_ROLE_ATTRIBUTE = "data-role";
 export const BUBBLE_VARIANT_ATTRIBUTE = "data-variant";
 export const BUBBLE_CAP_ATTRIBUTE = "data-cap-lines";
+export { BUBBLE_MORE_ATTRIBUTE, BUBBLE_MORE_ELLIPSIS, BUBBLE_MORE_FADE };
+
+/**
+ * A capped bubble's MORE SIGNAL (owner rulings, 2026-09-27): the shared
+ * bottom fade, or the ELLIPSIS — the collapsed body clamped to its line by the
+ * stylesheet's ellipsis rule, which ends that line in `…` exactly when
+ * anything is left after it (a wrapped over-long line, a further line, a
+ * further block) and in nothing when it is the whole content, with no fade.
+ * `data-more` carries it.
+ */
+export type BubbleMore = typeof BUBBLE_MORE_FADE | typeof BUBBLE_MORE_ELLIPSIS;
+
+/**
+ * The only line limit the ellipsis is drawn at: ONE line. A clamp counts whole
+ * text lines, and the shared feed cap (27.5 lines, or the 50vh ceiling) is no
+ * whole count, so the spec types make an ellipsis at any other cap
+ * unrepresentable rather than drawn inexactly.
+ */
+export const ELLIPSIS_CAP_LINES = 1 satisfies CappedLines;
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";
@@ -127,9 +149,7 @@ interface BubbleSpecBase {
 }
 
 /** A capped bubble's limit, and the expand-only chrome only it can carry. */
-interface CappedSpec {
-  /** The collapsed line limit. */
-  capLines: CappedLines;
+interface CappedSpecBase {
   /**
    * Chrome after the scroll box shown ONLY while the bubble is expanded (a held
    * prompt's details and actions): it wears `BUBBLE_EXPAND_ONLY_CLASS`, which
@@ -139,15 +159,32 @@ interface CappedSpec {
   expandOnly?: readonly HTMLElement[];
 }
 
-/** An uncapped bubble: always at full height, so it has nothing expand-only. */
+/** A capped bubble that signals more with the shared fade (the default). */
+interface FadeSpec extends CappedSpecBase {
+  /** The collapsed line limit. */
+  capLines: CappedLines;
+  more?: typeof BUBBLE_MORE_FADE;
+}
+
+/** A capped bubble that signals more with the one-line ellipsis. */
+interface EllipsisSpec extends CappedSpecBase {
+  capLines: typeof ELLIPSIS_CAP_LINES;
+  more: typeof BUBBLE_MORE_ELLIPSIS;
+}
+
+/** An uncapped bubble: always at full height, so it has nothing expand-only and no more to signal. */
 interface UncappedSpec {
   capLines: typeof BUBBLE_UNCAPPED;
+  more?: never;
   expandOnly?: never;
 }
 
+/** A bubble's cap: its line limit, and how it signals what the limit hides. */
+export type BubbleCapSpec = FadeSpec | EllipsisSpec | UncappedSpec;
+
 /** A prompt bubble: right rail, blue, and the only role that can wave. */
 export type PromptBubbleSpec = BubbleSpecBase &
-  (CappedSpec | UncappedSpec) & {
+  BubbleCapSpec & {
     role: "prompt";
     variant: PromptVariant;
     /** The daemon's in-flight fact, drawn as the working wave. */
@@ -156,7 +193,7 @@ export type PromptBubbleSpec = BubbleSpecBase &
 
 /** A response bubble: left rail, purple, never waving. */
 export type ResponseBubbleSpec = BubbleSpecBase &
-  (CappedSpec | UncappedSpec) & {
+  BubbleCapSpec & {
     role: "response";
     variant: ResponseVariant;
   };
@@ -208,6 +245,9 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   bubble.setAttribute(BUBBLE_ROLE_ATTRIBUTE, spec.role);
   bubble.setAttribute(BUBBLE_VARIANT_ATTRIBUTE, spec.variant);
   bubble.setAttribute(BUBBLE_CAP_ATTRIBUTE, String(spec.capLines));
+  // The more signal is a CAPPED box's; an uncapped one hides nothing to signal.
+  if (capped) bubble.setAttribute(BUBBLE_MORE_ATTRIBUTE, spec.more ?? BUBBLE_MORE_FADE);
+  else bubble.removeAttribute(BUBBLE_MORE_ATTRIBUTE);
   if (spec.state === undefined) bubble.removeAttribute("data-state");
   else bubble.setAttribute("data-state", spec.state);
   if (spec.role === "prompt") {

@@ -11,6 +11,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  BUBBLE_MORE_ATTRIBUTE,
+  BUBBLE_MORE_ELLIPSIS,
+  BUBBLE_MORE_FADE,
   HAS_MORE_CLASS,
   MORE_BUBBLE_SELECTOR,
   TITLE_FOLD_CLASS,
@@ -67,6 +70,21 @@ function bubbleBox(opts: {
   return scroll;
 }
 
+/**
+ * A collapsed ONE-line bubble in MORE mode whose body the stylesheet's ellipsis
+ * clamp would hold at its one line: its own box (`offsetHeight`) is one line,
+ * and its rendered lines are LINES tall (`scrollHeight`), clamped or not.
+ */
+function clampedBox(more: string, lines: number): HTMLElement {
+  const scroll = bubbleBox({ lines, cap: 1 });
+  scroll.parentElement?.setAttribute(BUBBLE_MORE_ATTRIBUTE, more);
+  const body = scroll.querySelector<HTMLElement>(`.${BUBBLE_BODY_CLASS}`);
+  if (body === null) throw new Error("fixture: no body");
+  Object.defineProperty(body, "offsetHeight", { configurable: true, value: LINE_PX });
+  Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
+  return scroll;
+}
+
 describe("MORE_BUBBLE_SELECTOR: held to the scroll-box class", () => {
   it("targets the shared bubble-scroll class (the literal must not drift)", () => {
     // Arrange / Act / Assert — the inlined literal equals the exported constant.
@@ -119,6 +137,30 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
 
     // Act / Assert
     expect(hidesContentBeyondCap(box)).toBe(true);
+  });
+
+  it("reads an ellipsis bubble's lines past the clamp that holds its body at one line", () => {
+    // Arrange — three rendered lines, the clamped body's own box one line tall.
+    const box = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(true);
+  });
+
+  it("finds nothing hidden on an ellipsis bubble whose one line is its whole content", () => {
+    // Arrange
+    const box = clampedBox(BUBBLE_MORE_ELLIPSIS, 1);
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(false);
+  });
+
+  it("reads a fade bubble's own body box, never its scrollable overflow", () => {
+    // Arrange — an unclamped body is its own lines; an overflow reading would lie.
+    const box = clampedBox(BUBBLE_MORE_FADE, 3);
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(false);
   });
 
   it("refuses a box that holds no body, and records it at error", async () => {
