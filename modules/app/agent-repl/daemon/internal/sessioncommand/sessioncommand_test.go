@@ -46,6 +46,12 @@ func TestParse(t *testing.T) {
 			known: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT},
 		{name: "surrounding whitespace is trimmed", text: "  /clear  ", want: Parsed{Slash: true, Name: "/clear", Known: true},
 			known: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR},
+		{name: "a newline ends the name as the vendor's CLI reads it", text: "/compact\nkeep the plan",
+			want:  Parsed{Slash: true, Name: "/compact", Arg: "keep the plan", Known: true},
+			known: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT},
+		{name: "a tab ends the name as the vendor's CLI reads it", text: "/compact\tkeep the plan",
+			want:  Parsed{Slash: true, Name: "/compact", Arg: "keep the plan", Known: true},
+			known: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT},
 		{name: "an unknown command", text: "/deploy-everything now", want: Parsed{Slash: true, Name: "/deploy-everything", Arg: "now"}},
 	}
 	for _, tt := range tests {
@@ -74,6 +80,7 @@ func TestContextCut(t *testing.T) {
 		{name: "a bare /compact", text: "/compact", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, ok: true},
 		{name: "/compact with instructions", text: "/compact foo bar", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, arg: "foo bar", ok: true},
 		{name: "a bare /clear", text: "/clear", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, ok: true},
+		{name: "/compact with instructions on the next line", text: "/compact\nfoo bar", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, arg: "foo bar", ok: true},
 		{name: "/clear with trailing text, which the schema says it does not take", text: "/clear the table"},
 		{name: "a longer word that begins with the literal", text: "/compacting"},
 		{name: "the literal not at the start", text: "please /compact"},
