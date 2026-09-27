@@ -935,9 +935,9 @@ Two mutations report stages today and they do NOT work the same way:
 Each verb takes its reporter as a proto-free interface (`CreateProgress`,
 `OpenProgress`) so the verb layer never names a wire type; the server maps the
 verb's own stage vocabulary onto the wire (a create's onto its own
-`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto the
-`WorkspaceOpenStage` enum), and an unmapped stage is logged at ERROR and NOT
-relayed rather than sent unset or as UNSPECIFIED. A stage is reported
+`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto its own
+`WorkspaceOpenStage` oneof arm on `entered_stage`), and an unmapped stage is
+logged at ERROR and NOT relayed rather than sent with its oneof unset. A stage is reported
 only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
