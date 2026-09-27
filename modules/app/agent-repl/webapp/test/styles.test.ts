@@ -2721,7 +2721,7 @@ function rgbOf(block: string, token: string): [number, number, number] {
 /** The spread between an RGB triple's strongest and weakest channel. */
 const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
 
-describe("the held prompt's fill: much more grey than blue", () => {
+describe("the held prompt's tint: much more grey than blue", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", () => darkThemeBlock()],
@@ -2750,11 +2750,57 @@ describe("the held prompt's fill: much more grey than blue", () => {
     expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
   });
 
-  it("is the one background the held variant sets", () => {
+});
+
+/**
+ * THE HELD FILL IS NEARLY TRANSPARENT (owner ruling, 2026-09-27): 5% of the
+ * held tint over 95% of the feed's background, mixed from the two tokens so
+ * each theme's own pair decides it and no resulting hex is ever written down.
+ */
+describe("the held prompt's fill: 5% of the tint over the feed", () => {
+  /** The held fill the mix yields over BLOCK's tokens, channel by channel. */
+  const fillOver = (block: string): [number, number, number] => {
+    const tint = rgbOf(block, "--held-prompt-bg");
+    const feed = rgbOf(block, "--bg");
+    return [0, 1, 2].map((i) => 0.05 * tint[i] + 0.95 * feed[i]) as [number, number, number];
+  };
+
+  it("mixes the held variant's fill from the tint and the feed background", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
-    expect(rule).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)/);
+    expect(rule).toMatch(/--bubble-bg:\s*color-mix\(in srgb, var\(--held-prompt-bg\) 5%, var\(--bg\)\)\s*;/);
+  });
+
+  it("hardcodes no fill color of its own", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("sits within two steps of the feed background on every channel in the %s theme", (_theme, block) => {
+    // Arrange
+    const feed = rgbOf(block(), "--bg");
+    // Act
+    const fill = fillOver(block());
+    // Assert
+    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 2)).toEqual([true, true, true]);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("still differs from the feed background in the %s theme", (_theme, block) => {
+    // Arrange
+    const feed = rgbOf(block(), "--bg");
+    // Act
+    const fill = fillOver(block());
+    // Assert
+    expect(fill.some((channel, i) => Math.round(channel) !== feed[i])).toBe(true);
   });
 });
 
