@@ -18,7 +18,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { installClickExpand } from "../expand.js";
+import { expandedSectionAt, installClickExpand } from "../expand.js";
 import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
@@ -126,7 +126,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // wheel redirects to the feed. Without it, a section the feed scrolled under
   // a still cursor captures the next gesture and scrolling gets stuck in the
   // bubble (scroll.ts's installIntentScroll). No box, no sections to gate.
-  const intentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
+  // An OPEN (expanded) section is the exception: it keeps its whole wheel, and
+  // nothing chains from it to the feed (expand.ts says which sections are open).
+  const intentScroll =
+    scrollBox === null ? null : installIntentScroll(scrollBox, (el) => expandedSectionAt(el, scrollBox));
   // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
   // band out to ~5 viewport heights so a row within it lays out at its true
   // height before the reader scrolls to it — the cure for the first-scroll
@@ -152,7 +155,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // pointermove writes; calling it here on EXPAND ONLY (never on collapse)
   // arms the just-expanded section immediately, so the wheel scrolls it
   // without requiring the cursor to move first.
-  installClickExpand(host, undefined, (section, expanded) => {
+  //
+  // The same hook runs when the page's AutoCollapse owner (expand.ts) closes an
+  // open section the reader scrolled away from or left, since that close goes
+  // through the one collapse a click uses.
+  const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
     refreshHasMore(section);
     // A card's title fold follows the card's fold (title-fold.ts), so a toggle
     // re-measures the titles it owns as well as the section itself.
@@ -556,6 +563,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     watch?.cancel();
     unobserve?.();
     intentScroll?.uninstall();
+    uninstallExpand();
     uninstallClear?.();
     overscan?.dispose();
     root.dispose();

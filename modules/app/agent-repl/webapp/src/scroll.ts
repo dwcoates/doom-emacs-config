@@ -787,9 +787,43 @@ const domMetrics = (el: HTMLElement): ScrollMetrics => ({
 });
 
 /**
+ * True when a scroll box at M can still move in DELTA_Y's direction: down while
+ * content remains below its viewport, up while it is scrolled off the top.
+ */
+export function movesToward(m: ScrollMetrics & { scrollTop: number }, deltaY: number): boolean {
+  if (!isScrollBox(m)) return false;
+  if (deltaY > 0) return m.scrollTop + m.clientHeight < m.scrollHeight - 1;
+  if (deltaY < 0) return m.scrollTop > 0;
+  return false;
+}
+
+/**
+ * True when some scroll box from START up to and including SECTION can still
+ * move in DELTA_Y's direction — the boxes a wheel inside SECTION may scroll
+ * without leaving it. SECTION must contain START: a section that does not is a
+ * caller's broken invariant, and fails loudly rather than reading as "stuck".
+ */
+export function sectionTakesDelta(start: HTMLElement, section: HTMLElement, deltaY: number): boolean {
+  for (let node: HTMLElement | null = start; node !== null; node = node.parentElement) {
+    if (movesToward({ ...domMetrics(node), scrollTop: node.scrollTop }, deltaY)) return true;
+    if (node === section) return false;
+  }
+  throw new Error("scroll: sectionTakesDelta was handed a section that does not contain its start");
+}
+
+/**
+ * The open (expanded) section a wheel at an element lands inside, or null. The
+ * feed supplies it from expand.ts (`expandedSectionAt`), which owns what "open"
+ * means; this module only contains the wheel.
+ */
+export type ExpandedSectionAt = (el: HTMLElement) => HTMLElement | null;
+
+/**
  * Arm intent-based inner scrolling on `feed` (the scrollable feed region).
  *
- * A wheel over a NON-armed inner scroll box is redirected to the feed; a
+ * A wheel inside an OPEN (expanded) section — `expandedAt` answers which — is
+ * contained in it and never moves the feed (see `onWheel`). Otherwise, a
+ * wheel over a NON-armed inner scroll box is redirected to the feed; a
  * wheel over the armed box, or over no inner box at all, is the browser's.
  * A section arms ONLY by a deliberate pointer act:
  *
@@ -821,7 +855,10 @@ const domMetrics = (el: HTMLElement): ScrollMetrics => ({
  * expand). It resolves the same innermost-scroll-box lookup a pointer event
  * would, from any element inside (or equal to) that box.
  */
-export function installIntentScroll(feed: HTMLElement): { uninstall: () => void; arm: (el: Element) => void } {
+export function installIntentScroll(
+  feed: HTMLElement,
+  expandedAt: ExpandedSectionAt,
+): { uninstall: () => void; arm: (el: Element) => void } {
   const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
     innerScrollerAt(target instanceof HTMLElement ? target : null, feed, domMetrics);
 
@@ -832,6 +869,19 @@ export function installIntentScroll(feed: HTMLElement): { uninstall: () => void;
   let armed: HTMLElement | null = null;
 
   const onWheel = (e: WheelEvent): void => {
+    // AN OPEN SECTION KEEPS ITS WHEEL, ALL OF IT (owner ruling, 2026-09-27).
+    // A wheel inside an expanded box is that box's, armed or not, and never
+    // reaches the feed: while a box inside the section can still move, the
+    // browser scrolls it (and `overscroll-behavior: contain` on the open box
+    // keeps a gesture's overshoot from chaining out); once none can — the box
+    // at its top or bottom edge, or short enough not to scroll at all — the
+    // wheel is consumed here, so there is nothing left for the feed to take.
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    const open = target === null ? null : expandedAt(target);
+    if (target !== null && open !== null) {
+      if (e.deltaY !== 0 && !sectionTakesDelta(target, open, e.deltaY)) e.preventDefault();
+      return;
+    }
     const delta = armedWheelAction({
       armed,
       wheelScroller: scrollerUnder(e.target),

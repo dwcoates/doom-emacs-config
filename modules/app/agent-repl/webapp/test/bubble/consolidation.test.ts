@@ -104,9 +104,17 @@ describe("no bubble kind carries its own copy of the shared logic", () => {
   });
 
   it("toggles a fold open only in expand.ts", () => {
-    expect(sourcesMatching(/\btoggleExpanded\(|classList\.(?:add|toggle)\(\s*EXPANDED_CLASS/)).toEqual([
+    expect(sourcesMatching(/\btoggleSection\(|classList\.(?:add|toggle)\(\s*EXPANDED_CLASS/)).toEqual([
       "expand.ts",
     ]);
+  });
+
+  it("collapses a fold only in expand.ts", () => {
+    expect(sourcesMatching(/classList\.remove\(\s*EXPANDED_CLASS/)).toEqual(["expand.ts"]);
+  });
+
+  it("collapses a fold at exactly one site, the one collapse every trigger shares", () => {
+    expect(SOURCES.get("expand.ts")?.match(/classList\.remove\(\s*EXPANDED_CLASS/g)).toHaveLength(1);
   });
 
   it.each(KINDS)("has %s arm no click toggle of its own", (kind) => {
