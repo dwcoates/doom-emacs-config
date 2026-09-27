@@ -850,6 +850,22 @@ func TestBoundHides(t *testing.T) {
 			name: "later plane is unambiguously after the cut, kept",
 			row:  rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeHistory, seq: 5}, want: false,
 		},
+		{
+			name: "a fork's inherited row precedes the fork's own cut however early it was drawn, hidden",
+			row:  rowRank{plane: planeInherited, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+		},
+		{
+			name: "a fork's ported row precedes the fork's own replayed cut, hidden",
+			row:  rowRank{plane: planePorted, seq: 2}, bound: rowRank{plane: planeHistory, seq: 5}, want: true,
+		},
+		{
+			name: "a ported row drawn before an inherited cut keeps the seq rule, kept",
+			row:  rowRank{plane: planePorted, seq: 2}, bound: rowRank{plane: planeInherited, seq: 5}, want: false,
+		},
+		{
+			name: "the fork's own row is never hidden by an inherited cut",
+			row:  rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeInherited, seq: 9}, want: false,
+		},
 	}
 
 	for _, tc := range tests {

@@ -41,6 +41,10 @@ type resolver struct {
 	tokenSeq uint64
 	// loggers caches each workspace's resolved durable logger.
 	loggers map[ids.WorkspaceID]dlog.Logger
+	// lineage is what each workspace's descent is known to be: whether it is a
+	// fork, and which turns are its own (lineage.go). It has a mutex of its
+	// own because the reads that fill it run outside mu.
+	lineage lineages
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -204,6 +208,11 @@ type wsState struct {
 	replayPromptDrawn bool
 	replayAtFloor     bool
 	replayUnstamped   int
+	// inherited is the attribution a fork's inherited past is drawn under,
+	// carried from one inherited entry to the next (lineage.go). It is kept
+	// apart from the fork's own attribution so the copied conversation can
+	// never become the turn the fork is running.
+	inherited inheritedStance
 	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
 	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
 	// turn is interrupted to make the cut, and drawing that interrupt as a
@@ -326,11 +335,30 @@ const (
 	// planePorted is a fork's ported parent conversation: older than anything
 	// this workspace has of its own, by construction.
 	planePorted rowPlane = iota
+	// planeInherited is the store's copy of the conversation a fork inherited
+	// — its book's entries of turns the fork never opened — whenever it
+	// arrives: on a page, or live while the copy is still being ingested
+	// (lineage.go). Older than anything the fork produced, by construction.
+	planeInherited
 	// planeHistory is the store's own replayed history.
 	planeHistory
 	// planeLive is everything drawn as it happens.
 	planeLive
 )
+
+// replayed reports whether rows drawn in this plane are a replay of settled
+// history — a page, or a fork's inherited past — rather than the conversation
+// as it happens.
+func (p rowPlane) replayed() bool {
+	return p == planeHistory || p == planeInherited
+}
+
+// inheritedPast reports whether rows drawn in this plane are the conversation
+// a fork inherited from its parent — its ported prompts or the store's copy —
+// and so precede everything the fork produced.
+func (p rowPlane) inheritedPast() bool {
+	return p == planePorted || p == planeInherited
+}
 
 // String names a plane for a log record. The feed orders by plane THEN seq, so
 // a row's plane and seq are the whole story of where it landed relative to
@@ -339,6 +367,8 @@ func (p rowPlane) String() string {
 	switch p {
 	case planePorted:
 		return "ported"
+	case planeInherited:
+		return "inherited"
 	case planeHistory:
 		return "history"
 	case planeLive:
@@ -893,7 +923,18 @@ func (r *resolver) holdPushes(s *wsState) func() {
 // sidecar forwards late — would be pushed to every tail, which appends by
 // arrival and so lands it BELOW the divider on screen, where nothing retracts
 // it.
+//
+// A FORK'S INHERITED PAST IS NEVER PUSHED (lineage.go): it sorts above every
+// row the fork has of its own, so appended by arrival it would land below them
+// — and an inherited cut would truncate the fork's own conversation off the
+// reader's screen. Pages serve it where it belongs.
 func (r *resolver) withheldFromPush(s *wsState, f *feedState, id string) bool {
+	if rank, ok := f.rank[id]; ok && rank.plane == planeInherited {
+		r.logger(s.id).Debug("daemon.feed.push_withheld_inherited",
+			"a row of a fork's inherited past was stored but kept off the live push; pages serve it",
+			dlog.Context{"feed": f.key, "row": id})
+		return true
+	}
 	return r.pushWithheldByBound(s, f, id)
 }
 

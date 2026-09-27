@@ -124,6 +124,11 @@ type harness struct {
 	// closesErr fails that read.
 	closes    map[ids.TurnID]wsm.RecordedClose
 	closesErr error
+	// owned is the set of turns the workspace recorded as its own; nil
+	// answers every turn owned (a test that is not about a fork's lineage).
+	// ownedErr fails the read.
+	owned    map[ids.TurnID]bool
+	ownedErr error
 	// faults is the fake fault record every raise in this resolver lands in.
 	faults *fakeFaults
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
@@ -197,6 +202,16 @@ func newHarness(t *testing.T) *harness {
 				}
 			}
 			return out, h.closesErr
+		},
+		OwnedTurns: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]bool, error) {
+			if h.ownedErr != nil {
+				return nil, h.ownedErr
+			}
+			out := map[ids.TurnID]bool{}
+			for _, turn := range turns {
+				out[turn] = h.owned == nil || h.owned[turn]
+			}
+			return out, nil
 		},
 		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
 		AfterFunc: h.clock.AfterFunc,
@@ -1113,6 +1128,7 @@ func TestRowPlaneNames(t *testing.T) {
 		want  string
 	}{
 		{planePorted, "ported"},
+		{planeInherited, "inherited"},
 		{planeHistory, "history"},
 		{planeLive, "live"},
 	}
