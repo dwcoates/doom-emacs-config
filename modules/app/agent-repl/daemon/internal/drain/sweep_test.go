@@ -124,6 +124,25 @@ func TestSweepReleasesTheHibernationLease(t *testing.T) {
 	}
 }
 
+// TestASweepCutShortStillReleasesTheHibernationLease pins the hibernation
+// lease's lifetime against the daemon leaving mid-hibernation: its release is
+// written on a context the sweep's cancellation cannot refuse.
+func TestASweepCutShortStillReleasesTheHibernationLease(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	ctx, cancel := context.WithCancel(context.Background())
+	h.stand.onHibernate = cancel
+
+	// Act
+	_, _ = h.c.Sweep(ctx, instant)
+
+	// Assert
+	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("Lease after the cut-short sweep = (held %v, %v), want the hibernation lease released", held, err)
+	}
+}
+
 func TestSweepLeavesASessionEngagedInsideTheCutoffAlone(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

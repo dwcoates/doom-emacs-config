@@ -588,6 +588,35 @@ func TestFireReleasesTheDrainHoldsBeforeExiting(t *testing.T) {
 	}
 }
 
+// TestAFireCutShortReleasesTheDrainHoldsItTook pins the fire's hold lifetime:
+// a freeness wait ended by the daemon leaving returns before the ordinary
+// release, and the holds it took are released anyway -- on a context the
+// cancellation that ended the wait cannot refuse.
+func TestAFireCutShortReleasesTheDrainHoldsItTook(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+	h.freeness.Gate(ws)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.fire(ctx, schedule) }()
+	<-h.freeness.calls
+	cancel()
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("fire = %v, want the cancelled wait", err)
+	}
+	if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+		t.Fatalf("Lease after the cut-short fire = (held %v, %v), want the drain hold released", held, dbErr)
+	}
+}
+
 func TestResolveIdleCutoffLetsTheEnvironmentBeatTheFlag(t *testing.T) {
 	// Arrange
 	t.Setenv(IdleCutoffEnv, "250")
