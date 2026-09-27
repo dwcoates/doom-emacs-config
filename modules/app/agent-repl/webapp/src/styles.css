@@ -178,7 +178,6 @@
      because the token is the vocabulary other surfaces are written in. Reads
      clearly against the blue --user fill in this theme; the dark theme lifts
      it the same way --final-response lifts for its own dark fill. */
-  --prompt-live-border: #c084fc;
   /* THE AGENT-TO-AGENT PROMPT'S BORDER (owner ruling, 2026-09-23): the one
      amber every prompt one agent addresses to another wears — the
      agent-addressed prompt row (the lead's or any agent's send, and its
@@ -376,7 +375,6 @@
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
-    --prompt-live-border: #d8b4fe;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --agent-prompt-border: #fbbf24;
     /* Brighter amber for the dark theme, as the other state borders lift. */
@@ -1568,11 +1566,8 @@ pre {
    keyed on `data-wave`, so the turn resolving takes nothing away, and nothing
    here animates. A HELD prompt in the tray has not been received and wears NO
    border (only the base rule's transparent reservation).
-   The USER prompt wears the light purple, recoloring the 0.3px the base rule
-   already reserves, so it never reflows the feed. */
-.bubble[data-role="prompt"][data-variant="user"] {
-  border-color: var(--prompt-live-border);
-}
+   The USER's own prompt wears NO border, ever (owner ruling, 2026-09-27,
+   retiring the light purple): only an agent-to-agent prompt is bordered. */
 /* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
    lead or any agent to another, on either end) and the peer message — is the
    same blue prompt bubble in the one amber. */
