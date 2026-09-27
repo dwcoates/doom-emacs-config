@@ -98,6 +98,12 @@ const (
 	// worktree (`git worktree add`), the step a cancelled request context used
 	// to kill mid-run.
 	CreateStageCreatingWorktree
+	// CreateStageStartingSession: the daemon is starting the workspace's
+	// session — registering the workspace, copying a fork's transcript,
+	// spawning the shim and bringing the vendor session up, then submitting
+	// the initial prompt when there is one. Reported by EVERY create that gets
+	// past the worktree, and ended by the create's terminal outcome.
+	CreateStageStartingSession
 )
 
 // CreateProgress receives a Create's stage transitions in order. The terminal
