@@ -819,6 +819,13 @@ describe("the mocked vendor's files, at the ruled paths", () => {
     const stream = await openAgentStream(shim);
 
     await runTurn(shim, stream, "t1", "!bash-detach");
+    // THE RUN OUTLIVES THE TURN, so the turn's end says nothing about the
+    // spool. The shim's own terminal for the run is the happens-before: the
+    // vendor writes the EXIT line, then notifies, and the shim writes the
+    // terminal from that notification.
+    await shim.store?.entryLanded(
+      (entry) => entry.upsertKey.startsWith("bash:") && entry.upsertKey.endsWith(":terminal"),
+    );
 
     const spools = readSpools(shim.dirs, started.vendorSessionId);
     expect(spools.length).toBeGreaterThan(0);
