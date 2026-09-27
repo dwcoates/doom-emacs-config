@@ -15,7 +15,7 @@
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
-import { placeChildren } from "../dom.js";
+import { placeChildren, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
@@ -194,7 +194,7 @@ function scrollbarGutterPx(body: HTMLElement, view: Window): number {
   const borderPx = computedPx(scroll, s, "borderLeftWidth") + computedPx(scroll, s, "borderRightWidth");
   const offsetPx = scroll.offsetWidth;
   const clientPx = scroll.clientWidth;
-  const gutterPx = offsetPx - clientPx - borderPx;
+  const gutterPx = scrollbarWidthPx(scroll, borderPx);
   if (!Number.isFinite(gutterPx) || gutterPx < 0) {
     unmeasurable("the scroll box's scrollbar gutter measured negative or not finite", {
       offset_px: offsetPx,
