@@ -164,8 +164,24 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
 	address := successor.Address()
-	fields = merge(fields, dlog.Context{"successor": address})
-	c.log.Info(opHandover, "the successor is up in joining mode", fields)
+	fields = merge(fields, dlog.Context{"successor": address, "successor_pid": successor.PID()})
+	// NOTHING IS ANNOUNCED, QUIESCED OR TRANSFERRED TO A SUCCESSOR THAT HAS
+	// NOT ANSWERED. Its address report only says its listener is bound; the
+	// 2026-09-27 successor bound, reported, and died 3ms later on a state
+	// layout it could not read, and every workspace handed to it was left
+	// held with no daemon serving it. So the handover stops here, before a
+	// single workspace is touched, unless the successor answers a health
+	// probe -- and a successor that dies first is named with its exit.
+	ready, cancelReady := context.WithTimeout(ctx, c.deps.ReadyBound)
+	err = successor.Ready(ready)
+	cancelReady()
+	if err != nil {
+		c.log.Error(opHandover, "the successor never proved it was serving; the handover is abandoned before any workspace was quiesced or announced, and this daemon keeps serving",
+			withCause(merge(fields, dlog.Context{"ready_bound": c.deps.ReadyBound.String()}), err))
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, fmt.Errorf("rollout: handover: the successor never proved it was serving: %w", err)
+	}
+	c.log.Info(opHandover, "the successor answered its health probe; it is serving in joining mode", fields)
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {

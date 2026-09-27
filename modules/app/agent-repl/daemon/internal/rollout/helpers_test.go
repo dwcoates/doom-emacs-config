@@ -167,6 +167,10 @@ type fakeSpawner struct {
 	// successor is answered, so a test observes what a booting successor
 	// would find.
 	onSpawn func()
+	// readyErr is what every successor's Ready answers; nil proves it serving.
+	readyErr error
+	// readies counts the Ready calls.
+	readies int
 	mu      sync.Mutex
 	told    []string
 	spawned []*fakeSuccessor
@@ -229,6 +233,25 @@ type fakeSuccessor struct {
 }
 
 func (c *fakeSuccessor) Address() string { return c.address }
+
+// fakeSuccessorPID is the pid every fake successor answers.
+const fakeSuccessorPID = 51345
+
+func (c *fakeSuccessor) PID() int { return fakeSuccessorPID }
+
+func (c *fakeSuccessor) Ready(context.Context) error {
+	c.spawner.mu.Lock()
+	defer c.spawner.mu.Unlock()
+	c.spawner.readies++
+	return c.spawner.readyErr
+}
+
+// Readies counts the readiness waits the handover asked for.
+func (s *fakeSpawner) Readies() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readies
+}
 
 func (c *fakeSuccessor) Stop(context.Context) error {
 	c.spawner.mu.Lock()

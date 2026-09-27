@@ -132,6 +132,11 @@ type ProcessSpawner struct {
 	// kernel was told to kill that is still not reaped past it is reported as
 	// possibly alive, never assumed gone.
 	ReapBound time.Duration
+	// Probe asks a reported address for a health answer; see Successor.Ready.
+	Probe HealthProbe
+	// ProbeEvery and ProbeAttempt are the readiness wait's cadence and the
+	// bound on one probe.
+	ProbeEvery, ProbeAttempt time.Duration
 }
 
 // The production spawner's stop windows.
@@ -151,6 +156,10 @@ func NewProcessSpawner(exe, stateDir string) *ProcessSpawner {
 		Timeout:   30 * time.Second,
 		StopGrace: DefaultSuccessorStopGrace,
 		ReapBound: DefaultSuccessorReapBound,
+
+		Probe:        DaemonHealthProbe,
+		ProbeEvery:   readyProbeEvery,
+		ProbeAttempt: readyAttemptBound,
 	}
 }
 
@@ -210,20 +219,24 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 		return nil, fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
 	}
 	child := &processSuccessor{
-		process:   cmd.Process,
-		exited:    make(chan struct{}),
-		stopGrace: s.StopGrace,
-		reapBound: s.ReapBound,
+		process:      cmd.Process,
+		exited:       make(chan struct{}),
+		stopGrace:    s.StopGrace,
+		reapBound:    s.ReapBound,
+		probe:        s.Probe,
+		probeEvery:   s.ProbeEvery,
+		probeAttempt: s.ProbeAttempt,
 	}
 	// The successor OUTLIVES this process by design, so nothing blocks on its
 	// exit; this goroutine only reaps it and marks the reap, which is what a
 	// Stop waits on as its proof that the process is gone.
 	//
-	// Wait's error is the child's exit status, which says nothing to act on
-	// here: a successor that exits on its own is reported by what it no longer
-	// answers, and one this daemon stopped was expected to exit on a signal.
+	// Wait's error is the child's EXIT, kept for the one reader that needs
+	// it: a successor that ends before it proves it is serving is reported
+	// with it (Ready). It is written before exited closes, so every reader
+	// that has seen the close sees it.
 	go func() {
-		_ = cmd.Wait()
+		child.waitErr = cmd.Wait()
 		close(child.exited)
 	}()
 
@@ -260,10 +273,36 @@ type processSuccessor struct {
 
 	stopGrace time.Duration
 	reapBound time.Duration
+
+	probe                    HealthProbe
+	probeEvery, probeAttempt time.Duration
+	// waitErr is the reap's answer, readable once exited has closed.
+	waitErr error
 }
 
 // Address implements Successor.
 func (p *processSuccessor) Address() string { return p.address }
+
+// PID implements Successor.
+func (p *processSuccessor) PID() int { return p.process.Pid }
+
+// Ready implements Successor: a DaemonHealth round trip on the reported
+// address, or the process's own end, whichever comes first.
+func (p *processSuccessor) Ready(ctx context.Context) error {
+	if p.probe == nil {
+		return fmt.Errorf("rollout: the successor (pid %d) has no health probe to prove it is serving", p.process.Pid)
+	}
+	return awaitAnswer(ctx, p.probe, p.address, p.exited, p.exitError, p.probeEvery, p.probeAttempt)
+}
+
+// exitError renders the reaped exit. Called only after exited has closed.
+func (p *processSuccessor) exitError() error {
+	exit := "exit status 0"
+	if p.waitErr != nil {
+		exit = p.waitErr.Error()
+	}
+	return &SuccessorExitedError{PID: p.process.Pid, Exit: exit}
+}
 
 // Stop implements Successor: SIGTERM, the grace, SIGKILL, and the reap.
 //
