@@ -12,8 +12,8 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
+| `fix/session-acts-never-classified` | `~/.config/doom-worktrees/session-acts-never-classified` | `/clear` and `/compact [text]` are always queued and never classified: one daemon predicate ahead of the classifier, covering the held-prompt edit path, with an INFO record. | `a57ed7a08da44bf76` | 09-27 |
 | `style/held-prompt-quiet-one-line` | `~/.config/doom-worktrees/held-prompt-quiet-one-line` | The held prompt's fill is 5% tint over 95% of the feed background. Collapsed, it shows one line with an ellipsis when there's more, and no fade. ADDED: thinking bubbles use the same ellipsis instead of a fade, keeping their line limit (this replaces the lead's half-line fade). | `a8caa5c6cbc418cb1` | 09-27 |
-| `fix/teardown-lands-before-kill` | `~/.config/doom-worktrees/teardown-lands-before-kill` | Closing the current workspace lands on the survivor first, then kills (never Doom's `+workspace/kill`, whose fallback put the splash over the landing workspace's panels). The roster teardown uses the same order, with INFO records and a source-scan guard. | `aba122e666cbbf988` | 09-27 |
 
 
 ## Still waiting on the owner
@@ -23,6 +23,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- 09-27: a teardown lands the user first, then kills a persp that is no longer current, never Doom's `+workspace/kill` (whose fallback put the splash over the landing workspace's panels); INFO records for the landing, kill and panel-restore decisions; ERT 4798 green; hot-loaded into Emacs (`fix/teardown-lands-before-kill`). Also 09-27: `SPC j x` confirms y/n; user prompts carry no border; the thinking fade is half a line (being replaced by the ellipsis agent). The row-ordering plan is at `2026-09-27-feed-row-order-plan.md`.
 - 09-25: the store's `live_work` lineage uses real indexes, built in place on open (no version bump, no nuke), and every hot-path plan is asserted free of AUTOMATIC indexes (`perf/store-live-work-indexes`; the store suite is green).
 - 09-25: `feat/sidecar-watches-active-workspaces` (the sidecar watches only active workspaces) and `fix/sidecar-writes-lineage` (a copied subagent keeps its spawner lineage) were merged by the lead. The lineage test was fixed for the required write class, and the store and sidecar suites are green.
 - 09-24: every turn ends visibly (one close door), and many handover, relaunch and perf fixes (see `git log`).
