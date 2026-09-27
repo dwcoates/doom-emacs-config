@@ -185,8 +185,8 @@ func TestARefusedContextCutClearsTheUninterruptibleMark(t *testing.T) {
 	if err == nil {
 		t.Fatal("a refused context cut must be surfaced")
 	}
-	if got := h.q.state(theWorkspace).uninterruptible; got != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		t.Fatalf("uninterruptible = %s, want it cleared", got)
+	if cut, ok := h.q.runningCut(theWorkspace); ok {
+		t.Fatalf("running cut = %+v, want it retired", cut)
 	}
 }
 
@@ -306,5 +306,202 @@ func TestAContextCutTellsTheFooterWhatItCarries(t *testing.T) {
 				t.Fatalf("footer act = %v, want %v", turns[0].Act, tc.want)
 			}
 		})
+	}
+}
+
+// --- nothing overtakes a running /clear or /compact ------------------------
+
+// cutRunsWithAnInterjectingPromptHeld starts a context cut down the one path,
+// then submits a prompt the classifier would mark interject while it runs.
+func cutRunsWithAnInterjectingPromptHeld(t *testing.T, h *harness, kind string) {
+	t.Helper()
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: kind, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	h.watcher.running("cut-1")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+}
+
+var contextCutKinds = []struct {
+	name string
+	kind string
+}{
+	{name: "/compact", kind: ActCompact},
+	{name: "/clear", kind: ActClear},
+}
+
+func TestAPromptHeldDuringAContextCutDoesNotInterruptIt(t *testing.T) {
+	for _, tt := range contextCutKinds {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			cutRunsWithAnInterjectingPromptHeld(t, h, tt.kind)
+			// Assert
+			if killed := h.sender.killed(); len(killed) != 0 {
+				t.Fatalf("killed = %v, want the session act left to run", killed)
+			}
+		})
+	}
+}
+
+func TestAPromptHeldDuringAContextCutIsDrawnAsAHeldRow(t *testing.T) {
+	for _, tt := range contextCutKinds {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			cutRunsWithAnInterjectingPromptHeld(t, h, tt.kind)
+			// Assert
+			h.holds.mu.Lock()
+			defer h.holds.mu.Unlock()
+			last := h.holds.pushes[len(h.holds.pushes)-1]
+			if len(last) != 1 || last[0].Turn != "t1" || last[0].Tombstone != nil {
+				t.Fatalf("tray = %+v, want the prompt standing as a held row", last)
+			}
+		})
+	}
+}
+
+func TestAPromptHeldDuringAContextCutIsDeliveredAfterIt(t *testing.T) {
+	for _, tt := range contextCutKinds {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			cutRunsWithAnInterjectingPromptHeld(t, h, tt.kind)
+			// Act
+			h.watcher.idle()
+			h.q.OnTurnEnded(theWorkspace, "cut-1", wsm.CloseCompleted)
+			// Assert
+			if started := h.sender.started(); len(started) != 2 || started[0] != "cut-1" || started[1] != "t1" {
+				t.Fatalf("started = %v, want the act and then the held prompt", started)
+			}
+		})
+	}
+}
+
+// TestAUserInterruptOfACompactStillEndsItAndDeliversWhatWaited pins that the
+// guard is on INTERJECTION only: the user's own interrupt (C-c C-k, or the
+// UI's) ends the act like any turn, and the held prompt then goes.
+func TestAUserInterruptOfACompactStillEndsItAndDeliversWhatWaited(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cutRunsWithAnInterjectingPromptHeld(t, h, ActCompact)
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "cut-1", wsm.CloseKilled)
+	// Assert
+	if started := h.sender.started(); len(started) != 2 || started[1] != "t1" {
+		t.Fatalf("started = %v, want the held prompt delivered once the interrupt ended the act", started)
+	}
+}
+
+// actQueuedBehindARunningTurn queues a context cut behind an ordinary running
+// turn, with a prompt already standing behind that turn.
+func actQueuedBehindARunningTurn(t *testing.T, h *harness) {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+}
+
+func TestATurnEndThatStartsAQueuedCompactDeliversNoHeldPromptIntoIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	actQueuedBehindARunningTurn(t, h)
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "cut-1" {
+		t.Fatalf("started = %v, want the compaction alone", started)
+	}
+}
+
+func TestAPromptKeptBehindAStartedCompactIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	actQueuedBehindARunningTurn(t, h)
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opTurnEnded && r.Context["session_act_turn"] == "cut-1" &&
+			r.Context["session_act"] == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT.String() {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an info naming the running act and its turn", h.log.Records())
+}
+
+func TestAStillClassifyingPromptIsNotDeliveredIntoACompactTheTurnEndStarted(t *testing.T) {
+	// Arrange: the prompt's verdict is still with the model when the turn
+	// ends and the queued /compact starts.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	release := h.judge.hold()
+	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-h.judge.asking()
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	h.watcher.running("cut-1")
+	release()
+	h.q.waitForClassifications()
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "cut-1" {
+		t.Fatalf("started = %v, want the compaction alone", started)
+	}
+}
+
+func TestActsQueuedAfterAContextCutWaitForItsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	for _, act := range []Act{{Kind: ActCompact, Turn: "cut-1"}, {Kind: ActSetModel, Value: "opus"}} {
+		if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, act); err != nil {
+			t.Fatalf("SubmitSessionAct: %v", err)
+		}
+	}
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if len(h.sender.models) != 0 {
+		t.Fatalf("models = %v, want the model change held behind the running compaction", h.sender.models)
+	}
+}
+
+func TestActsQueuedAfterAContextCutRunAtItsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	for _, act := range []Act{{Kind: ActCompact, Turn: "cut-1"}, {Kind: ActSetModel, Value: "opus"}} {
+		if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, act); err != nil {
+			t.Fatalf("SubmitSessionAct: %v", err)
+		}
+	}
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	h.watcher.running("cut-1")
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "cut-1", wsm.CloseCompleted)
+	// Assert
+	if len(h.sender.models) != 1 || h.sender.models[0] != "opus" {
+		t.Fatalf("models = %v, want the model change run at the compaction's end", h.sender.models)
 	}
 }
