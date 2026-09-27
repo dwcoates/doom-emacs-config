@@ -48,6 +48,7 @@
      (:accepted . "the daemon accepted the workspace create…")
      (:deriving-name . "deriving the workspace's name…")
      (:creating-worktree . "creating the workspace's git worktree…")
+     (:starting-session . "starting the workspace's session…")
      (:completed . "workspace created: %s")
      (:failed . "workspace creation FAILED: %s"))
     (:open

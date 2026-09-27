@@ -222,7 +222,7 @@ as progress."
 (ert-deftest agent-repl-test-mp-create-states-every-daemon-stage ()
   "Every stage the daemon's WorkspaceCreateStage enum can push has a sentence."
   ;; Arrange / Act / Assert.
-  (dolist (stage '(:deriving-name :creating-worktree))
+  (dolist (stage '(:deriving-name :creating-worktree :starting-session))
     (should (alist-get stage (alist-get :create agent-repl-workspace-progress-phases)))))
 
 (ert-deftest agent-repl-test-mp-create-states-the-daemon-s-acceptance ()
@@ -233,6 +233,14 @@ the daemon's stages, created or FAILED -- reaches the minibuffer."
                (lambda () (agent-repl-workspace-progress-report :create :accepted)))))
     ;; Assert.
     (should (equal said '("the daemon accepted the workspace create…")))))
+
+(ert-deftest agent-repl-test-mp-create-echoes-starting-the-session ()
+  "A create's starting_session stage reaches the minibuffer in its own words."
+  ;; Arrange / Act.
+  (let ((said (agent-repl-test-mp--echoed
+               (lambda () (agent-repl-workspace-progress-report :create :starting-session)))))
+    ;; Assert.
+    (should (equal said '("starting the workspace's session…")))))
 
 (provide 'test-mutation-progress)
 
