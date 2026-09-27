@@ -24,6 +24,7 @@ import {
   buildPrompt,
   promptEntry,
   saidText,
+  STARTED_TURNS_REMEMBERED,
   textSaid,
   TurnEngine,
   type OpenTurn,
@@ -36,6 +37,8 @@ import path from "node:path";
 import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
 
 const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
+/** A turn other than {@link TURN}: a second start that is NOT a repeat. */
+const OTHER_TURN = create(conversationv1.TurnIdSchema, { value: "turn-2" });
 
 interface Harness {
   readonly turns: TurnEngine;
@@ -163,11 +166,14 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
   return Object.assign(state, { turns: new TurnEngine(context) });
 }
 
-function startTurn(): shimv1.StartTurnRequest {
+function startTurn(
+  turn: conversationv1.TurnId = TURN,
+  origin: conversationv1.PromptOrigin = conversationv1.PromptOrigin.USER_SENT,
+): shimv1.StartTurnRequest {
   return create(shimv1.StartTurnRequestSchema, {
-    turn: TURN,
+    turn,
     said: textSaid("do the thing"),
-    origin: conversationv1.PromptOrigin.USER_SENT,
+    origin,
     pageSize: 20,
   });
 }
@@ -312,7 +318,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     const first = h.turns.startTurn(startTurn());
 
     // Act
-    const second = await h.turns.startTurn(startTurn());
+    const second = await h.turns.startTurn(startTurn(OTHER_TURN));
     leave();
     await first;
 
@@ -757,7 +763,7 @@ describe("StartTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
 
-    const second = await h.turns.startTurn(startTurn());
+    const second = await h.turns.startTurn(startTurn(OTHER_TURN));
 
     expect(failureKind(second)).toBe("turnAlreadyOpen");
   });
@@ -777,7 +783,7 @@ describe("StartTurn", () => {
     const first = h.turns.startTurn(startTurn());
 
     // Act
-    const second = await h.turns.startTurn(startTurn());
+    const second = await h.turns.startTurn(startTurn(OTHER_TURN));
     release();
     await first;
 
@@ -793,7 +799,7 @@ describe("StartTurn", () => {
     const before = vi.mocked(writeSync).mock.calls.length;
 
     // Act
-    await h.turns.startTurn(startTurn());
+    await h.turns.startTurn(startTurn(OTHER_TURN));
 
     // Assert
     expect(recordsSince(before)).toContainEqual(
@@ -808,7 +814,7 @@ describe("StartTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
 
-    await h.turns.startTurn(startTurn());
+    await h.turns.startTurn(startTurn(OTHER_TURN));
 
     expect(h.submitted).toHaveLength(1);
   });
@@ -834,6 +840,312 @@ describe("StartTurn", () => {
     await h.turns.startTurn(startTurn());
 
     expect(h.open).toBeUndefined();
+  });
+});
+
+/** The record a repeated StartTurn writes. */
+const REPEAT_MESSAGE =
+  "a StartTurn repeated a turn id this shim already started; nothing is started again and the original's success is answered";
+
+/** The repeated-start record written since `before`, if any. */
+function repeatRecord(before: number): Record<string, unknown> | undefined {
+  return recordsSince(before).find((record) => record.message === REPEAT_MESSAGE);
+}
+
+describe("a repeated StartTurn of a turn id the shim already started", () => {
+  /** Hold every durable write until the returned callback runs. */
+  function holdDurableWrites(h: Harness): () => void {
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    let release = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    return release;
+  }
+
+  it("is answered success while the original is still open", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    // Act
+    const repeat = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeat.result.case).toBe("success");
+  });
+
+  it("is answered success once the original has ended", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.open = undefined;
+
+    // Act
+    const repeat = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeat.result.case).toBe("success");
+  });
+
+  it("answers the prompt under the same turn id", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    // Act
+    const repeat = await h.turns.startTurn(startTurn());
+
+    // Assert
+    const success = repeat.result.value as shimv1.StartTurnSuccess;
+    expect(success.prompt?.id?.value).toBe("turn-1");
+  });
+
+  it("answers the prompt with the ORIGINAL start's origin", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn(TURN, conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR));
+
+    // Act
+    const repeat = await h.turns.startTurn(startTurn(TURN, conversationv1.PromptOrigin.USER_SENT));
+
+    // Assert
+    const success = repeat.result.value as shimv1.StartTurnSuccess;
+    expect(success.prompt?.origin).toBe(conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR);
+  });
+
+  it("delivers nothing to the vendor a second time", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.submitted).toHaveLength(1);
+  });
+
+  it("delivers a repeated context cut to the vendor once", async () => {
+    // Arrange: a /clear is a StartTurn carrying the command's literal.
+    const h = await harness();
+    const cut = create(shimv1.StartTurnRequestSchema, {
+      turn: TURN,
+      said: textSaid("/clear"),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      pageSize: 20,
+    });
+    await h.turns.startTurn(cut);
+
+    // Act
+    const repeat = await h.turns.startTurn(cut);
+
+    // Assert
+    expect([repeat.result.case, h.submitted.map((entry) => saidText(entry.said))]).toEqual(["success", ["/clear"]]);
+  });
+
+  it("writes no second prompt row", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    const rows = h.persistence.durable.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.persistence.durable).toHaveLength(rows);
+  });
+
+  it("opens no second turn after the original ended", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.open = undefined;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.open).toBeUndefined();
+  });
+
+  it("records the repeat at ERROR with the original's state", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeatRecord(before)).toMatchObject({
+      level: "error",
+      context: {
+        turn_id: "turn-1",
+        verb: "StartTurn",
+        original_state: "open",
+        original_origin: "USER_SENT",
+        requested_origin: "USER_SENT",
+        agent_id: "agent-1",
+        vendor_session_id: "agent-1",
+      },
+    });
+  });
+
+  it("records an ended original's state as ended", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.open = undefined;
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeatRecord(before)).toMatchObject({ level: "error", context: { original_state: "ended" } });
+  });
+
+  it("does not wait behind the shim's own keep-alive", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.open = undefined;
+    openKeepalive(h);
+
+    // Act
+    const repeat = h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(await settled(repeat)).toBe(true);
+  });
+
+  it("racing its still-starting original is answered success once the original is accepted", async () => {
+    // Arrange
+    const h = await harness();
+    const release = holdDurableWrites(h);
+    const original = h.turns.startTurn(startTurn());
+    const repeat = h.turns.startTurn(startTurn());
+
+    // Act
+    release();
+    await original;
+
+    // Assert
+    expect((await repeat).result.case).toBe("success");
+  });
+
+  it("racing its still-starting original delivers the prompt once", async () => {
+    // Arrange
+    const h = await harness();
+    const release = holdDurableWrites(h);
+    const original = h.turns.startTurn(startTurn());
+    const repeat = h.turns.startTurn(startTurn());
+
+    // Act
+    release();
+    await Promise.all([original, repeat]);
+
+    // Assert
+    expect(h.submitted).toHaveLength(1);
+  });
+
+  it("racing its still-starting original records the repeat at ERROR as starting", async () => {
+    // Arrange
+    const h = await harness();
+    h.persistence.writeDurable = () => new Promise<void>(() => {});
+    void h.turns.startTurn(startTurn());
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    void h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeatRecord(before)).toMatchObject({ level: "error", context: { original_state: "starting" } });
+  });
+
+  it("racing an original the vendor refused is started as a first StartTurn", async () => {
+    // Arrange
+    const h = await harness();
+    const release = holdDurableWrites(h);
+    h.submitRejects = new Error("the binary said no");
+    const original = h.turns.startTurn(startTurn());
+    const repeat = h.turns.startTurn(startTurn());
+
+    // Act
+    release();
+    await original;
+    h.submitRejects = undefined;
+    const answered = await repeat;
+
+    // Assert
+    expect([answered.result.case, h.submitted.length]).toEqual(["success", 1]);
+  });
+
+  it("after the vendor refused the original is started as a first StartTurn", async () => {
+    // Arrange
+    const h = await harness();
+    h.submitRejects = new Error("the binary said no");
+    await h.turns.startTurn(startTurn());
+    h.submitRejects = undefined;
+
+    // Act
+    const retry = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect([retry.result.case, h.submitted.length]).toEqual(["success", 1]);
+  });
+
+  it("records nothing at ERROR for a retry after the vendor refused the original", async () => {
+    // Arrange
+    const h = await harness();
+    h.submitRejects = new Error("the binary said no");
+    await h.turns.startTurn(startTurn());
+    h.submitRejects = undefined;
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(repeatRecord(before)).toBeUndefined();
+  });
+
+  it("still starts a different turn id once the first has ended", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.open = undefined;
+
+    // Act
+    const second = await h.turns.startTurn(startTurn(OTHER_TURN));
+
+    // Assert
+    expect([second.result.case, h.submitted.length]).toEqual(["success", 2]);
+  });
+
+  it("starts an id pushed out of the remembered window as a first StartTurn", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    for (let i = 0; i < STARTED_TURNS_REMEMBERED; i++) {
+      h.open = undefined;
+      await h.turns.startTurn(startTurn(create(conversationv1.TurnIdSchema, { value: `later-${i}` })));
+    }
+    h.open = undefined;
+    const delivered = h.submitted.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.submitted).toHaveLength(delivered + 1);
   });
 });
 
