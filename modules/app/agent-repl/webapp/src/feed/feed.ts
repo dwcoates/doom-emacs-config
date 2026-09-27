@@ -18,7 +18,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { installClickExpand } from "../expand.js";
+import { expandedSectionAt, installClickExpand } from "../expand.js";
 import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
@@ -126,7 +126,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // wheel redirects to the feed. Without it, a section the feed scrolled under
   // a still cursor captures the next gesture and scrolling gets stuck in the
   // bubble (scroll.ts's installIntentScroll). No box, no sections to gate.
-  const intentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
+  // An OPEN (expanded) section is the exception: it keeps its whole wheel, and
+  // nothing chains from it to the feed (expand.ts says which sections are open).
+  const intentScroll =
+    scrollBox === null ? null : installIntentScroll(scrollBox, (el) => expandedSectionAt(el, scrollBox));
   // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
   // band out to ~5 viewport heights so a row within it lays out at its true
   // height before the reader scrolls to it — the cure for the first-scroll

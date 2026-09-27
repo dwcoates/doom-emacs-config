@@ -13,6 +13,8 @@ import {
   innerScrollerAt,
   TailFollow,
   isScrollBox,
+  movesToward,
+  sectionTakesDelta,
   type ReanchorBox,
   sectionFor,
   sectionTakesWheel,
@@ -27,7 +29,10 @@ import {
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
-import { installClickExpand } from "../src/expand.js";
+import { expandedSectionAt, installClickExpand } from "../src/expand.js";
+
+/** An `ExpandedSectionAt` for a feed with no open section. */
+const noneOpen = (): HTMLElement | null => null;
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -1813,7 +1818,7 @@ describe("installIntentScroll", () => {
     // Arrange — a section nobody entered.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     // Act
     wheelAt(box, 40);
     // Assert — the feed took the delta instead of the box.
@@ -1824,7 +1829,7 @@ describe("installIntentScroll", () => {
     // Arrange — the redirect must stop the browser scrolling the section too.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     // Act
     const e = wheelAt(box, 40);
     // Assert
@@ -1835,7 +1840,7 @@ describe("installIntentScroll", () => {
     // Arrange — the reader moved the pointer INTO the box, arming it.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("pointermove", box);
     // Act
     wheelAt(box, 40);
@@ -1847,7 +1852,7 @@ describe("installIntentScroll", () => {
     // Arrange — a click inside a box is a deliberate entry.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("pointerdown", box);
     // Act
     wheelAt(box, 40);
@@ -1860,7 +1865,7 @@ describe("installIntentScroll", () => {
     // the feed slides a box under a stationary pointer, so the box stays unarmed.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("mouseenter", box);
     pointerAt("mouseover", box);
     // Act
@@ -1874,7 +1879,7 @@ describe("installIntentScroll", () => {
     const feed = makeFeed();
     const first = makeSection(feed);
     const second = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("pointermove", first);
     pointerAt("pointermove", second);
     // Act
@@ -1888,7 +1893,7 @@ describe("installIntentScroll", () => {
     const feed = makeFeed();
     const first = makeSection(feed);
     const second = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("pointermove", first);
     pointerAt("pointermove", second);
     // Act — a wheel back over the box the reader left.
@@ -1901,7 +1906,7 @@ describe("installIntentScroll", () => {
     // Arrange — the pointer sits over the feed itself, not any section.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     pointerAt("pointermove", feed);
     // Act
     wheelAt(box, 40);
@@ -1913,7 +1918,7 @@ describe("installIntentScroll", () => {
     // Arrange — a wide code block inside a section must still pan.
     const feed = makeFeed();
     const box = makeSection(feed);
-    installIntentScroll(feed);
+    installIntentScroll(feed, noneOpen);
     // Act — a wheel with no vertical component.
     wheelAt(box, 0);
     // Assert — the feed is untouched; the browser owns the horizontal pan.
@@ -1924,7 +1929,7 @@ describe("installIntentScroll", () => {
     // Arrange
     const feed = makeFeed();
     const box = makeSection(feed);
-    const { uninstall } = installIntentScroll(feed);
+    const { uninstall } = installIntentScroll(feed, noneOpen);
     // Act
     uninstall();
     wheelAt(box, 40);
@@ -1937,7 +1942,7 @@ describe("installIntentScroll", () => {
     // pointermove, so the box it just revealed must still be armable.
     const feed = makeFeed();
     const box = makeSection(feed);
-    const { arm } = installIntentScroll(feed);
+    const { arm } = installIntentScroll(feed, noneOpen);
     // Act — arm the box the same way a pointermove into it would, but without
     // dispatching any pointer event at all.
     arm(box);
@@ -1954,7 +1959,7 @@ describe("installIntentScroll", () => {
     const box = makeSection(feed);
     const inner = document.createElement("span");
     box.append(inner);
-    const { arm } = installIntentScroll(feed);
+    const { arm } = installIntentScroll(feed, noneOpen);
     // Act
     arm(inner);
     wheelAt(box, 40);
@@ -1967,7 +1972,7 @@ describe("installIntentScroll", () => {
     const feed = makeFeed();
     const armedBox = makeSection(feed);
     const other = makeSection(feed);
-    const { arm } = installIntentScroll(feed);
+    const { arm } = installIntentScroll(feed, noneOpen);
     // Act
     arm(armedBox);
     wheelAt(other, 40);
@@ -2024,7 +2029,7 @@ describe("click-to-expand arms the just-expanded box (the feed.ts wiring)", () =
 
   /** Wire the two modules exactly as feed.ts does, recording every `arm` call. */
   function wire(feed: HTMLElement) {
-    const { arm } = installIntentScroll(feed);
+    const { arm } = installIntentScroll(feed, (el) => expandedSectionAt(el, feed));
     const armCalls: HTMLElement[] = [];
     installClickExpand(feed, () => "", (section, expanded) => {
       if (expanded) {
@@ -2083,5 +2088,195 @@ describe("click-to-expand arms the just-expanded box (the feed.ts wiring)", () =
     wheelAt(box, 40);
     // Assert
     expect(feed.scrollTop).toBe(0);
+  });
+});
+
+describe("movesToward", () => {
+  /** A 100px-tall box over 400px of content, scrolled to TOP. */
+  const at = (scrollTop: number, overflowY = "auto") => ({ scrollHeight: 400, clientHeight: 100, overflowY, scrollTop });
+
+  it.each([
+    ["down, mid-scroll", 150, 40, true],
+    ["down, at the bottom edge", 300, 40, false],
+    ["up, mid-scroll", 150, -40, true],
+    ["up, at the top edge", 0, -40, false],
+    ["with no vertical delta", 150, 0, false],
+  ] as const)("answers %s", (_label, scrollTop, deltaY, moves) => {
+    expect(movesToward(at(scrollTop), deltaY)).toBe(moves);
+  });
+
+  it("answers a box that does not scroll at all as never moving", () => {
+    expect(movesToward(at(150, "hidden"), 40)).toBe(false);
+  });
+});
+
+describe("sectionTakesDelta", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  /** A scrollable box (100px over 400px) scrolled to TOP, appended to PARENT. */
+  function box(parent: HTMLElement, scrollTop: number): HTMLElement {
+    const el = document.createElement("div");
+    el.style.overflowY = "auto";
+    Object.defineProperty(el, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: 100, configurable: true });
+    Object.defineProperty(el, "scrollTop", { value: scrollTop, configurable: true });
+    parent.append(el);
+    return el;
+  }
+
+  it("answers true while a box inside the section can still move", () => {
+    // Arrange — the section is at its bottom; the box inside it is not.
+    const section = box(document.body, 300);
+    const inner = box(section, 100);
+    // Act / Assert
+    expect(sectionTakesDelta(inner, section, 40)).toBe(true);
+  });
+
+  it("answers false once no box up to the section can move", () => {
+    // Arrange — both at their bottom edge.
+    const section = box(document.body, 300);
+    const inner = box(section, 300);
+    // Act / Assert
+    expect(sectionTakesDelta(inner, section, 40)).toBe(false);
+  });
+
+  it("never looks past the section, however far its ancestors could move", () => {
+    // Arrange — the section's own parent could scroll down; the section cannot.
+    const outer = box(document.body, 0);
+    const section = box(outer, 300);
+    // Act / Assert
+    expect(sectionTakesDelta(section, section, 40)).toBe(false);
+  });
+
+  it("fails loudly when handed a section that does not contain its start", () => {
+    // Arrange
+    const section = box(document.body, 0);
+    const stray = box(document.body, 300);
+    // Act / Assert
+    expect(() => sectionTakesDelta(stray, section, 40)).toThrow(/does not contain its start/);
+  });
+});
+
+describe("installIntentScroll: an open section keeps its whole wheel", () => {
+  // Owner ruling, 2026-09-27: while the reader scrolls inside an expanded box,
+  // the FEED never moves — not mid-box, and not at the box's edges either.
+  let uninstall: Array<() => void> = [];
+  afterEach(() => {
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    document.body.innerHTML = "";
+  });
+
+  /** A scrollable feed holding one response bubble's scroll box. */
+  function mount(open: boolean, scrollTop = 0): { feed: HTMLElement; scroll: HTMLElement; text: HTMLElement } {
+    const feed = document.createElement("div");
+    Object.defineProperty(feed, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(feed, "clientHeight", { value: 300, configurable: true });
+    let feedTop = 0;
+    Object.defineProperty(feed, "scrollTop", {
+      configurable: true,
+      get: () => feedTop,
+      set: (v: number) => {
+        feedTop = v;
+      },
+    });
+    feed.innerHTML = `<div class="bubble" data-role="response"><div class="bubble-scroll"><p>text</p></div></div>`;
+    const scroll = feed.querySelector(".bubble-scroll") as HTMLElement;
+    // An open box scrolls (overflow-y auto); a collapsed one clips (hidden).
+    scroll.style.overflowY = open ? "auto" : "hidden";
+    if (open) scroll.classList.add("expanded");
+    Object.defineProperty(scroll, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(scroll, "clientHeight", { value: 100, configurable: true });
+    Object.defineProperty(scroll, "scrollTop", { value: scrollTop, configurable: true, writable: true });
+    document.body.append(feed);
+    uninstall.push(installIntentScroll(feed, (el) => expandedSectionAt(el, feed)).uninstall);
+    return { feed, scroll, text: scroll.querySelector("p") as HTMLElement };
+  }
+
+  /** Dispatch a vertical wheel at TARGET; answer it so its default can be read. */
+  function wheelAt(target: HTMLElement, deltaY: number): WheelEvent {
+    const e = new Event("wheel", { bubbles: true, cancelable: true }) as WheelEvent;
+    Object.defineProperty(e, "deltaY", { value: deltaY });
+    Object.defineProperty(e, "deltaMode", { value: 0 });
+    target.dispatchEvent(e);
+    return e;
+  }
+
+  it("leaves a wheel inside an open box at mid-scroll to the box, never the feed", () => {
+    // Arrange — never armed: no pointer act has touched the box.
+    const { feed, text } = mount(true, 150);
+    // Act
+    const e = wheelAt(text, 40);
+    // Assert — no redirect, and the browser is left to scroll the box.
+    expect([feed.scrollTop, e.defaultPrevented]).toEqual([0, false]);
+  });
+
+  it("consumes a wheel down at the open box's bottom edge, so the feed does not move", () => {
+    // Arrange
+    const { feed, text } = mount(true, 300);
+    // Act
+    const e = wheelAt(text, 40);
+    // Assert
+    expect([feed.scrollTop, e.defaultPrevented]).toEqual([0, true]);
+  });
+
+  it("consumes a wheel up at the open box's top edge, so the feed does not move", () => {
+    // Arrange
+    const { feed, text } = mount(true, 0);
+    // Act
+    const e = wheelAt(text, -40);
+    // Assert
+    expect([feed.scrollTop, e.defaultPrevented]).toEqual([0, true]);
+  });
+
+  it("consumes the wheel of an open box too short to scroll at all", () => {
+    // Arrange — the open content fits: nothing inside can move.
+    const { feed, scroll, text } = mount(true, 0);
+    Object.defineProperty(scroll, "scrollHeight", { value: 100, configurable: true });
+    // Act
+    const e = wheelAt(text, 40);
+    // Assert
+    expect([feed.scrollTop, e.defaultPrevented]).toEqual([0, true]);
+  });
+
+  it("leaves a horizontal-only wheel inside an open box to the browser", () => {
+    // Arrange
+    const { text } = mount(true, 300);
+    // Act
+    const e = wheelAt(text, 0);
+    // Assert
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("leaves a collapsed box's wheel to the feed, as before", () => {
+    // Arrange — a collapsed box clips rather than scrolls, so it is no scroll
+    // box at all and the wheel is the feed's, the browser's native scroll.
+    const { feed, text } = mount(false, 0);
+    // Act
+    const e = wheelAt(text, 40);
+    // Assert
+    expect([feed.scrollTop, e.defaultPrevented]).toEqual([0, false]);
+  });
+
+  it("composes with auto-collapse: a wheel inside neither closes the box nor moves the feed", () => {
+    // Arrange — the click owner and its auto-collapse, wired as feed.ts does.
+    const { feed, scroll, text } = mount(true, 300);
+    uninstall.push(installClickExpand(feed, () => ""));
+    // Act
+    wheelAt(text, 40);
+    // Assert
+    expect([scroll.classList.contains("expanded"), feed.scrollTop]).toEqual([true, 0]);
+  });
+
+  it("composes with auto-collapse: a wheel on the feed outside closes the box and is the feed's", () => {
+    // Arrange
+    const { feed, scroll } = mount(true, 300);
+    uninstall.push(installClickExpand(feed, () => ""));
+    // Act
+    const e = wheelAt(feed, 40);
+    // Assert — closed, and left to the browser to scroll the feed.
+    expect([scroll.classList.contains("expanded"), e.defaultPrevented]).toEqual([false, false]);
   });
 });
