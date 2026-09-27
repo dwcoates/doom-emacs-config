@@ -45,6 +45,44 @@ adding an unlisted `message` call fails the ERT suite. The same source audit
 rejects record-builder/file-writer bypasses and unclassified literal-nil
 workspace log sites.
 
+## A workspace's link always follows the live daemon
+
+`host.el` moves a workspace onto a daemon through ONE walk,
+`agent-repl-host--reattach`, whatever started it. Its CLAIM is how the new
+daemon is asked; everything after the claim is shared:
+
+| trigger | claim |
+| --- | --- |
+| `transferred` push; `transferring_away` / `not_yet_adopted` refusal; successor accepted | `:adopt` (AdoptHostWorkspace, the handover rendezvous; the webview is reloaded BESIDE the adopt) |
+| host stream lost (`stream-lost`); a call finding its connection closed (`dead-connection`); a promotion that left the workspace on the old daemon (`promotion`); `link-up` | `:register` (RegisterWorkspace, idempotent by dir; the webview is reloaded after the subscribe) |
+
+Both end in `agent-repl-host--reattached`: the old stream cancelled, the
+host stream re-subscribed on the new daemon (which moves `:conn`/`:ref`, and
+so the page URL), INFO `elisp.host.reattached ... trigger=`, and
+`agent-repl-host-reattached-functions` (the prompt queue releases the
+workspace's outage-held prompts there).
+
+- The target is ALWAYS `agent-repl-link-live`: the accepted primary the link
+  resolved from `daemon.addr` or promoted from an announced successor. A
+  workspace never follows an address of its own.
+- `agent-repl-host-conn` NEVER answers a dead connection: it starts the
+  reattach and answers the live daemon, or nil with no link.
+- With no link a workspace is marked `:detached` and INFO
+  `elisp.host.reattach-awaiting-link` is written; the link-up edge (or a
+  promotion) walks it. Nothing polls.
+- A loss on a daemon that is itself handing over waits for the successor's
+  promotion (`agent-repl-host-on-link-promote`), which walks every workspace
+  still on the old connection and every detached one.
+- Every walk carries a token; only the newest walk for a workspace may
+  finish, and a close of a stream the workspace already left is stale.
+- The roster stream follows the same rule (`agent-repl-roster--follow-live-daemon`):
+  an accepted stream that is lost is re-subscribed on the live daemon; with no
+  link, or on a stream never accepted, the link's own edge re-subscribes.
+
+Regression, 2026-09-27: a daemon exited without transferring a workspace,
+the link was promoted onto its successor, and the workspace kept its dead
+connection — calls to `127.0.0.1:61043` and a blank webview.
+
 ## Workspace create/open/register progress
 
 Every gesture that makes or restores a workspace -- `SPC TAB n`, `N`, `c`,
