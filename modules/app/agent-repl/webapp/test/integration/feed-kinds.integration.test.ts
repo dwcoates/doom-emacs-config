@@ -76,6 +76,7 @@ import {
   detachedShellRow,
   shellHeadRow,
   peerMessageRow,
+  subagentHandbackRow,
   removedRow,
   detachedSubagentRow,
   feedId,
@@ -141,6 +142,7 @@ describe("arm coverage", () => {
       "detachedShell",
       "shellHead",
       "peerMessage",
+      "subagentHandback",
       "removed",
       "permission",
       "question",
@@ -824,6 +826,29 @@ describe("a peer message", () => {
     expect(
       harness.$('[data-feed-row="peer-1"] .bubble.peer > .bubble-scroll')?.classList.contains("expanded"),
     ).toBe(true);
+  });
+});
+
+describe("a subagent hand-back", () => {
+  it("draws the label the daemon composed, verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".subagent-handback-badge")?.textContent).toBe("agent Explore reported back");
+  });
+
+  it("is a badge, never a bubble", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".bubble")).toBeNull();
+  });
+
+  it("carries no body: the report is not drawn in the main feed", async () => {
+    // Arrange / Act
+    const row = await drawRow(subagentHandbackRow());
+    // Assert
+    expect(row.querySelector(".subagent-handback-badge")?.children.length).toBe(0);
   });
 });
 
