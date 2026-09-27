@@ -682,9 +682,9 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	h := newHarness(t)
 	h.Verbs.openStages = []workspace.OpenStage{
 		workspace.OpenStageCheckingWorktree,
+		workspace.OpenStageStartingSession,
 		workspace.OpenStageReviving,
 		workspace.OpenStageClearingClosed,
-		workspace.OpenStageStartingSession,
 		workspace.OpenStageCheckingBuild,
 	}
 	stream := proveDaemonSubscription(t, h)
@@ -700,7 +700,7 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	}
 
 	// Assert.
-	wantStages := []string{"checking_worktree", "reviving", "clearing_closed", "starting_session", "checking_build"}
+	wantStages := []string{"checking_worktree", "starting_session", "reviving", "clearing_closed", "checking_build"}
 	for i, want := range wantStages {
 		if !stream.Receive() {
 			t.Fatalf("receive stage %d: %v", i, stream.Err())
