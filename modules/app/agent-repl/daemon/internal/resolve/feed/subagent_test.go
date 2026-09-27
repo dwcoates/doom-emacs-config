@@ -3593,3 +3593,54 @@ func TestAnAnnouncementNamingTheStartsOwnAgentIsQuiet(t *testing.T) {
 		t.Fatalf("records = %+v, want the ordinary detachment and no error", h.records())
 	}
 }
+
+func TestAResumedSubagentsSubFeedIsMintedAtTheAnnouncement(t *testing.T) {
+	// Arrange: the send's row stands.
+	h := newHarness(t)
+	h.sendMessageBound("send-1", &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"})
+
+	// Act: the announcement alone, before any frame of the run.
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+
+	// Assert: the head is already drawn, detached, and its sub-feed opens --
+	// so the agent's own first page always has a feed to land on.
+	row := h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})
+	if row.GetDetachedSubagent() == nil {
+		t.Fatalf("row = %T, want the detached wrapper", row.GetRow())
+	}
+	h.openPage(feedid.Feed{Agent: &conversationv1.AgentId{Value: "spawn-1"}}, "reader-1")
+}
+
+func TestAResumedSubagentsBeatRedrawsTheHeadDrawnAtTheAnnouncement(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessageBound("send-1", &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"})
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+	before := len(h.rows(rootFeed()))
+
+	// Act.
+	h.send(resumedBeat("send-1"))
+
+	// Assert: one head, now carrying the run's spend.
+	if after := len(h.rows(rootFeed())); after != before {
+		t.Fatalf("root rows %d → %d, want the beat to redraw the head rather than add a row", before, after)
+	}
+	if bubbleOf(h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})).GetTokens().GetText() == "" {
+		t.Fatal("the head does not carry the beat's spend")
+	}
+}
+
+func TestAResumedSubagentAnnouncedBeforeItsSendIsDrawnWhenTheSendDraws(t *testing.T) {
+	// Arrange: the announcement lands first, as a replay can deliver it.
+	h := newHarness(t)
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+
+	// Act.
+	h.sendMessageBound("send-1", &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"})
+
+	// Assert.
+	row := h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})
+	if row.GetDetachedSubagent().GetSubagent().GetWorkId().GetText() != "w-send" {
+		t.Fatalf("row = %+v, want the detached head carrying w-send", row)
+	}
+}
