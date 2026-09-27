@@ -842,6 +842,21 @@ that tells its three cases apart."
                      (agent-repl-test-wire-common--parse "{\"binary\":\"b\",\"osError\":\"x\"}"))))
                  '("LockHolderFailure" osError "unknown field"))))
 
+;;;; ---- DaemonStreamEnding ----
+
+(ert-deftest agent-repl-test-wire-common-daemon-stream-ending-decodes-to-nil ()
+  "The planned ending is an empty message: its presence is the whole fact."
+  (should (null (agent-repl-test-wire-common--decode
+                 #'agent-repl-wire-decode-daemon-stream-ending "{}"))))
+
+(ert-deftest agent-repl-test-wire-common-daemon-stream-ending-refuses-a-field ()
+  "A field on the ending is a schema this consumer does not hold."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-daemon-stream-ending
+                     (agent-repl-test-wire-common--parse "{\"address\":\"x\"}"))))
+                 '("DaemonStreamEnding" address "unknown field"))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here
