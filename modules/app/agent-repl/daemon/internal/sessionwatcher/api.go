@@ -111,6 +111,17 @@ type FeedSink interface {
 	// is never a person's prompt and never this agent's own work; the feed draws
 	// it as the abbreviated, right-aligned, purple, expandable peer bubble.
 	OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, addr OutputAddress)
+	// OnPromptRetired removes every row OnPrompt drew for a prompt the store
+	// retired (WatchAgentResponse.retired): the user-prompt row, or an agent
+	// prompt's two ends.
+	OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, addr OutputAddress)
+	// OnPeerMessageRetired removes the row OnPeerMessage drew for a peer
+	// message the store retired.
+	OnPeerMessageRetired(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr OutputAddress)
+	// OnApiErrorRetired withdraws the evidence OnApiError recorded for an
+	// api_error page line the store retired. `turn` is the retired entry's own
+	// stamp.
+	OnApiErrorRetired(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnActivity is one unit of a turn's synchronous progress.
 	//
 	// EVERY ENTRY-DRIVEN METHOD CARRIES `turn`: the entry's own stamp
