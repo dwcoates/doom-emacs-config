@@ -6,7 +6,7 @@
  * is: open-then-watch pinning and `known_through` bounding are the STORE's
  * semantics, and a double would be asserting our beliefs about them.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -713,60 +713,19 @@ describe("openBashRun", () => {
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
-  it("waits out a refused open when the caller still believes the run is live, and is woken by its first row", async () => {
-    const { plane } = await seeded("bash-still-live", 0);
-
-    // Nothing has been written for run-1 yet, but the caller (the daemon's own
-    // live table) says the announcement already reached it, so the refusal is
-    // a race to wait out rather than a real "unknown_work".
+  it("does not wait for a first row: a run refused at the open stays refused when a row lands later", async () => {
+    // NEVER A SILENT WAIT (2026-09-27). The shim writes an announced run's
+    // start before announcing it, so a refusal is the answer and not a race.
+    const { plane } = await seeded("bash-no-wait", 0);
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
-      () => "live",
     );
-    const iterator = run[Symbol.asyncIterator]();
-    const pending = iterator.next();
+    const first = run[Symbol.asyncIterator]().next();
 
     plane.write([bashStartEntry()]);
     await plane.flush();
 
-    const first = await pending;
-    expect((first.value as conversationv1.AgentBash | undefined)?.result.case).toBe("start");
-  });
-
-  it("waits out a refused open through the concluded-but-unwritten window", async () => {
-    const { plane } = await seeded("bash-concluded", 0);
-
-    // THE WINDOW e2e run 5 hit: the run left the live set before its first row
-    // was committed, so the caller's standing is "concluded" rather than
-    // "live" -- and an announced run whose rows are merely late is not a run
-    // that does not exist.
-    const run = await plane.openBashRun(
-      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
-      () => "concluded",
-    );
-    const iterator = run[Symbol.asyncIterator]();
-    const pending = iterator.next();
-
-    plane.write([bashStartEntry()]);
-    await plane.flush();
-
-    const first = await pending;
-    expect((first.value as conversationv1.AgentBash | undefined)?.result.case).toBe("start");
-  });
-
-  it("refuses a run nothing was ever announced under", async () => {
-    const { plane } = await seeded("bash-unknown-standing", 0);
-
-    const run = await plane.openBashRun(
-      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
-      () => "unknown",
-    );
-
-    await expect(
-      (async () => {
-        for await (const frame of run) void frame;
-      })(),
-    ).rejects.toMatchObject({ kind: "unknown_work" });
+    await expect(first).rejects.toMatchObject({ kind: "unknown_work" });
   });
 });
 
@@ -1548,102 +1507,48 @@ describe("openBashRun against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK, () => "live"))).rejects.toMatchObject({
+    await expect(drain(await reader.openBashRun(WORK))).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
 
-  it("stops waiting on a concluded run once its terminal row has been written", async () => {
-    // After the terminal write, a store that still holds no row is answering
-    // about a run that genuinely is absent -- the refusal is the truth.
+  it("asks the store exactly once for a run it refuses", async () => {
     // Arrange.
+    let asks = 0;
     const reader = readerOver({
       watchBashRun: () => ({
         async *[Symbol.asyncIterator]() {
+          asks += 1;
           throw new ConnectError("no such run", Code.NotFound);
         },
       }),
     });
-    const terminal = bashTerminalEntry().item;
-    if (terminal.kind !== "bash_run") throw new Error("the terminal fixture is no longer a run row");
-    reader.noteBashFrame("run-1", terminal.frame);
+
+    // Act.
+    await drain(await reader.openBashRun(WORK)).catch(() => undefined);
+
+    // Assert.
+    expect(asks).toBe(1);
+  });
+
+  it("refuses as unknown_work a run the store refuses after serving it", async () => {
+    // Arrange: a refusal is the store saying "no such run" however late it
+    // comes; it is never re-read as a transport failure.
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+          throw new ConnectError("no such run", Code.NotFound);
+        },
+      }),
+    });
 
     // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK, () => "concluded"))).rejects.toMatchObject({
+    await expect(drain(await reader.openBashRun(WORK))).rejects.toMatchObject({
       kind: "unknown_work",
     });
-  });
-
-  it("keeps waiting on a concluded run whose rows land late, and serves them", async () => {
-    // THE WINDOW THIS REPLACED: a run that had left the live set was refused
-    // 500ms after it concluded, and a loaded host's sidecar wrote the rows 523ms
-    // after -- the daemon, told the run did not exist, never re-opened it.
-    // Arrange: the store refuses the run until well past that old window.
-    vi.useFakeTimers();
-    try {
-      let refusals = 0;
-      const reader = readerOver({
-        watchBashRun: () => ({
-          async *[Symbol.asyncIterator]() {
-            if (refusals < 25) {
-              refusals += 1;
-              throw new ConnectError("no such run", Code.NotFound);
-            }
-            yield create(storev1.WatchBashRunResponseSchema, {
-              row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
-            });
-          },
-        }),
-      });
-      const run = await reader.openBashRun(WORK, () => "concluded");
-      const first = run[Symbol.asyncIterator]().next();
-
-      // Act: twenty-five refusals, well past the old 500ms window at any
-      // cadence.
-      await vi.advanceTimersByTimeAsync(30_000);
-
-      // Assert.
-      const got = await first;
-      expect(got.done).toBe(false);
-      expect(refusals).toBe(25);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("backs its recheck off while a run's rows are late", async () => {
-    // Arrange.
-    vi.useFakeTimers();
-    try {
-      let asks = 0;
-      const reader = readerOver({
-        watchBashRun: () => ({
-          async *[Symbol.asyncIterator]() {
-            asks += 1;
-            throw new ConnectError("no such run", Code.NotFound);
-          },
-        }),
-      });
-      let standing: "live" | "unknown" = "live";
-      const run = await reader.openBashRun(WORK, () => standing);
-      const ended = run[Symbol.asyncIterator]().next().catch(() => "ended");
-
-      // Act: 25+50+100+200 = 375ms reaches the 250ms ceiling, then a second
-      // more is four more asks.
-      await vi.advanceTimersByTimeAsync(1_375);
-      const counted = asks;
-      // The announcement withdrawn ends the wait, so nothing keeps asking.
-      standing = "unknown";
-      await vi.advanceTimersByTimeAsync(1_000);
-
-      // Assert: the first ask plus one per recheck (1 + 4 + 4), never forty a
-      // second.
-      expect(counted).toBeLessThanOrEqual(9);
-      expect(counted).toBeGreaterThanOrEqual(8);
-      expect(await ended).toBe("ended");
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

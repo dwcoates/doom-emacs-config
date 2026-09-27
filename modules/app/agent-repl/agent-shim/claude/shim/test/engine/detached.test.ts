@@ -8,7 +8,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
-import { LiveWorkTable } from "../../src/engine/detached.js";
+import { create } from "@bufbuild/protobuf";
+import { LiveWorkTable, ShellRunStarts } from "../../src/engine/detached.js";
+import { conversationv1 } from "../../src/proto.js";
+import type { PersistEntry } from "../../src/store/persistence.js";
 import type {
   SdkBackgroundTasksChangedMessage,
   SdkTaskNotificationMessage,
@@ -534,5 +537,73 @@ describe("foreground work, which is never detached work", () => {
 
     // Assert.
     expect([table.tracked("b0"), table.tracked("b256")?.taskId]).toEqual([undefined, "b256"]);
+  });
+});
+
+describe("ShellRunStarts", () => {
+  /** A bash_run row for `run`, carrying the arm named. */
+  function bashRow(run: string, arm: "start" | "success"): PersistEntry {
+    return {
+      agentId: create(conversationv1.AgentIdSchema, { value: "main" }),
+      upsertKey: `bash:${run}:${arm === "start" ? "start" : "terminal"}`,
+      source: { vendorUuid: `shell-run:${run}`, discriminator: `agent_bash.${arm}` },
+      keepalive: false,
+      turn: undefined,
+      item: {
+        kind: "bash_run",
+        run: create(conversationv1.AgentActivityIdSchema, { value: run }),
+        frame: create(conversationv1.AgentBashSchema, {
+          result:
+            arm === "start"
+              ? { case: "start", value: create(conversationv1.AgentBashStartSchema, {}) }
+              : { case: "success", value: create(conversationv1.AgentBashSuccessSchema, {}) },
+        }),
+      },
+    };
+  }
+
+  const work = (run: string): conversationv1.DetachedWorkId =>
+    create(conversationv1.DetachedWorkIdSchema, { value: run });
+
+  it("remembers a run's start row by the run", () => {
+    // Arrange.
+    const starts = new ShellRunStarts();
+    const row = bashRow("toolu_1", "start");
+
+    // Act.
+    starts.note([row]);
+
+    // Assert.
+    expect(starts.get(work("toolu_1"))).toBe(row);
+  });
+
+  it("does not take a run's terminal for its start", () => {
+    // Arrange.
+    const starts = new ShellRunStarts();
+
+    // Act.
+    starts.note([bashRow("toolu_1", "success")]);
+
+    // Assert.
+    expect(starts.get(work("toolu_1"))).toBeUndefined();
+  });
+
+  it("answers nothing for a run it never saw start", () => {
+    // Arrange, Act, Assert.
+    expect(new ShellRunStarts().get(work("toolu_unseen"))).toBeUndefined();
+  });
+
+  it("forgets the oldest run's start beyond its bound", () => {
+    // Arrange.
+    const starts = new ShellRunStarts();
+
+    // Act.
+    starts.note(Array.from({ length: 257 }, (_, index) => bashRow(`toolu_${String(index)}`, "start")));
+
+    // Assert.
+    expect([starts.get(work("toolu_0")), starts.get(work("toolu_256"))?.upsertKey]).toEqual([
+      undefined,
+      "bash:toolu_256:start",
+    ]);
   });
 });
