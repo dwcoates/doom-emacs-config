@@ -60,6 +60,9 @@ type Store interface {
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)
 	BashRun(ctx context.Context, runID string) (BashRunReplay, error)
 	LiveWork(ctx context.Context, session string) (*storev1.GetLiveWorkSuccess, error)
+	// AgentByVendorTask answers which agent of `session`'s lineage a vendor
+	// task locator names; `found` false with no error is the not-found answer.
+	AgentByVendorTask(ctx context.Context, session, vendorTaskID string) (agentID string, found bool, err error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error
