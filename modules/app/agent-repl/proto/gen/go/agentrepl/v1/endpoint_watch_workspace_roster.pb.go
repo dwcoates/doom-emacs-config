@@ -67,8 +67,13 @@ func (*WatchWorkspaceRosterRequest) Descriptor() ([]byte, []int) {
 // The current roster, delivered live.
 type WatchWorkspaceRosterResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The roster, whole.
-	Roster        *v1.WorkspaceRoster `protobuf:"bytes,1,opt,name=roster,proto3" json:"roster,omitempty"`
+	// What this frame carries: the roster, or the planned end of the stream.
+	//
+	// Types that are valid to be assigned to Push:
+	//
+	//	*WatchWorkspaceRosterResponse_Roster
+	//	*WatchWorkspaceRosterResponse_Ending
+	Push          isWatchWorkspaceRosterResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -103,21 +108,61 @@ func (*WatchWorkspaceRosterResponse) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_workspace_roster_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *WatchWorkspaceRosterResponse) GetRoster() *v1.WorkspaceRoster {
+func (x *WatchWorkspaceRosterResponse) GetPush() isWatchWorkspaceRosterResponse_Push {
 	if x != nil {
-		return x.Roster
+		return x.Push
 	}
 	return nil
 }
+
+func (x *WatchWorkspaceRosterResponse) GetRoster() *v1.WorkspaceRoster {
+	if x != nil {
+		if x, ok := x.Push.(*WatchWorkspaceRosterResponse_Roster); ok {
+			return x.Roster
+		}
+	}
+	return nil
+}
+
+func (x *WatchWorkspaceRosterResponse) GetEnding() *DaemonStreamEnding {
+	if x != nil {
+		if x, ok := x.Push.(*WatchWorkspaceRosterResponse_Ending); ok {
+			return x.Ending
+		}
+	}
+	return nil
+}
+
+type isWatchWorkspaceRosterResponse_Push interface {
+	isWatchWorkspaceRosterResponse_Push()
+}
+
+type WatchWorkspaceRosterResponse_Roster struct {
+	// The whole roster, re-pushed on every change.
+	Roster *v1.WorkspaceRoster `protobuf:"bytes,1,opt,name=roster,proto3,oneof"`
+}
+
+type WatchWorkspaceRosterResponse_Ending struct {
+	// The daemon is standing down in a planned exit and this is the stream's
+	// last frame; the client reattaches to the live daemon without treating
+	// the end as a fault. See the message.
+	Ending *DaemonStreamEnding `protobuf:"bytes,2,opt,name=ending,proto3,oneof"`
+}
+
+func (*WatchWorkspaceRosterResponse_Roster) isWatchWorkspaceRosterResponse_Push() {}
+
+func (*WatchWorkspaceRosterResponse_Ending) isWatchWorkspaceRosterResponse_Push() {}
 
 var File_agentrepl_v1_endpoint_watch_workspace_roster_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_workspace_roster_proto_rawDesc = "" +
 	"\n" +
-	"2agentrepl/v1/endpoint_watch_workspace_roster.proto\x12\fagentrepl.v1\x1a\x19frontend/v1/sidebar.proto\"\x1d\n" +
-	"\x1bWatchWorkspaceRosterRequest\"T\n" +
-	"\x1cWatchWorkspaceRosterResponse\x124\n" +
-	"\x06roster\x18\x01 \x01(\v2\x1c.frontend.v1.WorkspaceRosterR\x06rosterB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"2agentrepl/v1/endpoint_watch_workspace_roster.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a\x19frontend/v1/sidebar.proto\"\x1d\n" +
+	"\x1bWatchWorkspaceRosterRequest\"\x9a\x01\n" +
+	"\x1cWatchWorkspaceRosterResponse\x126\n" +
+	"\x06roster\x18\x01 \x01(\v2\x1c.frontend.v1.WorkspaceRosterH\x00R\x06roster\x12:\n" +
+	"\x06ending\x18\x02 \x01(\v2 .agentrepl.v1.DaemonStreamEndingH\x00R\x06endingB\x06\n" +
+	"\x04pushB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_workspace_roster_proto_rawDescOnce sync.Once
@@ -136,20 +181,27 @@ var file_agentrepl_v1_endpoint_watch_workspace_roster_proto_goTypes = []any{
 	(*WatchWorkspaceRosterRequest)(nil),  // 0: agentrepl.v1.WatchWorkspaceRosterRequest
 	(*WatchWorkspaceRosterResponse)(nil), // 1: agentrepl.v1.WatchWorkspaceRosterResponse
 	(*v1.WorkspaceRoster)(nil),           // 2: frontend.v1.WorkspaceRoster
+	(*DaemonStreamEnding)(nil),           // 3: agentrepl.v1.DaemonStreamEnding
 }
 var file_agentrepl_v1_endpoint_watch_workspace_roster_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.WatchWorkspaceRosterResponse.roster:type_name -> frontend.v1.WorkspaceRoster
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 1: agentrepl.v1.WatchWorkspaceRosterResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_workspace_roster_proto_init() }
 func file_agentrepl_v1_endpoint_watch_workspace_roster_proto_init() {
 	if File_agentrepl_v1_endpoint_watch_workspace_roster_proto != nil {
 		return
+	}
+	file_agentrepl_v1_daemon_stream_ending_proto_init()
+	file_agentrepl_v1_endpoint_watch_workspace_roster_proto_msgTypes[1].OneofWrappers = []any{
+		(*WatchWorkspaceRosterResponse_Roster)(nil),
+		(*WatchWorkspaceRosterResponse_Ending)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
