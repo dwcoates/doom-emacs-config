@@ -255,6 +255,30 @@ func TestAReplayedUnitKeepsTheTurnItsLiveRowWasStampedWith(t *testing.T) {
 	}
 }
 
+// A subagent's hand-back is its RESULT, never an ordinary tool card
+// (conversation.v1 AgentSubagentHandback).
+func TestASubagentHandbackIsNeverDrawnAsAToolCard(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(bound(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_SubagentHandback{SubagentHandback: &conversationv1.AgentSubagentHandback{
+			Result: &conversationv1.AgentSubagentHandback_Success{Success: &conversationv1.AgentSubagentHandbackSuccess{
+				Report: &conversationv1.AgentSubagentHandbackReport{Text: "the report"},
+			}},
+		}},
+	}))
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetActivity().GetSimpleToolCall() != nil {
+			t.Fatalf("a hand-back drew an ordinary tool card: %+v", row)
+		}
+	}
+}
+
 // activityRow is the root feed's row for one activity unit.
 func (h *harness) activityRow(unit string) *frontendv1.FeedRow {
 	h.t.Helper()

@@ -1451,6 +1451,8 @@ func activityToolName(act *conversationv1.AgentActivity) string {
 		return "Skill"
 	case *conversationv1.AgentActivity_SendMessage:
 		return "SendMessage"
+	case *conversationv1.AgentActivity_SubagentHandback:
+		return "SubagentHandback"
 	case *conversationv1.AgentActivity_TaskAct:
 		return "TaskAct"
 	case *conversationv1.AgentActivity_Hook:

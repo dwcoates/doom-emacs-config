@@ -9,7 +9,8 @@ import (
 )
 
 // ② THE PEER MESSAGE ROW. A message another Claude session sent into this
-// conversation — an inter-session peer message or a subagent hand-back. It is
+// conversation — an inter-session peer message, drawn as a bubble, or a
+// subagent hand-back, drawn as a badge (see drawPeerMessage). It is
 // NOT a prompt (never a person's words) and NOT this agent's own work (never a
 // turn's response or terminal), so it is neither drawn on the prompt path nor
 // filed as an answer: it is its own low-priority row, the abbreviated purple
@@ -31,15 +32,44 @@ func (r *resolver) drawPeerMessage(s *wsState, peer *conversationv1.PeerMessage)
 	// drawing two bubbles.
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPeer, ID: peer.GetId()}),
-		Row: &frontendv1.FeedRow_PeerMessage{PeerMessage: &frontendv1.FeedPeerMessage{
-			Sender: peerLabel(peer.GetSender()),
-			Body:   peer.GetBody(),
-		}},
 	}
+	// A SUBAGENT'S HAND-BACK IS A BADGE, NOT A BUBBLE: its report is the
+	// subagent's result and is drawn once, in the subagent's own card, so the
+	// main feed only marks where it arrived. The row id is the SAME one a peer
+	// bubble takes, so a live and an adopted delivery still upsert one row.
+	// Inter-session and UNSET (a producer that stated no kind) draw the bubble.
+	if peer.GetSubagentHandback() != nil {
+		row.Row = &frontendv1.FeedRow_SubagentHandback{SubagentHandback: &frontendv1.FeedSubagentHandbackBadge{
+			Label: &frontendv1.FeedSubagentHandbackBadgeLabel{Text: handbackLabel(peer.GetSender())},
+		}}
+		log.Debug("daemon.feed.peer_message",
+			"a subagent's hand-back was drawn as a badge; its report belongs to the subagent's card",
+			dlog.Context{"peer_id": peer.GetId(), "sender": peer.GetSender(), "agent": recipient.GetValue(), "kind": "subagent_handback"})
+		r.upsert(s, at, row, true)
+		return
+	}
+	row.Row = &frontendv1.FeedRow_PeerMessage{PeerMessage: &frontendv1.FeedPeerMessage{
+		Sender: peerLabel(peer.GetSender()),
+		Body:   peer.GetBody(),
+	}}
 	log.Debug("daemon.feed.peer_message",
 		"a message from another Claude session was drawn as a peer bubble",
-		dlog.Context{"peer_id": peer.GetId(), "sender": peer.GetSender(), "agent": recipient.GetValue()})
+		dlog.Context{"peer_id": peer.GetId(), "sender": peer.GetSender(), "agent": recipient.GetValue(), "kind": peerKindName(peer)})
 	r.upsert(s, at, row, true)
+}
+
+// handbackLabel composes the hand-back badge's text from the sender, in the
+// same wording the peer bubble names a sender with.
+func handbackLabel(sender string) string {
+	return peerLabel(sender) + " reported back"
+}
+
+// peerKindName names the kind a bubble-drawn peer message stated, for the log.
+func peerKindName(peer *conversationv1.PeerMessage) string {
+	if peer.GetInterSession() != nil {
+		return "inter_session"
+	}
+	return "unset"
 }
 
 // peerLabel composes the collapsed bubble's label from the sender id/name. The

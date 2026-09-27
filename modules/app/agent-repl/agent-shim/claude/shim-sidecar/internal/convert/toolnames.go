@@ -26,6 +26,7 @@ const (
 	kindSubagent
 	kindSkill
 	kindSendMessage
+	kindSubagentHandback
 	kindTaskAct
 	kindWebFetch
 	kindWebSearch
@@ -51,6 +52,7 @@ var builtinTools = map[string]toolKind{
 	"Task":             kindSubagent,
 	"Skill":            kindSkill,
 	"SendMessage":      kindSendMessage,
+	"SubagentHandback": kindSubagentHandback,
 	"TaskCreate":       kindTaskAct,
 	"TaskUpdate":       kindTaskAct,
 	"WebFetch":         kindWebFetch,
