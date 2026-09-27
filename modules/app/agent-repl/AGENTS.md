@@ -422,6 +422,24 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## A finished branch lands on master at once, with no question asked
+
+Owner policy, standing (2026-09-27). A branch whose work is done — its
+agent has reported and its tests are green — is merged into master
+IMMEDIATELY by whoever receives the report, as a `--no-ff` merge commit.
+
+- Nobody asks the owner for permission to merge, and nobody holds a finished
+  branch "pending a go-ahead." The owner's earlier approval of the work IS the
+  approval to land it.
+- Open questions a report raises (a proto ruling, an edge case left for later)
+  do not hold the merge. They are surfaced to the owner AFTER the branch has
+  landed, and are answered by follow-up work on a new branch.
+- The only thing that holds a merge is a red suite. A red suite is fixed on
+  the branch, and the merge follows the moment it is green.
+- Once merged, the branch is deleted and its worktree removed in the same
+  breath. No finished branch or worktree is left behind.
+- The merge is followed by the ONE deploy the next section requires.
+
 ## ONE deploy per complete change landing on master, and the daemon runs it
 
 Owner design, standing (2026-09-23; supersedes the 2026-09-21 "deploy
