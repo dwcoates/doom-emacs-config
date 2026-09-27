@@ -863,7 +863,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // patch that moves it among them — still needs its spawning call.
         const entry = live.tracked(taskId);
         if (entry === undefined) return undefined;
-        return entry.toolUseId === undefined ? { toolUseId: "" } : { toolUseId: entry.toolUseId };
+        // THE KIND TRAVELS WITH IT: the vendor's live level states a task's
+        // `task_type` even for a task whose start this process never saw.
+        return {
+          toolUseId: entry.toolUseId ?? "",
+          ...(entry.taskType === undefined ? {} : { taskType: entry.taskType }),
+        };
       },
     };
   }
