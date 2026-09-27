@@ -162,6 +162,10 @@ CREATE TABLE idempotency_keys (
   idempotency_key TEXT NOT NULL,
   turn_id         TEXT NOT NULL,
   claimed_at      INTEGER NOT NULL,
+  -- When the prompt queue ACCEPTED the bound turn's submission (delivered it
+  -- or durably held it); NULL while it has not. Only an accepted claim refuses
+  -- a retry as a duplicate. See acceptedAtDDL and ClaimIdempotencyKey.
+  accepted_at     INTEGER,
   PRIMARY KEY (workspace_id, idempotency_key)
 );
 

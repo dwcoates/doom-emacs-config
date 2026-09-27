@@ -3,6 +3,7 @@ package prompthandler
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -12,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/wsm"
 )
 
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
@@ -434,4 +436,199 @@ func TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() = %v, want the prompt delivered despite the unroutable sink", err)
 	}
+}
+
+// retryTurn is the turn a retry mints, distinct from the first submission's.
+const retryTurn ids.TurnID = "retry-turn"
+
+// deliveries counts everything the handler forwarded down the queue's path.
+func (h *harness) deliveries() int {
+	return len(h.queue.forwarded()) + len(h.queue.sessionActs())
+}
+
+// TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted reproduces the
+// 2026-09-27 prompt loss: the key was claimed, the queue never accepted the
+// submission, and the retry under the SAME key must be delivered -- once --
+// rather than refused as a duplicate of a turn nobody delivered.
+func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{
+			name: "the process died between the claim and the acceptance",
+			text: "hello",
+			arrange: func(t *testing.T, h *harness) {
+				h.db.claimed["key-1"] = &fakeClaim{turn: "abandoned-turn"}
+				h.respawn(t)
+			},
+		},
+		{
+			name: "the queue refused the first submission",
+			text: "hello",
+			arrange: func(t *testing.T, h *harness) {
+				h.queue.submitErr = errors.New("the queue is wedged")
+				if _, err := h.submit("hello"); err == nil {
+					t.Fatal("arrange: the refused submission succeeded")
+				}
+				h.queue.submitErr = nil
+			},
+		},
+		{
+			name: "the first submission's caller gave up mid-submit",
+			text: "hello",
+			arrange: func(t *testing.T, h *harness) {
+				h.queue.submitErr = context.DeadlineExceeded
+				if _, err := h.submit("hello"); err == nil {
+					t.Fatal("arrange: the abandoned submission succeeded")
+				}
+				h.queue.submitErr = nil
+			},
+		},
+		{
+			name: "the queue refused the first context cut",
+			text: "/clear",
+			arrange: func(t *testing.T, h *harness) {
+				h.queue.actErr = errors.New("the workspace has no session")
+				if _, err := h.submit("/clear"); err == nil {
+					t.Fatal("arrange: the refused context cut succeeded")
+				}
+				h.queue.actErr = nil
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+			h.minted = retryTurn
+
+			// Act
+			got, err := h.submit(tc.text)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v, want the retry delivered", err)
+			}
+			if got.Turn != retryTurn {
+				t.Fatalf("turn = %q, want the retry's own %q", got.Turn, retryTurn)
+			}
+			if n := h.deliveries(); n != 1 {
+				t.Fatalf("%d deliveries, want exactly one", n)
+			}
+			if claim := h.db.claimOn("key-1"); !claim.accepted || claim.turn != retryTurn {
+				t.Fatalf("claim = %+v, want the retry's turn stamped accepted", claim)
+			}
+		})
+	}
+}
+
+// TestSubmitRefusesARetryOfAnAcceptedContextCut pins the act path's duplicate:
+// a context cut the queue accepted refuses its retry.
+func TestSubmitRefusesARetryOfAnAcceptedContextCut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if _, err := h.submit("/clear"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act
+	_, err := h.submit("/clear")
+
+	// Assert
+	if !errors.Is(err, ErrDuplicateSubmission) {
+		t.Fatalf("err = %v, want ErrDuplicateSubmission", err)
+	}
+	if n := h.deliveries(); n != 1 {
+		t.Fatalf("%d deliveries, want exactly one", n)
+	}
+}
+
+// TestSubmitKeepsARetryOutWhileItsOriginalIsInFlight pins the no-double-
+// delivery half: while the original is still blocked inside the queue, its
+// retry is neither re-driven (a second delivery once the original unblocks)
+// nor refused as a duplicate (the original has not been accepted). It waits,
+// and here its caller gives up first.
+func TestSubmitKeepsARetryOutWhileItsOriginalIsInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.queue.entered = make(chan struct{}, 1)
+	h.queue.gate = make(chan struct{})
+	var original sync.WaitGroup
+	original.Add(1)
+	go func() {
+		defer original.Done()
+		if _, err := h.submit("hello"); err != nil {
+			t.Errorf("the original Submit: %v", err)
+		}
+	}()
+	<-h.queue.entered
+	h.queue.entered = nil
+	gaveUp, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := h.h.Submit(gaveUp, theWorkspace, userSaid("hello"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+	// Assert
+	close(h.queue.gate)
+	original.Wait()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the retry's own cancellation", err)
+	}
+	if n := h.deliveries(); n != 1 {
+		t.Fatalf("%d deliveries, want the original's alone", n)
+	}
+}
+
+// TestSubmitSurfacesAFailedAcceptanceStamp pins that a claim the queue accepted
+// but that could not be recorded accepted is surfaced, never swallowed.
+func TestSubmitSurfacesAFailedAcceptanceStamp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.acceptErr = errors.New("the database is read-only")
+
+	// Act
+	_, err := h.submit("hello")
+
+	// Assert
+	if !errors.Is(err, h.db.acceptErr) {
+		t.Fatalf("err = %v, want the failed stamp surfaced", err)
+	}
+	if !loggedAt(h, opSubmit, "error") {
+		t.Fatalf("the failed stamp was not recorded at error")
+	}
+}
+
+// TestSubmitRefusesAClaimStandingItDoesNotKnow pins the handler's backstop
+// against a standing wsm adds without the handler learning it.
+func TestSubmitRefusesAClaimStandingItDoesNotKnow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	unknown := wsm.ClaimStanding(99)
+	h.db.standing = &unknown
+
+	// Act
+	_, err := h.submit("hello")
+
+	// Assert
+	if err == nil {
+		t.Fatal("an unknown claim standing must be refused")
+	}
+	if n := h.deliveries(); n != 0 {
+		t.Fatalf("%d deliveries, want none", n)
+	}
+}
+
+// loggedAt reports whether the handler recorded operation at level.
+func loggedAt(h *harness, operation, level string) bool {
+	for _, record := range h.h.deps.Log.(*dlog.TestSurfaces).Records() {
+		if record.Operation == operation && record.Level == level {
+			return true
+		}
+	}
+	return false
 }
