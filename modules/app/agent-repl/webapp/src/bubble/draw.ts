@@ -69,14 +69,14 @@ export const BUBBLE_VARIANTS = {
 } as const satisfies Record<ResponseVariant | PromptVariant, BubbleRole>;
 
 /**
- * A CAPPED bubble's collapsed line limit: the shared feed cap, two lines (a held
- * prompt), one line (a thinking bubble), or none past the header strip (a peer
+ * A CAPPED bubble's collapsed line limit: the shared feed cap, one line (a held
+ * prompt, a landed thinking bubble), or none past the header strip (a peer
  * message). Each kind states its limit itself, never through another kind's
  * constant, so changing one kind's cap never moves another's. A closed set,
  * because the stylesheet maps each value to its line count
  * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
  */
-export type CappedLines = "feed" | 2 | 1 | 0;
+export type CappedLines = "feed" | 1 | 0;
 
 /**
  * THE UNCAPPED MODE (owner request, 2026-09-27): a bubble shown at its FULL
@@ -93,7 +93,7 @@ export const BUBBLE_UNCAPPED = "none";
 export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
 
 /** Every CAPPED value, each of which the stylesheet must map to a line count. */
-export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 2, 1, 0];
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 1, 0];
 
 /** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
 export function isCapped(cap: BubbleCapLines): cap is CappedLines {

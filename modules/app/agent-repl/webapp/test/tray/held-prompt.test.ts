@@ -49,6 +49,8 @@ import type { TrayContext } from "../../src/tray/context.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_MORE_ATTRIBUTE,
+  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANT_ATTRIBUTE,
@@ -63,6 +65,7 @@ import {
   useTreeLayout,
 } from "../tree-layout.js";
 import { installClickExpand } from "../../src/expand.js";
+import { HAS_MORE_CLASS, refreshHasMore } from "../../src/feed/bubble-more.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import stylesheet from "../../src/styles.css?raw";
 import heldPromptSource from "../../src/tray/held-prompt.ts?raw";
@@ -767,10 +770,17 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     expect(drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("held");
   });
 
-  it("collapses at two lines", () => {
+  it("collapses at one line", () => {
     const { tc } = trayContext();
     expect(drawHeldPrompt(saying("first line\nsecond line\nthird line"), tc).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(
-      "2",
+      "1",
+    );
+  });
+
+  it("signals more with the ellipsis, never the fade", () => {
+    const { tc } = trayContext();
+    expect(drawHeldPrompt(saying("first line\nsecond line"), tc).getAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(
+      BUBBLE_MORE_ELLIPSIS,
     );
   });
 
@@ -1601,5 +1611,123 @@ describe("the retired keep-alive hold", () => {
     const arms = Object.keys(heldPromptModule.NO_RELEASE_TITLES);
     // Assert
     expect(arms).not.toContain("keepAlive");
+  });
+});
+
+/** The selector of the stylesheet rule PATTERN captures, or a loud failure naming WHAT. */
+function selectorOf(pattern: RegExp, what: string): string {
+  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+  const found = pattern.exec(css)?.[1]?.trim();
+  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
+  return found;
+}
+
+/** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
+const CLAMPED_BODY = selectorOf(/([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/, "ellipsis clamp");
+
+/** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
+const FADE_HIDDEN_ON = selectorOf(/([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/, "hidden fade");
+
+/**
+ * THE HELD PROMPT'S ONE LINE (owner ruling, 2026-09-27). Collapsed, it shows its
+ * first line, ending in the ellipsis the stylesheet's clamp writes when anything
+ * follows it, and no fade; expanded, everything. jsdom lays nothing out, so
+ * each case states the geometry the engine would give it: the clamp holds the
+ * body's own box at one line, and its rendered lines run LINES deep.
+ */
+describe("a held prompt's one collapsed line", () => {
+  const LINE_PX = 21;
+
+  /** A held prompt saying TEXT, laid out as LINES rendered lines, mounted under the one toggle. */
+  function mounted(text: string, lines: number): { card: HTMLElement; box: HTMLElement; body: HTMLElement } {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(saying(text), tc);
+    const host = document.createElement("div");
+    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    host.append(card);
+    document.body.append(host);
+    const box = card.querySelector<HTMLElement>(":scope > .bubble-scroll");
+    const body = box?.querySelector<HTMLElement>(":scope > .bubble-body");
+    if (box === null || box === undefined || body === null || body === undefined) throw new Error("fixture: no box");
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: LINE_PX });
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: LINE_PX });
+    Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
+    refreshHasMore(box);
+    return { card, box, body };
+  }
+
+  /** Whether the collapsed line ends in the ellipsis: the clamp holds it, and something follows it. */
+  const ellipsized = (box: HTMLElement, body: HTMLElement): boolean =>
+    body.matches(CLAMPED_BODY) && box.classList.contains(HAS_MORE_CLASS);
+
+  it("clamps its collapsed body to one line", () => {
+    // Arrange / Act
+    const { body } = mounted("only line", 1);
+    // Assert
+    expect(body.matches(CLAMPED_BODY)).toBe(true);
+  });
+
+  it("ends the line in an ellipsis when further lines follow", () => {
+    // Arrange / Act
+    const { box, body } = mounted("first line\nsecond line\nthird line", 3);
+    // Assert
+    expect(ellipsized(box, body)).toBe(true);
+  });
+
+  it("ends the line in an ellipsis when the one line is too long to fit", () => {
+    // Arrange / Act — one over-long line, which wraps once into the clamp's hidden second line.
+    const { box, body } = mounted("word ".repeat(80), 2);
+    // Assert
+    expect(ellipsized(box, body)).toBe(true);
+  });
+
+  it("ends the line in nothing when it is the whole prompt", () => {
+    // Arrange / Act
+    const { box, body } = mounted("only line", 1);
+    // Assert
+    expect(ellipsized(box, body)).toBe(false);
+  });
+
+  it("draws no fade, even with more to show", () => {
+    // Arrange / Act
+    const { box } = mounted("first line\nsecond line", 2);
+    // Assert
+    expect([box.classList.contains(HAS_MORE_CLASS), box.matches(FADE_HIDDEN_ON)]).toEqual([true, true]);
+  });
+
+  it("keeps its badges shown beside the one line", () => {
+    // Arrange / Act
+    const { card } = mounted("first line\nsecond line", 2);
+    // Assert
+    expect(card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull();
+  });
+
+  it("lifts the clamp once expanded, showing everything", () => {
+    // Arrange
+    const { card, body } = mounted("first line\nsecond line\nthird line", 3);
+    // Act
+    card.querySelector<HTMLElement>(".queued-head")?.click();
+    // Assert
+    expect(body.matches(CLAMPED_BODY)).toBe(false);
+  });
+
+  it("drops the more signal once expanded", () => {
+    // Arrange
+    const { card, box } = mounted("first line\nsecond line\nthird line", 3);
+    // Act
+    card.querySelector<HTMLElement>(".queued-head")?.click();
+    // Assert
+    expect(box.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("clamps to the one line again once collapsed", () => {
+    // Arrange
+    const { card, box, body } = mounted("first line\nsecond line\nthird line", 3);
+    const head = card.querySelector<HTMLElement>(".queued-head");
+    head?.click();
+    // Act
+    head?.click();
+    // Assert
+    expect(ellipsized(box, body)).toBe(true);
   });
 });

@@ -9,11 +9,12 @@
  * (owner ruling, 2026-09-27), so it barely lifts off the page — the reader
  * sees their words have NOT reached the agent — at HALF the one bubble
  * width, whose header strip is its status BADGES, whose content is what the
- * user said, painted by the one body pipeline, and which collapses at TWO lines
- * behind the one has-more fade, opened by the one toggle (expand.ts, armed on
- * the tray).
+ * user said, painted by the one body pipeline, and which collapses to ONE line
+ * ending in the one bubble's ellipsis when there is more, never a fade (owner
+ * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the tray).
  *
- * COLLAPSED IT IS TWO LINES AND ITS BADGES (owner spec, 2026-09-23). The rest —
+ * COLLAPSED IT IS ONE LINE AND ITS BADGES (owner spec, 2026-09-23; one line,
+ * 2026-09-27). The rest —
  * the queued age, the classifier's rationale or failure detail, and the
  * actions — is the bubble's EXPAND-ONLY region (`expandOnly`,
  * src/bubble/draw.ts), shown once the same click that opens the text opens it.
@@ -96,7 +97,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
-import { drawBubble } from "../bubble/draw.js";
+import { BUBBLE_MORE_ELLIPSIS, ELLIPSIS_CAP_LINES, drawBubble } from "../bubble/draw.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
@@ -150,7 +151,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   });
 
   // THE STRIP IS THE BADGES, and only the badges: the card's headline, the one
-  // thing besides the first two lines a collapsed card shows.
+  // thing besides the first line a collapsed card shows.
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
@@ -200,7 +201,8 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
       strip: [head],
       content,
       expandOnly: [details],
-      capLines: 2,
+      capLines: ELLIPSIS_CAP_LINES,
+      more: BUBBLE_MORE_ELLIPSIS,
     },
     previous,
   ).bubble;
