@@ -63,7 +63,7 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	// the task, and the run it cancels is the call recorded here.
 	c.spawnedRuns[taskID] = call.activityID
 	if backgrounded {
-		c.spawns[call.activityID] = spawnRecord{prompt: subagentPrompt(call, result)}
+		c.spawns[call.activityID] = spawnRecord{prompt: subagentPrompt(call, result), startedAtMs: call.startedAt}
 	}
 	// THE THIRD FACT IS THE SPAWNER, NOT THE SPAWNED. A created agent's id is
 	// the spawning call's id and needs no separate report; what the reader

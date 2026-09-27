@@ -133,6 +133,12 @@ func TestGoldenCorpusVendorSpecificKindsAreTheDeclaredSet(t *testing.T) {
 		"attachment/hook_non_blocking_error": true, "attachment/hook_cancelled": true,
 		// R15: a file-plane prompt can never be a page line.
 		"user_prompt": true, "user/meta": true,
+		// User-role records no person typed (convert/bookkeeping.go): the CLI's
+		// own slash-command bookkeeping, a local command's printed output, the
+		// interrupt marker, and a task notification this stream cannot settle
+		// a spawn from. Never a prompt.
+		"user/slash_command": true, "user/local_command_output": true,
+		"user/interrupt": true, "user/task_notification": true,
 		// A settle whose call is behind the cursor.
 		"orphan_tool_result": true,
 		// A fork's copied context: an assistant record it QUOTES from a parent,

@@ -88,7 +88,7 @@ const SLASH_SHAPE_A = scenario({
     "content is the CLI's own slash-command bookkeeping (`<command-message>{name}</command-message>\\n` " +
     "`<command-name>/{name}</command-name>\\n<command-args></command-args>`), parameterized by command name",
   writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
-  arms: "none in this converter — this record is what the DAEMON's own history classifier reads directly off the transcript; the shim ships it unclassified",
+  arms: "none in this converter (nothing reaches the stream); the SIDECAR classifies the record on the file plane — a command the CLI answers itself is `user/slash_command` residue, never a prompt (shim-sidecar internal/convert/bookkeeping.go)",
   run(ctx) {
     const name = ctx.args === "" ? "compact" : ctx.args;
     ctx.log.debug({ turn: ctx.turn, branch: "slash-shape-a", command: name }, "fake Shape-A slash-command bookkeeping turn");
@@ -113,7 +113,7 @@ const SLASH_SHAPE_A_UNNAMED = scenario({
     "NOTHING on the stream — the same FILE-PLANE-ONLY \"user\"-typed record, but the WITHHELD-UNNAMED shape: only " +
     "`<local-command-stdout>...</local-command-stdout>`, with no `<command-name>` element at all",
   writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
-  arms: "none in this converter — a record naming no command, which is the negative `slash-shape-a` exists to prove",
+  arms: "none in this converter (nothing reaches the stream); the SIDECAR classifies the record on the file plane as `user/local_command_output` residue, never a prompt (shim-sidecar internal/convert/bookkeeping.go)",
   run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "slash-shape-a-unnamed" }, "fake Shape-A withheld-unnamed bookkeeping turn");
     ctx.files.transcript.append({
