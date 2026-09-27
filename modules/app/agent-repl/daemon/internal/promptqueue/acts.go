@@ -135,7 +135,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		state = &wsState{}
 		q.states[ws] = state
 	}
-	state.uninterruptible = command
+	state.cut = &runningCut{turn: turn, command: command}
 	q.mu.Unlock()
 
 	// THE FOOTER IS TOLD WHAT THE TURN CARRIES, BEFORE THE TURN EXISTS. Nothing
@@ -176,7 +176,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		q.deps.Feed.OnContextCutAborted(ws, turn)
 		q.deps.Footer.SetTurn(ws, nil)
 		q.deps.Sidebar.SetTurn(ws, nil)
-		q.clearUninterruptible(ws)
+		q.retireCut(ws)
 		log.Error(opAct, "the shim refused the context cut", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("deliver the context cut on %q: %w", ws, err)
 	}
@@ -209,12 +209,12 @@ func footerAct(command conversationv1.SessionCommand) footer.SessionAct {
 	}
 }
 
-// clearUninterruptible releases the uninterruptible mark a context cut set.
-func (q *queue) clearUninterruptible(ws ids.WorkspaceID) {
+// retireCut releases the running-cut record a context cut set.
+func (q *queue) retireCut(ws ids.WorkspaceID) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if state, ok := q.states[ws]; ok {
-		state.uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+		state.cut = nil
 	}
 }
 

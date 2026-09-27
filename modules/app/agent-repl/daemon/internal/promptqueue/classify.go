@@ -41,8 +41,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// has to un-draw.
 	uninterruptible := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 	if running != "" {
-		uninterruptible = q.state(sub.WS).uninterruptible
-		if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		if cut, ok := q.runningCut(sub.WS); ok {
+			uninterruptible = cut.command
 			held.Classification = &wsm.Classification{
 				Arm:     wsm.ArmUninterruptibleTurn,
 				Reason:  "the running turn is a context cut and cannot be interrupted",
@@ -95,7 +95,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 // asynchronously, and the verdict's own mechanics (an interject included) are
 // the ordinary ones.
 func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
-	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+	if cut, ok := q.runningCut(sub.WS); ok {
+		command := cut.command
 		log.Info(opClassify, "the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs", dlog.Context{
 			"command": command.String(),
 		})
@@ -131,11 +132,11 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, e
 func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) (wsm.Classification, bool) {
 	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
 	// context cut cannot be interrupted, so there is nothing to judge.
-	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+	if cut, ok := q.runningCut(sub.WS); ok {
 		return wsm.Classification{
 			Arm:     wsm.ArmUninterruptibleTurn,
 			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: command,
+			Command: cut.command,
 			At:      q.deps.Now(),
 		}, false
 	}

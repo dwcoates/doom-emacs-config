@@ -102,7 +102,7 @@ func TestEveryVerdictIsLoggedAtInfoWithItsReason(t *testing.T) {
 func TestAContextCutVerdictIsLoggedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.q.state(theWorkspace).uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.q.state(theWorkspace).cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR}
 	h.watcher.running("t-running")
 	// Act.
 	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
@@ -548,7 +548,7 @@ func TestAFailedInterruptLeavesNoQueueJumpBehind(t *testing.T) {
 func TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush(t *testing.T) {
 	// Arrange: a context cut is the running turn.
 	h := newHarness(t)
-	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.q.state("ws-1").cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR}
 	h.watcher.running("t-running")
 
 	// Act.
@@ -572,7 +572,7 @@ func TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush(t *testing
 func TestAHoldBehindAContextCutAsksNoClassifier(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_COMPACT
+	h.q.state("ws-1").cut = &runningCut{turn: "t-running", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT}
 	h.watcher.running("t-running")
 
 	// Act.
