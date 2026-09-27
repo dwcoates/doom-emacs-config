@@ -562,14 +562,6 @@ describe("the 'more below' affordance", () => {
     expect(fade).toMatch(/pointer-events:\s*none/);
   });
 
-  it("fades a thinking bubble over only the lower half of its last line", () => {
-    // Arrange / Act
-    const fade = declarationsOf('.bubble[data-variant="thinking"] > .bubble-scroll.has-more::after');
-
-    // Assert — half the shared 1.5em line box, so the line's top reads as text.
-    expect(fade).toMatch(/height:\s*0\.75em/);
-  });
-
   it("fades every bubble into its own background token", () => {
     // Arrange / Act — the gradient rule (the selector also names a base ::after
     // rule for geometry, so pick the copy carrying the background).
@@ -614,13 +606,12 @@ describe("the 'more below' affordance", () => {
       const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
-      // A rule that only repaints, re-places or re-sizes a pseudo-element the
-      // base rule already took out of flow (the fade's per-kind gradient, the
-      // thinking bubble's half-line fade height).
+      // A rule that only repaints or re-places a pseudo-element the base rule
+      // already took out of flow (the fade's per-kind gradient).
       const decorative = rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
-        .every((prop) => prop === "" || ["background", "left", "right", "transform", "height"].includes(prop));
+        .every((prop) => prop === "" || ["background", "left", "right", "transform"].includes(prop));
       return !positioned && !decorative;
     });
 
@@ -666,7 +657,7 @@ describe("the 'more below' affordance", () => {
     for (const rule of withHasMore) {
       for (const sel of rule.selectors) {
         expect(sel).toMatch(
-          /^(?:\.bubble(?:\[data-cap-lines="0"\]|\[data-variant="thinking"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+          /^(?:\.bubble(?:\[data-cap-lines="0"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
         );
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
@@ -776,6 +767,19 @@ describe("the ellipsis instead of the fade", () => {
     remove();
     // Assert
     expect(faded).toEqual([true, false]);
+  });
+
+  it("keeps the fade on a capped non-thinking response bubble", () => {
+    // Arrange — an agentic card: a response-role bubble under the default fade.
+    const { bubble, body } = drawBubble({ role: "response", variant: "agentic", content: [], capLines: "feed" });
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", "")), body.matches(CLAMP)];
+    bubble.remove();
+    // Assert
+    expect(faded).toEqual([true, false, false]);
   });
 
   it("keys neither the clamp nor the hidden fade on has-more, so the measurer moves nothing", () => {

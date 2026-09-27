@@ -260,7 +260,12 @@ hand any more:
   is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
-  included. A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
+  included. A LANDED THINKING bubble (owner ruling, 2026-09-27) keeps its
+  one-line cap (`THINKING_CAP_LINES`) and says "more" with the same ellipsis,
+  never a fade (`responseCap`, src/feed/cards/response.ts); a thinking bubble
+  still arriving is under the feed cap, which the ellipsis cannot state, so it
+  keeps the fade until it lands. The earlier half-line thinking fade is gone.
+  A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
   non-thinking response (arriving, interim pear, final green) and the
   ended-turn bubble is drawn `BUBBLE_UNCAPPED` (`data-cap-lines="none"`), the
   one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
