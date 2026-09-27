@@ -18,7 +18,7 @@
  * one the reader scrolled away from or left (see `AutoCollapse`). Both go
  * through the one collapse, `collapseSection`.
  */
-import { ancestorMatching } from "./dom.js";
+import { ancestorMatching, scrollbarWidthPx } from "./dom.js";
 import { log } from "./log.js";
 import { collapseClicked } from "./scroll.js";
 
@@ -354,7 +354,7 @@ export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
  * one here (see `AutoCollapse`).
  */
 export function onVerticalScrollbar(el: Element, clientX: number): boolean {
-  const barWidth = el instanceof HTMLElement ? el.offsetWidth - el.clientLeft * 2 - el.clientWidth : 0;
+  const barWidth = el instanceof HTMLElement ? scrollbarWidthPx(el, el.clientLeft * 2) : 0;
   if (barWidth <= 0) return false;
   const rect = el.getBoundingClientRect();
   const barLeft = rect.left + el.clientLeft + el.clientWidth;
