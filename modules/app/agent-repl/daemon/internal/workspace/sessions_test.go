@@ -81,6 +81,16 @@ type fakeClient struct {
 	// killTurns records every KillTurn request, and killTurnErr fails it.
 	killTurns   []*shimv1.KillTurnRequest
 	killTurnErr error
+	// startTurns records every StartTurn request; each is accepted.
+	startTurns []*shimv1.StartTurnRequest
+}
+
+func (c *fakeClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
+	c.startTurns = append(c.startTurns, req)
+	return &shimv1.StartTurnResponse{Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{
+		Prompt: &conversationv1.AgentPrompt{Id: req.GetTurn(), Agent: &conversationv1.AgentId{Value: "main-agent"}},
+		Page:   &conversationv1.HistoryPage{},
+	}}}, nil
 }
 
 func (c *fakeClient) KillTurn(_ context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error) {
@@ -334,6 +344,15 @@ func (w *fakeWatcher) Close() error {
 func (w *fakeWatcher) Connected() bool { return true }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
+
+func (w *fakeWatcher) OnTurnOpening(ids.WorkspaceID, ids.TurnID) {}
+
+func (w *fakeWatcher) OnTurnOpenFailed(ids.WorkspaceID, ids.TurnID) {}
+
+func (w *fakeWatcher) SetMainAgent(*conversationv1.AgentId) {}
+
+func (w *fakeWatcher) OnTurnOpened(ids.WorkspaceID, *conversationv1.AgentPrompt, *conversationv1.HistoryPage) {
+}
 
 func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return sessionwatcher.LiveWorkSet{} }
 

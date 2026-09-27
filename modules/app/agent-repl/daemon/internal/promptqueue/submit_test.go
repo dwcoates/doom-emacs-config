@@ -785,3 +785,20 @@ func TestSubmitOfTheTurnAlreadyInFlightStartsNothing(t *testing.T) {
 // repeatedStartMessage is the record a submission of the turn in flight
 // writes.
 const repeatedStartMessage = "a submission repeated the turn already in flight; it is answered as the delivery the original was and nothing is started again"
+
+// TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn pins that the
+// guidance is started under the submission's turn, never one minted
+// downstream, so a re-driven retry of it is the start the shim already took.
+func TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if len(h.parkedTurns) != 1 || h.parkedTurns[0] != "t1" {
+		t.Fatalf("parked route turns = %v, want the submission's own t1", h.parkedTurns)
+	}
+}
