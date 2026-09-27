@@ -6,8 +6,8 @@
  * ARM a reconciled ending takes, because the arm is what a reader is told
  * happened.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -72,17 +72,6 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     writeBatch: refuse,
     ...overrides,
   };
-}
-
-/** Every structured record the logger wrote since `before`. */
-function recordsSince(before: number): Record<string, unknown>[] {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
-  return calls.slice(before).map(([, bytes, offset, length]) => {
-    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  });
 }
 
 /** One recorded bash start, as it would come back from the agent's own book. */
@@ -239,7 +228,7 @@ describe("liveWork", () => {
   it("logs the refusal of an empty session at error", async () => {
     // Arrange.
     const client = stubClient({});
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await createReconciler({ client, sleep: instantly })
@@ -247,7 +236,7 @@ describe("liveWork", () => {
       .catch(() => undefined);
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "refusing an open-obligation read that names no session",
@@ -329,7 +318,7 @@ describe("liveWork", () => {
           },
         }),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await createReconciler({ client, sleep: instantly })
@@ -337,7 +326,7 @@ describe("liveWork", () => {
       .catch(() => undefined);
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the store refused the open-obligation read as malformed",
@@ -1108,14 +1097,14 @@ describe("announceLiveWork for the non-shell kinds", () => {
         result: { case: "start", value: create(conversationv1.AgentSubagentStartSchema, {}) },
       }),
     });
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const announced = announceLiveWork([entry], [HANDLE], BOOK);
 
     // Assert.
     expect(announced).toEqual([]);
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the recorded start of this live work states no announceable kind; it is not announced",

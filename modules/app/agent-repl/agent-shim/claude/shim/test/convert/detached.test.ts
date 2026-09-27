@@ -8,8 +8,8 @@
  * arm a reader is told, which is the whole point of `lost` — and the ruling
  * itself belongs to whoever holds the live set.
  */
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
@@ -1060,19 +1060,15 @@ describe("convertDetached: foreground work", () => {
 
   it("records a foreground start at debug, naming the task", () => {
     // Arrange.
-    const written = vi.mocked(writeSync);
-    const before = written.mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     convert(foregroundStart("local_bash"));
 
     // Assert.
-    const records = (written.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>)
-      .map(([, bytes, offset, length]) =>
-        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-      )
+    const records = logRecordsSince(before)
       .filter((record) => record.message === "a task started in the foreground; it is not detached work and nothing is announced")
-      .map((record) => ({ level: record.level, task: (record.context as Record<string, unknown>).task_id }));
+      .map((record) => ({ level: record.level, task: record.context.task_id }));
     expect(records).toEqual([{ level: "debug", task: "t1" }]);
   });
 
@@ -1277,20 +1273,9 @@ describe("convertDetached: the call's handoff", () => {
 // WHAT KIND OF WORK IT IS: the vendor's `task_type`, on every announcement
 // ---------------------------------------------------------------------------
 
-/** Every structured record the logger wrote since `before`. */
-function recordsSince(before: number): Record<string, unknown>[] {
-  const written = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
-  return written.slice(before).map(([, bytes, offset, length]) => {
-    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  });
-}
-
 /** The ERROR records written since `before`, by message. */
 function errorsSince(before: number): string[] {
-  return recordsSince(before)
+  return logRecordsSince(before)
     .filter((record) => record.level === "error")
     .map((record) => String(record.message));
 }
@@ -1497,7 +1482,7 @@ describe("convertDetached: the announcement's kind", () => {
     // Arrange.
     const calls = createCallRegistry();
     openCall(calls, "toolu_send", "SendMessage");
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const entries = convert(
@@ -1516,7 +1501,7 @@ describe("convertDetached: the announcement's kind", () => {
 
   it("refuses a task whose kind the vendor left unstated, at ERROR", () => {
     // Arrange.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" });
@@ -1530,7 +1515,7 @@ describe("convertDetached: the announcement's kind", () => {
 
   it("refuses a task whose kind this shim does not know, at ERROR", () => {
     // Arrange.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "mcp_task" });
@@ -1582,7 +1567,7 @@ describe("convertDetached: the announcement's kind", () => {
 
   it("announces nothing for a by-hand backgrounding of a task of no known kind, at ERROR", () => {
     // Arrange.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const entries = convert({
@@ -1634,7 +1619,7 @@ describe("convertDetached: the announcement's kind", () => {
 
   it("upserts no announcement for a notification of a task of no known kind, at ERROR", () => {
     // Arrange.
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     const entries = convert({
@@ -1716,13 +1701,13 @@ describe("the task registry's agent join", () => {
     for (let index = 0; index < TASK_KIND_CAPACITY; index += 1) {
       registry.rememberAgent(`task-${index}`, create(conversationv1.AgentIdSchema, { value: `toolu_${index}` }));
     }
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     registry.rememberAgent("newest", create(conversationv1.AgentIdSchema, { value: "toolu_new" }));
 
     // Assert.
-    const warned = recordsSince(before).filter((record) => record.level === "warn");
-    expect(warned.map((record) => (record.context as Record<string, unknown>).task_id)).toEqual(["task-0"]);
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect(warned.map((record) => record.context.task_id)).toEqual(["task-0"]);
   });
 });

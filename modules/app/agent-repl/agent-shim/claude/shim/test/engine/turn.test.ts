@@ -13,7 +13,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
-import { writeSync } from "node:fs";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { PersistenceError, type AgentPageSession } from "../../src/store/persistence.js";
 import { ForegroundUnitTable } from "../../src/engine/foreground.js";
@@ -76,17 +76,6 @@ interface Harness {
     command: conversationv1.AgentInterruptedByUser | undefined;
     afterInterrupt: boolean;
   }[];
-}
-
-/** Every structured record the logger wrote since `before`. */
-function recordsSince(before: number): Record<string, unknown>[] {
-  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
-  return calls.slice(before).map(([, bytes, offset, length]) => {
-    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  });
 }
 
 async function harness(persistence: RecordingPersistence = new RecordingPersistence()): Promise<Harness> {
@@ -339,14 +328,14 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     // Arrange
     const h = await harness();
     openKeepalive(h);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     const starting = h.turns.startTurn(startTurn());
     await settled(starting);
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message:
@@ -386,13 +375,13 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     const h = await harness();
     openKeepalive(h);
     h.yieldBudgetMs = 1;
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message:
@@ -453,14 +442,14 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     openKeepalive(h);
     const caller = new AbortController();
     const starting = h.turns.startTurn(startTurn(), caller.signal);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     caller.abort();
     await starting;
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message:
@@ -713,13 +702,13 @@ describe("StartTurn", () => {
     const h = await harness();
     h.persistence.writeDurable = () =>
       Promise.reject(new PersistenceError("store_unavailable", "the store is down"));
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await h.turns.startTurn(startTurn());
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the prompt row could not be acked before the turn; the retry buffer holds it in order",
@@ -732,13 +721,13 @@ describe("StartTurn", () => {
     const h = await harness();
     h.persistence.writeDurable = () =>
       Promise.reject(new PersistenceError("invalid_request", "the store refused a durable row as malformed"));
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     await h.turns.startTurn(startTurn());
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message: "the store refused the prompt row as malformed; the turn runs without it",
@@ -790,13 +779,13 @@ describe("StartTurn", () => {
     const h = await harness();
     h.persistence.writeDurable = () => new Promise<void>(() => {});
     void h.turns.startTurn(startTurn());
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "debug",
         message: "refused a StartTurn because another StartTurn is still being started",
@@ -1080,13 +1069,13 @@ describe("KillTurn", () => {
       { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.killTurn(kill(false));
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "debug",
         message: "refused KillTurn because no turn is open; any live work the turn left keeps running",
@@ -1335,13 +1324,13 @@ describe("KillTurn", () => {
       { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     await h.turns.killTurn(kill(false));
 
     // Assert
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message: "interrupted a turn; the detached work it spawned keeps running",
@@ -1585,7 +1574,7 @@ describe("WatchAgent", () => {
     // shim used to say nothing about it at any level it runs at.
     // Arrange. The fake's tail is finite, so it runs out with no conclusion.
     const h = await harness();
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     for await (const _ of h.turns.watchAgent(
@@ -1595,7 +1584,7 @@ describe("WatchAgent", () => {
     }
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "error",
         message:
@@ -1609,7 +1598,7 @@ describe("WatchAgent", () => {
     // what it owed, named the pointer, and the stream ended on it.
     // Arrange.
     const h = await harness();
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act. The conclusion arrives while the stream stands, as the teardown's
     // does: the registration the session holds is the only way in.
@@ -1620,7 +1609,7 @@ describe("WatchAgent", () => {
     }
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "info",
         message: "the WatchAgent tail served everything its conclusion named and ended",
@@ -1633,7 +1622,7 @@ describe("WatchAgent", () => {
     const persistence = new RecordingPersistence();
     persistence.standingTail = true;
     const h = await harness(persistence);
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act.
     for await (const _ of h.turns.watchAgent(
@@ -1643,7 +1632,7 @@ describe("WatchAgent", () => {
     }
 
     // Assert.
-    expect(recordsSince(before)).toContainEqual(
+    expect(logRecordsSince(before)).toContainEqual(
       expect.objectContaining({
         level: "debug",
         message: "the WatchAgent stream ended: its consumer stopped consuming it",
