@@ -9,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/classifier"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -516,5 +517,76 @@ func TestAClearSubmittedWithNothingRunningIsRunAsTheSessionAct(t *testing.T) {
 	cut, ok := h.q.runningCut(theWorkspace)
 	if !ok || cut.turn != "t1" || cut.command != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR {
 		t.Fatalf("running cut = (%+v, %v), want t1 recorded as the running /clear", cut, ok)
+	}
+}
+
+// clearSpellings are the texts the vendor's CLI reads as /clear, each of which
+// is delivered as the /clear cut (owner ruling, 2026-09-27).
+var clearSpellings = []struct {
+	name string
+	text string
+	sent string
+}{
+	{name: "/reset", text: "/reset", sent: "/clear"},
+	{name: "/new", text: "/new", sent: "/clear"},
+	{name: "/clear with trailing text", text: "/clear foo", sent: "/clear foo"},
+	{name: "/reset with trailing text", text: "/reset foo", sent: "/clear foo"},
+}
+
+func TestEverySpellingOfClearIsDeliveredAsTheClearCut(t *testing.T) {
+	for _, tt := range clearSpellings {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			// Assert
+			cut, ok := h.q.runningCut(theWorkspace)
+			if !ok || cut.command != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR {
+				t.Fatalf("running cut = (%+v, %v), want the running /clear", cut, ok)
+			}
+		})
+	}
+}
+
+func TestEverySpellingOfClearIsSentToTheVendorAsClear(t *testing.T) {
+	for _, tt := range clearSpellings {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			// Assert
+			if got := saidText(h.sender.said[0]); got != tt.sent {
+				t.Fatalf("text = %q, want %q", got, tt.sent)
+			}
+		})
+	}
+}
+
+func TestAPromptHeldDuringAnySpellingOfClearDoesNotInterruptIt(t *testing.T) {
+	for _, tt := range clearSpellings {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if _, err := h.q.Submit(context.Background(), submission("cut-1", tt.text)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.watcher.running("cut-1")
+			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert
+			if killed := h.sender.killed(); len(killed) != 0 {
+				t.Fatalf("killed = %v, want the running /clear left to run", killed)
+			}
+		})
 	}
 }

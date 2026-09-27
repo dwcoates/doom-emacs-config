@@ -33,7 +33,8 @@ var (
 )
 
 // Specs reads the recognition table off the SessionCommand enum's descriptor,
-// once, keyed by literal.
+// once, keyed by every spelling the command is typed as: its literal and each
+// of its aliases.
 func Specs() map[string]Spec {
 	specsOnce.Do(func() {
 		specs = make(map[string]Spec)
@@ -51,10 +52,17 @@ func Specs() map[string]Spec {
 				// names no command, so there is nothing to match it against.
 				continue
 			}
-			specs[carried.GetLiteral()] = Spec{
+			spec := Spec{
 				Command:   conversationv1.SessionCommand(value.Number()),
 				Literal:   carried.GetLiteral(),
 				TakesArgs: carried.GetTakesArgs(),
+			}
+			specs[spec.Literal] = spec
+			// AN ALIAS IS THE SAME COMMAND: it maps to the same spec, so its
+			// Literal is still the canonical spelling the command is sent and
+			// shown as.
+			for _, alias := range carried.GetAliases() {
+				specs[alias] = spec
 			}
 		}
 	})
@@ -93,10 +101,9 @@ func Parse(text string) Parsed {
 	return Parsed{Slash: true, Name: name, Arg: rest, Spec: spec, Known: known}
 }
 
-// ContextCut reports whether text IS a context cut — /clear or /compact — as
-// the command table defines one: the literal alone, or, for a command that
-// takes arguments, the literal followed by any text. It answers the command
-// and its argument.
+// ContextCut reports whether text IS a context cut — /clear (or an alias of
+// it) or /compact — as the vendor's CLI would read it: the command followed by
+// ANY text or none. It answers the command and its argument.
 //
 // This is the predicate that keeps a session act away from the routing
 // classifier: whatever path a context cut's text arrives by, it is a session
@@ -112,8 +119,12 @@ func ContextCut(text string) (conversationv1.SessionCommand, string, bool) {
 	default:
 		return conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, "", false
 	}
-	if got.Arg != "" && !got.Spec.TakesArgs {
-		return conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, "", false
-	}
+	// TAKES_ARGS IS DELIBERATELY NOT CONSULTED HERE. The schema says /clear
+	// takes no argument, and elsewhere that keeps "/status of the build" a
+	// prompt. For a context cut it is overridden ON PURPOSE (owner ruling,
+	// 2026-09-27): anything the vendor's CLI would read as /clear — /clear,
+	// /reset or /new followed by any text at all — must never be classified
+	// and never be interrupted, whatever text follows it. The CLI answers
+	// "/clear <text>" as a clear, so it is one here too.
 	return got.Spec.Command, got.Arg, true
 }

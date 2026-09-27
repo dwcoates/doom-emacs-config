@@ -53,6 +53,14 @@ message SessionCommandSpec {
   // genuinely meant to say to the agent — an unrecoverable loss, since a
   // suppressed prompt is never recovered later.
   bool takes_args = 2;
+
+  // Other spellings the vendor's CLI reads as this SAME command, leading slash
+  // included — the CLI's own `aliases` (it answers `/reset` and `/new` as
+  // `/clear`). A recognizer matches an alias exactly as it matches `literal`
+  // and takes the same `takes_args`; the command is always SENT and SHOWN as
+  // `literal`. Carried here so the aliases have one definition, like the
+  // literal they stand for.
+  repeated string aliases = 3;
 }
 
 // Attaches a spec to the enum value that names the command. An extension
@@ -88,7 +96,7 @@ enum SessionCommand {
   // It carries NO spec, deliberately: it names no command, so there is no
   // literal to spell and nothing a recognizer could ever match it against.
   SESSION_COMMAND_UNSPECIFIED = 0;
-  SESSION_COMMAND_CLEAR = 1 [(session_command_spec) = {literal: "/clear"}];
+  SESSION_COMMAND_CLEAR = 1 [(session_command_spec) = {literal: "/clear", aliases: ["/reset", "/new"]}];
   SESSION_COMMAND_COMPACT = 2 [(session_command_spec) = {literal: "/compact", takes_args: true}];
   SESSION_COMMAND_MODEL = 3 [(session_command_spec) = {literal: "/model", takes_args: true}];
   SESSION_COMMAND_COST = 4 [(session_command_spec) = {literal: "/cost"}];

@@ -31,6 +31,26 @@ func TestSpecsCarryNoEntryForUnspecified(t *testing.T) {
 	}
 }
 
+func TestSpecsKeyEachAliasToItsCommandsCanonicalSpec(t *testing.T) {
+	tests := []struct {
+		name  string
+		alias string
+	}{
+		{name: "/reset", alias: "/reset"},
+		{name: "/new", alias: "/new"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, ok := Specs()[tt.alias]
+			// Assert
+			if !ok || got.Command != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR || got.Literal != "/clear" {
+				t.Fatalf("Specs()[%q] = (%+v, %v), want /clear's spec", tt.alias, got, ok)
+			}
+		})
+	}
+}
+
 func TestParse(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -81,7 +101,14 @@ func TestContextCut(t *testing.T) {
 		{name: "/compact with instructions", text: "/compact foo bar", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, arg: "foo bar", ok: true},
 		{name: "a bare /clear", text: "/clear", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, ok: true},
 		{name: "/compact with instructions on the next line", text: "/compact\nfoo bar", command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, arg: "foo bar", ok: true},
-		{name: "/clear with trailing text, which the schema says it does not take", text: "/clear the table"},
+		{name: "/clear with trailing text, a cut by owner ruling though the schema says it takes none", text: "/clear the table", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, arg: "the table", ok: true},
+		{name: "a bare /reset", text: "/reset", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, ok: true},
+		{name: "a bare /new", text: "/new", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, ok: true},
+		{name: "/reset with trailing text", text: "/reset foo", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, arg: "foo", ok: true},
+		{name: "/new with trailing text", text: "/new foo", command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, arg: "foo", ok: true},
+		{name: "a longer word that begins with /new", text: "/newer"},
+		{name: "a longer word that begins with /reset", text: "/resetting"},
+		{name: "an alias not at the start", text: "please /new"},
 		{name: "a longer word that begins with the literal", text: "/compacting"},
 		{name: "the literal not at the start", text: "please /compact"},
 		{name: "another act command", text: "/model opus"},
