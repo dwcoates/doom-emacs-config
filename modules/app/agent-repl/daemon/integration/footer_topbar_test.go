@@ -534,6 +534,8 @@ func TestFooterChecklistTakesASubjectAnActStatesEmpty(t *testing.T) {
 func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: unit},
+		// The spawn's own id IS its created agent (the minting rule).
+		Kind: subagentKind(unit),
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: activityID(unit),
 			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},

@@ -1593,15 +1593,13 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 	awaitShellHead(t, f, feed, "the restored live-work row on the root feed")
 }
 
-func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
+func TestSessionStartedDetachedOriginLiveWorkWithNoKindIsAnErrorAndSkipped(t *testing.T) {
 	t.Parallel()
-	// Arrange: a restored live item whose origin is `detached` (continuing an
-	// in-turn unit) rather than `created`. At restore time the watcher has no
-	// prior in-turn fact for ANY activity id -- it was just constructed -- so
-	// this is unresolvable by construction, which is exactly the scenario
-	// internal/sessionwatcher/route.go's resolveDetachedLocked logs as
-	// daemon.sessionwatcher.detached_kind_unknown before routeDetachedWorkLocked's
-	// own default branch logs it a second time and skips the item.
+	// Arrange: a restored live item whose origin is `detached` and which
+	// states NO kind. The kind is the announcement's own
+	// (AgentDetachedWork.kind); one without it is malformed, and
+	// internal/sessionwatcher/route.go's resolveDetachedLocked refuses it at
+	// ERROR before any view takes it.
 	f := newRegistered(t, harness.Opts{})
 	unknown := &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: "restored-detached-1"},
@@ -1621,10 +1619,7 @@ func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
 	// restored live-work set settles at zero rather than crashing bring-up.
 	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.detached_kind_unknown")
 	awaitLiveWork(t, f, 0)
-	// The feed resolver states the same unresolvable item a second time, from
-	// its own side, which is the second half of what the test asserts.
-	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown",
-		"daemon.feed.detached_unplaceable")
+	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
 }
 
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----
