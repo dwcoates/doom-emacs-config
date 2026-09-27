@@ -2765,9 +2765,9 @@ Returns the list of graphical frames that were actually re-pinned."
 
 Doom's stock `+workspace--message-body' builds the echo-area string as
 `<tabline> | <message>', so every `+workspace-message' / `+workspace-error'
-call (e.g. the `Deleted '<ws>' workspace' notification emitted by
-`+workspace/kill' inside `agent-repl--kill-one-workspace's merge-teardown
-path) briefly flashes the full workspaces tabline in the minibuffer.
+call (e.g. the `Deleted '<ws>' workspace' notification Doom's
+`+workspace/kill' emits) briefly flashes the full workspaces tabline in the
+minibuffer.
 
 Mirrors the rationale for the `+workspace/display' override above: the
 tab-bar is already painted at the top of the frame, so duplicating its
