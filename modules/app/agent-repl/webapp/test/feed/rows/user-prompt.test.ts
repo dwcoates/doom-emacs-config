@@ -5,6 +5,8 @@ import { FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedUserPrompt } from "../../../src/feed/rows/user-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
+import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import {
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
@@ -144,6 +146,22 @@ describe("drawFeedUserPrompt: its spec", () => {
   it("collapses at the shared feed cap", () => {
     const el = drawFeedUserPrompt(prompt([]));
     expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("feed");
+  });
+
+  it("stays expandable on a click, unlike a response (which is never abbreviated)", () => {
+    // Arrange
+    const host = document.createElement("div");
+    document.body.append(host);
+    const uninstall = installClickExpand(host, () => "");
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "go" } } }]));
+    host.append(el);
+    const box = el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
+    // Act
+    box?.click();
+    // Assert
+    expect(box?.classList.contains(EXPANDED_CLASS)).toBe(true);
+    uninstall();
+    host.remove();
   });
 });
 
