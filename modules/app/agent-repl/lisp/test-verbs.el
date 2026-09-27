@@ -979,6 +979,30 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
       (agent-repl-nuke-workspace)
       (should-not agent-repl-test-verbs--sent))))
 
+(ert-deftest agent-repl-verbs-kill-command-confirms-before-sending ()
+  "`SPC j x' asks y/n first, and a yes sends the kill."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_p) t)))
+      (agent-repl-kill-workspace)
+      (should (agent-repl-test-verbs--request :kill)))))
+
+(ert-deftest agent-repl-verbs-kill-command-declined-sends-nothing ()
+  "Declining the kill confirmation sends no request."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_p) nil)))
+      (agent-repl-kill-workspace)
+      (should-not agent-repl-test-verbs--sent))))
+
+(ert-deftest agent-repl-verbs-kill-command-declined-is-logged ()
+  "A declined kill is recorded, so the non-action is visible in the log."
+  (agent-repl-test-verbs--with nil
+    (let (logged)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-kill-workspace)
+        (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.kill-declined" m)) logged))))))
+
 (ert-deftest agent-repl-verbs-restart-command-prefix-arg-forces ()
   "A prefix argument makes `agent-repl-restart-workspace' forced."
   (agent-repl-test-verbs--with nil
