@@ -1530,3 +1530,34 @@ func TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans(t *testing.T) {
 		})
 	}
 }
+
+// TestAStreamOpenItsCallerAbandonedIsRecordedAtInfo pins that an open whose own
+// caller's context ended first -- the watcher closing, the daemon tearing down
+// -- is not a shim refusal: it is recorded at INFO with the cause, never at
+// ERROR, and the error is still returned.
+func TestAStreamOpenItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	f.watchBashRefusal = connect.NewError(connect.CodeInternal, errors.New("never reached"))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := c.WatchBash(ctx, &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("WatchBash() error = nil, want the abandoned open's error")
+	}
+	if hasRecordAt(log, "error", "daemon.shimclient.watch_bash") {
+		t.Fatalf("the abandoned open was recorded at error: %+v", log.Records())
+	}
+	if !hasRecordAt(log, "info", "daemon.shimclient.watch_bash") {
+		t.Fatalf("no info record for the abandoned open: %+v", log.Records())
+	}
+	if got := recordFields(t, log, "daemon.shimclient.watch_bash")["cause"]; got != context.Canceled.Error() {
+		t.Fatalf("cause = %v, want %q", got, context.Canceled.Error())
+	}
+}
