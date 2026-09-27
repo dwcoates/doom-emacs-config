@@ -772,6 +772,10 @@ func TestASessionActPromptNeverReachesTheClassifierWhileATurnRuns(t *testing.T) 
 		{name: "/compact with instructions", text: "/compact foo bar"},
 		{name: "/compact with instructions on the next line", text: "/compact\nfoo bar"},
 		{name: "a bare /clear", text: "/clear"},
+		{name: "/clear with trailing text", text: "/clear foo"},
+		{name: "the /reset alias", text: "/reset"},
+		{name: "the /new alias", text: "/new"},
+		{name: "the /reset alias with trailing text", text: "/reset foo"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -849,7 +853,9 @@ func TestANearMissOfASessionActIsClassifiedAsBefore(t *testing.T) {
 	}{
 		{name: "a longer word that begins with the literal", text: "/compacting"},
 		{name: "the literal not at the start", text: "please /compact"},
-		{name: "/clear with trailing text, which the schema says it does not take", text: "/clear the table"},
+		{name: "a longer word that begins with /new", text: "/newer"},
+		{name: "a longer word that begins with /reset", text: "/resetting"},
+		{name: "an alias not at the start", text: "please /new"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
