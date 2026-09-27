@@ -183,7 +183,7 @@ func TestRealtestStartTheEditor(t *testing.T) {
 		t.Logf("  open workspace %s (%s) at %s", ws.ID, ws.Name, ws.Dir)
 	}
 
-	env := RealEnv(home, os.TempDir(), os.Getuid(), openWorkspaces)
+	env := RealEnv(home, openWorkspaces)
 	sources, err := EnumerateSources(env)
 	if err != nil {
 		t.Fatalf("enumerate the logs to harvest: %v", err)

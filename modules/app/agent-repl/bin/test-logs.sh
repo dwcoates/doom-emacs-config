@@ -123,7 +123,7 @@ run_logs() {
         AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}" \
         AGENT_REPL_STATE_DIR="$state" \
         XDG_CACHE_HOME="$cache" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="$emacs_global" \
+        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
         TZ=UTC \
         "$LOGS" "$@"
 }
@@ -187,6 +187,20 @@ test_central() {
         pass "--central selects every central sink"
     else
         fail "--central selects every central sink"
+    fi
+}
+
+test_central_default_emacs_sink() {
+    local out
+    mkdir -p "$state/logs"
+    printf '%s\n' '{"timestamp":"2026-09-10T10:00:16.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.durable","message":"emacs durable central","context":{}}' \
+        >"$state/logs/emacs.central.log"
+    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE= run_logs --central --runtime emacs --json)"
+    rm -f "$state/logs/emacs.central.log"
+    if printf '%s\n' "$out" | grep -q '"operation":"emacs.durable"'; then
+        pass "--central reads the durable <state>/logs/emacs.central.log by default"
+    else
+        fail "--central reads the durable <state>/logs/emacs.central.log by default"
     fi
 }
 
@@ -681,7 +695,7 @@ EOF
         AGENT_REPL_LOGS_TEST_ROWS="$rows" \
         AGENT_REPL_STATE_DIR="$state" \
         XDG_CACHE_HOME="$cache" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="$emacs_global" \
+        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
         TZ=UTC \
         "$LOGS" --workspace "$workspace" --runtime daemon --follow --json \
         >"$TMP/follow.out" 2>"$TMP/follow.err" &
@@ -711,6 +725,7 @@ test_workspace_id
 test_workspace_name
 test_ambiguous_workspace_name
 test_central
+test_central_default_emacs_sink
 test_all
 test_since_rfc3339
 test_since_duration

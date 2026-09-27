@@ -913,7 +913,7 @@ The sources are the ones `logging-contract.md` names, and nothing else:
 | source | what |
 |---|---|
 | the five canonical per-workspace links | `<workspace>/.claude/emacs/{emacs,daemon,shim,webapp,sidecar}.log`, read through the LINK and never through a target path constructed by a reader |
-| the elisp global sink | `agent-repl-log-file-name` — `$TMPDIR/doom-agent-repl-<uid>/doom-agent-repl.log`, plus `.prev`. The pre-2026 default under `~/.claude-emacs` is retired and holds only historical records; no run harvests it |
+| the elisp global sink | `agent-repl-log-file-name` — `~/.claude-emacs/logs/emacs.central.log`, plus `.prev`. Both earlier defaults (`~/.claude-emacs/doom-agent-repl.log` and `$TMPDIR/doom-agent-repl-<uid>/doom-agent-repl.log`) are retired and hold only historical records; no run harvests them |
 | the daemon's global sink | `~/.claude-emacs/logs/daemon.run.log` and its rotation siblings |
 | the two services' global sinks | `~/.cache/agent-repl/log/shim-store.log`, `shim-claude-sidecar.log`, with rotation siblings |
 | the two services' stderr | `~/.cache/agent-repl/log/*.err.log` |
