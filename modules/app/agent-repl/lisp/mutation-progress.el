@@ -165,7 +165,7 @@ CREATE is `(:arm STEP :value V)'."
   (let ((step (plist-get create :arm))
         (value (plist-get create :value)))
     (pcase step
-      (:stage
+      (:entered-stage
        (when-let ((fn (plist-get callbacks :on-stage)))
          (funcall fn value)))
       (:succeeded

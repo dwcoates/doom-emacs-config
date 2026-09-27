@@ -969,7 +969,7 @@ over a newer one, so it is recorded and not echoed."
                  (agent-repl-mutation-progress-handle
                   (list :op-id (plist-get request :op-id)
                         :event (list :arm :create
-                                     :value (list :arm :stage :value :deriving-name))))
+                                     :value (list :arm :entered-stage :value :deriving-name))))
                  (funcall (plist-get keys :on-response) (list :arm :accepted :value nil)))))
       (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                               :initial-prompt "fix the flaky login test"))
