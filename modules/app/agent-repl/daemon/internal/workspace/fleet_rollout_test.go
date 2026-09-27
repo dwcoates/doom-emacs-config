@@ -161,7 +161,7 @@ func TestRouteGuidanceRefusesAnUnspecifiedOrigin(t *testing.T) {
 	f := newFleetFixture(t)
 
 	// Act
-	_, err := f.fleet.RouteGuidance(context.Background(), "ws-1", nil,
+	err := f.fleet.RouteGuidance(context.Background(), "ws-1", "turn-1", nil,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED)
 
 	// Assert
@@ -177,7 +177,7 @@ func TestRouteGuidanceRefusesAWorkspaceWithNoSession(t *testing.T) {
 	f := newFleetFixture(t)
 
 	// Act
-	_, err := f.fleet.RouteGuidance(context.Background(), "ws-1", nil,
+	err := f.fleet.RouteGuidance(context.Background(), "ws-1", "turn-1", nil,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 
 	// Assert
@@ -1144,5 +1144,53 @@ func TestAPrelaunchBesideAnAdoptedRelaunchedShimTakesTheNextGeneration(t *testin
 	// Assert.
 	if want := filepath.Join(dir, "w1.n2.sock"); got != want {
 		t.Fatalf("freshSocketPath = %q, want %q past the adopted shim's generation", got, want)
+	}
+}
+
+// TestRouteGuidanceRefusesAGuidanceNamingNoTurn covers the turn the guidance
+// must carry: minting one here would be a turn the shim cannot recognize when
+// the submission's retry is re-driven under its own.
+func TestRouteGuidanceRefusesAGuidanceNamingNoTurn(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act
+	err := f.fleet.RouteGuidance(context.Background(), ws.ID, "", &conversationv1.UserSaid{},
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+
+	// Assert
+	if err == nil {
+		t.Fatal("RouteGuidance accepted a guidance naming no turn, want a refusal")
+	}
+	if len(f.client.startTurns) != 0 {
+		t.Fatalf("StartTurn calls = %d, want none for a refused guidance", len(f.client.startTurns))
+	}
+}
+
+// TestRouteGuidanceStartsTheSubmissionsOwnTurn pins that the guidance runs
+// under the turn it was handed, never one minted here, so a re-driven retry of
+// the parked submission is the start the shim already took.
+func TestRouteGuidanceStartsTheSubmissionsOwnTurn(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act
+	err := f.fleet.RouteGuidance(context.Background(), ws.ID, "submitted-turn", &conversationv1.UserSaid{},
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RouteGuidance: %v", err)
+	}
+	if len(f.client.startTurns) != 1 || f.client.startTurns[0].GetTurn().GetValue() != "submitted-turn" {
+		t.Fatalf("StartTurn requests = %v, want one under the submission's own turn", f.client.startTurns)
 	}
 }

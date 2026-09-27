@@ -136,6 +136,24 @@ func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sende
 	return Disposition{Delivered: true}, nil
 }
 
+// logRepeatedStart records a submission whose turn is ALREADY the turn in
+// flight, which the caller answers as delivered without starting anything.
+//
+// A TURN ID IS STARTED ONCE. Only a retry of an idempotency claim the queue
+// never stamped accepted comes back under a turn id it already used (the
+// prompt handler re-drives it under the SAME id), so finding that turn running
+// means the original DID reach the shim and the process lost the stamp -- the
+// crash window the re-drive exists to close. Holding the retry behind the
+// running turn would queue the turn behind itself and start it again when it
+// ends; delivering it would ask the shim to start it twice. Both are the
+// double delivery, so it is answered as the delivery the original already
+// was, and recorded at ERROR because a repeated start is an invariant
+// violation whichever side catches it.
+func (q *queue) logRepeatedStart(log dlog.Logger, verb string, turn ids.TurnID) {
+	log.Error(opSubmit, "a submission repeated the turn already in flight; it is answered as the delivery the original was and nothing is started again",
+		dlog.Context{"turn": string(turn), "verb": verb, "original_state": "in_flight"})
+}
+
 // touchEngagement records that the user just engaged this session. IT IS WHAT
 // THE IDLE SWEEP MEASURES: without it every session's engagement stands still
 // at whatever the record was created with, so an actively used workspace is

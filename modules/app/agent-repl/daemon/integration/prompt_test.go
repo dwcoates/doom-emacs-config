@@ -117,6 +117,36 @@ func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
 	}
 }
 
+// TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn pins that the retry
+// re-drives the FIRST submission's turn id, not a fresh one: a shim that did
+// accept that turn (the daemon lost only its record of the acceptance) answers
+// the repeat as a no-op, which a fresh id would defeat.
+func TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
+	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
+	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
+	}); err == nil {
+		t.Fatal("the first submission succeeded, want it refused by the shim")
+	}
+	original := f.shim.ExpectStartTurn().GetTurn().GetValue()
+
+	// Act
+	retry := f.submit("do the thing", "retried-key", origin)
+
+	// Assert
+	again := f.shim.ExpectStartTurn().GetTurn().GetValue()
+	if original == "" || again != original {
+		t.Fatalf("the retry's StartTurn turn = %q, want the refused original's %q", again, original)
+	}
+	if got := retry.GetSuccess().GetTurn().GetTurn().GetValue(); got != original {
+		t.Fatalf("the retry answered turn %q, want the original's %q", got, original)
+	}
+}
+
 func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange

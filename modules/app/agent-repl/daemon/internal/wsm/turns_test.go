@@ -917,13 +917,10 @@ func TestClaimIdempotencyKeyAnswersTheStandingOnTheKey(t *testing.T) {
 		// wantFirstTurn: the claim answers the FIRST submission's turn rather
 		// than the offered one.
 		wantFirstTurn bool
-		// wantAbandoned: the claim names the first submission's turn as
-		// abandoned.
-		wantAbandoned bool
 	}{
 		{name: "a first claim mints", arrange: arrangeNothing, wantStanding: ClaimMinted},
 		{name: "an accepted claim is a duplicate", arrange: arrangeAccepted, wantStanding: ClaimAccepted, wantFirstTurn: true},
-		{name: "an unaccepted claim is re-driven", arrange: arrangeUnaccepted, wantStanding: ClaimRedriven, wantAbandoned: true},
+		{name: "an unaccepted claim is re-driven under its first turn", arrange: arrangeUnaccepted, wantStanding: ClaimRedriven, wantFirstTurn: true},
 		{name: "an unstamped claim whose prompt is held is a duplicate", arrange: arrangeHeldUnstamped, wantStanding: ClaimAccepted, wantFirstTurn: true},
 	}
 	for _, tc := range tests {
@@ -936,10 +933,6 @@ func TestClaimIdempotencyKeyAnswersTheStandingOnTheKey(t *testing.T) {
 			wantTurn := offered
 			if tc.wantFirstTurn {
 				wantTurn = first
-			}
-			var wantAbandoned TurnID
-			if tc.wantAbandoned {
-				wantAbandoned = first
 			}
 
 			// Act
@@ -955,10 +948,126 @@ func TestClaimIdempotencyKeyAnswersTheStandingOnTheKey(t *testing.T) {
 			if claim.Turn != wantTurn {
 				t.Fatalf("turn = %q, want %q", claim.Turn, wantTurn)
 			}
-			if claim.Abandoned != wantAbandoned {
-				t.Fatalf("abandoned = %q, want %q", claim.Abandoned, wantAbandoned)
+		})
+	}
+}
+
+// TestClaimIdempotencyKeyReadsTheClaimedTurnsRow pins what the claimed turn's
+// own row says about an unstamped claim, one edge per row: a vendor
+// terminal's close is acceptance, anything else is re-driven under the same
+// turn, and only an orphaned or agent-died close is reopened.
+func TestClaimIdempotencyKeyReadsTheClaimedTurnsRow(t *testing.T) {
+	tests := []struct {
+		name string
+		// row is false when the claimed turn has no row at all.
+		row bool
+		// close is the close stamped on the row; nil leaves it open.
+		close        *TurnClose
+		wantStanding ClaimStanding
+		wantEvidence string
+		wantReopened bool
+	}{
+		{name: "no turn row is re-driven", wantStanding: ClaimRedriven},
+		{name: "an open turn row is re-driven as it stands", row: true, wantStanding: ClaimRedriven},
+		{name: "an orphaned close is reopened and re-driven", row: true, close: closePtr(CloseOrphaned), wantStanding: ClaimRedriven, wantReopened: true},
+		{name: "an agent-died close is reopened and re-driven", row: true, close: closePtr(CloseAgentDied), wantStanding: ClaimRedriven, wantReopened: true},
+		{name: "a completed close is acceptance", row: true, close: closePtr(CloseCompleted), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
+		{name: "a failed close is acceptance", row: true, close: closePtr(CloseFailed), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
+		{name: "a killed close is acceptance", row: true, close: closePtr(CloseKilled), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			first := NewTurnID()
+			arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
+			if tc.row {
+				arrangeTurnRow(t, s, ws.ID, first, tc.close)
+			}
+
+			// Act
+			claim, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", NewTurnID())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ClaimIdempotencyKey: %v", err)
+			}
+			want := IdempotencyClaim{Standing: tc.wantStanding, Turn: first, Evidence: tc.wantEvidence, Reopened: tc.wantReopened}
+			if claim != want {
+				t.Fatalf("claim = %+v, want %+v", claim, want)
 			}
 		})
+	}
+}
+
+// TestClaimIdempotencyKeyStampsTheTerminalEvidence pins that a claim found
+// accepted by its turn's vendor terminal is STAMPED in the same transaction.
+func TestClaimIdempotencyKeyStampsTheTerminalEvidence(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	first := NewTurnID()
+	arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
+	arrangeTurnRow(t, s, ws.ID, first, closePtr(CloseCompleted))
+
+	// Act
+	if _, err := s.ClaimIdempotencyKey(context.Background(), ws.ID, "key-1", NewTurnID()); err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+
+	// Assert
+	got := scalar[int](t, s, `SELECT count(*) FROM idempotency_keys WHERE idempotency_key = 'key-1' AND accepted_at IS NOT NULL`)
+	if got != 1 {
+		t.Fatalf("%d accepted claims on the key, want 1", got)
+	}
+}
+
+// TestClaimIdempotencyKeyReopensATurnTheBootClosedAsOrphaned pins the boot's
+// orphan close against the re-drive: the turn the claim is bound to reads open
+// again once the retry claims it, so the re-driven turn is an open turn.
+func TestClaimIdempotencyKeyReopensATurnTheBootClosedAsOrphaned(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	first := NewTurnID()
+	arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
+	arrangeTurnRow(t, s, ws.ID, first, nil)
+	if _, err := s.CloseOrphans(ctx, ws.ID, instant); err != nil {
+		t.Fatalf("CloseOrphans: %v", err)
+	}
+
+	// Act
+	if _, err := s.ClaimIdempotencyKey(ctx, ws.ID, "key-1", NewTurnID()); err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+
+	// Assert
+	open, err := s.OpenTurns(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("OpenTurns: %v", err)
+	}
+	if len(open) != 1 || open[0].ID != first {
+		t.Fatalf("open turns = %+v, want only the re-driven turn %q", open, first)
+	}
+}
+
+// closePtr is a close kind by address, for a table's optional close.
+func closePtr(how TurnClose) *TurnClose { return &how }
+
+// arrangeTurnRow records turn on ws, closed with how when how is set.
+func arrangeTurnRow(t *testing.T, s *store, ws WorkspaceID, turn TurnID, how *TurnClose) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.PutTurn(ctx, Turn{ID: turn, Workspace: ws, Text: "hello", Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("arrange PutTurn: %v", err)
+	}
+	if how == nil {
+		return
+	}
+	if err := s.CloseTurn(ctx, turn, instant, *how); err != nil {
+		t.Fatalf("arrange CloseTurn: %v", err)
 	}
 }
 
@@ -983,21 +1092,22 @@ func TestClaimIdempotencyKeyStampsTheHeldEvidence(t *testing.T) {
 	}
 }
 
-// TestClaimIdempotencyKeyRebindsARedrivenClaim pins that a re-driven claim is
-// bound to the RETRY's turn durably, so accepting the retry stamps it.
-func TestClaimIdempotencyKeyRebindsARedrivenClaim(t *testing.T) {
+// TestClaimIdempotencyKeyKeepsARedrivenClaimOnItsTurn pins that a re-driven
+// claim stays bound to its FIRST turn durably, so accepting the retry, which
+// runs under that turn, stamps it.
+func TestClaimIdempotencyKeyKeepsARedrivenClaimOnItsTurn(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	retry := NewTurnID()
-	arrangeClaim(t, s, ws.ID, "key-1", NewTurnID(), arrangeUnaccepted)
-	if _, err := s.ClaimIdempotencyKey(ctx, ws.ID, "key-1", retry); err != nil {
+	first := NewTurnID()
+	arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
+	if _, err := s.ClaimIdempotencyKey(ctx, ws.ID, "key-1", NewTurnID()); err != nil {
 		t.Fatalf("ClaimIdempotencyKey: %v", err)
 	}
 
 	// Act
-	err := s.AcceptIdempotencyKey(ctx, ws.ID, "key-1", retry)
+	err := s.AcceptIdempotencyKey(ctx, ws.ID, "key-1", first)
 
 	// Assert
 	if err != nil {
@@ -1017,7 +1127,8 @@ func TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	ws := testWorkspace(t, before.(*store))
-	if _, err := before.ClaimIdempotencyKey(ctx, ws.ID, "key-1", NewTurnID()); err != nil {
+	first := NewTurnID()
+	if _, err := before.ClaimIdempotencyKey(ctx, ws.ID, "key-1", first); err != nil {
 		t.Fatalf("ClaimIdempotencyKey before the restart: %v", err)
 	}
 	if err := before.Close(); err != nil {
@@ -1036,8 +1147,9 @@ func TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimIdempotencyKey after the restart: %v", err)
 	}
-	if claim.Standing != ClaimRedriven {
-		t.Fatalf("standing = %s after a restart before acceptance, want %s", claim.Standing, ClaimRedriven)
+	want := IdempotencyClaim{Standing: ClaimRedriven, Turn: first}
+	if claim != want {
+		t.Fatalf("claim = %+v after a restart before acceptance, want %+v", claim, want)
 	}
 }
 

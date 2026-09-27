@@ -1033,8 +1033,10 @@ type harness struct {
 	displaced *Displaced
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
-	// parkedTurns answers ParkedRoute, consumed in order.
+	// parkedTurns records the turn each guidance was routed under.
 	parkedTurns []ids.TurnID
+	// awaitedTurns records every turn AwaitTurnEnd waited on.
+	awaitedTurns []ids.TurnID
 	// parkedSaid records what guidance was delivered.
 	parkedSaid []*conversationv1.UserSaid
 
@@ -1229,9 +1231,10 @@ func (h *harness) deps() Deps {
 				h.mu.Unlock()
 			}, true, nil
 		},
-		AwaitTurnEnd: func(context.Context, ids.WorkspaceID, ids.TurnID) (wsm.TurnClose, error) {
+		AwaitTurnEnd: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			h.awaitedTurns = append(h.awaitedTurns, turn)
 			if len(h.turnCloses) == 0 {
 				return wsm.CloseCompleted, nil
 			}
@@ -1248,16 +1251,12 @@ func (h *harness) deps() Deps {
 		Freeness:          h.freeness,
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
-		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
+		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.parkedSaid = append(h.parkedSaid, said)
-			if len(h.parkedTurns) == 0 {
-				return wsm.NewTurnID(), nil
-			}
-			turn := h.parkedTurns[0]
-			h.parkedTurns = h.parkedTurns[1:]
-			return turn, nil
+			h.parkedTurns = append(h.parkedTurns, turn)
+			return nil
 		},
 		Rollout: h.rollout,
 		Now:     h.clock,

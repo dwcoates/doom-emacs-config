@@ -40,6 +40,18 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    * durable record the turn produces is stamped with it, and the open turn is
    * addressed by it. The shim never mints one of its own.
    *
+   * A TURN ID IS STARTED ONCE. A StartTurn repeating a turn id this shim
+   * already accepted starts nothing and delivers nothing again: it is answered
+   * with `success` -- the prompt under this turn id, the session's agent and
+   * the ORIGINAL start's origin, and the opening page this request asks for --
+   * so a daemon re-driving a submission whose acceptance it lost proceeds as
+   * if its first call had answered. A
+   * repeat is an invariant violation the shim records at ERROR; it is never
+   * `turn_already_open`, which is only ever about a DIFFERENT turn. A repeat
+   * arriving while the original is still being started waits for it and is
+   * answered as above if the original was accepted, and started as a first
+   * StartTurn if it was refused.
+   *
    * @generated from field: conversation.v1.TurnId turn = 1;
    */
   turn?: TurnId | undefined;
@@ -168,8 +180,10 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
    */
   kind: {
     /**
-     * A turn is already open, or another StartTurn is still being started.
-     * Always the DAEMON's fault: it is the only queue. The shim's own cache
+     * A turn is already open, or another StartTurn is still being started,
+     * under a DIFFERENT turn id (a repeat of the same id is answered
+     * `success`; see StartTurnRequest.turn). Always the DAEMON's fault: it is
+     * the only queue. The shim's own cache
      * keep-alive NEVER produces this arm — a StartTurn that arrives while a
      * keep-alive runs waits inside the shim for the keep-alive to end and then
      * opens its turn, so no keep-alive is ever visible on this wire.
