@@ -81,6 +81,10 @@ type Report struct {
 	// because closing a row is a registry decision about the workspace, while
 	// an orphan close is about one workspace's unterminated turns.
 	MissingDirClosed []ids.WorkspaceID
+	// ClosedServingReleased are the CLOSED workspaces whose row still named a
+	// serving instance (or a spawned shim pid), which this boot released: a
+	// closed workspace is served by no daemon.
+	ClosedServingReleased []ids.WorkspaceID
 	// Orphaned are the turns closed because they had no terminal.
 	Orphaned []ids.TurnID
 	// HoldsRestored is how many held prompts came back.

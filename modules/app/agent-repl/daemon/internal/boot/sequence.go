@@ -89,6 +89,9 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.closeMissingDirs(ctx, log, workspaces, &report); err != nil {
 			return Report{}, err
 		}
+		if err := s.releaseClosedServing(ctx, log, workspaces, &report); err != nil {
+			return Report{}, err
+		}
 		clientless, err := s.adopt(ctx, log, workspaces, &report)
 		if err != nil {
 			return Report{}, err
@@ -135,6 +138,46 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		"dispositions":       len(report.Dispositions),
 	})
 	return report, nil
+}
+
+// releaseClosedServing heals every CLOSED workspace whose row still names a
+// serving instance or a spawned shim pid. A closed workspace is served by no
+// daemon, and every close releases both in the same write (wsm.SetClosed), so
+// such a row is an invariant violation a leaked close path left behind — it is
+// repaired through that same helper and stated at ERROR. Left alone, every
+// later handover transferred it (2026-09-27, 498b3b658c074bf4).
+func (s *sequence) releaseClosedServing(ctx context.Context, log dlog.Logger, workspaces []wsm.Workspace, report *Report) error {
+	const op = "daemon.boot.release_closed_serving"
+	for _, ws := range workspaces {
+		if !ws.Closed {
+			continue
+		}
+		owner, err := s.deps.DB.Serving(ctx, ws.ID)
+		if err != nil {
+			log.Error(op, "could not read a closed workspace's serving ownership", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws.ID), "error": err.Error(),
+			})
+			return fmt.Errorf("boot: read the serving ownership of closed workspace %s: %w", ws.ID, err)
+		}
+		if owner == nil && ws.SpawnedShimPID == nil {
+			continue
+		}
+		fields := dlog.Context{dlog.KeyWorkspaceID: string(ws.ID), "owner": ""}
+		if owner != nil {
+			fields["owner"] = string(*owner)
+		}
+		if ws.SpawnedShimPID != nil {
+			fields["spawned_shim_pid"] = *ws.SpawnedShimPID
+		}
+		log.Error(op, "a closed workspace was still recorded as served; its serving ownership is released", fields)
+		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+			fields["error"] = err.Error()
+			log.Error(op, "could not release a closed workspace's serving ownership", fields)
+			return fmt.Errorf("boot: release the serving ownership of closed workspace %s: %w", ws.ID, err)
+		}
+		report.ClosedServingReleased = append(report.ClosedServingReleased, ws.ID)
+	}
+	return nil
 }
 
 // closeMissingDirs closes every open workspace whose directory is GONE.
