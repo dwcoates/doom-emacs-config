@@ -87,8 +87,8 @@ export interface ScrollPosition {
  *   viewport collapsing — and the view shifts by exactly that, so the content
  *   under the reader stays put.
  * - `collapseCompensation`: a thinking bubble wholly ABOVE the reader collapsed
- *   because the daemon marked it superseded (a later response landed in its
- *   feed); the view shifts by exactly the height it lost, so the content under
+ *   because its own final text landed (the daemon re-pushed it settled); the
+ *   view shifts by exactly the height it lost, so the content under
  *   the reader stays put. Same semantics as `prependCompensation`.
  * - `latestVisible`: the reader can SEE the feed's latest entry
  *   (`latestEntryVisible`), so the follow latches where the view already is.
@@ -295,7 +295,7 @@ export class TailFollow {
   }
 
   /**
-   * A thinking bubble collapsed when the daemon marked it superseded: when it
+   * A thinking bubble collapsed when its own final text landed: when it
    * lies wholly ABOVE the viewport, shift by exactly the height it lost, so the
    * content under the reader stays put (`collapseDelta`). A following reader is
    * already kept at the tail by the follow, so nothing is added on top of it; a
