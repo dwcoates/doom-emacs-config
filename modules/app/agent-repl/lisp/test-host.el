@@ -141,6 +141,9 @@ the host suite alone passed every time.  So the harness records the
 schedule instead of arming it, and a test that wants the retry walked
 calls it itself.")
 
+(defvar agent-repl-test-host--live nil
+  "What the stubbed `agent-repl-link-live' answers: the live daemon, or nil.")
+
 (defvar agent-repl-test-host--dial-accepts t
   "When non-nil the stubbed dial is ACCEPTED at once and answers a conn.
 Nil models the real gate: the dial stands but is not accepted yet, so
@@ -183,6 +186,8 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--dialled nil)
          (agent-repl-test-host--timers nil)
          (agent-repl-test-host--dial-accepts t)
+         (agent-repl-test-host--live nil)
+         (agent-repl-host--reattach-tokens 0)
          (agent-repl-link-handover-functions nil)
          (agent-repl-test-host--register-answer
           (list :response (list :arm :success
@@ -238,6 +243,8 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-link-successor-pending-p)
                 (lambda () agent-repl-test-host--successor-pending))
                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
+               ((symbol-function 'agent-repl-link-live)
+                (lambda () agent-repl-test-host--live))
                ((symbol-function 'agent-repl-link-dial-successor)
                 (lambda (address)
                   (push address agent-repl-test-host--dialled)
@@ -2588,6 +2595,364 @@ callback must still run rather than resolve to nil."
     (agent-repl-host-rename "ws-1" "ws-2")
     ;; Assert
     (should (equal (plist-get (agent-repl-host-ref "ws-1") :id) "ws-id-1"))))
+
+;;;; ---- A workspace's link follows the live daemon ----
+;;
+;; Regression, 2026-09-27: a daemon exited without transferring a workspace,
+;; Emacs's link was promoted onto its successor, and the workspace kept its
+;; dead connection -- every SelectWorkspace and MarkWorkspaceViewed went to
+;; the dead address and its webview stayed blank on the dead origin.
+
+(defmacro agent-repl-test-host--with-dir (&rest body)
+  "Run BODY with every workspace's project dir answering /tmp/ws-1."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--ws-get)
+              (lambda (_ws key) (and (eq key :project-dir) "/tmp/ws-1"))))
+     ,@body))
+
+(defun agent-repl-test-host--lose (ws)
+  "Drop WS's standing host stream the way a daemon's exit does."
+  (funcall (plist-get (agent-repl-host-stream ws) :on-close)
+           (list :error (list :kind :no-end-frame
+                              :message "WatchHostWorkspace: producer closed without an end frame"))))
+
+(defun agent-repl-test-host--calls-to (method conn)
+  "Return the recorded METHOD calls sent on CONN."
+  (seq-filter (lambda (call) (and (equal (car call) method) (eq (nth 1 call) conn)))
+              agent-repl-test-host--calls))
+
+(ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
+  "A lost stream re-registers the workspace on the daemon the link now names."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
+                       (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-resubscribes-on-the-live-daemon ()
+  "The workspace's stream and connection move to the live daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) live))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-reloads-the-webview-onto-the-live-daemon ()
+  "The page is navigated to the LIVE daemon's origin, never the dead one's."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) live))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-records-the-reattach-at-info ()
+  "The loss is ERROR already; the reattach that answers it is INFO."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.reattached ws=ws-1 address=\"127.0.0.1:58175\" trigger=stream-lost"))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-with-no-link-sends-nothing ()
+  "With no daemon reachable nothing is dialed and nothing polls."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (agent-repl-test-host--lose "ws-1")
+      ;; Assert
+      (should (and (null agent-repl-test-host--calls)
+                   (null agent-repl-test-host--timers))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-with-no-link-records-the-wait ()
+  "The wait for the link is on the record, at INFO."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--lose "ws-1")
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.reattach-awaiting-link ws=ws-1 trigger=stream-lost")))))
+
+(ert-deftest agent-repl-test-host-stream-lost-with-no-link-reattaches-on-link-up ()
+  "The link-up edge is what re-attaches a workspace no daemon could take."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1")
+        (agent-repl-test-host--lose "ws-1")
+        (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1"))))
+          ;; Act
+          (agent-repl-host-on-link-up live))
+        ;; Assert
+        (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) live))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-on-a-daemon-handing-over-waits-for-the-promotion ()
+  "The daemon that lost the stream is leaving: its successor's promotion re-attaches.
+Registering on a daemon that is handing over would only fail."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving
+              agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:58175")
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (and (null agent-repl-test-host--calls)
+                     (agent-repl-test-host--logged-p
+                      :info "elisp.host.reattach-awaiting-promotion ws=ws-1")))))))
+
+(ert-deftest agent-repl-test-host-stale-stream-close-keeps-the-standing-stream ()
+  "A close of a stream the workspace already left does not drop the one standing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let* ((old (agent-repl-test-host--subscribe "ws-1"))
+             (standing (agent-repl-test-host--subscribe
+                        "ws-1" (agent-repl-connect-open "127.0.0.1:58175"))))
+        ;; Act
+        (funcall (plist-get old :on-close) '(:ended))
+        ;; Assert
+        (should (eq (agent-repl-host-stream "ws-1") standing))))))
+
+(ert-deftest agent-repl-test-host-call-on-a-dead-connection-goes-to-the-live-daemon ()
+  "A call whose connection is closed goes to the daemon that serves Emacs now."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (agent-repl-connect-close dead)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--calls-to "SelectWorkspace" live))))))
+
+(ert-deftest agent-repl-test-host-call-on-a-dead-connection-never-reaches-the-dead-address ()
+  "Nothing more is sent to an address whose connection is known dead."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (agent-repl-connect-close dead)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-mark-viewed "ws-1")
+        ;; Assert
+        (should (null (seq-filter (lambda (call) (eq (nth 1 call) dead))
+                                  agent-repl-test-host--calls)))))))
+
+(ert-deftest agent-repl-test-host-call-on-a-dead-connection-reattaches-the-workspace ()
+  "Finding the connection dead re-attaches the workspace, stream and all."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (agent-repl-connect-close dead)
+        (setq agent-repl-test-host--live live)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.reattached ws=ws-1 address=\"127.0.0.1:58175\" trigger=dead-connection"))))))
+
+(ert-deftest agent-repl-test-host-call-on-a-dead-connection-with-no-link-sends-nothing ()
+  "With no daemon reachable the call has no connection and is not sent."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (agent-repl-connect-close dead)
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should (null agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-promotion-reattaches-a-workspace-left-on-the-old-daemon ()
+  "A workspace the old daemon never transferred is walked onto the successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+            (new (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" old)
+        ;; Act
+        (agent-repl-host-on-link-promote old new)
+        ;; Assert
+        (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) new))))))
+
+(ert-deftest agent-repl-test-host-promotion-reattaches-a-detached-workspace ()
+  "A workspace that lost its daemon while waiting for the promotion is walked too."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+            (new (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:50000"))
+        (agent-repl-test-host--lose "ws-1")
+        ;; Act
+        (agent-repl-host-on-link-promote old new)
+        ;; Assert
+        (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) new))))))
+
+(ert-deftest agent-repl-test-host-promotion-leaves-an-adopted-workspace-alone ()
+  "A workspace already adopted onto the successor has nothing to rebuild."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+            (new (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" new)
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-on-link-promote old new)
+        ;; Assert
+        (should (null agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-promotion-is-on-the-promote-hook ()
+  "The promotion edge reaches host.el through daemon-link's promote seam."
+  ;; Arrange / Act / Assert
+  (should (memq #'agent-repl-host-on-link-promote
+                (default-value 'agent-repl-link-promote-functions))))
+
+(ert-deftest agent-repl-test-host-transfer-notice-and-stream-loss-share-one-reattach-path ()
+  "The transfer notice and a lost stream walk the SAME function, by claim."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (walks nil))
+      (agent-repl-test-host--subscribe "ws-1")
+      (setq agent-repl-test-host--successor successor
+            agent-repl-test-host--live successor)
+      (cl-letf (((symbol-function 'agent-repl-host--reattach)
+                 (lambda (_ws _new claim trigger &rest _)
+                   (push (list claim trigger) walks))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+        (setq agent-repl-test-host--successor nil)
+        (agent-repl-test-host--lose "ws-1"))
+      ;; Assert
+      (should (equal (reverse walks)
+                     '((:adopt "transferred") (:register "stream-lost")))))))
+
+(ert-deftest agent-repl-test-host-superseded-reattach-answer-is-dropped ()
+  "A walk's late answer never moves the workspace back behind a newer walk."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((first (agent-repl-connect-open "127.0.0.1:61043"))
+            (second (agent-repl-connect-open "127.0.0.1:58175"))
+            (answers nil)
+            (success (list :arm :success
+                           :value (list :workspace (agent-repl-test-host--ref)))))
+        (cl-letf (((symbol-function 'agent-repl-rpc-register-workspace)
+                   (lambda (_conn _request &rest keys)
+                     (push (plist-get keys :on-response) answers))))
+          (agent-repl-host--reattach "ws-1" first :register "stream-lost")
+          (agent-repl-host--reattach "ws-1" second :register "promotion"))
+        ;; Act
+        (funcall (car answers) success)
+        (funcall (cadr answers) success)
+        ;; Assert
+        (should (eq (agent-repl-host--recorded-conn "ws-1") second))))))
+
+(ert-deftest agent-repl-test-host-reattach-register-refusal-leaves-the-workspace-detached ()
+  "A daemon that will not register the workspace leaves it for the next edge."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--register-answer
+              (list :response (list :arm :error :value (list :message "no"))))
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (and (plist-get (agent-repl-host--entry "ws-1") :detached)
+                     (agent-repl-test-host--logged-p
+                      :error "elisp.host.stream-lost-register-failed ws=ws-1")))))))
+
+(ert-deftest agent-repl-test-host-reattach-runs-the-reattached-hook ()
+  "The end of the walk tells the consumers that held work for the workspace."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((live (agent-repl-connect-open "127.0.0.1:58175"))
+            (told nil))
+        (agent-repl-test-host--subscribe "ws-1")
+        (setq agent-repl-test-host--live live)
+        (let ((agent-repl-host-reattached-functions
+               (list (lambda (ws) (push ws told)))))
+          ;; Act
+          (agent-repl-test-host--lose "ws-1"))
+        ;; Assert
+        (should (equal told '("ws-1")))))))
+
+(ert-deftest agent-repl-test-host-reattach-in-flight-is-not-walked-twice ()
+  "A second loss found while a walk onto the live daemon is in flight sends nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175"))
+            (registers 0))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (agent-repl-connect-close dead)
+        (setq agent-repl-test-host--live live)
+        (cl-letf (((symbol-function 'agent-repl-rpc-register-workspace)
+                   (lambda (&rest _) (setq registers (1+ registers)))))
+          ;; Act
+          (agent-repl-host-select "ws-1")
+          (agent-repl-host-mark-viewed "ws-1"))
+        ;; Assert
+        (should (= registers 1))))))
 
 (provide 'test-host)
 
