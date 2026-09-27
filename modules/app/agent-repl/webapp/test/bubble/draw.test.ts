@@ -11,11 +11,15 @@ import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_CAP_LINES,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_MORE_ATTRIBUTE,
+  BUBBLE_MORE_ELLIPSIS,
+  BUBBLE_MORE_FADE,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANTS,
   BUBBLE_UNCAPPED,
   BUBBLE_VARIANT_ATTRIBUTE,
+  ELLIPSIS_CAP_LINES,
   SAYS_ATTRIBUTE,
   drawBubble,
   isCapped,
@@ -95,6 +99,65 @@ describe("drawBubble: the collapsed line limit", () => {
       expect(bubble.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(label);
     },
   );
+});
+
+describe("drawBubble: the more signal", () => {
+  /** The smallest spec that chooses the one-line ellipsis. */
+  const ellipsis = (): BubbleSpec =>
+    spec("held", { capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS });
+
+  it("stamps the shared fade on a capped bubble that chooses none", () => {
+    // Arrange / Act
+    const { bubble } = drawBubble(spec("user"));
+    // Assert
+    expect(bubble.getAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(BUBBLE_MORE_FADE);
+  });
+
+  it("stamps the ellipsis on a bubble that chooses it", () => {
+    // Arrange / Act
+    const { bubble } = drawBubble(ellipsis());
+    // Assert
+    expect(bubble.getAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(BUBBLE_MORE_ELLIPSIS);
+  });
+
+  it("draws the ellipsis at the one-line cap", () => {
+    // Arrange / Act
+    const { bubble } = drawBubble(ellipsis());
+    // Assert
+    expect(bubble.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("1");
+  });
+
+  it("states no more signal on an uncapped bubble", () => {
+    // Arrange / Act
+    const { bubble } = drawBubble(spec("response", { capLines: BUBBLE_UNCAPPED }));
+    // Assert
+    expect(bubble.hasAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("cannot be given the ellipsis at the shared feed cap, which no clamp can state", () => {
+    // Arrange / Act — the spec types refuse it; `npm run typecheck` holds the line.
+    // @ts-expect-error the ellipsis is drawn at the one-line cap only
+    const refused: BubbleSpec = { role: "response", variant: "thinking", content: [], capLines: "feed", more: BUBBLE_MORE_ELLIPSIS };
+    // Assert
+    expect(refused.capLines).toBe("feed");
+  });
+
+  it("switches the signal in place on a redraw, keeping the scroll box", () => {
+    // Arrange — a thinking bubble arriving under the fade, then landing.
+    const first = drawBubble(spec("thinking"));
+    const box = first.body.parentElement;
+    // Act
+    const again = drawBubble(
+      spec("thinking", { capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }),
+      first.bubble,
+    );
+    // Assert
+    expect([again.bubble === first.bubble, again.body.parentElement === box, again.bubble.getAttribute(BUBBLE_MORE_ATTRIBUTE)]).toEqual([
+      true,
+      true,
+      BUBBLE_MORE_ELLIPSIS,
+    ]);
+  });
 });
 
 describe("drawBubble: the uncapped mode", () => {

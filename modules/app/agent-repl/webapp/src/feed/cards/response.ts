@@ -65,7 +65,13 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { BUBBLE_UNCAPPED, SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
+import {
+  BUBBLE_UNCAPPED,
+  SAYS_ATTRIBUTE,
+  drawBubble,
+  type BubbleCapLines,
+  type BubbleCapSpec,
+} from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -207,7 +213,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
       footer: result.case === "error" ? [cutShortMarker()] : [],
-      capLines: responseCapLines(u),
+      ...responseCap(u),
     },
     rc.previous,
   );
@@ -244,8 +250,13 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
-  if (!u.thinking) return BUBBLE_UNCAPPED;
-  return thinkingLanded(u) ? THINKING_CAP_LINES : "feed";
+  return responseCap(u).capLines;
+}
+
+/** The bubble's cap: its collapsed line limit (`responseCapLines`) and its more signal. */
+export function responseCap(u: FeedResponse): BubbleCapSpec {
+  if (!u.thinking) return { capLines: BUBBLE_UNCAPPED };
+  return thinkingLanded(u) ? { capLines: THINKING_CAP_LINES } : { capLines: "feed" };
 }
 
 /**
