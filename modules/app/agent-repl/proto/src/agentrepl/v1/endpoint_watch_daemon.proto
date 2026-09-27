@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/drain_reason.proto";
 import "agentrepl/v1/workspace_mutation_progress.proto";
 
@@ -74,6 +75,10 @@ message WatchDaemonResponse {
     // and never replayed to a late subscriber: a stream opened later states
     // its own elisp_build, and a deploy that runs after it compares that.
     DaemonReloadElisp reload_elisp = 5;
+    // The daemon is standing down in a planned exit and this is the stream's
+    // last frame; the client reattaches to the live daemon without treating
+    // the end as a fault. See the message.
+    DaemonStreamEnding ending = 6;
   }
 }
 
