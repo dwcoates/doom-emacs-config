@@ -87,7 +87,8 @@
 (declare-function agent-repl--kill-workspace-buffers "agent-repl-commands" (ws))
 (declare-function agent-repl-window--delete-buffer-windows "window" (buf &rest keys))
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
-(declare-function +workspace/kill "ext:persp-mode" (name))
+(declare-function +workspace--protected-p "ext:persp-mode" (name))
+(declare-function persp-frames-with-persp "ext:persp-mode" (&optional persp))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
 (declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
 (declare-function persp-add-new "ext:persp-mode" (name))
@@ -723,7 +724,7 @@ can legitimately diverge:
   - During snapshot-restore, hash entries exist before
     `persp-add-new' runs.
   - After a successful merge with `preserve-entry', the hash entry
-    survives `+workspace/kill' so the workspace's merged state stays
+    survives the persp kill so the workspace's merged state stays
     visible to the surviving renderers (e.g. the picker).
 
 Errors via `--ws-require-known' on an unknown ws so the caller never
@@ -1012,7 +1013,7 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 ;;;; ---- Persp-mode integration boundary ---------------------------------
 ;;
 ;; The functions below are the ONLY place inside agent-repl that touches
-;; persp-mode internals (`persp-names-cache', `+workspace/kill',
+;; persp-mode internals (`persp-names-cache', `persp-kill',
 ;; `+workspace-exists-p', `persp-update-names-cache', etc).  See AGENTS.md
 ;; "NEVER manipulate third-party internals from a high-level layer" — the
 ;; wrappers in this section ARE the integration boundary they describe.
@@ -1070,8 +1071,9 @@ so no partial teardown is left behind.
 Kills any in-flight git-diff process, tears down the agent session
 and buffers, removes WS from `agent-repl--workspaces', kills every
 remaining buffer (and attached process) that belongs to the persp via
-`agent-repl--kill-workspace-buffers', and finally kills the persp
-workspace via `+workspace/kill'.  Designed to be reusable from
+`agent-repl--kill-workspace-buffers', and finally lands the user and
+kills the persp workspace via `agent-repl--ws-land-then-kill'.  Designed
+to be reusable from
 `agent-repl-kill-workspace' (one-shot),
 `agent-repl-kill-all-workspaces' (loop), and
 `agent-repl-close-workspace'.
@@ -1099,11 +1101,15 @@ throws), WS is not in
 `agent-repl--workspaces' (unless PRESERVE-ENTRY was non-nil) and its
 on-disk state.el is up-to-date.
 
+REFUSES (via `agent-repl--assert-persp-killable'), before any teardown
+step runs, a workspace whose perspective cannot be killed: one visible in
+another frame, or persp-mode's protected nil perspective.
+
 This function is part of the persp-mode integration boundary owned
-by `workspace.el' (see file Commentary and AGENTS.md).  It is the
-only `+workspace/kill' call site inside agent-repl outside the
-finish-workspace path."
+by `workspace.el' (see file Commentary and AGENTS.md).  It never calls
+Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
   (agent-repl--assert-mergeable-teardown ws)
+  (agent-repl--assert-persp-killable ws)
   ;; The teardown is under way, so every record it writes from here on is a
   ;; departing workspace's own, and a directory that has gone with it is not
   ;; a stale registry row.  Declared AFTER the mergeable assertion: a REFUSED
@@ -1163,46 +1169,15 @@ finish-workspace path."
         (agent-repl--kill-workspace-buffers ws)
       (error (agent-repl--warn ws "kill-one-workspace: kill-workspace-buffers error: %S" err)))
     (agent-repl--log ws "kill-one-workspace: kill-workspace-buffers returned ws=%s" ws)
-    ;; Kill the persp workspace last so all internal state is already
-    ;; cleaned up before the UI workspace disappears.
-    ;;
-    ;; Existence guard uses `+workspace-exists-p' (which checks
-    ;; `persp-names-cache' via `+workspace-list-names'), matching the
-    ;; same check `+workspace/kill' itself performs.  Earlier versions
-    ;; gated on `(persp-get-by-name ws)' — but persp-mode's
-    ;; `persp-get-by-name' returns the keyword `persp-not-persp' (i.e.
-    ;; `:nil', a truthy value) when the persp is missing, so that
-    ;; guard never short-circuited.  In the merge-async flow that
-    ;; double-closes the workspace (once preemptively in
-    ;; `--workspace-merge-async', then again in the deferred
-    ;; success callback of a merge teardown), pass 2 would slip
-    ;; through the broken guard and call `+workspace/kill', which then
-    ;; emitted the user-visible warning `'<ws>' workspace doesn't
-    ;; exist' in the echo area after every successful merge.
+    ;; Land, then kill the persp workspace -- last, so all internal state
+    ;; is already cleaned up before the UI workspace disappears.  The one
+    ;; teardown order lives in `agent-repl--ws-land-then-kill': when WS is
+    ;; the workspace the user stands on, the user is switched to the
+    ;; landing workspace FIRST, and only then is WS -- no longer current --
+    ;; killed, so the kill can never reach the landing workspace's windows.
     (condition-case err
-        (let* ((system-available (agent-repl--ws-system-available-p))
-               (exists-fn-bound (fboundp '+workspace-exists-p))
-               (exists (and system-available exists-fn-bound
-                            (+workspace-exists-p ws))))
-          (agent-repl--log
-           ws
-           "kill-one-workspace: persp-kill decision=%s system-available=%s exists-fn-bound=%s"
-           (if exists "kill" "skip")
-           (if system-available "t" "nil")
-           (if exists-fn-bound "t" "nil"))
-          (when exists
-          (agent-repl--log ws "kill-one-workspace: pre-persp-kill ws=%s cache=%S"
-                            ws persp-names-cache)
-          (+workspace/kill ws)
-          (agent-repl--log ws "kill-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
-                            ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
-      (error (agent-repl--warn ws "kill-one-workspace: workspace-kill error: %S" err)))
-    ;; The perspective the user was standing in may be the one just killed, so
-    ;; where they end up is CHOSEN here rather than inherited from whatever
-    ;; persp-mode left selected — see `agent-repl--land-after-teardown'.
-    (condition-case err
-        (agent-repl--land-after-teardown ws)
-      (error (agent-repl--warn ws "kill-one-workspace: land-after-teardown error: %S" err)))
+        (agent-repl--ws-land-then-kill ws)
+      (error (agent-repl--warn ws "kill-one-workspace: land-then-kill error: %S" err)))
     ;; The workspace is now gone from both the hash (tombstoned, unless
     ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
     ;; Repaint immediately rather than letting the row outlive its tab
@@ -1520,23 +1495,6 @@ never turn a teardown into an error."
       (error (agent-repl--warn ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
                                ws reason err)))))
 
-(defun agent-repl--ws-kill (ws)
-  "Kill workspace WS via `+workspace/kill'.
-No-op when `+workspace/kill' is unbound (e.g. persp-mode not loaded).
-Any error from the underlying call propagates to the caller — wrap at
-the call site with `condition-case' when teardown must stay robust.
-
-Repaints the sidebar afterwards (`agent-repl--ws-repaint-sidebar'), so
-the row this kill just removed from the roster disappears with the tab
-instead of a tick later.
-
-This is the persp-mode kill boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace/kill'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp '+workspace/kill)
-    (prog1 (+workspace/kill ws)
-      (agent-repl--ws-repaint-sidebar ws "workspace-kill"))))
-
 (defun agent-repl--ws-main-name ()
   "Return the name of Doom's main workspace, or nil.
 Reads `+workspaces-main', the variable holding the name Doom assigns to
@@ -1758,30 +1716,74 @@ Callers must use this function instead of reading `persp-names-cache'
 directly or guarding it themselves with `boundp'."
   (and (boundp 'persp-names-cache) persp-names-cache))
 
-(defun agent-repl--land-after-teardown (ws)
-  "Leave the frame in a well-defined perspective now that WS is gone.
+;; ---- The one teardown order: land first, then kill -------------------
+;;
+;; LANDING NEVER FOLLOWS THE KILL.  Doom's `+workspace/kill', asked to kill
+;; the CURRENT workspace, kills it (dropping the frame into persp-mode's nil
+;; perspective), switches to `+workspace--last', and then -- when the window
+;; it lands on shows no Doom-"real" buffer -- puts `doom-fallback-buffer' in
+;; that window.  agent-repl's panels are not Doom-real and a panels-only
+;; workspace has no other window to select, so the landing workspace's panel
+;; window got the Doom splash: closing workspace B destroyed workspace A's
+;; layout.  agent-repl therefore never calls `+workspace/kill'.  It lands on
+;; the chosen survivor through the ordinary switch a user makes, and only
+;; then kills the departing perspective, which is by then NOT current -- the
+;; branch of Doom's kill that is a bare `persp-kill', with no switch and no
+;; fallback.  Closing a workspace changes nothing about any other workspace.
 
-TEARING DOWN A WORKSPACE MUST NAME WHERE THE USER ENDS UP.  Killing the
-perspective the user is standing in leaves the frame wherever persp-mode
-happened to drop it — a persp that no longer exists, or persp-mode's
-`nil' sentinel, which owns none of Doom's workspace keymap.  That is the
-observed post-merge state: the merge completes, the workspace vanishes,
-and `SPC ESC' reports itself undefined because the frame is standing in
-no workspace at all.
+(defun agent-repl--teardown-landing-target (ws)
+  "Return the workspace a teardown of WS lands the user on, or nil.
 
-So the landing is CHOSEN rather than inherited: when the current
-perspective is gone, missing, or is WS itself, this switches to the first
-surviving agent-repl workspace, falling back to the first surviving persp
-of any kind.  When nothing survives there is nowhere to land and the
-frame is left as persp-mode arranged it, which is recorded rather than
-silently accepted.
+The first surviving agent-repl workspace, falling back to the first
+surviving perspective of any kind; WS itself is never a candidate.
 
-Returns the workspace landed on, or nil when no switch was made or
-possible.  A failing switch is warned about, never swallowed: a landing
-that did not happen must not read as one that did."
+A BUILT-IN PERSPECTIVE IS NOT A LANDING.  \"none\" and Doom's startup
+\"main\" are persp-mode's own perspectives
+\(`agent-repl--pseudo-workspace-name-p'): they own no project, no session
+and no panels, and Doom's \"main\" is auto-vivified into the registry by a
+persp hook, so it can lead `agent-repl--ws-list-names' and be picked ahead
+of every real workspace.  Landing there put the user on an EMPTY frame --
+the fallback buffer under a lone tab, observed as `*scratch*' in playbook
+B.16 after the merged child's tab was torn down.  So both candidate
+sources are filtered to workspaces this module actually owns."
+  (let ((landable-p (lambda (n)
+                      (and (stringp n)
+                           (not (equal n ws))
+                           (not (agent-repl--pseudo-workspace-name-p n))))))
+    (or (car (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
+        (car (cl-remove-if-not landable-p (agent-repl--ws-all-names))))))
+
+(defun agent-repl--land-before-teardown (ws)
+  "Move the user off WS, which is about to be killed, onto a survivor.
+
+TEARING DOWN A WORKSPACE MUST NAME WHERE THE USER ENDS UP, and it names
+it BEFORE the kill (see the section commentary above).  A landing is owed
+when the user stands on WS itself, or stands in no workspace at all -- no
+current perspective, a perspective no longer in the tab bar, or one of
+persp-mode's built-ins, which is a landing still owed rather than one
+already made.  Standing on some OTHER live workspace owes nothing, so a
+teardown of a tab the user is not on never moves them.
+
+The target is `agent-repl--teardown-landing-target', and the switch is
+`agent-repl--ws-switch' -- the switch a user's own `SPC TAB' makes -- so
+the landing workspace's saved layout is restored and its panels are
+reconciled by the same persp activation path as every other arrival
+\(`agent-repl--on-workspace-switch').  Nothing is armed on the target:
+an arrival re-shows panels by default, and a workspace whose panels the
+user explicitly closed keeps them closed, because tearing down one
+workspace must change nothing about another.
+
+When nothing survives there is nowhere to land: the frame is left as
+persp-mode arranges it, and that is recorded at WARN rather than silently
+accepted.
+
+Returns the workspace landed on, or nil when no switch was owed or
+possible.  A failing switch SIGNALS: a landing that did not happen must
+not read as one that did, and the caller must not go on to kill the
+workspace the user is still standing on."
   (if (not (agent-repl--ws-system-available-p))
       (progn
-        (agent-repl--log ws "land-after-teardown: skipped=no-workspace-system")
+        (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=skip reason=no-workspace-system" ws)
         nil)
     (let ((current (agent-repl--ws-current-name))
           (survivors (agent-repl--ws-all-names)))
@@ -1790,81 +1792,128 @@ that did not happen must not read as one that did."
                (not (agent-repl--pseudo-workspace-name-p current))
                (member current survivors))
           (progn
-            (agent-repl--log ws "land-after-teardown: already-live persp=%s" current)
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=not-owed current=%s"
+                              ws current)
             nil)
-        ;; A BUILT-IN PERSPECTIVE IS NOT A LANDING.  "none" and Doom's
-        ;; startup "main" are persp-mode's own perspectives
-        ;; (`agent-repl--pseudo-workspace-name-p'): they own no project, no
-        ;; session and no panels, and Doom's "main" is auto-vivified into
-        ;; the registry by a persp hook, so it can lead
-        ;; `agent-repl--ws-list-names' and be picked ahead of every real
-        ;; workspace.  Landing there put the user on an EMPTY frame -- the
-        ;; fallback buffer under a lone tab, observed as `*scratch*' in
-        ;; playbook B.16 after the merged child's tab was torn down.  So
-        ;; both candidate sources are filtered to workspaces this module
-        ;; actually owns, and standing in a built-in does not count as
-        ;; standing anywhere either: it is a landing still owed, not a
-        ;; landing already made.
-        (let* ((landable-p (lambda (n)
-                             (and (stringp n)
-                                  (not (equal n ws))
-                                  (not (agent-repl--pseudo-workspace-name-p n)))))
-               (target (or (car (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
-                           (car (cl-remove-if-not landable-p survivors)))))
+        (let ((target (agent-repl--teardown-landing-target ws)))
           (if (null target)
               (progn
                 (agent-repl--warn
-                 ws "land-after-teardown: NO surviving workspace to land in (current=%s survivors=%S)"
-                 current survivors)
+                 ws "teardown-landing: NO surviving workspace to land in (ws=%s current=%s survivors=%S)"
+                 ws current survivors)
                 nil)
-            (agent-repl--log ws "land-after-teardown: current=%s -> target=%s"
-                             current target)
-            ;; THE LANDING MUST HAVE SOMETHING ON IT.  Arming the flag
-            ;; BEFORE the switch is what makes the panel arrive: the persp
-            ;; activation hook drains `:pending-show-panels' on the way in
-            ;; (`agent-repl--on-workspace-switch'), so the frame is laid out
-            ;; by the same path that lays out every other arrival at a
-            ;; workspace rather than by a repair of its own.
-            (agent-repl--arm-landing-panels target)
-            (condition-case err
-                (progn
-                  (agent-repl--ws-switch target)
-                  (agent-repl--log ws "land-after-teardown: landed persp=%s" target)
-                  target)
-              (error
-               (agent-repl--warn ws "land-after-teardown: switch to %s FAILED: %S"
-                                 target err)
-               nil))))))))
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=land current=%s target=%s"
+                              ws current target)
+            (agent-repl--ws-switch target)
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s landed=%s" ws target)
+            target))))))
+
+(defun agent-repl--ws-persp-kill-refusal (ws)
+  "Return why persp WS may not be killed, or nil when it may.
+
+The refusals Doom's `+workspace/kill' makes, reproduced here because
+agent-repl no longer calls it (`agent-repl--ws-land-then-kill'):
+
+  - the perspective is visible in another frame
+    \(`persp-frames-with-persp'), which Doom refuses with \"Can't close
+    workspace, it's visible in another frame\".  Doom asks the question of
+    the CURRENT frame's perspective; it is asked here of WS's own, which is
+    the same question whenever WS is current and the meaningful one when it
+    is not;
+  - WS is persp-mode's protected nil perspective (`+workspace--protected-p',
+    the check Doom's `+workspace-kill' makes).
+
+Each probe is guarded on its persp-mode or Doom function being bound, so
+nil is also the answer when the workspace system is not loaded."
+  (cond
+   ((and (fboundp '+workspace--protected-p) (+workspace--protected-p ws))
+    "it is persp-mode's protected nil perspective")
+   ((when-let ((persp (agent-repl--ws-resolve-persp ws)))
+      (and (fboundp 'persp-frames-with-persp)
+           (delq (selected-frame) (persp-frames-with-persp persp))))
+    "it is visible in another frame")))
+
+(defun agent-repl--assert-persp-killable (ws)
+  "SIGNAL `user-error' when persp WS may not be killed.
+Logged at INFO, then signalled -- never swallowed: a caller that asked to
+kill a workspace the system will not kill asked for something it cannot
+have, and a silent skip would read as a completed teardown.  See
+`agent-repl--ws-persp-kill-refusal' for the refusals."
+  (when-let ((reason (agent-repl--ws-persp-kill-refusal ws)))
+    (agent-repl--info ws "elisp.workspace.teardown-refused: ws=%s reason=%s" ws reason)
+    (user-error "Can't close workspace '%s': %s" ws reason)))
+
+(defun agent-repl--ws-persp-exists-p (ws)
+  "Return non-nil when a perspective named WS is in the tab bar.
+Delegates to `+workspace-exists-p', the existence check Doom's
+`+workspace/kill' makes; nil when that function is unbound.  Part of the
+persp-mode integration boundary owned by `workspace.el'.
+
+`persp-get-by-name' is NOT the test: it answers the truthy keyword
+`persp-not-persp' for a missing persp, so a guard on it never
+short-circuits -- which let the merge flow's second close of an
+already-killed workspace through to a kill that echoed \"'<ws>' workspace
+doesn't exist\" after every successful merge."
+  (and (fboundp '+workspace-exists-p)
+       (+workspace-exists-p ws)
+       t))
+
+(defun agent-repl--ws-land-then-kill (ws)
+  "Tear down perspective WS in the one teardown order: land, then kill.
+
+Emulates Doom's `+workspace/kill' without its landing and fallback (see
+the section commentary): the existence check, the refusals
+\(`agent-repl--assert-persp-killable'), then -- in place of Doom's
+kill-switch-fallback -- `agent-repl--land-before-teardown' followed by
+the kill through `agent-repl--ws-persp-kill'.  By the time the kill runs
+WS is not current unless nothing survives, so the kill cannot touch the
+landing workspace's windows and no fallback buffer is ever displayed.
+
+A WS that is not a workspace is not killed and is not an error: the merge
+flow closes the same workspace twice, and the second close finds it gone.
+The landing still runs, because the user may be standing nowhere.
+
+This is the ONE teardown order: `agent-repl--kill-one-workspace' and the
+roster's tab teardown (`agent-repl-roster--teardown-tab') both call it.
+Refusals and a failed landing signal to the caller.  Returns non-nil
+when the perspective was killed."
+  (let ((exists (agent-repl--ws-persp-exists-p ws)))
+    (when exists
+      (agent-repl--assert-persp-killable ws))
+    (agent-repl--land-before-teardown ws)
+    (if (not exists)
+        (progn
+          (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s decision=skip reason=not-a-workspace" ws)
+          nil)
+      (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s decision=kill current=%s"
+                        ws (agent-repl--ws-current-name))
+      (agent-repl--ws-persp-kill ws)
+      (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s killed still-listed=%s"
+                        ws (if (agent-repl--ws-persp-exists-p ws) "t" "nil"))
+      t)))
 
 (defun agent-repl--arm-landing-panels (target)
   "Arm TARGET so ARRIVING at it puts its panel on the frame.
 
-A LANDING THAT SHOWS NOTHING IS NOT A LANDING.  Switching to a
-surviving workspace restores whatever window configuration persp-mode
+AN ARRIVAL THAT SHOWS NOTHING IS NOT AN ARRIVAL.  Switching to a
+workspace restores whatever window configuration persp-mode
 saved for it, and a workspace the user has not stood in since its panel
 was pre-created has no configuration worth restoring — so the frame came
 up EMPTY: one window, no buffer content, no mode line, with only the tab
-bar to say anything had happened at all.  That was the state after a
-merged child's tab was torn down, and it is indistinguishable from a
+bar to say anything had happened at all, indistinguishable from a
 wedged editor.
-
-`agent-repl--ensure-own-panels-on-persp-switch' does not cover it: that
-one re-shows panels which were VISIBLE when the workspace was last
-deactivated (`:panels-were-visible'), and a workspace nobody has stood
-in has no such record.  The question here is different and simpler — the
-user was just moved somewhere they did not ask to go, so the workspace
-they land on shows itself.
 
 It is the flag rather than a direct show because the flag is the
 module's own way of saying \"this workspace becomes visible on arrival\"
 \(`agent-repl--drain-pending-show-panels').  A second mechanism beside
 it would be a second answer to one question.
 
-THE TEARDOWN LANDING IS NOT THE ONLY ARRIVAL THAT NEEDS IT.
-`agent-repl-switch-to-project' arms it too, for the workspace a
-projectile switch is about to stand on -- a workspace you just created
-has never been stood in either, so without the arm `SPC TAB n' left the
-user on the same empty frame."
+`agent-repl-switch-to-project' arms it for the workspace a projectile
+switch is about to stand on -- a workspace you just created has never
+been stood in, so without the arm `SPC TAB n' left the user on an empty
+frame.  A teardown landing does NOT arm (`agent-repl--land-before-teardown'):
+the arrival re-shows panels by default, and arming would override an
+explicit close in a workspace the teardown was not about."
   (when target
     (agent-repl--log target "arm-landing-panels: ws=%s" target)
     (agent-repl--ws-put target :pending-show-panels t)))
@@ -1911,12 +1960,13 @@ No-op when persp-mode is not loaded or WS has no live persp."
 
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.
-No-op when `persp-kill' is unbound.  Distinct from `--ws-kill'
-(`+workspace/kill'): this is the lower-level persp-mode kill used when
-the caller has already decided the persp should be dropped.
+No-op when `persp-kill' is unbound.  This is the
+lower-level persp-mode kill used when the caller has already decided the
+persp should be dropped; a teardown reaches it through
+`agent-repl--ws-land-then-kill', which lands the user first.
 
 Repaints the sidebar afterwards (`agent-repl--ws-repaint-sidebar') for
-the same reason `agent-repl--ws-kill' does: the workspace just left the
+the same reason every tab-bar exit does: the workspace just left the
 tab bar, so its roster row is gone and the webview should say so now.
 
 This is the persp-mode low-level kill boundary owned by `workspace.el'.

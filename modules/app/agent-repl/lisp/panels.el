@@ -317,11 +317,13 @@ becomes visible.
 
 WHO ARMS IT: `agent-repl-switch-to-project' for the workspace a
 projectile switch is about to stand on -- which is how a workspace you
-just created comes up showing itself -- and
-`agent-repl--land-after-teardown' for the workspace a teardown moves the
-user to.  Both go through `agent-repl--arm-landing-panels' and both arm
-BEFORE the switch, so the flag is set by the time the persp activation
-hook drains it.  (The old headless birth path armed it too; it went with
+just created comes up showing itself -- through
+`agent-repl--arm-landing-panels', which arms BEFORE the switch, so the
+flag is set by the time the persp activation hook drains it.  A teardown
+landing arms nothing (`agent-repl--land-before-teardown'): arrival
+re-shows panels by default, and an explicit close in the landing
+workspace is not overridden by some other workspace's teardown.  (The
+old headless birth path armed it too; it went with
 `agent-repl--frontend-boot-session', which no longer exists.)"
   (if (not (agent-repl--ws-get ws :pending-show-panels))
       ;; The no-op branch is the one a persp placeholder reaches (it owns no
