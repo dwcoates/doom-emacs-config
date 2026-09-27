@@ -235,6 +235,11 @@ type Queue interface {
 	// dispatched until it has finished, and what was queued is then delivered
 	// to the new shim. Queued prompts never block a bounce.
 	RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error)
+	// EndKeptDrain ends the drain a KeepDraining bounce left standing after
+	// it ran -- a handover transfer whose workspace this daemon then took back
+	// -- and resumes dispatch on what serves the workspace now. A workspace
+	// with no kept drain is success.
+	EndKeptDrain(ws ids.WorkspaceID)
 	// OnFree is the watcher's freeness edge: the last turn or detached item
 	// ended. It takes a registered bounce.
 	OnFree(ws ids.WorkspaceID)
