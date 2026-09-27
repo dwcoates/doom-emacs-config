@@ -230,6 +230,32 @@ message EntryBatch {
   // Where the producer had read to when it produced these. Unset for
   // stream-plane producers, which have no file to be positioned in.
   optional CursorState cursor_advance = 2;
+
+  // THE VENDOR TASK LOCATORS of the subagents these records book, each paired
+  // with the agent it names. The sidecar states one for every batch it reads
+  // from a subagent's transcript: the locator from the file's name, the agent
+  // from the spawning call its meta file states. Empty for every other batch,
+  // and always empty from the stream plane.
+  //
+  // IT RIDES THE SAME WRITE as the agent's rows, so the pairing is on record
+  // from the agent's first batch onward and GetAgentByVendorTask can answer
+  // for any agent that has ever run. Re-stating a pairing already on record is
+  // absorbed; the store keeps one row per (locator, agent).
+  repeated AgentLocator agent_locators = 3;
+}
+
+// One subagent's vendor task locator, paired with the agent it names.
+//
+// THE LOCATOR IS NEVER THE AGENT. The vendor names a subagent's files and its
+// task by `<id>` (`agent-<id>.jsonl`, `task_started.task_id`), while every
+// plane books the agent under the `tool_use_id` of the call that spawned it
+// (the cross-plane minting rule). This message is the one place the two are
+// joined, and a consumer compares both for equality only.
+message AgentLocator {
+  // The vendor's own `<id>`, verbatim. REQUIRED, non-empty.
+  string vendor_task_id = 1;
+  // The agent the locator names. REQUIRED, non-empty.
+  conversation.v1.AgentId agent = 2;
 }
 
 // ---- The sidecar's file cursor: where each tailed file has been read to ----
