@@ -10,7 +10,8 @@
  *     thinking/pear/green/blue ladder, the compaction divider's own color, a
  *     user prompt's permanent purple, an agent-to-agent prompt's amber, an
  *     ended turn's red, and a held prompt's NONE) — the one exception is the
- *     held prompt's grey-blue background, which the rulings name;
+ *     held prompt's background, 5% of its grey-blue tint over the feed, which
+ *     the rulings name;
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;

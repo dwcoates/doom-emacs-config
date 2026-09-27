@@ -5,8 +5,9 @@
  * vendor never saw, so it draws beside the conversation rather than in it. But
  * it IS the prompt it will become, so it is drawn by the one bubble
  * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
- * prompt rail whose fill is the held grey with only a subtle blue hue — the
- * reader sees their words have NOT reached the agent — at HALF the one bubble
+ * prompt rail whose fill is only 5% of the held grey-blue tint over the feed
+ * (owner ruling, 2026-09-27), so it barely lifts off the page — the reader
+ * sees their words have NOT reached the agent — at HALF the one bubble
  * width, whose header strip is its status BADGES, whose content is what the
  * user said, painted by the one body pipeline, and which collapses at TWO lines
  * behind the one has-more fade, opened by the one toggle (expand.ts, armed on

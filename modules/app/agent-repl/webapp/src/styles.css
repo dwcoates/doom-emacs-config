@@ -62,9 +62,11 @@
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
   --user: #e0ecff;
-  /* A HELD prompt's fill (owner ruling, 2026-09-23): "much more grey than
+  /* A HELD prompt's TINT (owner ruling, 2026-09-23): "much more grey than
      blue" -- a neutral grey carrying only a subtle blue hue, so a prompt the
-     daemon is holding reads as the blue bubble it will become, not yet sent. */
+     daemon is holding reads as the blue bubble it will become, not yet sent.
+     The held FILL is only 5% of this tint over the feed's --bg (owner ruling,
+     2026-09-27; see `.bubble[data-variant="held"]`). */
   --held-prompt-bg: #e8ebf0;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
@@ -1503,13 +1505,17 @@ pre {
 }
 /* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
    in the tray is "much more grey than blue", with only a subtle blue hue, so it
-   reads as the prompt it will become that has not been sent yet. */
+   reads as the prompt it will become that has not been sent yet.
+   NEARLY TRANSPARENT (owner ruling, 2026-09-27): the fill is only very, very
+   subtly different from the feed, 5% of the held tint over 95% of the feed's
+   own background, mixed from the two tokens so both themes follow. It feeds
+   `--bubble-bg`, so anything painted from it matches. */
 /* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
    derived from the same token rather than a copied number. The body measures
    a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
    a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
-  --bubble-bg: var(--held-prompt-bg);
+  --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
   max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
@@ -2667,7 +2673,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   grey-blue held fill carries that, and everything else is the one bubble's.
+   near-feed held fill and its badges carry that, and everything else is the
+   one bubble's.
    A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
    once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
    frame and the lease hold's amber are gone; the hold's badge alone says what
