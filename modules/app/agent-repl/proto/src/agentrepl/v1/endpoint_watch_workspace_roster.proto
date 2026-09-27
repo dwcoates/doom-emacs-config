@@ -7,6 +7,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/daemon_stream_ending.proto";
 import "frontend/v1/sidebar.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -16,6 +17,13 @@ message WatchWorkspaceRosterRequest {}
 
 // The current roster, delivered live.
 message WatchWorkspaceRosterResponse {
-  // The roster, whole.
-  frontend.v1.WorkspaceRoster roster = 1;
+  // What this frame carries: the roster, or the planned end of the stream.
+  oneof push {
+    // The whole roster, re-pushed on every change.
+    frontend.v1.WorkspaceRoster roster = 1;
+    // The daemon is standing down in a planned exit and this is the stream's
+    // last frame; the client reattaches to the live daemon without treating
+    // the end as a fault. See the message.
+    DaemonStreamEnding ending = 2;
+  }
 }
