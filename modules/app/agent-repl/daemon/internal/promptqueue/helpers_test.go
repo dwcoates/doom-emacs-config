@@ -859,13 +859,20 @@ type scriptedJudge struct {
 	asked   [][2]string
 	// gate, when set, blocks every Judge call until it is closed.
 	gate chan struct{}
+	// entered, when set, is closed by the first Judge call to reach the gate,
+	// so a test can act while a verdict is known to be IN the model's hands.
+	entered     chan struct{}
+	enteredOnce sync.Once
 }
 
 func (j *scriptedJudge) Judge(_ context.Context, running, incoming string) (classifier.Verdict, error) {
 	j.mu.Lock()
 	j.asked = append(j.asked, [2]string{running, incoming})
-	gate := j.gate
+	gate, entered := j.gate, j.entered
 	j.mu.Unlock()
+	if entered != nil {
+		j.enteredOnce.Do(func() { close(entered) })
+	}
 	// THE GATE IS A RENDEZVOUS, NOT A SLEEP: a test that needs a verdict still
 	// IN FLIGHT closes it when it is done, and every other test leaves it nil.
 	if gate != nil {
@@ -880,9 +887,18 @@ func (j *scriptedJudge) hold() func() {
 	gate := make(chan struct{})
 	j.mu.Lock()
 	j.gate = gate
+	j.entered = make(chan struct{})
 	j.mu.Unlock()
 	var once sync.Once
 	return func() { once.Do(func() { close(gate) }) }
+}
+
+// asking answers a channel closed once a Judge call has reached the gate hold
+// installed.
+func (j *scriptedJudge) asking() <-chan struct{} {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.entered
 }
 
 func (j *scriptedJudge) questions() [][2]string {
@@ -1032,6 +1048,18 @@ func newHarnessWithoutRevival(t *testing.T) *harness {
 	}
 	h.q = q
 	return h
+}
+
+// beginCut records a context cut as the running turn, under the queue's lock
+// exactly as runContextCut does, and tells the watcher it is in flight.
+func (h *harness) beginCut(turn ids.TurnID, command conversationv1.SessionCommand) {
+	h.q.mu.Lock()
+	if _, ok := h.q.states[theWorkspace]; !ok {
+		h.q.states[theWorkspace] = &wsState{}
+	}
+	h.q.states[theWorkspace].cut = &runningCut{turn: turn, command: command}
+	h.q.mu.Unlock()
+	h.watcher.running(turn)
 }
 
 // lease installs an occupancy lease with a policy.

@@ -80,7 +80,10 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	if running := watcher.TurnInFlight(); running != nil {
 		// Delivery takes an interrupt: the release becomes the semantic head
 		// and the real turn end delivers it, exactly as an interjection does.
-		q.interject(ctx, submissionOf(held), *running, log)
+		// A running session act refuses the interjection, and so the release.
+		if !q.interject(ctx, submissionOf(held), *running, log) {
+			return ErrReleaseRefused
+		}
 		return nil
 	}
 	return q.deliverHeld(ctx, ws, held, log)
