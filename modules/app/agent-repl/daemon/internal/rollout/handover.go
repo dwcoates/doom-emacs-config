@@ -714,6 +714,23 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 	out := make([]wsm.Workspace, 0, len(all))
 	var left []wsm.Workspace
 	for _, ws := range all {
+		// A CLOSED WORKSPACE IS NEVER TRANSFERRED, whatever its serving row
+		// says. Every close releases serving (wsm.SetClosed), so a closed row
+		// still naming an instance is a stale record, and transferring it made
+		// every later deploy hand over a workspace the owner had killed
+		// (2026-09-27, 498b3b658c074bf4). A live shim for one still leaves
+		// with this daemon's obligation: it is stood down, never orphaned.
+		if ws.Closed {
+			if _, live := c.deps.Shims.Client(ws.ID); live {
+				c.log.Info(opHandover, "a closed workspace still has a live session; it is stood down, not handed over",
+					dlog.Context{"workspace": string(ws.ID)})
+				left = append(left, ws)
+				continue
+			}
+			c.log.Debug(opHandover, "a closed workspace is served by no daemon; it is not handed over",
+				dlog.Context{"workspace": string(ws.ID)})
+			continue
+		}
 		owner, err := c.deps.DB.Serving(ctx, ws.ID)
 		if err != nil {
 			c.log.Error(opHandover, "could not read a workspace's serving ownership",
