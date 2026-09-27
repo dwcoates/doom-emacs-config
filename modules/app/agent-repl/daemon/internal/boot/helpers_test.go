@@ -110,6 +110,8 @@ type fakeQueue struct {
 	// db answers the state client the boot was built with, so the door closes
 	// orphans on the very store (or failing store) the test arranged.
 	db func() wsm.DB
+	// leaseChanged records every OnLeaseChanged, in order.
+	leaseChanged []wsm.WorkspaceID
 }
 
 // CloseOrphans is the queue's door, closing on the boot's own state client.
@@ -121,6 +123,20 @@ func (q *fakeQueue) RestoreHolds(context.Context) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.err
+}
+
+// OnLeaseChanged records the workspaces whose lease set the boot changed.
+func (q *fakeQueue) OnLeaseChanged(ws wsm.WorkspaceID) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.leaseChanged = append(q.leaseChanged, ws)
+}
+
+// leaseChanges answers the workspaces the queue was told about, in order.
+func (q *fakeQueue) leaseChanges() []wsm.WorkspaceID {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]wsm.WorkspaceID(nil), q.leaseChanged...)
 }
 
 // fakeMerge is the merge orchestrator's recovery half.
@@ -410,6 +426,41 @@ type failingLease struct {
 func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, error) {
 	return wsm.Lease{}, false, d.err
 }
+
+// previousProcessLease takes a lease on ws through a SECOND state handle on the
+// boot's database file, standing for a previous daemon process that died
+// without its orderly close: the handle is never closed through Close, which
+// would release what it holds.
+func (h *harness) previousProcessLease(t *testing.T, ws wsm.WorkspaceID, holder wsm.LeaseHolder) wsm.Lease {
+	t.Helper()
+	previous, err := wsm.Open(context.Background(), h.deps.Layout.DB())
+	if err != nil {
+		t.Fatalf("wsm.Open for the previous process: %v", err)
+	}
+	t.Cleanup(func() { previous.Close() })
+	lease, err := previous.AcquireLease(context.Background(), ws, holder, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease by the previous process: %v", err)
+	}
+	return lease
+}
+
+// failingRelease is a state client whose lease release fails, which is how a
+// boot fails to clear a hold nobody owns.
+type failingRelease struct {
+	wsm.DB
+	err error
+}
+
+func (d failingRelease) ReleaseLease(context.Context, wsm.LeaseID) error { return d.err }
+
+// failingForeign is a state client whose lease table cannot be read.
+type failingForeign struct {
+	wsm.DB
+	err error
+}
+
+func (d failingForeign) ForeignLeases(context.Context) ([]wsm.Lease, error) { return nil, d.err }
 
 // StandDownEverySpawn is the supervisor's own sweep of processes it started
 // and still owns. These fakes spawn no process, so there is never one to
