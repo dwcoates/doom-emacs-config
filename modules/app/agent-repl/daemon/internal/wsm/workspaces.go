@@ -343,8 +343,43 @@ func requireOneRow(res sql.Result, what string) error {
 }
 
 // SetClosed records whether a workspace's editor state is torn down.
+//
+// A CLOSED WORKSPACE IS SERVED BY NO DAEMON. Closing releases the serving
+// ownership and clears the recorded spawned shim pid IN THE SAME UPDATE that
+// sets closed, so no close path (kill, close, teardown, merge terminal, boot's
+// missing-directory close) can leave a closed row a later handover transfers.
+// This is the one helper every close goes through; reopening touches only
+// the flag, because the bring-up claims serving itself.
 func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) error {
-	return s.setWorkspaceField(ctx, "daemon.wsm.set_closed", "closed", id, closed, dlog.Context{"closed": closed})
+	const op = "daemon.wsm.set_closed"
+	fields := dlog.Context{"closed": closed}
+	if !closed {
+		return s.setWorkspaceField(ctx, op, "closed", id, false, fields)
+	}
+	fields["workspace"] = string(id)
+	var released sql.NullString
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&released)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+	})
+	if err != nil {
+		return err
+	}
+	if released.Valid && released.String != "" {
+		s.log.Info(op, "the close released the workspace's serving ownership",
+			dlog.Context{"workspace": string(id), "instance": released.String})
+	}
+	return nil
 }
 
 // SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon
