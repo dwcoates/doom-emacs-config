@@ -1636,8 +1636,8 @@ func newFixture(t *testing.T) *fixture {
 	// of the arrangement every create test starts from, exactly as the corpus
 	// ships it.
 	f.briefs[BriefWorkspaceName] = prompts.Prompt{
-		Name: BriefWorkspaceName, Body: "name the work: {{prompt}} {{correction}}",
-		Placeholders: []string{"prompt", "correction"},
+		Name: BriefWorkspaceName, Body: "name the work: {{prompt}} {{conversation}} {{correction}}",
+		Placeholders: []string{"prompt", "conversation", "correction"},
 	}
 	f.hasSession = true
 
