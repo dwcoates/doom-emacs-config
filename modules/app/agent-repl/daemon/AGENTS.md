@@ -688,6 +688,12 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   status). Until it answers NOTHING is listed, announced, quiesced or asked of
   the bounce registry; a successor that dies or never answers abandons the
   handover at ERROR and the incumbent keeps serving.
+- **A closed workspace is served by no daemon.** `wsm.SetClosed(true)` is the
+  one close write and clears `serving_instance` and `spawned_shim_pid` in the
+  same update, so every close path releases serving. `served` never transfers
+  a closed row (one with a live session is stood down), and boot
+  (`daemon.boot.release_closed_serving`) heals a closed-but-served row at
+  ERROR.
 - **The serving row arbitrates a released workspace.** The successor's
   adoption and the incumbent's reclaim both go through
   `wsm.ClaimUnownedServing` (claim only if unowned or already ours), and only
