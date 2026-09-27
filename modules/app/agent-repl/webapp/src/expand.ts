@@ -13,10 +13,13 @@
  * across an item's re-render (expandedKeys + applyExpanded), so a
  * section the user opened stays open when its tool card later changes.
  *
- * installClickExpand is the only DOM-facing piece; every decision it
- * makes lives in the pure helpers above it.
+ * installClickExpand and the AutoCollapse owner it registers with are the
+ * DOM-facing pieces: a click toggles a section, and the owner closes an open
+ * one the reader scrolled away from or left (see `AutoCollapse`). Both go
+ * through the one collapse, `collapseSection`.
  */
-import { ancestorMatching } from "./dom.js";
+import { ancestorMatching, scrollbarWidthPx } from "./dom.js";
+import { log } from "./log.js";
 import { collapseClicked } from "./scroll.js";
 
 /**
@@ -106,6 +109,15 @@ export function cappedSectionAt<
 }
 
 /**
+ * The innermost OPEN (expanded) capped section at or above `start`, stopping
+ * below `feed` — the section a wheel there must stay inside (scroll.ts's
+ * `installIntentScroll` contains it).
+ */
+export function expandedSectionAt(start: HTMLElement, feed: HTMLElement): HTMLElement | null {
+  return ancestorMatching(start, feed, (node) => isCappedSection(node.classList) && isExpanded(node));
+}
+
+/**
  * The class every element of a bubble's HEADER STRIP wears (src/bubble/draw.ts
  * stamps it). The strip is the bubble's collapsed face as much as its capped
  * box is — a peer message's collapsed face is nothing BUT its strip — so a
@@ -158,19 +170,6 @@ export function expandAction<T>(opts: {
 /** True when the section is currently laid out at full length. */
 export function isExpanded(section: Section): boolean {
   return section.classList.contains(EXPANDED_CLASS);
-}
-
-/**
- * Flip the section between its capped preview and full length,
- * answering the state it lands in.
- */
-export function toggleExpanded(section: Section): boolean {
-  if (isExpanded(section)) {
-    section.classList.remove(EXPANDED_CLASS);
-    return false;
-  }
-  section.classList.add(EXPANDED_CLASS);
-  return true;
 }
 
 /** The class a section is keyed by: its first CAPPED_CLASSES entry. */
@@ -264,6 +263,43 @@ export function ownsSection<
 }
 
 /**
+ * What a host runs after every toggle of one of its sections, with the section
+ * and the state it landed in (see `installClickExpand`).
+ */
+export type AfterToggle = (section: HTMLElement, expanded: boolean) => void;
+
+/**
+ * THE ONE COLLAPSE. Every way a section returns to its capped preview goes
+ * through here, so every side effect of a collapse stays in step whatever
+ * asked for it: the class comes off, the preview shows from the top, and the
+ * host's `afterToggle` re-measures what it draws (the "more below" fade, the
+ * title folds).
+ *
+ * FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the top.
+ * The reader's own gesture is what moves the box, so the write lives in
+ * scroll.ts with every other scroll write (`collapseClicked`).
+ */
+export function collapseSection(section: HTMLElement, afterToggle?: AfterToggle): void {
+  section.classList.remove(EXPANDED_CLASS);
+  collapseClicked(section);
+  afterToggle?.(section, false);
+}
+
+/**
+ * Flip SECTION through the one expand and the one collapse
+ * (`collapseSection`), answering the state it lands in.
+ */
+export function toggleSection(section: HTMLElement, afterToggle?: AfterToggle): boolean {
+  if (isExpanded(section)) {
+    collapseSection(section, afterToggle);
+    return false;
+  }
+  section.classList.add(EXPANDED_CLASS);
+  afterToggle?.(section, true);
+  return true;
+}
+
+/**
  * Arm click-to-expand on `feed`: a click on a capped section lifts its
  * height cap, and the next click on it restores the capped preview.
  *
@@ -275,9 +311,9 @@ export function ownsSection<
 export function installClickExpand(
   feed: HTMLElement,
   selection: () => string = () => window.getSelection()?.toString() ?? "",
-  afterToggle?: (section: HTMLElement, expanded: boolean) => void,
-): void {
-  feed.addEventListener("click", (e: MouseEvent) => {
+  afterToggle?: AfterToggle,
+): () => void {
+  const onClick = (e: MouseEvent): void => {
     const target = e.target instanceof HTMLElement ? e.target : null;
     const section = expandAction({
       section: sectionAt(target, feed),
@@ -285,13 +321,175 @@ export function installClickExpand(
       selectedText: selection(),
     });
     if (section === null) return;
-    const expanded = toggleExpanded(section);
-    // FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the
-    // top. The reader's own click is what moves the box, so the write lives in
-    // scroll.ts with every other scroll write (`collapseClicked`).
-    if (!expanded) collapseClicked(section);
-    afterToggle?.(section, expanded);
-  });
+    toggleSection(section, afterToggle);
+  };
+  feed.addEventListener("click", onClick);
+  const unregister = autoCollapseFor(feed.ownerDocument).register(feed, afterToggle);
+  return () => {
+    feed.removeEventListener("click", onClick);
+    unregister();
+  };
+}
+
+/**
+ * Why an open section closed on its own (see `AutoCollapse`): the reader
+ * scrolled somewhere other than inside it, or focus left the page.
+ */
+export type CollapseTrigger = "scrollOutside" | "windowBlur" | "pageHidden";
+
+/**
+ * Every expanded capped section under HOST, in document order — the DOM's own
+ * answer to "which sections are open", read at the moment it is asked, so a
+ * section a redraw replaced (and `carryExpanded` re-opened) is found on the
+ * element that is actually drawn.
+ */
+export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
+  return cappedSectionsOf(host).filter((section) => isExpanded(section));
+}
+
+/**
+ * True when a pointer at (CLIENT_X, CLIENT_Y) lands on EL's own classic
+ * (layout-width) vertical scrollbar: right of its padding box and inside its
+ * border box. An overlay scrollbar takes no layout width, so it never reads as
+ * one here (see `AutoCollapse`).
+ */
+export function onVerticalScrollbar(el: Element, clientX: number): boolean {
+  const barWidth = el instanceof HTMLElement ? scrollbarWidthPx(el, el.clientLeft * 2) : 0;
+  if (barWidth <= 0) return false;
+  const rect = el.getBoundingClientRect();
+  const barLeft = rect.left + el.clientLeft + el.clientWidth;
+  return clientX >= barLeft && clientX < barLeft + barWidth;
+}
+
+/**
+ * THE AUTO-COLLAPSE OWNER: the one place that closes an open section the
+ * reader has moved away from. One per page (`autoCollapseFor`); every host that
+ * arms click-to-expand registers with it, and the owner closes that host's open
+ * sections through the SAME `collapseSection` a click-to-collapse uses, with the
+ * host's own `afterToggle`, so the fade, the title folds and the expand-only
+ * regions all follow exactly as they do on a click.
+ *
+ * WHAT CLOSES AN OPEN SECTION.
+ *
+ *   - `scrollOutside`: a reader SCROLL GESTURE whose target is not inside it —
+ *     a `wheel` anywhere else on the page (the feed, another box, the sidebar),
+ *     or a `pointerdown` on another element's classic scrollbar. A wheel inside
+ *     the open section keeps it open, whichever box the wheel ends up moving.
+ *   - `windowBlur`: the window lost focus. In Emacs's xwidget the webview is a
+ *     WKWebView inside the frame's EmacsView; a click on any other Emacs window
+ *     makes the EmacsView first responder (it accepts first responder, so
+ *     AppKit hands it on mouse-down), the WKWebView resigns, and WebKit blurs
+ *     the page's window. Switching Emacs frames or applications resigns key
+ *     window, which blurs it too.
+ *   - `pageHidden`: the page went hidden (`visibilitychange`), which the
+ *     xwidget reports whenever Emacs is not the frontmost application.
+ *
+ * STRUCTURALLY BLIND TO ITS OWN LAYOUT. The owner never listens to `scroll`:
+ * it keys only on the reader's INPUT events, which precede the movement they
+ * cause and which no layout change can synthesize. So neither an expand's
+ * growth, nor the collapse's own shrink and scroll-to-top, nor any implicit
+ * feed move (a tail follow, a compensation) can read as the reader scrolling
+ * away. Keys are not a trigger: xwidget hands a key to the page only while an
+ * input has focus, and forwards every other key to Emacs.
+ */
+export class AutoCollapse {
+  private readonly hosts = new Map<HTMLElement, AfterToggle | undefined>();
+
+  constructor(private readonly doc: Document) {}
+
+  /**
+   * Put HOST's open sections under this owner, closed with AFTER_TOGGLE; the
+   * page-wide listeners are attached with the first host and detached with the
+   * last. Answers the unregister.
+   */
+  register(host: HTMLElement, afterToggle?: AfterToggle): () => void {
+    if (this.hosts.size === 0) this.attach();
+    this.hosts.set(host, afterToggle);
+    return () => {
+      if (!this.hosts.delete(host)) return;
+      if (this.hosts.size === 0) this.detach();
+    };
+  }
+
+  /**
+   * Close every open section of every registered host that does not contain
+   * INSIDE (null: close them all), logging each at DEBUG with its trigger.
+   */
+  collapseOutside(trigger: CollapseTrigger, inside: Node | null): void {
+    for (const [host, afterToggle] of this.hosts) {
+      for (const section of expandedSectionsOf(host)) {
+        if (inside !== null && section.contains(inside)) continue;
+        log.debug(`auto-collapsing an open ${primaryClass(section)} on ${trigger}`, {
+          operation: "expand.auto-collapse",
+          context: { trigger, kind: primaryClass(section), role: roleOf(section) },
+        });
+        collapseSection(section, afterToggle);
+      }
+    }
+  }
+
+  private readonly onWheel = (e: WheelEvent): void => {
+    this.collapseOutside("scrollOutside", e.target instanceof Node ? e.target : null);
+  };
+
+  private readonly onPointerDown = (e: PointerEvent): void => {
+    const target = e.target;
+    if (!(target instanceof Element) || !onVerticalScrollbar(target, e.clientX)) return;
+    this.collapseOutside("scrollOutside", target);
+  };
+
+  private readonly onBlur = (e: FocusEvent): void => {
+    // An element's `blur` whose target is a node of the page can reach the
+    // window too; only the window's own blur (no node target) means focus left
+    // the page.
+    if (e.target instanceof Node) return;
+    this.collapseOutside("windowBlur", null);
+  };
+
+  private readonly onVisibility = (): void => {
+    if (this.doc.visibilityState !== "hidden") return;
+    this.collapseOutside("pageHidden", null);
+  };
+
+  private attach(): void {
+    const win = this.requireWindow();
+    this.doc.addEventListener("wheel", this.onWheel, { capture: true, passive: true });
+    this.doc.addEventListener("pointerdown", this.onPointerDown, { capture: true, passive: true });
+    this.doc.addEventListener("visibilitychange", this.onVisibility);
+    win.addEventListener("blur", this.onBlur);
+  }
+
+  private detach(): void {
+    const win = this.requireWindow();
+    this.doc.removeEventListener("wheel", this.onWheel, { capture: true });
+    this.doc.removeEventListener("pointerdown", this.onPointerDown, { capture: true });
+    this.doc.removeEventListener("visibilitychange", this.onVisibility);
+    win.removeEventListener("blur", this.onBlur);
+  }
+
+  private requireWindow(): Window {
+    const win = this.doc.defaultView;
+    if (win === null) throw new Error("expand: auto-collapse needs a document with a window");
+    return win;
+  }
+}
+
+/** The bubble role of an open section that is a bubble's own scroll box. */
+function roleOf(section: HTMLElement): string | undefined {
+  return primaryClass(section) === "bubble-scroll" ? section.parentElement?.dataset.role : undefined;
+}
+
+/** The one owner per document. */
+const owners = new WeakMap<Document, AutoCollapse>();
+
+/** The page's one `AutoCollapse`, made on first use. */
+export function autoCollapseFor(doc: Document): AutoCollapse {
+  let owner = owners.get(doc);
+  if (owner === undefined) {
+    owner = new AutoCollapse(doc);
+    owners.set(doc, owner);
+  }
+  return owner;
 }
 
 /**

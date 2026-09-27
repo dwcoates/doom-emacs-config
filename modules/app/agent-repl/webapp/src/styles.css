@@ -166,6 +166,11 @@
      final answer wears at rest, so the one bubble the next prompt will quote
      is unmistakable among the green answers around it. */
   --selected-response: #2563eb;
+  /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
+     worn by every response bubble while its scroll box is open, over whatever
+     the ladder would otherwise draw. A shade deeper than true eggshell here,
+     so the hairline still reads against the light theme's fill. */
+  --expanded-response-border: #e6dfc6;
   /* The USER prompt bubble's border: light purple, worn PERMANENTLY (owner
      ruling, 2026-09-23) — in flight and after its turn resolves alike, so it
      is independent of the `working` flag and the wave. It used to be keyed on
@@ -367,6 +372,8 @@
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
+    /* True eggshell for the dark theme, as the other state borders lift. */
+    --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
     --prompt-live-border: #d8b4fe;
@@ -1746,6 +1753,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .bubble.final-response.entry-selected {
   border-color: var(--selected-response);
 }
+/* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
+   own scroll box is open, its border is eggshell, whatever variant or state it
+   wears — thinking, interim, answer, selected, turn-ended. ONE rule keyed on
+   the role and the open box (`.expanded` lives on the box, the border on the
+   bubble, so the bubble is keyed through `:has`), last on the ladder and the
+   one `!important` border in the sheet, so it outranks every other border rule
+   by construction rather than by a specificity count. It sets the color alone:
+   the 0.3px the base reserves is recolored, never reflowed, and closing the
+   box hands the ladder's own border straight back. */
+.bubble[data-role="response"]:has(> .bubble-scroll.expanded) {
+  border-color: var(--expanded-response-border) !important;
+}
 /* The working-frontier BREATH is gone with the pulse machinery that drove it,
    and so is the streaming caret that used to trail a live bubble's text: the
    consolidated progress footer is the one place a still-running turn
@@ -2277,6 +2296,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   max-height: 50vh;
   overflow-y: auto;
   cursor: zoom-out;
+  /* AN OPEN BOX NEVER CHAINS ITS SCROLL TO THE FEED (owner ruling,
+     2026-09-27): a gesture's overshoot stops at the box's own top and bottom
+     edges. The native half of the containment; installIntentScroll
+     (scroll.ts) consumes the wheel a box that cannot move any further would
+     otherwise hand on. The card-level fold's section below does the same. */
+  overscroll-behavior: contain;
 }
 /* THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
    bubble's scroll box that the reader sees only once the bubble is opened (a
@@ -2316,6 +2341,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-fold.expanded > .tool-output {
   max-height: 50vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---- title fold (src/feed/title-fold.ts) ---- */

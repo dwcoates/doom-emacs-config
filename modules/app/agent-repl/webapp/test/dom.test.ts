@@ -1,6 +1,44 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { ancestorMatching, placeChildren } from "../src/dom.js";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { ancestorMatching, placeChildren, scrollbarWidthPx } from "../src/dom.js";
+
+describe("scrollbarWidthPx", () => {
+  it("answers a classic bar's width", () => {
+    expect(scrollbarWidthPx({ offsetWidth: 200, clientWidth: 185 }, 0)).toBe(15);
+  });
+
+  it("answers 0 for an overlay bar, which takes no layout width", () => {
+    expect(scrollbarWidthPx({ offsetWidth: 200, clientWidth: 200 }, 0)).toBe(0);
+  });
+
+  it("takes the side borders off, which are not the bar", () => {
+    expect(scrollbarWidthPx({ offsetWidth: 202, clientWidth: 185 }, 2)).toBe(15);
+  });
+
+  it("is the one formula: every scrollbar measurement calls it, and none rolls its own", () => {
+    // Arrange — every source under src/, comments stripped.
+    const src = join(process.cwd(), "src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return walk(path);
+        return path.endsWith(".ts") ? [path] : [];
+      });
+    const code = new Map(
+      walk(src).map((path) => [
+        relative(src, path),
+        readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""),
+      ]),
+    );
+    // Act
+    const callers = [...code].filter(([, text]) => /\bscrollbarWidthPx\(/.test(text)).map(([p]) => p).sort();
+    const rolled = [...code].filter(([, text]) => /offsetWidth\s*-[^;]*clientWidth/.test(text)).map(([p]) => p);
+    // Assert
+    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "expand.ts"], ["dom.ts"]]);
+  });
+});
 
 /** Fake ancestor-chain node: the shape ancestorMatching walks. */
 interface FakeNode {
