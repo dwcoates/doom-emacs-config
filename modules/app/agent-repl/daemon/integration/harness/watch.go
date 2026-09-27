@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -231,6 +232,14 @@ func (d *Daemon) WatchHost(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.Wa
 	return d.WatchHostFor(d.ctx, ws)
 }
 
+// DialHTTP1 builds a client that speaks HTTP/1.1 and the Connect JSON codec,
+// the transport Emacs speaks: one connection per exchange, so a standing
+// stream is an ordinary (never hijacked) HTTP/1.1 response.
+func (d *Daemon) DialHTTP1() agentreplv1connect.AgentReplClient {
+	d.t.Helper()
+	return agentreplv1connect.NewAgentReplClient(&http.Client{}, "http://"+d.Addr, connect.WithProtoJSON())
+}
+
 // WatchHostFor opens the workspace's host stream on a context THE CALLER OWNS.
 //
 // d.ctx expires at DefaultTimeout, which is right for a wait and wrong for a
@@ -252,12 +261,33 @@ func (d *Daemon) WatchHostFor(
 		func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse { return r })
 }
 
+// WatchHostOn opens the workspace's host stream on an explicit client, for
+// the tests whose subject is the transport a client speaks.
+func (d *Daemon) WatchHostOn(client interface {
+	WatchHostWorkspace(context.Context, *connect.Request[agentreplv1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], error)
+}, ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.WatchHostWorkspaceResponse] {
+	d.t.Helper()
+	return runStream(d.t, d.ctx,
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], error) {
+			return client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ws}))
+		},
+		func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse { return r })
+}
+
 // WatchWeb opens the workspace's webview stream.
 func (d *Daemon) WatchWeb(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.WatchWebWorkspaceResponse] {
 	d.t.Helper()
+	return d.WatchWebOn(d.Client(), ws)
+}
+
+// WatchWebOn opens the workspace's webview stream on an explicit client.
+func (d *Daemon) WatchWebOn(client interface {
+	WatchWebWorkspace(context.Context, *connect.Request[agentreplv1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse], error)
+}, ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.WatchWebWorkspaceResponse] {
+	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse], error) {
-			return d.Client().WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws, WebappBuild: FakeWebappEntry}))
+			return client.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws, WebappBuild: FakeWebappEntry}))
 		},
 		func(r *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse { return r })
 }
