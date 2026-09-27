@@ -1448,12 +1448,13 @@ pre {
    #login-overlay, #composer, the sidebar panes and the create forms); this
    one was missed. */
 .bubble[hidden] { display: none; }
-/* THE SCROLL BOX. It is the bubble's own child, its right edge IS the bubble's
+/* THE BOX. It is the bubble's own child, its right edge IS the bubble's
    inner edge, and it carries no horizontal padding of its own — the two facts
-   that put the scrollbar on the bubble's right-hand side. The N-line cap rides
-   it (see the shared cap rule below), which is what gives it something to
-   scroll. */
-.bubble > .bubble-scroll {
+   that put the scrollbar on the bubble's right-hand side. Every bubble's box
+   wears `.bubble-box`, and these structural rules key on it; a CAPPED box also
+   wears `.bubble-scroll`, which the N-line cap, the scroll, the fold and the
+   gutter ride (see the shared cap rule below). */
+.bubble > .bubble-box {
   padding-left: 0;
   padding-right: 0;
   min-width: 0;
@@ -1469,9 +1470,11 @@ pre {
      expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees wrap
      rather than scroll, so nothing inside the clipped box is cut off. */
   overflow-x: clip;
-  /* THE GUTTER IS THE SYSTEM BAR (owner ruling, 2026-09-24): reserved in the
-     collapsed `overflow-y: hidden` state too, so prose never re-flows when an
-     expanded bubble's bar appears (see "bubble scrollbars"). */
+}
+/* THE GUTTER IS THE SYSTEM BAR (owner ruling, 2026-09-24): reserved on a capped
+   box in the collapsed `overflow-y: hidden` state too, so prose never re-flows
+   when an expanded bubble's bar appears (see "bubble scrollbars"). */
+.bubble > .bubble-scroll {
   scrollbar-gutter: stable;
 }
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
@@ -2398,7 +2401,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    (`position: relative` on the box itself, not on `.has-more`), and the fade
    is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
-.bubble > .bubble-scroll,
+.bubble > .bubble-box,
 .title-fold {
   position: relative;
 }

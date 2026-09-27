@@ -23,7 +23,7 @@ import {
   type ResponseVariant,
 } from "../../src/bubble/draw.js";
 import { BUBBLE_BODY_TAG } from "../../src/bubble/body.js";
-import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 
 /** A plain element of CLASSNAME holding TEXT. */
@@ -158,7 +158,7 @@ describe("drawBubble: the structure every kind shares", () => {
     expect([...bubble.children].map((c) => c.className)).toEqual([
       `address ${BUBBLE_STRIP_CLASS}`,
       `delivery ${BUBBLE_STRIP_CLASS}`,
-      BUBBLE_SCROLL_CLASS,
+      `${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`,
     ]);
   });
 
