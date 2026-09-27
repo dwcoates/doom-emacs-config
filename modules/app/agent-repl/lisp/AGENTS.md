@@ -65,7 +65,11 @@ Every kind carries `:requested` (Emacs is sending), `:completed` and
 and a kind lists exactly the stages its rpc can push. A phase with no
 template is reported as a caller bug and never invented, so a stage added to
 `WorkspaceCreateStage` or `WorkspaceOpenStage` without a sentence here fails
-loudly rather than reaching the user as an enum name.
+loudly rather than reaching the user as an enum name. A create's stages are
+`:deriving-name` (only for a daemon-minted name), `:creating-worktree` and
+`:starting-session` (every create past the worktree, until its terminal
+step); `wire-host.el` decodes each from its `entered_stage` oneof arm and
+refuses an arm it does not hold as a logged contract breach.
 
 The echo goes through `agent-repl--backend-phase`, the same startup-phase
 channel the daemon build and bounce use: one call produces both the durable
