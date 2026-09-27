@@ -387,6 +387,29 @@ func (o *orchestrator) Drain(ctx context.Context) {
 		log.Info(op, "a merge was left mid-phase by the daemon's exit; the boot recovery owns it",
 			dlog.Context{"workspace": string(m.ws), "lease": string(m.lease), "phase": m.phase})
 	}
+	bound := o.terminalDrainBound()
+	expired := time.NewTimer(bound)
+	defer expired.Stop()
+	// THE ADMISSION STEPS ALREADY IN FLIGHT FINISH FIRST. `draining` is set
+	// above under the same lock enterAdmission registers under, so none begins
+	// after it; the ones that began before it are a few store reads, and the
+	// state client must outlive them.
+	admitted := make(chan struct{})
+	go func() {
+		o.admissions.Wait()
+		close(admitted)
+	}()
+	select {
+	case <-admitted:
+	case <-expired.C:
+		log.Error(op, "an admission step outlived the drain's bound; the state client closes under it",
+			dlog.Context{"bound": bound.String()})
+		return
+	case <-ctx.Done():
+		log.Error(op, "the drain was cancelled while an admission step was in flight; the state client closes under it",
+			dlog.Context{"bound": bound.String()})
+		return
+	}
 	if len(waits) == 0 {
 		log.Debug(op, "the merge drain had no terminal work to wait for",
 			dlog.Context{"mid_phase": len(mid)})
@@ -398,9 +421,6 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	if o.onDrainWait != nil {
 		o.onDrainWait()
 	}
-	bound := o.terminalDrainBound()
-	expired := time.NewTimer(bound)
-	defer expired.Stop()
 	for _, mark := range waits {
 		select {
 		case <-mark.done:
