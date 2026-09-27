@@ -15,7 +15,9 @@
  *    in step with the schema and no arm this end can re-word as another. The
  *    vendor's own sentence rides below it when the record carried one.
  *  - `interrupted` draws the stop as the stop it was — the user's act, never a
- *    failure.
+ *    failure. An INTERJECTION's stop draws nothing at all: the prompt that
+ *    superseded the turn, drawn as the active prompt, is its whole account, and
+ *    a bubble here would read as an error it is not. Its row still exists.
  *
  * THE COUNTDOWN IS THE CLIENT'S. `retry_after_ms` is the vendor's WAIT, so the
  * deadline is this turn's own end plus that wait, and the figure ticks from the
@@ -118,6 +120,10 @@ export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLEleme
   // `data-turn-error` for which failure it was; this is the outcome above it.
   el.setAttribute("data-state", outcome.case);
   if (outcome.case === "concluded") return el;
+  // AN INTERJECTION'S STOP DRAWS NOTHING: the superseding prompt, drawn as the
+  // active prompt, is its whole account. The row itself still stands, as the
+  // turn's liveness anchor.
+  if (outcome.case === "interrupted" && outcome.value.command.case === "interjection") return el;
 
   // Every other ending draws the bubble above its line. Its words are the
   // daemon's headline for a failure, drawn verbatim, and the stop's own
@@ -399,13 +405,34 @@ function drawRetryCountdown(
   return el;
 }
 
-/** The user's stop, stated as the user's act. */
+/**
+ * The user's stop, stated as the user's act — unless the stop was an
+ * INTERJECTION, which draws nothing: an empty marker row, exactly as a quiet
+ * conclusion is one. A direct stop and an UNSET command (a record that did not
+ * say how) both draw the stop.
+ */
 export function drawFeedTurnEndedInterrupted(
-  _interrupted: FeedTurnEndedInterrupted,
+  interrupted: FeedTurnEndedInterrupted,
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "turn-ended turn-ended-interrupted";
   el.setAttribute("data-arm", "interrupted");
-  el.textContent = "interrupted";
-  return el;
+  const command = interrupted.command;
+  switch (command.case) {
+    case "interjection":
+      log.debug("an interjection's stop draws nothing; the superseding prompt is its account", {
+        operation: "feed.draw-turn-ended-interjection",
+        context: { command: command.case },
+      });
+      return el;
+    case "direct":
+    case undefined:
+      el.textContent = "interrupted";
+      return el;
+    default:
+      return unreachableArm(
+        `${PATH}.interrupted.command`,
+        armName(command),
+      );
+  }
 }

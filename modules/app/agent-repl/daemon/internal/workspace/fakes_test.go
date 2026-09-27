@@ -1285,8 +1285,9 @@ func (s *fakeShim) ReadTranscripts(context.Context) (*shimv1.ReadTranscriptsResp
 }
 
 type killedTurn struct {
-	Turn  ids.TurnID
-	Force bool
+	Turn        ids.TurnID
+	Force       bool
+	CommandedBy *conversationv1.AgentInterruptedByUser
 }
 
 type deliveredAnswer struct {
@@ -1294,11 +1295,11 @@ type deliveredAnswer struct {
 	Answer *conversationv1.AgentAnswer
 }
 
-func (s *fakeShim) KillTurn(_ context.Context, turn ids.TurnID, force bool) error {
+func (s *fakeShim) KillTurn(_ context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
 	if s.killTurnErr != nil {
 		return s.killTurnErr
 	}
-	s.killedTurns = append(s.killedTurns, killedTurn{turn, force})
+	s.killedTurns = append(s.killedTurns, killedTurn{turn, force, commandedBy})
 	return nil
 }
 

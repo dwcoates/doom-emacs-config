@@ -141,6 +141,20 @@ export interface FoldContext {
    * findings to an edit that never happened.
    */
   readonly lastChange?: LastChange;
+
+  /**
+   * HOW the person commanded the stop the shim last issued on the main thread:
+   * `KillTurnRequest.commanded_by`, exactly as the caller stated it.
+   *
+   * The vendor's user-stop result states only THAT the turn was stopped; who
+   * decided it, and how, is known to the caller of `KillTurn` alone (an
+   * interjection is decided by the daemon's prompt queue, invisibly to the
+   * shim). So the engine hands the caller's statement to the fold, which
+   * records it verbatim as the terminal's `by_user` cause. Unset when the
+   * caller stated none, when no kill preceded this message, and on every
+   * message the keep-alive produced.
+   */
+  readonly stopCommand?: conversationv1.AgentInterruptedByUser;
 }
 
 /** Everything one SDK message produced, as the engine consumes it. */

@@ -8,6 +8,7 @@ import {
   FeedRowRemovedSchema,
   FeedRowSchema,
   FeedSelectionSchema,
+  FeedTurnEndedInterruptedInterjectionSchema,
   type FeedId,
   type FeedResponse,
   type FeedRow,
@@ -2160,6 +2161,25 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     expect(ticker.live()).toBe(1);
     // Act.
     controller.upsert(turnEndedRow("e", "turn-1"));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("stops the turn's clocks when an interjection's end lands, though that end draws nothing", () => {
+    // Arrange: a running call; the controller draws the terminal row itself,
+    // and an interjection's draws nothing but is still the turn's ending row.
+    const ticker = countingTicker();
+    const { controller } = fixture(harness({ ticker }), {}, {
+      renderers: { simpleToolCall: drawFeedSimpleToolCall },
+    });
+    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+    const interjected = turnEndedRow("e", "turn-1", "interrupted");
+    if (interjected.row.case !== "turnEnded" || interjected.row.value.outcome.case !== "interrupted") {
+      throw new Error("the fixture is not an interrupted ending");
+    }
+    interjected.row.value.outcome.value.command = { case: "interjection", value: create(FeedTurnEndedInterruptedInterjectionSchema, {}) };
+    // Act.
+    controller.upsert(interjected);
     // Assert.
     expect(ticker.live()).toBe(0);
   });

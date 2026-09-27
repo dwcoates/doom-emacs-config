@@ -233,12 +233,11 @@ func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversati
 		}
 		return concludedArm(concluded)
 	case *conversationv1.AgentSuccess_Interrupted:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Interrupted"})
-		return func(ended *frontendv1.FeedTurnEnded) {
-			ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{
-				Interrupted: &frontendv1.FeedTurnEndedInterrupted{},
-			}
-		}
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{
+			"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Interrupted",
+			"turn": turn, "command": byUserCommandWord(outcome.Interrupted.GetByUser()),
+		})
+		return interruptedArm(outcome.Interrupted.GetByUser())
 	case *conversationv1.AgentSuccess_Backgrounded:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Backgrounded"})
 		// The stream ended while the work did not. It is what was asked for,
@@ -257,6 +256,40 @@ type turnOutcome func(*frontendv1.FeedTurnEnded)
 func concludedArm(concluded *frontendv1.FeedTurnEndedConcluded) turnOutcome {
 	return func(ended *frontendv1.FeedTurnEnded) {
 		ended.Outcome = &frontendv1.FeedTurnEnded_Concluded{Concluded: concluded}
+	}
+}
+
+// byUserCommandWord names a recorded stop's command for a log record.
+func byUserCommandWord(byUser *conversationv1.AgentInterruptedByUser) string {
+	switch byUser.GetCommand().(type) {
+	case *conversationv1.AgentInterruptedByUser_Direct:
+		return "direct"
+	case *conversationv1.AgentInterruptedByUser_Interjection:
+		return "interjection"
+	}
+	return "unset"
+}
+
+// interruptedArm is THE ONE interruption setter, shared by the two paths that
+// draw a stopped turn's ending: the terminal's (concludedOutcome) and the
+// daemon-built close's (closedEnding). One builder is what keeps the two
+// drawing the same row for the same stop, live and rebuilt.
+//
+// byUser is the recorded `by_user` cause, and its command becomes the row's:
+// a direct stop draws the interruption bubble, an interjection draws nothing
+// (the superseding prompt is the whole account of it), and a cause that stated
+// no command — or no `by_user` at all — stays UNSET, which the client draws as
+// a direct stop.
+func interruptedArm(byUser *conversationv1.AgentInterruptedByUser) turnOutcome {
+	interrupted := &frontendv1.FeedTurnEndedInterrupted{}
+	switch byUser.GetCommand().(type) {
+	case *conversationv1.AgentInterruptedByUser_Direct:
+		interrupted.Command = &frontendv1.FeedTurnEndedInterrupted_Direct{Direct: &frontendv1.FeedTurnEndedInterruptedDirect{}}
+	case *conversationv1.AgentInterruptedByUser_Interjection:
+		interrupted.Command = &frontendv1.FeedTurnEndedInterrupted_Interjection{Interjection: &frontendv1.FeedTurnEndedInterruptedInterjection{}}
+	}
+	return func(ended *frontendv1.FeedTurnEnded) {
+		ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{Interrupted: interrupted}
 	}
 }
 

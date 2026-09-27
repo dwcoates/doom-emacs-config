@@ -391,7 +391,14 @@ export function convertResult(
   }
 
   if (isUserStop(message)) {
-    LOGGER.info({ turn: context.turnId?.value, reason }, "the turn was interrupted by a user stop");
+    // THE CALLER'S OWN STATEMENT OF HOW, VERBATIM. The vendor's result says
+    // only that the turn was stopped; KillTurn's caller said how, and a stop
+    // nobody stated a how for records `by_user` with no command.
+    const byUser = context.stopCommand ?? create(conversationv1.AgentInterruptedByUserSchema, {});
+    LOGGER.info(
+      { turn: context.turnId?.value, reason, command: byUser.command.case ?? "unstated" },
+      "the turn was interrupted by a user stop",
+    );
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",
       value: create(conversationv1.AgentSuccessSchema, {
@@ -400,7 +407,7 @@ export function convertResult(
           value: create(conversationv1.AgentInterruptedSchema, {
             cause: {
               case: "byUser",
-              value: create(conversationv1.AgentInterruptedByUserSchema, {}),
+              value: byUser,
             },
           }),
         },

@@ -99,7 +99,7 @@ func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		log.Debug(opRestart, "no shim to force-end the turn through", nil)
 		return nil
 	}
-	if err := shim.KillTurn(ctx, *running.Turn, true); err != nil {
+	if err := shim.KillTurn(ctx, *running.Turn, true, nil); err != nil {
 		log.Error(opRestart, "could not force-end the running turn", dlog.Context{
 			"turn": string(*running.Turn), "cause": err.Error(),
 		})

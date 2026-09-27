@@ -380,8 +380,11 @@ type Sender interface {
 	StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
 	// PromptAgent delivers a bubble-composer prompt to one agent.
 	PromptAgent(ctx context.Context, agent *conversationv1.AgentId, said *conversationv1.UserSaid) error
-	// KillTurn interrupts the open turn for an interjection.
-	KillTurn(ctx context.Context, turn ids.TurnID, force bool) error
+	// KillTurn interrupts the open turn for an interjection. commandedBy is
+	// HOW the person commanded the stop, relayed to the shim as
+	// KillTurnRequest.commanded_by and recorded verbatim as the interrupted
+	// terminal's `by_user` cause; nil states none.
+	KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error
 	// SetModel switches the session's model. It rides this interface because a
 	// model change resolves at the turn boundary and respects the lease like
 	// any other delivery.

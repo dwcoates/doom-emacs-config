@@ -66,6 +66,73 @@ describe("drawFeedTurnEnded: the arms", () => {
   });
 });
 
+describe("drawFeedTurnEnded: an interrupt's command", () => {
+  /** An interrupted ending stating the given command. */
+  function interruptedBy(command: "direct" | "interjection" | undefined): FeedTurnEnded {
+    return ended({
+      case: "interrupted",
+      value: command === undefined ? {} : { command: { case: command, value: {} } },
+    });
+  }
+
+  it("draws no bubble for an interjection", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy("interjection"), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBeNull();
+  });
+
+  it("draws no words for an interjection", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy("interjection"), contextWithRow(null));
+    // ASSERT
+    expect(el.textContent).toBe("");
+  });
+
+  it("still draws an interjection's row, the turn's liveness anchor, as an interrupted ending", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy("interjection"), contextWithRow(null));
+    // ASSERT
+    expect({ state: el.getAttribute("data-state"), arm: el.getAttribute("data-arm") }).toEqual({
+      state: "interrupted",
+      arm: "interrupted",
+    });
+  });
+
+  it("records the interjection's suppressed draw at debug", async () => {
+    // ARRANGE
+    const capture = captureLogRecords("debug");
+    // ACT
+    drawFeedTurnEnded(interruptedBy("interjection"), contextWithRow(null));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-turn-ended-interjection");
+    expect(record.level.case).toBe("debug");
+  });
+
+  it("draws the interruption bubble for a direct stop", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy("direct"), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
+  });
+
+  it("draws the interruption bubble for a stop whose command is unset", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy(undefined), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
+  });
+
+  it("refuses a command arm this client does not know", () => {
+    // ARRANGE
+    const unknown = interruptedBy(undefined);
+    if (unknown.outcome.case !== "interrupted") throw new Error("the fixture is not an interrupt");
+    unknown.outcome.value.command = { case: "invented" as never, value: {} as never };
+    // ACT, ASSERT
+    expect(() => drawFeedTurnEnded(unknown, contextWithRow(null))).toThrow(MalformedView);
+  });
+});
+
 describe("drawFeedTurnEnded: the final answer", () => {
   it("marks the row the producer named", () => {
     const row = document.createElement("article");

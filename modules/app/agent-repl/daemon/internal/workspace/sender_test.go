@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -21,6 +24,8 @@ type fakeSenderClient struct {
 	startTurnReq   *shimv1.StartTurnRequest
 	updateAgentReq *shimv1.UpdateAgentRequest
 	setModelReq    *shimv1.SetSessionModelRequest
+	killTurnReq    *shimv1.KillTurnRequest
+	killTurnErr    error
 }
 
 func (c *fakeSenderClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
@@ -33,7 +38,11 @@ func (c *fakeSenderClient) UpdateAgent(_ context.Context, req *shimv1.UpdateAgen
 	return c.updateAgent, nil
 }
 
-func (c *fakeSenderClient) KillTurn(context.Context, *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error) {
+func (c *fakeSenderClient) KillTurn(_ context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error) {
+	c.killTurnReq = req
+	if c.killTurnErr != nil {
+		return nil, c.killTurnErr
+	}
 	return c.killTurn, nil
 }
 
@@ -278,7 +287,7 @@ func TestSenderKillTurnCarriesTheNotTheOpenTurnRefusal(t *testing.T) {
 	}}}
 
 	// Act
-	err := s.KillTurn(context.Background(), "turn-1", false)
+	err := s.KillTurn(context.Background(), "turn-1", false, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -359,5 +368,129 @@ func TestFleetSenderStatesTheMainWatchsNewestPointer(t *testing.T) {
 	// Assert.
 	if known.GetValue() != senderPointer.GetValue() {
 		t.Fatalf("known_through = %q, want the main watch's newest %q", known.GetValue(), senderPointer.GetValue())
+	}
+}
+
+// killTurnKilled is a shim's plain success answer to a KillTurn.
+func killTurnKilled() *shimv1.KillTurnResponse {
+	return &shimv1.KillTurnResponse{Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{}}}
+}
+
+// TestKillTurnBuildsTheRequestFromItsArguments covers the one request builder:
+// the turn, the force and the commanded_by travel exactly as the caller stated
+// them, an unstated command included.
+func TestKillTurnBuildsTheRequestFromItsArguments(t *testing.T) {
+	interjection := &conversationv1.AgentInterruptedByUser{
+		Command: &conversationv1.AgentInterruptedByUser_Interjection{
+			Interjection: &conversationv1.AgentInterruptedByUserInterjection{},
+		},
+	}
+	tests := []struct {
+		name        string
+		force       bool
+		commandedBy *conversationv1.AgentInterruptedByUser
+	}{
+		{name: "a forced kill with no command stated", force: true},
+		{name: "a direct stop", commandedBy: directCommand()},
+		{name: "an interjection", commandedBy: interjection},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeSenderClient{killTurn: killTurnKilled()}
+			want := &shimv1.KillTurnRequest{
+				Turn:        &conversationv1.TurnId{Value: "turn-1"},
+				Force:       tt.force,
+				CommandedBy: tt.commandedBy,
+			}
+
+			// Act
+			err := killTurn(context.Background(), client, "turn-1", tt.force, tt.commandedBy)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("killTurn = %v, want nil", err)
+			}
+			if !proto.Equal(client.killTurnReq, want) {
+				t.Fatalf("request = %v, want %v", client.killTurnReq, want)
+			}
+		})
+	}
+}
+
+// TestKillTurnRelaysTheRefusalArm covers the one reading of the answer: a
+// refusal comes back as the typed arm, not as a success.
+func TestKillTurnRelaysTheRefusalArm(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{killTurn: &shimv1.KillTurnResponse{
+		Result: &shimv1.KillTurnResponse_Failure{Failure: &shimv1.KillTurnFailure{
+			Cause: &shimv1.KillTurnFailure_NoTurnOpen{NoTurnOpen: &shimv1.KillTurnNoTurnOpen{}},
+		}},
+	}}
+
+	// Act
+	err := killTurn(context.Background(), client, "turn-1", false, nil)
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != ArmShimNoTurnOpen {
+		t.Fatalf("killTurn = %v, want the no_turn_open refusal", err)
+	}
+}
+
+// TestKillTurnReturnsTheTransportError covers a call that never reached an
+// answer: the transport's error is returned as it is, never as a refusal.
+func TestKillTurnReturnsTheTransportError(t *testing.T) {
+	// Arrange
+	transport := errors.New("the socket closed")
+	client := &fakeSenderClient{killTurnErr: transport}
+
+	// Act
+	err := killTurn(context.Background(), client, "turn-1", false, nil)
+
+	// Assert
+	if !errors.Is(err, transport) {
+		t.Fatalf("killTurn = %v, want %v", err, transport)
+	}
+}
+
+// TestBothKillTurnCallersSendTheSharedRequest pins that the queue's sender and
+// the verbs' shim adapter go through the one builder: the same arguments put
+// the same request on the wire from either.
+func TestBothKillTurnCallersSendTheSharedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		kill func(client *fakeClient) error
+	}{
+		{
+			name: "the queue's sender",
+			kill: func(client *fakeClient) error {
+				return (&sender{client: client}).KillTurn(context.Background(), "turn-1", true, directCommand())
+			},
+		},
+		{
+			name: "the verbs' shim adapter",
+			kill: func(client *fakeClient) error {
+				return (&shimAdapter{client: client}).KillTurn(context.Background(), "turn-1", true, directCommand())
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeClient{}
+			want := &shimv1.KillTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-1"}, Force: true, CommandedBy: directCommand()}
+
+			// Act
+			err := tt.kill(client)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("KillTurn = %v, want nil", err)
+			}
+			if len(client.killTurns) != 1 || !proto.Equal(client.killTurns[0], want) {
+				t.Fatalf("requests = %v, want exactly %v", client.killTurns, want)
+			}
+		})
 	}
 }

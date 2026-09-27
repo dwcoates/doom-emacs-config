@@ -34,8 +34,7 @@ func TestForcedKillsHappenOnlyWhereTheUserAskedForThem(t *testing.T) {
 	allowed := []allowance{
 		{path: "internal/workspace/interrupt.go", fn: "(*verbs).interruptTurn", callee: "KillTurn", count: 1, reason: "force is the user's answer to the confirm challenge; an unconfirmed interrupt passes false"},
 		{path: "internal/workspace/restart.go", fn: "(*verbs).forceEndTurn", callee: "KillTurn", count: 1, reason: "the user asked for the workspace to be restarted"},
-		{path: "internal/workspace/sessions.go", fn: "(*shimAdapter).KillTurn", callee: "KillTurnRequest.Force", count: 1, reason: "the verbs' shim adapter forwards its caller's force unchanged"},
-		{path: "internal/workspace/sender.go", fn: "(*sender).KillTurn", callee: "KillTurnRequest.Force", count: 1, reason: "the queue's sender forwards its caller's force unchanged"},
+		{path: "internal/workspace/sender.go", fn: "killTurn", callee: "KillTurnRequest.Force", count: 1, reason: "the one KillTurn request builder, shared by the queue's sender and the verbs' shim adapter, forwards its caller's force unchanged"},
 	}
 
 	// Arrange.
@@ -94,6 +93,12 @@ func TestTheForcedKillScanFindsEveryForcedShape(t *testing.T) {
 			name: "a variable is forced until proven otherwise",
 			file: "internal/x/x.go",
 			body: "func f(s S, force bool) { s.KillTurn(nil, \"t\", force) }",
+			want: []string{"internal/x/x.go|f|KillTurn"},
+		},
+		{
+			name: "a literal true beside a stated command is forced",
+			file: "internal/x/x.go",
+			body: "func f(s S) { s.KillTurn(nil, \"t\", true, nil) }",
 			want: []string{"internal/x/x.go|f|KillTurn"},
 		},
 		{
@@ -219,7 +224,7 @@ func forcedKillIn(node ast.Node) (string, bool) {
 	switch n := node.(type) {
 	case *ast.CallExpr:
 		selector, ok := n.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "KillTurn" || len(n.Args) != 3 {
+		if !ok || selector.Sel.Name != "KillTurn" || len(n.Args) < 3 {
 			return "", false
 		}
 		return "KillTurn", !isFalse(n.Args[2])

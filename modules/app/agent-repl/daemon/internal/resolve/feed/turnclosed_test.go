@@ -98,6 +98,41 @@ func TestATurnClosedWithNoTerminalIsEndedFromItsClose(t *testing.T) {
 	}
 }
 
+// TestAKilledCloseWithNoTerminalDrawsAnUnsetCommand covers the daemon-built
+// close: a recorded close carries no cause, so its interrupted row states no
+// command, which the client draws as a direct stop.
+func TestAKilledCloseWithNoTerminalDrawsAnUnsetCommand(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act
+	h.closeTurn("turn-1", wsm.CloseKilled)
+
+	// Assert
+	if got := interruptedCommandWord(h.terminalRow("turn-1")); got != "unset" {
+		t.Fatalf("command = %q, want unset", got)
+	}
+}
+
+// TestAKilledCloseAfterAnInterjectionKeepsTheInterjection covers the two paths
+// agreeing live: the terminal drew the interjection first, and the door's
+// close that follows it does not redraw the row as a bubble.
+func TestAKilledCloseAfterAnInterjectionKeepsTheInterjection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", userStop(byUserInterjection()), nil)
+
+	// Act
+	h.closeTurn("turn-1", wsm.CloseKilled)
+
+	// Assert
+	if got := interruptedCommandWord(h.terminalRow("turn-1")); got != "interjection" {
+		t.Fatalf("command = %q, want the terminal's interjection", got)
+	}
+}
+
 func TestATurnClosedEndsAtItsRecordedInstant(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
