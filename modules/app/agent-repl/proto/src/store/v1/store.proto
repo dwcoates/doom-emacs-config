@@ -45,6 +45,14 @@ message StoreEntry {
   // this write supersedes it whole. Opaque to the store — the producer maps
   // it (a prompt's TurnId, a unit's activity id, a run's id); the store has
   // exactly one place it looks, never a per-kind rule.
+  //
+  // ONE EXCEPTION (owner ruling 2026-09-27): a bash run's TERMINAL row
+  // (StoreAgentBash whose frame is `success` or `failure`) held from the FILE
+  // plane is never superseded by a STREAM-plane terminal. The file plane's
+  // terminal carries the spool's exit code and output; the stream plane's says
+  // only that the run ended. The refused write is absorbed — answered success,
+  // nothing stored, nothing served — and a file-plane terminal still
+  // supersedes a stream-plane one.
   string upsert_key = 3;
 
   // What kind of fact this is. THE ARM IS THE KIND.

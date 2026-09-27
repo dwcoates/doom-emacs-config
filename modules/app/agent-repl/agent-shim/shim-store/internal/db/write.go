@@ -365,6 +365,24 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
+	held, err := d.fileTerminalHeld(ctx, tx, r)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+	if held {
+		// THE TRANSCRIPT'S TERMINAL OUTRANKS THE STREAM'S (owner ruling
+		// 2026-09-27). The file plane's terminal carries the spool's exit code
+		// and output; the stream plane's says only that the run ended. The
+		// stored row is kept, this entry lands nothing (no upsert, no ledger
+		// row, no watcher row), and the writer is answered success: this is an
+		// expected precedence decision, not a fault.
+		result.Absorbed++
+		info := fields
+		info.Level = "info"
+		d.log.Log(info, "stream-plane bash terminal not applied: the row already holds the file plane's terminal, which outranks it entries_index=%d", r.index)
+		return nil
+	}
+
 	if r.workflowNotImplemented {
 		// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing is
 		// lost, and the warning says why nothing serves it yet.
@@ -710,4 +728,33 @@ func (d *DB) upsertCursor(ctx context.Context, tx *sql.Tx, c *storev1.CursorStat
 		Operation: "store.db.write-batch", Table: "cursor", FileID: c.GetFileId(), Path: c.GetPath(), Offset: &offset,
 	}, "cursor advanced")
 	return nil
+}
+
+// fileTerminalHeld reports whether r is a stream-plane bash TERMINAL arriving
+// at a row that already holds a file-plane terminal. That is the one
+// supersession the store refuses by plane: for a bash run's terminal the file
+// plane outranks the stream plane, never the reverse. Every other write —
+// any non-bash row, any non-terminal arm, a file-plane write, a stream write
+// over a stream-plane or non-terminal row — supersedes as usual.
+func (d *DB) fileTerminalHeld(ctx context.Context, tx *sql.Tx, r routed) (bool, error) {
+	if r.kind != kindBash || r.plane != planeStream || !BashRowIsTerminal(r.bashRow) {
+		return false, nil
+	}
+	var plane int64
+	var stored []byte
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT plane, frame FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&plane, &stored); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, storagef(err, "reading the plane of bash row %q", r.upsertKey)
+	}
+	if plane != planeFile {
+		return false, nil
+	}
+	entry := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(stored, entry); err != nil {
+		return false, storagef(err, "the stored frame of bash row %q cannot be decoded", r.upsertKey)
+	}
+	return BashRowIsTerminal(entry.GetAgentUpdate().GetBash()), nil
 }
