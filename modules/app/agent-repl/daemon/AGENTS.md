@@ -617,6 +617,46 @@ open of the workspace: its feed holds nothing, so it still replays the first
 page. Whether it should instead carry the incumbent's feed is an owner
 question, recorded in `docs/REMEDIATION-CHANGELOG.md` (`replay-first-page-only`).
 
+## The feed never serves a row the newest cut withholds
+
+THE FEED BEGINS AT THE NEWEST SEPARATION (`cleared`/`compacted`;
+`compaction_failed` bounds nothing; the one statement of which cuts bound is
+`internal/contextcut`). The bound is a delivery bound read off the row order
+(`resolve/feed/pages.go` `deliverable`/`boundHides`), and three rules keep a
+reader from ever being handed a row it will withhold:
+
+- **A replay publishes nothing until its page is placed.** `OnHistoryPage`
+  holds every publication (`holdPushes`) and releases them once the page's
+  newest cut is in the order, each judged by the one push rule
+  (`withheldFromPush`); a row the page retired again is not re-published. A
+  tail's retained-log replay obeys the same rule. Before this a 16-cut page
+  pushed every pre-cut row and the webapp then truncated ~1,850 of them
+  (ship-gns, 2026-09-27).
+- **A fork's inherited past rides `planeInherited` and is never pushed.** A
+  fork resumes a copy of its parent's transcript, which the file plane
+  ingests into the fork's book WHILE the fork runs, so the past arrives live,
+  after the fork's own prompt, and on a later replay sits around it (the book
+  orders by first insert). On a fork (a workspace with ported prompts), a
+  main-agent entry stamped with a turn the workspace recorded
+  (`wsm.RecordedTurns`, `Deps.OwnedTurns`) is its own; every other main-agent
+  entry — a turn it never opened, or unstamped — is inherited: drawn below
+  everything the fork produced, in a stance of its own (it never becomes the
+  turn in flight, its prompts are drawn settled), and served by pages only.
+  An inherited cut therefore bounds only inherited rows, and by `boundHides`
+  the fork's OWN cut hides the whole inherited and ported past. A subagent's
+  entries are never classified. Known gap: an UNSTAMPED entry the fork itself
+  produced outside an open turn (a keep-alive-era handback, a cold-gate
+  compaction) is read as inherited.
+- **An opening page's spawns above its newest cut open no subagent watch**
+  (`sessionwatcher.watchSpawnedSubagentsOnPageLocked`): their bubbles are
+  withheld, so their books have no reader.
+
+What the daemon cannot do: order rows in CONVERSATION order when the store's
+book is not in it. The book orders by first insert and no conversation.v1
+entry carries a conversation-order key (prompts and cuts carry no time), so a
+book whose producer inserted older records late (a re-ingested transcript) is
+delivered, and bounded, in book order.
+
 ## A settle stands alone, and a bare one is graded by its producer's stamp
 
 A unit's start and settle upsert one store row, so a replay serves the settle

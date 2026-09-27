@@ -24,11 +24,16 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// inside the resolver's mutex.
 	ported := r.portedPrompts(ws)
 	closes := r.recordedCloses(ws, page)
+	r.learnLineage(ws, entryTurns(page)...)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	log := r.logger(ws)
+	// NOTHING THE PAGE DRAWS IS PUBLISHED UNTIL THE PAGE IS WHOLLY PLACED: the
+	// page's newest cut is established before any row is served, so no reader
+	// is ever handed a row that cut goes on to withhold (holdPushes).
+	defer r.holdPushes(s)()
 
 	r.replayPorted(s, ported)
 
@@ -45,7 +50,15 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	s.replayUnstamped = 0
 	s.replayCloses = closes
 	for i := len(entries) - 1; i >= 0; i-- {
-		r.replayStamped(s, agent, entries[i])
+		// A FORK'S BOOK HOLDS ITS INHERITED PAST AROUND ITS OWN TURNS (the
+		// book orders by first insert, and the copy was ingested while the
+		// fork ran): each entry is drawn in the plane its lineage names.
+		at := entries[i]
+		if classAgent, turn := entryClass(at, agent); r.inherits(s, classAgent, turn) {
+			r.drawInherited(s, func() { r.replayStamped(s, agent, at) })
+			continue
+		}
+		r.replayStamped(s, agent, at)
 	}
 	// The page's last turn, when its terminal is not on the page and its
 	// durable row is closed, ends here, still in the history plane.

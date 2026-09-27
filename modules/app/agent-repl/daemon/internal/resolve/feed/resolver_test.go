@@ -124,6 +124,11 @@ type harness struct {
 	// closesErr fails that read.
 	closes    map[ids.TurnID]wsm.RecordedClose
 	closesErr error
+	// owned is the set of turns the workspace recorded as its own; nil
+	// answers every turn owned (a test that is not about a fork's lineage).
+	// ownedErr fails the read.
+	owned    map[ids.TurnID]bool
+	ownedErr error
 	// faults is the fake fault record every raise in this resolver lands in.
 	faults *fakeFaults
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
@@ -197,6 +202,16 @@ func newHarness(t *testing.T) *harness {
 				}
 			}
 			return out, h.closesErr
+		},
+		OwnedTurns: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]bool, error) {
+			if h.ownedErr != nil {
+				return nil, h.ownedErr
+			}
+			out := map[ids.TurnID]bool{}
+			for _, turn := range turns {
+				out[turn] = h.owned == nil || h.owned[turn]
+			}
+			return out, nil
 		},
 		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
 		AfterFunc: h.clock.AfterFunc,
@@ -574,6 +589,69 @@ func TestRetireRowRemovesItFromTheFeed(t *testing.T) {
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
 		t.Fatalf("rows = %d, want 0 after retirement", len(rows))
+	}
+}
+
+// A HELD REPLAY IS PUBLISHED ONCE ITS PAGE IS PLACED, judged against the order
+// as it then stands. Each case is what happened to one row while the hold
+// stood; the assertion is what a following reader was pushed for it.
+func TestAHeldPublicationIsJudgedAtRelease(t *testing.T) {
+	cases := []struct {
+		name string
+		// during acts on the row (already upserted under the hold).
+		during func(r *resolver, s *wsState, id string)
+		want   func(id string) []string
+	}{
+		{
+			name:   "a row that still stands is pushed at release",
+			during: func(*resolver, *wsState, string) {},
+			want:   func(id string) []string { return []string{id} },
+		},
+		{
+			name: "a row retired under the hold is not re-published, only its removal",
+			during: func(r *resolver, s *wsState, id string) {
+				r.retire(s, rootFeed(), id)
+			},
+			want: func(id string) []string { return []string{id + " (removed)"} },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a reader following the root feed.
+			h := newHarness(t)
+			rows := h.follow(rootFeed(), "reader-1")
+			id := h.promptRowID("turn-held")
+
+			// Act: under the hold, upsert the row and act on it; then release.
+			h.resolver.mu.Lock()
+			s := h.resolver.state(testWorkspace)
+			release := h.resolver.holdPushes(s)
+			h.resolver.upsert(s, placement{feed: rootFeed()}, &frontendv1.FeedRow{
+				Id:  &frontendv1.FeedId{Value: id},
+				Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
+			}, true)
+			tc.during(h.resolver, s, id)
+			release()
+			h.resolver.mu.Unlock()
+			sentinel := h.sendSentinel()
+
+			// Assert.
+			var got []string
+			for {
+				row := <-rows
+				value := row.GetId().GetValue()
+				if value == sentinel {
+					break
+				}
+				if row.GetRemoved() != nil {
+					value += " (removed)"
+				}
+				got = append(got, value)
+			}
+			if want := tc.want(id); !equalIDs(got, want) {
+				t.Fatalf("pushed = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
@@ -1050,6 +1128,7 @@ func TestRowPlaneNames(t *testing.T) {
 		want  string
 	}{
 		{planePorted, "ported"},
+		{planeInherited, "inherited"},
 		{planeHistory, "history"},
 		{planeLive, "live"},
 	}

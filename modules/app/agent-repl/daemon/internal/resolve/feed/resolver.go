@@ -41,6 +41,10 @@ type resolver struct {
 	tokenSeq uint64
 	// loggers caches each workspace's resolved durable logger.
 	loggers map[ids.WorkspaceID]dlog.Logger
+	// lineage is what each workspace's descent is known to be: whether it is a
+	// fork, and which turns are its own (lineage.go). It has a mutex of its
+	// own because the reads that fill it run outside mu.
+	lineage lineages
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -82,6 +86,10 @@ type wsState struct {
 	// portedDrawn records that this workspace's ported conversation has been
 	// drawn, so it is replayed once rather than on every agent's page.
 	portedDrawn bool
+	// holdingPushes is set while a history page is being replayed: every
+	// publication is held on its feed until the page is wholly placed
+	// (resolver.holdPushes).
+	holdingPushes bool
 
 	// readers are the standing page walks, one per open connection.
 	readers map[ReaderID]*walk
@@ -200,6 +208,11 @@ type wsState struct {
 	replayPromptDrawn bool
 	replayAtFloor     bool
 	replayUnstamped   int
+	// inherited is the attribution a fork's inherited past is drawn under,
+	// carried from one inherited entry to the next (lineage.go). It is kept
+	// apart from the fork's own attribution so the copied conversation can
+	// never become the turn the fork is running.
+	inherited inheritedStance
 	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
 	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
 	// turn is interrupted to make the cut, and drawing that interrupt as a
@@ -322,11 +335,30 @@ const (
 	// planePorted is a fork's ported parent conversation: older than anything
 	// this workspace has of its own, by construction.
 	planePorted rowPlane = iota
+	// planeInherited is the store's copy of the conversation a fork inherited
+	// — its book's entries of turns the fork never opened — whenever it
+	// arrives: on a page, or live while the copy is still being ingested
+	// (lineage.go). Older than anything the fork produced, by construction.
+	planeInherited
 	// planeHistory is the store's own replayed history.
 	planeHistory
 	// planeLive is everything drawn as it happens.
 	planeLive
 )
+
+// replayed reports whether rows drawn in this plane are a replay of settled
+// history — a page, or a fork's inherited past — rather than the conversation
+// as it happens.
+func (p rowPlane) replayed() bool {
+	return p == planeHistory || p == planeInherited
+}
+
+// inheritedPast reports whether rows drawn in this plane are the conversation
+// a fork inherited from its parent — its ported prompts or the store's copy —
+// and so precede everything the fork produced.
+func (p rowPlane) inheritedPast() bool {
+	return p == planePorted || p == planeInherited
+}
 
 // String names a plane for a log record. The feed orders by plane THEN seq, so
 // a row's plane and seq are the whole story of where it landed relative to
@@ -335,6 +367,8 @@ func (p rowPlane) String() string {
 	switch p {
 	case planePorted:
 		return "ported"
+	case planeInherited:
+		return "inherited"
 	case planeHistory:
 		return "history"
 	case planeLive:
@@ -388,6 +422,10 @@ type feedState struct {
 	retention int
 	// subs are the tails following this feed.
 	subs map[*tailSub]struct{}
+	// held are the publications a history replay is holding back from subs
+	// until its page is wholly placed (resolver.holdPushes). Empty outside a
+	// replay.
+	held []*frontendv1.FeedRow
 	// historyMore records that older history exists beyond what was replayed,
 	// so a walk that reaches the oldest replayed row answers truncated rather
 	// than claiming the start.
@@ -817,20 +855,87 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(f.log) > f.retention"})
 		f.log = f.log[len(f.log)-f.retention:]
 	}
-	// THE DELIVERY BOUND GOVERNS THE PUSH, NOT JUST THE PAGE. A separation
-	// that cut context withholds every row that sorts ABOVE it: a page walk
-	// clamps to it (see pages.go), and the live push must too. Without this a
-	// row first drawn AFTER the divider yet sorting above it — a file-plane
-	// history row the sidecar forwards late — would be pushed to every tail,
-	// which appends by arrival and so lands it BELOW the divider on screen,
-	// where nothing retracts it. It stays stored (order, rank, log) so a later
-	// walk still orders it correctly; it is only kept off the wire.
-	if r.pushWithheldByBound(s, f, id) {
+	r.publish(s, f, snapshot)
+}
+
+// publish hands one publication — an upsert's snapshot or a removal — to the
+// feed's tails. It is the ONE door every publication leaves by.
+//
+// A HISTORY REPLAY HOLDS ITS PUBLICATIONS until its page is wholly placed
+// (holdPushes). A page is drawn oldest first and the delivery bound is read off
+// the order, so a page published row by row served every row above its newest
+// cut BEFORE the cut that withholds it had been drawn: the reader drew each
+// one, then took the cut and truncated them all. Held, the page is published
+// once the order holds its newest cut, and every row that cut withholds is
+// kept off the wire by the same rule a page walk reads.
+func (r *resolver) publish(s *wsState, f *feedState, row *frontendv1.FeedRow) {
+	if s.holdingPushes {
+		f.held = append(f.held, row)
+		return
+	}
+	r.push(s, f, row)
+}
+
+// push enqueues one publication on every tail following the feed, unless it
+// is an upsert the delivery rules keep off the wire (withheldFromPush). A
+// removal always goes: it retracts, and a reader that never held the row
+// drops nothing.
+func (r *resolver) push(s *wsState, f *feedState, row *frontendv1.FeedRow) {
+	if row.GetRemoved() == nil && r.withheldFromPush(s, f, row.GetId().GetValue()) {
 		return
 	}
 	for sub := range f.subs {
-		sub.enqueue(snapshot)
+		sub.enqueue(row)
 	}
+}
+
+// holdPushes starts holding this workspace's publications for a history
+// replay, and answers the release the replay defers. The release publishes
+// every held row in the order it was drawn, judged against the order AS IT
+// NOW STANDS: a row the page's own later cut withholds never reaches a tail,
+// and a row the page retired again is not re-published (its removal, held
+// behind it, is).
+func (r *resolver) holdPushes(s *wsState) func() {
+	s.holdingPushes = true
+	return func() {
+		s.holdingPushes = false
+		for _, f := range s.feeds {
+			held := f.held
+			f.held = nil
+			for _, row := range held {
+				if _, stands := f.rows[row.GetId().GetValue()]; row.GetRemoved() == nil && !stands {
+					continue
+				}
+				r.push(s, f, row)
+			}
+		}
+	}
+}
+
+// withheldFromPush reports whether an upsert of ID must be kept off the live
+// push. It stays stored (order, rank, log) so a page still serves it where
+// it belongs; it only never reaches a tail.
+//
+// THE DELIVERY BOUND GOVERNS THE PUSH, NOT JUST THE PAGE. A separation that cut
+// context withholds every row that sorts ABOVE it: a page walk clamps to it
+// (see pages.go), and the live push must too. Without this a row first drawn
+// AFTER the divider yet sorting above it — a file-plane history row the
+// sidecar forwards late — would be pushed to every tail, which appends by
+// arrival and so lands it BELOW the divider on screen, where nothing retracts
+// it.
+//
+// A FORK'S INHERITED PAST IS NEVER PUSHED (lineage.go): it sorts above every
+// row the fork has of its own, so appended by arrival it would land below them
+// — and an inherited cut would truncate the fork's own conversation off the
+// reader's screen. Pages serve it where it belongs.
+func (r *resolver) withheldFromPush(s *wsState, f *feedState, id string) bool {
+	if rank, ok := f.rank[id]; ok && rank.plane == planeInherited {
+		r.logger(s.id).Debug("daemon.feed.push_withheld_inherited",
+			"a row of a fork's inherited past was stored but kept off the live push; pages serve it",
+			dlog.Context{"feed": f.key, "row": id})
+		return true
+	}
+	return r.pushWithheldByBound(s, f, id)
 }
 
 // pushWithheldByBound reports whether ID is hidden by the feed's newest
@@ -906,9 +1011,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	if len(f.log) > f.retention {
 		f.log = f.log[len(f.log)-f.retention:]
 	}
-	for sub := range f.subs {
-		sub.enqueue(removal)
-	}
+	r.publish(s, f, removal)
 	return true
 }
 
