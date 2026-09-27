@@ -85,3 +85,20 @@ func (c *controller) recordTransfer(ws ids.WorkspaceID, successor string) {
 		"workspace": string(ws), "successor": successor,
 	})
 }
+
+// untransfer undoes recordTransfer for a workspace this daemon took back: its
+// per-workspace rpcs are served here again, and the rendezvous its
+// announcement armed is settled and disarmed so nothing waits on an adoption
+// that will not happen here.
+func (c *controller) untransfer(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	previous := c.transferred[ws]
+	delete(c.transferred, ws)
+	e, armed := c.rendezvous[ws]
+	delete(c.rendezvous, ws)
+	c.mu.Unlock()
+	if armed {
+		e.settle(ErrReclaimed)
+	}
+	c.logTransition(opTransfer, ws, "serving_standing", previous, "", dlog.Context{"reclaimed": true})
+}

@@ -363,7 +363,11 @@ func (p Participants) Count() int {
 
 // QuiesceFunc holds ALL intake for one workspace: queue, views, anything. From
 // the transfer notice on the outgoing daemon does no work for it.
-type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) error
+//
+// It answers the lease it TOOK, empty when another holder's lease already held
+// the intake: a transfer that fails, or whose adoption window expires, releases
+// exactly that lease and never another holder's.
+type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) (ids.LeaseID, error)
 
 // LeaseChangedFunc re-evaluates one workspace's standing holds against its new
 // lease set. It is promptqueue.Queue.OnLeaseChanged.
@@ -453,6 +457,9 @@ var (
 	ErrParticipantNotExpected = errors.New("rollout: this participant's stream was not open at announcement")
 	// ErrNotYetAdopted is answered while adoption is still in progress.
 	ErrNotYetAdopted = errors.New("rollout: this workspace is not adopted yet")
+	// ErrReclaimed settles a rendezvous whose workspace the incumbent took
+	// back: its adoption window expired, or its transfer failed.
+	ErrReclaimed = errors.New("rollout: the incumbent took this workspace back; it is not being handed over")
 )
 
 // New builds the controller.
