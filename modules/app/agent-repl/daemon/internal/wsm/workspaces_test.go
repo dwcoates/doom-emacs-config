@@ -528,6 +528,53 @@ func TestSetClosedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 }
 
+func TestSetClosedReleasesOwnership(t *testing.T) {
+	tests := []struct {
+		name   string
+		closed bool
+		want   bool // whether serving and the spawned pid survive the write
+	}{
+		{name: "a close releases serving and clears the spawned shim pid", closed: true, want: false},
+		{name: "a reopen leaves serving and the spawned shim pid untouched", closed: false, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if err := s.ClaimServing(ctx, ws.ID, NewInstanceID()); err != nil {
+				t.Fatalf("ClaimServing: %v", err)
+			}
+			pid := 63777
+			if err := s.SetSpawnedShimPID(ctx, ws.ID, &pid); err != nil {
+				t.Fatalf("SetSpawnedShimPID: %v", err)
+			}
+
+			// Act
+			if err := s.SetClosed(ctx, ws.ID, tt.closed); err != nil {
+				t.Fatalf("SetClosed: %v", err)
+			}
+
+			// Assert
+			owner, err := s.Serving(ctx, ws.ID)
+			if err != nil {
+				t.Fatalf("Serving: %v", err)
+			}
+			got, err := s.Workspace(ctx, ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if (owner != nil) != tt.want {
+				t.Fatalf("serving owner = %v, want present=%v", owner, tt.want)
+			}
+			if (got.SpawnedShimPID != nil) != tt.want {
+				t.Fatalf("spawned shim pid = %v, want present=%v", got.SpawnedShimPID, tt.want)
+			}
+		})
+	}
+}
+
 func TestSetAttentionRecordsTheMarker(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
