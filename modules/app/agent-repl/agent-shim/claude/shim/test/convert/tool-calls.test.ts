@@ -7,8 +7,8 @@
  * recognizable built-in in that last set is a producer defect, so the suite
  * forbids it by name.
  */
-import { writeSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { logRecordsDuring } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
@@ -45,23 +45,6 @@ function call(toolUseId: string, toolName = "Read"): PendingCall {
 /** One call on a subagent's stream: the spawning call its message named. */
 function onStream(toolUseId: string, spawningCall: string): PendingCall {
   return { ...call(toolUseId), spawningCall };
-}
-
-interface LogRecord {
-  readonly level: string;
-  readonly message: string;
-  readonly context: Record<string, unknown>;
-}
-
-/** Every log record `act` wrote, parsed back out of the mocked sink. */
-function recordsDuring(act: () => unknown): LogRecord[] {
-  const mockedWriteSync = vi.mocked(writeSync);
-  const before = mockedWriteSync.mock.calls.length;
-  act();
-  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as LogRecord,
-  );
 }
 
 const REGISTRY_FULL =
@@ -126,7 +109,7 @@ describe("the registry of calls in flight", () => {
     }
 
     // Act
-    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+    const records = logRecordsDuring(() => registry.remember(call("toolu_overflow")));
 
     // Assert
     expect(records.filter((record) => record.message === REGISTRY_FULL)).toMatchObject([
@@ -150,7 +133,7 @@ describe("the registry of calls in flight", () => {
     }
 
     // Act
-    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+    const records = logRecordsDuring(() => registry.remember(call("toolu_overflow")));
 
     // Assert
     expect(records.filter((record) => record.level === "warn")).toEqual([]);
@@ -394,7 +377,7 @@ describe("a result's settle", () => {
     const registry = createCallRegistry();
 
     // Act
-    const records = recordsDuring(() =>
+    const records = logRecordsDuring(() =>
       convertToolResult(
         TOOL_CONVERTERS,
         foldContext(),
@@ -418,7 +401,7 @@ describe("a result's settle", () => {
     const registry = createCallRegistry();
 
     // Act
-    const records = recordsDuring(() =>
+    const records = logRecordsDuring(() =>
       convertToolResult(TOOL_CONVERTERS, foldContext(), registry, "toolu_never", outcome(), {
         vendorUuid: "u_1",
       }),
@@ -437,7 +420,7 @@ describe("a result's settle", () => {
     registry.remember(call("toolu_r"));
 
     // Act
-    const records = recordsDuring(() =>
+    const records = logRecordsDuring(() =>
       convertToolResult(
         TOOL_CONVERTERS,
         foldContext(),
@@ -558,7 +541,7 @@ describe("the turn's end", () => {
     registry.remember(call("toolu_read", "Read"));
 
     // Act
-    const records = recordsDuring(() => endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, false));
+    const records = logRecordsDuring(() => endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, false));
 
     // Assert
     expect(records.filter((record) => record.message === TURN_RELEASED)).toMatchObject([
@@ -604,7 +587,7 @@ describe("the query's end", () => {
     registry.remember(call("toolu_read", "Read"));
 
     // Act
-    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+    const records = logRecordsDuring(() => endQueryCalls(registry, "the vendor query died"));
 
     // Assert
     expect(records.filter((record) => record.message === QUERY_RELEASED)).toMatchObject([
@@ -620,7 +603,7 @@ describe("the query's end", () => {
     const registry = createCallRegistry();
 
     // Act
-    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+    const records = logRecordsDuring(() => endQueryCalls(registry, "the vendor query died"));
 
     // Assert
     expect(records.filter((record) => record.message === QUERY_RELEASED)).toEqual([]);

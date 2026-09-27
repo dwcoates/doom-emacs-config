@@ -6,8 +6,8 @@
  * context whose last several exchanges are keep-alives — the model reads them,
  * the user paid for them, and nothing on any surface says they are there.
  */
-import { writeSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import {
   isKeepalivePrompt,
   KEEPALIVE_INTERVAL_MS,
@@ -312,19 +312,6 @@ describe("REAL_SCHEDULER", () => {
     expect(beats.length).toBe(1);
   });
 });
-
-/** The canonical logger's records written since `before`, decoded. */
-function logRecordsSince(before: number): Array<{ level: string; message: string; context: Record<string, unknown> }> {
-  const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(
-    ([, bytes, offset, length]) =>
-      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
-        level: string;
-        message: string;
-        context: Record<string, unknown>;
-      },
-  );
-}
 
 /** The client uuid the keep-alive send carries in these tests. */
 const KEEPALIVE_SEND = "00000000-0000-4000-8000-00000000ka01";
@@ -794,7 +781,7 @@ describe("the keep-alive turn scope", () => {
   it("records an abandoned keep-alive at INFO through the canonical logger", () => {
     // Arrange
     const scope = pendingScope();
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     scope.abandon("the vendor query died");
@@ -808,7 +795,7 @@ describe("the keep-alive turn scope", () => {
   it("records nothing when abandoning with no keep-alive pending", () => {
     // Arrange
     const scope = new KeepaliveScope();
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     scope.abandon("nothing was pending");
@@ -821,7 +808,7 @@ describe("the keep-alive turn scope", () => {
     // Arrange
     const scope = pendingScope();
     scope.attribute(reply());
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     // Act
     scope.attribute(result());

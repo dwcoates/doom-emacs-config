@@ -92,8 +92,13 @@ export interface FoldContext {
    * denials that never had an open ask.
    */
   deniedCall(toolUseId: string): boolean;
-  /** A live task, by vendor task id: the call it belongs to, and its agent when known. */
-  liveTask(taskId: string): { toolUseId: string; agentId?: conversationv1.AgentId } | undefined;
+  /**
+   * A live task, by vendor task id: the call it belongs to, its agent when
+   * known, and the vendor's `task_type` for it when the vendor stated one.
+   */
+  liveTask(
+    taskId: string,
+  ): { toolUseId: string; agentId?: conversationv1.AgentId; taskType?: string } | undefined;
   /**
    * WHICH AGENT a spawning call created, by that call's `tool_use_id`.
    *

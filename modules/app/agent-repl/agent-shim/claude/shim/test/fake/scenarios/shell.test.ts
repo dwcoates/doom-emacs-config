@@ -9,8 +9,9 @@
  * A detached test that only checked messages would pass against a mock that
  * wrote nothing at all.
  */
-import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { logRecordsSince, logSinkMark } from "../../log-records.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -227,9 +228,7 @@ describe("detached shells", () => {
  */
 describe("the detached-work gate", () => {
   const wroteLog = (needle: string): boolean =>
-    (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>).some(
-      ([, bytes, offset, length]) => bytes.subarray(offset, offset + length).toString("utf8").includes(needle),
-    );
+    logRecordsSince(0).some((record) => record.message.includes(needle));
 
   const untilLogged = async (needle: string): Promise<void> => {
     for (let i = 0; i < 1_000; i++) {
@@ -316,15 +315,13 @@ describe("the detached-work gate", () => {
     const gate = join(dir, "open");
     writeFileSync(gate, "");
     process.env[DETACH_GATE_PATH_ENV] = gate;
-    const before = vi.mocked(writeSync).mock.calls.length;
+    const before = logSinkMark();
 
     try {
       // Act
       const driven = await driveScenario(["!bash-detach"]);
-      const parkedAfter = (
-        vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>
-      ).some(([, bytes, offset, length]) =>
-        bytes.subarray(offset, offset + length).toString("utf8").includes("fake detached work PARKED on its gate"),
+      const parkedAfter = logRecordsSince(before).some((record) =>
+        record.message.includes("fake detached work PARKED on its gate"),
       );
 
       // Assert

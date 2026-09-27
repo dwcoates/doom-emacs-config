@@ -214,37 +214,46 @@ func TestDetachedAnnouncementOpensExactlyOneWatch(t *testing.T) {
 	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
 }
 
-// TestDetachedOriginResolvesItsKindFromTheUnit covers the `detached` origin,
-// which names only the in-turn unit the work used to be: the kind comes from
-// what that unit's own activity already taught the watcher.
-func TestDetachedOriginResolvesItsKindFromTheUnit(t *testing.T) {
+// TestDetachedOriginTakesItsKindFromTheAnnouncement covers the `detached`
+// origin, which names only the in-turn unit the work used to be: the kind, and
+// a subagent's agent, are the ANNOUNCEMENT's, whatever that unit was.
+func TestDetachedOriginTakesItsKindFromTheAnnouncement(t *testing.T) {
 	tests := []struct {
 		name      string
 		activity  *conversationv1.AgentActivity
+		kind      *conversationv1.DetachedWorkKind
 		wantAgent string
 		wantShell bool
 	}{
 		{
-			name:      "a spawn unit resolves to its created agent's watch",
+			name:      "an Agent spawn unit opens its created agent's watch",
 			activity:  subagentActivity("act-1", "sub-1"),
+			kind:      subagentKind("sub-1"),
 			wantAgent: "sub-1",
 		},
 		{
-			name:      "a shell unit resolves to a bash watch",
+			name:      "a shell unit opens a bash watch",
 			activity:  bashActivity("act-1"),
+			kind:      bashKind(),
 			wantShell: true,
+		},
+		{
+			name:      "a SendMessage unit opens the resumed agent's watch",
+			activity:  sendMessageActivity("act-1"),
+			kind:      subagentKind("sub-1"),
+			wantAgent: "sub-1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the unit streams first, which is what teaches the kind.
+			// Arrange.
 			h := newHarness(t, Session{Started: sessionStarted("")})
 			h.quiet()
 			h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(tt.activity))))
 
 			// Act.
-			h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1"))))
+			h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1", tt.kind))))
 
 			// Assert.
 			if tt.wantAgent != "" {
@@ -263,22 +272,126 @@ func TestDetachedOriginResolvesItsKindFromTheUnit(t *testing.T) {
 	}
 }
 
-// TestDetachedOriginForAnUnknownUnitIsAnError covers the gap honestly: an
-// announcement naming a unit this daemon never saw cannot be resolved to a
-// kind, and guessing one would open the wrong stream.
-func TestDetachedOriginForAnUnknownUnitIsAnError(t *testing.T) {
+// TestASubagentResumedBySendMessageIsLiveWork covers the 2026-09-27 defect: a
+// subagent resumed through SendMessage is announced as detached from the SEND,
+// and it enters the live set under the agent the announcement names, which is
+// what the footer is handed.
+func TestASubagentResumedBySendMessageIsLiveWork(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(sendMessageActivity("send-1")))))
+
+	// Act.
+	events := h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-send", "send-1", subagentKind("spawn-1")))))
+
+	// Assert.
+	h.client.nextAgentOpen(t)
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("spawn-1")}})
+	if got, ok := lastFooterLiveWork(events); !ok || len(got.Agents) != 1 || got.Agents[0].GetValue() != "spawn-1" {
+		t.Fatalf("the footer was handed %+v, want the resumed agent spawn-1", got)
+	}
+}
+
+// TestAnAgentDetachedFromAnUnseenUnitIsLiveWork covers work whose unit this
+// watcher never saw (a restored session): the announcement alone names its
+// kind and agent, so it enters the live set and is handed to the footer.
+func TestAnAgentDetachedFromAnUnseenUnitIsLiveWork(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 
 	// Act.
-	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "never-seen"))))
+	events := h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "never-seen", subagentKind("sub-1")))))
 
 	// Assert.
-	h.client.noAgentOpen(t)
-	h.client.noBashOpen(t)
-	if !h.hasRecord("error", "daemon.sessionwatcher.detached_kind_unknown") {
-		t.Fatal("an unresolvable detached announcement was not recorded as an error")
+	h.client.nextAgentOpen(t)
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
+	if got, ok := lastFooterLiveWork(events); !ok || len(got.Agents) != 1 || got.Agents[0].GetValue() != "sub-1" {
+		t.Fatalf("the footer was handed %+v, want sub-1", got)
+	}
+}
+
+// TestAnUnseenUnitsTerminalRetiresItsWork covers the join the announcement
+// records for a unit this watcher never saw: the unit's own terminal, arriving
+// later on the spawning agent's book, still retires the work.
+func TestAnUnseenUnitsTerminalRetiresItsWork(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "never-seen", subagentKind("sub-1")))))
+	h.client.nextAgentOpen(t)
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("never-seen", false)))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the settled work is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestAMalformedAnnouncementIsRefused covers the refusals: an announcement
+// the watcher cannot route is recorded at ERROR, opens nothing, reaches no
+// view, and leaves the live set as it was.
+func TestAMalformedAnnouncementIsRefused(t *testing.T) {
+	tests := []struct {
+		name      string
+		work      *conversationv1.AgentDetachedWork
+		operation string
+	}{
+		{
+			name:      "a detached announcement with no kind",
+			work:      detachedWork("w-1", "act-1", nil),
+			operation: "daemon.sessionwatcher.detached_kind_unknown",
+		},
+		{
+			name:      "a created announcement with no kind",
+			work:      withKind(createdWork("w-1", bashWork()), nil),
+			operation: "daemon.sessionwatcher.detached_kind_unknown",
+		},
+		{
+			name:      "a subagent kind naming no agent",
+			work:      detachedWork("w-1", "act-1", subagentKind("")),
+			operation: "daemon.sessionwatcher.detached_subagent_unaddressable",
+		},
+		{
+			name:      "a created description of a different kind",
+			work:      withKind(createdWork("w-1", bashWork()), monitorKind()),
+			operation: "daemon.sessionwatcher.detached_kind_conflict",
+		},
+		{
+			name:      "a created spawn of a different agent",
+			work:      withKind(createdWork("w-1", subagentWork("sub-1")), subagentKind("sub-2")),
+			operation: "daemon.sessionwatcher.detached_kind_conflict",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("act-1", "sub-1")))))
+			h.client.nextAgentOpen(t)
+			before := h.w.LiveWork()
+
+			// Act.
+			events := h.route(h.main, entryFrame(frameDetached("main-1", tt.work)))
+
+			// Assert.
+			h.client.noAgentOpen(t)
+			h.client.noBashOpen(t)
+			assertLiveWork(t, h.w.LiveWork(), before)
+			if !h.hasRecord("error", tt.operation) {
+				t.Fatalf("records = %+v, want an ERROR %s", h.log.Records(), tt.operation)
+			}
+			for _, e := range events {
+				if e.method == "OnDetachedWork" {
+					t.Fatalf("the refused announcement reached the %s", e.sink)
+				}
+			}
+		})
 	}
 }
 
@@ -329,7 +442,7 @@ func TestMonitorIsRetiredByItsOwnTerminal(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", false)))))
-	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1"))))
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1", monitorKind()))))
 	if h.w.LiveWork().Empty() {
 		t.Fatal("the announced monitor was not live")
 	}
@@ -2645,7 +2758,7 @@ func TestAReapedWatchReleasesItsHungOpen(t *testing.T) {
 	g := h.client.gate(&h.client.agentGate, true)
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
 	g.awaitBlocked(t)
-	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1"))))
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1", subagentKind("sub-1")))))
 
 	// Act: the detached run settles, which reaps its watch.
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))

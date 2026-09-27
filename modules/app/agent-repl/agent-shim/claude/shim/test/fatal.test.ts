@@ -8,21 +8,14 @@
  */
 import { writeSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsSince } from "./log-records.js";
 import { MAIN_FATAL_OPERATION, MAIN_LIFECYCLE_LOGGER, MAIN_LIFECYCLE_OPERATION, reportFatal } from "../src/fatal.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
 
-/** Every record the durable sink received, newest last. */
-function persisted(): Record<string, unknown>[] {
-  const calls = mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
-}
-
 /** The single record this test provoked. */
 function onlyRecord(): Record<string, unknown> {
-  const records = persisted();
+  const records = logRecordsSince(0);
   expect(records).toHaveLength(1);
   return records[0];
 }

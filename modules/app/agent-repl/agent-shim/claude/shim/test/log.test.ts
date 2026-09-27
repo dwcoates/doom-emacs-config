@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsSince } from "./log-records.js";
 import { containing } from "./expect-shapes.js";
 import { writeSync } from "node:fs";
 
@@ -14,13 +15,6 @@ async function freshLog() {
 /** One emergency-stderr line, parsed as the record it is. */
 function record(line: string): { message?: string } {
   return JSON.parse(line) as { message?: string };
-}
-
-function persisted(): Record<string, unknown>[] {
-  const calls = mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>;
-  return calls.map(([, bytes, offset, length]) =>
-    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-  );
 }
 
 describe("shim runtime logging", () => {
@@ -55,7 +49,7 @@ describe("shim runtime logging", () => {
     log.bindLog({ component: "shim-test", operation: "shim.test.persist" }).debug({ request_id: "request-1" }, "store write accepted");
     expect(mockedWriteSync).toHaveBeenCalledWith(3, expect.any(Buffer), 0, expect.any(Number));
     expect(terminal).toHaveLength(1);
-    expect(persisted()[0]).toMatchObject({ workspace_dir: "/canonical/workspace", workspace_id: "00000000000000dd", agent_repl_session_id: "agent-session-1", request_id: "request-1" });
+    expect(logRecordsSince(0)[0]).toMatchObject({ workspace_dir: "/canonical/workspace", workspace_id: "00000000000000dd", agent_repl_session_id: "agent-session-1", request_id: "request-1" });
   });
 
   it.each([
@@ -78,7 +72,7 @@ describe("shim runtime logging", () => {
     logger.error({}, "error");
 
     // Assert.
-    expect(persisted().map((record) => record.level)).toEqual(expected);
+    expect(logRecordsSince(0).map((record) => record.level)).toEqual(expected);
     expect(terminal.map((line) => JSON.parse(line) as { level: string }).map((record) => record.level)).toEqual(expected);
   });
 
@@ -95,7 +89,7 @@ describe("shim runtime logging", () => {
     logger.info({}, "info");
 
     // Assert.
-    expect(persisted().map((record) => record.level)).toEqual(["info"]);
+    expect(logRecordsSince(0).map((record) => record.level)).toEqual(["info"]);
     expect(terminal).toHaveLength(1);
   });
 
@@ -123,8 +117,8 @@ describe("shim runtime logging", () => {
     logger.debug({}, "before");
     log.setClaudeSessionId("claude-42");
     logger.debug({}, "after");
-    expect(persisted()[0]).toMatchObject({ workspace_id: "00000000000000dd" });
-    expect(persisted()[1]).toMatchObject({ claude_session_id: "claude-42" });
+    expect(logRecordsSince(0)[0]).toMatchObject({ workspace_id: "00000000000000dd" });
+    expect(logRecordsSince(0)[1]).toMatchObject({ claude_session_id: "claude-42" });
   });
 
   // WHAT THE DAEMON CALLS THIS WORKSPACE is the only thing `workspace_id`
@@ -140,7 +134,7 @@ describe("shim runtime logging", () => {
     log.bindLog({ operation: "shim.test.identity" }).debug({}, "one record");
 
     // Assert: "b3d05752" is the md5 prefix of that cwd, and is not the answer.
-    expect(persisted()[0]).toMatchObject({ workspace_id: "0100059cb65649bc" });
+    expect(logRecordsSince(0)[0]).toMatchObject({ workspace_id: "0100059cb65649bc" });
   });
 
   // NOTHING IS LOST BY THE MOVE: the md5 prefix is what names the workspace
@@ -154,7 +148,7 @@ describe("shim runtime logging", () => {
     log.bindLog({ operation: "shim.test.identity" }).debug({}, "one record");
 
     // Assert.
-    expect((persisted()[0].context as Record<string, unknown>).shim_workspace_hash).toBe(
+    expect(logRecordsSince(0)[0].context.shim_workspace_hash).toBe(
       "b3d05752",
     );
   });
@@ -182,7 +176,7 @@ describe("shim runtime logging", () => {
     log.bindLog({ operation: "shim.test.verbose-threshold" }).logVerbose({}, "below threshold");
 
     // Assert.
-    expect(persisted()).toEqual([]);
+    expect(logRecordsSince(0)).toEqual([]);
     expect(terminal).toEqual([]);
   });
 
@@ -243,7 +237,7 @@ describe("shim runtime logging", () => {
     const circular: Record<string, unknown> = { count: 9n };
     circular.self = circular;
     log.bindLog({ operation: "shim.test.serialize" }).debug({ cause: new Error("cannot connect"), circular }, "failed");
-    expect(persisted()[0]).toMatchObject({ context: { cause: { name: "Error", message: "cannot connect" }, circular: { count: "9", self: "[Circular]" } } });
+    expect(logRecordsSince(0)[0]).toMatchObject({ context: { cause: { name: "Error", message: "cannot connect" }, circular: { count: "9", self: "[Circular]" } } });
   });
 
   it("fails without partial normal emission when unconfigured or malformed", async () => {
@@ -307,7 +301,7 @@ describe("shim runtime logging", () => {
     bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
     bootstrapFatal(new Error("configured"));
-    expect(persisted()[0]).toMatchObject({
+    expect(logRecordsSince(0)[0]).toMatchObject({
       level: "error",
       operation: "shim.main.fatal",
       context: containing({
@@ -330,7 +324,7 @@ describe("shim runtime logging", () => {
     const log = await configured();
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
     log.bindLog({ operation: "shim.test.epipe" }).debug({}, "after the daemon exited");
-    expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
+    expect(logRecordsSince(0).map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
   });
 
   it("records the retirement at info, because a shim outliving its daemon is the design", async () => {
@@ -343,7 +337,7 @@ describe("shim runtime logging", () => {
 
     // Assert: the record stands, and it is not a warning about anything.
     expect(
-      persisted().find((record) => record.operation === "shim.logging.stderr-mirror"),
+      logRecordsSince(0).find((record) => record.operation === "shim.logging.stderr-mirror"),
     ).toMatchObject({ level: "info" });
   });
 
@@ -354,7 +348,7 @@ describe("shim runtime logging", () => {
     terminal.mockClear();
     log.bindLog({ operation: "shim.test.epipe" }).debug({}, "second");
     expect(terminal).not.toHaveBeenCalled();
-    expect(persisted().at(-1)).toMatchObject({ message: "second" });
+    expect(logRecordsSince(0).at(-1)).toMatchObject({ message: "second" });
   });
 
   it("retires the mirror on an asynchronous stderr error rather than letting it go uncaught", async () => {
@@ -442,25 +436,25 @@ describe("shim runtime logging", () => {
   it("carries a non-finite number as its stringified form rather than dropping the field", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).debug({ ratio: Number.POSITIVE_INFINITY }, "budget");
-    expect(persisted()[0].context).toMatchObject({ ratio: "Infinity" });
+    expect(logRecordsSince(0)[0].context).toMatchObject({ ratio: "Infinity" });
   });
 
   it("carries a bigint as a decimal string, which JSON has no other way to hold", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).debug({ offset: 9007199254740993n }, "offset");
-    expect(persisted()[0].context).toMatchObject({ offset: "9007199254740993" });
+    expect(logRecordsSince(0)[0].context).toMatchObject({ offset: "9007199254740993" });
   });
 
   it("carries a function-valued field as its stringified form", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).debug({ hook: function named() {} }, "hook");
-    expect(String((persisted()[0].context as Record<string, unknown>).hook)).toContain("named");
+    expect(String(logRecordsSince(0)[0].context.hook)).toContain("named");
   });
 
   it("carries a symbol-valued field as its stringified form", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).debug({ tag: Symbol("marker") }, "tag");
-    expect(persisted()[0].context).toMatchObject({ tag: "Symbol(marker)" });
+    expect(logRecordsSince(0)[0].context).toMatchObject({ tag: "Symbol(marker)" });
   });
 
   it("poisons the sink when the durable write fails WHILE recording the mirror's retirement", async () => {
@@ -503,7 +497,7 @@ describe("shim runtime logging", () => {
     const log = await configured();
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw "EPIPE"; });
     log.bindLog({ operation: "shim.test.nonerror-mirror" }).debug({}, "retire me");
-    expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
+    expect(logRecordsSince(0).map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
   });
 
   it("stamps the emergency record with the Claude identity once the SDK has revealed it", async () => {
