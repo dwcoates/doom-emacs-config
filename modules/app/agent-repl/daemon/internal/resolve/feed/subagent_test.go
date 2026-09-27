@@ -1,12 +1,14 @@
 package feed
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -3398,5 +3400,76 @@ func TestATailAccountingForFewerBytesIsASpoolThatStartedOver(t *testing.T) {
 	}
 	if !h.hasRecord("info", "daemon.feed.spool_restarted") {
 		t.Fatalf("records = %+v, want an INFO daemon.feed.spool_restarted", h.records())
+	}
+}
+
+// ---- drawReleasedSpawn: the one place a released hold is drawn ----
+
+// releaseHeld drives drawReleasedSpawn directly on one spawn state, under the
+// resolver's lock, and answers what the root feed then holds.
+func (h *harness) releaseHeld(unit string, created string, held ...*conversationv1.AgentSubagent) []*frontendv1.FeedRow {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	s := h.resolver.state(testWorkspace)
+	state := &subagentState{bubble: &frontendv1.FeedSubagent{}, feed: placement{feed: feedid.Feed{}}}
+	if created != "" {
+		state.created = &conversationv1.AgentId{Value: created}
+	}
+	s.subagents[unit] = state
+	h.resolver.drawReleasedSpawn(s, unit, state, held, "in this test")
+	h.resolver.mu.Unlock()
+	return h.rows(feedid.Feed{})
+}
+
+func TestDrawReleasedSpawnDrawsTheBubbleFromTheHeldFrames(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	beat := &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+		Prompt: &conversationv1.AgentSubagentPrompt{Text: "go and look", Description: proto.String("sweep")},
+	}}}
+
+	// Act.
+	rows := h.releaseHeld("spawn-1", "agent-1", beat)
+
+	// Assert.
+	if len(rows) != 1 || rows[0].GetDetachedSubagent().GetSubagent().GetDescription().GetText() != "sweep" &&
+		rows[0].GetActivity().GetSubagent().GetDescription().GetText() != "sweep" {
+		t.Fatalf("rows = %+v, want one bubble drawn from the held beat", rows)
+	}
+}
+
+func TestDrawReleasedSpawnReportsAFrameItCannotFold(t *testing.T) {
+	// Arrange: a frame with no arm, which no fold can draw.
+	h := newHarness(t)
+
+	// Act.
+	h.releaseHeld("spawn-1", "agent-1", &conversationv1.AgentSubagent{})
+
+	// Assert.
+	for _, record := range h.records() {
+		if record.Level == "error" && record.Operation == "daemon.feed.subagent_held_frame_undrawable" &&
+			record.Message == "a held spawn frame could not be folded in this test" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the ERROR naming the occasion", h.records())
+}
+
+// TestEveryReleasedHoldIsDrawnThroughOneHelper pins the consolidation: a hold
+// released without a naming frame is drawn by drawReleasedSpawn alone, so a
+// hand-rolled second copy of its fold-compose-push cannot drift from it.
+func TestEveryReleasedHoldIsDrawnThroughOneHelper(t *testing.T) {
+	// Arrange.
+	source, err := os.ReadFile("subagent.go")
+	if err != nil {
+		t.Fatalf("reading subagent.go: %v", err)
+	}
+
+	// Act.
+	count := strings.Count(string(source), "r.composeSubagent(s, state.feed, unitID, state, commission)")
+
+	// Assert.
+	if count != 1 {
+		t.Fatalf("subagent.go composes a released hold at %d sites, want exactly one (drawReleasedSpawn)", count)
 	}
 }

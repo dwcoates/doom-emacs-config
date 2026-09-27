@@ -411,23 +411,32 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 				"a spawn's pre-contract frames name no created agent and no start was held; its bubble is drawn but addresses no sub-feed",
 				dlog.Context{"unit": unitID, "kind": "subagent", "field": "created_agent_id", "frames": len(held), "occasion": occasion})
 		}
-		var commission *conversationv1.AgentSubagentPrompt
-		for _, frame := range held {
-			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
-				log.Error("daemon.feed.subagent_held_frame_undrawable",
-					"a held spawn frame could not be folded at its retirement",
-					dlog.Context{"unit": unitID, "cause": err.Error()})
-				continue
-			}
-			if p := commissionOf(frame); p != nil {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "p := commissionOf(frame); p != nil"})
-				commission = p
-			}
-		}
-		row := r.composeSubagent(s, state.feed, unitID, state, commission)
-		r.stampTurn(s, row, nil)
-		r.upsert(s, state.feed, row, true)
+		r.drawReleasedSpawn(s, unitID, state, held, "at its retirement")
 	}
+}
+
+// drawReleasedSpawn draws a spawn whose held frames were released from the
+// hold: each is folded in arrival order, a frame that cannot be folded is
+// reported rather than dropped, and the bubble is composed and pushed from
+// what folded. ONE PLACE, for every occasion a hold is released without a
+// naming frame of its own to fold beside it.
+func (r *resolver) drawReleasedSpawn(s *wsState, unitID string, state *subagentState, held []*conversationv1.AgentSubagent, occasion string) {
+	var commission *conversationv1.AgentSubagentPrompt
+	for _, frame := range held {
+		if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+			r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
+				"a held spawn frame could not be folded "+occasion,
+				dlog.Context{"unit": unitID, "cause": err.Error()})
+			continue
+		}
+		if p := commissionOf(frame); p != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "p := commissionOf(frame); p != nil"})
+			commission = p
+		}
+	}
+	row := r.composeSubagent(s, state.feed, unitID, state, commission)
+	r.stampTurn(s, row, nil)
+	r.upsert(s, state.feed, row, true)
 }
 
 // applyPrompt folds the commission's label and description onto the head. The
