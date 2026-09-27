@@ -823,7 +823,8 @@ daemon starts sending it, with no table to update here."
       '((:create . (:response (:arm :error
                                :value (:cause (:arm :unknown-repository :value nil))))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
-    (should (agent-repl-test-verbs--messaged-p "create refused: unknown-repository"))))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the daemon refused it: unknown-repository"))))
 
 (ert-deftest agent-repl-verbs-create-one-shot-policy-missing-names-the-directory ()
   "A one-shot refused for want of a repository policy names the directory the
@@ -838,11 +839,11 @@ detects the absence and Emacs draws the refusal it sent."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
                             :prompt "ship it")
     (should (agent-repl-test-verbs--messaged-p
-             "create refused: /src/p states no one-shot policy -- write oneshot-completion-directive.md in /src/p/.agent-repl/prompts"))))
+             "agent-repl: workspace creation FAILED: /src/p states no one-shot policy -- write oneshot-completion-directive.md in /src/p/.agent-repl/prompts"))))
 
-(ert-deftest agent-repl-verbs-create-one-shot-policy-missing-is-recorded-as-a-warning ()
-  "The refusal is recorded at the WARNING rung, which is what a durable sweep
-for refused creates reads."
+(ert-deftest agent-repl-verbs-create-one-shot-policy-missing-is-recorded-as-an-error ()
+  "The refusal is a FAILED create and is recorded at the ERROR rung (owner
+ruling, 2026-09-27), which is what a durable sweep for failed creates reads."
   (let (levels)
     (cl-letf (((symbol-function 'agent-repl--emit-log-record)
                (lambda (_ws level &rest _) (push level levels))))
@@ -854,7 +855,7 @@ for refused creates reads."
                                                            :missing-files nil)))))))
         (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
                                 :prompt "ship it")))
-    (should (member "warn" levels))))
+    (should (member "error" levels))))
 
 (ert-deftest agent-repl-verbs-create-one-shot-policy-missing-with-no-files-names-the-directory-alone ()
   "With no file list the directory is still the answer, and no empty list is
@@ -868,7 +869,7 @@ drawn beside it."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
                             :prompt "ship it")
     (should (agent-repl-test-verbs--messaged-p
-             "create refused: /src/p states no one-shot policy -- write /src/p/.agent-repl/prompts"))))
+             "agent-repl: workspace creation FAILED: /src/p states no one-shot policy -- write /src/p/.agent-repl/prompts"))))
 
 (ert-deftest agent-repl-verbs-create-other-refusals-still-fall-through ()
   "The one-shot policy handler CLAIMS only its own arm; every other create
@@ -878,7 +879,8 @@ refusal still reaches the generic reporting."
                                :value (:cause (:arm :base-ref-unresolved
                                                :value (:ref "origin/main")))))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
-    (should (agent-repl-test-verbs--messaged-p "create refused: base-ref-unresolved"))))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the daemon refused it: base-ref-unresolved"))))
 
 (ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
   "A create refused because the workspace could not be named states the cause
@@ -891,7 +893,7 @@ the daemon read off the failure."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :initial-prompt "fix the flaky login test")
     (should (agent-repl-test-verbs--messaged-p
-             "create refused: the workspace could not be named (timeout, 2 attempts)"))))
+             "agent-repl: workspace creation FAILED: the workspace could not be named (timeout, 2 attempts)"))))
 
 (ert-deftest agent-repl-verbs-create-naming-failed-quotes-the-model-s-answer ()
   "An INVALID answer is drawn, because it is what says whether to retry or to
@@ -905,9 +907,9 @@ supply a name by hand."
                             :initial-prompt "fix the flaky login test")
     (should (agent-repl-test-verbs--messaged-p "the model answered \"Fix The Login\""))))
 
-(ert-deftest agent-repl-verbs-create-naming-failed-is-recorded-as-a-warning ()
-  "The refusal is recorded at the WARNING rung, beside the one-shot policy
-refusal it sits next to."
+(ert-deftest agent-repl-verbs-create-naming-failed-is-recorded-as-an-error ()
+  "The refusal is a FAILED create and is recorded at the ERROR rung (owner
+ruling, 2026-09-27), never only as a warning."
   (let (levels)
     (cl-letf (((symbol-function 'agent-repl--emit-log-record)
                (lambda (_ws level &rest _) (push level levels))))
@@ -918,7 +920,68 @@ refusal it sits next to."
                                                            :attempts 2 :answer "")))))))
         (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                                 :initial-prompt "fix the flaky login test")))
-    (should (member "warn" levels))))
+    (should (member "error" levels))))
+
+(ert-deftest agent-repl-verbs-create-streamed-naming-failed-reaches-the-minibuffer ()
+  "The incident's shape: a naming refusal that arrives LATER on the progress
+stream is echoed as the create's failure, not left as a *Messages* warning."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :accepted :value nil))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :parent (agent-repl-test-verbs--ref) :fork t)
+    (agent-repl-mutation-progress-handle
+     (list :op-id (plist-get (agent-repl-test-verbs--request :create) :op-id)
+           :event (list :arm :create
+                        :value (list :arm :failed
+                                     :value (list :arm :refusal
+                                                  :value '(:cause (:arm :naming-failed
+                                                                   :value (:cause "invalid_answer" :attempts 2
+                                                                           :answer "Describe the work"))))))))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the workspace could not be named (invalid_answer, 2 attempts)"))))
+
+(ert-deftest agent-repl-verbs-create-handover-refusal-is-not-a-failure ()
+  "A handover arm is the rollout's ordering: it goes to the handover and is
+never echoed as a failed create."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :not-yet-adopted :value nil))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (should (equal (length agent-repl-test-verbs--handover) 1))
+    (should-not (agent-repl-test-verbs--messaged-p "FAILED"))))
+
+(ert-deftest agent-repl-verbs-create-echoes-the-daemon-s-acceptance ()
+  "The option-B ack is the first fact of the sequence, and it is shown."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :accepted :value nil))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: the daemon accepted the workspace create…"))))
+
+(ert-deftest agent-repl-verbs-create-acceptance-overtaken-by-a-stage-is-not-echoed ()
+  "An ack arriving after the daemon's first stage push would put an older line
+over a newer one, so it is recorded and not echoed."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-rpc-create-workspace)
+               (lambda (_conn request &rest keys)
+                 (push (cons :create request) agent-repl-test-verbs--sent)
+                 (agent-repl-mutation-progress-handle
+                  (list :op-id (plist-get request :op-id)
+                        :event (list :arm :create
+                                     :value (list :arm :stage :value :deriving-name))))
+                 (funcall (plist-get keys :on-response) (list :arm :accepted :value nil)))))
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                              :initial-prompt "fix the flaky login test"))
+    (should-not (agent-repl-test-verbs--messaged-p "accepted the workspace create"))))
+
+(ert-deftest agent-repl-verbs-create-synchronous-success-reports-completion ()
+  "A daemon that answered success on the rpc still says the create is done."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :success
+                               :value (:workspace (:id "new-id" :dir "/tmp/new-ws"))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "chosen")
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: workspace created: /tmp/new-ws"))))
 
 (ert-deftest agent-repl-verbs-create-acks-immediately ()
   "A create echoes the ack the instant it runs, before any slow work: under
