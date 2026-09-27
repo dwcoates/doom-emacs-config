@@ -96,6 +96,12 @@ type unitState struct {
 	// nothing will ever draw it, so a detachment naming it can never be
 	// claimed by a row and is retired rather than held.
 	drawsNoRow bool
+	// handbackReport is a subagent hand-back's report, held from whichever
+	// frame last stated it, because a progress beat restates nothing and the
+	// row is recomposed from scratch on every frame. handbackReportHeld says
+	// one was seen: an EMPTY report is a real (empty) report, not "none yet".
+	handbackReport     string
+	handbackReportHeld bool
 	// sendSummary is the one-line preview a send's caller supplied. Kept
 	// because it arrives only on the start arm and the row is recomposed from
 	// scratch on every later frame. EMPTY MEANS NONE WAS GIVEN, which draws no
