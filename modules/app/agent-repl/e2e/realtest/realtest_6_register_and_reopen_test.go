@@ -129,7 +129,7 @@ func TestRealtestRegisterAndReopen(t *testing.T) {
 	t.Logf("before the run the state database holds %d open workspace(s) and %d closed",
 		len(openBefore), len(closedBefore))
 
-	env := RealEnv(home, os.TempDir(), os.Getuid(), openBefore)
+	env := RealEnv(home, openBefore)
 	sources, err := EnumerateSources(env)
 	if err != nil {
 		t.Fatalf("enumerate the logs to harvest: %v", err)
@@ -239,7 +239,7 @@ func TestRealtestRegisterAndReopen(t *testing.T) {
 	}
 
 	allNow := append(append([]Workspace{}, allBefore...), registered)
-	actSources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), allNow))
+	actSources, err := EnumerateSources(RealEnv(home, allNow))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs now that the run has registered a workspace: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestRealtestRegisterAndReopen(t *testing.T) {
 		t.Logf("the tab bar draws %q again; the order is %v", reopenedName, reopenedTabs)
 	}
 
-	reopenedSources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), afterReopen))
+	reopenedSources, err := EnumerateSources(RealEnv(home, afterReopen))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs after the re-open: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestRealtestRegisterAndReopen(t *testing.T) {
 	// ---- The harvest ---------------------------------------------------
 
 	manifest.Ended = time.Now()
-	finalSources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), afterReopen))
+	finalSources, err := EnumerateSources(RealEnv(home, afterReopen))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs after the run: %v", err)
 	}

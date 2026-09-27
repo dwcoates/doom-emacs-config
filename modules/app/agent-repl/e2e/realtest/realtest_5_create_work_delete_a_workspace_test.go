@@ -142,7 +142,7 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	t.Logf("before the run the state database holds %d open workspace(s) and %d closed",
 		len(openBefore), len(closedBefore))
 
-	env := RealEnv(home, os.TempDir(), os.Getuid(), openBefore)
+	env := RealEnv(home, openBefore)
 	sources, err := EnumerateSources(env)
 	if err != nil {
 		t.Fatalf("enumerate the logs to harvest: %v", err)
@@ -306,7 +306,7 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	// ---- The tab appears ----------------------------------------------
 
 	allNow := append(append([]Workspace{}, allBefore...), created, registered)
-	actSources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), allNow))
+	actSources, err := EnumerateSources(RealEnv(home, allNow))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs now that the run has created workspaces: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	// ---- The harvest ---------------------------------------------------
 
 	manifest.Ended = time.Now()
-	finalSources, err := EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), allNow))
+	finalSources, err := EnumerateSources(RealEnv(home, allNow))
 	if err != nil {
 		t.Fatalf("re-enumerate the logs after the run: %v", err)
 	}

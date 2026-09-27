@@ -69,10 +69,16 @@ func (f *namingFailure) Error() string {
 // decorated or directive-appended form, which is composed later, at submission,
 // and would name the workspace after the system's own words.
 //
+// CONVERSATION is the summary of the conversation a FORK continues (owner
+// ruling, 2026-09-27), empty for every create that starts fresh. It rides the
+// SAME call, brief and validation as the prompt: a fork is not named by a
+// separate mechanism, only with more to go on, and a fork whose prompt is
+// blank is named from the conversation alone.
+//
 // The answer is VALIDATED, never repaired. An invalid or failed answer is
 // tried exactly once more; a second failure is a namingFailure the caller
 // turns into the create's refusal.
-func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt string) (string, error) {
+func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, conversation string) (string, error) {
 	if v.deps.Headless == nil {
 		return "", &namingFailure{
 			Cause:    headless.CauseNoBinary,
@@ -97,12 +103,15 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt s
 	var last namingFailure
 	correction := ""
 	for attempt := 1; attempt <= NamingAttempts; attempt++ {
-		question, err := v.splice(brief, map[string]string{"prompt": prompt, "correction": correction})
+		question, err := v.splice(brief, map[string]string{
+			"prompt": prompt, "conversation": conversation, "correction": correction,
+		})
 		if err != nil {
 			return "", fmt.Errorf("splice the %s brief: %w", BriefWorkspaceName, err)
 		}
 		log.Info(opNaming, "issued the workspace naming call", dlog.Context{
 			"model": headless.ModelHaiku, "repo_dir": repoDir, "config_dir": configDir, "attempt": attempt,
+			"prompt_blank": strings.TrimSpace(prompt) == "", "conversation_chars": len(conversation),
 		})
 		log.Debug(opNaming, "the naming prompt", dlog.Context{"prompt": question, "attempt": attempt})
 

@@ -239,7 +239,7 @@ fi
 
 state_root="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
-emacs_global_log="${AGENT_REPL_EMACS_GLOBAL_LOG:-${TMPDIR:-/tmp}/doom-agent-repl-$(id -u)/doom-agent-repl.log}"
+emacs_global_log="${AGENT_REPL_EMACS_GLOBAL_LOG:-$state_root/logs/emacs.central.log}"
 
 requested_runtimes=()
 if [ -n "$runtimes" ]; then

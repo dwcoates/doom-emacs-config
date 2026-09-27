@@ -45,6 +45,7 @@
 (defconst agent-repl-workspace-progress-phases
   '((:create
      (:requested . "creating workspace…")
+     (:accepted . "the daemon accepted the workspace create…")
      (:deriving-name . "deriving the workspace's name…")
      (:creating-worktree . "creating the workspace's git worktree…")
      (:completed . "workspace created: %s")
@@ -81,10 +82,14 @@ anything to name.
 The three phases every KIND carries are `:requested\=' (Emacs is sending the
 request), `:completed\=' and `:failed\='; everything between them is a stage
 the DAEMON reported reaching, and a kind lists only the stages its rpc
-actually has.  The wording follows the startup phases\=' own: a lowercase
-clause, a trailing ellipsis while the work is in flight, none once it has
-landed, and FAILED in capitals because a failure has to be readable at a
-glance in a line the user was not watching for.")
+actually has.  A create also carries `:accepted\=': its rpc answers
+with an option-B ack before the background work starts, and that ack
+is the first fact of the sequence the user is shown.
+
+The wording follows the startup phases\=' own: a lowercase clause, a
+trailing ellipsis while the work is in flight, none once it has landed,
+and FAILED in capitals because a failure has to be readable at a glance
+in a line the user was not watching for.")
 
 (defconst agent-repl-workspace-progress--scope
   agent-repl-mutation-progress--scope

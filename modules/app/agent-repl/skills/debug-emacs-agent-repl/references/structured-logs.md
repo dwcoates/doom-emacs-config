@@ -45,7 +45,10 @@ List genuine global logs:
 modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --global
 ```
 
-The resolver derives the default global Emacs sink from `TMPDIR`. If
+The resolver's default global Emacs sink is the durable
+`<state>/logs/emacs.central.log` (`~/.claude-emacs/logs/emacs.central.log`),
+which carries every `:agent-repl-central` record: creation, fork, kill,
+teardown and daemon administration. If
 `agent-repl-log-file-name` is customized, resolve its live value through
 `/runtime-eval-code` and pass that exact path through
 `AGENT_REPL_EMACS_GLOBAL_LOG`.
