@@ -23,10 +23,14 @@ import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
+  ELLIPSIS_CAP_LINES,
   drawBubble,
   type BubbleCapLines,
 } from "../src/bubble/draw.js";
+import { EXPANDED_CLASS } from "../src/expand.js";
+import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 
@@ -558,14 +562,6 @@ describe("the 'more below' affordance", () => {
     expect(fade).toMatch(/pointer-events:\s*none/);
   });
 
-  it("fades a thinking bubble over only the lower half of its last line", () => {
-    // Arrange / Act
-    const fade = declarationsOf('.bubble[data-variant="thinking"] > .bubble-scroll.has-more::after');
-
-    // Assert — half the shared 1.5em line box, so the line's top reads as text.
-    expect(fade).toMatch(/height:\s*0\.75em/);
-  });
-
   it("fades every bubble into its own background token", () => {
     // Arrange / Act — the gradient rule (the selector also names a base ::after
     // rule for geometry, so pick the copy carrying the background).
@@ -610,13 +606,12 @@ describe("the 'more below' affordance", () => {
       const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
-      // A rule that only repaints, re-places or re-sizes a pseudo-element the
-      // base rule already took out of flow (the fade's per-kind gradient, the
-      // thinking bubble's half-line fade height).
+      // A rule that only repaints or re-places a pseudo-element the base rule
+      // already took out of flow (the fade's per-kind gradient).
       const decorative = rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
-        .every((prop) => prop === "" || ["background", "left", "right", "transform", "height"].includes(prop));
+        .every((prop) => prop === "" || ["background", "left", "right", "transform"].includes(prop));
       return !positioned && !decorative;
     });
 
@@ -662,11 +657,134 @@ describe("the 'more below' affordance", () => {
     for (const rule of withHasMore) {
       for (const sel of rule.selectors) {
         expect(sel).toMatch(
-          /^(?:\.bubble(?:\[data-cap-lines="0"\]|\[data-variant="thinking"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+          /^(?:\.bubble(?:\[data-cap-lines="0"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
         );
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
+ * spec chooses it (`data-more="ellipsis"`) clamps its collapsed body to its one
+ * line, which the engine ends in `…` exactly when anything follows, and draws
+ * no fade; a bubble under the fade keeps it.
+ */
+describe("the ellipsis instead of the fade", () => {
+  const CLAMP = '.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body';
+  const NO_FADE = '.bubble[data-role][data-more="ellipsis"] > .bubble-scroll::after';
+  const FADE = ".bubble > .bubble-scroll.has-more::after";
+
+  /** A mounted, collapsed bubble wearing has-more, under the ellipsis or the fade. */
+  function drawnBox(ellipsis: boolean): { box: HTMLElement; body: HTMLElement; remove: () => void } {
+    const { bubble, body } = drawBubble(
+      ellipsis
+        ? { role: "prompt", variant: "held", working: false, content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
+        : { role: "prompt", variant: "user", working: false, content: [], capLines: "feed" },
+    );
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    return { box, body, remove: () => bubble.remove() };
+  }
+
+  /** The number of classes, attributes and pseudo-classes in SELECTOR. */
+  const weight = (selector: string): number => (selector.match(/\.[\w-]+|\[[^\]]+\]|:not\(/g) ?? []).length;
+
+  it("clamps the collapsed body as a vertical box", () => {
+    // Arrange / Act
+    const rule = declarationsOf(CLAMP) ?? "";
+    // Assert
+    expect([/display:\s*-webkit-box\s*;/.test(rule), /-webkit-box-orient:\s*vertical\s*;/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("clamps it at the bubble's own line cap", () => {
+    // Arrange / Act
+    const rule = declarationsOf(CLAMP) ?? "";
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*var\(--bubble-cap-lines\)\s*;/);
+  });
+
+  it("maps the ellipsis's one-line cap to one line", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.bubble[data-cap-lines="${ELLIPSIS_CAP_LINES}"]`) ?? "";
+    // Assert
+    expect(rule.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("clamps a collapsed ellipsis bubble's body", () => {
+    // Arrange
+    const { body, remove } = drawnBox(true);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(true);
+  });
+
+  it("lifts the clamp once the bubble is expanded, so everything shows", () => {
+    // Arrange
+    const { box, body, remove } = drawnBox(true);
+    box.classList.add(EXPANDED_CLASS);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("never clamps a bubble under the fade", () => {
+    // Arrange
+    const { body, remove } = drawnBox(false);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("hides the fade on an ellipsis bubble", () => {
+    // Arrange
+    const { box, remove } = drawnBox(true);
+    // Act
+    const hidden = box.matches(NO_FADE.replace("::after", "")) && /display:\s*none/.test(declarationsOf(NO_FADE) ?? "");
+    remove();
+    // Assert
+    expect(hidden).toBe(true);
+  });
+
+  it("outranks the fade's own selector, whatever the order", () => {
+    // Arrange / Act / Assert
+    expect(weight(NO_FADE)).toBeGreaterThan(weight(FADE));
+  });
+
+  it("keeps the fade on a bubble under the fade", () => {
+    // Arrange
+    const { box, remove } = drawnBox(false);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", ""))];
+    remove();
+    // Assert
+    expect(faded).toEqual([true, false]);
+  });
+
+  it("keeps the fade on a capped non-thinking response bubble", () => {
+    // Arrange — an agentic card: a response-role bubble under the default fade.
+    const { bubble, body } = drawBubble({ role: "response", variant: "agentic", content: [], capLines: "feed" });
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", "")), body.matches(CLAMP)];
+    bubble.remove();
+    // Assert
+    expect(faded).toEqual([true, false, false]);
+  });
+
+  it("keys neither the clamp nor the hidden fade on has-more, so the measurer moves nothing", () => {
+    // Arrange / Act / Assert
+    expect([CLAMP, NO_FADE].filter((sel) => sel.includes(".has-more"))).toEqual([]);
   });
 });
 
@@ -1458,13 +1576,18 @@ describe("the thinking bubble", () => {
     expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
   });
 
-  it("keeps the held prompt's two-line cap at two lines", () => {
-    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts),
-    // which the thinking bubble no longer shares.
-    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+  it("caps the held prompt at one line", () => {
+    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts,
+    // pinned there to "1"; owner ruling, 2026-09-27).
+    const rule = declarationsOf('.bubble[data-cap-lines="1"]');
 
     // Assert
-    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("maps no two-line cap now that no bubble collapses at two lines", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf('.bubble[data-cap-lines="2"]')).toBeUndefined();
   });
 
   it("excludes the thinking bubble from the green final-answer rule", () => {
@@ -2721,7 +2844,7 @@ function rgbOf(block: string, token: string): [number, number, number] {
 /** The spread between an RGB triple's strongest and weakest channel. */
 const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
 
-describe("the held prompt's fill: much more grey than blue", () => {
+describe("the held prompt's tint: much more grey than blue", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", () => darkThemeBlock()],
@@ -2750,11 +2873,57 @@ describe("the held prompt's fill: much more grey than blue", () => {
     expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
   });
 
-  it("is the one background the held variant sets", () => {
+});
+
+/**
+ * THE HELD FILL IS NEARLY TRANSPARENT (owner ruling, 2026-09-27): 5% of the
+ * held tint over 95% of the feed's background, mixed from the two tokens so
+ * each theme's own pair decides it and no resulting hex is ever written down.
+ */
+describe("the held prompt's fill: 5% of the tint over the feed", () => {
+  /** The held fill the mix yields over BLOCK's tokens, channel by channel. */
+  const fillOver = (block: string): [number, number, number] => {
+    const tint = rgbOf(block, "--held-prompt-bg");
+    const feed = rgbOf(block, "--bg");
+    return [0, 1, 2].map((i) => 0.05 * tint[i] + 0.95 * feed[i]) as [number, number, number];
+  };
+
+  it("mixes the held variant's fill from the tint and the feed background", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
-    expect(rule).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)/);
+    expect(rule).toMatch(/--bubble-bg:\s*color-mix\(in srgb, var\(--held-prompt-bg\) 5%, var\(--bg\)\)\s*;/);
+  });
+
+  it("hardcodes no fill color of its own", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("sits within two steps of the feed background on every channel in the %s theme", (_theme, block) => {
+    // Arrange
+    const feed = rgbOf(block(), "--bg");
+    // Act
+    const fill = fillOver(block());
+    // Assert
+    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 2)).toEqual([true, true, true]);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("still differs from the feed background in the %s theme", (_theme, block) => {
+    // Arrange
+    const feed = rgbOf(block(), "--bg");
+    // Act
+    const fill = fillOver(block());
+    // Assert
+    expect(fill.some((channel, i) => Math.round(channel) !== feed[i])).toBe(true);
   });
 });
 

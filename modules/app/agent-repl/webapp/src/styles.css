@@ -65,9 +65,11 @@
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
   --user: #e0ecff;
-  /* A HELD prompt's fill (owner ruling, 2026-09-23): "much more grey than
+  /* A HELD prompt's TINT (owner ruling, 2026-09-23): "much more grey than
      blue" -- a neutral grey carrying only a subtle blue hue, so a prompt the
-     daemon is holding reads as the blue bubble it will become, not yet sent. */
+     daemon is holding reads as the blue bubble it will become, not yet sent.
+     The held FILL is only 5% of this tint over the feed's --bg (owner ruling,
+     2026-09-27; see `.bubble[data-variant="held"]`). */
   --held-prompt-bg: #e8ebf0;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
@@ -1514,13 +1516,17 @@ pre {
 }
 /* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
    in the tray is "much more grey than blue", with only a subtle blue hue, so it
-   reads as the prompt it will become that has not been sent yet. */
+   reads as the prompt it will become that has not been sent yet.
+   NEARLY TRANSPARENT (owner ruling, 2026-09-27): the fill is only very, very
+   subtly different from the feed, 5% of the held tint over 95% of the feed's
+   own background, mixed from the two tokens so both themes follow. It feeds
+   `--bubble-bg`, so anything painted from it matches. */
 /* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
    derived from the same token rather than a copied number. The body measures
    a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
    a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
-  --bubble-bg: var(--held-prompt-bg);
+  --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
   max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
@@ -2247,13 +2253,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
    holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
-   reach it. The shared feed cap for most capped bubbles, two lines for a held
-   prompt, one line for a thinking bubble, and NONE past the header strip for a
+   reach it. The shared feed cap for most capped bubbles, one line for a held
+   prompt and a landed thinking bubble, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
-.bubble[data-cap-lines="2"] { --bubble-cap-lines: 2; }
 .bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
@@ -2437,17 +2442,35 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .title-fold.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
 }
-/* A THINKING bubble's fade covers only the LOWER HALF of its last visible line
-   (owner ruling, 2026-09-27). The shared 1.5em fade is exactly one line box, so
-   on a collapsed thinking bubble showing a single line the whole line sat under
-   the gradient and read greyed out; at half a line the line's top renders as
-   ordinary text and the fade still says there is more. */
-.bubble[data-variant="thinking"] > .bubble-scroll.has-more::after {
-  height: 0.75em;
-}
 /* "MORE BELOW" IS THE FADE ONLY, NEVER A CHEVRON (owner ruling, 2026-09-23),
    on every bubble and every title fold: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
+/* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
+   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt,
+   a landed thinking bubble) shows its ONE collapsed line and, when there is
+   more, ends that line in `…`; no fade. The collapsed BODY is clamped to the
+   cap's lines, so the engine itself writes the `…` at the end of the last line
+   it keeps exactly when anything follows that line: an over-long line (it
+   wraps, and its rest is the next line), a further line (`<br>`), or a further
+   block. A line that is the whole content ends in nothing. Nothing here keys on
+   `has-more`, which still measures the body structurally (bubble-more.ts reads
+   the clamped body's `scrollHeight`), so the measurer changes no layout. The
+   clamp is lifted with the one toggle's `.expanded`, which shows everything.
+   The spec types allow the ellipsis at a one-line cap only, a whole line
+   count the clamp can state. */
+.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--bubble-cap-lines);
+  overflow: hidden;
+}
+/* ...and the fade is never drawn on it: the ellipsis is its whole signal. Not
+   keyed on `has-more`, so the class still toggles nothing; the role attribute
+   every bubble wears lifts it to (0,4,1), over the fade's own (0,3,1) selector
+   whatever the order. */
+.bubble[data-role][data-more="ellipsis"] > .bubble-scroll::after {
+  display: none;
+}
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
    light up. The bars ride the SECTION (the whole card) rather than the
@@ -2678,7 +2701,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   grey-blue held fill carries that, and everything else is the one bubble's.
+   near-feed held fill and its badges carry that, and everything else is the
+   one bubble's.
    A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
    once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
    frame and the lease hold's amber are gone; the hold's badge alone says what

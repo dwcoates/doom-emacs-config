@@ -65,7 +65,15 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { BUBBLE_UNCAPPED, SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
+import {
+  BUBBLE_MORE_ELLIPSIS,
+  BUBBLE_UNCAPPED,
+  ELLIPSIS_CAP_LINES,
+  SAYS_ATTRIBUTE,
+  drawBubble,
+  type BubbleCapLines,
+  type BubbleCapSpec,
+} from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -90,10 +98,12 @@ export const REVEALED_ATTRIBUTE = "data-revealed";
 export const THINKING_BUBBLE_CLASS = "thinking-bubble";
 
 /**
- * A landed thinking bubble's collapsed line limit: ONE line, its own value in
- * `BubbleCapLines`, distinct from the held prompt's two.
+ * A landed thinking bubble's collapsed line limit: ONE line, stated here, never
+ * through another kind's constant. It is the ellipsis's one-line cap too
+ * (`ELLIPSIS_CAP_LINES`), which the landed thinking cap's more signal needs
+ * (`responseCap`), so the type holds it there.
  */
-export const THINKING_CAP_LINES = 1 satisfies BubbleCapLines;
+export const THINKING_CAP_LINES = 1 satisfies typeof ELLIPSIS_CAP_LINES;
 
 /**
  * How many prose blocks one response row draws.
@@ -207,7 +217,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
       footer: result.case === "error" ? [cutShortMarker()] : [],
-      capLines: responseCapLines(u),
+      ...responseCap(u),
     },
     rc.previous,
   );
@@ -244,8 +254,20 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
-  if (!u.thinking) return BUBBLE_UNCAPPED;
-  return thinkingLanded(u) ? THINKING_CAP_LINES : "feed";
+  return responseCap(u).capLines;
+}
+
+/**
+ * The bubble's cap: its collapsed line limit (`responseCapLines`) and its more
+ * signal. A LANDED THINKING BUBBLE SAYS "MORE" WITH THE ELLIPSIS, never the
+ * fade (owner ruling, 2026-09-27): its one collapsed line ends in `…` exactly
+ * when anything follows it. A thinking bubble still arriving is under the
+ * shared feed cap, which the ellipsis cannot state (no whole line count), so it
+ * keeps the default fade until it lands.
+ */
+export function responseCap(u: FeedResponse): BubbleCapSpec {
+  if (!u.thinking) return { capLines: BUBBLE_UNCAPPED };
+  return thinkingLanded(u) ? { capLines: THINKING_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS } : { capLines: "feed" };
 }
 
 /**
