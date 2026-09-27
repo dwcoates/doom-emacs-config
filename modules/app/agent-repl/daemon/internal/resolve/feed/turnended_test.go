@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
 )
 
 // TestInterruptedArmSetsTheInterruptedOutcome covers the one interruption
@@ -23,11 +24,167 @@ func TestInterruptedArmSetsTheInterruptedOutcome(t *testing.T) {
 	ended := &frontendv1.FeedTurnEnded{}
 
 	// Act
-	interruptedArm()(ended)
+	interruptedArm(nil)(ended)
 
 	// Assert
 	if ended.GetInterrupted() == nil {
 		t.Fatalf("outcome = %T, want interrupted", ended.GetOutcome())
+	}
+}
+
+// byUserDirect, byUserInterjection and byUserUnstated are the three recorded
+// `by_user` causes a stop can carry.
+func byUserDirect() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{Command: &conversationv1.AgentInterruptedByUser_Direct{
+		Direct: &conversationv1.AgentInterruptedByUserDirect{},
+	}}
+}
+
+func byUserInterjection() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{Command: &conversationv1.AgentInterruptedByUser_Interjection{
+		Interjection: &conversationv1.AgentInterruptedByUserInterjection{},
+	}}
+}
+
+func byUserUnstated() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{}
+}
+
+// interruptedCommandWord names a drawn interrupted row's command.
+func interruptedCommandWord(ended *frontendv1.FeedTurnEnded) string {
+	switch ended.GetInterrupted().GetCommand().(type) {
+	case *frontendv1.FeedTurnEndedInterrupted_Direct:
+		return "direct"
+	case *frontendv1.FeedTurnEndedInterrupted_Interjection:
+		return "interjection"
+	}
+	return "unset"
+}
+
+// userStop is a terminal the user stopped, with the recorded cause.
+func userStop(byUser *conversationv1.AgentInterruptedByUser) *conversationv1.AgentSuccess {
+	interrupted := &conversationv1.AgentInterrupted{}
+	if byUser != nil {
+		interrupted.Cause = &conversationv1.AgentInterrupted_ByUser{ByUser: byUser}
+	}
+	return &conversationv1.AgentSuccess{Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: interrupted}}
+}
+
+// TestInterruptedArmMapsTheRecordedCommand covers the one mapping of a recorded
+// stop's HOW onto the row, one cause per case.
+func TestInterruptedArmMapsTheRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+		{name: "no by_user cause at all", byUser: nil, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ended := &frontendv1.FeedTurnEnded{}
+
+			// Act
+			interruptedArm(tt.byUser)(ended)
+
+			// Assert
+			if got := interruptedCommandWord(ended); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestByUserCommandWordNamesEachCommand covers the log word for each cause.
+func TestByUserCommandWordNamesEachCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "direct", byUser: byUserDirect(), want: "direct"},
+		{name: "interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "unstated", byUser: byUserUnstated(), want: "unset"},
+		{name: "absent", byUser: nil, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			got := byUserCommandWord(tt.byUser)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("word = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestALiveUserStopDrawsItsRecordedCommand covers the terminal path live: the
+// row's command is the recorded cause's, one cause per case.
+func TestALiveUserStopDrawsItsRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+
+			// Act
+			h.terminal("turn-1", userStop(tt.byUser), nil)
+
+			// Assert
+			if got := interruptedCommandWord(h.terminalRow("turn-1")); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestARebuiltUserStopDrawsItsRecordedCommand covers the terminal path rebuilt
+// from the store: a replayed page draws the same command the live terminal did.
+func TestARebuiltUserStopDrawsItsRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.closes = map[ids.TurnID]wsm.RecordedClose{"turn-1": {How: wsm.CloseKilled, At: closedAt}}
+
+			// Act
+			h.replay(historyPage(&conversationv1.HistoryFloor{},
+				frameEntry(mainAgent(), userStop(tt.byUser)),
+				promptEntry("turn-1", "hello"),
+			))
+
+			// Assert
+			if got := interruptedCommandWord(h.terminalRow("turn-1")); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+			if n := h.endingRows("turn-1"); n != 1 {
+				t.Fatalf("ending rows = %d, want exactly 1", n)
+			}
+		})
 	}
 }
 

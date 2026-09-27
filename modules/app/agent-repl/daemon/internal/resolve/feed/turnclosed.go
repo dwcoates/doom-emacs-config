@@ -102,7 +102,12 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 	case wsm.CloseCompleted:
 		concludedArm(&frontendv1.FeedTurnEndedConcluded{})(ended)
 	case wsm.CloseKilled:
-		interruptedArm()(ended)
+		// NO `by_user` REACHES THIS PATH. It draws only a turn whose terminal
+		// never reached this feed (a terminal that did reach it drew the
+		// ending first, and this close is then a no-op), and a recorded close
+		// carries how and when, never the cause. So the command stays unset,
+		// through the same setter the terminal path uses.
+		interruptedArm(nil)(ended)
 	case wsm.CloseAgentDied:
 		errored(func(e *frontendv1.FeedTurnEndedErrored) {
 			e.Error = &frontendv1.FeedTurnEndedErrored_AgentProcessDied{
