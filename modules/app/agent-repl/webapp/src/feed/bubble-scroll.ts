@@ -32,15 +32,35 @@ import { bubbleBodyOf, installHasMore, refreshHasMore } from "./bubble-more.js";
 /** The class the stylesheet caps, scrolls and paints a scrollbar on. */
 export const BUBBLE_SCROLL_CLASS = "bubble-scroll";
 
-/** Hang one bubble body in its scroll box, and give the box back. */
-export function bubbleScroll(body: HTMLElement): HTMLElement {
-  const scroll = document.createElement("div");
-  scroll.className = BUBBLE_SCROLL_CLASS;
-  scroll.append(body);
+/**
+ * The class EVERY bubble's box wears, whatever its cap: the structural half of
+ * the box (it reaches the bubble's inner edge, never side-scrolls, and is the
+ * containing block of anything positioned in it), which the stylesheet keys on
+ * separately from the cap, the scroll and the fold `BUBBLE_SCROLL_CLASS` carries.
+ */
+export const BUBBLE_BOX_CLASS = "bubble-box";
+
+/**
+ * Hang one bubble body in its box, and give the box back. A CAPPED box is also
+ * the scroll box (`BUBBLE_SCROLL_CLASS`): the cap, the clip, the gutter, the
+ * fold and the has-more fade all key on that class. An UNCAPPED box
+ * (`BUBBLE_UNCAPPED`, src/bubble/draw.ts) never wears it, so none of them can
+ * reach it, and it arms no has-more measurer, having nothing to hide. Which a
+ * box is, is fixed when it is built: a redraw that changes it builds a new one.
+ */
+export function bubbleBox(body: HTMLElement, capped: boolean): HTMLElement {
+  const box = document.createElement("div");
+  box.className = capped ? `${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}` : BUBBLE_BOX_CLASS;
+  box.append(body);
   // FIX2 (owner ruling, 2026-09-15): keep the "more below" fade in
   // step with the box's overflow for its whole life. The gate to response/prompt
   // bubbles ONLY lives in refreshHasMore (bubble-more.ts) — this factory is
-  // shared, so the observer is armed on every bubble and self-restricts.
-  installHasMore(scroll, refreshHasMore, bubbleBodyOf);
-  return scroll;
+  // shared, so the observer is armed on every capped bubble and self-restricts.
+  if (capped) installHasMore(box, refreshHasMore, bubbleBodyOf);
+  return box;
+}
+
+/** Whether BOX, a bubble's box, was built capped (see `bubbleBox`). */
+export function isCappedBox(box: Element): boolean {
+  return box.classList.contains(BUBBLE_SCROLL_CLASS);
 }

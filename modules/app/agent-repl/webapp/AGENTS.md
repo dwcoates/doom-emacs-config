@@ -96,7 +96,7 @@ and are contract on the same terms:
 | `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
-| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `turn-ended` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `1` \| `0` | one-bubble, 2026-09-23 |
+| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `turn-ended` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: every non-thinking `response` and the `turn-ended` bubble, at full height, whose box wears `.bubble-box` alone) | one-bubble, 2026-09-23; `none` 2026-09-27 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId: a subagent's bubble, a shell's head, a monitor's Monitor tool-call card) and `data-jump-unresolved` (`notDrawn`; `noFeedEntry` is retired, owner ruling 2026-09-23) | footer-rows-and-work-ids, 2026-09-23 |
@@ -251,7 +251,18 @@ hand any more:
   expand-only; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
-  included.
+  included. A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
+  non-thinking response (arriving, interim pear, final green) and the
+  ended-turn bubble is drawn `BUBBLE_UNCAPPED` (`data-cap-lines="none"`), the
+  one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
+  structural rules every box shares) but never `.bubble-scroll`, which every
+  cap, clip, gutter, zoom cursor, fade, click toggle, carried fold and
+  auto-collapse keys on, so it cannot be abbreviated or opened by construction;
+  the spec types forbid `expandOnly` on it, a box never switches mode in place
+  (`drawBubble` builds a fresh bubble), and `toggleSection` refuses at ERROR
+  (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
+  bubbles, prompts, held prompts, peers, agentic cards and compaction
+  summaries stay capped.
   `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
   has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
   it: "more below" is the FADE ONLY, never a chevron, and `has-more` means the
@@ -263,8 +274,8 @@ hand any more:
   `::-webkit-scrollbar` rule anywhere) and the bubble scroll box declares
   `scrollbar-gutter: stable`, so its gutter is the system bar's width in both
   states; and a tree's column budget takes off that gutter as MEASURED on the
-  `.bubble-scroll` box (`offsetWidth - clientWidth - borders`), so it never
-  re-wraps on a click.
+  `.bubble-box` (`offsetWidth - clientWidth - borders`), so it never
+  re-wraps on a click (an uncapped box reserves no gutter and measures 0).
 - **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
   must hang under an anchor and stay inside the window places itself through
   it — the topbar reveals and the sidebar row's detail panel both do — rather
@@ -318,7 +329,7 @@ hand any more:
   the ONE module that writes a scroll position; `test/scroll.test.ts` scans
   every other `src` module and fails on a `scrollTop`/`scrollLeft` assignment,
   a `scrollIntoView`/`scrollTo`/`scrollBy` call, or a park/place/shift call.
-  A bubble's own scroll box (an expanded response, thinking, tool or async
+  A bubble's own scroll box (an expanded thinking, prompt, tool or async
   bubble) has NO implicit writer: it moves only on the reader's input. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the

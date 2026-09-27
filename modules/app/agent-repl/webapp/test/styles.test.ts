@@ -20,7 +20,13 @@ import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
-import { BUBBLE_CAP_LINES, BUBBLE_EXPAND_ONLY_CLASS } from "../src/bubble/draw.js";
+import {
+  BUBBLE_CAP_LINES,
+  BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_UNCAPPED,
+  drawBubble,
+  type BubbleCapLines,
+} from "../src/bubble/draw.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 
@@ -260,9 +266,9 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     expect(column).toMatch(/--bubble-scroll-gap:\s*2px/);
   });
 
-  it("gives the bubble's scroll box no horizontal padding of its own", () => {
+  it("gives every bubble box no horizontal padding of its own", () => {
     // Arrange / Act
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    const scroll = declarationsOf(".bubble > .bubble-box");
 
     // Assert
     expect(scroll).toMatch(/padding-left:\s*0\s*;[\s\S]*padding-right:\s*0\s*;/);
@@ -270,7 +276,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
 
   it("clips the bubble's horizontal axis so a bubble never side-scrolls", () => {
     // Arrange / Act
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    const scroll = declarationsOf(".bubble > .bubble-box");
 
     // Assert — overflow-x is pinned to clip (not left unset, which the CSS
     // overflow spec would promote to auto once overflow-y is hidden/auto).
@@ -278,8 +284,12 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
   });
 
   it("never lets the bubble scroll box compute a horizontal scrollbar", () => {
-    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box.
-    const scroll = declarationsOf(".bubble > .bubble-scroll");
+    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box,
+    // capped or not.
+    const scroll = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => /^\.bubble > \.bubble-(?:box|scroll)$/.test(sel)))
+      .map((rule) => rule.declarations)
+      .join(";");
 
     // Assert
     expect(scroll).not.toMatch(/overflow-x:\s*(auto|scroll)/);
@@ -607,7 +617,7 @@ describe("the 'more below' affordance", () => {
 
   it("makes the box the affordance's containing block whether or not it wears has-more", () => {
     // Arrange
-    const boxes = [".bubble > .bubble-scroll", ".title-fold"];
+    const boxes = [".bubble > .bubble-box", ".title-fold"];
 
     // Act — whether any rule on the bare box (no has-more) makes it relative.
     const relative = boxes.map((box) =>
@@ -2629,6 +2639,70 @@ describe("the one bubble rule set", () => {
     );
   });
 
+});
+
+/**
+ * THE UNCAPPED BUBBLE (owner request, 2026-09-27): an interim or final
+ * response, and the ended-turn notice, show their full height, always. The
+ * mode is `BUBBLE_UNCAPPED` in src/bubble/draw.ts, and its box wears only
+ * `.bubble-box`; these hold the stylesheet to leaving that box alone.
+ */
+describe("the uncapped bubble", () => {
+  /** A drawn bubble of CAPLINES, the answer's hooks and state, mounted. */
+  function boxOf(capLines: BubbleCapLines): HTMLElement {
+    const { bubble } = drawBubble(
+      capLines === BUBBLE_UNCAPPED
+        ? { role: "response", variant: "response", state: "success", hooks: ["assistant", "final-response"], content: [], capLines }
+        : { role: "response", variant: "thinking", state: "success", hooks: ["assistant"], content: [], capLines },
+    );
+    document.body.append(bubble);
+    return bubble.firstElementChild as HTMLElement;
+  }
+
+  /** The selectors of every rule that caps, clips, scrolls, reserves a gutter or sets a cursor, matching EL. */
+  function limitingSelectorsOn(el: HTMLElement): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*(?:max-height|overflow-y|overflow|scrollbar-gutter|cursor|overscroll-behavior)\s*:/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => !sel.includes("::") && el.matches(sel));
+  }
+
+  it("maps no line count for the uncapped mode", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf(`.bubble[data-cap-lines="${BUBBLE_UNCAPPED}"]`)).toBeUndefined();
+  });
+
+  it("lets no cap, clip, scroll, gutter or cursor rule reach an uncapped bubble's box", () => {
+    // Arrange
+    const box = boxOf(BUBBLE_UNCAPPED);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toEqual([]);
+  });
+
+  it("still caps a capped bubble's box through the same rules", () => {
+    // Arrange
+    const box = boxOf(THINKING_CAP_LINES);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toContain(".bubble > .bubble-scroll");
+  });
+
+  it("gives the structural box rules nothing but structure", () => {
+    // Arrange
+    const structural = new Set(["padding-left", "padding-right", "min-width", "overflow-x", "position"]);
+    // Act
+    const props = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.includes(".bubble-box")))
+      .flatMap((rule) => rule.declarations.split(";").map((decl) => decl.split(":")[0]?.trim() ?? ""))
+      .filter((prop) => prop !== "" && !structural.has(prop));
+    // Assert
+    expect(props).toEqual([]);
+  });
 });
 
 /** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */

@@ -60,7 +60,8 @@ export const CAPPED_CLASSES = [
   // The response/prompt/peer bubble's own scroll box (bubble-scroll.ts). Owner
   // ruling, 2026-09-15: a collapsed bubble no longer scrolls; clicking it
   // expands it to at most 50vh, and only then is its scroll revealed. Last in
-  // the list, and left exactly as it was.
+  // the list, and left exactly as it was. Only a CAPPED bubble's box wears it:
+  // an uncapped one (`BUBBLE_UNCAPPED`, src/bubble/draw.ts) is no section.
   "bubble-scroll",
 ] as const;
 
@@ -139,7 +140,9 @@ export const BUBBLE_EXPAND_ONLY_CLASS = "bubble-expand-only";
  * capped section at or above it, or — when a bubble's header strip is met
  * first — that bubble's own scroll box. ONE toggle for every bubble kind: a
  * peer message's label, a prompt's address line and a held prompt's badges all
- * open the same box a click on the text itself does.
+ * open the same box a click on the text itself does. An UNCAPPED bubble's box
+ * (`BUBBLE_UNCAPPED`, src/bubble/draw.ts) wears no `.bubble-scroll`, so neither
+ * its text nor its strip resolves to a section: a click on it toggles nothing.
  */
 export function sectionAt(start: HTMLElement | null, feed: HTMLElement): HTMLElement | null {
   const hit = ancestorMatching(
@@ -290,6 +293,15 @@ export function collapseSection(section: HTMLElement, afterToggle?: AfterToggle)
  * (`collapseSection`), answering the state it lands in.
  */
 export function toggleSection(section: HTMLElement, afterToggle?: AfterToggle): boolean {
+  // Only a capped section has an open state. An uncapped bubble's box is not
+  // one (src/bubble/draw.ts `BUBBLE_UNCAPPED`), and no caller may open it.
+  if (!isCappedSection(section.classList)) {
+    log.error("refused to toggle an element that is not a capped section", {
+      operation: "expand.toggle-uncapped",
+      context: { classes: section.className },
+    });
+    throw new Error("expand: only a capped section can be toggled");
+  }
   if (isExpanded(section)) {
     collapseSection(section, afterToggle);
     return false;
