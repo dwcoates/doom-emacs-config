@@ -1530,3 +1530,30 @@ func TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans(t *testing.T) {
 		})
 	}
 }
+
+// TestAnOpenItsCallerAbandonedIsNotRecordedAsARefusal pins the teardown case:
+// the caller's own context ending cancels the open, the shim refused nothing,
+// and the record is INFO. The error is still returned.
+func TestAnOpenItsCallerAbandonedIsNotRecordedAsARefusal(t *testing.T) {
+	// Arrange.
+	_, uds := startFakeShim(t, shortDir(t))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := c.WatchBash(ctx, &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert.
+	var refusal *StreamOpenError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WatchBash() error = %v, want a *StreamOpenError", err)
+	}
+	if !hasRecordAt(log, "info", "daemon.shimclient.watch_bash") {
+		t.Fatalf("no info record for the abandoned open: %+v", log.Records())
+	}
+	if hasRecordAt(log, "error", "daemon.shimclient.watch_bash") {
+		t.Fatalf("the abandoned open was recorded at error: %+v", log.Records())
+	}
+}
