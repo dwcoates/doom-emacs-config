@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/contextcut"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -863,8 +864,22 @@ func (w *watcher) watchCreatedAgentLocked(created *conversationv1.AgentId, activ
 // the child's own page replays into Feed{Agent: created}. Opening is idempotent
 // (watchCreatedAgentLocked skips an already-watched agent), so this cannot
 // double a watch the main watch or live-work adoption already holds.
+//
+// A SPAWN ABOVE THE PAGE'S NEWEST CUT OPENS NOTHING. The feed begins at that
+// cut: the spawn's bubble is withheld, so the child's sub-feed can never be
+// reached, and its book would be fetched for no reader. Live work that
+// outlived the cut is adopted by the live-work path, not by this one.
 func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.HistoryPage) {
-	for _, at := range page.GetEntries() {
+	entries := page.GetEntries()
+	if bound := contextcut.NewestBoundOnPage(page); bound >= 0 {
+		if skipped := len(entries) - bound - 1; skipped > 0 {
+			w.log.Debug("daemon.sessionwatcher.page_spawns_above_cut", "a page's entries above its newest context cut open no subagent watches", dlog.Context{
+				"entries_above_cut": skipped,
+			})
+		}
+		entries = entries[:bound]
+	}
+	for _, at := range entries {
 		frame := at.GetEntry().GetAgentFrame()
 		if frame == nil {
 			continue
