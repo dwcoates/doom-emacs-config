@@ -60,6 +60,13 @@ func recognize(text string) recognized {
 		// user-authored slash command the enum has not been taught.
 		return recognized{kind: RecognizedNone}
 	}
+	// A CONTEXT CUT IS AN ACT WHATEVER TEXT FOLLOWS IT, /clear and its aliases
+	// included, though the schema says /clear takes no argument: the owner
+	// ruled that anything the vendor's CLI reads as /clear is never a prompt
+	// (sessioncommand.ContextCut states the ruling where it is decided).
+	if _, _, cut := sessioncommand.ContextCut(text); cut {
+		return recognized{kind: RecognizedAct, spec: matched, literal: name, arg: rest}
+	}
 	if rest != "" && !matched.TakesArgs {
 		return recognized{kind: RecognizedNone}
 	}
