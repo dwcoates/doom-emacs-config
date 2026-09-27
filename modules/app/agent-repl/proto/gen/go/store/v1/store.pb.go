@@ -86,7 +86,27 @@ type StoreEntry struct {
 	// stored one: a fact never moves between turns, whichever plane wrote it
 	// last. Present with an empty value is refused — absence is expressed by
 	// absence.
-	Turn          *v1.TurnId `protobuf:"bytes,6,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
+	Turn *v1.TurnId `protobuf:"bytes,6,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
+	// WHERE THIS FACT SITS IN ITS CONVERSATION (conversation.v1
+	// ConversationPlace), stamped by the producer at the one place it builds this
+	// envelope, so every arm carries it and no arm can forget to. Served as
+	// conversation.v1 HistoryEntryAt.recorded_place.
+	//
+	// THE SIDECAR stamps the timestamp of the vendor record that opened the
+	// unit and the entry's index among that record's entries — both read from
+	// the bytes, so a re-read mints the identical place. THE SHIM stamps the
+	// instant it first observed the fact, at the moment it builds the entry, so a
+	// retried write carries the original instant.
+	//
+	// THE STORE KEEPS A ROW'S FIRST STATED PLACE, as it keeps its first turn: a
+	// write with no place, or with a different one, leaves the stored place
+	// standing, so no write moves a row within its book. A row stored with NO
+	// stated place takes the place the first later write states — the one way a
+	// row first written without one gains its recorded place. UNSET when the
+	// producer can state none (a terminal concluded from the absence of a file);
+	// the store then orders the row by its first-insert receipt instant and serves
+	// that as `received_place`. Present with a non-positive at_ms is refused.
+	Place         *v1.ConversationPlace `protobuf:"bytes,7,opt,name=place,proto3,oneof" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -170,6 +190,13 @@ func (x *StoreEntry) GetSessionUpdate() *v1.SessionUpdate {
 func (x *StoreEntry) GetTurn() *v1.TurnId {
 	if x != nil {
 		return x.Turn
+	}
+	return nil
+}
+
+func (x *StoreEntry) GetPlace() *v1.ConversationPlace {
+	if x != nil {
+		return x.Place
 	}
 	return nil
 }
@@ -1198,9 +1225,10 @@ func (x *CursorState) GetCarry() []byte {
 	return nil
 }
 
-// An opaque, store-minted position of one item in one book's order. Echoed
-// verbatim, never parsed or constructed by a caller; stable across upserts
-// because order is by the unit's FIRST insert, not its last write.
+// An opaque, store-minted name of one item of one book. Echoed verbatim, never
+// parsed, constructed or compared by a caller. It names the ITEM, not a place
+// in any order: stable across upserts and across the item gaining a recorded
+// place, so an echoed pointer never goes stale because its item was re-placed.
 type StoreItemPointer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
@@ -1245,17 +1273,27 @@ func (x *StoreItemPointer) GetValue() string {
 	return ""
 }
 
-// One line, its position and its turn, so the caller always holds a reconnect
-// and paging pointer for the newest thing it has seen.
+// One line, its pointer, its turn and its place, so the caller always holds a
+// resumption pointer for the newest thing it has seen and can order what it
+// holds by conversation place.
 type StoreLineAt struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// This line's position in its book's order.
+	// This line's resumption pointer.
 	At *StoreItemPointer `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
 	// The line itself.
 	Line *StorePageLine `protobuf:"bytes,2,opt,name=line,proto3" json:"line,omitempty"`
 	// The turn the line's row is stamped with, as the store holds it (the row's
 	// first stamp — see StoreEntry.turn). UNSET for a row no write ever stamped.
-	Turn          *v1.TurnId `protobuf:"bytes,3,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
+	Turn *v1.TurnId `protobuf:"bytes,3,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
+	// WHERE THE LINE SITS IN ITS CONVERSATION — the key this store orders every
+	// book by, served exactly as conversation.v1 HistoryEntryAt.place. Always set
+	// by this store. THE ARM IS WHO ESTABLISHED IT.
+	//
+	// Types that are valid to be assigned to Place:
+	//
+	//	*StoreLineAt_RecordedPlace
+	//	*StoreLineAt_ReceivedPlace
+	Place         isStoreLineAt_Place `protobuf_oneof:"place"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1310,6 +1348,50 @@ func (x *StoreLineAt) GetTurn() *v1.TurnId {
 	}
 	return nil
 }
+
+func (x *StoreLineAt) GetPlace() isStoreLineAt_Place {
+	if x != nil {
+		return x.Place
+	}
+	return nil
+}
+
+func (x *StoreLineAt) GetRecordedPlace() *v1.ConversationPlace {
+	if x != nil {
+		if x, ok := x.Place.(*StoreLineAt_RecordedPlace); ok {
+			return x.RecordedPlace
+		}
+	}
+	return nil
+}
+
+func (x *StoreLineAt) GetReceivedPlace() *v1.ConversationPlace {
+	if x != nil {
+		if x, ok := x.Place.(*StoreLineAt_ReceivedPlace); ok {
+			return x.ReceivedPlace
+		}
+	}
+	return nil
+}
+
+type isStoreLineAt_Place interface {
+	isStoreLineAt_Place()
+}
+
+type StoreLineAt_RecordedPlace struct {
+	// The row's first stated place (StoreEntry.place).
+	RecordedPlace *v1.ConversationPlace `protobuf:"bytes,4,opt,name=recorded_place,json=recordedPlace,proto3,oneof"`
+}
+
+type StoreLineAt_ReceivedPlace struct {
+	// No write of the row stated a place: its first-insert receipt instant
+	// stands in, with ordinal 0.
+	ReceivedPlace *v1.ConversationPlace `protobuf:"bytes,5,opt,name=received_place,json=receivedPlace,proto3,oneof"`
+}
+
+func (*StoreLineAt_RecordedPlace) isStoreLineAt_Place() {}
+
+func (*StoreLineAt_ReceivedPlace) isStoreLineAt_Place() {}
 
 // Older lines exist below this page.
 type ReadAgentPageMore struct {
@@ -1540,7 +1622,7 @@ var File_store_v1_store_proto protoreflect.FileDescriptor
 
 const file_store_v1_store_proto_rawDesc = "" +
 	"\n" +
-	"\x14store/v1/store.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bconversation/v1/agent.proto\x1a$conversation/v1/agent_activity.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\xbb\x02\n" +
+	"\x14store/v1/store.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bconversation/v1/agent.proto\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\x84\x03\n" +
 	"\n" +
 	"StoreEntry\x12%\n" +
 	"\x05plane\x18\x01 \x01(\v2\x0f.store.v1.PlaneR\x05plane\x12\x19\n" +
@@ -1549,9 +1631,11 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"upsert_key\x18\x03 \x01(\tR\tupsertKey\x12?\n" +
 	"\fagent_update\x18\x04 \x01(\v2\x1a.store.v1.StoreAgentUpdateH\x00R\vagentUpdate\x12G\n" +
 	"\x0esession_update\x18\x05 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\rsessionUpdate\x120\n" +
-	"\x04turn\x18\x06 \x01(\v2\x17.conversation.v1.TurnIdH\x01R\x04turn\x88\x01\x01B\a\n" +
+	"\x04turn\x18\x06 \x01(\v2\x17.conversation.v1.TurnIdH\x01R\x04turn\x88\x01\x01\x12=\n" +
+	"\x05place\x18\a \x01(\v2\".conversation.v1.ConversationPlaceH\x02R\x05place\x88\x01\x01B\a\n" +
 	"\x05entryB\a\n" +
-	"\x05_turn\"\xde\x02\n" +
+	"\x05_turnB\b\n" +
+	"\x06_place\"\xde\x02\n" +
 	"\x10StoreAgentUpdate\x12:\n" +
 	"\ttop_level\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\btopLevel\x88\x01\x01\x12B\n" +
 	"\x0fserveable_frame\x18\x02 \x01(\v2\x17.store.v1.StorePageLineH\x00R\x0eserveableFrame\x12B\n" +
@@ -1613,11 +1697,14 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
 	"\x05carry\x18\x04 \x01(\fR\x05carry\"(\n" +
 	"\x10StoreItemPointer\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xa1\x01\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xc4\x02\n" +
 	"\vStoreLineAt\x12*\n" +
 	"\x02at\x18\x01 \x01(\v2\x1a.store.v1.StoreItemPointerR\x02at\x12+\n" +
 	"\x04line\x18\x02 \x01(\v2\x17.store.v1.StorePageLineR\x04line\x120\n" +
-	"\x04turn\x18\x03 \x01(\v2\x17.conversation.v1.TurnIdH\x00R\x04turn\x88\x01\x01B\a\n" +
+	"\x04turn\x18\x03 \x01(\v2\x17.conversation.v1.TurnIdH\x01R\x04turn\x88\x01\x01\x12K\n" +
+	"\x0erecorded_place\x18\x04 \x01(\v2\".conversation.v1.ConversationPlaceH\x00R\rrecordedPlace\x12K\n" +
+	"\x0ereceived_place\x18\x05 \x01(\v2\".conversation.v1.ConversationPlaceH\x00R\rreceivedPlaceB\a\n" +
+	"\x05placeB\a\n" +
 	"\x05_turn\"L\n" +
 	"\x11ReadAgentPageMore\x127\n" +
 	"\tlast_item\x18\x01 \x01(\v2\x1a.store.v1.StoreItemPointerR\blastItem\"\x14\n" +
@@ -1645,78 +1732,82 @@ func file_store_v1_store_proto_rawDescGZIP() []byte {
 
 var file_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_store_v1_store_proto_goTypes = []any{
-	(*StoreEntry)(nil),          // 0: store.v1.StoreEntry
-	(*StoreAgentUpdate)(nil),    // 1: store.v1.StoreAgentUpdate
-	(*StorePageLine)(nil),       // 2: store.v1.StorePageLine
-	(*StoreAgentItem)(nil),      // 3: store.v1.StoreAgentItem
-	(*StoreAgentBash)(nil),      // 4: store.v1.StoreAgentBash
-	(*StoreAgentWorkflow)(nil),  // 5: store.v1.StoreAgentWorkflow
-	(*Plane)(nil),               // 6: store.v1.Plane
-	(*PlaneStream)(nil),         // 7: store.v1.PlaneStream
-	(*PlaneFile)(nil),           // 8: store.v1.PlaneFile
-	(*StoreUnservedItem)(nil),   // 9: store.v1.StoreUnservedItem
-	(*StoreVendorSpecific)(nil), // 10: store.v1.StoreVendorSpecific
-	(*StoreUnknown)(nil),        // 11: store.v1.StoreUnknown
-	(*StoreUnparsed)(nil),       // 12: store.v1.StoreUnparsed
-	(*EntryBatch)(nil),          // 13: store.v1.EntryBatch
-	(*CursorState)(nil),         // 14: store.v1.CursorState
-	(*StoreItemPointer)(nil),    // 15: store.v1.StoreItemPointer
-	(*StoreLineAt)(nil),         // 16: store.v1.StoreLineAt
-	(*ReadAgentPageMore)(nil),   // 17: store.v1.ReadAgentPageMore
-	(*ReadAgentPageFloor)(nil),  // 18: store.v1.ReadAgentPageFloor
-	(*AgentSessionToken)(nil),   // 19: store.v1.AgentSessionToken
-	(*AgentSessionPage)(nil),    // 20: store.v1.AgentSessionPage
-	(*v1.SessionUpdate)(nil),    // 21: conversation.v1.SessionUpdate
-	(*v1.TurnId)(nil),           // 22: conversation.v1.TurnId
-	(*v1.AgentId)(nil),          // 23: conversation.v1.AgentId
-	(*v1.AgentPrompt)(nil),      // 24: conversation.v1.AgentPrompt
-	(*v1.AgentFrame)(nil),       // 25: conversation.v1.AgentFrame
-	(*v1.PeerMessage)(nil),      // 26: conversation.v1.PeerMessage
-	(*v1.AgentActivityId)(nil),  // 27: conversation.v1.AgentActivityId
-	(*v1.AgentBash)(nil),        // 28: conversation.v1.AgentBash
-	(*v1.AgentWorkflow)(nil),    // 29: conversation.v1.AgentWorkflow
-	(*structpb.Struct)(nil),     // 30: google.protobuf.Struct
+	(*StoreEntry)(nil),           // 0: store.v1.StoreEntry
+	(*StoreAgentUpdate)(nil),     // 1: store.v1.StoreAgentUpdate
+	(*StorePageLine)(nil),        // 2: store.v1.StorePageLine
+	(*StoreAgentItem)(nil),       // 3: store.v1.StoreAgentItem
+	(*StoreAgentBash)(nil),       // 4: store.v1.StoreAgentBash
+	(*StoreAgentWorkflow)(nil),   // 5: store.v1.StoreAgentWorkflow
+	(*Plane)(nil),                // 6: store.v1.Plane
+	(*PlaneStream)(nil),          // 7: store.v1.PlaneStream
+	(*PlaneFile)(nil),            // 8: store.v1.PlaneFile
+	(*StoreUnservedItem)(nil),    // 9: store.v1.StoreUnservedItem
+	(*StoreVendorSpecific)(nil),  // 10: store.v1.StoreVendorSpecific
+	(*StoreUnknown)(nil),         // 11: store.v1.StoreUnknown
+	(*StoreUnparsed)(nil),        // 12: store.v1.StoreUnparsed
+	(*EntryBatch)(nil),           // 13: store.v1.EntryBatch
+	(*CursorState)(nil),          // 14: store.v1.CursorState
+	(*StoreItemPointer)(nil),     // 15: store.v1.StoreItemPointer
+	(*StoreLineAt)(nil),          // 16: store.v1.StoreLineAt
+	(*ReadAgentPageMore)(nil),    // 17: store.v1.ReadAgentPageMore
+	(*ReadAgentPageFloor)(nil),   // 18: store.v1.ReadAgentPageFloor
+	(*AgentSessionToken)(nil),    // 19: store.v1.AgentSessionToken
+	(*AgentSessionPage)(nil),     // 20: store.v1.AgentSessionPage
+	(*v1.SessionUpdate)(nil),     // 21: conversation.v1.SessionUpdate
+	(*v1.TurnId)(nil),            // 22: conversation.v1.TurnId
+	(*v1.ConversationPlace)(nil), // 23: conversation.v1.ConversationPlace
+	(*v1.AgentId)(nil),           // 24: conversation.v1.AgentId
+	(*v1.AgentPrompt)(nil),       // 25: conversation.v1.AgentPrompt
+	(*v1.AgentFrame)(nil),        // 26: conversation.v1.AgentFrame
+	(*v1.PeerMessage)(nil),       // 27: conversation.v1.PeerMessage
+	(*v1.AgentActivityId)(nil),   // 28: conversation.v1.AgentActivityId
+	(*v1.AgentBash)(nil),         // 29: conversation.v1.AgentBash
+	(*v1.AgentWorkflow)(nil),     // 30: conversation.v1.AgentWorkflow
+	(*structpb.Struct)(nil),      // 31: google.protobuf.Struct
 }
 var file_store_v1_store_proto_depIdxs = []int32{
 	6,  // 0: store.v1.StoreEntry.plane:type_name -> store.v1.Plane
 	1,  // 1: store.v1.StoreEntry.agent_update:type_name -> store.v1.StoreAgentUpdate
 	21, // 2: store.v1.StoreEntry.session_update:type_name -> conversation.v1.SessionUpdate
 	22, // 3: store.v1.StoreEntry.turn:type_name -> conversation.v1.TurnId
-	23, // 4: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
-	2,  // 5: store.v1.StoreAgentUpdate.serveable_frame:type_name -> store.v1.StorePageLine
-	9,  // 6: store.v1.StoreAgentUpdate.unserved_item:type_name -> store.v1.StoreUnservedItem
-	4,  // 7: store.v1.StoreAgentUpdate.bash:type_name -> store.v1.StoreAgentBash
-	5,  // 8: store.v1.StoreAgentUpdate.workflow:type_name -> store.v1.StoreAgentWorkflow
-	23, // 9: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
-	3,  // 10: store.v1.StorePageLine.agent_item:type_name -> store.v1.StoreAgentItem
-	24, // 11: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
-	25, // 12: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
-	26, // 13: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
-	27, // 14: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
-	28, // 15: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
-	23, // 16: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
-	29, // 17: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
-	7,  // 18: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
-	8,  // 19: store.v1.Plane.file:type_name -> store.v1.PlaneFile
-	10, // 20: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
-	11, // 21: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
-	12, // 22: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
-	30, // 23: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
-	30, // 24: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
-	0,  // 25: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
-	14, // 26: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
-	15, // 27: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
-	2,  // 28: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
-	22, // 29: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
-	15, // 30: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
-	16, // 31: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
-	17, // 32: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
-	18, // 33: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	23, // 4: store.v1.StoreEntry.place:type_name -> conversation.v1.ConversationPlace
+	24, // 5: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
+	2,  // 6: store.v1.StoreAgentUpdate.serveable_frame:type_name -> store.v1.StorePageLine
+	9,  // 7: store.v1.StoreAgentUpdate.unserved_item:type_name -> store.v1.StoreUnservedItem
+	4,  // 8: store.v1.StoreAgentUpdate.bash:type_name -> store.v1.StoreAgentBash
+	5,  // 9: store.v1.StoreAgentUpdate.workflow:type_name -> store.v1.StoreAgentWorkflow
+	24, // 10: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
+	3,  // 11: store.v1.StorePageLine.agent_item:type_name -> store.v1.StoreAgentItem
+	25, // 12: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
+	26, // 13: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
+	27, // 14: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
+	28, // 15: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
+	29, // 16: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
+	24, // 17: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
+	30, // 18: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
+	7,  // 19: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
+	8,  // 20: store.v1.Plane.file:type_name -> store.v1.PlaneFile
+	10, // 21: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
+	11, // 22: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
+	12, // 23: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
+	31, // 24: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
+	31, // 25: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
+	0,  // 26: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
+	14, // 27: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
+	15, // 28: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
+	2,  // 29: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
+	22, // 30: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
+	23, // 31: store.v1.StoreLineAt.recorded_place:type_name -> conversation.v1.ConversationPlace
+	23, // 32: store.v1.StoreLineAt.received_place:type_name -> conversation.v1.ConversationPlace
+	15, // 33: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
+	16, // 34: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
+	17, // 35: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
+	18, // 36: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }
@@ -1749,7 +1840,10 @@ func file_store_v1_store_proto_init() {
 		(*StoreUnservedItem_Unparsed)(nil),
 	}
 	file_store_v1_store_proto_msgTypes[13].OneofWrappers = []any{}
-	file_store_v1_store_proto_msgTypes[16].OneofWrappers = []any{}
+	file_store_v1_store_proto_msgTypes[16].OneofWrappers = []any{
+		(*StoreLineAt_RecordedPlace)(nil),
+		(*StoreLineAt_ReceivedPlace)(nil),
+	}
 	file_store_v1_store_proto_msgTypes[20].OneofWrappers = []any{
 		(*AgentSessionPage_More)(nil),
 		(*AgentSessionPage_Floor)(nil),

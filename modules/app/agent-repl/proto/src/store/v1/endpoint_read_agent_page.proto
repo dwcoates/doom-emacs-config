@@ -7,22 +7,31 @@ syntax = "proto3";
 package store.v1;
 
 import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
 import "store/v1/store.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
-// The store's page read: N page lines of one book, newest first.
+// The store's page read: N page lines of one book, in descending conversation
+// place.
 message ReadAgentPageRequest {
   // The book: the agent whose page lines are wanted.
   conversation.v1.AgentId book = 1;
   // How many lines this page may hold. The caller's budget per call, so it
   // can vary across calls of one walk.
   uint32 page_size = 2;
-  // The page begins strictly OLDER than the item this pointer names — the
-  // pointer served by a previous page's `more` arm or by a streamed line,
-  // echoed verbatim. There is no first-page arm: the first page is
-  // OpenAgentSession's answer, and this verb only ever walks older.
-  StoreItemPointer after = 3;
+  // Where the page begins. THE ARM IS THE POSITION. There is no newest-page
+  // arm: the newest page is OpenAgentSession's answer.
+  oneof position {
+    // Lines placed strictly BEFORE the line this pointer names — the pointer
+    // served by a previous page's `more` arm or by a streamed line, echoed
+    // verbatim. Compared against that line's place as the store holds it now.
+    StoreItemPointer after = 3;
+    // The newest lines placed AT OR BEFORE this bound: the book as it stood at
+    // that instant. A fork reads its parent's conversation up to the fork
+    // point this way.
+    conversation.v1.ConversationThrough through = 4;
+  }
 }
 
 // The page, or why it could not be served.
@@ -35,7 +44,7 @@ message ReadAgentPageResponse {
 
 // The page as served.
 message ReadAgentPageSuccess {
-  // The lines, newest first, each with its pointer — a continuation page
+  // The lines, in descending conversation place, each with its pointer — a continuation page
   // carries real positions exactly as the opening page does, so a reader
   // never mints a placeholder mark. At most page_size of them.
   repeated StoreLineAt lines = 1;
@@ -51,14 +60,20 @@ message ReadAgentPageFailure {
   // The store's account, for a human and for logs; never switched on.
   string detail = 1;
   oneof kind {
-    // Empty book, zero page_size, or an `after` that is unset, empty or not
-    // store-minted.
+    // Empty book, zero page_size, an unset position, an `after` that is empty
+    // or not store-minted, or a `through` whose at_ms is not positive.
     ReadAgentPageInvalidRequest invalid_request = 2;
     // A well-formed `after` naming no line of this book.
     ReadAgentPageStalePointer stale_pointer = 3;
     ReadAgentPageStorageFailure storage_failure = 4;
+    // A `through` read of a book this store holds no agent row for: refused
+    // rather than served empty, so a mistyped or never-written book is
+    // distinguishable from one that holds nothing at that instant.
+    ReadAgentPageUnknownAgent unknown_agent = 5;
   }
 }
+// The addressed book names no agent this store has heard of.
+message ReadAgentPageUnknownAgent {}
 // The request was malformed or violated the validation invariant.
 message ReadAgentPageInvalidRequest {
   // Which field (with the offending entry's index where one applies), as
