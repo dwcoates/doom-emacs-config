@@ -437,8 +437,9 @@ type ShimFunc func(ws ids.WorkspaceID) (Shim, bool)
 // shim process.
 type Shim interface {
 	// KillTurn interrupts the open turn, forced when the confirm challenge was
-	// answered.
-	KillTurn(ctx context.Context, turn ids.TurnID, force bool) error
+	// answered. commandedBy is HOW the person commanded the stop, relayed as
+	// KillTurnRequest.commanded_by; nil states none.
+	KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error
 	// StopAgent sends UpdateAgent.stop to one detached subagent.
 	StopAgent(ctx context.Context, agent *conversationv1.AgentId) error
 	// StopBash stops one detached shell.

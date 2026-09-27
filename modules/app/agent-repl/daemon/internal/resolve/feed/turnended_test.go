@@ -1,6 +1,12 @@
 package feed
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -8,7 +14,229 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
 )
+
+// TestInterruptedArmSetsTheInterruptedOutcome covers the one interruption
+// setter itself.
+func TestInterruptedArmSetsTheInterruptedOutcome(t *testing.T) {
+	// Arrange
+	ended := &frontendv1.FeedTurnEnded{}
+
+	// Act
+	interruptedArm(nil)(ended)
+
+	// Assert
+	if ended.GetInterrupted() == nil {
+		t.Fatalf("outcome = %T, want interrupted", ended.GetOutcome())
+	}
+}
+
+// byUserDirect, byUserInterjection and byUserUnstated are the three recorded
+// `by_user` causes a stop can carry.
+func byUserDirect() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{Command: &conversationv1.AgentInterruptedByUser_Direct{
+		Direct: &conversationv1.AgentInterruptedByUserDirect{},
+	}}
+}
+
+func byUserInterjection() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{Command: &conversationv1.AgentInterruptedByUser_Interjection{
+		Interjection: &conversationv1.AgentInterruptedByUserInterjection{},
+	}}
+}
+
+func byUserUnstated() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{}
+}
+
+// interruptedCommandWord names a drawn interrupted row's command.
+func interruptedCommandWord(ended *frontendv1.FeedTurnEnded) string {
+	switch ended.GetInterrupted().GetCommand().(type) {
+	case *frontendv1.FeedTurnEndedInterrupted_Direct:
+		return "direct"
+	case *frontendv1.FeedTurnEndedInterrupted_Interjection:
+		return "interjection"
+	}
+	return "unset"
+}
+
+// userStop is a terminal the user stopped, with the recorded cause.
+func userStop(byUser *conversationv1.AgentInterruptedByUser) *conversationv1.AgentSuccess {
+	interrupted := &conversationv1.AgentInterrupted{}
+	if byUser != nil {
+		interrupted.Cause = &conversationv1.AgentInterrupted_ByUser{ByUser: byUser}
+	}
+	return &conversationv1.AgentSuccess{Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: interrupted}}
+}
+
+// TestInterruptedArmMapsTheRecordedCommand covers the one mapping of a recorded
+// stop's HOW onto the row, one cause per case.
+func TestInterruptedArmMapsTheRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+		{name: "no by_user cause at all", byUser: nil, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ended := &frontendv1.FeedTurnEnded{}
+
+			// Act
+			interruptedArm(tt.byUser)(ended)
+
+			// Assert
+			if got := interruptedCommandWord(ended); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestByUserCommandWordNamesEachCommand covers the log word for each cause.
+func TestByUserCommandWordNamesEachCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "direct", byUser: byUserDirect(), want: "direct"},
+		{name: "interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "unstated", byUser: byUserUnstated(), want: "unset"},
+		{name: "absent", byUser: nil, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			got := byUserCommandWord(tt.byUser)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("word = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestALiveUserStopDrawsItsRecordedCommand covers the terminal path live: the
+// row's command is the recorded cause's, one cause per case.
+func TestALiveUserStopDrawsItsRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+
+			// Act
+			h.terminal("turn-1", userStop(tt.byUser), nil)
+
+			// Assert
+			if got := interruptedCommandWord(h.terminalRow("turn-1")); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestARebuiltUserStopDrawsItsRecordedCommand covers the terminal path rebuilt
+// from the store: a replayed page draws the same command the live terminal did.
+func TestARebuiltUserStopDrawsItsRecordedCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		byUser *conversationv1.AgentInterruptedByUser
+		want   string
+	}{
+		{name: "a direct stop", byUser: byUserDirect(), want: "direct"},
+		{name: "an interjection", byUser: byUserInterjection(), want: "interjection"},
+		{name: "a user stop that stated no command", byUser: byUserUnstated(), want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.closes = map[ids.TurnID]wsm.RecordedClose{"turn-1": {How: wsm.CloseKilled, At: closedAt}}
+
+			// Act
+			h.replay(historyPage(&conversationv1.HistoryFloor{},
+				frameEntry(mainAgent(), userStop(tt.byUser)),
+				promptEntry("turn-1", "hello"),
+			))
+
+			// Assert
+			if got := interruptedCommandWord(h.terminalRow("turn-1")); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+			if n := h.endingRows("turn-1"); n != 1 {
+				t.Fatalf("ending rows = %d, want exactly 1", n)
+			}
+		})
+	}
+}
+
+// TestOnlyInterruptedArmBuildsTheInterruptedOutcome pins that both paths that
+// draw a stopped turn's ending — the terminal's and the daemon-built close's —
+// go through interruptedArm: no other production function in this package
+// spells the interrupted outcome, so the two cannot drift apart.
+func TestOnlyInterruptedArmBuildsTheInterruptedOutcome(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	fset := token.NewFileSet()
+
+	// Act
+	var builders []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		parsed, err := parser.ParseFile(fset, name, source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				literal, ok := node.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				if selector, ok := literal.Type.(*ast.SelectorExpr); ok && selector.Sel.Name == "FeedTurnEnded_Interrupted" {
+					builders = append(builders, name+":"+function.Name.Name)
+				}
+				return true
+			})
+		}
+	}
+
+	// Assert
+	if len(builders) != 1 || builders[0] != "turnended.go:interruptedArm" {
+		t.Fatalf("interrupted outcome built in %v, want only turnended.go:interruptedArm", builders)
+	}
+}
 
 // THE TERMINAL ROW is the liveness anchor: its ABSENCE for the current turn is
 // what "the turn is live" means. Every arm carries a daemon-composed headline,

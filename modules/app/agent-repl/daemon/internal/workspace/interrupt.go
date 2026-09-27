@@ -88,6 +88,15 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	}
 }
 
+// directCommand is a direct stop's HOW: the person stopped the turn itself.
+func directCommand() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{
+		Command: &conversationv1.AgentInterruptedByUser_Direct{
+			Direct: &conversationv1.AgentInterruptedByUserDirect{},
+		},
+	}
+}
+
 // interruptTurn kills the open turn, raising the confirm challenge first when
 // detached agents would go with it.
 func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running, confirm bool) (InterruptOutcome, error) {
@@ -127,7 +136,9 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 	// The status fires now, not at the turn's real end.
 	v.deps.Footer.SetInterrupting(ws, true)
 
-	if err := shim.KillTurn(ctx, *running.Turn, confirm); err != nil {
+	// THE USER STOPPED THE TURN ITSELF, and the record says so: the feed draws
+	// the interruption bubble for a direct stop.
+	if err := shim.KillTurn(ctx, *running.Turn, confirm, directCommand()); err != nil {
 		v.deps.Footer.SetInterrupting(ws, false)
 		if refusal, ok := AsShimRefusal(err); ok {
 			if refusal.Benign() {

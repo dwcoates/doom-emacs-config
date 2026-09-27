@@ -169,7 +169,7 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 	}
 	// THE MARK GOES DOWN BEFORE THE KILL. A kill that landed with no durable
 	// mark would end the user's turn and leave nothing to put back.
-	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, false); err != nil {
+	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, false, nil); err != nil {
 		// The kill failing does NOT unmark the turn: it is still the turn the
 		// holder displaced, and putting it back at release is right either way.
 		f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", dlog.Context{

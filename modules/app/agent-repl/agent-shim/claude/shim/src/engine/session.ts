@@ -551,6 +551,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The one turn that may be open. Written ONLY through {@link setOpen}. */
   let open: OpenTurn | undefined;
   /**
+   * HOW the person commanded the last stop issued on the main thread, held for
+   * the stopped turn's terminal (`KillTurnRequest.commanded_by`; `command` is
+   * undefined when the caller stated none).
+   *
+   * THE NEXT MAIN-THREAD RESULT CONSUMES IT, whatever its outcome: that result
+   * is the stopped turn's terminal. It is not keyed by the fold's turn because
+   * the kill clears the turn slot before the vendor's stop result arrives. A
+   * real turn opening retires one never consumed, so a stop can never be
+   * attributed to a later turn.
+   */
+  let stopCommand:
+    | { readonly turn: conversationv1.TurnId; readonly command: conversationv1.AgentInterruptedByUser | undefined }
+    | undefined;
+  /**
    * Settled the moment the keep-alive now open leaves the turn slot.
    *
    * Minted lazily by the first `StartTurn` that has to wait behind it, and
@@ -837,6 +851,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       claudeConfigDir: deps.env.configDir,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(lastChange === undefined ? {} : { lastChange }),
+      // THE KEEP-ALIVE IS NOBODY'S STOP: only a main-thread message reads it.
+      ...(attribution.keepalive || stopCommand?.command === undefined ? {} : { stopCommand: stopCommand.command }),
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
       deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
       reportFault: (_kind, detail) => {
@@ -1695,6 +1711,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     noteDetachedWork(message);
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext(attribution));
+    if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
     if (converterDefectThisMessage) {
       LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
     }
@@ -2186,6 +2203,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const end = keepaliveEnd;
     keepaliveEnd = undefined;
     end?.resolve();
+  }
+
+  /** Drop the held stop command, if one is held, saying why. */
+  function retireStopCommand(why: string): void {
+    const held = stopCommand;
+    if (held === undefined) return;
+    stopCommand = undefined;
+    LOGGER.debug(
+      { turn_id: held.turn.value, command: held.command?.command.case ?? "unstated", why },
+      "the held stop command retired",
+    );
   }
 
   /** The promise a waiting `StartTurn` holds; absence when no keep-alive holds the slot. */
@@ -3923,9 +3951,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveYieldBudgetMs: deps.keepaliveYieldBudgetMs ?? KEEPALIVE_YIELD_BUDGET_MS,
     submit,
     setOpenTurn: (turn) => {
+      if (turn !== undefined && !turn.keepalive) retireStopCommand("a real turn opened");
       setOpen(turn);
       if (turn === undefined) cadence?.resume();
       else cadence?.pause();
+    },
+    noteStopCommand: (turn, command) => {
+      stopCommand = { turn, command };
+      LOGGER.debug(
+        { turn_id: turn.value, command: command?.command.case ?? "unstated" },
+        "holding the stop's command for the stopped turn's terminal",
+      );
     },
     reportStoreUnreachable: (detail) => {
       pushes.fault(sessionFault({ kind: "storeUnreachable" }, HISTORY_READ_COMPONENT, detail));

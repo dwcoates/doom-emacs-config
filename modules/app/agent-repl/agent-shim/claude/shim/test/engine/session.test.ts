@@ -9878,3 +9878,79 @@ describe("refreshing the context reading after a main-agent API response", () =>
     expect(components).toContain("vendor-context-usage");
   });
 });
+
+describe("the held stop command (KillTurn.commanded_by)", () => {
+  const interjection = (): conversationv1.AgentInterruptedByUser =>
+    create(conversationv1.AgentInterruptedByUserSchema, {
+      command: { case: "interjection", value: create(conversationv1.AgentInterruptedByUserInterjectionSchema, {}) },
+    });
+
+  /** Kill the open real turn, stating `commandedBy` when given. */
+  async function kill(h: Harness, turnId: string, commandedBy?: conversationv1.AgentInterruptedByUser): Promise<void> {
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+        force: false,
+        ...(commandedBy === undefined ? {} : { commandedBy }),
+      }),
+    );
+  }
+
+  it("hands the stated command to the fold of the stopped turn's result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await kill(h, "turn-1", interjection());
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stopped-result"));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.stopCommand?.command.case).toBe("interjection");
+  });
+
+  it("hands no command to the fold when the kill stated none", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await kill(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stopped-result"));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.stopCommand).toBeUndefined();
+  });
+
+  it("is consumed by the stopped turn's result, so the next message folds without it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await kill(h, "turn-1", interjection());
+    await h.engine.onSdkMessage(resultMessage("stopped-result"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("after-the-stop"));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.stopCommand).toBeUndefined();
+  });
+
+  it("is retired unconsumed when a real turn opens, so it never reaches a later turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await kill(h, "turn-1", interjection());
+
+    // Act
+    await realPrompt(h, "turn-2");
+    await h.engine.onSdkMessage(resultMessage("turn-2-result"));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.stopCommand).toBeUndefined();
+  });
+});
