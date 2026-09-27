@@ -65,6 +65,26 @@ func TestRestartWithForceEndsTheRunningTurnFirst(t *testing.T) {
 	}
 }
 
+// TestRestartKillStatesNoCommand pins that a restart's kill states no HOW:
+// whether it is a user stop is not settled, so it relays none.
+func TestRestartKillStatesNoCommand(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert.
+	if len(f.shim.killedTurns) != 1 || f.shim.killedTurns[0].CommandedBy != nil {
+		t.Fatalf("killed turns = %+v, want one kill with no commanded_by", f.shim.killedTurns)
+	}
+}
+
 func TestRestartWithForceAndNoTurnKillsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

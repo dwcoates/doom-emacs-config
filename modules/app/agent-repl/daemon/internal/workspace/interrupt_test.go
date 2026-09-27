@@ -48,6 +48,26 @@ func TestInterruptTurnWithNoAgentsKillsUnforced(t *testing.T) {
 	}
 }
 
+// TestInterruptTurnStatesTheStopAsDirect covers the HOW the user's own stop
+// carries: the record says direct, so the feed draws the interruption bubble.
+func TestInterruptTurnStatesTheStopAsDirect(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(f.shim.killedTurns) != 1 || f.shim.killedTurns[0].CommandedBy.GetDirect() == nil {
+		t.Fatalf("killed turns = %+v, want one kill commanded directly", f.shim.killedTurns)
+	}
+}
+
 func TestInterruptTurnWithLiveAgentsRaisesTheConfirmChallenge(t *testing.T) {
 	// Arrange: killing the turn would take the detached agents with it.
 	f := newFixture(t)

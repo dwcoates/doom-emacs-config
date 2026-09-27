@@ -159,8 +159,8 @@ func (s *sender) PromptAgent(ctx context.Context, agent *conversationv1.AgentId,
 }
 
 // KillTurn interrupts the open turn for an interjection.
-func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool) error {
-	return killTurn(ctx, s.client, turn, force)
+func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
+	return killTurn(ctx, s.client, turn, force, commandedBy)
 }
 
 // turnKiller is the one shim call killTurn needs, satisfied by both the queue's
@@ -173,10 +173,14 @@ type turnKiller interface {
 // answer, shared by the queue's sender and the verbs' shim adapter. The two
 // were line-for-line copies; one of them growing a field the other forgot
 // would make the same stop say different things depending on who asked.
-func killTurn(ctx context.Context, client turnKiller, turn ids.TurnID, force bool) error {
+//
+// commandedBy travels exactly as the caller stated it, nil included: the shim
+// records it verbatim as the interrupted terminal's `by_user` cause.
+func killTurn(ctx context.Context, client turnKiller, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
 	response, err := client.KillTurn(ctx, &shimv1.KillTurnRequest{
-		Turn:  &conversationv1.TurnId{Value: string(turn)},
-		Force: force,
+		Turn:        &conversationv1.TurnId{Value: string(turn)},
+		Force:       force,
+		CommandedBy: commandedBy,
 	})
 	if err != nil {
 		return err

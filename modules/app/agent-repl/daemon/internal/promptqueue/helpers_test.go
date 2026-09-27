@@ -381,14 +381,17 @@ type fakeSender struct {
 	kills   []ids.TurnID
 	// killForces is each recorded kill's force flag, index-aligned with
 	// kills, so a test can assert an interrupt never forced one.
-	killForces  []bool
-	models      []string
-	modes       []string
-	startErr    error
-	killErr     error
-	promptErr   error
-	setModelErr error
-	mainAgent   string
+	killForces []bool
+	// killCommands is each recorded kill's commanded_by, index-aligned with
+	// kills, so a test can assert HOW the stop was stated.
+	killCommands []*conversationv1.AgentInterruptedByUser
+	models       []string
+	modes        []string
+	startErr     error
+	killErr      error
+	promptErr    error
+	setModelErr  error
+	mainAgent    string
 	// startHook runs inside StartTurn, so a test can observe what the queue
 	// holds while a delivery is in flight.
 	startHook func()
@@ -433,7 +436,7 @@ func (s *fakeSender) PromptAgent(_ context.Context, agent *conversationv1.AgentI
 	return nil
 }
 
-func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, force bool) error {
+func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.killErr != nil {
@@ -441,6 +444,7 @@ func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, force bool) er
 	}
 	s.kills = append(s.kills, turn)
 	s.killForces = append(s.killForces, force)
+	s.killCommands = append(s.killCommands, commandedBy)
 	return nil
 }
 
@@ -449,6 +453,14 @@ func (s *fakeSender) killedForces() []bool {
 	defer s.mu.Unlock()
 	out := make([]bool, len(s.killForces))
 	copy(out, s.killForces)
+	return out
+}
+
+func (s *fakeSender) killedCommands() []*conversationv1.AgentInterruptedByUser {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*conversationv1.AgentInterruptedByUser, len(s.killCommands))
+	copy(out, s.killCommands)
 	return out
 }
 
