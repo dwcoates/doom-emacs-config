@@ -177,3 +177,62 @@ func TestReleaseServingRefusesAnUnservedWorkspace(t *testing.T) {
 		t.Fatalf("ReleaseServing = %v, want a *ServingError naming no holder", err)
 	}
 }
+
+func TestClaimUnownedServing(t *testing.T) {
+	claimant := NewInstanceID()
+	other := NewInstanceID()
+	tests := []struct {
+		name        string
+		standing    *InstanceID
+		wantClaimed bool
+		wantHolder  InstanceID
+		wantOwner   InstanceID
+	}{
+		{name: "an unowned workspace is claimed", standing: nil, wantClaimed: true, wantOwner: claimant},
+		{name: "a workspace the claimant already serves stays claimed", standing: &claimant, wantClaimed: true, wantOwner: claimant},
+		{name: "a workspace another instance serves is not taken", standing: &other, wantClaimed: false, wantHolder: other, wantOwner: other},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if tt.standing != nil {
+				if err := s.ClaimServing(context.Background(), ws.ID, *tt.standing); err != nil {
+					t.Fatalf("ClaimServing: %v", err)
+				}
+			}
+
+			// Act
+			claimed, holder, err := s.ClaimUnownedServing(context.Background(), ws.ID, claimant)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ClaimUnownedServing: %v", err)
+			}
+			if claimed != tt.wantClaimed || holder != tt.wantHolder {
+				t.Fatalf("ClaimUnownedServing = (%v, %q), want (%v, %q)", claimed, holder, tt.wantClaimed, tt.wantHolder)
+			}
+			got, err := s.Serving(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Serving: %v", err)
+			}
+			if got == nil || *got != tt.wantOwner {
+				t.Fatalf("serving = %v, want %q", got, tt.wantOwner)
+			}
+		})
+	}
+}
+
+func TestClaimUnownedServingRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	_, _, err := s.ClaimUnownedServing(context.Background(), WorkspaceID("absent"), NewInstanceID())
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ClaimUnownedServing on an unknown workspace = %v, want ErrNotFound", err)
+	}
+}

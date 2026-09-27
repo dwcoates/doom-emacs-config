@@ -259,6 +259,11 @@ type DB interface {
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.
 	ClaimServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error
+	// ClaimUnownedServing claims serving ownership only when no other
+	// instance holds it, answering whether the claim stood and, when it did
+	// not, who holds the workspace. It is the arbitration between an
+	// incumbent reclaiming a workspace and the successor adopting it.
+	ClaimUnownedServing(ctx context.Context, id WorkspaceID, daemon InstanceID) (bool, InstanceID, error)
 	// Serving reports which daemon instance serves a workspace, nil when none
 	// does.
 	Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error)
