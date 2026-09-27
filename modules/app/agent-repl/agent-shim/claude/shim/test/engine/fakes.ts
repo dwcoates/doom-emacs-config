@@ -31,7 +31,6 @@ import type {
 import { PersistenceError } from "../../src/store/persistence.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
-import type { BashRunStanding } from "../../src/store/reader.js";
 
 /** A query whose message stream a suite pushes into, one message at a time. */
 export class ScriptedQuery implements QueryLike {
@@ -353,9 +352,13 @@ export class RecordingPersistence implements Persistence {
   producerHasWrittenRows(): boolean {
     return this.wroteUnderProducer;
   }
+  /** What `writeDurable` rejects with, the way an unreachable store does. */
+  writeDurableRejects: Error | undefined;
   writeDurable(entries: PersistEntry[]): Promise<void> {
     this.wroteUnderProducer = true;
     this.durable.push(...entries);
+    this.bashRunCalls.push(...entries.map((entry) => `durable:${entry.upsertKey}`));
+    if (this.writeDurableRejects !== undefined) return Promise.reject(this.writeDurableRejects);
     return Promise.resolve();
   }
   /** What `write` throws, the way a row the writer cannot envelope does. */
@@ -464,13 +467,13 @@ export class RecordingPersistence implements Persistence {
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
     return Promise.resolve(this.live);
   }
-  /** The standing predicate the caller passed on its last openBashRun, if any. */
-  lastAnnouncement: (() => BashRunStanding) | undefined;
-  openBashRun(
-    _work?: conversationv1.DetachedWorkId,
-    announcement?: () => BashRunStanding,
-  ): Promise<AsyncIterable<conversationv1.AgentBash>> {
-    this.lastAnnouncement = announcement;
+  /**
+   * The durable writes and shell-run opens, in the order they were made — so a
+   * suite can say the start was made durable BEFORE the run was opened.
+   */
+  readonly bashRunCalls: string[] = [];
+  openBashRun(work?: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>> {
+    this.bashRunCalls.push(`open:${work?.value ?? ""}`);
     const frames = this.bashFrames;
     return Promise.resolve({
       async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {
