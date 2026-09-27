@@ -307,11 +307,24 @@ func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnI
 		q.stripJump(ctx, sub, running, errors.New("the workspace lost its session before the interrupt could be sent"), log)
 		return
 	}
-	if err := sender.KillTurn(ctx, running, false); err != nil {
+	// THE STOP IS THE PROMPT'S SIDE EFFECT, NOT AN ACT OF ITS OWN, and the
+	// record says so: the feed draws no interruption bubble for it, because
+	// the superseding prompt is the whole account of the stop.
+	if err := sender.KillTurn(ctx, running, false, interjectionCommand()); err != nil {
 		q.stripJump(ctx, sub, running, err, log)
 		return
 	}
 	log.Debug(opInterject, "the interrupt was sent; delivery waits for the turn's real end", nil)
+}
+
+// interjectionCommand is an interjection's HOW: the person sent a prompt that
+// was judged to supersede the running turn.
+func interjectionCommand() *conversationv1.AgentInterruptedByUser {
+	return &conversationv1.AgentInterruptedByUser{
+		Command: &conversationv1.AgentInterruptedByUser_Interjection{
+			Interjection: &conversationv1.AgentInterruptedByUserInterjection{},
+		},
+	}
 }
 
 // stripJump undoes a refused interjection: the queue jump goes, the footer's

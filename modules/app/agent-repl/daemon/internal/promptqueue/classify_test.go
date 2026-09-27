@@ -323,6 +323,26 @@ func TestInterjectSendsTheInterruptToTheShim(t *testing.T) {
 	}
 }
 
+// TestInterjectStatesTheStopAsAnInterjection covers the HOW the kill carries:
+// the stop is the superseding prompt's side effect, so the record must say
+// interjection and the feed then draws no interruption bubble for it.
+func TestInterjectStatesTheStopAsAnInterjection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	commands := h.sender.killedCommands()
+	if len(commands) != 1 || commands[0].GetInterjection() == nil {
+		t.Fatalf("commanded_by = %v, want exactly one interjection", commands)
+	}
+}
+
 func TestInterjectWaitsForTheTurnsRealEndBeforeDelivering(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
