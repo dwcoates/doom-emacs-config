@@ -414,6 +414,49 @@ joins every open in flight. A new open path goes through `decideOpenLocked`;
 `TestAHungWatchOpenHoldsNoLock` holds each kind of open forever and requires
 the watcher to keep answering.
 
+### The lock stall watchdog (`internal/lockwatch`)
+
+That wedge logged NOTHING for 18 minutes; its dump exists only because the
+operator SIGQUIT-killed the daemon. The watchdog records a wedge while the
+daemon is still in it. It is a DETECTOR: it never releases, kills or works
+around anything.
+
+- **Watched locks** are `lockwatch.Mutex` values (a `sync.Mutex` that counts
+  holds in one atomic word) registered through a component's optional
+  `Stalls lockwatch.Registry`, wired in `graph.go`:
+  `sessionwatcher.watcher` (per workspace, unwatched at `Close`),
+  `promptqueue.drain` and `promptqueue.verdicts` (per workspace, registered
+  when the queue first resolves the workspace's logger), and the daemon-wide
+  `promptqueue.queue` and `feed.resolver`. The footer, topbar, sidebar and
+  holds resolvers are only reached under the watcher's mutex or the delivery
+  lock, so a wedge there reports as those. `workspace.Fleet`'s start gate is
+  NOT watched: it is held across a whole bring-up, up to the 60s
+  `StartSession` bound, legitimately. A new hot lock on the prompt or feed path
+  is a `lockwatch.Mutex` registered the same way.
+- **Threshold** `lockwatch.DefaultThreshold` = 6s, tick `DefaultEvery` = 1s.
+  The slowest legitimate hold found is the delivery lock across an in-line
+  revival (real bring-ups 1.2s to 4.6s, 2026-09-27 logs); a synchronous
+  delivery is 9ms p50 / 143ms max. A stall is recorded by threshold + one
+  tick = 7s, before Emacs's 10s unary timeout.
+- **Reading a report.** ONE `daemon.lockwatch.stall` ERROR per episode, in the
+  lock's workspace log (the run log for a daemon-wide lock): `lock`,
+  `workspace_id`, `held_for` / `held_for_ms` (measured at `resolution`, one
+  tick), `threshold`, `dump_id`, and `goroutines` + `goroutine_dump`
+  (`internal/goroutinedump`, the same rendering SIGQUIT writes). Every stall
+  found in one tick shares ONE dump: the first record carries it, the others
+  name it in `goroutine_dump_carried_by`. Find the holder in the dump: the
+  goroutines parked in `sync.(*Mutex).Lock` under the named lock's owner are
+  the waiters, and the holder is the goroutine inside that owner blocked
+  elsewhere. The acquire site is not recorded: it would cost a stack walk on
+  every Lock. The end of the episode is `daemon.lockwatch.release` INFO with the
+  total `held_for`; a lock held past the threshold again is a new episode.
+- **Overhead** (M4 Max, `go test -bench . ./internal/lockwatch`): an
+  uncontended Lock/Unlock pair is 5.2ns against `sync.Mutex`'s 2.4ns, 0 allocs,
+  and contended pairs are indistinguishable (~100ns both); one tick over 50
+  watched locks is 265ns (none held) to 505ns (all held), 0 allocs. The hot
+  path reads no clock: hold duration is measured by the ticks. One goroutine,
+  one ticker, and a dump only when a stall is detected.
+
 ### The footer and the roster take ONE live-work set
 
 `sessionwatcher`'s `LiveWorkSet` is the SINGLE AUTHORITY for detached-work

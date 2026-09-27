@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
@@ -229,6 +230,12 @@ type ImageResolver func(*conversationv1.ImageBlock) (src string, alt string, err
 type Deps struct {
 	// Log is the daemon's logging surface. Required.
 	Log dlog.Surfaces
+	// Stalls is the lock stall watchdog the resolver's mutex is registered
+	// with. OPTIONAL: nil leaves it unwatched, which is what every test that
+	// does not exercise it leaves it. Production always wires it: every
+	// watcher's sink call and every accepted prompt's mirror takes this
+	// mutex, and it is held across the workspace directory lookup.
+	Stalls lockwatch.Registry
 	// WorkspaceDir resolves a workspace's directory so records land in that
 	// workspace's durable sink. Required: failing to resolve is an invariant
 	// violation, never a reason to write globally.

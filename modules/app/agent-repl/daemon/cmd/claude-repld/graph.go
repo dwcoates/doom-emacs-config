@@ -27,6 +27,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/imageorigin"
+	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/login"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/paint"
@@ -370,6 +371,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
 	}
 
+	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
+	// it watches (the feed, the session watchers, the prompt queue), and it
+	// runs as a background loop. A wedged lock is otherwise invisible until
+	// Emacs's unary timeout, and its evidence dies with the SIGQUIT that finds
+	// it (daemon/AGENTS.md "The lock stall watchdog").
+	stalls, err := lockwatch.New(lockwatch.Deps{Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the lock stall watchdog: %w", err)
+	}
+
 	// THE FEED RESOLVER IS BUILT AFTER THE DECORATION, and that ordering is the
 	// wiring. It raises the `final_answer_unresolved` fault when a turn concludes
 	// with no green answer standing, and it must raise it into the SAME state
@@ -377,6 +388,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// would be recorded and reach no footer.
 	feedResolver, err := feed.New(feed.Deps{
 		Log:            p.Surfaces,
+		Stalls:         stalls,
 		WorkspaceDir:   workspaceDir,
 		Painter:        painter,
 		StripSentinels: stripSentinels,
@@ -462,6 +474,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Holds:     holdsResolver,
 			Lifecycle: lifecycle,
 			Title:     titleSynth,
+			Stalls:    stalls,
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
@@ -518,6 +531,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// later, so the publish reads it out of the relay forwarder.
 		PublishHost: relay.PublishHostWorkspace,
 		Log:         p.Surfaces,
+		Stalls:      stalls,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the prompt queue: %w", err)
@@ -872,6 +886,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 			}},
 			{Name: "worktree_reaper", Run: reaper.Run},
+			{Name: "lock_watchdog", Run: stalls.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,
