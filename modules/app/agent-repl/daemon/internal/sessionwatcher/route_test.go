@@ -1807,7 +1807,7 @@ func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
 			settle: func(t *testing.T) (*harness, *conversationv1.AgentDetachedWork) {
 				h := detachedSubagentHarness(t)
 				h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))
-				return h, detachedWork("w-1", "spawn-1")
+				return h, detachedWork("w-1", "spawn-1", subagentKind("sub-1"))
 			},
 		},
 		{

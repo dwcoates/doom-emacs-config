@@ -1275,7 +1275,7 @@ func detachedSubagentHarness(t *testing.T) *harness {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
 	h.client.nextAgentOpen(t)
-	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1"))))
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1", subagentKind("sub-1")))))
 	if live := h.w.LiveWork(); len(live.Agents) != 1 {
 		t.Fatalf("live work = %v, want the detached subagent live before its terminal", live.Agents)
 	}
@@ -1312,6 +1312,39 @@ func runningSubagentActivity(activityID string) *conversationv1.AgentActivity {
 
 // bashActivity is an in-turn shell call, the unit a detached shell detaches
 // from.
+// sendMessageActivity is a SendMessage call's start: the unit a resumed
+// subagent detaches from.
+func sendMessageActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{
+			Result: &conversationv1.AgentSendMessage_Start{Start: &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"}},
+		}},
+	}
+}
+
+// withKind restates an announcement's kind, for the announcements a producer
+// must never send.
+func withKind(work *conversationv1.AgentDetachedWork, kind *conversationv1.DetachedWorkKind) *conversationv1.AgentDetachedWork {
+	work.Kind = kind
+	return work
+}
+
+// lastFooterLiveWork answers the last live-work set the footer was handed
+// among `events`.
+func lastFooterLiveWork(events []event) (LiveWorkSet, bool) {
+	var last *LiveWorkSet
+	for _, e := range events {
+		if e.name() == "footer.OnLiveWorkChanged" && e.live != nil {
+			last = e.live
+		}
+	}
+	if last == nil {
+		return LiveWorkSet{}, false
+	}
+	return *last, true
+}
+
 func bashActivity(activityID string) *conversationv1.AgentActivity {
 	return &conversationv1.AgentActivity{
 		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
@@ -1343,24 +1376,63 @@ func monitorFailedActivity(activityID string) *conversationv1.AgentActivity {
 	}
 }
 
-// createdWork is a detached-work announcement whose origin STATES the kind.
+// createdWork is a detached-work announcement whose origin describes the work,
+// stating the SAME kind as its description, as a producer does.
 func createdWork(work string, created *conversationv1.DetachableWork) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work:   workID(work),
+		Kind:   kindDescribing(created),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{WorkCreated: created}},
 	}
 }
 
+// kindDescribing is the kind a producer states beside a `created` description.
+func kindDescribing(created *conversationv1.DetachableWork) *conversationv1.DetachedWorkKind {
+	switch arm := created.GetWork().(type) {
+	case *conversationv1.DetachableWork_Subagent:
+		return subagentKind(arm.Subagent.GetStart().GetCreatedAgentId().GetValue())
+	case *conversationv1.DetachableWork_Bash:
+		return bashKind()
+	case *conversationv1.DetachableWork_Monitor:
+		return monitorKind()
+	case *conversationv1.DetachableWork_Workflow:
+		return workflowKind()
+	default:
+		return nil
+	}
+}
+
 // detachedWork is an announcement whose origin names only the in-turn unit the
-// work used to be.
-func detachedWork(work, from string) *conversationv1.AgentDetachedWork {
+// work used to be, and whose kind the producer states beside it.
+func detachedWork(work, from string, kind *conversationv1.DetachedWorkKind) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work: workID(work),
+		Kind: kind,
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: from},
 			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
 		}},
 	}
+}
+
+// subagentKind, bashKind, monitorKind and workflowKind are the four kinds an
+// announcement can state; a subagent's names the agent that is running.
+func subagentKind(agent string) *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Subagent{
+		Subagent: &conversationv1.DetachedWorkKindSubagent{AgentId: agentID(agent)},
+	}}
+}
+
+func bashKind() *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Bash{Bash: &conversationv1.DetachedWorkKindBash{}}}
+}
+
+func monitorKind() *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Monitor{Monitor: &conversationv1.DetachedWorkKindMonitor{}}}
+}
+
+func workflowKind() *conversationv1.DetachedWorkKind {
+	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Workflow{Workflow: &conversationv1.DetachedWorkKindWorkflow{}}}
 }
 
 // subagentWork, bashWork, monitorWork and workflowWork are the four kinds a
