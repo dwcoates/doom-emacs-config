@@ -20,6 +20,14 @@ message WatchAgentSessionRequest {
 // opening page's newest item. No terminal arm: the store concludes nothing,
 // and terminal facts ride the lines themselves.
 message WatchAgentSessionResponse {
-  // The line, with its pointer — the caller's next high-water mark.
-  StoreLineAt line = 1;
+  // THE ARM IS WHAT HAPPENED TO THE LINE.
+  oneof frame {
+    // The line, with its pointer — the caller's next high-water mark.
+    StoreLineAt line = 1;
+    // A line the store RETIRED (StoreRetirement): the record behind it no
+    // longer converts to it. It carries the line as it was last served, at its
+    // own pointer, so the caller finds what it drew for it and removes it. No
+    // page serves the line again; its pointer stays valid in its book.
+    StoreLineAt retired = 2;
+  }
 }
