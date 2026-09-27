@@ -28,7 +28,7 @@ import {
   FeedShellSchema,
   FeedSimpleToolCallSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS, bubbleBox } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
 import { drawFeedShellBody } from "../../src/feed/cards/shell.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
@@ -112,17 +112,29 @@ const KINDS: readonly Kind[] = [
   },
 ];
 
-describe("bubbleScroll: the shared scroll box", () => {
+describe("bubbleBox: the shared box", () => {
   it("wears the class the stylesheet caps and paints a scrollbar on", () => {
     // Arrange
     const body = document.createElement("div");
     body.className = "bubble-body";
 
     // Act
-    const scroll = bubbleScroll(body);
+    const scroll = bubbleBox(body, true);
 
     // Assert
-    expect(scroll.className).toBe(BUBBLE_SCROLL_CLASS);
+    expect(scroll.className).toBe(`${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`);
+  });
+
+  it("builds an uncapped box with the structural class alone, never the scroll class", () => {
+    // Arrange
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+
+    // Act
+    const box = bubbleBox(body, false);
+
+    // Assert
+    expect(box.className).toBe(BUBBLE_BOX_CLASS);
   });
 
   it("holds the body as its only child, so the box's edge is not the text's", () => {
@@ -131,7 +143,7 @@ describe("bubbleScroll: the shared scroll box", () => {
     body.className = "bubble-body";
 
     // Act
-    const scroll = bubbleScroll(body);
+    const scroll = bubbleBox(body, true);
 
     // Assert
     expect([...scroll.children]).toEqual([body]);
@@ -190,7 +202,7 @@ describe("the agentic bubbles: the same box as the response they copy", () => {
     if (body === null) throw new Error("no body");
 
     // Assert
-    expect(body.parentElement?.className).toBe(BUBBLE_SCROLL_CLASS);
+    expect(body.parentElement?.className).toBe(`${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}`);
     expect(bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`)).toBe(body.parentElement);
   });
 });

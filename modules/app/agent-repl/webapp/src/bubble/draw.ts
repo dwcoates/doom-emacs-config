@@ -15,7 +15,9 @@
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;
  *   - its CONTENT, drawn through the one body pipeline (src/bubble/body.ts);
- *   - its COLLAPSED LINE LIMIT, the lines shown before the has-more fade;
+ *   - its COLLAPSED LINE LIMIT, the lines shown before the has-more fade, or
+ *     the UNCAPPED mode (`BUBBLE_UNCAPPED`): always at full height, never a
+ *     fade, a scroll or a fold;
  *   - its EXPAND-ONLY chrome: what the reader sees only once the bubble is
  *     opened (a held prompt's details and actions), hidden while collapsed;
  *   - the WORKING wave, which only a prompt can carry: the spec types make a
@@ -30,7 +32,7 @@
 import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS } from "../expand.js";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
+import { BUBBLE_BOX_CLASS, bubbleBox, isCappedBox } from "../feed/bubble-scroll.js";
 import { stopTicking } from "../feed/ticking.js";
 import {
   BUBBLE_BODY_CLASS,
@@ -63,17 +65,36 @@ export const BUBBLE_VARIANTS = {
 } as const satisfies Record<ResponseVariant | PromptVariant, BubbleRole>;
 
 /**
- * The collapsed line limit: the shared feed cap, two lines (a held prompt), one
- * line (a thinking bubble), or none past the header strip (a peer message). Each
- * kind's limit is its own value, never a shared one, so changing one kind's cap
- * never moves another's. A closed set,
- * because the stylesheet maps each value to its line count
- * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
+ * A CAPPED bubble's collapsed line limit: the shared feed cap, two lines (a held
+ * prompt), one line (a thinking bubble), or none past the header strip (a peer
+ * message). Each kind's limit is its own value, never a shared one, so changing
+ * one kind's cap never moves another's. A closed set, because the stylesheet
+ * maps each value to its line count (`.bubble[data-cap-lines=…]`) and
+ * styles.test.ts holds the two together.
  */
-export type BubbleCapLines = "feed" | 2 | 1 | 0;
+export type CappedLines = "feed" | 2 | 1 | 0;
 
-/** Every cap value the stylesheet must carry a rule for. */
-export const BUBBLE_CAP_LINES: readonly BubbleCapLines[] = ["feed", 2, 1, 0];
+/**
+ * THE UNCAPPED MODE (owner request, 2026-09-27): a bubble shown at its FULL
+ * HEIGHT, always — an interim or final response, and the ended-turn notice.
+ * It is not a line count: its box is built WITHOUT `.bubble-scroll`
+ * (`bubbleBox`), so no cap, clip, gutter, zoom cursor, has-more fade or fold
+ * rule can reach it, and it is not a capped section, so no click, auto-collapse
+ * or carried fold can open it. It carries no expand-only chrome (the spec types
+ * forbid it), because there is no open state to reveal it in.
+ */
+export const BUBBLE_UNCAPPED = "none";
+
+/** The collapsed line limit: a capped count, or the uncapped mode. */
+export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
+
+/** Every CAPPED value, each of which the stylesheet must map to a line count. */
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 2, 1, 0];
+
+/** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
+export function isCapped(cap: BubbleCapLines): cap is CappedLines {
+  return cap !== BUBBLE_UNCAPPED;
+}
 
 /** The attributes the stylesheet keys a bubble's look on. */
 export const BUBBLE_ROLE_ATTRIBUTE = "data-role";
@@ -100,6 +121,14 @@ interface BubbleSpecBase {
   corner?: HTMLElement;
   /** The content: nodes, markdown slots among them (see body.ts). */
   content: readonly ChildNode[];
+  /** Chrome after the scroll box, always shown (a cut-short marker). */
+  footer?: readonly HTMLElement[];
+}
+
+/** A capped bubble's limit, and the expand-only chrome only it can carry. */
+interface CappedSpec {
+  /** The collapsed line limit. */
+  capLines: CappedLines;
   /**
    * Chrome after the scroll box shown ONLY while the bubble is expanded (a held
    * prompt's details and actions): it wears `BUBBLE_EXPAND_ONLY_CLASS`, which
@@ -107,25 +136,29 @@ interface BubbleSpecBase {
    * toggle (expand.ts) is what reveals it. Drawn before the footer.
    */
   expandOnly?: readonly HTMLElement[];
-  /** Chrome after the scroll box, always shown (a cut-short marker). */
-  footer?: readonly HTMLElement[];
-  /** The collapsed line limit. */
-  capLines: BubbleCapLines;
+}
+
+/** An uncapped bubble: always at full height, so it has nothing expand-only. */
+interface UncappedSpec {
+  capLines: typeof BUBBLE_UNCAPPED;
+  expandOnly?: never;
 }
 
 /** A prompt bubble: right rail, blue, and the only role that can wave. */
-export interface PromptBubbleSpec extends BubbleSpecBase {
-  role: "prompt";
-  variant: PromptVariant;
-  /** The daemon's in-flight fact, drawn as the working wave. */
-  working: boolean;
-}
+export type PromptBubbleSpec = BubbleSpecBase &
+  (CappedSpec | UncappedSpec) & {
+    role: "prompt";
+    variant: PromptVariant;
+    /** The daemon's in-flight fact, drawn as the working wave. */
+    working: boolean;
+  };
 
 /** A response bubble: left rail, purple, never waving. */
-export interface ResponseBubbleSpec extends BubbleSpecBase {
-  role: "response";
-  variant: ResponseVariant;
-}
+export type ResponseBubbleSpec = BubbleSpecBase &
+  (CappedSpec | UncappedSpec) & {
+    role: "response";
+    variant: ResponseVariant;
+  };
 
 export type BubbleSpec = PromptBubbleSpec | ResponseBubbleSpec;
 
@@ -159,10 +192,11 @@ const drawnHooks = new WeakMap<Element, readonly string[]>();
  * (`paintBody`). Nothing already in its place is moved (`placeChildren`).
  */
 export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubble {
-  const reused = reusableParts(previous, spec.role);
+  const capped = isCapped(spec.capLines);
+  const reused = reusableParts(previous, spec.role, capped);
   const bubble = reused?.bubble ?? document.createElement("div");
   const body = reused?.body ?? createBubbleBody();
-  const scroll = reused?.scroll ?? bubbleScroll(body);
+  const scroll = reused?.scroll ?? bubbleBox(body, capped);
 
   const hooks = [BUBBLE_CLASS, "md", ...(spec.hooks ?? [])];
   for (const old of drawnHooks.get(bubble) ?? []) {
@@ -209,16 +243,18 @@ interface BubbleParts {
 }
 
 /**
- * The parts of PREVIOUS when it is a bubble of ROLE this module drew, to be
- * updated in place; null for anything else (a first draw, a row whose kind
- * changed), which then gets a fresh bubble.
+ * The parts of PREVIOUS when it is a bubble of ROLE this module drew, whose box
+ * is CAPPED exactly when this draw's is, to be updated in place; null for
+ * anything else (a first draw, a row whose kind changed, a row whose cap mode
+ * changed), which then gets a fresh bubble. A box never changes mode in place,
+ * so an uncapped box can never inherit a capped one's open fold or fade.
  */
-function reusableParts(previous: HTMLElement | undefined, role: BubbleRole): BubbleParts | null {
+function reusableParts(previous: HTMLElement | undefined, role: BubbleRole, capped: boolean): BubbleParts | null {
   if (previous === undefined || !previous.classList.contains(BUBBLE_CLASS)) return null;
   if (previous.getAttribute(BUBBLE_ROLE_ATTRIBUTE) !== role) return null;
-  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
+  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_BOX_CLASS}`);
   const body = scroll?.querySelector(`:scope > .${BUBBLE_BODY_CLASS}`);
-  if (scroll === null || !isBubbleBody(body)) return null;
+  if (scroll === null || !isBubbleBody(body) || isCappedBox(scroll) !== capped) return null;
   return { bubble: previous, scroll, body };
 }
 

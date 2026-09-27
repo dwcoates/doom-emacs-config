@@ -42,11 +42,11 @@ function mount(el: HTMLElement): HTMLElement {
  * A body inside a scroll box inside a bubble (of BUBBLECLASS), attached under
  * its own column unless DETACHED.
  */
-function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTMLElement {
+function stageBody(opts: { detached?: boolean; bubbleClass?: string; boxClass?: string } = {}): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = opts.bubbleClass ?? "bubble assistant md";
   const scroll = document.createElement("div");
-  scroll.className = "bubble-scroll";
+  scroll.className = opts.boxClass ?? "bubble-scroll bubble-box";
   const body = document.createElement("div");
   body.className = "bubble-body";
   scroll.append(body);
@@ -91,6 +91,15 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     const cols = measureTreeCols(body);
     // Assert — floor(750 / 8) and floor(736 / 8).
     expect(cols).toBe(want);
+  });
+
+  it("takes no gutter off an uncapped bubble's budget, whose box reserves none", () => {
+    // Arrange — the uncapped box wears `.bubble-box` alone (BUBBLE_UNCAPPED).
+    const body = stageBody({ boxClass: "bubble-box" });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — floor(750 / 8): the 8px classic gutter is not taken.
+    expect(cols).toBe(93);
   });
 
   it("wraps a collapsed bubble to the same budget as the expanded one", () => {

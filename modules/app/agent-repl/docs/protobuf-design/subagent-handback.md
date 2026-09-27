@@ -98,3 +98,31 @@ ARCHITECTURAL CONSEQUENCES
   so live/adopted supersession is unchanged.
 - Cost accepted: hand-back records stored before this change have no `kind`
   and rebuild as peer bubbles.
+
+### 2026-09-27 — the report draws as a result unit on the subagent's own feed
+
+WHAT
+- `frontend.v1.FeedTurnActivity.unit` gains `FeedSubagentResult subagent_result = 11`,
+  with elements `FeedSubagentResultReport`, `FeedSubagentResultUndeliveredReason`,
+  and state arms `delivering` / `delivered` / `undelivered`.
+
+WHY
+- The implementing agent found no `frontend.v1` element for a subagent's
+  returned result: `FeedSubagent`'s settled arm has none and no activity arm
+  fits. Without one, the report (now removed from the main feed as a badge)
+  would be visible nowhere.
+
+WHY THE ALTERNATIVES LOST
+- A result field on the subagent HEAD's settled arm: puts a long markdown
+  report into the compact head, and forces the daemon to carry it from the
+  subagent's feed to the parent's.
+- Reusing `FeedResponse` / `FeedTurnEndedConcluded.answer`: recasts a tool call
+  as prose, the same objection that rejected `AgentCompleted.answer` above.
+- The refusal reason is an element message, not a bare optional string, per
+  figma-to-idl.
+
+ARCHITECTURAL CONSEQUENCES
+- The daemon draws `AgentSubagentHandback` as this unit, keyed by its activity
+  id like every unit, on the subagent's own feed (`resolve/feed/sink.go`,
+  replacing the draws-nothing branch). The webapp renders the report through
+  the response markdown pipeline.
