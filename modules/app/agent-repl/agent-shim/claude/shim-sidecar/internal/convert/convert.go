@@ -68,6 +68,11 @@ type Observer interface {
 	// reader mints the terminal through the spool's own handler, the same way a
 	// LOST conclusion does.
 	TaskStopped(taskID string)
+
+	// TaskConcluded reports that this stream SETTLED a backgrounded agent run
+	// itself — from its task notification or its agent TaskStop — so the reader
+	// never later concludes that run LOST over the terminal already written.
+	TaskConcluded(taskID string)
 }
 
 // noopObserver is the default: a converter with nobody listening still converts.
@@ -75,6 +80,7 @@ type noopObserver struct{}
 
 func (noopObserver) TaskSpawned(string, string, string, string, bool) {}
 func (noopObserver) TaskStopped(string)                               {}
+func (noopObserver) TaskConcluded(string)                             {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map
