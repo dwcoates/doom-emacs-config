@@ -145,17 +145,17 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		// A send IS an agent-addressed prompt, drawn on the SENDER's feed with
 		// the same component the recipient's delivered prompt is drawn with.
 		row, err = r.drawSendMessage(s, at, act, item.SendMessage)
+	case *conversationv1.AgentActivity_SubagentHandback:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SubagentHandback"})
+		// A hand-back IS the subagent's returned result, drawn once on the
+		// subagent's OWN feed (inside its card) and never as a tool card.
+		row, err = r.drawSubagentResult(s, at, act, item.SubagentHandback)
 	default:
 		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
 		// the topbar's warning dropdown. Every other kind that draws nowhere
 		// (task acts, wakeups, cron, notifications, injected context) answers
 		// the same way. THINKING and MONITORS draw their own rows above, so
 		// they are no longer in this list.
-		//
-		// A SUBAGENT'S HAND-BACK (AgentSubagentHandback) lands here too, and
-		// is never an ordinary tool card. Its report is the subagent's result,
-		// drawn once inside the subagent's own card; frontend.v1 has no element
-		// for that result yet, so until one lands the unit draws nothing here.
 		//
 		// THE KIND IS RECORDED, because a detachment naming this unit has to
 		// be able to tell "nothing has drawn it YET" from "nothing will ever
