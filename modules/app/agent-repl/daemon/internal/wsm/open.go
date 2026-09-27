@@ -55,6 +55,13 @@ type store struct {
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.
 	canonicalDir func(string) (string, error)
+
+	// leaseMu guards owned.
+	leaseMu sync.Mutex
+	// owned is every lease THIS HANDLE acquired and has not released. One
+	// daemon process holds exactly one handle, so this set is exactly the
+	// leases whose owning process is alive: see ForeignLeases and Close.
+	owned map[LeaseID]Lease
 }
 
 // Open opens the workspace-state-manager database at path, creating the file
@@ -253,8 +260,26 @@ func (s *store) createSchema(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the handle.
-func (s *store) Close() error { return s.db().Close() }
+// Close releases every lease this handle still owns, then the handle.
+//
+// A LEASE DOES NOT OUTLIVE THE PROCESS THAT TOOK IT. The handle is the
+// process's one writer, so its close is the end of every operation that
+// could still be holding a lease: a relaunch, a drain hold, a handover's
+// quiesce hold still waiting on a holdout. Left behind, such a lease is read
+// by every later daemon as a live hold -- the composer's `restarting` arm
+// refused every prompt of five workspaces for hours after the 2026-09-27
+// handover (see ForeignLeases for the boot's half).
+//
+// A MERGE LEASE IS KEPT: it is the merge ledger's durable identity, and the
+// next boot's merge recovery is what resolves it.
+//
+// A lease another process already released -- the successor that adopted a
+// handed-over workspace drains its quiesce hold -- is simply gone, and is
+// recorded at DEBUG. Every failure is returned, joined with the close's own.
+func (s *store) Close() error {
+	released := s.releaseOwnedLeases(context.Background())
+	return errors.Join(released, s.db().Close())
+}
 
 // db answers the handle in force. It is a method because a PROMOTION swaps it
 // under every reader.

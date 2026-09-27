@@ -107,6 +107,10 @@ type DB interface {
 	// Lease loads a workspace's current lease; the bool reports whether one is
 	// held.
 	Lease(ctx context.Context, id WorkspaceID) (Lease, bool, error)
+	// ForeignLeases lists every held lease THIS HANDLE did not acquire. A
+	// daemon holds one handle for its whole life, so on an incumbent's boot
+	// each of them is an orphan whose owning process is gone.
+	ForeignLeases(ctx context.Context) ([]Lease, error)
 	// SetLeasePolicy changes what a held lease projects onto new submissions
 	// (a merge moving from refusing to parked).
 	SetLeasePolicy(ctx context.Context, leaseID LeaseID, p LeasePolicy) error

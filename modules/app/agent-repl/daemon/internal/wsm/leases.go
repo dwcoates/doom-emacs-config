@@ -84,19 +84,142 @@ func (s *store) AcquireLeaseAs(ctx context.Context, id WorkspaceID, lease LeaseI
 	if err != nil {
 		return Lease{}, err
 	}
+	s.own(out)
 	return out, nil
 }
 
 // ReleaseLease releases one acquisition. Releasing a lease that is not held is
 // a refusal, never a no-op: it means the caller lost track of the arbitration.
 func (s *store) ReleaseLease(ctx context.Context, leaseID LeaseID) error {
-	return s.write(ctx, "daemon.wsm.release_lease", dlog.Context{"lease": string(leaseID)}, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.write(ctx, "daemon.wsm.release_lease", dlog.Context{"lease": string(leaseID)}, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ?`, leaseID)
 		if err != nil {
 			return err
 		}
 		return requireOneRow(res, fmt.Sprintf("wsm: lease %s", leaseID))
 	})
+	if err != nil {
+		return err
+	}
+	s.disown(leaseID)
+	return nil
+}
+
+// own records a lease this handle acquired.
+func (s *store) own(l Lease) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	if s.owned == nil {
+		s.owned = map[LeaseID]Lease{}
+	}
+	s.owned[l.ID] = l
+}
+
+// disown forgets a lease this handle no longer holds.
+func (s *store) disown(id LeaseID) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	delete(s.owned, id)
+}
+
+// ForeignLeases lists every held lease THIS HANDLE did not acquire.
+//
+// OWNERSHIP IS THE ACQUIRING PROCESS. A daemon holds exactly one state handle
+// for its whole life, so a lease this handle did not take was taken by some
+// other process. On an INCUMBENT'S BOOT that process is gone -- the boot claim
+// is the kernel's proof no other incumbent runs, and a joining successor's
+// boot reconciles nothing -- so every lease this answers there is an orphan
+// whose owner died without its orderly close (Close releases what it owns).
+// The boot sequence releases each of them, loudly.
+func (s *store) ForeignLeases(ctx context.Context) ([]Lease, error) {
+	var all []Lease
+	err := s.read(ctx, "daemon.wsm.foreign_leases", nil, func(ctx context.Context) error {
+		rows, err := s.db().QueryContext(ctx, `SELECT `+leaseColumns+` FROM leases ORDER BY acquired_at, id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var out []Lease
+		for rows.Next() {
+			l, err := scanLease(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, l)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		all = out
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	foreign := make([]Lease, 0, len(all))
+	for _, l := range all {
+		if _, mine := s.owned[l.ID]; !mine {
+			foreign = append(foreign, l)
+		}
+	}
+	return foreign, nil
+}
+
+// releaseOwnedLeases releases every non-merge lease this handle still owns, in
+// one transaction, recording what it released at INFO. A lease whose row is
+// already gone was released by the process it was handed to, and is recorded
+// at DEBUG.
+func (s *store) releaseOwnedLeases(ctx context.Context) error {
+	const op = "daemon.wsm.close"
+	s.leaseMu.Lock()
+	var owned []Lease
+	for _, l := range s.owned {
+		if l.Holder != HolderMerge {
+			owned = append(owned, l)
+		}
+	}
+	s.leaseMu.Unlock()
+	if len(owned) == 0 {
+		return nil
+	}
+	var released, gone []string
+	err := s.write(ctx, op, dlog.Context{"leases": len(owned)}, func(ctx context.Context, tx *sql.Tx) error {
+		released, gone = nil, nil
+		for _, l := range owned {
+			res, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ?`, l.ID)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			entry := string(l.ID) + " " + string(l.Workspace) + " " + l.Holder.String()
+			if n == 0 {
+				gone = append(gone, entry)
+				continue
+			}
+			released = append(released, entry)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("wsm: release the leases this handle still owns: %w", err)
+	}
+	for _, l := range owned {
+		s.disown(l.ID)
+	}
+	if len(gone) > 0 {
+		s.log.Debug(op, "leases this handle took were already released by the process they were handed to",
+			dlog.Context{"leases": gone})
+	}
+	if len(released) > 0 {
+		s.log.Info(op, "released the leases this process still held as its state handle closed",
+			dlog.Context{"leases": released})
+	}
+	return nil
 }
 
 // Lease loads a workspace's current lease; the bool reports whether one is held.
