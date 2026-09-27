@@ -32,6 +32,8 @@ import {
   outputPathFromProse,
   patchBackgrounds,
   resultBackgroundTaskId,
+  shellRunStartEntry,
+  shellRunTerminalEntry,
   startedInForeground,
   wentSilent,
 } from "../../src/convert/detached.js";
@@ -1744,5 +1746,272 @@ describe("isAgentTaskType", () => {
 
     // Assert: the words appear only in VENDOR_TASK_KINDS.
     expect(readers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SHELL RUN'S OWN LIFECYCLE: the shim writes a detached run's start and
+// terminal, so a run the sidecar never tails still opens and still ends.
+// ---------------------------------------------------------------------------
+
+describe("the shell run's lifecycle rows", () => {
+  const SHELL = "toolu_shell";
+
+  /** The open `Bash` call a detached run was spawned by. */
+  function shellCall(input: Record<string, unknown> = { command: "sleep 3", description: "wait" }): PendingCall {
+    return { toolUseId: SHELL, toolName: "Bash", input, startedAtMs: 7, agentId: MAIN_AGENT };
+  }
+
+  /** A call registry holding the shell's open call. */
+  function holdingShell(): CallRegistry {
+    const calls = createCallRegistry();
+    calls.remember(shellCall());
+    return calls;
+  }
+
+  /** A registry that knows the task is a shell, as its `task_started` stated. */
+  function shellTask(): ReturnType<typeof createTaskKindRegistry> {
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_bash");
+    return registry;
+  }
+
+  /** The bash frame a lifecycle row carries. */
+  function bashOf(entry: PersistEntry | undefined): conversationv1.AgentBash {
+    if (entry?.item.kind !== "bash_run") throw new Error("expected a bash_run row");
+    return entry.item.frame;
+  }
+
+  /** The settled arm of a terminal row. */
+  function successOf(entry: PersistEntry | undefined): conversationv1.AgentBashSuccess {
+    const frame = bashOf(entry);
+    if (frame.result.case !== "success") throw new Error("expected the success arm");
+    return frame.result.value;
+  }
+
+  /** The cause arm of a settled outcome, or the outcome's own arm when it is not interrupted. */
+  function causeOf(settled: conversationv1.AgentBashSuccess): string | undefined {
+    return settled.outcome.case === "interrupted" ? settled.outcome.value.cause.case : settled.outcome.case;
+  }
+
+  const BY_HAND = { subtype: "task_updated", task_id: "t1", tool_use_id: SHELL, patch: { is_backgrounded: true } };
+  const CONCLUDED = {
+    subtype: "task_notification",
+    task_id: "t1",
+    tool_use_id: SHELL,
+    status: "completed",
+    output_file: "/tmp/t1.output",
+  };
+
+  it("keys the start as the run's cross-plane start row", () => {
+    // Arrange, Act.
+    const entry = shellRunStartEntry(foldContext(), MAIN_AGENT, SHELL, shellCall());
+
+    // Assert.
+    expect(entry?.upsertKey).toBe(`bash:${SHELL}:start`);
+  });
+
+  it("names the run the start is about", () => {
+    // Arrange, Act.
+    const entry = shellRunStartEntry(foldContext(), MAIN_AGENT, SHELL, shellCall());
+
+    // Assert.
+    expect(entry?.item.kind === "bash_run" ? entry.item.run.value : undefined).toBe(SHELL);
+  });
+
+  it("states the call's command and its ORIGINAL instant", () => {
+    // Arrange, Act.
+    const frame = bashOf(shellRunStartEntry(foldContext({ nowMs: 9_000 }), MAIN_AGENT, SHELL, shellCall()));
+
+    // Assert.
+    if (frame.result.case !== "start") throw new Error("expected the start arm");
+    expect({ line: frame.result.value.command?.line, at: frame.result.value.startedAt?.atMs }).toEqual({
+      line: "sleep 3",
+      at: 7n,
+    });
+  });
+
+  it("writes no start for a call this fold never saw open", () => {
+    // Arrange, Act, Assert.
+    expect(shellRunStartEntry(foldContext(), MAIN_AGENT, SHELL, undefined)).toBeUndefined();
+  });
+
+  it("writes no start for a call that named no command line", () => {
+    // Arrange, Act, Assert.
+    expect(shellRunStartEntry(foldContext(), MAIN_AGENT, SHELL, shellCall({}))).toBeUndefined();
+  });
+
+  it("gives every restatement of one run's start ONE write coordinate, so the store absorbs the repeats", () => {
+    // Arrange, Act: two restatements from two different moments of the fold.
+    const first = shellRunStartEntry(foldContext({ turnId: "turn-1" }), MAIN_AGENT, SHELL, shellCall());
+    const again = shellRunStartEntry(foldContext({ turnId: "turn-2" }), MAIN_AGENT, SHELL, shellCall());
+
+    // Assert.
+    expect(again?.source).toEqual(first?.source);
+  });
+
+  it("keys the terminal as the run's cross-plane terminal row", () => {
+    // Arrange, Act.
+    const entry = shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined);
+
+    // Assert.
+    expect(entry.upsertKey).toBe(`bash:${SHELL}:terminal`);
+  });
+
+  it("settles a COMPLETED run as completed, with output not observed and no termination stated", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
+    );
+
+    // Assert.
+    if (settled.outcome.case !== "completed") throw new Error("expected the completed outcome");
+    expect({
+      form: settled.outcome.value.output?.form.case,
+      termination: settled.outcome.value.termination,
+    }).toEqual({ form: "notObserved", termination: undefined });
+  });
+
+  it("settles a FAILED run as completed too, since a non-zero exit is the command's own verdict", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "failed", undefined),
+    );
+
+    // Assert.
+    expect(settled.outcome.case).toBe("completed");
+  });
+
+  it("settles a STOPPED run as interrupted by the user", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "stopped", undefined),
+    );
+
+    // Assert.
+    expect(causeOf(settled)).toBe("byUser");
+  });
+
+  it("states NO cause for a run the vendor found orphaned by a worker restart", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "stopped", "worker_restart"),
+    );
+
+    // Assert.
+    expect(causeOf(settled)).toBeUndefined();
+  });
+
+  it("states NO cause for a status this shim does not know", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "vanished", undefined),
+    );
+
+    // Assert.
+    expect(causeOf(settled)).toBeUndefined();
+  });
+
+  it("restates the spawning call's command on the terminal", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
+    );
+
+    // Assert.
+    expect(settled.command?.line).toBe("sleep 3");
+  });
+
+  it("leaves the command UNSET when this fold never saw the spawning call", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, undefined, "completed", undefined),
+    );
+
+    // Assert.
+    expect(settled.command).toBeUndefined();
+  });
+
+  it("settles at the fold's clock, restating the run's start instant", () => {
+    // Arrange, Act.
+    const settled = successOf(
+      shellRunTerminalEntry(foldContext({ nowMs: 9_000 }), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
+    );
+
+    // Assert.
+    expect({ at: settled.settledAt?.atMs, started: settled.settledAt?.startedAt?.atMs }).toEqual({
+      at: 9_000n,
+      started: 7n,
+    });
+  });
+
+  it("puts a by-hand backgrounded shell's START ahead of its announcement", () => {
+    // Arrange, Act: the incident's path, a shell a person backgrounded, announced here.
+    const entries = convert(BY_HAND, {}, shellTask(), holdingShell());
+
+    // Assert.
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([`bash:${SHELL}:start`, `detached:${SHELL}`]);
+  });
+
+  it("writes no start when a by-hand backgrounded task is an AGENT", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+
+    // Act.
+    const entries = convert(BY_HAND, {}, registry, holdingShell());
+
+    // Assert.
+    expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
+  });
+
+  it("ends a concluded shell with its start restated, then its terminal", () => {
+    // Arrange: the call was seen open while the run was announced.
+    const registry = shellTask();
+    drain(convert(BY_HAND, {}, registry, holdingShell()));
+
+    // Act.
+    const entries = convert(CONCLUDED, {}, registry, createCallRegistry());
+
+    // Assert.
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([
+      `detached:${SHELL}`,
+      `bash:${SHELL}:start`,
+      `bash:${SHELL}:terminal`,
+    ]);
+  });
+
+  it("restates the start at the conclusion under the SAME write coordinate the announcement's start used", () => {
+    // Arrange.
+    const registry = shellTask();
+    const announced = convert(BY_HAND, {}, registry, holdingShell());
+
+    // Act.
+    const concluded = convert(CONCLUDED, {}, registry, createCallRegistry());
+
+    // Assert.
+    const startOf = (entries: readonly PersistEntry[]): PersistEntry | undefined =>
+      entries.find((entry) => entry.upsertKey === `bash:${SHELL}:start`);
+    expect(startOf(concluded)?.source).toEqual(startOf(announced)?.source);
+  });
+
+  it("still writes the terminal of a concluded shell whose call this fold never saw", () => {
+    // Arrange, Act: a run adopted from before this process, concluding now.
+    const entries = convert(CONCLUDED, {}, shellTask(), createCallRegistry());
+
+    // Assert.
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([`detached:${SHELL}`, `bash:${SHELL}:terminal`]);
+  });
+
+  it("writes no shell terminal when an AGENT task concludes", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+
+    // Act.
+    const entries = convert(CONCLUDED, {}, registry);
+
+    // Assert.
+    expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
   });
 });

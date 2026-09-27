@@ -1116,7 +1116,7 @@ describe("the transcript backup", () => {
 });
 
 describe("a detached shell run's key spellings", () => {
-  test("the shim's bash rows are keyed bash:<run> and bash:<run>:terminal, with the VENDOR's run id", async () => {
+  test("the shim's bash rows are keyed bash:<run>:start and bash:<run>:terminal, with the VENDOR's run id", async () => {
     // THE RUN ID IS THE BASH CALL'S OWN tool_use_id, which the vendor wrote
     // into the transcript. The sidecar keys the same run off the same id from
     // the file, so a shim that keyed by anything else would write a second
@@ -1149,11 +1149,13 @@ describe("a detached shell run's key spellings", () => {
     expect(vendorIds.length).toBeGreaterThan(0);
     for (const key of bashKeys) {
       const rest = key.slice("bash:".length);
-      const run = rest.endsWith(":terminal") ? rest.slice(0, -":terminal".length) : rest;
-      // Not an offset row: the shim writes none.
-      expect(rest === run || rest === `${run}:terminal`).toBe(true);
+      const run = rest.replace(/:(start|terminal)$/, "");
+      // Not a tail row: the shim writes only a run's lifecycle, never its output.
+      expect(rest === `${run}:start` || rest === `${run}:terminal`).toBe(true);
       expect(vendorIds).toContain(run);
     }
+    // THE SHIM WRITES BOTH ENDS: the start at the announcement, the terminal here.
+    expect(bashKeys.some((key) => key.endsWith(":start"))).toBe(true);
     expect(bashKeys.some((key) => key.endsWith(":terminal"))).toBe(true);
   });
 });
