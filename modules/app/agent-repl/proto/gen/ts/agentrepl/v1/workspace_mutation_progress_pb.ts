@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_mutation_progress.proto.
  */
 export const file_agentrepl_v1_workspace_mutation_progress: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEioQEKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIAEIHCgVldmVudCJIChVXb3Jrc3BhY2VPcGVuUHJvZ3Jlc3MSLwoFc3RhZ2UYASABKA4yIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlIsoBChdXb3Jrc3BhY2VDcmVhdGVQcm9ncmVzcxIzCgVzdGFnZRgBIAEoDjIiLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUgAEjsKCXN1Y2NlZWRlZBgCIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdWNjZWVkZWRIABI1CgZmYWlsZWQYAyABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlRmFpbGVkSABCBgoEc3RlcCJrChVXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSNQoHcmVmdXNhbBgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VFcnJvckgAEhIKCGludGVybmFsGAIgASgJSABCBwoFY2F1c2UiVwoYV29ya3NwYWNlQ3JlYXRlU3VjY2VlZGVkEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEbmFtZRgCIAEoCSqHAgoSV29ya3NwYWNlT3BlblN0YWdlEiQKIFdPUktTUEFDRV9PUEVOX1NUQUdFX1VOU1BFQ0lGSUVEEAASKgomV09SS1NQQUNFX09QRU5fU1RBR0VfQ0hFQ0tJTkdfV09SS1RSRUUQARIpCiVXT1JLU1BBQ0VfT1BFTl9TVEFHRV9TVEFSVElOR19TRVNTSU9OEAISIQodV09SS1NQQUNFX09QRU5fU1RBR0VfUkVWSVZJTkcQAxIoCiRXT1JLU1BBQ0VfT1BFTl9TVEFHRV9DTEVBUklOR19DTE9TRUQQBBInCiNXT1JLU1BBQ0VfT1BFTl9TVEFHRV9DSEVDS0lOR19CVUlMRBAFKpYBChRXb3Jrc3BhY2VDcmVhdGVTdGFnZRImCiJXT1JLU1BBQ0VfQ1JFQVRFX1NUQUdFX1VOU1BFQ0lGSUVEEAASKAokV09SS1NQQUNFX0NSRUFURV9TVEFHRV9ERVJJVklOR19OQU1FEAESLAooV09SS1NQQUNFX0NSRUFURV9TVEFHRV9DUkVBVElOR19XT1JLVFJFRRACQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEioQEKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIAEIHCgVldmVudCJIChVXb3Jrc3BhY2VPcGVuUHJvZ3Jlc3MSLwoFc3RhZ2UYASABKA4yIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlIt8BChdXb3Jrc3BhY2VDcmVhdGVQcm9ncmVzcxI7Cg1lbnRlcmVkX3N0YWdlGAQgASgLMiIuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlSAASOwoJc3VjY2VlZGVkGAIgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZEgAEjUKBmZhaWxlZBgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVGYWlsZWRIAEIGCgRzdGVwSgQIARACUgVzdGFnZSJrChVXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSNQoHcmVmdXNhbBgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VFcnJvckgAEhIKCGludGVybmFsGAIgASgJSABCBwoFY2F1c2UiiAIKFFdvcmtzcGFjZUNyZWF0ZVN0YWdlEkcKDWRlcml2aW5nX25hbWUYASABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWVIABJPChFjcmVhdGluZ193b3JrdHJlZRgCIAEoCzIyLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUNyZWF0aW5nV29ya3RyZWVIABJNChBzdGFydGluZ19zZXNzaW9uGAMgASgLMjEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uSABCBwoFc3RhZ2UiIgogV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWUiJgokV29ya3NwYWNlQ3JlYXRlU3RhZ2VDcmVhdGluZ1dvcmt0cmVlIiUKI1dvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uIlcKGFdvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkqhwIKEldvcmtzcGFjZU9wZW5TdGFnZRIkCiBXT1JLU1BBQ0VfT1BFTl9TVEFHRV9VTlNQRUNJRklFRBAAEioKJldPUktTUEFDRV9PUEVOX1NUQUdFX0NIRUNLSU5HX1dPUktUUkVFEAESKQolV09SS1NQQUNFX09QRU5fU1RBR0VfU1RBUlRJTkdfU0VTU0lPThACEiEKHVdPUktTUEFDRV9PUEVOX1NUQUdFX1JFVklWSU5HEAMSKAokV09SS1NQQUNFX09QRU5fU1RBR0VfQ0xFQVJJTkdfQ0xPU0VEEAQSJwojV09SS1NQQUNFX09QRU5fU1RBR0VfQ0hFQ0tJTkdfQlVJTEQQBUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * One staged-progress push for one in-flight workspace mutation.
@@ -110,18 +110,21 @@ export const WorkspaceOpenProgressSchema: GenMessage<WorkspaceOpenProgress> = /*
  */
 export type WorkspaceCreateProgress = Message<"agentrepl.v1.WorkspaceCreateProgress"> & {
   /**
+   * Which step the create is on. Exactly one arm is set per progress push.
+   *
    * @generated from oneof agentrepl.v1.WorkspaceCreateProgress.step
    */
   step: {
     /**
      * An intermediate stage the create has just entered. Emitted only for the
-     * stages the create actually reaches: a create with a supplied name never
-     * emits `DERIVING_NAME`, because the daemon mints no name for it.
+     * stages the create actually reaches, in order: a create with a supplied
+     * name never enters `deriving_name`, because the daemon mints no name for
+     * it.
      *
-     * @generated from field: agentrepl.v1.WorkspaceCreateStage stage = 1;
+     * @generated from field: agentrepl.v1.WorkspaceCreateStage entered_stage = 4;
      */
     value: WorkspaceCreateStage;
-    case: "stage";
+    case: "enteredStage";
   } | {
     /**
      * TERMINAL: the workspace was created. Carries the minted identity (the
@@ -137,8 +140,9 @@ export type WorkspaceCreateProgress = Message<"agentrepl.v1.WorkspaceCreateProgr
      * TERMINAL: the create failed. Mirrors the two ways the synchronous form
      * fails — a typed refusal or an internal error — so a client surfaces the
      * failure identically whichever form it used. Only the failures that can
-     * arrive after the ack ride here — naming, worktree, spawn; the pre-detach
-     * refusals stay on the rpc's own `error` arm.
+     * arrive after the ack ride here — naming, worktree, spawn, the initial
+     * prompt's submission; the pre-detach refusals stay on the rpc's own
+     * `error` arm.
      *
      * @generated from field: agentrepl.v1.WorkspaceCreateFailed failed = 3;
      */
@@ -196,6 +200,111 @@ export const WorkspaceCreateFailedSchema: GenMessage<WorkspaceCreateFailed> = /*
   messageDesc(file_agentrepl_v1_workspace_mutation_progress, 3);
 
 /**
+ * A stage a create passes through between the ack and its terminal outcome.
+ * THE SET ARM IS THE STAGE. The "creating workspace" phase is the ack itself
+ * (CreateWorkspaceAccepted), and "created" is the `succeeded` step, so neither
+ * is a stage here. A client words each arm as one minibuffer line; a stage
+ * that is entered replaces the line of the one before it.
+ *
+ * @generated from message agentrepl.v1.WorkspaceCreateStage
+ */
+export type WorkspaceCreateStage = Message<"agentrepl.v1.WorkspaceCreateStage"> & {
+  /**
+   * The stage just entered. Stages arrive in the order declared here, and a
+   * create skips only the stages its form does not need.
+   *
+   * @generated from oneof agentrepl.v1.WorkspaceCreateStage.stage
+   */
+  stage: {
+    /**
+     * The daemon is deriving the workspace's name with a headless naming call —
+     * from the initial prompt, plus the parent conversation's digest for a
+     * fork. Entered only when the create supplied no name.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceCreateStageDerivingName deriving_name = 1;
+     */
+    value: WorkspaceCreateStageDerivingName;
+    case: "derivingName";
+  } | {
+    /**
+     * The daemon is materializing the workspace's git worktree
+     * (`worktree add`).
+     *
+     * @generated from field: agentrepl.v1.WorkspaceCreateStageCreatingWorktree creating_worktree = 2;
+     */
+    value: WorkspaceCreateStageCreatingWorktree;
+    case: "creatingWorktree";
+  } | {
+    /**
+     * The daemon is starting the workspace's session: registering the
+     * workspace, spawning its shim and bringing the vendor session up — for a
+     * fork, after copying the parent's transcript — then submitting the
+     * initial prompt when there is one. Entered by every create that gets past
+     * the worktree, and usually the longest stage. It ends at the create's
+     * terminal step: `succeeded` once the session is up and any initial prompt
+     * is accepted by the queue, or `failed` naming what went wrong.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceCreateStageStartingSession starting_session = 3;
+     */
+    value: WorkspaceCreateStageStartingSession;
+    case: "startingSession";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceCreateStage.
+ * Use `create(WorkspaceCreateStageSchema)` to create a new message.
+ */
+export const WorkspaceCreateStageSchema: GenMessage<WorkspaceCreateStage> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 4);
+
+/**
+ * The naming stage. It carries nothing: the arm being set is the whole fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceCreateStageDerivingName
+ */
+export type WorkspaceCreateStageDerivingName = Message<"agentrepl.v1.WorkspaceCreateStageDerivingName"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceCreateStageDerivingName.
+ * Use `create(WorkspaceCreateStageDerivingNameSchema)` to create a new message.
+ */
+export const WorkspaceCreateStageDerivingNameSchema: GenMessage<WorkspaceCreateStageDerivingName> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 5);
+
+/**
+ * The worktree stage. It carries nothing: the arm being set is the whole fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+ */
+export type WorkspaceCreateStageCreatingWorktree = Message<"agentrepl.v1.WorkspaceCreateStageCreatingWorktree"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceCreateStageCreatingWorktree.
+ * Use `create(WorkspaceCreateStageCreatingWorktreeSchema)` to create a new message.
+ */
+export const WorkspaceCreateStageCreatingWorktreeSchema: GenMessage<WorkspaceCreateStageCreatingWorktree> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 6);
+
+/**
+ * The session bring-up stage. It carries nothing: the arm being set is the
+ * whole fact, and a failure inside it arrives as the create's `failed` step.
+ *
+ * @generated from message agentrepl.v1.WorkspaceCreateStageStartingSession
+ */
+export type WorkspaceCreateStageStartingSession = Message<"agentrepl.v1.WorkspaceCreateStageStartingSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceCreateStageStartingSession.
+ * Use `create(WorkspaceCreateStageStartingSessionSchema)` to create a new message.
+ */
+export const WorkspaceCreateStageStartingSessionSchema: GenMessage<WorkspaceCreateStageStartingSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 7);
+
+/**
  * The terminal success of a create, on the progress channel.
  *
  * @generated from message agentrepl.v1.WorkspaceCreateSucceeded
@@ -225,7 +334,7 @@ export type WorkspaceCreateSucceeded = Message<"agentrepl.v1.WorkspaceCreateSucc
  * Use `create(WorkspaceCreateSucceededSchema)` to create a new message.
  */
 export const WorkspaceCreateSucceededSchema: GenMessage<WorkspaceCreateSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 4);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 8);
 
 /**
  * The stages an open passes through while its rpc is in flight. Emitted only
@@ -286,39 +395,4 @@ export enum WorkspaceOpenStage {
  */
 export const WorkspaceOpenStageSchema: GenEnum<WorkspaceOpenStage> = /*@__PURE__*/
   enumDesc(file_agentrepl_v1_workspace_mutation_progress, 0);
-
-/**
- * The stages a create passes through between the ack and the terminal outcome.
- * The "creating workspace" phase is the ack itself (CreateWorkspaceAccepted),
- * and "created" is the `succeeded` step, so neither is a stage here.
- *
- * @generated from enum agentrepl.v1.WorkspaceCreateStage
- */
-export enum WorkspaceCreateStage {
-  /**
-   * @generated from enum value: WORKSPACE_CREATE_STAGE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * The daemon is deriving the workspace's name from its initial prompt with a
-   * headless naming call. Emitted only when the create supplied no name.
-   *
-   * @generated from enum value: WORKSPACE_CREATE_STAGE_DERIVING_NAME = 1;
-   */
-  DERIVING_NAME = 1,
-
-  /**
-   * The daemon is materializing the workspace's git worktree (`worktree add`).
-   *
-   * @generated from enum value: WORKSPACE_CREATE_STAGE_CREATING_WORKTREE = 2;
-   */
-  CREATING_WORKTREE = 2,
-}
-
-/**
- * Describes the enum agentrepl.v1.WorkspaceCreateStage.
- */
-export const WorkspaceCreateStageSchema: GenEnum<WorkspaceCreateStage> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_workspace_mutation_progress, 1);
 
