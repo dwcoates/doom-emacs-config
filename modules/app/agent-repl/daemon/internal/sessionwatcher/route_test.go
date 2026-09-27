@@ -1176,6 +1176,7 @@ func TestRefusedShellWatchIsNotKept(t *testing.T) {
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	h.client.awaitRefusedOpen(t, "WatchBash")
 
 	// Assert.
 	h.w.mu.Lock()
@@ -1197,6 +1198,7 @@ func TestARefusedShellWatchOpenNeverSeversTheLink(t *testing.T) {
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	h.client.awaitRefusedOpen(t, "WatchBash")
 
 	// Assert.
 	if got := h.w.Link(); got != shimclient.LinkConnected {
@@ -1213,6 +1215,7 @@ func TestRepeatedAnnouncementReopensARefusedSubagentWatch(t *testing.T) {
 	h.quiet()
 	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	h.client.awaitRefusedOpen(t, "WatchAgent")
 	h.client.setAgentErr(nil)
 
 	// Act.
@@ -1233,6 +1236,7 @@ func TestRepeatedAnnouncementReopensARefusedShellWatch(t *testing.T) {
 	h.quiet()
 	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	h.client.awaitRefusedOpen(t, "WatchBash")
 	h.client.setBashErr(nil)
 
 	// Act.

@@ -1162,7 +1162,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 				// The promotion is not an excuse to leave a refused watch
 				// dark: a spawn whose open the shim refused has no stream,
 				// and this announcement is an occasion to open one.
-				if entry.stream == nil {
+				if entry.stream == nil && !w.inFlightLocked(entry.opening) {
 					w.openAgentStreamLocked(entry)
 				}
 				return
@@ -1171,7 +1171,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 			// shim refuses WatchAgent for a book it has not registered yet,
 			// so an entry can be carrying no stream, and the repeated
 			// announcement is the occasion to open one.
-			if entry.stream == nil {
+			if entry.stream == nil && !w.inFlightLocked(entry.opening) {
 				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached subagent's watch", dlog.Context{
 					"agent_id": agent.GetValue(),
 				})
@@ -1199,14 +1199,11 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 			// carrying no stream; the repeated announcement is the occasion
 			// to open one, and answering it "already watched" would leave the
 			// shell dark for the rest of the session.
-			if entry.stream == nil {
+			if entry.stream == nil && !w.inFlightLocked(entry.opening) {
 				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached shell's watch", dlog.Context{
 					"work_id": handle.GetValue(),
 				})
-				if !w.openShellStreamLocked(entry) {
-					delete(w.shells, handle.GetValue())
-					w.publishLiveWorkLocked()
-				}
+				w.openShellStreamLocked(entry, shellForgottenOnFailure)
 				return
 			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the shell is already watched", dlog.Context{
@@ -1214,16 +1211,15 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 			})
 			return
 		}
+		// THE ENTRY IS LIVE FROM THE ANNOUNCEMENT. Its open is made off the
+		// lock, so the entry stands in the map (and so in every live set any
+		// stream publishes) while the open is in flight; it is published here
+		// rather than at an install nobody can order against the frames that
+		// follow. A failed open forgets it and republishes
+		// (shellForgottenOnFailure).
 		entry := &shellWatch{work: handle}
 		w.shells[handle.GetValue()] = entry
-		if !w.openShellStreamLocked(entry) {
-			// A NIL-STREAM ENTRY NEVER PERSISTS: while one sits in the map
-			// every repeated announcement is answered "already watched", so
-			// the refusal would be permanent. Forgetting it makes the next
-			// announcement open the watch afresh.
-			delete(w.shells, handle.GetValue())
-			return
-		}
+		w.openShellStreamLocked(entry, shellForgottenOnFailure)
 		w.publishLiveWorkLocked()
 
 	case kindMonitor:
@@ -1333,6 +1329,9 @@ func (w *watcher) reapAgentLocked(key string) bool {
 	}
 	entry.done = true
 	delete(w.agents, key)
+	// AN OPEN STILL IN FLIGHT FOR IT IS ABANDONED, so a hung open is released
+	// now rather than at the watcher's close; its completion is discarded.
+	entry.opening.abandon()
 	if entry.work.GetValue() != "" {
 		w.retiredWork[entry.work.GetValue()] = struct{}{}
 	}
@@ -1353,6 +1352,8 @@ func (w *watcher) reapShellLocked(key string) bool {
 	}
 	entry.done = true
 	delete(w.shells, key)
+	// An open still in flight for it is abandoned, as for a subagent.
+	entry.opening.abandon()
 	w.retiredWork[key] = struct{}{}
 	if entry.stream != nil {
 		stream := entry.stream
