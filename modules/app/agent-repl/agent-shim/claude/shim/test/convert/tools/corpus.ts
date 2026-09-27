@@ -34,3 +34,20 @@ export function toolInput(name: string): Record<string, unknown> {
   }
   return input as Record<string, unknown>;
 }
+
+/**
+ * The text of the single `tool_result` block in one tool-results corpus file,
+ * for a result the vendor records with NO `toolUseResult` object — its only
+ * statement is the block's own text.
+ */
+export function toolResultText(name: string): string {
+  const line = readFileSync(`${CORPUS}tool-results/${name}.jsonl`, "utf8").trim().split("\n")[0];
+  if (line === undefined) throw new Error(`corpus ${name} is empty`);
+  const record = JSON.parse(line) as {
+    message?: { content?: { type?: string; content?: { type?: string; text?: string }[] }[] };
+  };
+  const block = record.message?.content?.find((entry) => entry.type === "tool_result");
+  const text = block?.content?.find((entry) => entry.type === "text")?.text;
+  if (text === undefined) throw new Error(`corpus ${name} carries no tool_result text block`);
+  return text;
+}

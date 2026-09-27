@@ -29,6 +29,7 @@ import { scheduleWakeupConverter } from "./schedule-wakeup.js";
 import { sendMessageConverter } from "./send-message.js";
 import { skillUseConverter } from "./skill-use.js";
 import { subagentConverter } from "./subagent.js";
+import { subagentHandbackConverter } from "./subagent-handback.js";
 import { taskActConverter } from "./task-act.js";
 import { unmodeledConverter } from "./unmodeled.js";
 import { webFetchConverter } from "./web-fetch.js";
@@ -51,6 +52,7 @@ export const TOOL_CONVERTERS: ReadonlyMap<string, ToolConverter> = new Map<strin
   ["Agent", subagentConverter],
   ["Task", subagentConverter],
   ["SendMessage", sendMessageConverter],
+  ["SubagentHandback", subagentHandbackConverter],
   // Skills.
   ["Skill", skillUseConverter],
   // The task tracker.
