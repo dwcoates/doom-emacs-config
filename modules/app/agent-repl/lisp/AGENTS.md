@@ -77,7 +77,14 @@ the user through `agent-repl--emit-message`, which the audit already permits.
 
 A create is acked and worked in the daemon's background, so its terminal
 outcome arrives on the progress stream and the correlation seat retires the
-op there. An OPEN is answered synchronously, so only its stages ride the
+op there. A create also carries `:accepted`, echoed when the ack lands
+unless a daemon stage already overtook it. EVERY REFUSAL OF A CREATE IS ITS
+`:failed` PHASE -- synchronous or streamed, `naming_failed` and
+`one_shot_policy_missing` included -- so it is an ERROR record and an
+`agent-repl: workspace creation FAILED: ...` minibuffer line, never a
+WARNING left in *Messages*; only the two handover arms go to the handover
+instead. Every create mode (plain, child, static, fork, one-shot) sends
+through `agent-repl-verb-create`, so none has its own failure path. An OPEN is answered synchronously, so only its stages ride the
 stream: the verb retires the op itself on success, on refusal, and on a
 transport failure (`agent-repl-verbs--send`'s `:on-transport-failure`).
 Nothing on the stream would ever retire it.
