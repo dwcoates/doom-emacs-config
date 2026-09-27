@@ -673,6 +673,8 @@ type fakeRegistry struct {
 	pending  map[ids.WorkspaceID]bounce.Request
 	err      error
 	running  sync.WaitGroup
+	// endedDrains records every EndKeptDrain.
+	endedDrains []ids.WorkspaceID
 	// runCtx is the context each bounce runs on; nil is context.Background(),
 	// which is what the queue's own runs are detached onto.
 	runCtx context.Context
@@ -705,6 +707,20 @@ func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req 
 	r.mu.Unlock()
 	r.run(ws, req)
 	return bounce.Decision{Now: true, Forced: !free}, nil
+}
+
+// EndKeptDrain records the ended drain.
+func (r *fakeRegistry) EndKeptDrain(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.endedDrains = append(r.endedDrains, ws)
+}
+
+// EndedDrains answers the workspaces whose kept drain was ended, in order.
+func (r *fakeRegistry) EndedDrains() []ids.WorkspaceID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), r.endedDrains...)
 }
 
 // run performs one bounce the way the queue does: its own goroutine, then the

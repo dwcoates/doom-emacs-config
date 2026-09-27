@@ -262,6 +262,10 @@ type BounceRegistry interface {
 	// RequestBounce asks for one workspace to be bounced; see
 	// promptqueue.Queue.RequestBounce.
 	RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error)
+	// EndKeptDrain ends the drain a handover transfer left standing, once
+	// this daemon has taken the workspace back; see
+	// promptqueue.Queue.EndKeptDrain.
+	EndKeptDrain(ws ids.WorkspaceID)
 }
 
 // ShimBuildFunc answers the installed shim bundle's content hash.

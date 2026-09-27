@@ -443,7 +443,9 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 // successor, so it is served here again. Its answer is the reclaim's own
 // failure, joined onto the transfer's.
 func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, hadShim bool, fields dlog.Context) error {
-	_, err := c.reclaim(ctx, ws, lease, hadShim, fields)
+	// The transfer's bounce is still running here and FAILS, which is what
+	// resumes the registry's dispatch; there is no kept drain to end.
+	_, err := c.reclaim(ctx, ws, lease, hadShim, false, fields)
 	return err
 }
 
@@ -464,7 +466,11 @@ func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids
 //
 // It runs on a context the handover's own cancellation cannot refuse: the
 // release it owes is exactly what must not be skipped.
-func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, reattach bool, fields dlog.Context) (bool, error) {
+//
+// endDrain is set once the transfer's bounce has FINISHED: the registry then
+// keeps the workspace drained for its new owner, and that drain is ended here
+// so dispatch resumes on this daemon.
+func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, reattach, endDrain bool, fields dlog.Context) (bool, error) {
 	ctx = context.WithoutCancel(ctx)
 	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
 	if err != nil {
@@ -488,6 +494,9 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	}
 	if err := c.releaseHold(ctx, ws, lease, fields); err != nil {
 		failures = append(failures, err)
+	}
+	if endDrain {
+		c.deps.Bounces.EndKeptDrain(ws)
 	}
 	if c.deps.PublishViews != nil {
 		if err := c.deps.PublishViews(ctx, ws); err != nil {
@@ -599,7 +608,7 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 		}
 	}
 	window := dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}
-	reclaimed, err := c.reclaim(ctx, ws, lease, detached, merge(fields, window))
+	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, merge(fields, window))
 	if !reclaimed {
 		if err == nil {
 			// The arbitration answered for the successor: it adopted in the

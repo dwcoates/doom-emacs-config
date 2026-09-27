@@ -507,6 +507,20 @@ func TestAnExpiredAdoptionWindowReleasesTheTransfersHold(t *testing.T) {
 	}
 }
 
+func TestAnExpiredAdoptionWindowEndsTheTransfersKeptDrain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if ended := h.registry.EndedDrains(); len(ended) != 1 || ended[0] != ws {
+		t.Fatalf("ended drains = %v, want the taken-back workspace's dispatch resumed", ended)
+	}
+}
+
 func TestAnExpiredAdoptionWindowReattachesTheDetachedShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -577,7 +591,7 @@ func TestAWorkspaceTheSuccessorClaimedIsNotTakenBack(t *testing.T) {
 	}
 
 	// Act
-	reclaimed, err := h.c.reclaim(context.Background(), ws, "", true, dlog.Context{})
+	reclaimed, err := h.c.reclaim(context.Background(), ws, "", true, true, dlog.Context{})
 
 	// Assert
 	if err != nil || reclaimed {
