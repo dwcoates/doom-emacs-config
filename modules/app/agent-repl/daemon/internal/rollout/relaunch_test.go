@@ -368,6 +368,51 @@ func TestTheHoldIsReleasedAfterAFailedResume(t *testing.T) {
 	}
 }
 
+// TestEveryFailedRelaunchReleasesTheRestartHold pins the hold's scope-bound
+// lifetime: whichever step a bounce fails at, the restart-pending hold it took
+// is released -- including a stand-down cut short by its own context, whose
+// release used to be written through that same cancelled context and refused.
+func TestEveryFailedRelaunchReleasesTheRestartHold(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "a replacement dead before the stand-down", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			fresh := newFakeShim(9999, h.order)
+			fresh.Die()
+			h.fleet.prelaunched[ws] = fresh
+		}},
+		{name: "a failed install", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.fleet.installErr[ws] = errFake
+			h.fleet.live[ws].onKillSession = func() { h.fleet.live[ws].Reap() }
+		}},
+		{name: "a stand-down ended by its context", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			ctx, cancel := context.WithCancel(context.Background())
+			h.registry.runCtx = ctx
+			h.fleet.live[ws].onKillSession = cancel
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tt.arrange(t, h, ws)
+
+			// Act
+			err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+			// Assert
+			if err == nil {
+				t.Fatal("the bounce succeeded; the case is a failure path")
+			}
+			if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+				t.Fatalf("Lease after the failed bounce = (held %v, %v), want the restart hold released", held, dbErr)
+			}
+		})
+	}
+}
+
 func TestTheNewShimsPidIsRecordedForTheNextManifest(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
