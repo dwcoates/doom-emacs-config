@@ -1295,10 +1295,9 @@ describe("the cost corner", () => {
 });
 
 /**
- * THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
- * once it is RECEIVED and stays: a user prompt wears the light purple
- * permanently, in flight and after its turn resolves, independent of the
- * working flag and its wave; an agent-to-agent prompt (the agent-addressed row
+ * THE PROMPT BORDERS (owner rulings, 2026-09-23 and 2026-09-27). A user's own
+ * prompt is never bordered, in flight or after its turn resolves; an
+ * agent-to-agent prompt (the agent-addressed row
  * and the peer message) wears the one amber; a held prompt in the tray wears
  * none. Each case is asked of the stylesheet as the cascade would: which
  * border-setting rules a bubble with that role, variant, wave and hook classes
@@ -1323,12 +1322,12 @@ describe("the prompt borders", () => {
   it.each([
     ["in flight", true],
     ["after its turn resolves", false],
-  ] as const)("borders a user prompt in the light purple %s", (_label, working) => {
+  ] as const)("gives a user prompt no border %s", (_label, working) => {
     // Arrange / Act
     const borders = bordersOn(prompt("user", working), ["user"]);
 
-    // Assert
-    expect(borders).toEqual(["border-color: var(--prompt-live-border)"]);
+    // Assert — the user's own prompt is never bordered (owner ruling, 2026-09-27).
+    expect(borders).toEqual([]);
   });
 
   it.each([
@@ -1365,9 +1364,7 @@ describe("the prompt borders", () => {
   });
 
   it.each([
-    ["--prompt-live-border", "light"],
     ["--agent-prompt-border", "light"],
-    ["--prompt-live-border", "dark"],
     ["--agent-prompt-border", "dark"],
   ] as const)("defines %s in the %s theme", (token, theme) => {
     // Arrange / Act
