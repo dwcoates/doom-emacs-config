@@ -125,6 +125,24 @@ function declarationsOf(selector: string): string | undefined {
 }
 
 /**
+ * The border declarations every non-base rule a bubble so marked matches sets,
+ * in source order: the cascade asked as a bubble with those attributes and hook
+ * classes would ask it, beyond the base rule's transparent reservation. Module
+ * scope because both the prompt and the response border suites ask it.
+ */
+function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string[] {
+  const el = document.createElement("div");
+  el.className = ["bubble", "md", ...hooks].join(" ");
+  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+  return rulesOf(stylesheet)
+    .filter((rule) =>
+      rule.selectors.some((sel) => sel !== ".bubble" && sel.includes(".bubble") && !sel.includes("::") && el.matches(sel)),
+    )
+    .flatMap((rule) => rule.declarations.match(/(?:^|;)\s*border(?:-color)?\s*:[^;]*/g) ?? [])
+    .map((decl) => decl.replace(/^;?\s*/, "").trim());
+}
+
+/**
  * The raw text of the `@media (prefers-color-scheme: dark)` block, found by
  * balancing braces from its opening `{` — `rulesOf`'s flat scan cannot tell a
  * media block's own `:root` apart from the top-level one, so a dark-theme
@@ -1244,19 +1262,6 @@ describe("the cost corner", () => {
  * matches, beyond the base rule's transparent reservation.
  */
 describe("the prompt borders", () => {
-  /** The border declarations every non-base rule a bubble so marked matches sets, in source order. */
-  function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string[] {
-    const el = document.createElement("div");
-    el.className = ["bubble", "md", ...hooks].join(" ");
-    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
-    return rulesOf(stylesheet)
-      .filter((rule) =>
-        rule.selectors.some((sel) => sel !== ".bubble" && sel.includes(".bubble") && !sel.includes("::") && el.matches(sel)),
-      )
-      .flatMap((rule) => rule.declarations.match(/(?:^|;)\s*border(?:-color)?\s*:[^;]*/g) ?? [])
-      .map((decl) => decl.replace(/^;?\s*/, "").trim());
-  }
-
   /** A prompt bubble's attributes, waving or not. */
   function prompt(variant: string, working: boolean): Record<string, string> {
     const attrs: Record<string, string> = { "data-role": "prompt", "data-variant": variant };
