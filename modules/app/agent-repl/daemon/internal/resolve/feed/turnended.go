@@ -234,11 +234,7 @@ func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversati
 		return concludedArm(concluded)
 	case *conversationv1.AgentSuccess_Interrupted:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Interrupted"})
-		return func(ended *frontendv1.FeedTurnEnded) {
-			ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{
-				Interrupted: &frontendv1.FeedTurnEndedInterrupted{},
-			}
-		}
+		return interruptedArm()
 	case *conversationv1.AgentSuccess_Backgrounded:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Backgrounded"})
 		// The stream ended while the work did not. It is what was asked for,
@@ -257,6 +253,16 @@ type turnOutcome func(*frontendv1.FeedTurnEnded)
 func concludedArm(concluded *frontendv1.FeedTurnEndedConcluded) turnOutcome {
 	return func(ended *frontendv1.FeedTurnEnded) {
 		ended.Outcome = &frontendv1.FeedTurnEnded_Concluded{Concluded: concluded}
+	}
+}
+
+// interruptedArm is THE ONE interruption setter, shared by the two paths that
+// draw a stopped turn's ending: the terminal's (concludedOutcome) and the
+// daemon-built close's (closedEnding). One builder is what keeps the two
+// drawing the same row for the same stop, live and rebuilt.
+func interruptedArm() turnOutcome {
+	return func(ended *frontendv1.FeedTurnEnded) {
+		ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{Interrupted: &frontendv1.FeedTurnEndedInterrupted{}}
 	}
 }
 
