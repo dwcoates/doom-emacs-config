@@ -184,6 +184,10 @@ type server struct {
 	// life is cancelled by Close, which is what ends every open stream.
 	life   context.Context
 	cancel context.CancelFunc
+	// closeOnce makes Close idempotent: the orderly exit ends the streams
+	// through it while it still serves, and the teardown's deferred Close
+	// then finds nothing left to do.
+	closeOnce sync.Once
 
 	// registry orders every registry read a request's RESOLUTION makes
 	// against Close: a read holds it shared, Close takes it exclusively and
@@ -402,14 +406,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 
 // Close ends every open stream by cancelling the lifetime they hang off.
 func (s *server) Close() error {
-	// THE REGISTRY GATE CLOSES FIRST: every resolution read already admitted
-	// finishes, and none is admitted after, so no request of this surface
-	// reads a state client the exit is about to close.
-	s.registry.Lock()
-	s.registryClosed = true
-	s.registry.Unlock()
-	s.cancel()
-	s.log.Info("daemon.server.close", "every open stream was ended", nil)
+	s.closeOnce.Do(func() {
+		// THE REGISTRY GATE CLOSES FIRST: every resolution read already
+		// admitted finishes, and none is admitted after, so no request of this
+		// surface reads a state client the exit is about to close.
+		s.registry.Lock()
+		s.registryClosed = true
+		s.registry.Unlock()
+		s.cancel()
+		s.log.Info("daemon.server.close", "every open stream was ended", nil)
+	})
 	return nil
 }
 

@@ -69,8 +69,11 @@ type hooks struct {
 	// once, at the very start of the shutdown sequence, while the listener is
 	// still accepting — it is where the advertisement is withdrawn so a client
 	// forwarding during shutdown finds no address rather than a present address
-	// backed by a listener that has stopped accepting.
-	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown func()) error
+	// backed by a listener that has stopped accepting. endStreams ends every
+	// standing stream the surface serves (the server's Close); the shutdown
+	// runs it once the answers owed have left, and waits for every stream's
+	// end frame before the process can exit.
+	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func()) error
 	// BootStall bounds the whole boot reconciliation; zero means
 	// bootStallBound. It is a seam because the behavior under test is a
 	// reconciliation that never finishes, and a test must not wait out a
@@ -490,7 +493,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// during shutdown finds no address rather than a present address backed by
 	// a listener that no longer accepts. The deferred finish above is the
 	// safety net for boot errors and paths that never reached serving.
-	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin); err != nil {
+	endStreams := func() {
+		if err := srv.Close(); err != nil {
+			log.Error("daemon.cmd.serve", "the surface could not end its standing streams", dlog.Context{
+				"error": err.Error(),
+			})
+		}
+	}
+	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin, endStreams); err != nil {
 		log.Error("daemon.cmd.serve", "the daemon stopped serving its listener", dlog.Context{
 			"address": claim.Address(),
 			"error":   err.Error(),
@@ -594,7 +604,7 @@ func workspaceIDLookup(ctx context.Context, db wsm.DB) dlog.WorkspaceIDLookup {
 
 // serve runs the http server on the claimed listener until ctx ends, then shuts
 // it down gracefully.
-func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown func()) error {
+func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func()) error {
 	// THE GRACE HAS TO BE OURS, so the handler must carry the gate that counts
 	// the calls being answered. `Server.Shutdown` cannot do it: every client
 	// dials h2c, `h2c.NewHandler` serves such a connection by HIJACKING it,
@@ -660,6 +670,20 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown f
 		// everything else, so a genuinely busy link never falls silent and is
 		// not a lost announcement.
 		gate.AwaitWritesQuiet(writesQuietBound)
+		// EVERY STANDING STREAM ENDS WITH ITS END FRAME, BEFORE THE PROCESS
+		// CAN EXIT. `Shutdown` below cannot do it: it neither closes nor waits
+		// for a hijacked h2c connection, and the surface's own Close used to
+		// run only as a deferred call the process exit raced -- so every client
+		// still watching (a workspace no transfer notice reached, the roster)
+		// read "producer closed without an end frame". The streams are ended
+		// here, after the last pushes have left, and the exit waits for each
+		// one's end frame to reach the socket. This holds on EVERY exit path:
+		// a handover's last transfer, a restart's stand-down, a drain, a
+		// signal, a state-root loss.
+		if endStreams != nil {
+			gate.EndStreams(endStreams)
+			gate.AwaitStreamsEnded(streamsEndBound)
+		}
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
 		// request, and this daemon's Watch* handlers are STANDING STREAMS that
 		// end only when their client goes away — so an unbounded wait is a
@@ -752,6 +776,16 @@ func (w *addrWithdrawal) finish() {
 		"address": w.claim.Address(),
 	})
 }
+
+// streamsEndBound is how long the exit gives the standing streams, once ended,
+// to have returned and written their end frames.
+//
+// IT NESTS server's per-stream answerWriteBound (250ms, one end frame's write
+// after its handler returns) with the same again for the handlers to leave:
+// each one selects on the lifetime Close cancels, so it returns within one
+// scheduling of the goroutine. It is a last resort well under shutdownGrace;
+// an overrun is ERROR naming how many streams were left open.
+const streamsEndBound = 500 * time.Millisecond
 
 // writesQuietBound is how long the exit gives the connections to stop writing
 // after every counted call has been answered.
