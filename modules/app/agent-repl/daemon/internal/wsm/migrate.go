@@ -54,7 +54,29 @@ var migrations = []migration{
 	{To: 8, Name: "workspaces_spawned_shim_pid", DDL: spawnedShimPidDDL},
 	{To: 9, Name: "workspaces_last_activity_at", DDL: lastActivityAtDDL},
 	{To: 10, Name: "feed_text_scale", DDL: feedTextScaleDDL},
+	{To: 11, Name: "idempotency_keys_accepted_at", DDL: acceptedAtDDL},
 }
+
+// acceptedAtDDL adds when the prompt queue ACCEPTED an idempotency claim's
+// submission. A claim was once final the instant it was written, BEFORE the
+// queue took the submission, so a submission whose queue call hung, errored or
+// died with its process left a key that refused every retry as a duplicate of
+// a turn that was never delivered -- and the client, told "the earlier
+// submission stands", dropped the prompt.
+//
+// THE BACKFILL STAMPS A CLAIM ONLY ON DURABLE EVIDENCE THE QUEUE TOOK IT: a
+// turn row (written on the delivery path) or a held-prompt row (a hold, which
+// is never deleted, only tombstoned) under the claimed turn. A claim with
+// neither never reached the queue's first durable write, so it stays NULL and
+// a retry of it is re-driven, which is exactly the rule this build enforces.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the column inline in schema.go.
+const acceptedAtDDL = `
+ALTER TABLE idempotency_keys ADD COLUMN accepted_at INTEGER;
+UPDATE idempotency_keys SET accepted_at = claimed_at
+WHERE turn_id IN (SELECT id FROM turns) OR turn_id IN (SELECT turn_id FROM held_prompts);
+`
 
 // lastActivityAtDDL adds when a workspace LAST DID REAL WORK — the roster
 // when-column's new source, stamped inside the turn writes at the genuine

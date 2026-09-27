@@ -602,3 +602,72 @@ func TestTheMigratedRowsCarryNoActivity(t *testing.T) {
 		t.Fatalf("%d migrated workspace rows carry a last-activity instant, want none", got)
 	}
 }
+
+// TestTheMigrationAddsTheIdempotencyAcceptedAtColumn pins the layout-11 step:
+// a file written before a claim's acceptance was durable carries the column
+// afterwards.
+func TestTheMigrationAddsTheIdempotencyAcceptedAtColumn(t *testing.T) {
+	// Arrange — a file written before accepted_at existed.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM pragma_table_info('idempotency_keys') WHERE name = 'accepted_at'`)
+	if got != 1 {
+		t.Fatalf("idempotency_keys.accepted_at exists %d times after the migration, want 1", got)
+	}
+}
+
+// TestTheMigrationStampsOnlyAClaimTheQueueTook pins the layout-11 backfill: a
+// claim is stamped accepted only on durable evidence the queue took it, and a
+// claim with none is left unaccepted so its retry is re-driven.
+func TestTheMigrationStampsOnlyAClaimTheQueueTook(t *testing.T) {
+	tests := []struct {
+		name         string
+		evidence     string
+		wantAccepted int
+	}{
+		{name: "a claim whose turn was recorded", evidence: `INSERT INTO turns (id, workspace_id, text, origin, displaced, started_at) VALUES ('turn-1', 'ws-layout3', 'hi', 'emacs', 0, 1)`, wantAccepted: 1},
+		{name: "a claim whose prompt was held", evidence: `INSERT INTO held_prompts (turn_id, workspace_id, said, origin, accepted, queued_at) VALUES ('turn-1', 'ws-layout3', x'', 'emacs', 0, 1)`, wantAccepted: 1},
+		{name: "a claim the queue never took", evidence: ``, wantAccepted: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			path := layout3Fixture(t)
+			withRawDB(t, path, func(db *sql.DB) {
+				if _, err := db.Exec(`INSERT INTO idempotency_keys (workspace_id, idempotency_key, turn_id, claimed_at) VALUES ('ws-layout3', 'key-1', 'turn-1', 1)`); err != nil {
+					t.Fatalf("seed the claim: %v", err)
+				}
+				if tc.evidence == "" {
+					return
+				}
+				if _, err := db.Exec(tc.evidence); err != nil {
+					t.Fatalf("seed the evidence: %v", err)
+				}
+			})
+
+			// Act
+			handle, err := Open(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Open on a layout-3 database: %v", err)
+			}
+			defer handle.Close()
+
+			// Assert
+			got := scalar[int](t, handle.(*store),
+				`SELECT count(*) FROM idempotency_keys WHERE accepted_at IS NOT NULL`)
+			if got != tc.wantAccepted {
+				t.Fatalf("%d claims stamped accepted, want %d", got, tc.wantAccepted)
+			}
+		})
+	}
+}
