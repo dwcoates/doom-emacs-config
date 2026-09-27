@@ -3473,3 +3473,123 @@ func TestEveryReleasedHoldIsDrawnThroughOneHelper(t *testing.T) {
 		t.Fatalf("subagent.go composes a released hold at %d sites, want exactly one (drawReleasedSpawn)", count)
 	}
 }
+
+// ---- A SUBAGENT RESUMED BY SENDMESSAGE: the announcement names the agent ----
+
+// detachSubagentWork announces work detached from `unit` whose kind is a
+// subagent running `agent`, as the producer states it.
+func (h *harness) detachSubagentWork(work, unit, agent string) {
+	h.t.Helper()
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: mainAgent(),
+		Kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Subagent{
+			Subagent: &conversationv1.DetachedWorkKindSubagent{AgentId: &conversationv1.AgentId{Value: agent}},
+		}},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}, nil, noAddress())
+}
+
+// resumedBeat is the running beat the task stream writes for a resumed run,
+// on the SEND's unit: it names no created agent.
+func resumedBeat(unit string) *conversationv1.AgentActivity {
+	return bound(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "resume the sweep"},
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 1_200},
+			}},
+		}},
+	})
+}
+
+func TestASendMessageResumedSubagentsHeadAddressesItsSubFeed(t *testing.T) {
+	// Arrange: the send, then its announcement naming the resumed agent.
+	h := newHarness(t)
+	h.sendMessageBound("send-1", &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"})
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+
+	// Act: the resumed run's first beat, on the send's unit.
+	h.send(resumedBeat("send-1"))
+
+	// Assert: the head is drawn under the resumed agent, and its sub-feed opens.
+	row := h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})
+	page, _ := h.openPage(feedid.Feed{Agent: &conversationv1.AgentId{Value: "spawn-1"}}, "reader-1")
+	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
+	if len(crumbs) != 1 || crumbs[0].GetTarget().GetValue() != row.GetId().GetValue() {
+		t.Fatalf("crumbs = %+v, want the resumed run's head", crumbs)
+	}
+}
+
+func TestASendMessageResumedSubagentIsNotWarnedAsHavingNoStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessageBound("send-1", &conversationv1.AgentSendMessageStart{AddressedTo: "a5583"})
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+	h.send(resumedBeat("send-1"))
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.feed.subagent_without_start") {
+		t.Fatalf("records = %+v, want no subagent_without_start for a named resumed run", h.records())
+	}
+}
+
+func TestAnAnnouncementReleasesFramesHeldForTheAgentsName(t *testing.T) {
+	// Arrange: the beat lands first, and is held for a name.
+	h := newHarness(t)
+	h.send(resumedBeat("send-1"))
+	if held := h.heldSpawnFrames("send-1"); held != 1 {
+		t.Fatalf("held frames = %d, want the beat held before the announcement", held)
+	}
+
+	// Act.
+	h.detachSubagentWork("w-send", "send-1", "spawn-1")
+
+	// Assert.
+	if held := h.heldSpawnFrames("send-1"); held != 0 {
+		t.Fatalf("held frames = %d, want none once the announcement named the agent", held)
+	}
+	if bubbleOf(h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})).GetWorkId().GetText() != "w-send" {
+		t.Fatal("the released head does not carry its detached-work id")
+	}
+}
+
+func TestAnAnnouncementNamingADifferentAgentThanTheStartIsAnError(t *testing.T) {
+	// Arrange: a spawn whose own start named its agent.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act.
+	h.detachSubagentWork("work-1", "spawn-1", "agent-other")
+
+	// Assert: the start's agent stands, and the disagreement is recorded.
+	h.bubbleRow("spawn-1", created)
+	if !h.hasRecord("error", "daemon.feed.announced_agent_conflict") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.announced_agent_conflict", h.records())
+	}
+}
+
+func TestAnAnnouncementNamingTheStartsOwnAgentIsQuiet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act.
+	h.detachSubagentWork("work-1", "spawn-1", "agent-explore")
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetWorkId().GetText() != "work-1" || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want the ordinary detachment and no error", h.records())
+	}
+}
