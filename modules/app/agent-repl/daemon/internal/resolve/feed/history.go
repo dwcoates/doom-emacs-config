@@ -29,6 +29,10 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	log := r.logger(ws)
+	// NOTHING THE PAGE DRAWS IS PUBLISHED UNTIL THE PAGE IS WHOLLY PLACED: the
+	// page's newest cut is established before any row is served, so no reader
+	// is ever handed a row that cut goes on to withhold (holdPushes).
+	defer r.holdPushes(s)()
 
 	r.replayPorted(s, ported)
 
