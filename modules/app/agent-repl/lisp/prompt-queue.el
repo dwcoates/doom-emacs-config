@@ -69,6 +69,7 @@
 (defvar agent-repl-roster-finish-functions)
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-promote-functions)
+(defvar agent-repl-host-reattached-functions)
 
 ;;;; ---- State -----------------------------------------------------------
 
@@ -250,7 +251,7 @@ decorate an already-decorated prompt."
 (defun agent-repl-prompt-queue-drain (ws &optional kind)
   "Send WS's held prompts, oldest first; only those of KIND when given.
 Safe to call when nothing is held, when the workspace is not deliverable,
-and while a drain is already running -- wire it to the two release edges
+and while a drain is already running -- wire it to the release edges
 and to nothing else.  Returns the number of entries sent."
   (let ((held (agent-repl-prompt-queue-pending ws kind)))
     (cond
@@ -319,8 +320,20 @@ exactly until the successor owns the workspace -- and the promotion is
 that moment."
   (agent-repl--prompt-queue-on-link-up))
 
+(defun agent-repl--prompt-queue-on-reattached (ws)
+  "Release WS's OUTAGE-held prompts once WS is re-attached to a daemon.
+The per-workspace edge that ends an outage.  A workspace whose daemon went
+without transferring it is re-attached on its own walk, AFTER the link
+edges above have already run -- the promotion runs every promote hook
+before host.el\='s re-registration answers -- so a prompt held while that
+workspace had no daemon is released here, on the daemon that now serves
+it, rather than waiting for an edge that may never come."
+  (agent-repl--info ws "elisp.prompt-queue.reattached ws=%s" ws)
+  (agent-repl-prompt-queue-drain ws :outage))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl--prompt-queue-on-link-up)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl--prompt-queue-on-link-promote)
+(add-hook 'agent-repl-host-reattached-functions #'agent-repl--prompt-queue-on-reattached)
 
 (provide 'prompt-queue)
 
