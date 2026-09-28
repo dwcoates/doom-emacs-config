@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/ids"
 )
 
@@ -215,5 +216,40 @@ func TestReplacementArgv(t *testing.T) {
 				t.Fatalf("argv = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestARestartStandDownWaitsForFreeness(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+
+	// Act
+	if _, err := h.c.Restart(context.Background(), false); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert: the stand-down is not a handover, and keeps the freeness gate.
+	requests := h.registry.Requests()
+	if len(requests) != 1 || requests[0].Req.WaitFor != bounce.GateFreeness {
+		t.Fatalf("requests = %+v, want one stand-down at freeness", requests)
+	}
+	if !h.registry.Pending(ws) {
+		t.Fatalf("the busy workspace's stand-down is not registered behind its work")
+	}
+}
+
+func TestARestartStandDownCarriesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	if _, found, err := h.c.readCarry(ws); err != nil || found {
+		t.Fatalf("readCarry = (%v, %v), want no carry: a restart has no successor to carry to", found, err)
 	}
 }
