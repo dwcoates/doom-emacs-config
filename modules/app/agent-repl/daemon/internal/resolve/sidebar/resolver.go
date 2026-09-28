@@ -256,7 +256,9 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 
 // SetViewed records that the user has READ the last turn's result, which
 // draws the row PARTIAL — but only when the report lands on a TURN-END row
-// (done, interrupted or turn_failed).
+// (done, interrupted or turn_failed), or on a VENDOR_BLOCKED row, whose block
+// a failed turn raised: viewing it reads that turn's result (owner ruling,
+// 2026-09-28), though the marker itself is still drawn only on a turn end.
 //
 // The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
 // fact, and the editor reports it whatever the status. Whether it takes is
@@ -272,7 +274,7 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
 		"the roster took the editor's viewed report; it reads the result only on a turn-end row",
 		nil, func(s *wsState, log dlog.Logger) {
-			if !s.lastArmSeen || !isTurnEndArm(s.lastArm) {
+			if !s.lastArmSeen || !readsResult(s.lastArm) {
 				log.Debug("daemon.sidebar.row_viewed_refused",
 					"the row is not on a turn-end arm, so the viewed report was dropped and the row stays FULL",
 					dlog.Context{"status": s.lastArm, "result": s.result.String()})
