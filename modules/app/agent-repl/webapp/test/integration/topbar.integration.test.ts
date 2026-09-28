@@ -648,6 +648,7 @@ const WARNING_DETAILS = [
   { arm: "detachedUnmodeled" as const, expected: "mcp__weather__watch" },
   { arm: "sessionFault" as const, expected: "store writes rejected" },
   { arm: "degradedWindow" as const, expected: "disk pressure" },
+  { arm: "deployFailed" as const, expected: "rename store: permission denied" },
 ];
 
 describe.each(WARNING_DETAILS)("the $arm warning's detail", ({ arm, expected }) => {
@@ -682,6 +683,40 @@ describe("the session-fault detail", () => {
     await harness.click('.topbar-warning-row[data-arm="sessionFault"]');
     // Assert
     expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain("shim");
+  });
+});
+
+/**
+ * A FAILED DEPLOY (owner request, 2026-09-28): the daemon raises it on every
+ * workspace's topbar; its row opens what failed, and the page logs it loudly
+ * the first time it appears.
+ */
+describe("the failed-deploy detail", () => {
+  it("draws what became of the install beside the step", async () => {
+    // Arrange
+    await withTopbar({ warnings: [topbarWarning("deployFailed")] });
+    await harness.click(".topbar-warnings");
+    // Act
+    await harness.click('.topbar-warning-row[data-arm="deployFailed"]');
+    // Assert
+    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"] [data-datum="rollback"]')).toBe(
+      "it was rolled back to the previous build",
+    );
+  });
+
+  it("is logged to the daemon at ERROR when it first appears on the page", async () => {
+    // Arrange / Act: the page boots over a standing failed deploy.
+    harness = await startHarness({
+      clientLog: true,
+      arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("deployFailed")] })),
+    });
+    await harness.settle();
+    // Assert
+    const records = harness.fake
+      .calls<{ record?: { operation: string; level: { case: string } } }>("clientLog")
+      .map((call) => call.record)
+      .filter((record) => record?.operation === "topbar.deploy-failed");
+    expect(records.map((record) => record?.level.case)).toEqual(["error"]);
   });
 });
 

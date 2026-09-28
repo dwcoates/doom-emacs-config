@@ -64,6 +64,9 @@ afterEach(async () => {
 });
 
 /** Boot with one footer view already scripted. */
+/** A failed deploy's fault activity, as the daemon composes it. */
+const FAILED_DEPLOY = { kind: "deploy_failed", detail: "build webapp: error TS2322" };
+
 async function withFooter(init: Parameters<typeof footerView>[0]): Promise<Harness> {
   harness = await startHarness({ arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView(init)) });
   return harness;
@@ -193,6 +196,25 @@ describe("the activity cell", () => {
   it("draws no activity cell when the view carries none", async () => {
     // Arrange / Act: activity is `optional` — absent means draw nothing.
     await withFooter({ status: "idle" });
+    // Assert
+    expect(harness.$(".footer-activity")).toBeNull();
+  });
+
+  // A FAILED DEPLOY (owner request, 2026-09-28) stands on every strip's
+  // ACTIVITY line through the fault arm, and comes down with the fault.
+  it("draws a failed deploy on the activity line", async () => {
+    // Arrange / Act
+    await withFooter({ status: "idle", activity: "fault", activityOverride: FAILED_DEPLOY });
+    // Assert
+    expect(harness.text(".footer-activity-fault")).toBe("deploy failed \u00b7 build webapp: error TS2322");
+  });
+
+  it("takes a failed deploy off the activity line when the fault closes", async () => {
+    // Arrange
+    await withFooter({ status: "idle", activity: "fault", activityOverride: FAILED_DEPLOY });
+    // Act
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
+    await harness.settle();
     // Assert
     expect(harness.$(".footer-activity")).toBeNull();
   });

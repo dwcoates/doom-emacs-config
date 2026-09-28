@@ -1677,6 +1677,7 @@ export const TOPBAR_WARNING_ARMS = [
   "detachedUnmodeled",
   "sessionFault",
   "degradedWindow",
+  "deployFailed",
 ] as const;
 export type TopbarWarningArm = (typeof TOPBAR_WARNING_ARMS)[number];
 
@@ -1715,6 +1716,16 @@ const warningDetail = (arm: TopbarWarningArm): WarningDetail => {
           reason: { text: "disk pressure" },
           beganAtMs: 1_000n,
           extent: { case: "open", value: {} },
+        },
+      };
+    case "deployFailed":
+      return {
+        case: "deployFailed",
+        value: {
+          step: { text: "install" },
+          component: { text: "store" },
+          rollback: { text: "it was rolled back to the previous build" },
+          detail: { text: "rename store: permission denied" },
         },
       };
   }
