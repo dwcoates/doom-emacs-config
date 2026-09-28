@@ -179,6 +179,7 @@ type controlCommand struct {
 	Agent     string `json:"agent,omitempty"`
 	Pointer   string `json:"pointer,omitempty"`
 	Turn      string `json:"turn,omitempty"`
+	PlaceMs   int64  `json:"place_ms,omitempty"`
 	Work      string `json:"work,omitempty"`
 	Stream    string `json:"stream,omitempty"`
 	Code      int    `json:"code,omitempty"`
@@ -417,6 +418,15 @@ func (s *ShimControl) PushAgentFrameAt(agent, pointer string, f *conversationv1.
 func (s *ShimControl) PushAgentFrameIn(agent, turn string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
 	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Turn: turn, Payload: encode(s.t, f)})
+}
+
+// PushAgentFramePlaced delivers one agent frame whose entry sits at AT_MS in
+// its conversation (HistoryEntryAt.recorded_place), as the real shim states a
+// place for every entry it serves. An empty agent addresses the frame's own
+// agent_id.
+func (s *ShimControl) PushAgentFramePlaced(agent string, atMs int64, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, PlaceMs: atMs, Payload: encode(s.t, f)})
 }
 
 // PushUserPrompt delivers one DELIVERED PROMPT on the matching WatchAgent
