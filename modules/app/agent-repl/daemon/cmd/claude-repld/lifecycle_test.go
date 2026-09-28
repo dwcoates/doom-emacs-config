@@ -26,6 +26,8 @@ type fakeReporter struct {
 	next     int
 	// openErr scripts the state client's refusal of an OpenFault.
 	openErr error
+	// readErr scripts the state client's refusal of an OpenFaults read.
+	readErr error
 }
 
 func (r *fakeReporter) Daemon(context.Context) (*agentreplv1.DaemonHealthResponse, error) {
@@ -52,8 +54,22 @@ func (r *fakeReporter) CloseFault(_ context.Context, id ids.FaultID) error {
 	return nil
 }
 
-func (r *fakeReporter) OpenFaults(context.Context, wsm.FaultScope) ([]wsm.Fault, error) {
-	return r.standing, nil
+// OpenFaults answers the standing faults in scope, as the state client does.
+func (r *fakeReporter) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	if r.readErr != nil {
+		return nil, r.readErr
+	}
+	var out []wsm.Fault
+	for _, f := range r.standing {
+		if scope.Kind != "" && f.Kind != scope.Kind {
+			continue
+		}
+		if scope.Workspace != nil && (f.Workspace == nil || *f.Workspace != *scope.Workspace) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 func newDiagnosticsSink(t *testing.T, reporter health.Reporter) *lifecycleSink {
@@ -184,6 +200,58 @@ func TestADiagnosticsPushLeavesAFaultOfAnotherKindStanding(t *testing.T) {
 	// Assert
 	if len(reporter.closed) != 0 {
 		t.Fatalf("closed %v, want a fault the shim never reported left standing", reporter.closed)
+	}
+}
+
+func TestADiagnosticsPushThatCannotReadTheStandingFaultsOpensNone(t *testing.T) {
+	// Arrange
+	reporter := &fakeReporter{readErr: errors.New("state client closed")}
+	sink := newDiagnosticsSink(t, reporter)
+
+	// Act
+	sink.OnSessionDiagnostics("ws-1", unhealthyDiagnostics(&conversationv1.SessionFault{
+		Component: "store client",
+		Detail:    "the store socket went away",
+		Kind: &conversationv1.SessionFault_StoreUnreachable{
+			StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{},
+		},
+	}))
+
+	// Assert
+	if len(reporter.opened) != 0 {
+		t.Fatalf("opened %v, want nothing stacked on a verdict whose predecessor could not be read", reporter.opened)
+	}
+}
+
+// A RECORDED SHIM DEATH IS THE RECOVERY EDGE OF THE SEVERING it caused, and of
+// nothing else (health/lifetime.go).
+func TestARecordedShimDeathClosesOnlyTheSeveringItCaused(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"the severed link the death caused", health.KindLinkSevered, true},
+		{"a watch open the shim refused", health.KindWatchOpenRefused, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ws := wsm.WorkspaceID("ws-1")
+			reporter := &fakeReporter{standing: []wsm.Fault{{ID: "f-standing", Workspace: &ws, Kind: tt.kind}}}
+			sink := newDiagnosticsSink(t, reporter)
+
+			// Act
+			sink.OnLinkFault("ws-1", sessionwatcher.LinkFault{
+				Kind: sessionwatcher.LinkFaultDead, Detail: "the shim process is gone",
+			})
+
+			// Assert
+			closed := len(reporter.closed) == 1 && reporter.closed[0] == "f-standing"
+			if closed != tt.closes {
+				t.Fatalf("closed %v, want %s closed = %v", reporter.closed, tt.kind, tt.closes)
+			}
+		})
 	}
 }
 

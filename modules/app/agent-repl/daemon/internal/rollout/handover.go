@@ -14,12 +14,13 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
 // FaultAdoptionExpired is the fault kind an expired adoption window records.
-const FaultAdoptionExpired = "adoption_window_expired"
+const FaultAdoptionExpired = health.KindAdoptionWindowExpired
 
 // adoptionPoll is how often the outgoing daemon looks for serving ownership
 // having moved. It only ever shortens the adoption window.
