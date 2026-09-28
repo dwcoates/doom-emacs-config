@@ -10,6 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 )
 
@@ -93,6 +94,26 @@ func TestApplyFileAppliesNothingFromAMalformedFile(t *testing.T) {
 	// Assert.
 	if len(f.merge.enqueued) != 0 {
 		t.Fatalf("enqueued merges = %v, want none", f.merge.enqueued)
+	}
+}
+
+// TestApplyFileEnqueuesAMergeAsTheAgentsAsk pins who a command-file merge is
+// from: an agent's turn, whose merge must never displace that very turn
+// (merge.Requester; 2026-09-28, prompt-bubble-height).
+func TestApplyFileEnqueuesAMergeAsTheAgentsAsk(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_merge.json", `[{"type":"merge","workspace":"w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.by) != 1 || f.merge.by[0] != merge.RequestedByAgent {
+		t.Fatalf("the merge was enqueued as %v, want the agent's ask", f.merge.by)
 	}
 }
 
