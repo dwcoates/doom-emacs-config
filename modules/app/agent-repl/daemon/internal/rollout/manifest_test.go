@@ -67,7 +67,7 @@ func reconcileOnePID(t *testing.T, h *harness, intent Intent, lock sessionlock.S
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
 	}
-	got, err := h.c.Reconcile(context.Background(), nil)
+	got, err := h.c.Reconcile(context.Background(), Survivors{})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestReconcileAnswersNothingWithNoManifest(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	got, err := h.c.Reconcile(context.Background(), nil)
+	got, err := h.c.Reconcile(context.Background(), Survivors{})
 
 	// Assert
 	if err != nil {
@@ -230,65 +230,221 @@ func TestReconcileAnswersNothingWithNoManifest(t *testing.T) {
 	}
 }
 
-func TestNoManifestWithASurvivingSessionAnswersBounceUnknown(t *testing.T) {
-	// Arrange: a crash — the outgoing daemon wrote no manifest — whose shim
-	// this boot adopted.
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
+// ---- a crash boot: no manifest ----
+//
+// AN ADOPTED SESSION IS ACCOUNTED FOR BY ITS ADOPTION and records no
+// bounce_unknown at all; a session the lock says may survive that the boot did
+// NOT adopt is the one it cannot account for, and stands open.
 
-	// Act
-	got, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Reconcile: %v", err)
+func TestNoManifestAnswersEachSurvivorsDisposition(t *testing.T) {
+	tests := []struct {
+		name      string
+		survivors func(ws ids.WorkspaceID) Survivors
+		want      DispositionKind
+	}{
+		{
+			name: "an adopted session is preserved",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Adopted: []AdoptedSession{{Workspace: ws, ShimPID: 4242}}}
+			},
+			want: DispositionPreserved,
+		},
+		{
+			name: "a lock-held session nobody adopted is unknown",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Unadopted: []UnadoptedSession{{Workspace: ws, Lock: sessionlock.StateHeld}}}
+			},
+			want: DispositionUnknown,
+		},
+		{
+			name: "a session whose lock could not be read is unknown",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Unadopted: []UnadoptedSession{{Workspace: ws, Lock: sessionlock.StateUnknown}}}
+			},
+			want: DispositionUnknown,
+		},
 	}
-	if len(got) != 1 || got[0].Kind != DispositionUnknown || got[0].Workspace != ws {
-		t.Fatalf("dispositions = %+v, want one UNKNOWN for the adopted workspace", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+
+			// Act
+			got, err := h.c.Reconcile(context.Background(), tc.survivors(ws))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if len(got) != 1 || got[0].Kind != tc.want || got[0].Workspace != ws {
+				t.Fatalf("dispositions = %+v, want one %s for the workspace", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestNoManifestWithASurvivingSessionLeavesAnOpenFault(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-
-	// Act
-	if _, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}}); err != nil {
-		t.Fatalf("Reconcile: %v", err)
+func TestNoManifestLeavesAnOpenBounceUnknownOnlyForASessionNobodyAdopted(t *testing.T) {
+	tests := []struct {
+		name      string
+		survivors func(ws ids.WorkspaceID) Survivors
+		wantOpen  int
+	}{
+		{
+			name: "an adopted session records none",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Adopted: []AdoptedSession{{Workspace: ws, ShimPID: 4242}}}
+			},
+			wantOpen: 0,
+		},
+		{
+			name: "a session nobody adopted stands open",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Unadopted: []UnadoptedSession{{Workspace: ws, Lock: sessionlock.StateHeld}}}
+			},
+			wantOpen: 1,
+		},
 	}
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
 
-	// Assert
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if len(open) != 1 {
-		t.Fatalf("open faults = %+v, want one bounce_unknown: an unaccounted session is surfaced per workspace", open)
+			// Act
+			if _, err := h.c.Reconcile(context.Background(), tc.survivors(ws)); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenFaults: %v", err)
+			}
+			if len(open) != tc.wantOpen {
+				t.Fatalf("open bounce_unknown faults = %+v, want %d", open, tc.wantOpen)
+			}
+		})
 	}
 }
 
-// TestNoManifestFaultNamesTheSurvivingShimPID pins that the unaccounted
-// session's record says WHICH process survived. It recorded `shim_pid: 0` —
-// the zero value of an empty manifest entry, not a reading of anything — for
-// the one case where a process demonstrably answered the boot's dial.
-func TestNoManifestFaultNamesTheSurvivingShimPID(t *testing.T) {
+func TestNoManifestRecordsItsSurvivorsAtTheirLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		survivors func(ws ids.WorkspaceID) Survivors
+		wantWarn  int
+	}{
+		{
+			name: "every survivor adopted warns nothing",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Adopted: []AdoptedSession{{Workspace: ws, ShimPID: 4242}}}
+			},
+			wantWarn: 0,
+		},
+		{
+			name: "a survivor nobody adopted warns",
+			survivors: func(ws ids.WorkspaceID) Survivors {
+				return Survivors{Unadopted: []UnadoptedSession{{Workspace: ws, Lock: sessionlock.StateHeld}}}
+			},
+			wantWarn: 2,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+
+			// Act
+			if _, err := h.c.Reconcile(context.Background(), tc.survivors(ws)); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+
+			// Assert
+			warns := 0
+			for _, r := range h.log.Records() {
+				if r.Operation == opReconcile && r.Level == "warn" {
+					warns++
+				}
+			}
+			if warns != tc.wantWarn {
+				t.Fatalf("reconcile warnings = %d, want %d: %+v", warns, tc.wantWarn, h.log.Records())
+			}
+		})
+	}
+}
+
+// TestNoManifestRecordNamesTheAdoptedShimPID pins that the adopted session's
+// record says WHICH process survived. It recorded `shim_pid: 0` — the zero
+// value of an empty manifest entry, not a reading of anything — for the one
+// case where a process demonstrably answered the boot's dial.
+func TestNoManifestRecordNamesTheAdoptedShimPID(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	h.c.deps.DB = recorder
 	ws, _ := h.workspace(t)
 
 	// Act
-	if _, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}}); err != nil {
+	if _, err := h.c.Reconcile(context.Background(), Survivors{Adopted: []AdoptedSession{{Workspace: ws, ShimPID: 4242}}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
 
 	// Assert
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
+	if len(recorder.opened) != 1 {
+		t.Fatalf("records = %d, want exactly one for the adopted session", len(recorder.opened))
 	}
-	if len(open) != 1 || open[0].Evidence["shim_pid"] != "4242" {
-		t.Fatalf("open faults = %+v, want one naming shim_pid 4242", open)
+	f, err := h.db.Fault(context.Background(), recorder.opened[0])
+	if err != nil {
+		t.Fatalf("Fault: %v", err)
+	}
+	if f.Evidence["shim_pid"] != "4242" || f.ResolvedAt == nil {
+		t.Fatalf("record = %+v, want a resolved record naming shim_pid 4242", f)
+	}
+}
+
+// TestAManifestSessionThisBootAdoptedIsPreserved pins the manifest half of the
+// same rule: a stand-down whose lock still reads held is UNKNOWN on its own,
+// and PRESERVED once this boot adopted the survivor.
+func TestAManifestSessionThisBootAdoptedIsPreserved(t *testing.T) {
+	tests := []struct {
+		name    string
+		adopted bool
+		want    DispositionKind
+	}{
+		{name: "not adopted, it cannot be told", adopted: false, want: DispositionUnknown},
+		{name: "adopted, it is preserved", adopted: true, want: DispositionPreserved},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, dir := h.workspace(t)
+			h.mu.Lock()
+			h.lockStates[dir] = sessionlock.StateHeld
+			h.mu.Unlock()
+			if err := h.c.writeManifest(context.Background(), Manifest{
+				Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+				Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentStandDown}},
+			}); err != nil {
+				t.Fatalf("writeManifest: %v", err)
+			}
+			survivors := Survivors{}
+			if tc.adopted {
+				survivors.Adopted = []AdoptedSession{{Workspace: ws, ShimPID: 4242}}
+			}
+
+			// Act
+			got, err := h.c.Reconcile(context.Background(), survivors)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if len(got) != 1 || got[0].Kind != tc.want {
+				t.Fatalf("dispositions = %+v, want one %s", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -297,7 +453,7 @@ func TestNoManifestWithNoSurvivingSessionIsAnOrdinaryBoot(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	got, err := h.c.Reconcile(context.Background(), nil)
+	got, err := h.c.Reconcile(context.Background(), Survivors{})
 
 	// Assert
 	if err != nil || got != nil {
@@ -520,7 +676,7 @@ func TestASecondBootFindsNoManifestToAccountFor(t *testing.T) {
 	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
 
 	// Act
-	got, err := h.c.Reconcile(context.Background(), nil)
+	got, err := h.c.Reconcile(context.Background(), Survivors{})
 
 	// Assert
 	if err != nil || got != nil {
@@ -594,7 +750,7 @@ func reconcileGone(t *testing.T, h *harness, ws ids.WorkspaceID, dir string) *re
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
 	}
-	if _, err := h.c.Reconcile(context.Background(), nil); err != nil {
+	if _, err := h.c.Reconcile(context.Background(), Survivors{}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	return recorder
