@@ -2150,6 +2150,11 @@ in the same shape (still leftmost, nil-name still at head)."
   ;; Act / Assert
   (should (equal (alist-get :compacting agent-repl-ws-state-icons) "🗜")))
 
+(ert-deftest agent-repl-test-ws-state-icon-turn-failed ()
+  ":turn-failed has a glyph of its own in `agent-repl-ws-state-icons'."
+  ;; Act / Assert
+  (should (equal (alist-get :turn-failed agent-repl-ws-state-icons) "⚠")))
+
 (ert-deftest agent-repl-test-ws-severed-takes-a-glyph-of-its-own ()
   "`:severed\=' gets its OWN glyph, never the sleep one.
 Color and glyph are the only two things a tab carries, so reusing 💤 for

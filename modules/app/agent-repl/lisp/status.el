@@ -627,6 +627,8 @@ sits flush on the bar with no ground of its own.  See
 
     (:vendor-blocked  . "blue")
 
+    (:turn-failed     . "blue")
+
     (:submitting      . "red")
     (:thinking        . "red")
     (:clearing        . "red")
@@ -872,6 +874,14 @@ in `agent-repl--color-default-bracket'."
                       'agent-repl-tab-done
                       agent-repl--color-done-green
                       agent-repl--color-dark))
+    ;; TURN-FAILED is BLUE (owner ruling, 2026-09-28): a turn end like the
+    ;; two greens above, holding the tab as an unread result the same way, but
+    ;; the turn did not produce what it was asked for, so it takes the blue
+    ;; that says something is wrong.
+    (:turn-failed . ,(agent-repl--tab-palette-row
+                      'agent-repl-tab-init
+                      agent-repl--color-init-blue
+                      agent-repl--color-light))
     (:permission . ,(agent-repl--tab-palette-row
                      'agent-repl-tab-permission
                      agent-repl--color-done-green
@@ -3018,11 +3028,11 @@ so this reaction never has to enumerate origins."
   "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
 Registered on `agent-repl-roster-status-change-functions'.
 
-The daemon takes a dwell on a turn-end row (done or interrupted) only: one
-reported while WS is thinking, waiting, severed or anything else is dropped, so
-there is no marker for the viewed-cleared edge to announce later.  Without
-this, a user who watched a turn run to done would have spent the one-shot
-dwell on the running turn, and the finished response would never go
+The daemon takes a dwell on a turn-end row (done, interrupted or turn-failed)
+only: one reported while WS is thinking, waiting, severed or anything else is
+dropped, so there is no marker for the viewed-cleared edge to announce later.
+Without this, a user who watched a turn run to done would have spent the
+one-shot dwell on the running turn, and the finished response would never go
 PARTIAL.  Every status change therefore restarts the clock, and the next
 report lands on whatever the row has become; whether it takes is the
 daemon's decision, never this one's."

@@ -88,6 +88,12 @@ describe("the status mark", () => {
     expect(drawStatusMark(arm, "R.status").hasAttribute("data-glyph")).toBe(true);
   });
 
+  it("draws a failed turn end as a blue dot", () => {
+    const mark = drawStatusMark("turnFailed", "R.status");
+    expect(mark.classList.contains("tone-blue")).toBe(true);
+    expect(mark.getAttribute("data-glyph")).toBe("dot");
+  });
+
   it("draws a merge as the recycle glyph rather than a lifecycle dot", () => {
     expect(drawStatusMark("merging", "R.status").getAttribute("data-glyph")).toBe("recycle");
   });
