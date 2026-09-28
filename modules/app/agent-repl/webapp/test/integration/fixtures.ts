@@ -1914,6 +1914,7 @@ export const ROSTER_STATUS_ARMS = [
   "permission",
   "done",
   "interrupted",
+  "turnFailed",
   "ready",
   "idleAsync",
   "vendorBlocked",
