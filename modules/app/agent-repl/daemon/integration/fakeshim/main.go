@@ -406,7 +406,7 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.rememberPushedBash(f)
 		p.srv.rememberPushedPermission(agent, f)
 		p.srv.settleTurn(agent, f)
-		p.srv.agents.publish(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn})
+		p.srv.agents.publish(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn, placeMs: cmd.PlaceMs})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpPushUserPrompt:
