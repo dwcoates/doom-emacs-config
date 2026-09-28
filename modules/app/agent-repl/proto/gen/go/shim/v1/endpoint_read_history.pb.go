@@ -32,9 +32,8 @@ const (
 // Which agent's history, and where in it.
 type ReadHistoryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHOSE history. UNSET = the session's prompt thread, resolved by the shim.
-	// Any book the store holds may be named — a fork's daemon reads its
-	// parent's book this way; an unknown agent is a refusal.
+	// WHOSE history. UNSET = the session's prompt thread, resolved by the
+	// shim; an unknown agent is a refusal.
 	Target *v1.AgentId `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
 	// This page's budget.
 	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
@@ -44,7 +43,6 @@ type ReadHistoryRequest struct {
 	//
 	//	*ReadHistoryRequest_First
 	//	*ReadHistoryRequest_After
-	//	*ReadHistoryRequest_Through
 	Position      isReadHistoryRequest_Position `protobuf_oneof:"position"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -119,15 +117,6 @@ func (x *ReadHistoryRequest) GetAfter() *v1.HistoryPointer {
 	return nil
 }
 
-func (x *ReadHistoryRequest) GetThrough() *v1.ConversationThrough {
-	if x != nil {
-		if x, ok := x.Position.(*ReadHistoryRequest_Through); ok {
-			return x.Through
-		}
-	}
-	return nil
-}
-
 type isReadHistoryRequest_Position interface {
 	isReadHistoryRequest_Position()
 }
@@ -139,22 +128,14 @@ type ReadHistoryRequest_First struct {
 }
 
 type ReadHistoryRequest_After struct {
-	// Entries placed strictly BEFORE the entry this pointer names — a pointer
-	// served by a page's `more` arm or by a watched entry, echoed verbatim.
+	// Strictly OLDER than the entry this pointer names — a pointer served by
+	// a page's `more` arm or by a watched entry, echoed verbatim.
 	After *v1.HistoryPointer `protobuf:"bytes,4,opt,name=after,proto3,oneof"`
-}
-
-type ReadHistoryRequest_Through struct {
-	// The newest entries placed AT OR BEFORE this bound: the book as it stood
-	// at that instant. `more` then walks older with `after` as usual.
-	Through *v1.ConversationThrough `protobuf:"bytes,5,opt,name=through,proto3,oneof"`
 }
 
 func (*ReadHistoryRequest_First) isReadHistoryRequest_Position() {}
 
 func (*ReadHistoryRequest_After) isReadHistoryRequest_Position() {}
-
-func (*ReadHistoryRequest_Through) isReadHistoryRequest_Position() {}
 
 // Anchor at the newest entry.
 type ReadHistoryFirst struct {
@@ -545,13 +526,12 @@ var File_shim_v1_endpoint_read_history_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_read_history_proto_rawDesc = "" +
 	"\n" +
-	"#shim/v1/endpoint_read_history.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xad\x02\n" +
+	"#shim/v1/endpoint_read_history.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xeb\x01\n" +
 	"\x12ReadHistoryRequest\x125\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x06target\x88\x01\x01\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x121\n" +
 	"\x05first\x18\x03 \x01(\v2\x19.shim.v1.ReadHistoryFirstH\x00R\x05first\x127\n" +
-	"\x05after\x18\x04 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\x05after\x12@\n" +
-	"\athrough\x18\x05 \x01(\v2$.conversation.v1.ConversationThroughH\x00R\athroughB\n" +
+	"\x05after\x18\x04 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\x05afterB\n" +
 	"\n" +
 	"\bpositionB\t\n" +
 	"\a_target\"\x12\n" +
@@ -596,25 +576,23 @@ var file_shim_v1_endpoint_read_history_proto_goTypes = []any{
 	(*ReadHistoryStoreUnavailable)(nil), // 7: shim.v1.ReadHistoryStoreUnavailable
 	(*v1.AgentId)(nil),                  // 8: conversation.v1.AgentId
 	(*v1.HistoryPointer)(nil),           // 9: conversation.v1.HistoryPointer
-	(*v1.ConversationThrough)(nil),      // 10: conversation.v1.ConversationThrough
-	(*v1.HistoryPage)(nil),              // 11: conversation.v1.HistoryPage
+	(*v1.HistoryPage)(nil),              // 10: conversation.v1.HistoryPage
 }
 var file_shim_v1_endpoint_read_history_proto_depIdxs = []int32{
 	8,  // 0: shim.v1.ReadHistoryRequest.target:type_name -> conversation.v1.AgentId
 	1,  // 1: shim.v1.ReadHistoryRequest.first:type_name -> shim.v1.ReadHistoryFirst
 	9,  // 2: shim.v1.ReadHistoryRequest.after:type_name -> conversation.v1.HistoryPointer
-	10, // 3: shim.v1.ReadHistoryRequest.through:type_name -> conversation.v1.ConversationThrough
-	3,  // 4: shim.v1.ReadHistoryResponse.success:type_name -> shim.v1.ReadHistorySuccess
-	4,  // 5: shim.v1.ReadHistoryResponse.failure:type_name -> shim.v1.ReadHistoryFailure
-	11, // 6: shim.v1.ReadHistorySuccess.page:type_name -> conversation.v1.HistoryPage
-	5,  // 7: shim.v1.ReadHistoryFailure.unknown_agent:type_name -> shim.v1.ReadHistoryUnknownAgent
-	6,  // 8: shim.v1.ReadHistoryFailure.stale_pointer:type_name -> shim.v1.ReadHistoryStalePointer
-	7,  // 9: shim.v1.ReadHistoryFailure.store_unavailable:type_name -> shim.v1.ReadHistoryStoreUnavailable
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	3,  // 3: shim.v1.ReadHistoryResponse.success:type_name -> shim.v1.ReadHistorySuccess
+	4,  // 4: shim.v1.ReadHistoryResponse.failure:type_name -> shim.v1.ReadHistoryFailure
+	10, // 5: shim.v1.ReadHistorySuccess.page:type_name -> conversation.v1.HistoryPage
+	5,  // 6: shim.v1.ReadHistoryFailure.unknown_agent:type_name -> shim.v1.ReadHistoryUnknownAgent
+	6,  // 7: shim.v1.ReadHistoryFailure.stale_pointer:type_name -> shim.v1.ReadHistoryStalePointer
+	7,  // 8: shim.v1.ReadHistoryFailure.store_unavailable:type_name -> shim.v1.ReadHistoryStoreUnavailable
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_read_history_proto_init() }
@@ -625,7 +603,6 @@ func file_shim_v1_endpoint_read_history_proto_init() {
 	file_shim_v1_endpoint_read_history_proto_msgTypes[0].OneofWrappers = []any{
 		(*ReadHistoryRequest_First)(nil),
 		(*ReadHistoryRequest_After)(nil),
-		(*ReadHistoryRequest_Through)(nil),
 	}
 	file_shim_v1_endpoint_read_history_proto_msgTypes[2].OneofWrappers = []any{
 		(*ReadHistoryResponse_Success)(nil),
