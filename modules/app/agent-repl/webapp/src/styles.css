@@ -85,6 +85,13 @@
      `.token-count` site (the subagent head's figure is the first) shares it. A
      readable amber-yellow on the light ground; the dark block lifts it. */
   --token-yellow: #ca8a04;
+  /* The footer tokens cell's heat gradient (FooterTokensCellInputHeat): four
+     colors evenly spaced along one gradient, green → yellow → orange → red.
+     The daemon states where on it a figure falls; these pick the palette. */
+  --token-heat-0: var(--ok);
+  --token-heat-1: var(--token-yellow);
+  --token-heat-2: var(--thinking);
+  --token-heat-3: var(--err);
   /* Agent boot: the same blue the Emacs tab-bar paints the :init state
      (`agent-repl--color-init-blue'), so a starting workspace reads as one
      state across both renderers instead of red in one and blue in the other. */

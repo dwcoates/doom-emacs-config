@@ -19,6 +19,7 @@ import {
   IDLE_CLOCK_LABEL,
   drawClientDisconnectedStrip,
   drawFooterStrip,
+  footerTokensHeatColor,
   statusWords,
   subStatusWords,
 } from "../../src/footer/strip.js";
@@ -786,6 +787,30 @@ describe("drawFooterTokensCell", () => {
     expect(h.calls.interrupt).toHaveLength(0);
   });
 
+  it("colors a figure with no heat not at all", () => {
+    const { row } = drawStrip({ tokens: { input: { text: "--" } } });
+    const input = row.querySelector<HTMLElement>(".footer-tokens-input");
+    expect(input?.hasAttribute("data-heat")).toBe(false);
+    expect(input?.style.color).toBe("");
+  });
+
+  it("colors the figure from its heat", () => {
+    const { row } = drawStrip({ tokens: { input: { text: "40k in", heat: { position: 0.5 } } } });
+    const input = row.querySelector<HTMLElement>(".footer-tokens-input");
+    expect(input?.getAttribute("data-heat")).toBe("0.5");
+    expect(input?.style.color).toContain("--token-heat-1");
+  });
+
+  it("refuses a heat outside the gradient", () => {
+    const h = harness();
+    expect(() =>
+      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx),
+        selection: null,
+        onSelect: () => {},
+      }),
+    ).toThrow(MalformedView);
+  });
+
   it("draws the idle figure the daemon states, verbatim", () => {
     const { row } = drawStrip({ tokens: { input: { text: "--" } } });
     expect(row.querySelector(".footer-tokens-input")?.textContent).toBe("--");
@@ -1332,5 +1357,25 @@ describe("the update activity: a deploy's progress on the strip", () => {
       status: withActivity(statusCase, subCase, "update", { phase: { case: "installing", value: {} } }),
     });
     expect(row.querySelector(".footer-activity-update")?.textContent).toBe("installing");
+  });
+});
+
+describe("footerTokensHeatColor", () => {
+  it.each([
+    [0, 0, 1, 0],
+    [1 / 6, 0, 1, 50],
+    [1 / 3, 1, 2, 0],
+    [0.5, 1, 2, 50],
+    [2 / 3, 2, 3, 0],
+    [5 / 6, 2, 3, 50],
+    [1, 2, 3, 100],
+  ])("places %d between heat color %d and %d at %d%%", (position, lower, upper, share) => {
+    expect(footerTokensHeatColor(position, "p")).toBe(
+      `color-mix(in oklab, var(--token-heat-${String(lower)}), var(--token-heat-${String(upper)}) ${String(share)}%)`,
+    );
+  });
+
+  it.each([[-0.01], [1.01], [Number.NaN], [Number.POSITIVE_INFINITY]])("refuses %d", (position) => {
+    expect(() => footerTokensHeatColor(position, "p")).toThrow(MalformedView);
   });
 });
