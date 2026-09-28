@@ -43,7 +43,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// explanation on 2026-09-14. The gate is the fact; it is named as the fact.
 	if q.deps.ColdGate != nil {
 		if detail, gated := q.deps.ColdGate(sub.WS); gated {
-			log.Info(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
+			refusalLevel(ctx, log, log.Info)(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
 				dlog.Context{"detail": detail})
 			return Disposition{}, &ColdGateRefusal{Detail: detail}
 		}
@@ -67,7 +67,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		// exactly as mounting the frontend is; only a workspace that will not
 		// come back refuses.
 		if q.deps.Revive == nil {
-			log.Warn(opSubmit, "the workspace has no session to submit to", nil)
+			refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session to submit to", nil)
 			return Disposition{}, ErrNoSession
 		}
 		return q.holdForRevival(ctx, sub, log)
@@ -82,7 +82,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
-		log.Warn(opSubmit, "the workspace has no session watcher", nil)
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session watcher", nil)
 		return Disposition{}, ErrNoSession
 	}
 	if running := watcher.TurnInFlight(); running != nil {
@@ -138,7 +138,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	switch lease.Policy {
 	case wsm.PolicyRefuse:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyRefuse"})
-		log.Warn(opSubmit, "the submission is refused: a merge is in flight", fields)
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the submission is refused: a merge is in flight", fields)
 		q.noteDrainRefusal(lease.Holder, sub.WS)
 		return Disposition{RefusedArm: ArmMerging}, true, ErrMerging
 

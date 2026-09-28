@@ -1433,6 +1433,30 @@ Owner rulings, 2026-09-27 (`internal/sessioncommand`, `internal/promptqueue/acts
 - **THE QUEUE KNOWS THE RUNNING TURN IS A SESSION ACT.** `wsState.cut` (turn + command, under `q.mu`) is set by `runContextCut` before the watcher or shim hear of the turn, and retired by the turn-close door (`turnclose.go`, every close path) or a refused start.
 - **NOTHING INTERJECTS OR OVERTAKES A RUNNING CUT.** `interject` refuses under the same `q.mu` hold that installs the head, so a verdict or a Release cannot target it (INFO record: `session_act_turn`, `session_act`, `held_turn`); `popAndDeliver` delivers nothing while it runs; `drainActs` stops after a cut opens; `Submit` and `Release` treat a recorded cut as running before the watcher learns of it. Held prompts stay held rows and are delivered in order at the act's end. A user's explicit interrupt (`workspace/interrupt.go`) never goes through the queue and still ends the act.
 
+## A deferred prompt is held for the turn's end, never classified, and durable
+
+Owner ruling, 2026-09-28: held prompts survive outages AND restarts, deferred
+ones (`SPC j RET`) included. `agentrepl.v1.SubmitPromptRequest.delivery =
+SUBMIT_PROMPT_DELIVERY_DEFERRED` (`internal/promptqueue/classify.go`,
+`internal/wsm` `held_prompts.delivery`, layout 12).
+
+- **NEVER CLASSIFIED, SO NEVER INTERJECTED.** Behind a running turn it is
+  stamped `hold_for_turn_end` by `deferredVerdict` in `hold`, `classifyHeld`
+  (an edit's commit, a successor's re-judgement) and `verdictFor` (the
+  classifier call site itself), and recorded at INFO. With nothing running it
+  is delivered at once, like any prompt.
+- **ITS OWN TURN.** A turn end delivers held prompts one at a time, oldest
+  first, so N deferred prompts run as N turns in order.
+- **THE DELIVERY IS DURABLE.** It is a column of the hold row, so a restart's
+  restore and a handover's successor honor it; an unknown value fails the
+  hold's decode rather than being read as ordinary.
+- **HELD LIKE ANY HELD PROMPT.** It is in the tray. A merge or a cold gate
+  refuses a NEW submission (deferred or not); Emacs writes a refused deferred
+  submission to the held-prompt ingress with its `delivery`, whose backoff
+  retries it until the condition clears. The ingress submits it under the same
+  delivery. A user's Release from the tray still sends it through: that is a
+  later, explicit request.
+
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
 Every standing watch a webview holds is a SUBSCRIPTION on that page's single

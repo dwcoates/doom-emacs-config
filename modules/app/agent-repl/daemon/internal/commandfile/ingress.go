@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/intakegate"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -26,11 +27,18 @@ const (
 	opClaim      = "daemon.commandfile.claim"
 	opQuarantine = "daemon.commandfile.quarantine"
 	opEntry      = "daemon.commandfile.entry"
+	opGate       = "daemon.commandfile.gate"
 )
 
 // ErrQuarantined marks the error a malformed file yields: the file was warned
 // about and moved aside, so the failure is already reported where it happened.
 var ErrQuarantined = errors.New("commandfile: the file was quarantined")
+
+// ErrClaimedElsewhere marks a file that was gone before this ingress could
+// claim it: another daemon on the same state root (a handover's other half,
+// finishing a sweep it began) claimed it first. The rename is the claim, so
+// losing it is the exclusivity working, never a fault.
+var ErrClaimedElsewhere = errors.New("commandfile: the file was claimed by another sweeper")
 
 // commandFileOrigin is the prompt origin every command-file prompt carries: the
 // channel is a host-written file, not a composer, and the origin says so on the
@@ -42,6 +50,8 @@ const commandFileOrigin = conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_
 // never a second implementation of a verb to keep in step.
 type ingress struct {
 	deps Deps
+	// gate answers whether this daemon takes the intake at all.
+	gate *intakegate.Gate
 }
 
 // Run polls the ingress directory until ctx is cancelled.
@@ -75,14 +85,25 @@ func (i *ingress) Run(ctx context.Context) error {
 
 // sweep applies every claimable file once, oldest name first so a producer that
 // drops two files gets them in the order it wrote them.
+//
+// ONLY THE DAEMON THAT SERVES SWEEPS (intakegate): a joining successor and an
+// incumbent whose handover has begun apply nothing, because the verbs and the
+// prompt body the entries map onto act on workspaces such a daemon does not
+// serve.
 func (i *ingress) sweep(ctx context.Context, log dlog.Logger) error {
+	if !i.gate.Admits() {
+		return nil
+	}
 	matches, err := filepath.Glob(filepath.Join(i.deps.Dir, i.deps.Glob))
 	if err != nil {
 		return fmt.Errorf("glob %q: %w", i.deps.Glob, err)
 	}
 	sort.Strings(matches)
 	for _, path := range matches {
-		if settled, err := i.settled(path); err != nil {
+		if settled, err := i.settled(path); errors.Is(err, os.ErrNotExist) {
+			log.Debug(opRun, "a command file was gone before it was judged; another sweeper claimed it", dlog.Context{"path": path})
+			continue
+		} else if err != nil {
 			log.Warn(opRun, "could not judge whether a command file has settled", dlog.Context{
 				"path": path, "cause": err.Error(),
 			})
@@ -97,6 +118,8 @@ func (i *ingress) sweep(ctx context.Context, log dlog.Logger) error {
 			log.Debug(opRun, "a malformed command file was quarantined", dlog.Context{
 				"path": path, "cause": err.Error(),
 			})
+		case errors.Is(err, ErrClaimedElsewhere):
+			log.Debug(opRun, "a command file was claimed by another sweeper", dlog.Context{"path": path})
 		default:
 			log.Error(opRun, "a command file did not apply", dlog.Context{"path": path, "cause": err.Error()})
 		}
@@ -138,6 +161,10 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 	log := i.deps.Log.Global().With(dlog.Context{"path": path})
 
 	claimed, err := i.claim(path)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Debug(opClaim, "the command file was gone before it was claimed; another sweeper claimed it", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("claim %q: %w: %w", path, ErrClaimedElsewhere, err)
+	}
 	if err != nil {
 		log.Error(opClaim, "could not claim the command file", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("claim %q: %w", path, err)
@@ -310,7 +337,7 @@ func (i *ingress) applyPrompt(ctx context.Context, file string, index int, entry
 		return err
 	}
 	key := fmt.Sprintf("%s:%d", file, index)
-	_, err = i.deps.Prompts.Submit(ctx, ws, workspace.SaidText(entry.Prompt), key, commandFileOrigin, nil)
+	_, err = i.deps.Prompts.Submit(ctx, ws, workspace.SaidText(entry.Prompt), key, commandFileOrigin, wsm.DeliveryOrdinary, nil)
 	return err
 }
 

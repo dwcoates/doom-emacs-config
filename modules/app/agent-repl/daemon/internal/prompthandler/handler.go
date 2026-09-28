@@ -66,12 +66,12 @@ func (h *handler) movedOn(ctx context.Context, ws ids.WorkspaceID) {
 // is checked before anything is minted or mirrored, the addressed feed is
 // checked against the workspace, recognition forks the answer, and only an
 // ordinary prompt reaches the queue.
-func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, target *feedid.Ref) (Outcome, error) {
+func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
 	log, err := h.logger(ctx, ws)
 	if err != nil {
 		return Outcome{}, err
 	}
-	log = log.With(dlog.Context{"origin": origin.String(), "idempotency_key": idempotencyKey})
+	log = log.With(dlog.Context{"origin": origin.String(), "idempotency_key": idempotencyKey, "delivery": delivery.String()})
 
 	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		log.Warn(opSubmit, "the submission carries no origin", nil)
@@ -105,7 +105,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	defer c.done()
 	turn := c.turn
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target,
+		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target, Delivery: delivery,
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -218,7 +218,14 @@ func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyK
 		// exactly this claim, and the shim answers a repeated start of a turn
 		// id it already accepted as a no-op; a fresh id would start the prompt
 		// a second time.
-		log.Info(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn",
+		// A RE-DRIVE MEETS THIS CLAIM ON EVERY RETRY of an entry the queue
+		// keeps refusing, so there it is DEBUG: the re-driver records the
+		// entry's outcome itself.
+		level := log.Info
+		if isRedrive(ctx) {
+			level = log.Debug
+		}
+		level(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn",
 			dlog.Context{"turn": string(got.Turn), "offered_turn": string(turn), "reopened": got.Reopened})
 	case wsm.ClaimMinted:
 		log.Debug(opSubmit, "claimed the idempotency key", dlog.Context{"turn": string(got.Turn)})

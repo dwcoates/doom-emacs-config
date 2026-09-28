@@ -186,20 +186,24 @@ var (
 	emGHISettledArms = []string{":ready", ":done", ":interrupted", ":idle-async"}
 )
 
-// emGHIHeldPromptsForm counts WS's held prompts, which
-// EMACS-LAYER-SPEC.md's readback table names as `agent-repl--prompt-queue`
-// — never the tray.
-func emGHIHeldPromptsForm(ws string) string {
-	return `(length (agent-repl-prompt-queue-pending ` + elispString(ws) + `))`
+// emGHIIngressWaitingForm counts WS's prompts waiting in the durable
+// on-disk held-prompt ingress (`$AGENT_REPL_STATE_DIR/held-prompts/`), which
+// EMACS-LAYER-SPEC.md's readback table names as
+// `agent-repl-held-ingress-waiting` — never the tray. Owner ruling
+// 2026-09-28: Emacs holds no prompt in memory, so the ingress is the ONLY
+// place Emacs itself still holds one (a prompt the daemon did not take).
+func emGHIIngressWaitingForm(ws string) string {
+	return `(agent-repl-held-ingress-waiting ` + elispString(ws) + `)`
 }
 
-// emGHIAwaitHeldPrompts waits until WS holds exactly WANT prompts.
-func emGHIAwaitHeldPrompts(t *testing.T, e *Emacs, ws, what string, want int) {
+// emGHIAssertIngressEmpty reads, without waiting, that none of WS's prompts
+// wait in the ingress. Call it only once the edge that would have written an
+// entry is already behind the test, so "empty now" is the settled answer.
+func emGHIAssertIngressEmpty(t *testing.T, e *Emacs, ws, when string) {
 	t.Helper()
-	e.AwaitEval(what, emGHIHeldPromptsForm(ws), func(raw json.RawMessage) bool {
-		var got int
-		return json.Unmarshal(raw, &got) == nil && got == want
-	})
+	if n := e.EvalInt(emGHIIngressWaitingForm(ws)); n != 0 {
+		t.Fatalf("%d of %s's prompts wait in the held-prompt ingress %s, want none", n, ws, when)
+	}
 }
 
 // emGHIAssertResponsive is the heartbeat assertion, made explicit at a call
@@ -249,11 +253,12 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 
 	// Assert: the agent is not resumed. The roster arm stays settled — a
 	// resumption would move it back into the running half — and no prompt was
-	// re-driven from the queue behind the test's back.
+	// left behind for re-driving: Emacs holds prompts nowhere but the durable
+	// ingress, and it is empty.
 	if got := emGHIAwaitStatus(t, e, ws, "the roster arm to stay settled", emGHISettledArms...); got != ":interrupted" {
 		t.Fatalf("the roster arm moved to %s after the forced restart, want it to stay :interrupted: the agent was resumed", got)
 	}
-	emGHIAwaitHeldPrompts(t, e, ws, "no prompt to be held after a forced restart", 0)
+	emGHIAssertIngressEmpty(t, e, ws, "after a forced restart")
 }
 
 // TestEmacsForcedRestartClosesTheComposerOnItsSend holds the ONE edge that
@@ -289,11 +294,18 @@ func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
 
 // TestEmacsGracefulRestartHoldsPromptsMeanwhile is scenario 36.
 //
-// The claim under test is that Emacs HOLDS rather than refuses: undelivered
-// user intent may never be silently discarded, so a prompt written while a
-// restart is in flight lands in `agent-repl--prompt-queue` and drains on the
-// finish edge. This is the deferral edge, and it is the difference between
-// "the restart lost my prompt" and "the restart delayed it".
+// The claim under test is that a prompt written around a restart is HELD
+// rather than refused: undelivered user intent may never be silently
+// discarded. Owner ruling 2026-09-28 moved the holding out of Emacs: the
+// deferral (`SPC j RET`) is submitted AT ONCE with `:delivery :deferred`
+// and the DAEMON holds it in its held tray, delivering it as its own turn
+// when the running one ends. Emacs therefore proves three things it can see:
+// the deferral left at once, deferred, with the composer cleared; nothing
+// was left waiting on disk (the daemon took it rather than refusing it); and
+// the turn settles once the gate lets the restart reach its finish edge. The
+// daemon's `:success' answer to the deferral is read at the RPC boundary.
+// The daemon's tray itself is not read here: this Emacs-layer world exposes
+// no daemon client.
 func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 	t.Parallel()
 	// Arrange. The parked turn here is the fake's TURN GATE, not
@@ -312,22 +324,36 @@ func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 	emGHIOpenPanel(t, e)
 	emGHISubmit(t, e, ws, emGHIGatedPrompt)
 	emGHIAwaitStatus(t, e, ws, "the turn to be running before the restart", emGHIRunningArms...)
+	// Armed AFTER the gated turn's own send, so the observers see only the
+	// deferral.
+	armSubmissionObserver(t, e)
+	armSubmissionAnswerObserver(t, e)
 
-	// Act: the user writes a second prompt mid-turn and enqueues it through
+	// Act: the user writes a second prompt mid-turn and defers it through
 	// the ordinary command (`SPC j RET`), then asks for a GRACEFUL restart —
 	// no prefix argument, so the turn is not forced down.
+	const heldText = "the held prompt"
 	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
                  (erase-buffer)
-                 (insert "the held prompt")
+                 (insert ` + elispString(heldText) + `)
                  t)`)
 	e.Eval(`(agent-repl-queue-deferred-prompt)`)
 
-	// Assert: it is HELD, not refused, and the composer was cleared because
-	// the text is now the queue's rather than the draft's.
-	emGHIAwaitHeldPrompts(t, e, ws, "the deferred prompt to be held", 1)
+	// Assert: the deferral reached the RPC boundary at once, DEFERRED, and
+	// the composer was cleared because the words are now the daemon's.
+	sent := awaitSubmissions(t, e, 1, "the deferral to reach the RPC boundary")[0]
+	if sent.Text != heldText || sent.Delivery != ":deferred" {
+		t.Fatalf("the deferral was submitted as text %q delivery %q, want %q delivered :deferred",
+			sent.Text, sent.Delivery, heldText)
+	}
 	if got := e.EvalString(`(with-current-buffer ` + elispString(buffer) + ` (buffer-string))`); got != "" {
-		t.Fatalf("the composer holds %q after the deferral, want it emptied into the queue", got)
+		t.Fatalf("the composer holds %q after the deferral, want it cleared", got)
+	}
+
+	// Assert: the daemon TOOK it into its held tray rather than refusing it.
+	if arm := awaitSubmissionAnswer(t, e, heldText, "the daemon to answer the deferral"); arm != ":success" {
+		t.Fatalf("the daemon answered the mid-turn deferral %s, want :success: a deferral is held, never refused", arm)
 	}
 
 	e.Eval(`(agent-repl-restart-workspace nil ` + elispString(ws) + `)`)
@@ -340,11 +366,12 @@ func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 		t.Fatalf("e2e: open the turn gate: %v", err)
 	}
 
-	// Assert: the queue drains on the finish edge the restart produces. One
-	// entry per finished turn is the queue's own contract, and one entry is
-	// all this test wrote.
+	// Assert: the turn settles on the finish edge the restart produces, and
+	// nothing was left waiting on disk: had the daemon refused the deferral
+	// or the transport dropped it, Emacs would have written it to the
+	// ingress. An empty ingress is the daemon having taken it.
 	emGHIAwaitStatus(t, e, ws, "the turn to settle after the graceful restart", emGHISettledArms...)
-	emGHIAwaitHeldPrompts(t, e, ws, "the held prompt to drain on the finish edge", 0)
+	emGHIAssertIngressEmpty(t, e, ws, "once the graceful restart has settled")
 }
 
 // TestEmacsRestartDoesNotWedgeEmacs is scenario 37, and the HEARTBEAT is the

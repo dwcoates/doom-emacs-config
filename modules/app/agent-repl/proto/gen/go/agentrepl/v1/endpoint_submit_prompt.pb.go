@@ -30,6 +30,66 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// HOW a submitted prompt is delivered, when it asks for something other than
+// the ordinary delivery. The ordinary delivery is the field's ABSENCE: a prompt
+// goes to the session at once when nothing runs, and while a turn runs it is
+// held and classified against that turn, which may interject it.
+type SubmitPromptDelivery int32
+
+const (
+	// Never sent: a request carrying it is refused as InvalidArgument. The
+	// ordinary delivery is an ABSENT `delivery`, never this value.
+	SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED SubmitPromptDelivery = 0
+	// DEFERRED: run as ITS OWN turn after the current one, never interjected.
+	// It goes to the session at once when nothing runs. While a turn runs it is
+	// held until that turn ends and is then delivered as a turn of its own:
+	// it is never classified, so it can never earn an interject. It is held
+	// like any other held prompt -- it shows in the held tray, a merge or a cold
+	// gate keeps it held, and it survives a restart of the daemon, the shim and
+	// the client -- and a turn end delivers held prompts one at a time, oldest
+	// first, so several deferred prompts run as that many turns in order.
+	SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED SubmitPromptDelivery = 1
+)
+
+// Enum value maps for SubmitPromptDelivery.
+var (
+	SubmitPromptDelivery_name = map[int32]string{
+		0: "SUBMIT_PROMPT_DELIVERY_UNSPECIFIED",
+		1: "SUBMIT_PROMPT_DELIVERY_DEFERRED",
+	}
+	SubmitPromptDelivery_value = map[string]int32{
+		"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED": 0,
+		"SUBMIT_PROMPT_DELIVERY_DEFERRED":    1,
+	}
+)
+
+func (x SubmitPromptDelivery) Enum() *SubmitPromptDelivery {
+	p := new(SubmitPromptDelivery)
+	*p = x
+	return p
+}
+
+func (x SubmitPromptDelivery) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SubmitPromptDelivery) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_enumTypes[0].Descriptor()
+}
+
+func (SubmitPromptDelivery) Type() protoreflect.EnumType {
+	return &file_agentrepl_v1_endpoint_submit_prompt_proto_enumTypes[0]
+}
+
+func (x SubmitPromptDelivery) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SubmitPromptDelivery.Descriptor instead.
+func (SubmitPromptDelivery) EnumDescriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{0}
+}
+
 // What the user typed, submitted whole.
 type SubmitPromptRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -67,8 +127,13 @@ type SubmitPromptRequest struct {
 	// set-but-unresolvable feedid is the daemon's to refuse, exactly as `feed`
 	// is. Additive and mutually compatible with every existing field.
 	ReferenceResponseFeedid *v12.FeedId `protobuf:"bytes,6,opt,name=reference_response_feedid,json=referenceResponseFeedid,proto3,oneof" json:"reference_response_feedid,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// OPTIONAL delivery mode. ABSENT is the ordinary delivery; set, it names the
+	// one other delivery the daemon honors (SubmitPromptDelivery). Additive and
+	// mutually compatible with every existing field. Set to UNSPECIFIED, the
+	// request is refused as InvalidArgument.
+	Delivery      *SubmitPromptDelivery `protobuf:"varint,7,opt,name=delivery,proto3,enum=agentrepl.v1.SubmitPromptDelivery,oneof" json:"delivery,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubmitPromptRequest) Reset() {
@@ -141,6 +206,13 @@ func (x *SubmitPromptRequest) GetReferenceResponseFeedid() *v12.FeedId {
 		return x.ReferenceResponseFeedid
 	}
 	return nil
+}
+
+func (x *SubmitPromptRequest) GetDelivery() SubmitPromptDelivery {
+	if x != nil && x.Delivery != nil {
+		return *x.Delivery
+	}
+	return SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED
 }
 
 // THE ARM IS THE OUTCOME.
@@ -1609,16 +1681,18 @@ var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\x89\x03\n" +
+	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xdb\x03\n" +
 	"\x13SubmitPromptRequest\x128\n" +
 	"\tworkspace\x18\x05 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12-\n" +
 	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12,\n" +
 	"\x04feed\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01\x125\n" +
 	"\x06origin\x18\x04 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x12T\n" +
-	"\x19reference_response_feedid\x18\x06 \x01(\v2\x13.frontend.v1.FeedIdH\x01R\x17referenceResponseFeedid\x88\x01\x01B\a\n" +
+	"\x19reference_response_feedid\x18\x06 \x01(\v2\x13.frontend.v1.FeedIdH\x01R\x17referenceResponseFeedid\x88\x01\x01\x12C\n" +
+	"\bdelivery\x18\a \x01(\x0e2\".agentrepl.v1.SubmitPromptDeliveryH\x02R\bdelivery\x88\x01\x01B\a\n" +
 	"\x05_feedB\x1c\n" +
-	"\x1a_reference_response_feedid\"\x98\x01\n" +
+	"\x1a_reference_response_feedidB\v\n" +
+	"\t_delivery\"\x98\x01\n" +
 	"\x14SubmitPromptResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.SubmitPromptSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\x05errorB\b\n" +
@@ -1683,7 +1757,10 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\x19SubmitPromptNotYetAdopted\" \n" +
 	"\x1eSubmitPromptFeedNotInWorkspace\"\x1d\n" +
 	"\x1bSubmitPromptFeedUndecodable\"\x17\n" +
-	"\x15SubmitPromptNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x15SubmitPromptNoSession*c\n" +
+	"\x14SubmitPromptDelivery\x12&\n" +
+	"\"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fSUBMIT_PROMPT_DELIVERY_DEFERRED\x10\x01B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescOnce sync.Once
@@ -1697,82 +1774,85 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescData
 }
 
+var file_agentrepl_v1_endpoint_submit_prompt_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
-	(*SubmitPromptRequest)(nil),              // 0: agentrepl.v1.SubmitPromptRequest
-	(*SubmitPromptResponse)(nil),             // 1: agentrepl.v1.SubmitPromptResponse
-	(*SubmitPromptSuccess)(nil),              // 2: agentrepl.v1.SubmitPromptSuccess
-	(*SubmitPromptCommandActed)(nil),         // 3: agentrepl.v1.SubmitPromptCommandActed
-	(*SubmitPromptCommandRefused)(nil),       // 4: agentrepl.v1.SubmitPromptCommandRefused
-	(*SubmitPromptTurn)(nil),                 // 5: agentrepl.v1.SubmitPromptTurn
-	(*SubmitPromptCommandPanel)(nil),         // 6: agentrepl.v1.SubmitPromptCommandPanel
-	(*SubmitPromptError)(nil),                // 7: agentrepl.v1.SubmitPromptError
-	(*SubmitPromptModelNotInCatalog)(nil),    // 8: agentrepl.v1.SubmitPromptModelNotInCatalog
-	(*SubmitPromptModelRefused)(nil),         // 9: agentrepl.v1.SubmitPromptModelRefused
-	(*SubmitPromptColdGate)(nil),             // 10: agentrepl.v1.SubmitPromptColdGate
-	(*SubmitPromptBubbleRefused)(nil),        // 11: agentrepl.v1.SubmitPromptBubbleRefused
-	(*SubmitPromptBubbleNotDeliverable)(nil), // 12: agentrepl.v1.SubmitPromptBubbleNotDeliverable
-	(*SubmitPromptBubbleAgentBusy)(nil),      // 13: agentrepl.v1.SubmitPromptBubbleAgentBusy
-	(*SubmitPromptDuplicateSubmission)(nil),  // 14: agentrepl.v1.SubmitPromptDuplicateSubmission
-	(*SubmitPromptRefusedMerging)(nil),       // 15: agentrepl.v1.SubmitPromptRefusedMerging
-	(*SubmitPromptUnknownWorkspace)(nil),     // 16: agentrepl.v1.SubmitPromptUnknownWorkspace
-	(*SubmitPromptWorkspaceRefMismatch)(nil), // 17: agentrepl.v1.SubmitPromptWorkspaceRefMismatch
-	(*SubmitPromptTransferringAway)(nil),     // 18: agentrepl.v1.SubmitPromptTransferringAway
-	(*SubmitPromptNotYetAdopted)(nil),        // 19: agentrepl.v1.SubmitPromptNotYetAdopted
-	(*SubmitPromptFeedNotInWorkspace)(nil),   // 20: agentrepl.v1.SubmitPromptFeedNotInWorkspace
-	(*SubmitPromptFeedUndecodable)(nil),      // 21: agentrepl.v1.SubmitPromptFeedUndecodable
-	(*SubmitPromptNoSession)(nil),            // 22: agentrepl.v1.SubmitPromptNoSession
-	(*v1.WorkspaceRef)(nil),                  // 23: workspace.v1.WorkspaceRef
-	(*v11.UserSaid)(nil),                     // 24: conversation.v1.UserSaid
-	(*v12.FeedId)(nil),                       // 25: frontend.v1.FeedId
-	(v11.PromptOrigin)(0),                    // 26: conversation.v1.PromptOrigin
-	(*v11.TurnId)(nil),                       // 27: conversation.v1.TurnId
-	(*v12.StatusPanelView)(nil),              // 28: frontend.v1.StatusPanelView
-	(*v12.TodosPanelView)(nil),               // 29: frontend.v1.TodosPanelView
-	(*v12.AgentsPanelView)(nil),              // 30: frontend.v1.AgentsPanelView
-	(*v12.McpPanelView)(nil),                 // 31: frontend.v1.McpPanelView
-	(*v12.ContextPanelView)(nil),             // 32: frontend.v1.ContextPanelView
-	(*v12.HelpPanelView)(nil),                // 33: frontend.v1.HelpPanelView
+	(SubmitPromptDelivery)(0),                // 0: agentrepl.v1.SubmitPromptDelivery
+	(*SubmitPromptRequest)(nil),              // 1: agentrepl.v1.SubmitPromptRequest
+	(*SubmitPromptResponse)(nil),             // 2: agentrepl.v1.SubmitPromptResponse
+	(*SubmitPromptSuccess)(nil),              // 3: agentrepl.v1.SubmitPromptSuccess
+	(*SubmitPromptCommandActed)(nil),         // 4: agentrepl.v1.SubmitPromptCommandActed
+	(*SubmitPromptCommandRefused)(nil),       // 5: agentrepl.v1.SubmitPromptCommandRefused
+	(*SubmitPromptTurn)(nil),                 // 6: agentrepl.v1.SubmitPromptTurn
+	(*SubmitPromptCommandPanel)(nil),         // 7: agentrepl.v1.SubmitPromptCommandPanel
+	(*SubmitPromptError)(nil),                // 8: agentrepl.v1.SubmitPromptError
+	(*SubmitPromptModelNotInCatalog)(nil),    // 9: agentrepl.v1.SubmitPromptModelNotInCatalog
+	(*SubmitPromptModelRefused)(nil),         // 10: agentrepl.v1.SubmitPromptModelRefused
+	(*SubmitPromptColdGate)(nil),             // 11: agentrepl.v1.SubmitPromptColdGate
+	(*SubmitPromptBubbleRefused)(nil),        // 12: agentrepl.v1.SubmitPromptBubbleRefused
+	(*SubmitPromptBubbleNotDeliverable)(nil), // 13: agentrepl.v1.SubmitPromptBubbleNotDeliverable
+	(*SubmitPromptBubbleAgentBusy)(nil),      // 14: agentrepl.v1.SubmitPromptBubbleAgentBusy
+	(*SubmitPromptDuplicateSubmission)(nil),  // 15: agentrepl.v1.SubmitPromptDuplicateSubmission
+	(*SubmitPromptRefusedMerging)(nil),       // 16: agentrepl.v1.SubmitPromptRefusedMerging
+	(*SubmitPromptUnknownWorkspace)(nil),     // 17: agentrepl.v1.SubmitPromptUnknownWorkspace
+	(*SubmitPromptWorkspaceRefMismatch)(nil), // 18: agentrepl.v1.SubmitPromptWorkspaceRefMismatch
+	(*SubmitPromptTransferringAway)(nil),     // 19: agentrepl.v1.SubmitPromptTransferringAway
+	(*SubmitPromptNotYetAdopted)(nil),        // 20: agentrepl.v1.SubmitPromptNotYetAdopted
+	(*SubmitPromptFeedNotInWorkspace)(nil),   // 21: agentrepl.v1.SubmitPromptFeedNotInWorkspace
+	(*SubmitPromptFeedUndecodable)(nil),      // 22: agentrepl.v1.SubmitPromptFeedUndecodable
+	(*SubmitPromptNoSession)(nil),            // 23: agentrepl.v1.SubmitPromptNoSession
+	(*v1.WorkspaceRef)(nil),                  // 24: workspace.v1.WorkspaceRef
+	(*v11.UserSaid)(nil),                     // 25: conversation.v1.UserSaid
+	(*v12.FeedId)(nil),                       // 26: frontend.v1.FeedId
+	(v11.PromptOrigin)(0),                    // 27: conversation.v1.PromptOrigin
+	(*v11.TurnId)(nil),                       // 28: conversation.v1.TurnId
+	(*v12.StatusPanelView)(nil),              // 29: frontend.v1.StatusPanelView
+	(*v12.TodosPanelView)(nil),               // 30: frontend.v1.TodosPanelView
+	(*v12.AgentsPanelView)(nil),              // 31: frontend.v1.AgentsPanelView
+	(*v12.McpPanelView)(nil),                 // 32: frontend.v1.McpPanelView
+	(*v12.ContextPanelView)(nil),             // 33: frontend.v1.ContextPanelView
+	(*v12.HelpPanelView)(nil),                // 34: frontend.v1.HelpPanelView
 }
 var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
-	23, // 0: agentrepl.v1.SubmitPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	24, // 1: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
-	25, // 2: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
-	26, // 3: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
-	25, // 4: agentrepl.v1.SubmitPromptRequest.reference_response_feedid:type_name -> frontend.v1.FeedId
-	2,  // 5: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
-	7,  // 6: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
-	5,  // 7: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
-	6,  // 8: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
-	4,  // 9: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
-	3,  // 10: agentrepl.v1.SubmitPromptSuccess.command_acted:type_name -> agentrepl.v1.SubmitPromptCommandActed
-	27, // 11: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
-	28, // 12: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	29, // 13: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	30, // 14: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
-	31, // 15: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	32, // 16: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
-	33, // 17: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
-	15, // 18: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
-	16, // 19: agentrepl.v1.SubmitPromptError.unknown_workspace:type_name -> agentrepl.v1.SubmitPromptUnknownWorkspace
-	17, // 20: agentrepl.v1.SubmitPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.SubmitPromptWorkspaceRefMismatch
-	18, // 21: agentrepl.v1.SubmitPromptError.transferring_away:type_name -> agentrepl.v1.SubmitPromptTransferringAway
-	19, // 22: agentrepl.v1.SubmitPromptError.not_yet_adopted:type_name -> agentrepl.v1.SubmitPromptNotYetAdopted
-	20, // 23: agentrepl.v1.SubmitPromptError.feed_not_in_workspace:type_name -> agentrepl.v1.SubmitPromptFeedNotInWorkspace
-	21, // 24: agentrepl.v1.SubmitPromptError.feed_undecodable:type_name -> agentrepl.v1.SubmitPromptFeedUndecodable
-	22, // 25: agentrepl.v1.SubmitPromptError.no_session:type_name -> agentrepl.v1.SubmitPromptNoSession
-	14, // 26: agentrepl.v1.SubmitPromptError.duplicate_submission:type_name -> agentrepl.v1.SubmitPromptDuplicateSubmission
-	11, // 27: agentrepl.v1.SubmitPromptError.bubble_refused:type_name -> agentrepl.v1.SubmitPromptBubbleRefused
-	10, // 28: agentrepl.v1.SubmitPromptError.cold_gate:type_name -> agentrepl.v1.SubmitPromptColdGate
-	8,  // 29: agentrepl.v1.SubmitPromptError.model_not_in_catalog:type_name -> agentrepl.v1.SubmitPromptModelNotInCatalog
-	9,  // 30: agentrepl.v1.SubmitPromptError.model_refused:type_name -> agentrepl.v1.SubmitPromptModelRefused
-	12, // 31: agentrepl.v1.SubmitPromptBubbleRefused.not_deliverable:type_name -> agentrepl.v1.SubmitPromptBubbleNotDeliverable
-	13, // 32: agentrepl.v1.SubmitPromptBubbleRefused.agent_busy:type_name -> agentrepl.v1.SubmitPromptBubbleAgentBusy
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	24, // 0: agentrepl.v1.SubmitPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	25, // 1: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
+	26, // 2: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
+	27, // 3: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
+	26, // 4: agentrepl.v1.SubmitPromptRequest.reference_response_feedid:type_name -> frontend.v1.FeedId
+	0,  // 5: agentrepl.v1.SubmitPromptRequest.delivery:type_name -> agentrepl.v1.SubmitPromptDelivery
+	3,  // 6: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
+	8,  // 7: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
+	6,  // 8: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
+	7,  // 9: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
+	5,  // 10: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
+	4,  // 11: agentrepl.v1.SubmitPromptSuccess.command_acted:type_name -> agentrepl.v1.SubmitPromptCommandActed
+	28, // 12: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
+	29, // 13: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	30, // 14: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	31, // 15: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
+	32, // 16: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	33, // 17: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	34, // 18: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
+	16, // 19: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
+	17, // 20: agentrepl.v1.SubmitPromptError.unknown_workspace:type_name -> agentrepl.v1.SubmitPromptUnknownWorkspace
+	18, // 21: agentrepl.v1.SubmitPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.SubmitPromptWorkspaceRefMismatch
+	19, // 22: agentrepl.v1.SubmitPromptError.transferring_away:type_name -> agentrepl.v1.SubmitPromptTransferringAway
+	20, // 23: agentrepl.v1.SubmitPromptError.not_yet_adopted:type_name -> agentrepl.v1.SubmitPromptNotYetAdopted
+	21, // 24: agentrepl.v1.SubmitPromptError.feed_not_in_workspace:type_name -> agentrepl.v1.SubmitPromptFeedNotInWorkspace
+	22, // 25: agentrepl.v1.SubmitPromptError.feed_undecodable:type_name -> agentrepl.v1.SubmitPromptFeedUndecodable
+	23, // 26: agentrepl.v1.SubmitPromptError.no_session:type_name -> agentrepl.v1.SubmitPromptNoSession
+	15, // 27: agentrepl.v1.SubmitPromptError.duplicate_submission:type_name -> agentrepl.v1.SubmitPromptDuplicateSubmission
+	12, // 28: agentrepl.v1.SubmitPromptError.bubble_refused:type_name -> agentrepl.v1.SubmitPromptBubbleRefused
+	11, // 29: agentrepl.v1.SubmitPromptError.cold_gate:type_name -> agentrepl.v1.SubmitPromptColdGate
+	9,  // 30: agentrepl.v1.SubmitPromptError.model_not_in_catalog:type_name -> agentrepl.v1.SubmitPromptModelNotInCatalog
+	10, // 31: agentrepl.v1.SubmitPromptError.model_refused:type_name -> agentrepl.v1.SubmitPromptModelRefused
+	13, // 32: agentrepl.v1.SubmitPromptBubbleRefused.not_deliverable:type_name -> agentrepl.v1.SubmitPromptBubbleNotDeliverable
+	14, // 33: agentrepl.v1.SubmitPromptBubbleRefused.agent_busy:type_name -> agentrepl.v1.SubmitPromptBubbleAgentBusy
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_submit_prompt_proto_init() }
@@ -1823,13 +1903,14 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes,
 		DependencyIndexes: file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs,
+		EnumInfos:         file_agentrepl_v1_endpoint_submit_prompt_proto_enumTypes,
 		MessageInfos:      file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes,
 	}.Build()
 	File_agentrepl_v1_endpoint_submit_prompt_proto = out.File

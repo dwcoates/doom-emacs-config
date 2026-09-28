@@ -23,10 +23,11 @@ var fixedNow = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 
 // submission is one recorded Submit call.
 type submission struct {
-	WS     ids.WorkspaceID
-	Key    string
-	Text   string
-	Origin conversationv1.PromptOrigin
+	WS       ids.WorkspaceID
+	Key      string
+	Text     string
+	Origin   conversationv1.PromptOrigin
+	Delivery wsm.Delivery
 }
 
 // fakeHandler is the prompt handler. Its accepted set stands for the durable
@@ -47,8 +48,8 @@ func newFakeHandler() *fakeHandler {
 	return &fakeHandler{accepted: map[string]bool{}, deliveries: map[string]int{}, refuse: map[string]error{}}
 }
 
-func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *feedid.Ref) (prompthandler.Outcome, error) {
-	h.calls = append(h.calls, submission{WS: ws, Key: key, Text: said.GetContent().GetBlocks()[0].GetText().GetText(), Origin: origin})
+func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+	h.calls = append(h.calls, submission{WS: ws, Key: key, Text: said.GetContent().GetBlocks()[0].GetText().GetText(), Origin: origin, Delivery: delivery})
 	if err, ok := h.refuse[key]; ok {
 		return prompthandler.Outcome{}, err
 	}
@@ -78,6 +79,8 @@ type world struct {
 	publishedSaw []int
 	now          time.Time
 	remove       func(string) error
+	// serves is what the ingress's serving answer says.
+	serves bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -91,7 +94,8 @@ func newWorld(t *testing.T) *world {
 			"/work/one": {ID: "ws-one", Dir: "/work/one"},
 			"/work/two": {ID: "ws-two", Dir: "/work/two"},
 		},
-		now: fixedNow,
+		now:    fixedNow,
+		serves: true,
 	}
 }
 
@@ -107,6 +111,7 @@ func (w *world) ingress() Ingress {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))
 		},
+		Serves: func() bool { return w.serves },
 		Log:    w.log,
 		Remove: w.remove,
 		Now:    func() time.Time { return w.now },
@@ -132,6 +137,12 @@ func (w *world) ingressLookup() WorkspaceByDirFunc {
 // and a rename as every producer does.
 func (w *world) write(name, dir, key, text string) string {
 	w.t.Helper()
+	return w.writeDelivered(name, dir, key, text, "")
+}
+
+// writeDelivered is write with the entry's delivery named ("" for none).
+func (w *world) writeDelivered(name, dir, key, text, delivery string) string {
+	w.t.Helper()
 	said, err := json.Marshal(map[string]any{
 		"content": map[string]any{"blocks": []any{map[string]any{"text": map[string]any{"text": text}}}},
 	})
@@ -140,7 +151,7 @@ func (w *world) write(name, dir, key, text string) string {
 	}
 	body, err := json.Marshal(Entry{
 		Version: FormatVersion, ProjectDir: dir, IdempotencyKey: key,
-		Origin: "PROMPT_ORIGIN_USER_SENT", Said: said, QueuedAt: "2026-09-28T11:59:00Z",
+		Origin: "PROMPT_ORIGIN_USER_SENT", Said: said, QueuedAt: "2026-09-28T11:59:00Z", Delivery: delivery,
 	})
 	if err != nil {
 		w.t.Fatal(err)

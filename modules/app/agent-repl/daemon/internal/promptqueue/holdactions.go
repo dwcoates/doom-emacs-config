@@ -228,11 +228,12 @@ func (q *queue) clearHeadIf(ws ids.WorkspaceID, turn ids.TurnID) {
 // submissionOf reconstructs the submission a standing hold recorded.
 func submissionOf(held wsm.HeldPrompt) Submission {
 	return Submission{
-		WS:     held.Workspace,
-		Turn:   held.Turn,
-		Said:   held.Said,
-		Origin: conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[held.Origin]),
-		Target: held.Target,
+		WS:       held.Workspace,
+		Turn:     held.Turn,
+		Said:     held.Said,
+		Origin:   conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[held.Origin]),
+		Target:   held.Target,
+		Delivery: held.Delivery,
 	}
 }
 

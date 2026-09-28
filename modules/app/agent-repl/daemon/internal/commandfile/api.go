@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/intakegate"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/workspace"
@@ -51,6 +52,10 @@ type Deps struct {
 	Prompts prompthandler.Handler
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
+	// Serves reports whether THIS daemon takes the intake now:
+	// rollout.Controller.ServesIntake. A sweep while it answers false takes
+	// nothing. See internal/intakegate.
+	Serves func() bool
 
 	// Interval is how often the directory is polled. fsnotify is deliberately
 	// not a dependency: the ingress is a directory of small files written by
@@ -91,6 +96,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("commandfile: the prompt handler is required")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("commandfile: log surfaces are required")
+	case deps.Serves == nil:
+		return nil, fmt.Errorf("commandfile: the serving answer is required")
 	}
 	if deps.Glob == "" {
 		deps.Glob = DefaultGlob
@@ -107,5 +114,8 @@ func New(deps Deps) (Ingress, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	return &ingress{deps: deps}, nil
+	return &ingress{
+		deps: deps,
+		gate: intakegate.New(deps.Serves, deps.Log.Global().With(dlog.Context{"dir": deps.Dir}), opGate),
+	}, nil
 }

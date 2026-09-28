@@ -27,6 +27,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		Origin:    sub.Origin.String(),
 		Target:    sub.Target,
 		QueuedAt:  q.deps.Now(),
+		Delivery:  sub.Delivery,
 	}
 	if lease != nil {
 		kind := lease.kind
@@ -40,11 +41,12 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// shows a decision being made when none is being made is a lie the client
 	// has to un-draw.
 	//
-	// A PROMPT THAT IS ITSELF A SESSION ACT is decided here too, for the same
-	// reason: it is queued, never classified (sessionActVerdict).
+	// A PROMPT THE CLASSIFIER IS NEVER ASKED ABOUT -- a session act, a
+	// deferred prompt -- is decided here too, for the same reason
+	// (neverJudged).
 	var cut runningCut
 	underCut := false
-	ownAct := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	var unjudged func(dlog.Logger, ids.TurnID)
 	if running != "" {
 		if cut, underCut = q.runningCut(sub.WS); underCut {
 			held.Classification = &wsm.Classification{
@@ -53,8 +55,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 				Command: cut.command,
 				At:      q.deps.Now(),
 			}
-		} else if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
-			ownAct = command
+		} else if verdict, why, ok := q.neverJudged(sub); ok {
+			unjudged = why
 			held.Classification = &verdict
 		} else {
 			held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
@@ -81,8 +83,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
 		return disposition, nil
 	}
-	if ownAct != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		neverClassified(log, sub.Turn, ownAct, running)
+	if unjudged != nil {
+		unjudged(log, running)
 		return disposition, nil
 	}
 
@@ -116,8 +118,8 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		}, log)
 		return
 	}
-	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
-		neverClassified(log, sub.Turn, command, running)
+	if verdict, why, ok := q.neverJudged(sub); ok {
+		why(log, running)
 		q.record(ctx, sub, verdict, log)
 		return
 	}
@@ -148,6 +150,47 @@ func (q *queue) sessionActVerdict(sub Submission) (wsm.Classification, conversat
 		Reason: "the prompt is " + literal + ", a session act: it is queued behind the running turn and never classified",
 		At:     q.deps.Now(),
 	}, command, true
+}
+
+// neverJudged answers the verdict a prompt earns when the classifier is NEVER
+// asked about it, and the INFO record that says why: a session act (queued
+// behind the running turn and delivered as the act it is) or a deferred prompt
+// (its own turn after the running one). ok is false for a prompt the
+// classifier judges. It is the ONE reading hold, classifyHeld and verdictFor
+// share, so a kind of prompt kept from the model is kept from it on every
+// path at once.
+func (q *queue) neverJudged(sub Submission) (verdict wsm.Classification, why func(log dlog.Logger, running ids.TurnID), ok bool) {
+	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
+		return verdict, func(log dlog.Logger, running ids.TurnID) { neverClassified(log, sub.Turn, command, running) }, true
+	}
+	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
+		return verdict, func(log dlog.Logger, running ids.TurnID) { deferredNeverClassified(log, sub.Turn, running) }, true
+	}
+	return wsm.Classification{}, nil, false
+}
+
+// deferredVerdict answers the verdict a DEFERRED prompt earns while a turn
+// runs: hold for that turn's end. It is QUEUED AND NEVER CLASSIFIED, like a
+// session act, because what the user asked for is "after this turn, as its
+// own turn", and a classifier's interject is exactly what that excludes. A
+// turn end delivers held prompts one at a time, so it runs as its own turn.
+func (q *queue) deferredVerdict(sub Submission) (wsm.Classification, bool) {
+	if sub.Delivery != wsm.DeliveryDeferred {
+		return wsm.Classification{}, false
+	}
+	return wsm.Classification{
+		Arm:    wsm.ArmHoldForTurnEnd,
+		Reason: "the prompt was deferred: it runs as its own turn after the running one, and is never classified",
+		At:     q.deps.Now(),
+	}, true
+}
+
+// deferredNeverClassified records, at INFO, a deferred prompt kept from the
+// classifier.
+func deferredNeverClassified(log dlog.Logger, held, running ids.TurnID) {
+	log.Info(opClassify, "the prompt was deferred; it waits for the running turn to end and is never classified", dlog.Context{
+		"held_turn": string(held), "running_turn": string(running),
+	})
 }
 
 // neverClassified records, at INFO, a session act kept from the classifier.
@@ -183,11 +226,12 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 		}, false
 	}
 
-	// A PROMPT THAT IS ITSELF A SESSION ACT never reaches the model. hold and
-	// classifyHeld decide it before any judge starts; this is the classifier
-	// call site's own refusal, so no path to Judge can carry one.
-	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
-		neverClassified(log, sub.Turn, command, running)
+	// A PROMPT THAT IS ITSELF A SESSION ACT, OR IS DEFERRED, never reaches
+	// the model. hold and classifyHeld decide it before any judge starts;
+	// this is the classifier call site's own refusal, so no path to Judge can
+	// carry one.
+	if verdict, why, ok := q.neverJudged(sub); ok {
+		why(log, running)
 		return verdict, false
 	}
 
