@@ -7,6 +7,7 @@ describe("the display mode a row draws in", () => {
     { name: "is FULL for a row the daemon carries no marker for", arm: "ready", viewed: false, want: "full" },
     { name: "is PARTIAL for a row the daemon carries the marker for", arm: "done", viewed: true, want: "partial" },
     { name: "is PARTIAL for an interrupted row the daemon carries the marker for", arm: "interrupted", viewed: true, want: "partial" },
+    { name: "is PARTIAL for a turn_failed row the daemon carries the marker for", arm: "turnFailed", viewed: true, want: "partial" },
   ])("$name", ({ arm, viewed, want }) => {
     // Arrange, Act.
     const mode = viewedMode("ws-1", arm, viewed);

@@ -194,6 +194,18 @@ glyph to tell two purples apart."
   (should (equal agent-repl--color-init-blue
                  (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
+(ert-deftest agent-repl-test-status-color-table-turn-failed-is-blue ()
+  "A failed turn end takes BLUE in the shared assignment (owner ruling,
+2026-09-28), where done and interrupted take green."
+  ;; Act / Assert
+  (should (equal (alist-get :turn-failed agent-repl-status-color-table) "blue")))
+
+(ert-deftest agent-repl-test-tab-spec-turn-failed-is-blue ()
+  "A turn-failed tab paints BLUE on the tab bar, unselected."
+  ;; Act / Assert
+  (should (equal agent-repl--color-init-blue
+                 (plist-get (agent-repl--tab-spec :turn-failed nil) :bg))))
+
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-not-purple ()
   "Nothing but the merge states may paint purple on this surface.
 The collision is the whole reason vendor-blocked moved, so it is pinned
@@ -3267,7 +3279,7 @@ test can assert the re-assertion left an already-correct frame alone."
                             agent-repl-status-tab-bar-color-table)))
 
 (ert-deftest agent-repl-test-status-every-arm-has-a-tab-colour ()
-  "All 23 arms answer with a colour: an unpainted dot is not a state."
+  "All 24 arms answer with a colour: an unpainted dot is not a state."
   ;; Act / Assert
   (dolist (arm agent-repl-wire-roster-row-status-keywords)
     (should (stringp (agent-repl-status-tab-color arm)))))
@@ -3278,7 +3290,7 @@ test can assert the re-assertion left an already-correct frame alone."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
                  (sort (list :init :severed :dead :degraded :start-failed
-                             :vendor-blocked)
+                             :vendor-blocked :turn-failed)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-purple-is-the-in-flight-merge ()

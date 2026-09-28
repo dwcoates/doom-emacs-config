@@ -973,6 +973,7 @@ Returns:
     (:ready          . "✅")
     (:idle           . "✅")
     (:interrupted    . "✋")
+    (:turn-failed    . "⚠")
     (:idle-async     . "🌙")
     (:permission     . "❓")
     (:vendor-blocked . "⛔")
