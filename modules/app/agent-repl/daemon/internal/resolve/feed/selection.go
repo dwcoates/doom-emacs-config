@@ -107,7 +107,14 @@ func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit st
 			dlog.Context{"unit": unit, "row": fold.row.GetValue()})
 		return false
 	}
-	clone.GetActivity().GetResponse().FinalAnswer = true
+	bubble := clone.GetActivity().GetResponse()
+	bubble.FinalAnswer = true
+	// THE FINAL ANSWER CARRIES THE TURN'S WHOLE FRESH INPUT. The bubble landed
+	// with its own frozen delta; turning green re-stamps it ONCE with the main
+	// agent's turn tally (usage.go), keeping its settled instant.
+	if s.stampFinalAnswerTotal(fold) {
+		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage, AtMs: bubble.GetUsage().GetAtMs()}
+	}
 	r.upsert(s, placement{feed: fold.feed}, clone, true)
 	return true
 }

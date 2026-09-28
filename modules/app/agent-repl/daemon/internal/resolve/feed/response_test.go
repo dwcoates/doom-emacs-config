@@ -263,9 +263,8 @@ func TestResponseFailureKeepsWhatLandedAndMarksItBroken(t *testing.T) {
 	}
 }
 
-func TestTheUsageStampIsFreshInputPlusOutputAndExcludesCache(t *testing.T) {
-	// Arrange: a response over a huge cached context — the response bubble is
-	// this turn's work, not the context window (see usage.go).
+func TestTheUsageStampIsFreshInputAndExcludesCacheReadsAndOutput(t *testing.T) {
+	// Arrange: a response over a huge cached context.
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{
 		InputHits:    &conversationv1.TokenCacheHits{Read: 900_000},
@@ -277,10 +276,10 @@ func TestTheUsageStampIsFreshInputPlusOutputAndExcludesCache(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
 
-	// Assert: fresh input (240) + output (5_000) = 5.2k; cache_read and
-	// cache_creation are the context window and are excluded.
-	if got := h.response().GetUsage().GetText(); got != "5.2k" {
-		t.Fatalf("usage stamp = %q, want the turn's 240+5_000 = 5.2k", got)
+	// Assert: cache writes (18_000) + uncached input (240) = 18.2k; cache reads
+	// and output are not fresh input.
+	if got := h.response().GetUsage().GetText(); got != "18.2k" {
+		t.Fatalf("usage stamp = %q, want the fresh 18_000+240 = 18.2k", got)
 	}
 }
 

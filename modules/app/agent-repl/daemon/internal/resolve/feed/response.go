@@ -52,16 +52,11 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	r.disarmAnswerStall(s, unit)
 	r.clearStalledAnswerFault(s, unit, "a response frame arrived")
 
-	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
-	// window: usage rides exactly one unit per API response (usually a sibling,
-	// the thinking block's), and the bubble draws the SUM of fresh input +
-	// output across every API response of the turn — cache_read/cache_creation
-	// excluded, reset per turn. The topbar's context-window figure is a
-	// different resolver; see usage.go. Filing is idempotent, so drawing this
-	// bubble from a direct call files what the sink would have filed.
-	s.fileAPIResponse(unit, act.GetUsage())
-	if stamp := s.apiResponseStamp(unit); stamp != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.apiResponseStamp(unit); stamp != \"\""})
+	// THE STAMP IS THE FRESH INPUT THIS BUBBLE'S AGENT ADDED SINCE ITS PREVIOUS
+	// BUBBLE LANDED (usage.go): growing while the bubble arrives, frozen once it
+	// settles. The sink tallied this frame's usage before the draw.
+	if stamp := s.openStamp(fold, agent); stamp != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.openStamp(fold, agent); stamp != \"\""})
 		fold.usage = stamp
 	}
 
@@ -144,6 +139,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// former daemon treefmt engine).
 		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
+		s.landStamp(fold)
 		r.stampSettled(fold, state.Success.GetSettledAt().GetAtMs())
 		notice, isNotice := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice)
 		// THE SETTLED WHOLE DECIDES AUTHORSHIP, so a later settle restating the
@@ -185,6 +181,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
+		s.landStamp(fold)
 		fold.notice = false
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
