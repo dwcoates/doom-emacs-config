@@ -40,9 +40,15 @@ func emRFCatch(t *testing.T, e *Emacs, form string) string {
 //
 // A submission with no daemon behind it is a unary call that cannot be made.
 // The contract has two halves and the second is the one that matters to the
-// user: the failure is surfaced, AND THE COMPOSER TEXT IS PRESERVED. A send
-// that cleared the composer on a failure would destroy the only copy of what
-// the user wrote.
+// user: the failure is surfaced, AND THE USER'S WORDS ARE NOT LOST. Owner
+// ruling (older, on master): a from-buffer send clears the composer
+// OPTIMISTICALLY at dispatch, whether or not the daemon acks, so the
+// composer is NOT where the words survive and this test does not read it.
+// They survive in two places instead: the durable on-disk held-prompt
+// ingress (owner ruling 2026-09-28: held prompts survive outages and
+// restarts, and Emacs holds none in memory), which the daemon ingests once
+// it serves; and the input history ring, from which the user can recall
+// them.
 func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace, then no daemon. Emacs asks the daemon
@@ -64,24 +70,30 @@ func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
 		`(if (agent-repl-link-up-p) nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
-	// Act, and read the queue IN THE SAME command-loop iteration as the
-	// send: the no-connection branch of the submit runs inline, and the
-	// reconnect loop may bring a daemon back at any later instant and drain
-	// what was held. One form makes the observation race-free without a
-	// sleep and without pausing the module's own timers.
-	held := e.EvalInt(`(progn (agent-repl-send)
-                              (length (agent-repl-prompt-queue-pending ` + elispString(ws) + `)))`)
-
-	// Assert: the prompt was HELD, not dropped. Holding it is how Emacs
-	// refuses loudly without discarding intent.
-	if held != 1 {
-		t.Fatalf("the workspace holds %d prompts after a send with no daemon, want 1 held for the outage", held)
+	// Act, and read the ingress and the history IN THE SAME command-loop
+	// iteration as the send: the no-connection branch of the submit runs
+	// inline, and the reconnect loop may bring a daemon back at any later
+	// instant and ingest what was held. One form makes the observation
+	// race-free without a sleep and without pausing the module's own timers.
+	got := e.EvalStrings(`(progn (agent-repl-send)
+                                 (list (number-to-string (agent-repl-held-ingress-waiting ` + elispString(ws) + `))
+                                       (with-current-buffer ` + elispString(buffer) + `
+                                         (or (car agent-repl--input-history) ""))))`)
+	if len(got) != 2 {
+		t.Fatalf("the post-send readback answered %q, want the ingress count and the newest history entry", got)
 	}
 
-	// Assert: the composer still carries the user's own words. Only an
-	// ACCEPTED submission earns the right to erase them.
-	if got := e.EvalString(`(with-current-buffer ` + elispString(buffer) + ` (buffer-string))`); !strings.Contains(got, draft) {
-		t.Fatalf("the composer holds %q after the refused send, want it to still carry %q", got, draft)
+	// Assert: the prompt was HELD on disk, not dropped. Holding it is how
+	// Emacs refuses loudly without discarding intent.
+	if got[0] != "1" {
+		t.Fatalf("%s of the workspace's prompts wait in the held-prompt ingress after a send with no daemon, want 1 held for the outage", got[0])
+	}
+
+	// Assert: the user's own words are recallable from the input history,
+	// which the optimistic clear pushed them onto before erasing the
+	// composer.
+	if got[1] != draft {
+		t.Fatalf("the newest input history entry is %q after the refused send, want the draft %q", got[1], draft)
 	}
 }
 

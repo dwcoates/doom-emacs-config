@@ -143,8 +143,8 @@ func decodeString(raw json.RawMessage) string {
 // The submission observer
 // ---------------------------------------------------------------------------
 
-// submissionSeparator joins a captured submission's origin to its text. A
-// unit separator cannot appear in composed prompt text.
+// submissionSeparator joins a captured submission's origin, its delivery and
+// its text. A unit separator cannot appear in composed prompt text.
 const submissionSeparator = "\x1f"
 
 // armSubmissionObserver advises the module's OWN outbound RPC verb,
@@ -167,6 +167,9 @@ func armSubmissionObserver(t *testing.T, e *Emacs) {
              (defun agent-repl-e2e--record-send (_conn request &rest _)
                (push (concat (format "%s" (plist-get request :origin))
                              "` + submissionSeparator + `"
+                             (let ((delivery (plist-get request :delivery)))
+                               (if delivery (format "%s" delivery) ""))
+                             "` + submissionSeparator + `"
                              (agent-repl-e2e--said-text (plist-get request :said)))
                      agent-repl-e2e--sent))
              (unless (advice-member-p 'agent-repl-e2e--record-send
@@ -177,9 +180,12 @@ func armSubmissionObserver(t *testing.T, e *Emacs) {
 }
 
 // submission is one observed SubmitPrompt, split back into its parts.
+// Delivery is the request's `:delivery' keyword as printed (":deferred"),
+// empty for the ordinary delivery, which rides no `:delivery' key at all.
 type submission struct {
-	Origin string
-	Text   string
+	Origin   string
+	Delivery string
+	Text     string
 }
 
 // awaitSubmissions waits until exactly n submissions have been observed and
@@ -194,11 +200,15 @@ func awaitSubmissions(t *testing.T, e *Emacs, n int, what string) []submission {
 	}
 	out := make([]submission, 0, len(lines))
 	for _, line := range lines {
-		origin, text, found := strings.Cut(line, submissionSeparator)
+		origin, rest, found := strings.Cut(line, submissionSeparator)
 		if !found {
 			t.Fatalf("malformed observed submission %q", line)
 		}
-		out = append(out, submission{Origin: origin, Text: text})
+		delivery, text, found := strings.Cut(rest, submissionSeparator)
+		if !found {
+			t.Fatalf("malformed observed submission %q", line)
+		}
+		out = append(out, submission{Origin: origin, Delivery: delivery, Text: text})
 	}
 	return out
 }
@@ -207,6 +217,67 @@ func awaitSubmissions(t *testing.T, e *Emacs, n int, what string) []submission {
 // negative assertion scenario 23 makes.
 func observedSubmissionCount(e *Emacs) int {
 	return e.EvalInt(`(length agent-repl-e2e--sent)`)
+}
+
+// armSubmissionAnswerObserver advises the same public RPC boundary as
+// `armSubmissionObserver' to record how the DAEMON ANSWERED each submission:
+// the response's `:arm' (":success" or ":error"), or ":failure" when the
+// transport failed. Each record is the submitted text and the answer, and
+// it is pushed only AFTER the module's own callback has run, so observing
+// an answer means everything the module does on it (an ingress write on a
+// refusal, say) is already done. It depends on the helper
+// `agent-repl-e2e--said-text' that `armSubmissionObserver' defines, so arm
+// that one first.
+func armSubmissionAnswerObserver(t *testing.T, e *Emacs) {
+	t.Helper()
+	e.Eval(`(progn
+             (defvar agent-repl-e2e--answered nil)
+             (setq agent-repl-e2e--answered nil)
+             (defun agent-repl-e2e--record-answer (orig conn request &rest keys)
+               (let ((on-response (plist-get keys :on-response))
+                     (on-failure (plist-get keys :on-failure))
+                     (text (agent-repl-e2e--said-text (plist-get request :said))))
+                 (apply orig conn request
+                        :on-response
+                        (lambda (response)
+                          (unwind-protect
+                              (when on-response (funcall on-response response))
+                            (push (concat text "` + submissionSeparator + `"
+                                          (format "%s" (plist-get response :arm)))
+                                  agent-repl-e2e--answered)))
+                        :on-failure
+                        (lambda (detail)
+                          (unwind-protect
+                              (when on-failure (funcall on-failure detail))
+                            (push (concat text "` + submissionSeparator + `:failure")
+                                  agent-repl-e2e--answered)))
+                        keys)))
+             (unless (advice-member-p 'agent-repl-e2e--record-answer
+                                      'agent-repl-rpc-submit-prompt)
+               (advice-add 'agent-repl-rpc-submit-prompt :around
+                           #'agent-repl-e2e--record-answer))
+             t)`)
+}
+
+// awaitSubmissionAnswer waits until the daemon's answer to the submission
+// of TEXT has been observed, and returns it (":success", ":error" or
+// ":failure").
+func awaitSubmissionAnswer(t *testing.T, e *Emacs, text, what string) string {
+	t.Helper()
+	find := func(lines []string) (string, bool) {
+		for _, line := range lines {
+			if got, arm, found := strings.Cut(line, submissionSeparator); found && got == text {
+				return arm, true
+			}
+		}
+		return "", false
+	}
+	raw := e.AwaitEval(what, `agent-repl-e2e--answered`, func(raw json.RawMessage) bool {
+		_, ok := find(decodeStrings(raw))
+		return ok
+	})
+	arm, _ := find(decodeStrings(raw))
+	return arm
 }
 
 // typeIntoComposer puts TEXT in the composer the way a user's typing leaves
@@ -373,19 +444,25 @@ func TestEmacsDiscardInputClearsTheComposer(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 24. DeferredPromptDrainsOnTheFinishEdge
+// 24. DeferredPromptIsSubmittedDeferredAtOnce
 // ---------------------------------------------------------------------------
 
-// TestEmacsDeferredPromptDrainsOnTheFinishEdge is scenario 24.
+// TestEmacsDeferredPromptIsSubmittedDeferredAtOnce is scenario 24.
 //
-// The queue must be filled WHILE the turn is running, and "while running" is
-// not something a Go-side poll can hit without racing the turn's end. So the
-// enqueue is armed INSIDE Emacs on `agent-repl-roster-update-functions', the
+// Owner ruling 2026-09-28: Emacs holds no prompt in memory. A mid-turn
+// `agent-repl-queue-deferred-prompt' clears the composer and SUBMITS AT
+// ONCE, asking for `:delivery :deferred'; the DAEMON holds it and runs it as
+// its own turn when the running one ends. So the claim here is made at the
+// RPC boundary, not on a queue: the deferral left Emacs while the first turn
+// was still running, deferred, under the deferral's own origin.
+//
+// The deferral must be issued WHILE the turn is running, and "while running"
+// is not something a Go-side poll can hit without racing the turn's end. So
+// it is armed INSIDE Emacs on `agent-repl-roster-update-functions', the
 // module's own per-push hook: it fires the moment the workspace's row first
 // shows a running arm, types into the composer, and invokes the ordinary
-// `agent-repl-queue-deferred-prompt' command. That is deterministic by
-// construction — there is no window in which the edge can be missed.
-func TestEmacsDeferredPromptDrainsOnTheFinishEdge(t *testing.T) {
+// command. That is deterministic by construction.
+func TestEmacsDeferredPromptIsSubmittedDeferredAtOnce(t *testing.T) {
 	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
@@ -394,50 +471,59 @@ func TestEmacsDeferredPromptDrainsOnTheFinishEdge(t *testing.T) {
 
 	const deferred = "and then tell me about the roster"
 
-	// Arm the mid-turn enqueue. `agent-repl-e2e--queued-depth' records what
-	// the queue held IMMEDIATELY after the command returned, captured inside
-	// Emacs so the drain cannot empty it before the assertion reads it.
+	// ARRANGE: arm the mid-turn deferral. `agent-repl-e2e--deferred-sent'
+	// records how many submissions the observer held IMMEDIATELY after the
+	// command returned, and `agent-repl-e2e--deferred-composer' what the
+	// composer held then, both captured inside Emacs in the same command
+	// loop turn, so nothing later can change them before the readback.
 	e.Eval(`(progn
-             (defvar agent-repl-e2e--queued-depth nil)
-             (setq agent-repl-e2e--queued-depth nil)
-             (defun agent-repl-e2e--queue-when-running (_roster)
-               (when (and (null agent-repl-e2e--queued-depth)
+             (defvar agent-repl-e2e--deferred-sent nil)
+             (defvar agent-repl-e2e--deferred-composer nil)
+             (setq agent-repl-e2e--deferred-sent nil
+                   agent-repl-e2e--deferred-composer nil)
+             (defun agent-repl-e2e--defer-when-running (_roster)
+               (when (and (null agent-repl-e2e--deferred-sent)
                           (memq (agent-repl-e2e--arm-of ` + elispString(s.Name) + `)
                                 agent-repl-roster-running-statuses))
                  (with-current-buffer (agent-repl--input-buffer ` + elispString(s.Name) + `)
                    (erase-buffer)
                    (insert ` + elispString(deferred) + `)
-                   (call-interactively #'agent-repl-queue-deferred-prompt))
-                 (setq agent-repl-e2e--queued-depth
-                       (length (agent-repl-prompt-queue-pending ` + elispString(s.Name) + ` :deferred)))))
+                   (call-interactively #'agent-repl-queue-deferred-prompt)
+                   (setq agent-repl-e2e--deferred-composer (buffer-string)))
+                 (setq agent-repl-e2e--deferred-sent (length agent-repl-e2e--sent))))
              (add-hook 'agent-repl-roster-update-functions
-                       #'agent-repl-e2e--queue-when-running)
+                       #'agent-repl-e2e--defer-when-running)
              t)`)
 
-	// Drive one ordinary turn from the composer, the way a user does.
+	// ACT: drive one ordinary turn from the composer, the way a user does;
+	// the hook defers mid-turn.
 	typeIntoComposer(e, s.Input, "hello from the deferred-prompt scenario")
 	e.KeysIn(s.Input, "RET")
 
-	// The hook fired mid-turn and the queue HELD the prompt.
-	e.AwaitTrue("the deferred prompt to be queued during the running turn",
-		`agent-repl-e2e--queued-depth`)
-	if depth := e.EvalInt(`(or agent-repl-e2e--queued-depth 0)`); depth != 1 {
-		t.Fatalf("the queue held %d deferred prompts mid-turn, want 1", depth)
+	// ASSERT: the deferral reached the RPC boundary before the command
+	// returned, and cleared the composer.
+	e.AwaitTrue("the deferred prompt to be issued during the running turn",
+		`agent-repl-e2e--deferred-sent`)
+	if n := e.EvalInt(`(or agent-repl-e2e--deferred-sent 0)`); n != 2 {
+		t.Fatalf("%d submissions had reached the RPC boundary when the deferral returned, want 2 (the turn and the deferral, at once)", n)
+	}
+	if got := e.EvalString(`(or agent-repl-e2e--deferred-composer "")`); got != "" {
+		t.Errorf("the composer held %q after the deferral, want it cleared", got)
 	}
 
-	// The finish edge drains it: the queue empties and the held text goes
-	// out under the QUEUE's own origin, not the composer's.
-	e.AwaitEval("the deferred prompt queue to drain on the finish edge",
-		`(length (agent-repl-prompt-queue-pending `+elispString(s.Name)+` :deferred))`,
-		func(raw json.RawMessage) bool { return string(raw) == "0" })
-
-	sent := awaitSubmissions(t, e, 2, "the drained prompt to reach the RPC boundary")
+	sent := awaitSubmissions(t, e, 2, "the turn and the deferral to reach the RPC boundary")
+	if sent[0].Delivery != "" {
+		t.Errorf("the ordinary send asked for delivery %q, want the ordinary delivery (no :delivery key)", sent[0].Delivery)
+	}
 	if sent[1].Text != deferred {
-		t.Errorf("the drained submission is %q, want the held text %q", sent[1].Text, deferred)
+		t.Errorf("the deferred submission is %q, want the deferred text %q", sent[1].Text, deferred)
+	}
+	if sent[1].Delivery != ":deferred" {
+		t.Errorf("the deferred submission asked for delivery %q, want :deferred", sent[1].Delivery)
 	}
 	origin := e.EvalString(`(format "%s" agent-repl--prompt-queue-drain-origin)`)
 	if sent[1].Origin != origin {
-		t.Errorf("the drained submission's origin is %q, want the queue's own %q",
+		t.Errorf("the deferred submission's origin is %q, want the deferral's own %q",
 			sent[1].Origin, origin)
 	}
 }
