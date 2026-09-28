@@ -496,6 +496,12 @@ type Watcher interface {
 	// that ended just before the call is answered from the watcher's memory of
 	// recently closed turns, so the caller cannot miss the edge it submitted.
 	AwaitTurnEnd(ctx context.Context, turn ids.TurnID) (TurnClose, error)
+	// AwaitSessionFacts blocks until the session facts have been taken up
+	// (StartSession's answer, or an adopted shim's re-announcement), so a
+	// caller adopting a shim mid-work reads its turn in flight rather than
+	// the nil before the facts. A watcher closed first answers
+	// ErrWatcherClosed.
+	AwaitSessionFacts(ctx context.Context) error
 	// SetOutputAddress installs the address a lease holder wants this
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(addr *OutputAddress)
