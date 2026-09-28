@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +17,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sourcescan"
 )
 
 // newBareClient builds a client with no process and no connection, for the
@@ -1608,24 +1607,8 @@ func TestARedialCountsItsConnectionBeforeAnnouncingIt(t *testing.T) {
 // connected() is the one place a link is announced, so no site can publish
 // LinkConnected without advancing the count a consumer relies on.
 func TestOnlyConnectedAnnouncesALink(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	announcements := 0
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-
-		// Act
-		announcements += strings.Count(string(body), "publish(LinkConnected)")
-	}
+	// Act
+	announcements := sourcescan.Count(t, "publish(LinkConnected)")
 
 	// Assert
 	if announcements != 1 {
