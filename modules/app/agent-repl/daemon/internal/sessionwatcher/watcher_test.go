@@ -2387,6 +2387,7 @@ func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
 		name         string
 		openAtAttach []ids.TurnID
 		inFlight     string
+		waiting      []string
 		wantClosed   []ids.TurnID
 		wantInFlight string
 	}{
@@ -2409,6 +2410,13 @@ func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
 			wantInFlight: "turn-2",
 		},
 		{
+			name:         "a turn waiting behind the one in flight stays open",
+			openAtAttach: []ids.TurnID{"turn-v", "turn-q"},
+			inFlight:     "turn-v",
+			waiting:      []string{"turn-q"},
+			wantInFlight: "turn-v",
+		},
+		{
 			name:     "an adoption that found nothing open closes nothing",
 			inFlight: "turn-3",
 			// The shim's own turn is in flight; nothing was open to close.
@@ -2422,7 +2430,7 @@ func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
 			h.session = h.client.nextSessionOpen(t)
 
 			// Act.
-			h.sendSessionStarted(t, sessionStarted(tt.inFlight))
+			h.sendSessionStarted(t, sessionStartedWaiting(tt.inFlight, tt.waiting...))
 			h.sendSessionUpdate(t, compactingUpdate())
 			seen := h.rec.until(t, "footer.OnSessionUpdate")
 
@@ -3038,6 +3046,111 @@ func TestAReplayedConnectedHeardAfterTheSeveringIsNotAReconnect(t *testing.T) {
 			h.client.noSessionOpen(t)
 			if got := h.w.Link(); got != shimclient.LinkRedialing {
 				t.Fatalf("link = %v, want redialing: the fleet's streams are still down", got)
+			}
+		})
+	}
+}
+
+// TestTurnsTheFactsNameAsWaitingStandInFlightWhenTheTurnAheadEnds covers a
+// daemon attaching while a turn of its own waits behind a vendor-started one:
+// the facts name the running turn in flight and the rest as waiting, and each
+// waiting turn stands in flight, first listed first, when the turn ahead of it
+// ends. Told only of the running turn, the watcher went idle at its end while
+// the shim went on to run the waiting one.
+func TestTurnsTheFactsNameAsWaitingStandInFlightWhenTheTurnAheadEnds(t *testing.T) {
+	tests := []struct {
+		name    string
+		waiting []string
+		want    string
+	}{
+		{name: "one waiting turn stands in flight", waiting: []string{"turn-q"}, want: "turn-q"},
+		{name: "the first of two listed runs first", waiting: []string{"turn-q1", "turn-q2"}, want: "turn-q1"},
+		{name: "the turn in flight listed as waiting is not stood behind itself", waiting: []string{"turn-v"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStartedWaiting("turn-v", tt.waiting...)})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			endAdopted(h)
+
+			// Assert.
+			got := ""
+			if turn := h.w.TurnInFlight(); turn != nil {
+				got = string(*turn)
+			}
+			if got != tt.want {
+				t.Fatalf("turn in flight = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestATurnTheFactsNameAsWaitingTakesItsOpenEdgesWhenItStandsInFlight covers
+// the views: the waiting turn's send reached the shim, so it is accepted, and
+// the footer and the feed are given its open edge when it starts to run.
+func TestATurnTheFactsNameAsWaitingTakesItsOpenEdgesWhenItStandsInFlight(t *testing.T) {
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{name: "the footer then the feed", want: []string{"footer.OnTurnOpened", "feed.OnTurnOpened"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStartedWaiting("turn-v", "turn-q")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := endAdopted(h)
+
+			// Assert.
+			var opened []string
+			for _, e := range got {
+				if (e.name() == "footer.OnTurnOpened" || e.name() == "feed.OnTurnOpened") && e.detail == "turn-q" {
+					opened = append(opened, e.name())
+				}
+			}
+			if !slices.Equal(opened, tt.want) {
+				t.Fatalf("open edges for turn-q = %v, want %v", opened, tt.want)
+			}
+		})
+	}
+}
+
+// TestMalformedWaitingTurnsInTheFactsAreErrors covers the two shapes the
+// facts must never take: turns waiting behind no turn in flight, and a
+// waiting turn with no id. Each is recorded at ERROR and stood behind nothing.
+func TestMalformedWaitingTurnsInTheFactsAreErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		started   *conversationv1.SessionStarted
+		operation string
+	}{
+		{
+			name:      "turns waiting behind no turn in flight",
+			started:   sessionStartedWaiting("", "turn-q"),
+			operation: "daemon.sessionwatcher.turns_waiting_unanchored",
+		},
+		{
+			name:      "a waiting turn with no id",
+			started:   sessionStartedWaiting("turn-v", ""),
+			operation: "daemon.sessionwatcher.turn_waiting_unidentified",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act.
+			h := newHarness(t, Session{Started: tt.started})
+
+			// Assert.
+			if !h.hasRecord("error", tt.operation) {
+				t.Fatalf("no ERROR %s was recorded", tt.operation)
 			}
 		})
 	}
