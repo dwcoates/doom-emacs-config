@@ -205,6 +205,54 @@ func TestADuplicateIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive(t *testi
 	}
 }
 
+func TestAClaimNeverAcceptedIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive(t *testing.T) {
+	const message = "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn"
+	tests := []struct {
+		name      string
+		ctx       func(context.Context) context.Context
+		wantLevel string
+	}{
+		{name: "an ordinary retry", ctx: func(ctx context.Context) context.Context { return ctx }, wantLevel: "info"},
+		{name: "a re-drive meets it on every retry", ctx: WithRedrive, wantLevel: "debug"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the key's first submission was refused by the queue, so
+			// its claim stands unaccepted.
+			h := newHarness(t)
+			h.queue.submitErr = promptqueue.ErrMerging
+			if _, err := h.submit("hello"); !errors.Is(err, promptqueue.ErrMerging) {
+				t.Fatalf("first Submit = %v, want the merge refusal", err)
+			}
+
+			// Act
+			_, _ = h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), "key-1",
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+			// Assert
+			var levels []string
+			for _, r := range h.log.Records() {
+				if r.Operation == opSubmit && r.Message == message {
+					levels = append(levels, r.Level)
+				}
+			}
+			if len(levels) != 1 || levels[0] != tc.wantLevel {
+				t.Fatalf("re-driven claim records = %v, want exactly one at %s", levels, tc.wantLevel)
+			}
+		})
+	}
+}
+
+func TestWithRedriveSetsTheQueuesOwnMark(t *testing.T) {
+	// Act
+	ctx := WithRedrive(context.Background())
+
+	// Assert
+	if !promptqueue.IsRedrive(ctx) {
+		t.Fatal("promptqueue.IsRedrive(WithRedrive(ctx)) = false, want the handler and the queue to read one mark")
+	}
+}
+
 func TestSubmitForwardsWithoutAKeyWhenNoneWasSupplied(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

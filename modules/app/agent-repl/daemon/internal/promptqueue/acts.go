@@ -57,7 +57,7 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 			// would be run by no daemon. It is refused so the caller asks the
 			// daemon the workspace moves to.
 			q.mu.Unlock()
-			log.Info(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
+			refusalLevel(ctx, log, log.Info)(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
 			return fmt.Errorf("session act %q on %q: %w", act.Kind, ws, bounce.ErrMovedAway)
 		}
 		state.acts = append(state.acts, act)
@@ -92,7 +92,7 @@ func (q *queue) somethingIsAhead(ctx context.Context, ws ids.WorkspaceID) (bool,
 func (q *queue) runAct(ctx context.Context, ws ids.WorkspaceID, act Act, log dlog.Logger) error {
 	sender, ok := q.deps.Client(ws)
 	if !ok {
-		log.Warn(opAct, "the workspace has no session to act on", nil)
+		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on", nil)
 		return ErrNoSession
 	}
 

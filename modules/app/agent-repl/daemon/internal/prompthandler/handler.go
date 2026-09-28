@@ -209,7 +209,14 @@ func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyK
 		// exactly this claim, and the shim answers a repeated start of a turn
 		// id it already accepted as a no-op; a fresh id would start the prompt
 		// a second time.
-		log.Info(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn",
+		// A RE-DRIVE MEETS THIS CLAIM ON EVERY RETRY of an entry the queue
+		// keeps refusing, so there it is DEBUG: the re-driver records the
+		// entry's outcome itself.
+		level := log.Info
+		if isRedrive(ctx) {
+			level = log.Debug
+		}
+		level(opSubmit, "the key's earlier submission never reached the queue's acceptance; the retry is driven under the same turn",
 			dlog.Context{"turn": string(got.Turn), "offered_turn": string(turn), "reopened": got.Reopened})
 	case wsm.ClaimMinted:
 		log.Debug(opSubmit, "claimed the idempotency key", dlog.Context{"turn": string(got.Turn)})
