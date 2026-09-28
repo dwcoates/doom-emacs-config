@@ -116,9 +116,9 @@ have a tab.  A first sighting is NOT a change (PREVIOUS is never nil).")
 
 The daemon is the single source of the viewed (partial) mode: it derives
 `RosterRowViewed' from the workspace's read-result fact, which a reported
-dwell on a turn-end row (done or interrupted) sets and the next turn resets,
-and it carries the marker only while the row stands on a turn-end arm.  This
-hook fires on the present->absent edge of that marker,
+dwell on a turn-end row (done, interrupted or turn-failed) sets and the next
+turn resets, and it carries the marker only while the row stands on a
+turn-end arm.  This hook fires on the present->absent edge of that marker,
 computed against the previous accepted push.  A restated marker is not a
 clear, and a first sighting without the marker is not a clear.
 
@@ -188,8 +188,10 @@ the user, so permission -> thinking is a move within this set and no
 finish edge at all.")
 
 (defconst agent-repl-roster-settled-statuses
-  '(:ready :done :interrupted :idle-async)
+  '(:ready :done :interrupted :turn-failed :idle-async)
   "The SETTLED half of the finish edge — the foreground turn has ended.
+`turn-failed' is settled: a turn that FAILED has ended as surely as one
+that finished or was stopped.
 `idle-async' is settled deliberately: no FOREGROUND turn is running, and
 detached work is work the user may talk over.")
 

@@ -51,7 +51,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/sidebar.proto.
  */
 export const file_frontend_v1_sidebar: GenFile = /*@__PURE__*/
-  fileDesc("Chlmcm9udGVuZC92MS9zaWRlYmFyLnByb3RvEgtmcm9udGVuZC52MSL1AQoPV29ya3NwYWNlUm9zdGVyEjUKCnJlcG9zaXRvcnkYASABKAsyIS5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvc2l0b3J5VmlldxIpCgR0YXNrGAIgASgLMhsuZnJvbnRlbmQudjEuUm9zdGVyVGFza1ZpZXcSOQoPcmVjZW50bHlfbWVyZ2VkGAMgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyTWVyZ2VkU2VjdGlvbhI5CgdjdXJyZW50GAQgASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyQ3VycmVudFdvcmtzcGFjZUgAiAEBQgoKCF9jdXJyZW50IicKFlJvc3RlclJvd1ByaW9yaXR5QmFkZ2USDQoFbGFiZWwYASABKAkiFAoSUm9zdGVyUm93QXR0ZW50aW9uIhEKD1Jvc3RlclJvd1ZpZXdlZCITChFSb3N0ZXJSb3dSZXZpdmluZyJHChZSb3N0ZXJDdXJyZW50V29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSAoUUm9zdGVyUmVwb3NpdG9yeVZpZXcSMAoIc2VjdGlvbnMYASADKAsyHi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvU2VjdGlvbiJCCg5Sb3N0ZXJUYXNrVmlldxIwCghzZWN0aW9ucxgBIAMoCzIeLmZyb250ZW5kLnYxLlJvc3RlclRhc2tTZWN0aW9uIpUBChFSb3N0ZXJSZXBvU2VjdGlvbhInCgNrZXkYASABKAsyGi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvS2V5EjAKBmhlYWRlchgCIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclNlY3Rpb25IZWFkZXISJQoEcm93cxgDIAEoCzIXLmZyb250ZW5kLnYxLlJvc3RlclJvd3MiQAoNUm9zdGVyUmVwb0tleRIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYimQEKEVJvc3RlclRhc2tTZWN0aW9uEicKA2tleRgBIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclRhc2tLZXkSNAoGaGVhZGVyGAIgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyVGFza1NlY3Rpb25IZWFkZXISJQoEcm93cxgDIAEoCzIXLmZyb250ZW5kLnYxLlJvc3RlclJvd3MiIAoNUm9zdGVyVGFza0tleRIPCgd0YXNrX2lkGAEgASgJIm4KE1Jvc3Rlck1lcmdlZFNlY3Rpb24SMAoGaGVhZGVyGAEgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyU2VjdGlvbkhlYWRlchIlCgRyb3dzGAIgASgLMhcuZnJvbnRlbmQudjEuUm9zdGVyUm93cyI+ChNSb3N0ZXJTZWN0aW9uSGVhZGVyEicKBWxhYmVsGAEgASgLMhguZnJvbnRlbmQudjEuUm9zdGVyTGFiZWwibQoXUm9zdGVyVGFza1NlY3Rpb25IZWFkZXISJwoFbGFiZWwYASABKAsyGC5mcm9udGVuZC52MS5Sb3N0ZXJMYWJlbBIpCgRkb25lGAIgASgLMhsuZnJvbnRlbmQudjEuUm9zdGVyVGFza0RvbmUiGwoLUm9zdGVyTGFiZWwSDAoEdGV4dBgBIAEoCSIeCg5Sb3N0ZXJUYXNrRG9uZRIMCgRkb25lGAEgASgIIjIKClJvc3RlclJvd3MSJAoEcm93cxgBIAMoCzIWLmZyb250ZW5kLnYxLlJvc3RlclJvdyK6DwoJUm9zdGVyUm93EjIKCXdvcmtzcGFjZRgBIAEoCzIfLmZyb250ZW5kLnYxLlJvc3RlclJvd1dvcmtzcGFjZRI3CglhdHRlbnRpb24YICABKAsyHy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dBdHRlbnRpb25IAYgBARI6Cghwcmlvcml0eRghIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1ByaW9yaXR5QmFkZ2VIAogBARIxCgZ2aWV3ZWQYIiABKAsyHC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dWaWV3ZWRIA4gBARI1CghyZXZpdmluZxgjIAEoCzIeLmZyb250ZW5kLnYxLlJvc3RlclJvd1Jldml2aW5nSASIAQESKAoEbmFtZRgCIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclJvd05hbWUSPAoKc3VibWl0dGluZxgDIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1N1Ym1pdHRpbmdIABI4Cgh0aGlua2luZxgEIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1RoaW5raW5nSAASOAoIY2xlYXJpbmcYBSABKAsyJC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNDbGVhcmluZ0gAEjwKCmNvbXBhY3RpbmcYBiABKAsyJi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNDb21wYWN0aW5nSAASPAoKcGVybWlzc2lvbhgHIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1Blcm1pc3Npb25IABIwCgRkb25lGAggASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRG9uZUgAEj4KC2ludGVycnVwdGVkGAkgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzSW50ZXJydXB0ZWRIABIyCgVyZWFkeRgKIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1JlYWR5SAASOwoKaWRsZV9hc3luYxgLIAEoCzIlLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0lkbGVBc3luY0gAEkMKDnZlbmRvcl9ibG9ja2VkGAwgASgLMikuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzVmVuZG9yQmxvY2tlZEgAEjAKBGluaXQYDSABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbml0SAASNgoHc2V2ZXJlZBgOIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1NldmVyZWRIABI/CgxzdGFydF9mYWlsZWQYECABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNTdGFydEZhaWxlZEgAEjgKCGRlZ3JhZGVkGBEgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRGVncmFkZWRIABIwCgRkZWFkGBIgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRGVhZEgAEkUKD21lcmdlX2VucXVldWluZxgTIAEoCzIqLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlRW5xdWV1aW5nSAASNgoHbWVyZ2luZxgUIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdpbmdIABI/CgxtZXJnZV9xdWV1ZWQYFSABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZVF1ZXVlZEgAEkMKDm1lcmdlX2NvbmZsaWN0GBYgASgLMikuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VDb25mbGljdEgAEj8KDG1lcmdlX2ZhaWxlZBgXIAEoCzInLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlRmFpbGVkSAASNAoGbWVyZ2VkGBggASgLMiIuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VkSAASMAoEbm9uZRgZIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c05vbmVIABI4CghpbmFjdGl2ZRgaIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0luYWN0aXZlSAASLgoHY3VycmVudBgbIAEoCzIdLmZyb250ZW5kLnYxLlJvc3RlclJvd0N1cnJlbnQSKAoIY2hpbGRyZW4YHCADKAsyFi5mcm9udGVuZC52MS5Sb3N0ZXJSb3cSKAoEd2hlbhgdIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW4SLAoGZGV0YWlsGB4gASgLMhwuZnJvbnRlbmQudjEuUm9zdGVyUm93RGV0YWlsEiwKBmNsb3NlZBgfIAEoCzIcLmZyb250ZW5kLnYxLlJvc3RlclJvd0Nsb3NlZEIICgZzdGF0dXNCDAoKX2F0dGVudGlvbkILCglfcHJpb3JpdHlCCQoHX3ZpZXdlZEILCglfcmV2aXZpbmciQwoSUm9zdGVyUm93V29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHQoNUm9zdGVyUm93TmFtZRIMCgR0ZXh0GAEgASgJIiMKEFJvc3RlclJvd0N1cnJlbnQSDwoHY3VycmVudBgBIAEoCCL3AQoNUm9zdGVyUm93V2hlbhI/Cg1sYXN0X3NlbGVjdGVkGAEgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93V2hlbkxhc3RTZWxlY3RlZEgAEjIKBm1lcmdlZBgCIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW5NZXJnZWRIABIyCgZhY3RpdmUYAyABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dXaGVuQWN0aXZlSAASNAoHY3JlYXRlZBgEIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW5DcmVhdGVkSABCBwoFc2hvd24iKgoZUm9zdGVyUm93V2hlbkxhc3RTZWxlY3RlZBINCgVhdF9tcxgBIAEoAyIkChNSb3N0ZXJSb3dXaGVuTWVyZ2VkEg0KBWF0X21zGAEgASgDIiQKE1Jvc3RlclJvd1doZW5BY3RpdmUSDQoFYXRfbXMYASABKAMiJQoUUm9zdGVyUm93V2hlbkNyZWF0ZWQSDQoFYXRfbXMYASABKAMivAEKD1Jvc3RlclJvd0RldGFpbBIyCgZicmFuY2gYASABKAsyIi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dEZXRhaWxCcmFuY2gSPwoNcGFyZW50X2JyYW5jaBgCIAEoCzIoLmZyb250ZW5kLnYxLlJvc3RlclJvd0RldGFpbFBhcmVudEJyYW5jaBI0CgdzdW1tYXJ5GAMgASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyUm93RGV0YWlsU3VtbWFyeSIlChVSb3N0ZXJSb3dEZXRhaWxCcmFuY2gSDAoEbmFtZRgBIAEoCSIrChtSb3N0ZXJSb3dEZXRhaWxQYXJlbnRCcmFuY2gSDAoEbmFtZRgBIAEoCSImChZSb3N0ZXJSb3dEZXRhaWxTdW1tYXJ5EgwKBHRleHQYASABKAkiIQoPUm9zdGVyUm93Q2xvc2VkEg4KBmNsb3NlZBgBIAEoCCIbChlSb3N0ZXJSb3dTdGF0dXNTdWJtaXR0aW5nIhkKF1Jvc3RlclJvd1N0YXR1c1RoaW5raW5nIhkKF1Jvc3RlclJvd1N0YXR1c0NsZWFyaW5nIhsKGVJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmciGwoZUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbiIVChNSb3N0ZXJSb3dTdGF0dXNEb25lIhwKGlJvc3RlclJvd1N0YXR1c0ludGVycnVwdGVkIhYKFFJvc3RlclJvd1N0YXR1c1JlYWR5IhoKGFJvc3RlclJvd1N0YXR1c0lkbGVBc3luYyIeChxSb3N0ZXJSb3dTdGF0dXNWZW5kb3JCbG9ja2VkIhUKE1Jvc3RlclJvd1N0YXR1c0luaXQiGAoWUm9zdGVyUm93U3RhdHVzU2V2ZXJlZCIcChpSb3N0ZXJSb3dTdGF0dXNTdGFydEZhaWxlZCIZChdSb3N0ZXJSb3dTdGF0dXNEZWdyYWRlZCIVChNSb3N0ZXJSb3dTdGF0dXNEZWFkIh8KHVJvc3RlclJvd1N0YXR1c01lcmdlRW5xdWV1aW5nIhgKFlJvc3RlclJvd1N0YXR1c01lcmdpbmciHAoaUm9zdGVyUm93U3RhdHVzTWVyZ2VRdWV1ZWQiHgocUm9zdGVyUm93U3RhdHVzTWVyZ2VDb25mbGljdCIcChpSb3N0ZXJSb3dTdGF0dXNNZXJnZUZhaWxlZCIXChVSb3N0ZXJSb3dTdGF0dXNNZXJnZWQiFQoTUm9zdGVyUm93U3RhdHVzTm9uZSIZChdSb3N0ZXJSb3dTdGF0dXNJbmFjdGl2ZUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Chlmcm9udGVuZC92MS9zaWRlYmFyLnByb3RvEgtmcm9udGVuZC52MSL1AQoPV29ya3NwYWNlUm9zdGVyEjUKCnJlcG9zaXRvcnkYASABKAsyIS5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvc2l0b3J5VmlldxIpCgR0YXNrGAIgASgLMhsuZnJvbnRlbmQudjEuUm9zdGVyVGFza1ZpZXcSOQoPcmVjZW50bHlfbWVyZ2VkGAMgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyTWVyZ2VkU2VjdGlvbhI5CgdjdXJyZW50GAQgASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyQ3VycmVudFdvcmtzcGFjZUgAiAEBQgoKCF9jdXJyZW50IicKFlJvc3RlclJvd1ByaW9yaXR5QmFkZ2USDQoFbGFiZWwYASABKAkiFAoSUm9zdGVyUm93QXR0ZW50aW9uIhEKD1Jvc3RlclJvd1ZpZXdlZCITChFSb3N0ZXJSb3dSZXZpdmluZyJHChZSb3N0ZXJDdXJyZW50V29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSAoUUm9zdGVyUmVwb3NpdG9yeVZpZXcSMAoIc2VjdGlvbnMYASADKAsyHi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvU2VjdGlvbiJCCg5Sb3N0ZXJUYXNrVmlldxIwCghzZWN0aW9ucxgBIAMoCzIeLmZyb250ZW5kLnYxLlJvc3RlclRhc2tTZWN0aW9uIpUBChFSb3N0ZXJSZXBvU2VjdGlvbhInCgNrZXkYASABKAsyGi5mcm9udGVuZC52MS5Sb3N0ZXJSZXBvS2V5EjAKBmhlYWRlchgCIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclNlY3Rpb25IZWFkZXISJQoEcm93cxgDIAEoCzIXLmZyb250ZW5kLnYxLlJvc3RlclJvd3MiQAoNUm9zdGVyUmVwb0tleRIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYimQEKEVJvc3RlclRhc2tTZWN0aW9uEicKA2tleRgBIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclRhc2tLZXkSNAoGaGVhZGVyGAIgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyVGFza1NlY3Rpb25IZWFkZXISJQoEcm93cxgDIAEoCzIXLmZyb250ZW5kLnYxLlJvc3RlclJvd3MiIAoNUm9zdGVyVGFza0tleRIPCgd0YXNrX2lkGAEgASgJIm4KE1Jvc3Rlck1lcmdlZFNlY3Rpb24SMAoGaGVhZGVyGAEgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyU2VjdGlvbkhlYWRlchIlCgRyb3dzGAIgASgLMhcuZnJvbnRlbmQudjEuUm9zdGVyUm93cyI+ChNSb3N0ZXJTZWN0aW9uSGVhZGVyEicKBWxhYmVsGAEgASgLMhguZnJvbnRlbmQudjEuUm9zdGVyTGFiZWwibQoXUm9zdGVyVGFza1NlY3Rpb25IZWFkZXISJwoFbGFiZWwYASABKAsyGC5mcm9udGVuZC52MS5Sb3N0ZXJMYWJlbBIpCgRkb25lGAIgASgLMhsuZnJvbnRlbmQudjEuUm9zdGVyVGFza0RvbmUiGwoLUm9zdGVyTGFiZWwSDAoEdGV4dBgBIAEoCSIeCg5Sb3N0ZXJUYXNrRG9uZRIMCgRkb25lGAEgASgIIjIKClJvc3RlclJvd3MSJAoEcm93cxgBIAMoCzIWLmZyb250ZW5kLnYxLlJvc3RlclJvdyL5DwoJUm9zdGVyUm93EjIKCXdvcmtzcGFjZRgBIAEoCzIfLmZyb250ZW5kLnYxLlJvc3RlclJvd1dvcmtzcGFjZRI3CglhdHRlbnRpb24YICABKAsyHy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dBdHRlbnRpb25IAYgBARI6Cghwcmlvcml0eRghIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1ByaW9yaXR5QmFkZ2VIAogBARIxCgZ2aWV3ZWQYIiABKAsyHC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dWaWV3ZWRIA4gBARI1CghyZXZpdmluZxgjIAEoCzIeLmZyb250ZW5kLnYxLlJvc3RlclJvd1Jldml2aW5nSASIAQESKAoEbmFtZRgCIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclJvd05hbWUSPAoKc3VibWl0dGluZxgDIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1N1Ym1pdHRpbmdIABI4Cgh0aGlua2luZxgEIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1RoaW5raW5nSAASOAoIY2xlYXJpbmcYBSABKAsyJC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNDbGVhcmluZ0gAEjwKCmNvbXBhY3RpbmcYBiABKAsyJi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNDb21wYWN0aW5nSAASPAoKcGVybWlzc2lvbhgHIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1Blcm1pc3Npb25IABIwCgRkb25lGAggASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRG9uZUgAEj4KC2ludGVycnVwdGVkGAkgASgLMicuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzSW50ZXJydXB0ZWRIABI9Cgt0dXJuX2ZhaWxlZBgkIAEoCzImLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1R1cm5GYWlsZWRIABIyCgVyZWFkeRgKIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1JlYWR5SAASOwoKaWRsZV9hc3luYxgLIAEoCzIlLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0lkbGVBc3luY0gAEkMKDnZlbmRvcl9ibG9ja2VkGAwgASgLMikuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzVmVuZG9yQmxvY2tlZEgAEjAKBGluaXQYDSABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNJbml0SAASNgoHc2V2ZXJlZBgOIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c1NldmVyZWRIABI/CgxzdGFydF9mYWlsZWQYECABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNTdGFydEZhaWxlZEgAEjgKCGRlZ3JhZGVkGBEgASgLMiQuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRGVncmFkZWRIABIwCgRkZWFkGBIgASgLMiAuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzRGVhZEgAEkUKD21lcmdlX2VucXVldWluZxgTIAEoCzIqLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlRW5xdWV1aW5nSAASNgoHbWVyZ2luZxgUIAEoCzIjLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdpbmdIABI/CgxtZXJnZV9xdWV1ZWQYFSABKAsyJy5mcm9udGVuZC52MS5Sb3N0ZXJSb3dTdGF0dXNNZXJnZVF1ZXVlZEgAEkMKDm1lcmdlX2NvbmZsaWN0GBYgASgLMikuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VDb25mbGljdEgAEj8KDG1lcmdlX2ZhaWxlZBgXIAEoCzInLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c01lcmdlRmFpbGVkSAASNAoGbWVyZ2VkGBggASgLMiIuZnJvbnRlbmQudjEuUm9zdGVyUm93U3RhdHVzTWVyZ2VkSAASMAoEbm9uZRgZIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c05vbmVIABI4CghpbmFjdGl2ZRgaIAEoCzIkLmZyb250ZW5kLnYxLlJvc3RlclJvd1N0YXR1c0luYWN0aXZlSAASLgoHY3VycmVudBgbIAEoCzIdLmZyb250ZW5kLnYxLlJvc3RlclJvd0N1cnJlbnQSKAoIY2hpbGRyZW4YHCADKAsyFi5mcm9udGVuZC52MS5Sb3N0ZXJSb3cSKAoEd2hlbhgdIAEoCzIaLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW4SLAoGZGV0YWlsGB4gASgLMhwuZnJvbnRlbmQudjEuUm9zdGVyUm93RGV0YWlsEiwKBmNsb3NlZBgfIAEoCzIcLmZyb250ZW5kLnYxLlJvc3RlclJvd0Nsb3NlZEIICgZzdGF0dXNCDAoKX2F0dGVudGlvbkILCglfcHJpb3JpdHlCCQoHX3ZpZXdlZEILCglfcmV2aXZpbmciQwoSUm9zdGVyUm93V29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHQoNUm9zdGVyUm93TmFtZRIMCgR0ZXh0GAEgASgJIiMKEFJvc3RlclJvd0N1cnJlbnQSDwoHY3VycmVudBgBIAEoCCL3AQoNUm9zdGVyUm93V2hlbhI/Cg1sYXN0X3NlbGVjdGVkGAEgASgLMiYuZnJvbnRlbmQudjEuUm9zdGVyUm93V2hlbkxhc3RTZWxlY3RlZEgAEjIKBm1lcmdlZBgCIAEoCzIgLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW5NZXJnZWRIABIyCgZhY3RpdmUYAyABKAsyIC5mcm9udGVuZC52MS5Sb3N0ZXJSb3dXaGVuQWN0aXZlSAASNAoHY3JlYXRlZBgEIAEoCzIhLmZyb250ZW5kLnYxLlJvc3RlclJvd1doZW5DcmVhdGVkSABCBwoFc2hvd24iKgoZUm9zdGVyUm93V2hlbkxhc3RTZWxlY3RlZBINCgVhdF9tcxgBIAEoAyIkChNSb3N0ZXJSb3dXaGVuTWVyZ2VkEg0KBWF0X21zGAEgASgDIiQKE1Jvc3RlclJvd1doZW5BY3RpdmUSDQoFYXRfbXMYASABKAMiJQoUUm9zdGVyUm93V2hlbkNyZWF0ZWQSDQoFYXRfbXMYASABKAMivAEKD1Jvc3RlclJvd0RldGFpbBIyCgZicmFuY2gYASABKAsyIi5mcm9udGVuZC52MS5Sb3N0ZXJSb3dEZXRhaWxCcmFuY2gSPwoNcGFyZW50X2JyYW5jaBgCIAEoCzIoLmZyb250ZW5kLnYxLlJvc3RlclJvd0RldGFpbFBhcmVudEJyYW5jaBI0CgdzdW1tYXJ5GAMgASgLMiMuZnJvbnRlbmQudjEuUm9zdGVyUm93RGV0YWlsU3VtbWFyeSIlChVSb3N0ZXJSb3dEZXRhaWxCcmFuY2gSDAoEbmFtZRgBIAEoCSIrChtSb3N0ZXJSb3dEZXRhaWxQYXJlbnRCcmFuY2gSDAoEbmFtZRgBIAEoCSImChZSb3N0ZXJSb3dEZXRhaWxTdW1tYXJ5EgwKBHRleHQYASABKAkiIQoPUm9zdGVyUm93Q2xvc2VkEg4KBmNsb3NlZBgBIAEoCCIbChlSb3N0ZXJSb3dTdGF0dXNTdWJtaXR0aW5nIhkKF1Jvc3RlclJvd1N0YXR1c1RoaW5raW5nIhkKF1Jvc3RlclJvd1N0YXR1c0NsZWFyaW5nIhsKGVJvc3RlclJvd1N0YXR1c0NvbXBhY3RpbmciGwoZUm9zdGVyUm93U3RhdHVzUGVybWlzc2lvbiIVChNSb3N0ZXJSb3dTdGF0dXNEb25lIhwKGlJvc3RlclJvd1N0YXR1c0ludGVycnVwdGVkIhsKGVJvc3RlclJvd1N0YXR1c1R1cm5GYWlsZWQiFgoUUm9zdGVyUm93U3RhdHVzUmVhZHkiGgoYUm9zdGVyUm93U3RhdHVzSWRsZUFzeW5jIh4KHFJvc3RlclJvd1N0YXR1c1ZlbmRvckJsb2NrZWQiFQoTUm9zdGVyUm93U3RhdHVzSW5pdCIYChZSb3N0ZXJSb3dTdGF0dXNTZXZlcmVkIhwKGlJvc3RlclJvd1N0YXR1c1N0YXJ0RmFpbGVkIhkKF1Jvc3RlclJvd1N0YXR1c0RlZ3JhZGVkIhUKE1Jvc3RlclJvd1N0YXR1c0RlYWQiHwodUm9zdGVyUm93U3RhdHVzTWVyZ2VFbnF1ZXVpbmciGAoWUm9zdGVyUm93U3RhdHVzTWVyZ2luZyIcChpSb3N0ZXJSb3dTdGF0dXNNZXJnZVF1ZXVlZCIeChxSb3N0ZXJSb3dTdGF0dXNNZXJnZUNvbmZsaWN0IhwKGlJvc3RlclJvd1N0YXR1c01lcmdlRmFpbGVkIhcKFVJvc3RlclJvd1N0YXR1c01lcmdlZCIVChNSb3N0ZXJSb3dTdGF0dXNOb25lIhkKF1Jvc3RlclJvd1N0YXR1c0luYWN0aXZlQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * One complete, self-contained picture of the sidebar.
@@ -156,7 +156,7 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * recedes to the muted colour while the marker stands.
  *
  * TURN-END-ONLY. The marker is PRESENT only on a row whose `status` is a turn
- * end, `done` or `interrupted`, never on any other arm, however long the user
+ * end, `done`, `interrupted` or `turn_failed`, never on any other arm, however long the user
  * has looked at it: every other arm is live work (thinking, a permission ask,
  * detached work, a merge running) or an exceptional state (severed, dead,
  * vendor_blocked, a merge conflict), and neither may ever be drawn
@@ -168,7 +168,7 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * THE MARKER IS DERIVED FROM A READ FACT, and the daemon resolves it in the
  * same render as the row's `status`, so every push states the two in
  * agreement and a client draws the marker as it arrives, with no rule of its
- * own. A turn that completes or is interrupted leaves its result UNREAD; a
+ * own. A turn that completes, is interrupted or fails leaves its result UNREAD; a
  * dwell on the turn-end row READS it; the next turn resets it. While the
  * result is unread the row holds its turn-end arm even over live detached
  * work (see the `status` oneof's `idle_async`), FULL. Once read, the marker stands
@@ -670,6 +670,20 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
      */
     value: RosterRowStatusInterrupted;
     case: "interrupted";
+  } | {
+    /**
+     * The last turn ended by FAILING: an agent-side failure, a turn the
+     * daemon closed as orphaned on reconcile, or a turn the agent process cut
+     * by dying under it. It is a TURN END like `done` and `interrupted`, with
+     * the same read rule: while its result is UNREAD it outranks
+     * `idle_async`; once read it is drawn with `viewed` (see
+     * RosterRowViewed). BLUE, where the other two turn ends are green: the
+     * turn did not produce the result it was asked for.
+     *
+     * @generated from field: frontend.v1.RosterRowStatusTurnFailed turn_failed = 36;
+     */
+    value: RosterRowStatusTurnFailed;
+    case: "turnFailed";
   } | {
     /**
      * Live, proven usable, and idle. BOTH the idle and ready render states
@@ -1255,6 +1269,19 @@ export const RosterRowStatusInterruptedSchema: GenMessage<RosterRowStatusInterru
   messageDesc(file_frontend_v1_sidebar, 38);
 
 /**
+ * @generated from message frontend.v1.RosterRowStatusTurnFailed
+ */
+export type RosterRowStatusTurnFailed = Message<"frontend.v1.RosterRowStatusTurnFailed"> & {
+};
+
+/**
+ * Describes the message frontend.v1.RosterRowStatusTurnFailed.
+ * Use `create(RosterRowStatusTurnFailedSchema)` to create a new message.
+ */
+export const RosterRowStatusTurnFailedSchema: GenMessage<RosterRowStatusTurnFailed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_sidebar, 39);
+
+/**
  * @generated from message frontend.v1.RosterRowStatusReady
  */
 export type RosterRowStatusReady = Message<"frontend.v1.RosterRowStatusReady"> & {
@@ -1265,7 +1292,7 @@ export type RosterRowStatusReady = Message<"frontend.v1.RosterRowStatusReady"> &
  * Use `create(RosterRowStatusReadySchema)` to create a new message.
  */
 export const RosterRowStatusReadySchema: GenMessage<RosterRowStatusReady> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 39);
+  messageDesc(file_frontend_v1_sidebar, 40);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusIdleAsync
@@ -1278,7 +1305,7 @@ export type RosterRowStatusIdleAsync = Message<"frontend.v1.RosterRowStatusIdleA
  * Use `create(RosterRowStatusIdleAsyncSchema)` to create a new message.
  */
 export const RosterRowStatusIdleAsyncSchema: GenMessage<RosterRowStatusIdleAsync> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 40);
+  messageDesc(file_frontend_v1_sidebar, 41);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusVendorBlocked
@@ -1291,7 +1318,7 @@ export type RosterRowStatusVendorBlocked = Message<"frontend.v1.RosterRowStatusV
  * Use `create(RosterRowStatusVendorBlockedSchema)` to create a new message.
  */
 export const RosterRowStatusVendorBlockedSchema: GenMessage<RosterRowStatusVendorBlocked> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 41);
+  messageDesc(file_frontend_v1_sidebar, 42);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusInit
@@ -1304,7 +1331,7 @@ export type RosterRowStatusInit = Message<"frontend.v1.RosterRowStatusInit"> & {
  * Use `create(RosterRowStatusInitSchema)` to create a new message.
  */
 export const RosterRowStatusInitSchema: GenMessage<RosterRowStatusInit> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 42);
+  messageDesc(file_frontend_v1_sidebar, 43);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusSevered
@@ -1317,7 +1344,7 @@ export type RosterRowStatusSevered = Message<"frontend.v1.RosterRowStatusSevered
  * Use `create(RosterRowStatusSeveredSchema)` to create a new message.
  */
 export const RosterRowStatusSeveredSchema: GenMessage<RosterRowStatusSevered> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 43);
+  messageDesc(file_frontend_v1_sidebar, 44);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusStartFailed
@@ -1330,7 +1357,7 @@ export type RosterRowStatusStartFailed = Message<"frontend.v1.RosterRowStatusSta
  * Use `create(RosterRowStatusStartFailedSchema)` to create a new message.
  */
 export const RosterRowStatusStartFailedSchema: GenMessage<RosterRowStatusStartFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 44);
+  messageDesc(file_frontend_v1_sidebar, 45);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusDegraded
@@ -1343,7 +1370,7 @@ export type RosterRowStatusDegraded = Message<"frontend.v1.RosterRowStatusDegrad
  * Use `create(RosterRowStatusDegradedSchema)` to create a new message.
  */
 export const RosterRowStatusDegradedSchema: GenMessage<RosterRowStatusDegraded> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 45);
+  messageDesc(file_frontend_v1_sidebar, 46);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusDead
@@ -1356,7 +1383,7 @@ export type RosterRowStatusDead = Message<"frontend.v1.RosterRowStatusDead"> & {
  * Use `create(RosterRowStatusDeadSchema)` to create a new message.
  */
 export const RosterRowStatusDeadSchema: GenMessage<RosterRowStatusDead> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 46);
+  messageDesc(file_frontend_v1_sidebar, 47);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMergeEnqueuing
@@ -1369,7 +1396,7 @@ export type RosterRowStatusMergeEnqueuing = Message<"frontend.v1.RosterRowStatus
  * Use `create(RosterRowStatusMergeEnqueuingSchema)` to create a new message.
  */
 export const RosterRowStatusMergeEnqueuingSchema: GenMessage<RosterRowStatusMergeEnqueuing> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 47);
+  messageDesc(file_frontend_v1_sidebar, 48);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMerging
@@ -1382,7 +1409,7 @@ export type RosterRowStatusMerging = Message<"frontend.v1.RosterRowStatusMerging
  * Use `create(RosterRowStatusMergingSchema)` to create a new message.
  */
 export const RosterRowStatusMergingSchema: GenMessage<RosterRowStatusMerging> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 48);
+  messageDesc(file_frontend_v1_sidebar, 49);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMergeQueued
@@ -1395,7 +1422,7 @@ export type RosterRowStatusMergeQueued = Message<"frontend.v1.RosterRowStatusMer
  * Use `create(RosterRowStatusMergeQueuedSchema)` to create a new message.
  */
 export const RosterRowStatusMergeQueuedSchema: GenMessage<RosterRowStatusMergeQueued> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 49);
+  messageDesc(file_frontend_v1_sidebar, 50);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMergeConflict
@@ -1408,7 +1435,7 @@ export type RosterRowStatusMergeConflict = Message<"frontend.v1.RosterRowStatusM
  * Use `create(RosterRowStatusMergeConflictSchema)` to create a new message.
  */
 export const RosterRowStatusMergeConflictSchema: GenMessage<RosterRowStatusMergeConflict> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 50);
+  messageDesc(file_frontend_v1_sidebar, 51);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMergeFailed
@@ -1421,7 +1448,7 @@ export type RosterRowStatusMergeFailed = Message<"frontend.v1.RosterRowStatusMer
  * Use `create(RosterRowStatusMergeFailedSchema)` to create a new message.
  */
 export const RosterRowStatusMergeFailedSchema: GenMessage<RosterRowStatusMergeFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 51);
+  messageDesc(file_frontend_v1_sidebar, 52);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusMerged
@@ -1434,7 +1461,7 @@ export type RosterRowStatusMerged = Message<"frontend.v1.RosterRowStatusMerged">
  * Use `create(RosterRowStatusMergedSchema)` to create a new message.
  */
 export const RosterRowStatusMergedSchema: GenMessage<RosterRowStatusMerged> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 52);
+  messageDesc(file_frontend_v1_sidebar, 53);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusNone
@@ -1447,7 +1474,7 @@ export type RosterRowStatusNone = Message<"frontend.v1.RosterRowStatusNone"> & {
  * Use `create(RosterRowStatusNoneSchema)` to create a new message.
  */
 export const RosterRowStatusNoneSchema: GenMessage<RosterRowStatusNone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 53);
+  messageDesc(file_frontend_v1_sidebar, 54);
 
 /**
  * @generated from message frontend.v1.RosterRowStatusInactive
@@ -1460,5 +1487,5 @@ export type RosterRowStatusInactive = Message<"frontend.v1.RosterRowStatusInacti
  * Use `create(RosterRowStatusInactiveSchema)` to create a new message.
  */
 export const RosterRowStatusInactiveSchema: GenMessage<RosterRowStatusInactive> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar, 54);
+  messageDesc(file_frontend_v1_sidebar, 55);
 

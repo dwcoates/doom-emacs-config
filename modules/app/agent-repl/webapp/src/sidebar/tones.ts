@@ -33,6 +33,7 @@ export const ROSTER_STATUS_CASES = [
   "permission",
   "done",
   "interrupted",
+  "turnFailed",
   "ready",
   "idleAsync",
   "vendorBlocked",

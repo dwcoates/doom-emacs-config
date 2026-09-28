@@ -290,6 +290,12 @@ roster where an absent message field is not a breach."
   "Decode VALUE as the empty `RosterRowStatusInterrupted'."
   (agent-repl-wire--decode-empty "RosterRowStatusInterrupted" value))
 
+(defun agent-repl-wire-decode-roster-row-status-turn-failed (value)
+  "Decode VALUE as the empty `RosterRowStatusTurnFailed'.
+The last turn ended by failing: a turn end like done and interrupted,
+with the same read rule, drawn blue."
+  (agent-repl-wire--decode-empty "RosterRowStatusTurnFailed" value))
+
 (defun agent-repl-wire-decode-roster-row-status-ready (value)
   "Decode VALUE as the empty `RosterRowStatusReady'.
 BOTH the idle and ready render states resolve here."
@@ -365,6 +371,7 @@ an assertion, where an unset oneof is the absence of one."
     (permission :permission agent-repl-wire-decode-roster-row-status-permission)
     (done :done agent-repl-wire-decode-roster-row-status-done)
     (interrupted :interrupted agent-repl-wire-decode-roster-row-status-interrupted)
+    (turnFailed :turn-failed agent-repl-wire-decode-roster-row-status-turn-failed)
     (ready :ready agent-repl-wire-decode-roster-row-status-ready)
     (idleAsync :idle-async agent-repl-wire-decode-roster-row-status-idle-async)
     (vendorBlocked :vendor-blocked
