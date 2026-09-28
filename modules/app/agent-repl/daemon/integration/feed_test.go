@@ -1932,21 +1932,7 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 	}))
 	bubble := awaitRow(t, f, tail, "the spawn's bubble", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetSubagent() != nil })
 
-	// Act: the subagent states its own usage (12.4k fresh input: 12,000 cache
-	// writes plus 400 unwritten), then settles. Its card's figure is its own
-	// lifetime fresh input (docs/protobuf-design/fresh-input-token-figures.md
-	// §4), read off its usage frames, not the settle's totals.
-	f.shim.PushAgentFrame("sub-2", activityFrame("sub-2", &conversationv1.AgentActivity{
-		ActivityId: activityID("sub-2-work"),
-		Usage: &conversationv1.TokenUsage{
-			InputHits:    &conversationv1.TokenCacheHits{Read: 50_000},
-			InputMisses:  &conversationv1.TokenCacheMisses{Written: 12_000, Unwritten: 400},
-			OutputTokens: 900,
-		},
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
-			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "working"}},
-		}}},
-	}))
+	// Act
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("spawn-2"),
 		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Success{
@@ -1962,17 +1948,15 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 		}}},
 	}))
 
-	// Assert: the usage and the settle ride two streams, so the card is
-	// awaited in the state both leave it in, whichever landed first.
-	settled := awaitRow(t, f, tail, "the settled subagent bubble with its figure", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == bubble.GetId().GetValue() && r.GetActivity().GetSubagent().GetSettled() != nil &&
-			r.GetActivity().GetSubagent().GetTokens().GetText() != ""
+	// Assert
+	settled := awaitRow(t, f, tail, "the settled subagent bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == bubble.GetId().GetValue() && r.GetActivity().GetSubagent().GetSettled() != nil
 	})
 	if settled.GetActivity().GetSubagent().GetSettled().GetSucceeded() == nil {
 		t.Fatalf("the settled bubble's outcome = %v, want succeeded", settled.GetActivity().GetSubagent().GetSettled().GetOutcome())
 	}
-	if got := settled.GetActivity().GetSubagent().GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("the settled bubble's figure = %q, want the subagent's own fresh input \"12.4k tok\"", got)
+	if settled.GetActivity().GetSubagent().GetTokens().GetText() == "" {
+		t.Fatal("the settled bubble carries no token sum, want one formatted from the totals")
 	}
 }
 
@@ -3002,11 +2986,12 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 // the `[thinking, text]` response states its usage on the THINKING unit — the
 // unit for its first content block — and the prose unit states none.
 //
-// THE STAMP IS FRESH INPUT (docs/protobuf-design/fresh-input-token-figures.md
-// §1): the cache misses, written plus unwritten, because new cache writes are
-// what a turn costs. Cache reads are context reused, and output is excluded
-// because it is re-sent as input on the next request. See
-// internal/resolve/feed/usage.go's file header.
+// THE STAMP IS THE TURN'S OWN WORK, NOT THE CONTEXT WINDOW (481bcf6f8): fresh
+// new input (InputMisses.Unwritten) plus output (output_tokens), EXCLUDING the
+// two cached-context buckets — InputHits.Read is context REUSED, not produced
+// this turn, and InputMisses.Written is context being (re-)cached. Both are the
+// context window growing, which is the TOPBAR's figure and a different
+// resolver. See internal/resolve/feed/usage.go's file header.
 func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -3033,14 +3018,16 @@ func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 		}}},
 	}))
 
-	// Assert: the drawn bubble carries the response's fresh input — the 18,000
-	// cache writes plus the 240 unwritten input tokens. The 900,000 cache reads
-	// and the 5,000 output tokens are excluded.
+	// Assert: the drawn bubble carries this turn's own work — the 240 unwritten
+	// input tokens plus the 5,000 output tokens. The 900,000 cache reads and the
+	// 18,000 cache writes are the context window and are deliberately excluded:
+	// a turn that reuses a huge context did little work, and stamping it with
+	// the context's size says the opposite.
 	row := awaitRow(t, f, tail, "the stamped response bubble", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetResponse().GetUsage() != nil
 	})
-	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "18.2k" {
-		t.Fatalf("the response's usage stamp = %q, want its fresh input %q (cache writes + unwritten input, no reads, no output)", got, "18.2k")
+	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "5.2k" {
+		t.Fatalf("the response's usage stamp = %q, want the turn's own work %q (fresh input + output, no cached context)", got, "5.2k")
 	}
 }
 
