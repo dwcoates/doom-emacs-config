@@ -131,8 +131,14 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	w.sinks.Feed.OnSessionUpdate(w.ws, update)
 	w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 
-	if w.turn != nil {
-		w.turnEndedLocked(*w.turn, wsm.CloseFailed)
+	// EVERY TURN THE QUERY HELD DIES WITH IT: the one in flight, then each
+	// one waiting behind it as it stands in flight in turn.
+	for w.turn != nil {
+		ended := *w.turn
+		w.turnEndedLocked(ended, wsm.CloseFailed)
+		if w.turn != nil {
+			w.sinks.Feed.OnTurnOpened(w.ws, *w.turn)
+		}
 	}
 	// NOTHING SURVIVES THE SESSION'S QUERY, so every live item concludes here.
 	if changed := w.concludeAllLocked(concludedQueryDied); changed {
@@ -516,9 +522,13 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 // fact, so the turn's terminal closes it through the one door and draws its
 // ending, final answer included.
 //
-// A TURN OF THE DAEMON'S OWN STILL OPENING is displaced, not kept. The shim
-// adopts only into an empty slot, so a StartTurn still in flight here is one
-// the shim refuses; the adopted turn is the one actually running.
+// A TURN ALREADY IN FLIGHT WAITS BEHIND IT (ruled 2026-09-28). The shim
+// adopts a vendor-started turn BESIDE a turn whose send is still in the
+// vendor's queue, delivers that send rather than refusing it, and matches each
+// reply to its own send by id. So the adopted turn is the one running, and the
+// turn it found in flight -- the daemon's own, opening or accepted, or an
+// adopted turn such as the shim's network resume -- stands in flight again
+// when it ends (turnEndedLocked).
 func (w *watcher) adoptVendorTurnLocked(prompt *conversationv1.AgentPrompt) {
 	turn := ids.TurnID(prompt.GetId().GetValue())
 	if turn == "" {
@@ -533,17 +543,26 @@ func (w *watcher) adoptVendorTurnLocked(prompt *conversationv1.AgentPrompt) {
 		})
 		return
 	}
-	displaced := turnValue(w.turn)
+	ahead := w.turn
+	aheadAdopted := w.adopted != nil && ahead != nil && *w.adopted == *ahead
+	aheadAccepted := ahead != nil && w.acceptedLocked(*ahead)
 	if !w.standTurnLocked(turn, "daemon.sessionwatcher.state_transition", "the vendor-started turn became the turn in flight") {
 		return
+	}
+	adopted := turn
+	w.adopted = &adopted
+	behind := ""
+	if ahead != nil && *ahead != turn {
+		behind = string(*ahead)
+		w.waiting = append(w.waiting, waitingTurn{turn: *ahead, accepted: aheadAccepted && !aheadAdopted, adopted: aheadAdopted})
 	}
 	w.sinks.Footer.OnTurnOpened(w.ws, turn)
 	w.sinks.Feed.OnTurnOpened(w.ws, turn)
 	w.pendingAdoptions = append(w.pendingAdoptions, turn)
 	w.log.Info("daemon.sessionwatcher.turn_adopted", "the vendor started a turn on its own; it is tracked as the turn in flight", dlog.Context{
-		"turn_id":   string(turn),
-		"agent_id":  prompt.GetAgent().GetValue(),
-		"displaced": displaced,
+		"turn_id":  string(turn),
+		"agent_id": prompt.GetAgent().GetValue(),
+		"behind":   behind,
 	})
 }
 
@@ -1122,6 +1141,16 @@ func (w *watcher) terminalTurnLocked(agent *conversationv1.AgentId, stamp *conve
 	named := ids.TurnID(stamp.GetValue())
 	if w.turn != nil && *w.turn == named {
 		return &named
+	}
+	// A TURN WAITING BEHIND THE ADOPTED ONE IS STILL OPEN: its terminal ends it
+	// where it waits, and the turn running ahead of it is left alone.
+	for _, waiting := range w.waiting {
+		if waiting.turn == named {
+			w.log.Info("daemon.sessionwatcher.terminal_turn_waiting", "a terminal named a turn waiting behind the turn in flight; it ends that turn", dlog.Context{
+				"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+			})
+			return &named
+		}
 	}
 	if w.turnKnownLocked(named) {
 		w.log.Debug("daemon.sessionwatcher.terminal_turn_not_open", "a terminal named a turn that is not in flight; it ends nothing that is open", dlog.Context{

@@ -204,6 +204,23 @@ type watcher struct {
 	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
 	// them over ahead of the turn ends.
 	pendingAdoptions []ids.TurnID
+	// adopted is the turn in flight when a VENDOR_STARTED prompt row stood it
+	// there (adoptVendorTurnLocked), nil otherwise.
+	adopted *ids.TurnID
+	// turnAccepted records that the turn in flight is past its opening: the
+	// queue handed it over (OnTurnOpened), a row or the session's facts stood
+	// it. False only for a turn OnTurnOpening stood that StartTurn has not yet
+	// answered for.
+	turnAccepted bool
+	// waiting are the turns an adopted turn stood BEHIND it, newest last: a
+	// turn of the daemon's own whose send reached the shim's vendor queue as
+	// the vendor started a turn of its own, or an adopted turn a newer one
+	// arrived beside. The shim matches each reply to its send by id (ruled
+	// 2026-09-28) and never refuses a StartTurn for a vendor-started turn, so
+	// both run; the one RUNNING stands in flight, and each waiting turn
+	// stands in flight again, newest first, when the turn ahead of it ends
+	// (turnEndedLocked). Invariant: waiting is empty whenever turn is nil.
+	waiting []waitingTurn
 
 	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
 	// can join it. It is a WaitGroup rather than a sleep.
@@ -635,6 +652,17 @@ func (w *watcher) nameMainForViewsLocked(agent *conversationv1.AgentId, source s
 	w.sinks.Feed.OnMainAgent(w.ws, agent)
 }
 
+// waitingTurn is one turn stood behind an adopted turn in flight.
+type waitingTurn struct {
+	turn ids.TurnID
+	// accepted records that the queue handed the turn over (OnTurnOpened), so
+	// the views are given its open edge when it stands in flight again. A
+	// turn still opening gets that edge from its own OnTurnOpened.
+	accepted bool
+	// adopted records that the turn was itself stood by a VENDOR_STARTED row.
+	adopted bool
+}
+
 // OnTurnOpening records the turn a caller is about to hand to the shim. See
 // the interface for why the record has to go down BEFORE StartTurn.
 func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
@@ -650,7 +678,48 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 		w.log.Error("daemon.sessionwatcher.turn_opening_unidentified", "an opening turn named no id", nil)
 		return
 	}
-	w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a turn is going to the shim")
+	if w.waitBehindAdoptedLocked(turn, false) {
+		return
+	}
+	if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a turn is going to the shim") {
+		w.turnAccepted = false
+	}
+}
+
+// acceptedLocked reports whether `turn` is the turn in flight and past its
+// opening.
+func (w *watcher) acceptedLocked(turn ids.TurnID) bool {
+	return w.turn != nil && *w.turn == turn && w.turnAccepted
+}
+
+// waitBehindAdoptedLocked stands a turn of the daemon's own BEHIND the
+// adopted turn in flight, rather than displacing it, and reports whether it
+// did. The vendor-started turn is the one running; the shim delivered this
+// turn's prompt into the vendor's queue behind it and matches each turn's
+// reply to its own send (ruled 2026-09-28), so displacing the running turn
+// would leave its terminal ending nothing and its row open forever.
+func (w *watcher) waitBehindAdoptedLocked(turn ids.TurnID, accepted bool) bool {
+	if w.adopted == nil || w.turn == nil || *w.turn != *w.adopted || *w.turn == turn {
+		return false
+	}
+	if _, ended := w.closedTurns[turn]; ended {
+		return false
+	}
+	for i := range w.waiting {
+		if w.waiting[i].turn == turn {
+			w.waiting[i].accepted = w.waiting[i].accepted || accepted
+			w.log.Debug("daemon.sessionwatcher.turn_waiting", "a turn already waiting behind the adopted turn was handed over", dlog.Context{
+				"turn_id": string(turn), "turn_in_flight": string(*w.turn), "accepted": w.waiting[i].accepted,
+			})
+			return true
+		}
+	}
+	w.waiting = append(w.waiting, waitingTurn{turn: turn, accepted: accepted})
+	w.knownTurns[turn] = struct{}{}
+	w.log.Info("daemon.sessionwatcher.turn_waiting", "a turn of the daemon's own waits behind the vendor-started turn in flight", dlog.Context{
+		"turn_id": string(turn), "turn_in_flight": string(*w.turn), "accepted": accepted,
+	})
+	return true
 }
 
 // standTurnLocked is the ONE writer that puts a turn in flight, and its callers
@@ -677,6 +746,10 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 	}
 	before := turnIDValue(w.turn)
 	w.turn = &turn
+	w.turnAccepted = true
+	if w.adopted != nil && *w.adopted != turn {
+		w.adopted = nil
+	}
 	w.knownTurns[turn] = struct{}{}
 	w.log.Debug(operation, message, dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
@@ -690,7 +763,15 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if ws != w.ws || w.turn == nil || *w.turn != turn {
+	if ws != w.ws {
+		return
+	}
+	if w.dropWaitingLocked(turn, "the shim refused a turn waiting behind the adopted turn") {
+		w.flushHeldTerminalLocked()
+		w.signalFreenessLocked()
+		return
+	}
+	if w.turn == nil || *w.turn != turn {
 		return
 	}
 	before := turnIDValue(w.turn)
@@ -721,6 +802,15 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	w.adoptMainAgentLocked(prompt.GetAgent(), "start_turn")
 	if turnID := prompt.GetId().GetValue(); turnID != "" {
 		turn := ids.TurnID(turnID)
+		// A VENDOR-STARTED TURN IS RUNNING AHEAD OF IT: the accepted turn waits
+		// behind it and takes its open edges when it stands in flight.
+		if w.waitBehindAdoptedLocked(turn, true) {
+			if page != nil {
+				w.routeOpeningPageLocked(w.main, page, pageTurnAccepted)
+			}
+			w.releaseHeldTerminalLocked()
+			return
+		}
 		// THE TURN MAY ALREADY BE OVER. Its terminal can beat StartTurn's
 		// response back — the very race OnTurnOpening exists for — and
 		// re-recording it would stand a dead turn back up in flight, with no
@@ -840,16 +930,17 @@ func (w *watcher) Close() error {
 // turn to end. The footer and the roster are told nothing here: they draw the
 // link, and the bring-up that follows is what they show.
 func (w *watcher) endCutTurnLocked() {
-	if w.turn == nil {
-		return
+	// EVERY TURN THE SHIM HELD ENDS WITH IT: the one in flight, then each one
+	// waiting behind it as it stands in flight in turn.
+	for w.turn != nil {
+		turn := *w.turn
+		w.log.Info("daemon.sessionwatcher.turn_cut", "the shim died with a turn in flight; the turn ended with it", dlog.Context{
+			"turn_id": string(turn),
+		})
+		w.flushHeldTerminalLocked()
+		w.sinks.Feed.OnTurnOpened(w.ws, turn)
+		w.turnEndedLocked(turn, wsm.CloseAgentDied)
 	}
-	turn := *w.turn
-	w.log.Info("daemon.sessionwatcher.turn_cut", "the shim died with a turn in flight; the turn ended with it", dlog.Context{
-		"turn_id": string(turn),
-	})
-	w.flushHeldTerminalLocked()
-	w.sinks.Feed.OnTurnOpened(w.ws, turn)
-	w.turnEndedLocked(turn, wsm.CloseAgentDied)
 }
 
 // Departed implements Watcher.
