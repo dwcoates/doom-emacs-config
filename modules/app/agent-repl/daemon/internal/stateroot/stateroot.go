@@ -97,6 +97,11 @@ func (l Layout) CommandFileGlob() string {
 	return filepath.Join(l.OutputDir(), "workspace_commands_*.json")
 }
 
+// HeldPromptDir holds the held-prompt ingress: one file per prompt a client
+// could not hand to a live daemon, ingested into the prompt queue once one
+// serves (internal/heldingress).
+func (l Layout) HeldPromptDir() string { return filepath.Join(l.dir, "held-prompts") }
+
 // CheckSocketPathBudget reports whether SockDir plus the longest per-workspace
 // socket name still fits a unix-domain socket path. The daemon calls it at
 // boot and refuses loudly rather than discovering the truncation at the first

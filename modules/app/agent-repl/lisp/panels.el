@@ -7,6 +7,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
 (declare-function agent-repl--agent-panel-buffer-p "core")
 (declare-function agent-repl--align-buffer-to-ws-dir "status")
 (declare-function agent-repl--buffer-name "core")
@@ -1162,7 +1163,10 @@ Errors if the buffer is already initialized (already in
         (agent-repl-input-mode)
         (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
                           ws (buffer-name input-buf))
-        (agent-repl--history-restore ws)))))
+        (agent-repl--history-restore ws))
+      ;; THE WAITING LINE IS READ FROM DISK when the composer is born, so a
+      ;; prompt held durably before an Emacs restart is shown again at once.
+      (agent-repl-held-ingress-refresh ws))))
 
 ;;;; Panel show/hide strategies
 
