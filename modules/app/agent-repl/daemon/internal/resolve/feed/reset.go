@@ -4,6 +4,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 )
 
@@ -109,7 +110,7 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 	for unit := range old.stalls {
 		r.disarmAnswerStall(old, unit)
 	}
-	r.closeAnswerFault(old, because)
+	r.closeAnswerFault(old, health.EdgeFeedReset, because)
 
 	fresh := newWSState(ws)
 	rows := 0
