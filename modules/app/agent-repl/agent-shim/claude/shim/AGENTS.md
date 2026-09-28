@@ -799,6 +799,45 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
 - **THE FILE PLANE is the marker, not the stamp**: the title digest and the
   transcript listing skip a prompt that begins with the keep-alive marker.
 
+## A reply is matched to the send that caused it, by id (ruled 2026-09-28)
+
+`src/engine/sends.ts` (`SendLedger`) is the ONE attribution of vendor output
+to turns. Arrival order attributes nothing.
+
+- **EVERY SEND IS STAMPED.** `submit` (every StartTurn prompt: user, queued,
+  held, session acts, merge-repair, guidance), `deliverNetworkResume` and the
+  keep-alive beat all push through `pushSend`, which registers a client uuid
+  in the ledger BEFORE the push. A refused rewind re-delivers the same send
+  under the same uuid. `newUuid` names sends only; turn ids never use it.
+- **THE VENDOR'S ECHO ATTRIBUTES EACH VENDOR TURN.** `user_message_uuid` /
+  `user_message_uuids` (sdk.d.ts) on a turn's first reply frames and its
+  `result` name the send it answers; the SDK's binding rule lets a sender find
+  its uuid anywhere in the list. Unstamped frames after the first reply belong
+  to the vendor turn already running.
+- **AN UNSTAMPED FIRST REPLY IS A VENDOR-STARTED TURN** and takes the
+  adoption path (`VENDOR_STARTED` prompt row, shim-minted id). It is adopted
+  BESIDE the send slot, never into it, so a StartTurn is never refused because
+  of it: the prompt is delivered, and the vendor runs it after its own turn or
+  FOLDS it in. A fold (a vendor-started turn whose echo moves onto one of our
+  sends) concludes the adopted turn as absorbed (`Fold.concludeAbsorbedTurn`,
+  COMPLETED naming its last prose) before the send's rows.
+- **AN ECHO NAMING A UUID WE NEVER SENT** is an invariant violation: ERROR
+  (`shim-engine-sends`), attributed to no turn, never guessed.
+- **WHAT NO ID SPEAKS TO.** A turn's preamble (init, a UserPromptSubmit
+  hook) and detached work between turns carry no stamp; they are charged by
+  slot (`unstatedTurn`), which is not a reply's attribution.
+- **A STARTTURN WAITS ONLY BEHIND THE SHIM'S OWN TURN**: the keep-alive, or
+  the network-resume prompt (`shimTurnEnded`), bounded by
+  `KEEPALIVE_YIELD_BUDGET_MS`. `turn_already_open` is only ever the daemon's
+  own open turn; a send slot found taken after StartTurn's awaits is an
+  invariant break at ERROR, refused undelivered.
+- **THE DAEMON STANDS THE WAITING TURN BEHIND THE ADOPTED ONE**
+  (`daemon/internal/sessionwatcher`, `waiting`): the adopted turn is served as
+  the turn in flight (`servedOpenTurn`), and the daemon's turn stands in flight
+  again when it ends.
+- **NOTHING VENDOR-SHAPED CROSSES THE WIRE.** The client uuids stay in this
+  process; the daemon correlates by turn id, so no proto field carries them.
+
 ## A turn id is started once
 
 `TurnEngine.repeatedStart` (`src/engine/turn.ts`); the contract is the comment on
