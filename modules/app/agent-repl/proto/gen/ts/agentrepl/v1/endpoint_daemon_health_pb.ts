@@ -9,7 +9,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { DeployBuildFailed, DeployInstallFailed, DeployServiceRestartFailed } from "./endpoint_deploy_pb";
+import type { DeployBuildFailed, DeployComponent, DeployInstallFailed, DeployServiceRestartFailed } from "./endpoint_deploy_pb";
 import { file_agentrepl_v1_endpoint_deploy } from "./endpoint_deploy_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_daemon_health.proto.
  */
 export const file_agentrepl_v1_endpoint_daemon_health: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiyQQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SAASUQoXZGFlbW9uX3N0YXRlX3VucmVhZGFibGUYCCABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABI+Cg1kZXBsb3lfZmFpbGVkGAkgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0RGVwbG95RmFpbGVkSABCBgoEa2luZEoECAQQBVIUZGVwbG95X3NjcmlwdF9mYWlsZWQiUQogRGFlbW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiIxCiBEYWVtb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZRINCgVjYXVzZRgBIAEoCSIqChpEYWVtb25GYXVsdExvZ1NpbmtQb2lzb25lZBIMCgRzaW5rGAEgASgJIjEKH0RhZW1vbkZhdWx0U3VjY2Vzc29yU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJIiwKHERhZW1vbkZhdWx0UHJvbXB0c0Rpck1pc3NpbmcSDAoEcGF0aBgBIAEoCSIYChZEYWVtb25GYXVsdFdzbVJlYWRPbmx5Is8BChdEYWVtb25GYXVsdERlcGxveUZhaWxlZBIwCgVidWlsZBgBIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lCdWlsZEZhaWxlZEgAEjQKB2luc3RhbGwYAiABKAsyIS5hZ2VudHJlcGwudjEuRGVwbG95SW5zdGFsbEZhaWxlZEgAEkQKEHJlc3RhcnRfc2VydmljZXMYAyABKAsyKC5hZ2VudHJlcGwudjEuRGVwbG95U2VydmljZVJlc3RhcnRGYWlsZWRIAEIGCgRzdGVwIhMKEURhZW1vbkhlYWx0aEVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_deploy, file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiyQQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SAASUQoXZGFlbW9uX3N0YXRlX3VucmVhZGFibGUYCCABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABI+Cg1kZXBsb3lfZmFpbGVkGAkgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0RGVwbG95RmFpbGVkSABCBgoEa2luZEoECAQQBVIUZGVwbG95X3NjcmlwdF9mYWlsZWQiUQogRGFlbW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiIxCiBEYWVtb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZRINCgVjYXVzZRgBIAEoCSIqChpEYWVtb25GYXVsdExvZ1NpbmtQb2lzb25lZBIMCgRzaW5rGAEgASgJIjEKH0RhZW1vbkZhdWx0U3VjY2Vzc29yU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJIiwKHERhZW1vbkZhdWx0UHJvbXB0c0Rpck1pc3NpbmcSDAoEcGF0aBgBIAEoCSIYChZEYWVtb25GYXVsdFdzbVJlYWRPbmx5IocCChdEYWVtb25GYXVsdERlcGxveUZhaWxlZBIwCgVidWlsZBgBIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lCdWlsZEZhaWxlZEgAEjQKB2luc3RhbGwYAiABKAsyIS5hZ2VudHJlcGwudjEuRGVwbG95SW5zdGFsbEZhaWxlZEgAEkQKEHJlc3RhcnRfc2VydmljZXMYAyABKAsyKC5hZ2VudHJlcGwudjEuRGVwbG95U2VydmljZVJlc3RhcnRGYWlsZWRIABI2Cghyb2xsYmFjaxgEIAEoCzIiLmFnZW50cmVwbC52MS5EZXBsb3lSb2xsYmFja0ZhaWxlZEgAQgYKBHN0ZXAiWAoURGVwbG95Um9sbGJhY2tGYWlsZWQSMAoJY29tcG9uZW50GAEgASgOMh0uYWdlbnRyZXBsLnYxLkRlcGxveUNvbXBvbmVudBIOCgZkZXRhaWwYAiABKAkiEwoRRGFlbW9uSGVhbHRoRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_deploy, file_workspace_v1_workspace]);
 
 /**
  * Nothing to ask beyond "you?".
@@ -246,11 +246,13 @@ export type DaemonFault = Message<"agentrepl.v1.DaemonFault"> & {
     case: "daemonStateUnreadable";
   } | {
     /**
-     * A deploy's build, install or service restart did not go through. It
-     * stands until a later deploy gets through the step that failed, and a
-     * daemon that boots closes the ones an earlier daemon left standing. A
-     * handover whose successor would not start is `successor_spawn_failed`
-     * instead.
+     * A deploy's build, install or service restart did not go through, or
+     * its rollback did not restore the previous build. A failure after the
+     * install began ROLLS BACK (owner ruling, 2026-09-28). A step's fault
+     * stands until a later deploy gets through that step, a rollback's until
+     * a deploy gets all the way through, and a daemon that boots closes the
+     * ones an earlier daemon left standing. A handover whose successor would
+     * not start is `successor_spawn_failed` instead.
      *
      * @generated from field: agentrepl.v1.DaemonFaultDeployFailed deploy_failed = 9;
      */
@@ -417,6 +419,16 @@ export type DaemonFaultDeployFailed = Message<"agentrepl.v1.DaemonFaultDeployFai
      */
     value: DeployServiceRestartFailed;
     case: "restartServices";
+  } | {
+    /**
+     * The failed deploy's ROLLBACK did not restore the previous build: a
+     * kept artifact could not be put back, or a service would not restart
+     * onto it. It stands as a fault of its own, beside the step's.
+     *
+     * @generated from field: agentrepl.v1.DeployRollbackFailed rollback = 4;
+     */
+    value: DeployRollbackFailed;
+    case: "rollback";
   } | { case: undefined; value?: undefined };
 };
 
@@ -426,6 +438,35 @@ export type DaemonFaultDeployFailed = Message<"agentrepl.v1.DaemonFaultDeployFai
  */
 export const DaemonFaultDeployFailedSchema: GenMessage<DaemonFaultDeployFailed> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_daemon_health, 13);
+
+/**
+ * A failed deploy's rollback did not restore the previous build. The host may
+ * run neither build cleanly until a deploy gets all the way through.
+ *
+ * @generated from message agentrepl.v1.DeployRollbackFailed
+ */
+export type DeployRollbackFailed = Message<"agentrepl.v1.DeployRollbackFailed"> & {
+  /**
+   * The first component the rollback could not restore. REQUIRED.
+   *
+   * @generated from field: agentrepl.v1.DeployComponent component = 1;
+   */
+  component: DeployComponent;
+
+  /**
+   * Every failure, in the rollback's own words. REQUIRED.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DeployRollbackFailed.
+ * Use `create(DeployRollbackFailedSchema)` to create a new message.
+ */
+export const DeployRollbackFailedSchema: GenMessage<DeployRollbackFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 14);
 
 /**
  * No arms: DaemonHealth has no refusal site (landing 4).
@@ -440,5 +481,5 @@ export type DaemonHealthError = Message<"agentrepl.v1.DaemonHealthError"> & {
  * Use `create(DaemonHealthErrorSchema)` to create a new message.
  */
 export const DaemonHealthErrorSchema: GenMessage<DaemonHealthError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 14);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 15);
 

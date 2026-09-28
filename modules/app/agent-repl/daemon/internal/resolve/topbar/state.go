@@ -278,6 +278,10 @@ type wsState struct {
 	// the key the raising site named. Never retracted: each is a thing that
 	// already went wrong, and the record of it stays in front of the reader.
 	raised map[string]*raisedRecord
+	// daemonRaised are the DAEMON-scoped warnings standing on this strip, by
+	// key: the resolver's daemon set, each with this strip's own observation
+	// order. Retracted when the daemon retracts them.
+	daemonRaised map[string]*raisedRecord
 
 	// seq mints observation orders.
 	seq int
@@ -293,6 +297,8 @@ func newWSState() *wsState {
 		faults:    map[string]*faultRecord{},
 		windows:   map[string]*windowRecord{},
 		raised:    map[string]*raisedRecord{},
+
+		daemonRaised: map[string]*raisedRecord{},
 	}
 }
 
