@@ -464,6 +464,17 @@ export class RecordingPersistence implements Persistence {
     this.olderPageAfter.push(after?.value ?? "");
     return Promise.resolve(this.olderPages.shift() ?? this.page);
   }
+  /** Every bound a through read named, in order. */
+  readonly throughBounds: bigint[] = [];
+  readPageThrough(
+    _agent?: conversationv1.AgentId,
+    _pageSize?: number,
+    through?: conversationv1.ConversationThrough,
+  ): Promise<conversationv1.HistoryPage> {
+    if (this.readError !== undefined) return Promise.reject(this.readError);
+    this.throughBounds.push(through?.atMs ?? 0n);
+    return Promise.resolve(this.page);
+  }
   /** The session every live-work read was scoped to, in order. */
   readonly liveWorkSessions: string[] = [];
   liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {

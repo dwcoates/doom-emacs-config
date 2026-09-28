@@ -1150,7 +1150,7 @@ func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimSt
 		res, err := c.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 			Book:     agentID(agent),
 			PageSize: pageSize,
-			After:    more.GetLastItem(),
+			Position: &storev1.ReadAgentPageRequest_After{After: more.GetLastItem()},
 		}))
 		if err != nil {
 			t.Fatalf("ReadAgentPage(%s): %v", agent, err)

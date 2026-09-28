@@ -67,7 +67,7 @@ func TestAClearTurnsResponseDrawsNoBubble(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: no response bubble.
 	if got := h.responseRows(); len(got) != 0 {
@@ -87,7 +87,7 @@ func TestAClearTurnsResponseStaysSuppressedOnLateRedelivery(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	h.cutAt("entry-clear", clearedContextCut())
 	h.terminal("turn-2", interruptedByUser(), nil)
 
@@ -95,7 +95,7 @@ func TestAClearTurnsResponseStaysSuppressedOnLateRedelivery(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: still no response bubble.
 	if got := h.responseRows(); len(got) != 0 {
@@ -111,7 +111,7 @@ func TestAUserStoppedTurnsPartialResponseStillDraws(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "partial answer"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "partial answer"}, nil), nil, nil, noAddress())
 
 	// Act: the user stops it — no context cut.
 	h.terminal("turn-1", interruptedByUser(), nil)
@@ -126,7 +126,7 @@ func TestResponseStartDrawsTheEmptyBubble(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 
 	// Assert: an update arm with no prose is what makes the agent visibly begin
 	// answering before the first token lands.
@@ -140,13 +140,13 @@ func TestResponseFragmentsAccumulateDaemonSide(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 
 	// Act: two fragments, each a delta.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Hello, "}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Hello, "}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 
 	// Assert: the row carries the whole, not the last delta.
 	if got := h.response().GetUpdate().GetProse().GetMarkdown(); got != "Hello, world" {
@@ -158,13 +158,13 @@ func TestTheTerminalRestatesTheWholeAndSelfCorrectsALostFragment(t *testing.T) {
 	// Arrange: a fold that missed a fragment in transit.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Hel"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Hel"}, nil), nil, nil, noAddress())
 
 	// Act: the settled frame carries the whole text regardless.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "Hello, world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the settled bubble is right even though the fold was wrong.
 	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "Hello, world" {
@@ -178,11 +178,11 @@ func TestAFragmentAfterTheTerminalCannotReopenTheBubble(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Act: a late fragment.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: " and more"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: " and more"}, nil), nil, nil, noAddress())
 
 	// Assert: the settled whole stands, and the arrival is recorded.
 	//
@@ -206,18 +206,18 @@ func TestASettledWholeFromOnePlaneOutrunsTheOthersTrailingDeltas(t *testing.T) {
 	// Arrange: the stream plane opens the block.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 
 	// Act: the file plane settles the whole, then the stream plane's deltas
 	// for that same block arrive behind it.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "Here is what I found."},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "t I found."}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "t I found."}, nil), nil, nil, noAddress())
 
 	// Assert: the bubble reads as the settled whole, with nothing doubled.
 	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "Here is what I found." {
@@ -231,15 +231,15 @@ func TestACrossPlaneInterleaveRaisesNoWarning(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 
 	// Act.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "Here is what I found."},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), nil, nil, noAddress())
 
 	// Assert.
 	if h.hasRecord("warn", "daemon.feed.response_fragment_after_settle") {
@@ -254,7 +254,7 @@ func TestResponseFailureKeepsWhatLandedAndMarksItBroken(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
 			Prose:  &conversationv1.AgentResponseProse{Markdown: "half an ans"},
 			Reason: &conversationv1.AgentResponseFailureReason{},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: WHY it died is the turn's terminal row, not this bubble's.
 	broken := h.response().GetError()
@@ -274,7 +274,7 @@ func TestTheUsageStampIsFreshInputAndExcludesCacheReadsAndOutput(t *testing.T) {
 
 	// Act.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
 
 	// Assert: cache writes (18_000) + uncached input (240) = 18.2k; cache reads
 	// and output are not fresh input.
@@ -288,11 +288,11 @@ func TestTheUsageStampSurvivesLaterFramesThatCarryNone(t *testing.T) {
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
 
 	// Act: a fragment with no usage of its own.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "hi"}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "hi"}, nil), nil, nil, noAddress())
 
 	// Assert: absence means "not the carrying frame", never "free".
 	if got := h.response().GetUsage().GetText(); got != "2.1k" {
@@ -304,7 +304,7 @@ func TestAResponseWithNoObservedUsageDrawsNoStamp(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 
 	// Assert: absence draws no stamp, never a zero.
 	if h.response().GetUsage() != nil {
@@ -317,13 +317,13 @@ func TestTheUsageStampCarriesTheSettledInstant(t *testing.T) {
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
 
 	// Act: the terminal frame, at the harness clock's instant.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the settled bubble's stamp counts back from when it settled.
 	if got := h.response().GetUsage().GetAtMs(); got != h.nowMs {
@@ -336,7 +336,7 @@ func TestTheUsageStampCarriesNoInstantWhileArriving(t *testing.T) {
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
 
 	// Assert: there is no settled instant yet, so the corner carries a zero
 	// and the client reveals no timestamp.
@@ -350,11 +350,11 @@ func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	first := h.response().GetUsage().GetAtMs()
 
 	// Act: the other plane re-delivers the same settle, later on the clock.
@@ -362,7 +362,7 @@ func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the first settle instant stands, never the replay time.
 	if got := h.response().GetUsage().GetAtMs(); got != first {
@@ -387,7 +387,7 @@ func TestASettledSuccessStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose:     &conversationv1.AgentResponseProse{Markdown: "done"},
 			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: carried},
-		}, usage), nil, noAddress())
+		}, usage), nil, nil, noAddress())
 
 	// Assert: the corner is the carried settle instant, not the replay clock.
 	if got := h.response().GetUsage().GetAtMs(); got != carried {
@@ -409,7 +409,7 @@ func TestASettledFailureStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 			Prose:     &conversationv1.AgentResponseProse{Markdown: "half an ans"},
 			Reason:    &conversationv1.AgentResponseFailureReason{},
 			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: carried},
-		}, usage), nil, noAddress())
+		}, usage), nil, nil, noAddress())
 
 	// Assert.
 	if got := h.response().GetUsage().GetAtMs(); got != carried {
@@ -426,7 +426,7 @@ func TestASettledResponseWithNoCarriedInstantFallsBackToNow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-		}, usage), nil, noAddress())
+		}, usage), nil, nil, noAddress())
 
 	// Assert: the corner is the harness clock, the only instant available.
 	if got := h.response().GetUsage().GetAtMs(); got != h.nowMs {
@@ -450,7 +450,7 @@ func TestASynthesizedNoticeIsDrawnAsANoticeAndNotAsTheAgentsAnswer(t *testing.T)
 					},
 				},
 			},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the authorship is stated in the bubble's notice field.
 	heading := h.response().GetNotice().GetHeading()
@@ -476,7 +476,7 @@ func TestASynthesizedNoticesProseIsKeptVerbatimWithNoHeadingSplicedIn(t *testing
 					},
 				},
 			},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert.
 	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "you have hit your monthly spend limit" {
@@ -493,7 +493,7 @@ func TestAModelAuthoredResponseCarriesNoNotice(t *testing.T) {
 			Authorship: &conversationv1.AgentResponseSuccess_FromModel{
 				FromModel: &conversationv1.AgentResponseFromModel{},
 			},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: unset notice is what says "these are the agent's own words".
 	if h.response().GetNotice() != nil {
@@ -510,7 +510,7 @@ func TestAModelAuthoredResponseCarriesNoNoticeHeading(t *testing.T) {
 			Authorship: &conversationv1.AgentResponseSuccess_FromModel{
 				FromModel: &conversationv1.AgentResponseFromModel{},
 			},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert.
 	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "here is the answer" {
@@ -546,7 +546,7 @@ func (h *harness) settle(markdown string) string {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	return h.response().GetSuccess().GetProse().GetMarkdown()
 }
 
@@ -582,9 +582,9 @@ func TestASettledArmMatchesTheStreamingDeltaArmForTheSameProse(t *testing.T) {
 	h := newHarness(t)
 	tree := "1. 🎯 Root\n├── 1.1. " + strings.TrimSpace(strings.Repeat("word ", 30))
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: tree}, nil), nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: tree}, nil), nil, nil, noAddress())
 	delta := h.response().GetUpdate().GetProse().GetMarkdown()
 
 	// Act: the settled success restates the whole.
@@ -625,15 +625,15 @@ func TestADivergentPlaneSettleLeavesOneSettledRowNotTwo(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 
 	// Act: the settling whole lands under a DIVERGENT unit.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: exactly one response row, and it is the settled whole.
 	rows := h.responseRows()
@@ -651,7 +651,7 @@ func TestADivergentPlaneSettleRetiresTheUnsettledPartialsRow(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 	partialID := testEncode(feedid.Ref{
 		WS: testWorkspace, Feed: rootFeed(),
 		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "unit-stream"},
@@ -661,7 +661,7 @@ func TestADivergentPlaneSettleRetiresTheUnsettledPartialsRow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the partial's row is gone from the feed.
 	for _, row := range h.rows(rootFeed()) {
@@ -678,14 +678,14 @@ func TestADivergentPartialArrivingAfterTheSettleDrawsNoRow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Act: the stream's start + partial deltas arrive AFTER, under the divergent
 	// unit (the plane disorder response.go documents, across two ids).
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 
 	// Assert: still one settled row; the late fragment drew nothing.
 	if got := len(h.responseRows()); got != 1 {
@@ -705,11 +705,11 @@ func TestTwoDistinctProseBlocksOfOneTurnAreBothKept(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-a", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "first block about cats"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-b", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "second block about dogs"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: both blocks stand.
 	if got := len(h.settledResponseRows()); got != 2 {
@@ -726,12 +726,12 @@ func TestADivergentFragmentOfAnotherTurnIsNotSuppressed(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	h.deliverPrompt("turn-2", "second")
 
 	// Act: turn-2's partial happens to read "world".
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 
 	// Assert: both rows stand — one settled whole, one live partial.
 	if got := len(h.responseRows()); got != 2 {
@@ -752,20 +752,20 @@ func TestARecordedAnswerRowKeepsFinalAnswerAcrossARedraw(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	id := ids.TurnID("turn-1")
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{
 			Answer: &conversationv1.AgentActivityId{Value: "unit-1"},
 		}},
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 
 	// Act: the file plane re-delivers the same settled response — a fresh draw of
 	// the same row with no live turn-ended event.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert: the redrawn row still carries the flag.
 	rows := h.responseRows()
@@ -787,7 +787,7 @@ func TestANonAnswerResponseIsNotStampedFinal(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "just talking"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Assert.
 	rows := h.responseRows()
@@ -812,11 +812,11 @@ func TestAThinkingBubbleIsNeverStampedFinal(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
 				Text: &conversationv1.AgentThinkingText{Text: "reasoning"},
 			},
-		}), nil, noAddress())
+		}), nil, nil, noAddress())
 	id := ids.TurnID("turn-1")
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 
 	// Assert.
 	got := h.thinkingRows()
@@ -848,11 +848,11 @@ func TestARetiredDivergentUnitStillResolvesToTheSurvivingAnswerRow(t *testing.T)
 			name: "the whole settles after the fragment, retiring it",
 			deliver: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, mainAgent(),
-					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 				h.resolver.OnActivity(testWorkspace, mainAgent(),
 					responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 						Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-					}, nil), nil, noAddress())
+					}, nil), nil, nil, noAddress())
 			},
 		},
 		{
@@ -861,9 +861,9 @@ func TestARetiredDivergentUnitStillResolvesToTheSurvivingAnswerRow(t *testing.T)
 				h.resolver.OnActivity(testWorkspace, mainAgent(),
 					responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 						Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-					}, nil), nil, noAddress())
+					}, nil), nil, nil, noAddress())
 				h.resolver.OnActivity(testWorkspace, mainAgent(),
-					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 			},
 		},
 	}
@@ -877,7 +877,7 @@ func TestARetiredDivergentUnitStillResolvesToTheSurvivingAnswerRow(t *testing.T)
 			// Act: the terminal names the RETIRED stream unit as the answer.
 			turn := ids.TurnID("turn-1")
 			h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn,
-				completedWith("unit-stream"), nil, noAddress())
+				completedWith("unit-stream"), nil, nil, noAddress())
 
 			// Assert: the surviving row wears the green final-answer flag.
 			rows := h.responseRows()
@@ -900,16 +900,16 @@ func TestARetiredDivergentAnswerIsSelectableAsTheWholeNotTheFragment(t *testing.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, noAddress())
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 
 	// Act: the terminal names the retired unit.
 	turn := ids.TurnID("turn-1")
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn,
-		completedWith("unit-stream"), nil, noAddress())
+		completedWith("unit-stream"), nil, nil, noAddress())
 
 	// Assert: the one selectable final response carries the whole.
 	finals := h.resolver.FinalResponses(testWorkspace)

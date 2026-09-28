@@ -84,6 +84,9 @@ type agentFrame struct {
 	pointer string
 	// turn, when set, stamps the delivered entry — see Command.Turn.
 	turn string
+	// placeMs, when positive, is the delivered entry's recorded place — see
+	// Command.PlaceMs.
+	placeMs int64
 	// retired, when set, makes this a WatchAgentResponse.retired frame: the
 	// entry as last served, at its own pointer. It mints no pointer.
 	retired *conversationv1.HistoryEntryAt
@@ -95,6 +98,16 @@ func (f agentFrame) stamp() *conversationv1.TurnId {
 		return nil
 	}
 	return &conversationv1.TurnId{Value: f.turn}
+}
+
+// place applies the pushed entry's recorded place, when one was stated.
+func (f agentFrame) place(at *conversationv1.HistoryEntryAt) *conversationv1.HistoryEntryAt {
+	if f.placeMs > 0 {
+		at.Place = &conversationv1.HistoryEntryAt_RecordedPlace{
+			RecordedPlace: &conversationv1.ConversationPlace{AtMs: f.placeMs},
+		}
+	}
+	return at
 }
 
 // entry renders the pushed arm as the history entry WatchAgent delivers.
@@ -767,11 +780,11 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				at = pointerAt(target, seq)
 			}
 			if err := stream.Send(&shimv1.WatchAgentResponse{
-				Frame: &shimv1.WatchAgentResponse_Entry{Entry: &conversationv1.HistoryEntryAt{
+				Frame: &shimv1.WatchAgentResponse_Entry{Entry: f.place(&conversationv1.HistoryEntryAt{
 					At:    &conversationv1.HistoryPointer{Value: at},
 					Entry: f.entry(),
 					Turn:  f.stamp(),
-				}},
+				})},
 			}); err != nil {
 				return err
 			}

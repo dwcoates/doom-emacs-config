@@ -25,6 +25,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpPushAgentFrame, Agent: "sub-1", Payload: payload},
 		},
 		{
+			name: "push_agent_frame may state the entry's place",
+			line: `{"op":"push_agent_frame","place_ms":1700000000000,"payload":"` + payload + `"}`,
+			want: Command{Op: OpPushAgentFrame, PlaceMs: 1_700_000_000_000, Payload: payload},
+		},
+		{
 			name: "push_user_prompt addresses an agent",
 			line: `{"op":"push_user_prompt","agent":"sub-1","payload":"` + payload + `"}`,
 			want: Command{Op: OpPushUserPrompt, Agent: "sub-1", Payload: payload},

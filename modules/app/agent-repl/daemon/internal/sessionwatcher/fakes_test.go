@@ -578,6 +578,8 @@ type event struct {
 	// boundary is the boundary arm of a page the feed was handed: "floor",
 	// "more" or "" for none.
 	boundary string
+	// place is the conversation place an entry-driven feed call carried.
+	place *conversationv1.ConversationPlace
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -696,12 +698,12 @@ func (s *feedSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
 	s.rec.emit(event{sink: "feed", method: "OnTurnOpened", detail: string(turn)})
 }
 
-func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue()})
+func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
+func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId(), place: place})
 }
 
 func (s *feedSink) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt, _ OutputAddress) {
@@ -716,28 +718,28 @@ func (s *feedSink) OnApiErrorRetired(_ ids.WorkspaceID, agent *conversationv1.Ag
 	s.rec.emit(event{sink: "feed", method: "OnApiErrorRetired", agent: agent.GetValue(), detail: failed.GetMessage()})
 }
 
-func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
+func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnQuestion", agent: agent.GetValue(), detail: q.GetId().GetValue()})
+func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnQuestion", agent: agent.GetValue(), detail: q.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue()})
+func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnContextCut", agent: agent.GetValue()})
+func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnContextCut", agent: agent.GetValue(), place: place})
 }
 
-func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnApiError", agent: agent.GetValue(), detail: failed.GetMessage()})
+func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnApiError", agent: agent.GetValue(), detail: failed.GetMessage(), place: place})
 }
 
-func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn})
+func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn, place: place})
 }
 
 // OnMainAgent is recorded BESIDE the event stream rather than in it: the
@@ -747,8 +749,8 @@ func (s *feedSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId)
 	s.rec.nameMain("feed", agent.GetValue())
 }
 
-func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue()})
+func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue(), place: place})
 }
 
 func (s *feedSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId, _ *conversationv1.AgentBash, _ OutputAddress) {

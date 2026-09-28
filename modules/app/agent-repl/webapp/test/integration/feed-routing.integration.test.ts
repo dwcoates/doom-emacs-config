@@ -78,6 +78,35 @@ describe("upsert by FeedId", () => {
     expect(harness.rowIds()).toEqual(["a", "b"]);
   });
 
+  it("draws late rows at their keys, not below the rows that arrived before them", async () => {
+    // Arrange — a turn's answer and its end are already drawn.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("why", { id: feedId("prompt"), order: { key: "k1" } }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "because", { id: feedId("answer"), order: { key: "k5" } }));
+    await harness.settle();
+    // Act — two rows whose keys sort between them arrive last.
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "one", { id: feedId("late-1"), order: { key: "k3" } }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "two", { id: feedId("late-2"), order: { key: "k4" } }));
+    await harness.settle();
+    // Assert
+    expect(harness.rowIds()).toEqual(["prompt", "late-1", "late-2", "answer"]);
+  });
+
+  it("refuses a pushed row without an order key as an undecodable frame", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "unplaced", { order: undefined }));
+    await harness.settle();
+    // Assert
+    expect({ rows: harness.rowIds(), failures: harness.failureArms() }).toEqual({
+      rows: [],
+      failures: expect.arrayContaining(["frameUndecodable"]) as unknown,
+    });
+  });
+
   it("drops the old text when a row is replaced whole", async () => {
     // Arrange
     harness = await startHarness();
@@ -151,7 +180,8 @@ describe("paging", () => {
         fake.setNextPage(
           WORKSPACE_ID,
           ROOT_FEED,
-          feedPageSuccess([userPromptRow("older", { id: feedId("old") })]),
+          // The older row's key sorts before the newest page's: the walk serves history.
+          feedPageSuccess([userPromptRow("older", { id: feedId("old"), order: { key: "a" } })]),
         );
       },
     });
@@ -544,7 +574,10 @@ describe("paging a sub-feed", () => {
         fake.setNextPage(
           WORKSPACE_ID,
           "bubble",
-          feedPageSuccess([responseRow("success", "older inner", { id: feedId("inner-old") })]),
+          // The older row's key sorts before the newest page's: the walk serves history.
+          feedPageSuccess([
+            responseRow("success", "older inner", { id: feedId("inner-old"), order: { key: "a" } }),
+          ]),
         );
       },
     });

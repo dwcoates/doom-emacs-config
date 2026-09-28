@@ -1900,7 +1900,7 @@ func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionSta
 // the watches are opened in is the order a reader sees them.
 func (w *watcher) adoptLiveWorkLocked(started *conversationv1.SessionStarted) {
 	for _, item := range started.GetLiveWork() {
-		w.routeDetachedWorkLocked(nil, item, nil)
+		w.routeDetachedWorkLocked(nil, item, nil, nil)
 	}
 }
 
