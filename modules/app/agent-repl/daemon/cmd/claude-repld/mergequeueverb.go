@@ -185,7 +185,7 @@ func (d connectMergeQueueDaemon) Footer(ctx context.Context, ref *workspacev1.Wo
 // runMergeQueueVerb runs the verb and answers the process's exit status.
 func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer, env mergeQueueEnv, out, errOut io.Writer) int {
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(errOut, "claude-repld merge-queue: "+format+"\n", a...)
+		say(errOut, "claude-repld merge-queue: "+format+"\n", a...)
 		return exitFailure
 	}
 	fs := flag.NewFlagSet(mergeQueueVerb, flag.ContinueOnError)
@@ -330,7 +330,7 @@ func (w *mergeWatch) run(ctx context.Context) int {
 				if !errors.Is(ev.err, errStreamEnding) {
 					return w.fail("the roster stream failed: %v", ev.err)
 				}
-				fmt.Fprintf(w.out, "merge-queue: the daemon stood down; reattaching\n")
+				say(w.out, "merge-queue: the daemon stood down; reattaching\n")
 				if events, err = w.attach(ctx); err != nil {
 					return w.fail("%v", err)
 				}
@@ -388,8 +388,8 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 		return nil, err
 	}
 	w.file = name
-	fmt.Fprintf(w.out, "merge-queue: enqueued %s (command file %s)\n", w.target.label, name)
-	fmt.Fprintf(w.out, "%s%s\n", worktreeLinePrefix, w.target.dir)
+	say(w.out, "merge-queue: enqueued %s (command file %s)\n", w.target.label, name)
+	say(w.out, "%s%s\n", worktreeLinePrefix, w.target.dir)
 	return events, nil
 }
 
@@ -402,14 +402,14 @@ func (w *mergeWatch) observe(ctx context.Context, roster *frontendv1.WorkspaceRo
 	row := findRosterRow(roster, w.target.dir)
 	status := rowStatus(row)
 	if status != w.last {
-		fmt.Fprintf(w.out, "merge-queue: %s: %s\n", w.target.label, status)
+		say(w.out, "merge-queue: %s: %s\n", w.target.label, status)
 		w.last = status
 	}
 	switch status {
 	case statusEnqueuing, statusQueued, statusMerging:
 		w.seenLive = true
 		if !w.wait {
-			fmt.Fprintf(w.out, "merge-queue: %s is in the queue\n", w.target.label)
+			say(w.out, "merge-queue: %s is in the queue\n", w.target.label)
 			return exitSuccess, true
 		}
 		return 0, false
@@ -440,16 +440,16 @@ func (w *mergeWatch) ours(status string, row *frontendv1.RosterRow) bool {
 func (w *mergeWatch) conclude(ctx context.Context, status string, row *frontendv1.RosterRow) int {
 	switch status {
 	case statusMergedDone:
-		fmt.Fprintf(w.out, "merge-queue: LANDED: %s is on its target\n", w.target.label)
+		say(w.out, "merge-queue: LANDED: %s is on its target\n", w.target.label)
 		return exitSuccess
 	case statusMergeFail:
-		fmt.Fprintf(w.out, "merge-queue: FAILED: %s did not land. The reason is the daemon's daemon.merge.abort record:\n", w.target.label)
-		fmt.Fprintf(w.out, "  modules/app/agent-repl/bin/logs.sh --workspace %s --since 6h --json | jq -r 'select(.operation == \"daemon.merge.abort\") | .context.summary'\n", w.target.dir)
+		say(w.out, "merge-queue: FAILED: %s did not land. The reason is the daemon's daemon.merge.abort record:\n", w.target.label)
+		say(w.out, "  modules/app/agent-repl/bin/logs.sh --workspace %s --since 6h --json | jq -r 'select(.operation == \"daemon.merge.abort\") | .context.summary'\n", w.target.dir)
 		return exitMergeFailed
 	default:
 		footer, err := w.daemon.Footer(ctx, row.GetWorkspace().GetWorkspace())
 		if err != nil {
-			fmt.Fprintf(w.errOut, "claude-repld merge-queue: %s stopped awaiting guidance, and its footer could not be read: %v\n", w.target.label, err)
+			say(w.errOut, "claude-repld merge-queue: %s stopped awaiting guidance, and its footer could not be read: %v\n", w.target.label, err)
 			return exitMergeParked
 		}
 		stopped := footer.GetStrip().GetStatus().GetMergeConflict()
@@ -457,13 +457,13 @@ func (w *mergeWatch) conclude(ctx context.Context, status string, row *frontendv
 		case stopped == nil:
 			// The roster and the footer are two streams; the footer moved on
 			// between the frame that concluded and this read.
-			fmt.Fprintf(w.out, "merge-queue: PARKED: %s stopped awaiting guidance; its footer has since moved on\n", w.target.label)
+			say(w.out, "merge-queue: PARKED: %s stopped awaiting guidance; its footer has since moved on\n", w.target.label)
 		case stopped.GetParked() == nil:
 			// The arm's own meaning: stopped on a conflict, whose name is the
 			// whole fact.
-			fmt.Fprintf(w.out, "merge-queue: PARKED: %s stopped on a conflict its resolution could not settle\n", w.target.label)
+			say(w.out, "merge-queue: PARKED: %s stopped on a conflict its resolution could not settle\n", w.target.label)
 		default:
-			fmt.Fprintf(w.out, "merge-queue: PARKED: %s: %s\n", w.target.label, stopped.GetParked().GetLine())
+			say(w.out, "merge-queue: PARKED: %s: %s\n", w.target.label, stopped.GetParked().GetLine())
 		}
 		return exitMergeParked
 	}
@@ -477,8 +477,8 @@ func (w *mergeWatch) checkQuarantine() (int, bool) {
 	quarantined := filepath.Join(w.layout.OutputDir(), "quarantine", w.file)
 	switch _, err := os.Stat(quarantined); {
 	case err == nil:
-		fmt.Fprintf(w.errOut, "claude-repld merge-queue: REFUSED: the daemon quarantined %s. Its reason is the ingress's warning:\n", quarantined)
-		fmt.Fprintf(w.errOut, "  modules/app/agent-repl/bin/logs.sh --central --since 1h --json | jq -r 'select(.context.path // \"\" | endswith(\"%s\")) | .context.cause // empty'\n", w.file)
+		say(w.errOut, "claude-repld merge-queue: REFUSED: the daemon quarantined %s. Its reason is the ingress's warning:\n", quarantined)
+		say(w.errOut, "  modules/app/agent-repl/bin/logs.sh --central --since 1h --json | jq -r 'select(.context.path // \"\" | endswith(\"%s\")) | .context.cause // empty'\n", w.file)
 		return exitMergeRefused, true
 	case errors.Is(err, os.ErrNotExist):
 		return 0, false
@@ -489,7 +489,7 @@ func (w *mergeWatch) checkQuarantine() (int, bool) {
 
 // fail prints the verb's own failure.
 func (w *mergeWatch) fail(format string, a ...any) int {
-	fmt.Fprintf(w.errOut, "claude-repld merge-queue: "+format+"\n", a...)
+	say(w.errOut, "claude-repld merge-queue: "+format+"\n", a...)
 	return exitFailure
 }
 
@@ -545,4 +545,11 @@ func canonicalDir(path string) string {
 // within reports whether path is dir or lies beneath it.
 func within(path, dir string) bool {
 	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// say is the verb's one writer. The verb is a CLI whose product is its output:
+// every line goes to the injected stdout or stderr, and the daemon logs every
+// decision it makes itself.
+func say(to io.Writer, format string, a ...any) {
+	fmt.Fprintf(to, format, a...)
 }
