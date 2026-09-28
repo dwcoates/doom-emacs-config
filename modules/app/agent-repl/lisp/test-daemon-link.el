@@ -96,6 +96,7 @@
          (agent-repl-link--bounce-cause nil)
          (agent-repl-link--ending-conn nil)
          (agent-repl-link-drain nil)
+         (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
          (agent-repl-link-no-daemon-functions nil)
          (agent-repl-link-up-functions nil)
@@ -1063,6 +1064,114 @@ as if it were understood."
          conn (list :arm :reload-elisp :value '(:module-root "/r/" :build "b1"))))
       ;; Assert
       (should (equal handled '((:module-root "/r/" :build "b1")))))))
+
+;;;; ---- The daemon's standing loud faults ----
+
+(defun agent-repl-test-link--standing (&rest ids)
+  "A decoded `faults_standing' push naming a failed deploy per id in IDS."
+  (list :arm :faults-standing
+        :value (list :faults
+                     (mapcar (lambda (id)
+                               (list :fault-id id
+                                     :line (format "deploy failed: build %s: tsc" id)
+                                     :fault '(:detail "tsc" :kind nil)
+                                     :opened-at-ms 7))
+                             ids))))
+
+(defmacro agent-repl-test-link--echoes (&rest body)
+  "Run BODY capturing `message' calls; answer the echoed lines, oldest first."
+  (declare (indent 0))
+  `(let ((echoed nil))
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
+       ,@body)
+     (nreverse echoed)))
+
+(ert-deftest agent-repl-test-link-a-standing-fault-is-echoed ()
+  "A failed deploy the daemon tells this Emacs is one minibuffer line."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (let ((echoed (agent-repl-test-link--echoes
+                      (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1")))))
+        ;; Assert
+        (should (equal echoed '("agent-repl: deploy failed: build f-1: tsc")))))))
+
+(ert-deftest agent-repl-test-link-a-standing-fault-is-an-error-record ()
+  "A failed deploy the daemon tells this Emacs is recorded at ERROR with its id."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--echoes
+        (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1")))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :error "elisp.link.daemon-fault fault-id=f-1 line=\"deploy failed: build f-1: tsc\"")))))
+
+(ert-deftest agent-repl-test-link-a-replayed-fault-is-not-echoed-again ()
+  "A resubscribe's replay of a fault already surfaced echoes nothing."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--echoes
+        (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1")))
+      ;; Act
+      (let ((echoed (agent-repl-test-link--echoes
+                      (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1")))))
+        ;; Assert
+        (should (null echoed))))))
+
+(ert-deftest agent-repl-test-link-a-fault-surfaced-before-a-reconnect-is-not-echoed-after-it ()
+  "A fault surfaced on one link is silent when a later link replays it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange: the first link surfaces it, and the link is torn down.
+    (let ((first (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--echoes
+        (agent-repl-test-link--push first (agent-repl-test-link--standing "f-1")))
+      (agent-repl-link-teardown)
+      (let ((second (agent-repl-test-link--connect "127.0.0.1:9002")))
+        ;; Act
+        (let ((echoed (agent-repl-test-link--echoes
+                        (agent-repl-test-link--push second (agent-repl-test-link--standing "f-1")))))
+          ;; Assert
+          (should (null echoed)))))))
+
+(ert-deftest agent-repl-test-link-only-the-new-faults-of-a-set-are-echoed ()
+  "Beside a fault already surfaced, only the new one reaches the minibuffer."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--echoes
+        (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1")))
+      ;; Act
+      (let ((echoed (agent-repl-test-link--echoes
+                      (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1" "f-2")))))
+        ;; Assert
+        (should (equal echoed '("agent-repl: deploy failed: build f-2: tsc")))))))
+
+(ert-deftest agent-repl-test-link-two-new-faults-share-one-echo ()
+  "A step's fault and its rollback's, told together, are one line."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (let ((echoed (agent-repl-test-link--echoes
+                      (agent-repl-test-link--push conn (agent-repl-test-link--standing "f-1" "f-2")))))
+        ;; Assert
+        (should (equal echoed '("agent-repl: deploy failed: build f-1: tsc; deploy failed: build f-2: tsc")))))))
+
+(ert-deftest agent-repl-test-link-an-empty-standing-set-echoes-nothing ()
+  "The daemon saying none stands (the last fault closed) is silent."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (let ((echoed (agent-repl-test-link--echoes
+                      (agent-repl-test-link--push conn (agent-repl-test-link--standing)))))
+        ;; Assert
+        (should (null echoed))))))
 
 ;;;; ---- Refusals ----
 
