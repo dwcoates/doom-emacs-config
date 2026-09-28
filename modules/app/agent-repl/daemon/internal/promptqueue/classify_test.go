@@ -3,13 +3,17 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -872,5 +876,194 @@ func TestANearMissOfASessionActIsClassifiedAsBefore(t *testing.T) {
 				t.Fatalf("classifier asked %v, want the prompt routed as today", asked)
 			}
 		})
+	}
+}
+
+// ---- a deferred prompt is never classified -------------------------------
+//
+// agentrepl.v1 SubmitPromptDelivery.DEFERRED: run as its own turn after the
+// current one, never interjected. The classifier's interject is exactly what
+// the user excluded, so the model is never asked.
+
+// deferredSubmission composes one deferred submission.
+func deferredSubmission(turn ids.TurnID, text string) Submission {
+	sub := submission(turn, text)
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT
+	sub.Delivery = wsm.DeliveryDeferred
+	return sub
+}
+
+// askedCount answers how many times the judge was asked.
+func askedCount(h *harness) int {
+	h.judge.mu.Lock()
+	defer h.judge.mu.Unlock()
+	return len(h.judge.asked)
+}
+
+func TestADeferredPromptBehindARunningTurnIsHeldForItsEndUnjudged(t *testing.T) {
+	// Arrange: a verdict that would interject, were the model ever asked.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "urgent"}
+
+	// Act
+	got, err := h.q.Submit(context.Background(), deferredSubmission("t1", "after this, run the tests"))
+	h.q.waitForClassifications()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("disposition = %+v, want held for the running turn's end", got)
+	}
+	if n := askedCount(h); n != 0 {
+		t.Fatalf("the judge was asked %d times, want never for a deferred prompt", n)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing interjected", started)
+	}
+}
+
+func TestADeferredHoldRecordsItsDelivery(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), deferredSubmission("t1", "later")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	held, err := h.q.standingHold(context.Background(), theWorkspace, "t1")
+	if err != nil || held.Delivery != wsm.DeliveryDeferred {
+		t.Fatalf("hold = (%+v, %v), want its deferred delivery stored", held, err)
+	}
+}
+
+func TestADeferredPromptIsDeliveredAtOnceWhenNothingRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got, err := h.q.Submit(context.Background(), deferredSubmission("t1", "run the tests"))
+
+	// Assert
+	if err != nil || !got.Delivered {
+		t.Fatalf("Submit = (%+v, %v), want delivered at once: there is no turn to wait for", got, err)
+	}
+}
+
+func TestDeferredPromptsRunAsTheirOwnTurnsOneTurnEndAtATime(t *testing.T) {
+	// Arrange: two deferred prompts behind a running turn.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	for _, turn := range []ids.TurnID{"t1", "t2"} {
+		if _, err := h.q.Submit(context.Background(), deferredSubmission(turn, "deferred "+string(turn))); err != nil {
+			t.Fatalf("Submit(%s): %v", turn, err)
+		}
+	}
+
+	// Act
+	turnEnds(h)
+
+	// Assert: only the first starts; the second waits for ITS end.
+	if started := h.sender.started(); !reflect.DeepEqual(started, []ids.TurnID{"t1"}) {
+		t.Fatalf("started = %v, want only the first deferred prompt", started)
+	}
+}
+
+func TestAnEditedDeferredPromptIsNotJudged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.Submit(context.Background(), deferredSubmission("t1", "later")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	beginEdit(t, h, "t1")
+
+	// Act
+	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("later, edited")); err != nil {
+		t.Fatalf("CommitEdit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if n := askedCount(h); n != 0 {
+		t.Fatalf("the judge was asked %d times, want never for an edited deferred prompt", n)
+	}
+	held, err := h.q.standingHold(context.Background(), theWorkspace, "t1")
+	if err != nil || held.Classification == nil || held.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("hold = (%+v, %v), want it still held for the turn's end", held, err)
+	}
+}
+
+func TestTheJudgeRefusesADeferredPromptAtItsOwnCallSite(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "urgent"}
+	log := dlog.NewTestLogger()
+
+	// Act
+	verdict, interject := h.q.verdictFor(context.Background(), deferredSubmission("t1", "later"), "running-turn", log)
+
+	// Assert
+	if interject || verdict.Arm != wsm.ArmHoldForTurnEnd || askedCount(h) != 0 {
+		t.Fatalf("verdictFor = (%+v, %v) after %d asks, want hold_for_turn_end and the model never asked", verdict, interject, askedCount(h))
+	}
+}
+
+func TestNeverJudgedAnswersEveryPromptTheModelIsNeverAsked(t *testing.T) {
+	tests := []struct {
+		name   string
+		sub    Submission
+		wantOK bool
+	}{
+		{name: "a session act", sub: submission("t1", "/compact"), wantOK: true},
+		{name: "a deferred prompt", sub: deferredSubmission("t1", "later"), wantOK: true},
+		{name: "an ordinary prompt", sub: submission("t1", "and also this"), wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			verdict, why, ok := h.q.neverJudged(tc.sub)
+
+			// Assert
+			if ok != tc.wantOK {
+				t.Fatalf("neverJudged ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && (verdict.Arm != wsm.ArmHoldForTurnEnd || why == nil) {
+				t.Fatalf("neverJudged = (%+v, why set %v), want hold_for_turn_end with its record", verdict, why != nil)
+			}
+		})
+	}
+}
+
+// TestEveryUnjudgedVerdictIsReadThroughNeverJudged pins that hold,
+// classifyHeld and verdictFor share ONE reading: a site calling
+// sessionActVerdict or deferredVerdict directly could keep a kind of prompt
+// from the model on one path and hand it over on another.
+func TestEveryUnjudgedVerdictIsReadThroughNeverJudged(t *testing.T) {
+	// Arrange
+	body, err := os.ReadFile("classify.go")
+	if err != nil {
+		t.Fatalf("read classify.go: %v", err)
+	}
+
+	// Act
+	calls := map[string]int{}
+	for _, name := range []string{"q.sessionActVerdict(", "q.deferredVerdict(", "q.neverJudged("} {
+		calls[name] = strings.Count(string(body), name)
+	}
+
+	// Assert: each primitive is read once, inside neverJudged, and the three
+	// deciding sites read neverJudged.
+	if calls["q.sessionActVerdict("] != 1 || calls["q.deferredVerdict("] != 1 || calls["q.neverJudged("] != 3 {
+		t.Fatalf("call counts = %v, want sessionActVerdict 1, deferredVerdict 1 (both in neverJudged) and neverJudged 3", calls)
 	}
 }

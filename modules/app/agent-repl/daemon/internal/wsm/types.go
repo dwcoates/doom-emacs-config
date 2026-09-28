@@ -367,7 +367,27 @@ type HeldPrompt struct {
 	Tombstone *Tombstone
 	// QueuedAt is when it was submitted.
 	QueuedAt time.Time
+	// Delivery is how the prompt asked to be delivered. It is DURABLE because
+	// every later decision about a standing hold -- an edit's re-judgement, a
+	// restart's restore, a successor's adoption -- must honor it: a deferred
+	// prompt is never classified and never interjected, whichever daemon holds
+	// it and however often the hold is judged again.
+	Delivery Delivery
 }
+
+// Delivery is how a held prompt asked to be delivered: agentrepl.v1's
+// SubmitPromptDelivery, as the queue stores it.
+type Delivery int
+
+// The deliveries.
+const (
+	// DeliveryOrdinary is the ordinary delivery: classified against the
+	// running turn, which may interject it.
+	DeliveryOrdinary Delivery = iota
+	// DeliveryDeferred runs as its own turn after the running one: never
+	// classified, never interjected.
+	DeliveryDeferred
+)
 
 // HoldKind is a DAEMON-SIDE condition holding a prompt, independent of any
 // classification verdict.

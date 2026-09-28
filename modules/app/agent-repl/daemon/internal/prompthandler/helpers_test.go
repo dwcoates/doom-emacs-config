@@ -309,7 +309,7 @@ func (h *harness) panelsAsked() []conversationv1.SessionCommand {
 // submit runs one ordinary user submission of text.
 func (h *harness) submit(text string) (Outcome, error) {
 	return h.h.Submit(context.Background(), theWorkspace, userSaid(text), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
 }
 
 // userSaid composes a one-block text submission.

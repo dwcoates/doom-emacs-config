@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -131,9 +134,6 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 	// Act
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
 	f.d = nd
-	// The surviving shim is adopted with no intent manifest to account for
-	// it, which the rollout reconciler states as a fault by design.
-	nd.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert: the first is delivered to the adopted session, the second is
 	// held behind it, and the ingress is empty.
@@ -193,5 +193,80 @@ func TestAMalformedHeldPromptEntryIsQuarantinedWithAWarning(t *testing.T) {
 	}
 	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
 		t.Fatalf("StartTurn count = %d, want 0", got)
+	}
+}
+
+// TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt pins the ingress's
+// place in a handover. The ingress submits through the prompt handler directly,
+// so the server's transferring_away / not_yet_adopted refusals never reach it:
+// ONLY THE DAEMON THAT SERVES may take it. An entry written after the transfer
+// and before the adoption is taken by neither daemon -- the incumbent's handover
+// has begun, the successor is still joining -- and once the successor serves it
+// takes the entry, exactly once, and delivers it as the held prompt it is.
+func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a running turn, so the move carries it and the ingested prompt
+	// is held behind it on the successor.
+	selfRepo, d := drainSelfRepoDaemon(t)
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	if first := f.submit("first", "k-handover-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); first.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt(first) = %v, want the turn accepted", first)
+	}
+	f.shim.ExpectStartTurn()
+	daemonStream := d.WatchDaemonStream()
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	d.AwaitLogRecord(d.RunLogPath(), "the incumbent leaving the intake", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.heldingress.gate" && r.Level == "info" &&
+			strings.Contains(r.Message, "does not serve")
+	})
+
+	// Act: the client writes a prompt while neither daemon serves the workspace.
+	path := heldWrite(t, d.StateDir, "held_20260928T120001.000000001_aaaaaaaa_k-handover.json", f.repo.Dir, "k-handover", "written mid-handover")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the entry: %v", err)
+	}
+
+	// Assert: neither daemon takes it.
+	d.ExpectFileUnchanged(path, string(body), harness.ProbeWindow)
+
+	// Act: the participants adopt, and the successor serves.
+	successor := drainDial(announced.GetAddress())
+	if resp, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AdoptHostWorkspace = (%v, %v), want a success", resp, err)
+	}
+	if resp, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AdoptWebWorkspace = (%v, %v), want a success", resp, err)
+	}
+
+	// Assert: the successor, and only the successor, ingested it.
+	ingested := d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the successor's ingest", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.heldingress.ingest" && r.Level == "info" && r.Context["idempotency_key"] == "k-handover"
+	})
+	if ingested.PID == d.PID() {
+		t.Fatalf("the incumbent (pid %d) ingested the entry after its handover began; only the serving daemon may", d.PID())
+	}
+	assertIngressEmpty(t, d.StateDir)
+
+	// Act: the carried turn ends on the successor's watch.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: delivered once, as its own turn.
+	if st := f.shim.ExpectStartTurn(); text(st.GetSaid()) != "written mid-handover" {
+		t.Fatalf("delivered = %q, want the prompt written mid-handover", text(st.GetSaid()))
+	}
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 2, harness.ProbeWindow)
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
 	}
 }

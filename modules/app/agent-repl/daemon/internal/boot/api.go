@@ -69,6 +69,13 @@ type Report struct {
 	// judges, because they are the only adopted shims that had a session to
 	// lose.
 	AdoptedSessions []rollout.AdoptedSession
+	// UnadoptedSessions are the UNDETERMINED workspaces whose lock says a
+	// session may still be running — it read HELD and the survivor never
+	// answered within the adoption bound, or the lock probe could not tell.
+	// They are the sessions the bounce accounting cannot account for; an
+	// undetermined workspace whose lock read FREE carries no session and is
+	// not among them.
+	UnadoptedSessions []rollout.UnadoptedSession
 	// AdoptedInert are the adopted shims that carry NO session: reached
 	// through a live listening socket while their workspace lock read FREE.
 	// A shim takes that lock at StartSession, so a free lock behind a live

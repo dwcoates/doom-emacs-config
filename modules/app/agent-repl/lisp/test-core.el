@@ -441,7 +441,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "agent-repl: no input to queue"
      "explains why the interactive queue command did nothing")
     ("prompt-queue.el" agent-repl-queue-deferred-prompt
-     "agent-repl: queued prompt #%d for %s (fires when the turn settles)"
+     "agent-repl: deferred the prompt for %s (it runs as its own turn once the current one ends)"
      "confirms the interactive queue command")
     ("roster.el" agent-repl-roster-echo-finished
      "Agent finished in workspace: %s"

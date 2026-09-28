@@ -644,6 +644,42 @@ wire."
       (should (equal (cdr (assq 'said encoded)) '((said . "hi")))))))
 
 
+(ert-deftest agent-repl-test-wire-verbs-submit-omits-delivery-when-absent ()
+  "An ordinary prompt spells no `delivery': absence is the ordinary delivery."
+  (agent-repl-test-wire-verbs--with-common
+    (should-not (assq 'delivery
+                      (agent-repl-wire-encode-submit-prompt-request
+                       (list :workspace agent-repl-test-wire-verbs--ref
+                             :said '(:text "hi") :idempotency-key "k-1"
+                             :origin :user-sent))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-carries-a-deferred-delivery ()
+  "A deferred submit spells its delivery by the generated enum name."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (assq 'delivery
+                              (agent-repl-wire-encode-submit-prompt-request
+                               (list :workspace agent-repl-test-wire-verbs--ref
+                                     :said '(:text "hi") :idempotency-key "k-1"
+                                     :origin :deferred-prompt :delivery :deferred))))
+                   "SUBMIT_PROMPT_DELIVERY_DEFERRED"))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-delivery-refuses-unspecified ()
+  "UNSPECIFIED has no elisp spelling, so an unknown keyword is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-delivery :unspecified)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-delivery-vocabulary-pinned ()
+  "The delivery vocabulary is every generated enum name except UNSPECIFIED."
+  (should (equal
+           (sort (mapcar #'cdr agent-repl-wire-submit-prompt-deliveries) #'string<)
+           (sort (remove "SUBMIT_PROMPT_DELIVERY_UNSPECIFIED"
+                         (agent-repl-test--generated-enum-names
+                          "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                          "SUBMIT_PROMPT_DELIVERY_"))
+                 #'string<))))
+
+
 ;;;; ---- SubmitPromptResponse --------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-submit-response-turn ()

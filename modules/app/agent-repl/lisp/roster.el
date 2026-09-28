@@ -28,9 +28,9 @@
 ;; - the R8 CURRENT-CHANGE reaction: a `current' Emacs did not originate is a
 ;;   tab-switch request (re-selection is idempotent, so no loop forms);
 ;; - THE FINISH EDGE — a row moving from a RUNNING status to a SETTLED one —
-;;   and the three Emacs-local reactions that ride it.  The fourth (the
-;;   deferred-prompt drain) is registered by prompt-queue.el on the same
-;;   hook.
+;;   and the three Emacs-local reactions that ride it.  A deferred prompt
+;;   (`SPC j RET') is NOT one of them: the daemon holds it and runs it as
+;;   its own turn when the running one ends (prompt-queue.el).
 ;;
 ;; WHAT THIS FILE DOES NOT OWN: registration (the roster's rows are already
 ;; registered daemon-side; Register is host.el's verb on Emacs's own

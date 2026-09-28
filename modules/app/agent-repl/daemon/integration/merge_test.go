@@ -1083,13 +1083,6 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir})
 	// The sweep covers every test; the declared records are evidence of the unfinished merge a restart leaves.
 	d2.ExpectWarnings("daemon.merge.recover")
-	// A shim now genuinely SURVIVES this bounce: the successor probes the same
-	// kernel-lock directory its predecessor named, so the surviving shim's
-	// workspace lock reads held and the session is ADOPTED rather than
-	// respawned. A bounce that wrote no intent manifest therefore has a live
-	// session to account for, which the rollout reconciler states as a fault
-	// by design.
-	d2.ExpectWarnings("daemon.rollout.reconcile")
 	// The recovered merge re-reaches the SAME scripted conflict, on this
 	// daemon's own pid; the records are the recovery working, not a fault.
 	d2.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts", "daemon.gitclient.merge_no_ff")
@@ -1387,7 +1380,7 @@ func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
 // displacedBounceWarnings declares the records every daemon in this scenario
 // legitimately writes: see the call site in displacedTurnAcrossABounce.
 func displacedBounceWarnings(d *harness.Daemon) {
-	d.ExpectWarnings("daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds")
+	d.ExpectWarnings("daemon.merge.recover", "daemon.promptqueue.restore_holds")
 }
 
 // displacedBounceText is the user's own words, asserted end to end.
@@ -1415,8 +1408,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
 	}})
 	// The sweep covers every test; these declared records are evidence of the
-	// crash this test stages. A daemon killed mid-merge writes no stand-down
-	// manifest (daemon.rollout.reconcile), the restart refuses to resume the
+	// crash this test stages. The restart refuses to resume the
 	// merge into an unclean target (daemon.merge.recover), and a turn left in
 	// flight by a killed daemon is closed by the next boot
 	// (daemon.promptqueue.restore_holds) -- which is what the RESUBMITTED turn

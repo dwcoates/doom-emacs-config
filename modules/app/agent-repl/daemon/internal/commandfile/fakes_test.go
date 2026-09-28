@@ -155,7 +155,7 @@ type fakePrompts struct {
 	err         error
 }
 
-func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	if p.err != nil {
 		return prompthandler.Outcome{}, p.err
 	}
@@ -222,6 +222,8 @@ type fixture struct {
 	db      *fakeDB
 	log     *fakeSurfaces
 	now     time.Time
+	// serves is what the ingress's serving answer says.
+	serves bool
 }
 
 // newFixture arranges an ingress over a fresh temp directory.
@@ -235,9 +237,11 @@ func newFixture(t *testing.T) *fixture {
 		db:      &fakeDB{byDir: map[string]wsm.Workspace{}},
 		log:     newFakeSurfaces(),
 		now:     fixedNow,
+		serves:  true,
 	}
 	ingress, err := New(Deps{
 		Dir: f.dir, Verbs: f.verbs, DB: f.db, Merge: f.merge, Prompts: f.prompts, Log: f.log,
+		Serves:   func() bool { return f.serves },
 		Interval: 10 * time.Millisecond,
 		Now:      func() time.Time { return f.now },
 	})

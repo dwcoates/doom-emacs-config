@@ -929,3 +929,88 @@ func TestARevivalThatLeavesNoSessionAtAllIsRecordedAtError(t *testing.T) {
 		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
 	}
 }
+
+// ---- a re-driven refusal is the re-driver's to record ---------------------
+//
+// The held-prompt ingress retries a refused entry on a backoff for as long as
+// the standing condition lasts, and records the refusal itself once per entry
+// and refusal kind. Recorded at the arm's own level here as well, one merge
+// produced the same WARN on every retry of every waiting prompt.
+
+func TestSubmitRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *testing.T) {
+	const (
+		merging   = "the submission is refused: a merge is in flight"
+		coldGate  = "the session is parked at its cold gate, so the submission is refused by the gate's own name"
+		noSession = "the workspace has no session to submit to"
+		noWatcher = "the workspace has no session watcher"
+	)
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T) *harness
+		redrive   bool
+		message   string
+		wantLevel string
+	}{
+		{name: "a live merge refusal warns", arrange: mergingHarness, message: merging, wantLevel: "warn"},
+		{name: "a re-driven merge refusal is debug", arrange: mergingHarness, redrive: true, message: merging, wantLevel: "debug"},
+		{name: "a live cold gate refusal is info", arrange: coldGatedHarness, message: coldGate, wantLevel: "info"},
+		{name: "a re-driven cold gate refusal is debug", arrange: coldGatedHarness, redrive: true, message: coldGate, wantLevel: "debug"},
+		{name: "a live no-session refusal warns", arrange: sessionlessHarness, message: noSession, wantLevel: "warn"},
+		{name: "a re-driven no-session refusal is debug", arrange: sessionlessHarness, redrive: true, message: noSession, wantLevel: "debug"},
+		{name: "a live missing-watcher refusal warns", arrange: watcherlessHarness, message: noWatcher, wantLevel: "warn"},
+		{name: "a re-driven missing-watcher refusal is debug", arrange: watcherlessHarness, redrive: true, message: noWatcher, wantLevel: "debug"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := tc.arrange(t)
+			ctx := context.Background()
+			if tc.redrive {
+				ctx = WithRedrive(ctx)
+			}
+
+			// Act
+			_, err := h.q.Submit(ctx, submission("t1", "hello"))
+
+			// Assert
+			if err == nil {
+				t.Fatal("Submit = nil error, want the refusal")
+			}
+			if !logged(h.log.Records(), tc.wantLevel, opSubmit, tc.message) {
+				t.Fatalf("records = %+v, want %q at %s", h.log.Records(), tc.message, tc.wantLevel)
+			}
+		})
+	}
+}
+
+func mergingHarness(t *testing.T) *harness {
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyRefuse)
+	return h
+}
+
+func coldGatedHarness(t *testing.T) *harness {
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold"
+	return h
+}
+
+func sessionlessHarness(t *testing.T) *harness {
+	h := newHarnessWithoutRevival(t)
+	h.noSession = true
+	return h
+}
+
+// watcherlessHarness has a shim client and no session watcher: the reaped-shim
+// window the second no-session arm answers.
+func watcherlessHarness(t *testing.T) *harness {
+	h := newHarness(t)
+	deps := h.q.deps
+	deps.Watcher = func(ids.WorkspaceID) (Watcher, bool) { return nil, false }
+	q, err := newQueue(deps)
+	if err != nil {
+		t.Fatalf("newQueue: %v", err)
+	}
+	h.q = q
+	return h
+}

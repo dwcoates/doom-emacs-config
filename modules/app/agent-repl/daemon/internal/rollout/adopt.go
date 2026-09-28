@@ -111,7 +111,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	c.recordDeployTakeover(m.Deploy)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
-	_, _, landed, err := c.reconcile(ctx, nil)
+	_, _, landed, err := c.reconcile(ctx, Survivors{})
 	if err != nil {
 		return false, err
 	}

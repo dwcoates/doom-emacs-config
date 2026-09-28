@@ -115,6 +115,12 @@ type Submission struct {
 	// Target, when set, is the bubble composer's addressed feed row — the
 	// prompt goes to THAT agent through UpdateAgent.prompt.
 	Target *feedid.Ref
+	// Delivery is how the prompt asked to be delivered (agentrepl.v1
+	// SubmitPromptDelivery). A DEFERRED prompt held behind a running turn is
+	// never classified, so it never interjects: it waits for the turn's end
+	// and runs as its own turn. It is stored on the hold, so every later
+	// judgement of the hold honors it.
+	Delivery wsm.Delivery
 }
 
 // Disposition is what became of a submission. A hold is an ANSWER, not a

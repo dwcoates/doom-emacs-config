@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/flock"
+	"claude-repld/internal/intakegate"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
@@ -24,14 +27,33 @@ const (
 	opDefer      = "daemon.heldingress.defer"
 	opQuarantine = "daemon.heldingress.quarantine"
 	opRemove     = "daemon.heldingress.remove"
+	opGate       = "daemon.heldingress.gate"
+	opLock       = "daemon.heldingress.lock"
 )
 
-// retry is one refused entry's standing: how often it was refused, and the
-// earliest instant it is submitted again.
+// retry is one refused entry's standing: how often it was refused, the
+// earliest instant it is submitted again, and the refusal kinds already
+// recorded at their own level.
 type retry struct {
 	attempts int
 	next     time.Time
+	// recorded names every kind of refusal this entry was already recorded
+	// under. A kind is stated once at its own level; its repeats are DEBUG.
+	recorded map[string]bool
 }
+
+// The kinds of deferral an entry can meet. Each is recorded at its own level
+// ONCE per entry, so a condition that changes (a merge, then a cold gate) is
+// still stated, and one that stands is not repeated on every retry.
+const (
+	kindUnregistered = "unregistered"
+	kindLookupFailed = "lookup_failed"
+	kindMerging      = "merging"
+	kindColdGate     = "cold_gate"
+	kindNoSession    = "no_session"
+	kindMovedAway    = "moved_away"
+	kindFault        = "fault"
+)
 
 // ingress is the held-prompt ingress.
 type ingress struct {
@@ -44,6 +66,8 @@ type ingress struct {
 	// in memory on purpose: a restart retries every entry at once, which is
 	// exactly what a restart is for.
 	retries map[string]retry
+	// gate answers whether this daemon takes the intake at all.
+	gate *intakegate.Gate
 }
 
 func removeFile(path string) error { return os.Remove(path) }
@@ -75,12 +99,48 @@ func (i *ingress) Run(ctx context.Context) error {
 
 // Sweep ingests every entry once, in name order.
 //
+// ONLY THE DAEMON THAT SERVES SWEEPS (intakegate): a joining successor and an
+// incumbent whose handover has begun take nothing.
+//
+// A SWEEP IS EXCLUSIVE ACROSS DAEMONS, under a kernel lock held for its whole
+// run. The gate alone cannot make it so: a sweep the incumbent began before
+// its handover can still be submitting when the successor's gate opens, and
+// an entry submitted by both -- the incumbent's claim of its key not yet
+// accepted when the successor re-drives it -- would be delivered twice. The
+// lock dies with its holder, so a daemon that crashed mid-sweep leaves nothing
+// behind but its entries, which the next sweep takes under their keys.
+//
 // ORDER IS KEPT PER WORKSPACE: once one workspace's entry is left for a later
 // sweep, every later entry for that workspace is left too, so a prompt is
 // never delivered ahead of one its writer wrote before it.
 func (i *ingress) Sweep(ctx context.Context) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if !i.gate.Admits() {
+		return nil
+	}
+	// THE LOCK NEVER CREATES THE DIRECTORY: the ingress is a directory in the
+	// shared state root, which a client creates when it writes an entry, and
+	// recreating it would put back a state root that was deleted under this
+	// daemon (its own root watch would then read the recreation as another
+	// directory). No directory is no entry, so there is nothing to sweep.
+	lock, held, err := flock.TryExclusiveIn(i.deps.LockPath)
+	if errors.Is(err, os.ErrNotExist) {
+		i.deps.Log.Global().Debug(opLock, "the ingress directory does not exist; nothing has been written to sweep", dlog.Context{"dir": i.deps.Dir})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("take the sweep lock %q: %w", i.deps.LockPath, err)
+	}
+	if !held {
+		i.deps.Log.Global().Debug(opLock, "another daemon is sweeping the ingress; this sweep takes nothing", dlog.Context{"lock": i.deps.LockPath})
+		return nil
+	}
+	defer func() {
+		if err := lock.Release(); err != nil {
+			i.deps.Log.Global().Error(opLock, "could not release the sweep lock", dlog.Context{"lock": i.deps.LockPath, "cause": err.Error()})
+		}
+	}()
 	matches, err := filepath.Glob(filepath.Join(i.deps.Dir, Glob))
 	if err != nil {
 		return fmt.Errorf("glob %q: %w", Glob, err)
@@ -138,11 +198,11 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 	record, err := i.deps.WorkspaceByDir(ctx, dir)
 	if err != nil {
 		waiting[dir] = true
-		level := log.Error
+		level, kind := log.Error, kindLookupFailed
 		if errors.Is(err, wsm.ErrNotFound) {
-			level = log.Warn
+			level, kind = log.Warn, kindUnregistered
 		}
-		i.deferEntry(log, level, path, "no workspace is registered at the entry's directory", err)
+		i.deferEntry(log, level, path, kind, "no workspace is registered at the entry's directory", err)
 		return
 	}
 	wlog := i.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{
@@ -151,17 +211,18 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 
 	// The submission RE-DRIVES the attempt the client gave up on, so an
 	// already-accepted key is the expected answer, not an anomaly.
-	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, nil)
+	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, entry.delivery, nil)
 	switch {
 	case errors.Is(err, prompthandler.ErrDuplicateSubmission):
 		wlog.Info(opDedupe, "the held prompt was already accepted under its idempotency key, so it is not delivered twice", nil)
 	case err != nil:
 		waiting[dir] = true
+		kind := refusalKind(err)
 		level := wlog.Error
-		if refusal(err) {
+		if kind != kindFault {
 			level = wlog.Info
 		}
-		i.deferEntry(wlog, level, path, "the queue did not accept the held prompt; it stays for a later sweep", err)
+		i.deferEntry(wlog, level, path, kind, "the queue did not accept the held prompt; it stays for a later sweep", err)
 		return
 	default:
 		wlog.Info(opIngest, "ingested a held prompt into the queue", dlog.Context{
@@ -170,6 +231,7 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 			"delivered":   outcome.Disposition.Delivered,
 			"held":        outcome.Disposition.Parked(),
 			"origin":      entry.origin.String(),
+			"delivery":    entry.delivery.String(),
 			"queued_at":   entry.QueuedAt,
 		})
 	}
@@ -183,21 +245,31 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 	i.deps.PublishHost(record.ID)
 }
 
-// refusal reports whether err is one of the queue's ANSWERS about a standing
-// condition — a merge in flight, a cold gate, no session — rather than a
-// fault. Each clears on its own, so the entry simply waits it out.
-func refusal(err error) bool {
-	return errors.Is(err, promptqueue.ErrMerging) ||
-		errors.Is(err, promptqueue.ErrColdGate) ||
-		errors.Is(err, promptqueue.ErrNoSession)
+// refusalKind names the queue's ANSWER about a standing condition — a merge
+// in flight, a cold gate, no session, the workspace's move sealed toward
+// another daemon — or kindFault for anything that is not one. Each standing
+// condition clears on its own, so the entry simply waits it out.
+func refusalKind(err error) string {
+	switch {
+	case errors.Is(err, promptqueue.ErrMerging):
+		return kindMerging
+	case errors.Is(err, promptqueue.ErrColdGate):
+		return kindColdGate
+	case errors.Is(err, promptqueue.ErrNoSession):
+		return kindNoSession
+	case errors.Is(err, bounce.ErrMovedAway):
+		return kindMovedAway
+	default:
+		return kindFault
+	}
 }
 
 // deferEntry records that an entry was left for a later sweep and schedules
 // its retry, doubling the delay up to the ceiling. The first deferral of an
-// entry is recorded at the given level; a repeat is DEBUG, because the
-// standing condition was already stated once and a record per retry would
-// only repeat it.
-func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Context), path, message string, cause error) {
+// entry under each KIND is recorded at the given level; a repeat of a kind
+// already stated is DEBUG, because the standing condition was already said
+// once and a record per retry would only repeat it.
+func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Context), path, kind, message string, cause error) {
 	standing := i.retries[path]
 	standing.attempts++
 	delay := i.deps.Interval
@@ -208,9 +280,16 @@ func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Co
 		delay = i.deps.RetryCeiling
 	}
 	standing.next = i.deps.Now().Add(delay)
+	first := !standing.recorded[kind]
+	if first {
+		if standing.recorded == nil {
+			standing.recorded = map[string]bool{}
+		}
+		standing.recorded[kind] = true
+	}
 	i.retries[path] = standing
-	fields := dlog.Context{"cause": cause.Error(), "attempts": standing.attempts, "retry_in_ms": delay.Milliseconds()}
-	if standing.attempts == 1 {
+	fields := dlog.Context{"cause": cause.Error(), "kind": kind, "attempts": standing.attempts, "retry_in_ms": delay.Milliseconds()}
+	if first {
 		level(opDefer, message, fields)
 		return
 	}

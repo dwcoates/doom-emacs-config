@@ -85,8 +85,14 @@ func (s *server) SubmitPrompt(
 		consumedReference = true
 	}
 
+	// VALIDATED ABOVE through the same mapping, so a failure here is a
+	// defect, surfaced as one.
+	delivery, err := prompthandler.DeliveryOf(req.Msg.Delivery)
+	if err != nil {
+		return nil, fail(subject.Log, rpc, err)
+	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
-		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
+		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), delivery, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(refused)))))
