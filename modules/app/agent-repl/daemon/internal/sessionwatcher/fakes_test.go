@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,7 +140,10 @@ type fakeClient struct {
 	agentOpens   chan agentOpen
 	bashOpens    chan bashOpen
 	links        chan shimclient.LinkState
-	exits        chan shimclient.ExitInfo
+	// connections is what Connections answers; an adopted client starts
+	// connected once.
+	connections atomic.Uint64
+	exits       chan shimclient.ExitInfo
 	// refusedOpens carries the procedure of every watch open the fake
 	// answered with an error, the moment it answers. With the watcher's
 	// opens made off its lock, it is how a test knows a refused open was
@@ -264,7 +268,7 @@ func (c *fakeClient) gate(slot **openGate, honorCtx bool) *openGate {
 }
 
 func newFakeClient() *fakeClient {
-	return &fakeClient{
+	c := &fakeClient{
 		sessionOpens: make(chan *fakeStream[*shimv1.WatchSessionResponse], 8),
 		agentOpens:   make(chan agentOpen, 32),
 		bashOpens:    make(chan bashOpen, 32),
@@ -272,6 +276,8 @@ func newFakeClient() *fakeClient {
 		exits:        make(chan shimclient.ExitInfo),
 		refusedOpens: make(chan string, 64),
 	}
+	c.connections.Store(1)
+	return c
 }
 
 func (c *fakeClient) WatchSession(ctx context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
@@ -335,6 +341,17 @@ func (c *fakeClient) WatchBash(ctx context.Context, work *conversationv1.Detache
 }
 
 func (c *fakeClient) Connectivity() <-chan shimclient.LinkState { return c.links }
+
+func (c *fakeClient) Connections() uint64 { return c.connections.Load() }
+
+// linkBack is the client re-establishing its link: the connection count
+// advances before LinkConnected is published, as the real client's connected()
+// does. A replayed bring-up transition is sent on links directly instead,
+// because it announces no new connection.
+func (c *fakeClient) linkBack() {
+	c.connections.Add(1)
+	c.links <- shimclient.LinkConnected
+}
 
 // nextAgentOpen returns the next WatchAgent the watcher opened, a stashed one
 // first.
@@ -2058,7 +2075,7 @@ func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	t.Helper()
 	h.session.fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 	h.session = h.client.nextSessionOpen(t)
 	open := h.client.nextAgentOpenFor(t, "")
 	h.main, h.mainReq = open.stream, open.req

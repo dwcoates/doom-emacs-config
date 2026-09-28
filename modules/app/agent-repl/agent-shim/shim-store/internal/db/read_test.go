@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -906,5 +907,69 @@ func TestEveryReadStatementBuildsNoAutomaticIndex(t *testing.T) {
 			// Assert
 			assertNoAutomaticIndex(t, test.name, plan)
 		})
+	}
+}
+
+// ---- cancelled reads and the WAL ----
+
+// cancelledOpenPages runs many OpenPage calls whose deadlines land at spread
+// instants inside the read, from several goroutines, and returns once every
+// one of them has returned.
+func cancelledOpenPages(t *testing.T, d *DB, book string) {
+	t.Helper()
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 60; i++ {
+				deadline := time.Duration((i*37+g*11)%3000) * time.Microsecond
+				c, cancel := context.WithTimeout(context.Background(), deadline)
+				_, _ = d.OpenPage(c, book, 2000, nil)
+				cancel()
+			}
+		}(g)
+	}
+	wg.Wait()
+}
+
+// modernc.org/sqlite before v1.40.1 dropped a stepped statement unclosed when
+// the context ended between its first step and the query's return. The
+// statement kept its read snapshot for the life of the process, so every later
+// checkpoint copied nothing and the WAL grew without bound (the owner's store
+// sat at 0 of 47,506 frames for four hours). This fails on that driver.
+func TestCancelledOpenPagesLeaveTheWALFullyCheckpointable(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedBook(t, d, "b", 3000)
+	if _, err := d.Checkpoint(ctx(), TriggerIdle); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	cancelledOpenPages(t, d, "b")
+	seedBook(t, d, "b", 50)
+
+	// Act
+	result, err := d.Checkpoint(ctx(), TriggerIdle)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if result.Checkpointed != result.WALFrames {
+		t.Fatalf("checkpointed %d of %d frames; a cancelled read still pins the WAL", result.Checkpointed, result.WALFrames)
+	}
+}
+
+func TestACancelledOpenPageHoldsNoConnectionOnceItReturns(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedBook(t, d, "b", 3000)
+
+	// Act
+	cancelledOpenPages(t, d, "b")
+
+	// Assert
+	if inUse := d.read.Stats().InUse; inUse != 0 {
+		t.Fatalf("read pool InUse = %d after every OpenPage returned; a rollback is still running off the caller's goroutine", inUse)
 	}
 }

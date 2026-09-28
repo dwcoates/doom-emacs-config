@@ -555,7 +555,7 @@ func (c *client) bringUp(parent context.Context) error {
 			}
 			continue
 		}
-		c.link.publish(LinkConnected)
+		c.connected()
 
 		frames, errs := recvLoop(stream, c.monitorCtx.Done())
 		err = c.awaitDiagnostics(parent, frames, errs)

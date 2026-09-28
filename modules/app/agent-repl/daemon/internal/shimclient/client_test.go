@@ -17,6 +17,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sourcescan"
 )
 
 // newBareClient builds a client with no process and no connection, for the
@@ -1559,5 +1560,58 @@ func TestAStreamOpenItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
 	}
 	if got := recordFields(t, log, "daemon.shimclient.watch_bash")["cause"]; got != context.Canceled.Error() {
 		t.Fatalf("cause = %v, want %q", got, context.Canceled.Error())
+	}
+}
+
+func TestABroughtUpClientCountsOneConnection(t *testing.T) {
+	// Arrange
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+
+	// Act
+	client := spawnReady(t, f, spec)
+	collectStates(t, client, 2)
+
+	// Assert
+	if got := client.Connections(); got != 1 {
+		t.Fatalf("Connections() = %d after bring-up, want 1", got)
+	}
+}
+
+// The count advances before LinkConnected is published, so a consumer that
+// has read the redial's connected state always sees the new count.
+func TestARedialCountsItsConnectionBeforeAnnouncingIt(t *testing.T) {
+	// Arrange
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	collectStates(t, client, 2)
+
+	// Act
+	f.dropSessions()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+	got := collectStates(t, client, 2)
+
+	// Assert
+	if got[1] != LinkConnected {
+		t.Fatalf("states = %v, want redialing then connected", got)
+	}
+	if n := client.Connections(); n != 2 {
+		t.Fatalf("Connections() = %d once the redial's LinkConnected was read, want 2", n)
+	}
+}
+
+// connected() is the one place a link is announced, so no site can publish
+// LinkConnected without advancing the count a consumer relies on.
+func TestOnlyConnectedAnnouncesALink(t *testing.T) {
+	// Act
+	announcements := sourcescan.Count(t, "publish(LinkConnected)")
+
+	// Assert
+	if announcements != 1 {
+		t.Fatalf("production source publishes LinkConnected at %d sites; only connected() may", announcements)
 	}
 }

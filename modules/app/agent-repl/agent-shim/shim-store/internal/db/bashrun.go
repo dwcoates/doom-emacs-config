@@ -53,7 +53,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	if err != nil {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}
-	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+	defer d.endTx(tx, base)
 
 	rows, err := tx.QueryContext(ctx, bashRunRowsSQL, runID, kindBash)
 	if err != nil {
