@@ -84,15 +84,15 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		return
 	}
 
-	// EVERY activity is filed under its API response before anything is drawn:
-	// the unit stating a response's usage is frequently not the unit that
-	// draws the stamp. When this filing recorded a usage figure, re-stamp the
-	// turn's already-drawn bubbles so a bubble drawn before this later API
-	// response grows to the turn's new total — every bubble of a turn shows the
-	// same turn total. The current activity's own row is drawn below with the
-	// up-to-date turn stamp, so it needs no re-stamp here.
-	if turnKey, recorded := s.fileAPIResponse(unit, act.GetUsage()); recorded {
-		r.restampTurnBubbles(s, turnKey)
+	// EVERY activity's usage is tallied in its agent's account before anything
+	// is drawn: the unit stating an API response's usage is frequently not the
+	// unit that draws the stamp (usage.go). When a figure was recorded, the
+	// account's still-arriving bubbles and the subagent's card grow to the new
+	// tally; a landed bubble never moves. The current activity's own row is
+	// drawn below from the up-to-date tally, so it needs no re-stamp here.
+	if account, recorded := r.recordUsage(s, unit, agent, act.GetUsage()); recorded {
+		r.restampOpenBubbles(s, account)
+		r.restampSubagentCard(s, agent)
 	}
 
 	var (

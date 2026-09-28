@@ -12,7 +12,6 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
-	"claude-repld/internal/figures"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 )
@@ -153,7 +152,7 @@ func TestASubagentsOwnRowsLandOnItsSubFeed(t *testing.T) {
 	}
 }
 
-func TestAnUpdateKeepsTheOriginalClockAndCarriesTheTokenSum(t *testing.T) {
+func TestAnUpdateKeepsTheOriginalClockAndMarksTheBeat(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	created := &conversationv1.AgentId{Value: "agent-explore"}
@@ -175,9 +174,6 @@ func TestAnUpdateKeepsTheOriginalClockAndCarriesTheTokenSum(t *testing.T) {
 	if got := bubble.GetRuntime().GetStartedAtMs(); got != 1_000 {
 		t.Fatalf("runtime = %d, want the original instant", got)
 	}
-	if got := bubble.GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("tokens = %q, want the running sum", got)
-	}
 	if bubble.GetLive().GetLastProgress().GetAtMs() != h.nowMs {
 		t.Fatalf("last_progress = %d, want the observed beat", bubble.GetLive().GetLastProgress().GetAtMs())
 	}
@@ -194,57 +190,6 @@ func (h *harness) progressBeat(unit string, tokens uint64) {
 			}},
 		}},
 	})
-}
-
-// TestSuccessiveProgressBeatsReplaceTheBubbleTokenSum locks the bubble's running
-// figure to REPLACE, never sum: each beat is a whole-state running total.
-func TestSuccessiveProgressBeatsReplaceTheBubbleTokenSum(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
-	h.progressBeat("spawn-1", 12_400)
-
-	// Act.
-	h.progressBeat("spawn-1", 20_000)
-
-	// Assert.
-	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "20k tok" {
-		t.Fatalf("tokens = %q, want the latest beat's whole sum, never 12.4k + 20k", got)
-	}
-}
-
-// TestASettledTotalSupersedesTheRunningBeat locks the proto's rule that the
-// running figure is superseded by the full accounting at conclusion: a settled
-// async total replaces whatever the last running beat had drawn.
-func TestASettledTotalSupersedesTheRunningBeat(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
-	h.progressBeat("spawn-1", 8_600)
-
-	// Act: the run settles with its reconciled total.
-	settledTotal := uint64(11_114)
-	h.send(&conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
-		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
-			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
-				Prompt: &conversationv1.AgentSubagentPrompt{Text: "go and look"},
-				Report: &conversationv1.AgentSubagentReport{},
-				Totals: &conversationv1.AgentSubagentTotals{
-					Usage: &conversationv1.AgentSubagentTotals_TotalOnly{
-						TotalOnly: &conversationv1.AgentSubagentAsyncUsage{TotalTokens: &settledTotal},
-					},
-				},
-			}},
-		}},
-	})
-
-	// Assert.
-	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "11.1k tok" {
-		t.Fatalf("tokens = %q, want the settled total to supersede the running beat", got)
-	}
 }
 
 func TestASettledSpawnStopsTheClockAndSucceeds(t *testing.T) {
@@ -332,35 +277,6 @@ func subagentOutcomeWord(settled *frontendv1.FeedSubagentSettled) string {
 		return "lost"
 	}
 	return "unset"
-}
-
-func TestASyncTotalsTokenSumIsTheFullBreakdown(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
-
-	// Act.
-	h.send(&conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
-		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
-			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
-				Prompt: &conversationv1.AgentSubagentPrompt{Text: "go and look"},
-				Report: &conversationv1.AgentSubagentReport{},
-				Totals: &conversationv1.AgentSubagentTotals{
-					Usage: &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{
-						InputMisses:  &conversationv1.TokenCacheMisses{Written: 10_000, Unwritten: 400},
-						OutputTokens: 2_000,
-					}},
-				},
-			}},
-		}},
-	})
-
-	// Assert.
-	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("tokens = %q", got)
-	}
 }
 
 func TestAnAsyncTotalWithNoUsageReportedDrawsNoTokenSum(t *testing.T) {
@@ -1800,13 +1716,13 @@ func TestAnUpdateHeldBeforeItsStartKeepsTheStartsOwnClock(t *testing.T) {
 	// Act.
 	h.startSubagentOnly("spawn-1", created, "Explore")
 
-	// Assert: the start's instant stands and the held figure is folded.
+	// Assert: the start's instant stands and the held beat is folded.
 	bubble := bubbleOf(h.bubbleRow("spawn-1", created))
 	if got := bubble.GetRuntime().GetStartedAtMs(); got != 1_000 {
 		t.Fatalf("runtime = %d, want the start's own instant", got)
 	}
-	if got := bubble.GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("tokens = %q, want the held update's running sum", got)
+	if bubble.GetLive().GetLastProgress() == nil {
+		t.Fatal("last_progress = unset, want the held update's beat folded in")
 	}
 }
 
@@ -2059,29 +1975,6 @@ func TestAnUpdateHeldBeforeANamingSuccessDoesNotRedrawItLive(t *testing.T) {
 	}
 }
 
-func TestAnUpdateHeldBeforeANamingSuccessIsStillFoldedIn(t *testing.T) {
-	// Arrange: the held update carries the only running token sum.
-	h := newHarness(t)
-	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.send(&conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
-		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
-			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
-				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go and look"},
-				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
-			}},
-		}},
-	})
-
-	// Act.
-	h.settleSubagentNaming("spawn-1", created)
-
-	// Assert: the hold is drained rather than dropped.
-	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("tokens = %q, want the held update's running sum folded in", got)
-	}
-}
-
 func TestABeatCarryingAnOlderProducerInstantDoesNotWindTheShellsAgeBackwards(t *testing.T) {
 	// Arrange: an append the daemon stamps on receipt. This is the drawn
 	// instant the contract names — FeedShellLive is "spool growth IS the beat,
@@ -2145,31 +2038,6 @@ func (h *harness) settleSubagentOnly(unit string, created *conversationv1.AgentI
 			}},
 		}},
 	})
-}
-
-// TestASettledFullTotalCountsEveryTokenIncludingCacheReads locks the head's
-// figure to the RUN'S TOTAL — every token, cache reads included — rather than
-// the expensive-input-plus-output partial it once drew, which understated the
-// total by the cached context a subagent reads.
-func TestASettledFullTotalCountsEveryTokenIncludingCacheReads(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	created := &conversationv1.AgentId{Value: "agent-explore"}
-
-	// Act: a sync run's full billed breakdown, cache reads dominating.
-	h.settleSubagentOnly("spawn-1", created, &conversationv1.AgentSubagentTotals{
-		Usage: &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{
-			InputHits:    &conversationv1.TokenCacheHits{Read: 470_000},
-			InputMisses:  &conversationv1.TokenCacheMisses{Written: 3_000, Unwritten: 1_000},
-			OutputTokens: 1_000,
-		}},
-	}, 9_000)
-
-	// Assert: 470k + 3k + 1k + 1k = 475k, never the 5k the old sum drew.
-	want := figures.Tokens(475_000) + " tok"
-	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != want {
-		t.Fatalf("tokens = %q, want %q (the run's total, cache reads included)", got, want)
-	}
 }
 
 // TestASettledOnlyReplayReconstructsTheClockFromItsDuration locks the fix for
@@ -3621,12 +3489,12 @@ func TestAResumedSubagentsBeatRedrawsTheHeadDrawnAtTheAnnouncement(t *testing.T)
 	// Act.
 	h.send(resumedBeat("send-1"))
 
-	// Assert: one head, now carrying the run's spend.
+	// Assert: one head, now carrying the run's beat.
 	if after := len(h.rows(rootFeed())); after != before {
 		t.Fatalf("root rows %d → %d, want the beat to redraw the head rather than add a row", before, after)
 	}
-	if bubbleOf(h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})).GetTokens().GetText() == "" {
-		t.Fatal("the head does not carry the beat's spend")
+	if bubbleOf(h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})).GetLive().GetLastProgress() == nil {
+		t.Fatal("the head does not carry the beat")
 	}
 }
 
@@ -3642,5 +3510,104 @@ func TestAResumedSubagentAnnouncedBeforeItsSendIsDrawnWhenTheSendDraws(t *testin
 	row := h.bubbleRow("send-1", &conversationv1.AgentId{Value: "spawn-1"})
 	if row.GetDetachedSubagent().GetSubagent().GetWorkId().GetText() != "w-send" {
 		t.Fatalf("row = %+v, want the detached head carrying w-send", row)
+	}
+}
+
+// subagentSpends sends one of the subagent's own API responses, its usage
+// riding a thinking unit.
+func (h *harness) subagentSpends(created *conversationv1.AgentId, unit string, usage *conversationv1.TokenUsage) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, created, thinkingFrame(unit, usage), nil, noAddress())
+}
+
+func TestTheSubagentCardIsItsLifetimeFreshInput(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act: two API responses, cache reads and output dominating.
+	h.subagentSpends(created, "sub-1", turnUsage(200, 4_000, 90_000, 1_000))
+	h.subagentSpends(created, "sub-2", turnUsage(0, 1_000, 95_000, 800))
+
+	// Assert: only the cache writes and uncached input count.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "5.2k tok" {
+		t.Fatalf("tokens = %q, want the fresh 4_200+1_000 = 5.2k", got)
+	}
+}
+
+func TestAProgressBeatsRunningTotalIsNotTheCardsFigure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act: a beat states the vendor's running grand total, and no usage.
+	h.progressBeat("spawn-1", 12_400)
+
+	// Assert: the card draws no figure until the subagent states usage.
+	if tokens := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens(); tokens != nil {
+		t.Fatalf("tokens = %q, want unset before any usage", tokens.GetText())
+	}
+}
+
+func TestTheMainAgentsUsageNeverReachesACard(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act: the main agent spends.
+	h.send(thinkingFrame("main-1", misses(50_000, 0)))
+
+	// Assert.
+	if tokens := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens(); tokens != nil {
+		t.Fatalf("tokens = %q, want unset: the main agent's spend is not the subagent's", tokens.GetText())
+	}
+}
+
+func TestTheCardKeepsItsLifetimeFigureThroughTheSettle(t *testing.T) {
+	// Arrange: the subagent spends 3k.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.subagentSpends(created, "sub-1", misses(3_000, 0))
+
+	// Act: it settles with a full billed breakdown of another size.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				Prompt: &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Report: &conversationv1.AgentSubagentReport{},
+				Totals: &conversationv1.AgentSubagentTotals{
+					Usage: &conversationv1.AgentSubagentTotals_Full{Full: turnUsage(0, 0, 470_000, 1_000)},
+				},
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+			}},
+		}},
+	})
+
+	// Assert: the figure is still the subagent's own tallied fresh input.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "3k tok" {
+		t.Fatalf("tokens = %q, want the lifetime 3k", got)
+	}
+}
+
+func TestASubagentsFigureSpansTurns(t *testing.T) {
+	// Arrange: the subagent spends in the turn that spawned it.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "go")
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.subagentSpends(created, "sub-1", misses(2_000, 0))
+
+	// Act: it keeps spending into the next turn.
+	h.deliverPrompt("turn-2", "carry on")
+	h.subagentSpends(created, "sub-2", misses(1_000, 0))
+
+	// Assert: its figure is its whole lifetime, never reset by a turn.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "3k tok" {
+		t.Fatalf("tokens = %q, want the lifetime 3k", got)
 	}
 }
