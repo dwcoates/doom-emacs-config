@@ -2998,18 +2998,19 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	}
 }
 
-// TestTheResponseBubbleStampsItsApiResponsesUsage proves the cost corner
+// TestTheResponseBubbleStampsItsAgentsFreshInput proves the cost corner
 // reaches the frontend frame for the vendor's OBSERVED response shape, where
 // the `[thinking, text]` response states its usage on the THINKING unit — the
 // unit for its first content block — and the prose unit states none.
 //
-// THE STAMP IS THE TURN'S OWN WORK, NOT THE CONTEXT WINDOW (481bcf6f8): fresh
-// new input (InputMisses.Unwritten) plus output (output_tokens), EXCLUDING the
-// two cached-context buckets — InputHits.Read is context REUSED, not produced
-// this turn, and InputMisses.Written is context being (re-)cached. Both are the
-// context window growing, which is the TOPBAR's figure and a different
-// resolver. See internal/resolve/feed/usage.go's file header.
-func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
+// THE STAMP IS THE AGENT'S FRESH INPUT (AGENTS.md, "Fresh input is the one
+// token quantity every spend figure counts"): the input tokens that were not
+// cache hits, InputMisses.Unwritten plus InputMisses.Written. Cache writes are
+// fresh on purpose, because they are the expensive part of a turn; cache reads
+// are not; output is not, because it is counted as input on the next request.
+// The first bubble of a turn stamps everything its agent added since the turn
+// opened. See internal/resolve/feed/usage.go's file header.
+func TestTheResponseBubbleStampsItsAgentsFreshInput(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -3035,16 +3036,14 @@ func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 		}}},
 	}))
 
-	// Assert: the drawn bubble carries this turn's own work — the 240 unwritten
-	// input tokens plus the 5,000 output tokens. The 900,000 cache reads and the
-	// 18,000 cache writes are the context window and are deliberately excluded:
-	// a turn that reuses a huge context did little work, and stamping it with
-	// the context's size says the opposite.
+	// Assert: the drawn bubble carries its agent's fresh input — the 18,000
+	// cache writes plus the 240 unwritten input tokens. The 900,000 cache reads
+	// and the 5,000 output tokens are not fresh input and are excluded.
 	row := awaitRow(t, f, tail, "the stamped response bubble", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetResponse().GetUsage() != nil
 	})
-	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "5.2k" {
-		t.Fatalf("the response's usage stamp = %q, want the turn's own work %q (fresh input + output, no cached context)", got, "5.2k")
+	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "18.2k" {
+		t.Fatalf("the response's usage stamp = %q, want its agent's fresh input %q (cache writes + unwritten input, no cache reads, no output)", got, "18.2k")
 	}
 }
 
