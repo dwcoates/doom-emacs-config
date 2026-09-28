@@ -741,6 +741,85 @@ func TestSeveredLinkReopensFromTheTrackedPointer(t *testing.T) {
 	}
 }
 
+// awaitLinkChanged reads the recorder up to the lifecycle sink hearing the
+// link go to this attachment, which is how a test knows runLink consumed it.
+func awaitLinkChanged(t *testing.T, h *harness, attached bool) {
+	t.Helper()
+	h.rec.untilEvent(t, "lifecycle.OnLinkChanged", func(e event) bool {
+		return e.name() == "lifecycle.OnLinkChanged" && e.attached != nil && *e.attached == attached
+	})
+}
+
+// TestAStreamEndingAfterTheLinkCameBackReopensAtOnce covers the order the
+// connectivity feed and a stream's end do not share: the client's redial is
+// consumed, connected, while every stream still reads as standing (so nothing
+// is re-opened), and only then does the session stream's end arrive. The
+// connected edge that would repair it is already spent, so the fleet re-opens
+// at once. It waited instead, and the session watch stayed down for good
+// (the integration suite's hung-shell bounce, ~1 run in 50).
+func TestAStreamEndingAfterTheLinkCameBackReopensAtOnce(t *testing.T) {
+	// Arrange: the client's redial is consumed with every stream standing.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.links <- shimclient.LinkRedialing
+	h.client.linkBack()
+	awaitLinkChanged(t, h, true)
+
+	// Act: the session stream's end arrives after the reconnect.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	h.client.nextSessionOpen(t)
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.reopen_after_reconnect")
+	if !h.w.Connected() {
+		t.Fatalf("Link() = %d after the re-open on a link already back, want connected", h.w.Link())
+	}
+}
+
+// TestAStreamEndingWithNoReconnectInItsGenerationWaitsForTheLink pins the
+// other side: a stream that ends while the client has not come back since the
+// generation opened has no connected edge behind it, so the fleet degrades
+// and waits for the link rather than re-opening against a broken one.
+func TestAStreamEndingWithNoReconnectInItsGenerationWaitsForTheLink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.fail(errors.New("connection reset"))
+	awaitLinkChanged(t, h, false)
+
+	// Assert.
+	h.client.noSessionOpen(t)
+	if h.hasRecord("info", "daemon.sessionwatcher.reopen_after_reconnect") {
+		t.Fatal("the fleet re-opened on a severing with no reconnect behind it")
+	}
+}
+
+// TestAReconnectTheFleetReopenedOnIsNotSpentTwice pins the generation reset:
+// a reconnect that re-opened a degraded fleet is that generation's own, so a
+// stream of the new generation that ends later waits for the next one.
+func TestAReconnectTheFleetReopenedOnIsNotSpentTwice(t *testing.T) {
+	// Arrange: a severing, then the reconnect that re-opens the fleet.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.session.fail(errors.New("connection reset"))
+	awaitLinkChanged(t, h, false)
+	h.client.linkBack()
+	reopened := h.client.nextSessionOpen(t)
+	awaitLinkChanged(t, h, true)
+
+	// Act: the re-opened generation's session stream ends.
+	reopened.fail(errors.New("connection reset"))
+	awaitLinkChanged(t, h, false)
+
+	// Assert.
+	h.client.noSessionOpen(t)
+	if h.hasRecord("info", "daemon.sessionwatcher.reopen_after_reconnect") {
+		t.Fatal("a reconnect the fleet already re-opened on was spent again")
+	}
+}
+
 // TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen covers the
 // connectivity feed's HISTORY: the client publishes dialing and then connected
 // during bring-up, and the watcher is created afterwards holding a connected
@@ -2888,7 +2967,7 @@ func linkBackBeforeTheSevering(t *testing.T, h *harness) {
 	h.session.fail(errors.New("connection reset"))
 }
 
-func TestASeveringHeardAfterTheLinkCameBackReopensTheFleet(t *testing.T) {
+func TestTheReopenAfterAReconnectNamesBothConnectionCounts(t *testing.T) {
 	// Arrange
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
@@ -2896,55 +2975,36 @@ func TestASeveringHeardAfterTheLinkCameBackReopensTheFleet(t *testing.T) {
 	// Act
 	linkBackBeforeTheSevering(t, h)
 
-	// Assert: nothing else will ever say the link is back, yet the fleet is
-	// opened again.
+	// Assert
 	h.client.nextSessionOpen(t)
-	h.client.nextAgentOpen(t)
-	h.awaitRecord(t, "info", "daemon.sessionwatcher.link")
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.reopen_after_reconnect")
 	for _, r := range h.log.Records() {
-		if r.Operation == "daemon.sessionwatcher.link" && r.Context["client_connections"] == uint64(2) && r.Context["fleet_connections"] == uint64(1) {
+		if r.Operation == "daemon.sessionwatcher.reopen_after_reconnect" && r.Context["client_connections"] == uint64(2) && r.Context["fleet_connections"] == uint64(1) {
 			return
 		}
 	}
 	t.Fatalf("no record names the fleet's and the client's connection counts; records: %+v", h.log.Records())
 }
 
-func TestASeveringHeardAfterTheLinkCameBackLeavesTheLinkConnected(t *testing.T) {
+// The connectivity feed replays bring-up's dialing and connected to a watcher
+// that was handed a connected link. That replay announces no new connection,
+// so a stream that ends after it degrades and waits like any other.
+func TestAReplayedBringUpConnectedIsNotAReconnect(t *testing.T) {
 	// Arrange
 	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.links <- shimclient.LinkDialing
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_replay")
+	h.client.links <- shimclient.LinkConnected
 	h.quiet()
 
 	// Act
-	linkBackBeforeTheSevering(t, h)
-	h.client.nextSessionOpen(t)
+	h.session.fail(errors.New("connection reset"))
+	awaitLinkChanged(t, h, false)
 
 	// Assert
-	h.w.mu.Lock()
-	degraded, link := h.w.degraded, h.w.link
-	h.w.mu.Unlock()
-	if degraded || link != shimclient.LinkConnected {
-		t.Fatalf("degraded=%v link=%v after the re-open, want a whole fleet on a connected link", degraded, link)
-	}
-}
-
-func TestASeveringWithNoNewConnectionWaitsForTheLinkToComeBack(t *testing.T) {
-	// Arrange
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-
-	// Act: the stream ends before the client has noticed anything.
-	h.session.fail(errors.New("connection reset"))
-	h.rec.until(t, "sidebar.OnLink")
-
-	// Assert: the severing's critical section is over once mu is free, and it
-	// left the fleet degraded, waiting on the LinkConnected still to come.
-	h.w.mu.Lock()
-	degraded, link := h.w.degraded, h.w.link
-	h.w.mu.Unlock()
-	if !degraded || link != shimclient.LinkRedialing {
-		t.Fatalf("degraded=%v link=%v, want a degraded fleet on a redialing link", degraded, link)
-	}
-	if h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
-		t.Fatal("the fleet was re-opened with no new connection to open it on")
+	h.client.noSessionOpen(t)
+	if h.hasRecord("info", "daemon.sessionwatcher.reopen_after_reconnect") {
+		t.Fatal("a replayed bring-up edge was taken for a reconnect")
 	}
 }

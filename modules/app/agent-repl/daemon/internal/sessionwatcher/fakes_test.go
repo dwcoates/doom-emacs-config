@@ -460,6 +460,17 @@ func (c *fakeClient) noAgentOpen(t *testing.T) {
 	}
 }
 
+// noSessionOpen asserts no further WatchSession was opened.
+func (c *fakeClient) noSessionOpen(t *testing.T) {
+	t.Helper()
+	c.settleOpens()
+	select {
+	case <-c.sessionOpens:
+		t.Fatal("an unexpected WatchSession was opened")
+	default:
+	}
+}
+
 // noBashOpen asserts no further WatchBash was opened.
 func (c *fakeClient) noBashOpen(t *testing.T) {
 	t.Helper()
