@@ -567,3 +567,20 @@ func TestASilencedBashIsSilencedForItsWorkAlone(t *testing.T) {
 		t.Fatalf("silenced(w-1) = %v, silenced(w-2) = %v, want true and false", srv.bashSilenced("w-1"), srv.bashSilenced("w-2"))
 	}
 }
+
+// TestASilencedReannouncementSilencesOneWatchAlone covers
+// silence_reannouncement's one-shot: the next open is silent, the one after
+// it re-announces again.
+func TestASilencedReannouncementSilencesOneWatchAlone(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+
+	// Act
+	srv.silenceReannouncement()
+	first, second := srv.reannouncementSilenced(), srv.reannouncementSilenced()
+
+	// Assert
+	if !first || second {
+		t.Fatalf("silenced = (%v, %v), want (true, false)", first, second)
+	}
+}

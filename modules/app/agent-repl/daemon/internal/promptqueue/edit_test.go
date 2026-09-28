@@ -333,7 +333,7 @@ func TestAVerdictInFlightAcrossACommitIsDiscarded(t *testing.T) {
 	if killed := h.sender.killed(); len(killed) != 1 {
 		t.Fatalf("killed = %v, want exactly one interrupt, from the new content's verdict", killed)
 	}
-	if !logged(h.log.Records(), "info", opClassify, "the verdict is about content an edit has since replaced; it is discarded") {
+	if !logged(h.log.Records(), "info", opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded") {
 		t.Fatalf("records = %+v, want the stale verdict's discard at info", h.log.Records())
 	}
 }

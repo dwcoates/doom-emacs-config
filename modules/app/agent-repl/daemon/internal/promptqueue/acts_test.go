@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -529,6 +530,24 @@ func TestAContextCutOfTheTurnAlreadyInFlightStartsNothing(t *testing.T) {
 	if !logged(h.log.Records(), "error", opSubmit, repeatedStartMessage) {
 		t.Fatalf("the repeated start was not recorded at error: %v", h.log.Records())
 	}
+}
+
+func TestSubmitSessionActAfterTheMoveSealedIsRefusedAsMovedAway(t *testing.T) {
+	// Arrange: a dispatch-quiet move has sealed the workspace's queue.
+	h := newHarness(t)
+	busy(t, h)
+	transfer := newGate()
+	startQuietMove(t, h, transfer)
+	if _, _, err := h.q.SealMove(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("SealMove: %v", err)
+	}
+	// Act
+	err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "t-compact"})
+	// Assert
+	if !errors.Is(err, bounce.ErrMovedAway) {
+		t.Fatalf("SubmitSessionAct after the seal = %v, want ErrMovedAway", err)
+	}
+	transfer.finish(h, nil)
 }
 
 // TestAContextCutBehindAnotherRunningTurnStillQueues pins that only the SAME
