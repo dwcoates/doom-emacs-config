@@ -154,16 +154,13 @@ func DeployFailedDetail(f wsm.Fault) string {
 	if d.Step == "" {
 		return f.Detail
 	}
-	subject := d.BuildStep
-	if d.Step != DeployStepBuild {
-		subject = strings.ToLower(strings.TrimPrefix(d.Component.String(), "DEPLOY_COMPONENT_"))
-	}
+	subject := d.subject()
 	if subject == d.Step {
 		// A builder that is one step (the operator's override) names the
 		// step the build itself; it is said once.
 		subject = ""
 	}
-	head := strings.TrimSpace(strings.ReplaceAll(d.Step, "_", " ") + " " + subject)
+	head := strings.TrimSpace(d.stepWords() + " " + subject)
 	switch d.Rollback {
 	case RollbackRestored:
 		head += ", rolled back"
@@ -175,4 +172,54 @@ func DeployFailedDetail(f wsm.Fault) string {
 		return head
 	}
 	return head + ": " + tail
+}
+
+// subject is what the step failed on: the build step for a build, the
+// component's bare lowercase name for every other step.
+func (d DeployFailure) subject() string {
+	if d.Step == DeployStepBuild {
+		return d.BuildStep
+	}
+	return strings.ToLower(strings.TrimPrefix(d.Component.String(), "DEPLOY_COMPONENT_"))
+}
+
+// stepWords is the step in words: "restart_services" is "restart services".
+func (d DeployFailure) stepWords() string {
+	return strings.ReplaceAll(d.Step, "_", " ")
+}
+
+// rollbackItselfFailed is what the overlay of a rollback's own fault says
+// became of the install.
+const rollbackItselfFailed = "the rollback itself failed; the previous build was not restored"
+
+// DeployOverlay is what a failed deploy's topbar row reveals, every line
+// composed out of the fault's own evidence.
+type DeployOverlay struct {
+	// Step is the step that failed, in words.
+	Step string
+	// Component is the build step for a build, the component otherwise.
+	Component string
+	// Rollback is what became of the install (RollbackClause), or that the
+	// rollback itself failed.
+	Rollback string
+	// Detail is the failure's own account, whole.
+	Detail string
+	// Log is where the build's whole output is archived; empty for none.
+	Log string
+}
+
+// DeployFailedOverlay composes a `deploy_failed` fault's overlay, false for a
+// record whose evidence names no step: its row is its prose line alone.
+func DeployFailedOverlay(f wsm.Fault) (DeployOverlay, bool) {
+	d := DeployFailureOf(f)
+	if d.Step == "" {
+		return DeployOverlay{}, false
+	}
+	rollback := RollbackClause(d.Rollback)
+	if d.Step == DeployStepRollback {
+		rollback = rollbackItselfFailed
+	}
+	return DeployOverlay{
+		Step: d.stepWords(), Component: d.subject(), Rollback: rollback, Detail: d.Detail, Log: d.Log,
+	}, true
 }
