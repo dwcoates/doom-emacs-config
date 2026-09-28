@@ -5,99 +5,129 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
-// THE STATUS PRECEDENCE, strongest claim first. Several facts hold at once
-// routinely — a merging workspace still has a session, a severed link still
-// has a last turn — so the order below is the contract's answer to which one
-// the dot reports, and it is stated ONCE here.
+// statusArm resolves the row's status arm.
 //
-//  1. inactive        no open perspective and nothing live behind it.
-//     DOMINATES every session state: a perspective-less
-//     workspace is inactive whatever its session once was.
-//  2. merge_*         the merge pipeline owns the row while it runs
-//     (enqueuing, queued, merging, conflict, failed, merged).
-//  3. none            no session has ever existed, so there is no lifecycle
-//     to report — an assertion, not an absent oneof.
-//  4. link states     start_failed, dead, severed, init, degraded. The route
-//     is what every session state below is reported OVER, so
-//     a broken route outranks them all.
-//  5. vendor_blocked  the block is the vendor's or the account's.
-//  6. permission      a gated call is waiting on the user.
-//  7. clearing        a context cut is running…
-//  8. compacting      …either kind.
-//  9. submitting      the turn is accepted and the shim has not acked it.
-//  10. thinking        the turn is producing activity.
-//  11. turn end, unread  done, interrupted or turn_failed, whichever the last
-//     turn's close resolves to (closeArm), while its result is
-//     UNREAD: the turn completed, was interrupted or failed
-//     (failed, orphaned or agent-died) and the user has not viewed
-//     the row since. It outranks idle_async below: a result is
-//     waiting, and detached work still running must not hide
-//     that. It holds until the editor reports the row viewed
-//     (SetViewed) or a new prompt starts a turn.
-//  12. idle_async      detached work runs while the foreground is free. It
-//     outranks the turn terminals below because work
-//     happening NOW outranks how the last turn ended — once
-//     that turn's result has been read.
-//  13. turn_failed     the last turn failed. BLUE.
-//  14. interrupted     the last turn was stopped by the user.
-//  15. done            the last turn finished.
-//     13, 14 and 15 are drawn PARTIAL (viewed) once their
-//     result is read, FULL while it is not.
-//  16. ready          live, proven usable and idle.
+// THE PRECEDENCE IS NOT STATED HERE. It is resolve/ladder's, the one ladder
+// the footer strip is projected from too, so the rail, the tab bar and the
+// strip cannot make different coarse claims about one workspace (owner
+// ruling, 2026-09-28). This resolver only draws each rung it can claim
+// (`rosterRung`) and the idle family at the bottom (`idleArm`), and asserts
+// that what it drew projects back onto the claim the ladder chose.
+//
+// ONE ARM SITS ABOVE THE LADDER: `inactive`, a registered workspace with no
+// open perspective and nothing live behind it. It dominates every session
+// state, and no footer is ever drawn for it.
+//
+// WITHIN a rung the order is this surface's detail:
+//   - merging: enqueuing, queued and merging are the one rung;
+//   - disconnected: start_failed, dead, severed, init, degraded (linkArm);
+//   - thinking: clearing, then compacting, then submitting, then thinking;
+//   - idle: none (no session was ever created), then the last turn's end
+//     while its result is UNREAD (done, interrupted or turn_failed — it
+//     outranks idle_async: a result is waiting, and detached work running
+//     must not hide that, until the editor reports the row viewed or a new
+//     prompt starts a turn), then idle_async (detached work running NOW
+//     outranks how an already-read turn ended), then the read turn end (drawn
+//     PARTIAL), then ready.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Logger) string {
 	if !s.live(session) && rec.Closed {
 		return "inactive"
 	}
 	// A PARKED SESSION IS IDLE, NOT BROKEN. The idle sweep stands the shim
-	// down deliberately and a prompt brings it straight back, so the row keeps
-	// an IDLE arm: nothing about a hibernation is visible to the user beyond
-	// the wait for the revival, and drawing `severed` or `dead` would report a
-	// fault where there is none. The link arm is skipped for exactly that
-	// reason — the route is down because the daemon put it down.
-	if parked(session) {
+	// down deliberately and a prompt brings it straight back, so the ladder
+	// skips the link rung: nothing about a hibernation is visible to the user
+	// beyond the wait for the revival, and drawing `severed` or `dead` would
+	// report a fault where there is none.
+	isParked := parked(session)
+	if isParked {
 		log.Debug("daemon.sidebar.status", "the session is parked by the idle sweep", nil)
-		return sessionArm(s, log)
 	}
-	if arm := mergeArm(s.merge); arm != "" {
-		return arm
+	claim, arm := ladder.Resolve(s.merge.State, isParked,
+		func(claim ladder.Claim) (string, bool) {
+			drawn := rosterRung(claim, s, session, log)
+			return drawn, drawn != ""
+		},
+		func() string { return idleArm(s, session, log) })
+	if drawn, ok := ladder.RosterArmClaim(arm); !ok || drawn != claim {
+		log.Error("daemon.sidebar.status_claim",
+			"the roster drew a status arm that does not project onto the ladder claim it resolved",
+			dlog.Context{
+				"claim":               string(claim),
+				"drawn":               string(drawn),
+				"arm":                 arm,
+				"invariant_violation": "the roster and the footer must make the same coarse claim",
+				"remediation":         "draw the rung's own arm, or place the arm in ladder.RosterArmClaim",
+			})
 	}
-	if arm := noSessionArm(s, session); arm != "" {
-		return arm
-	}
-	if arm := linkArm(s, session); arm != "" {
-		return arm
-	}
-	return sessionArm(s, log)
+	return arm
 }
 
-// mergeArm names the merge pipeline's arm, empty when no merge stands. "none"
-// and the empty state both mean the orchestrator has said nothing.
+// rosterRung draws one ladder rung, empty when this workspace's facts make no
+// claim there.
+func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.Logger) string {
+	switch claim {
+	case ladder.Merging:
+		return mergeArm(s.merge)
+	case ladder.MergeConflict:
+		return "merge_conflict"
+	case ladder.MergeFailed:
+		return "merge_failed"
+	case ladder.Merged:
+		return "merged"
+	case ladder.Disconnected:
+		if ladder.AwaitingBringUp(s.linkSeen, s.turn != nil) {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
+			return "init"
+		}
+		if noSessionArm(s, session) != "" {
+			// No session was ever created, so there is no route to be down.
+			return ""
+		}
+		return linkArm(s, session)
+	case ladder.Closing:
+		// The roster observes no close refusal; only the footer claims it.
+		return ""
+	case ladder.Blocked:
+		if s.vendorBlocked {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
+			return "vendor_blocked"
+		}
+		return ""
+	case ladder.Waiting:
+		if len(s.permissions) > 0 {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case len(s.permissions) > 0"})
+			return "permission"
+		}
+		return ""
+	case ladder.Thinking:
+		return thinkingArm(s, log)
+	default:
+		log.Error("daemon.sidebar.status_rung", "the ladder asked the roster for a rung it has no drawing for",
+			dlog.Context{
+				"claim":               string(claim),
+				"invariant_violation": "every ladder rung above idle has a roster drawing",
+				"remediation":         "add the rung to rosterRung",
+			})
+		return ""
+	}
+}
+
+// mergeArm names a merge IN FLIGHT's arm. The ladder calls it only when the
+// merge state stands on the merging rung; a merge state this build does not
+// name is one the orchestrator reports, so it draws `merging` (ladder.MergeClaim).
 func mergeArm(facts footer.MergeFacts) string {
 	switch facts.State {
 	case "enqueuing":
 		return "merge_enqueuing"
 	case "queued":
 		return "merge_queued"
-	case "merging":
-		return "merging"
-	case "conflict", "parked":
-		// A PARKED merge is one stopped awaiting the user's resolution, which
-		// is exactly what merge_conflict spells ("the merge stopped on a
-		// conflict awaiting resolution"). The roster has no parked arm of its
-		// own, and a parked merge must never fall through to the session's
-		// status: the row would then read `ready` for a workspace whose merge
-		// is holding its lease.
-		return "merge_conflict"
-	case "failed":
-		return "merge_failed"
-	case "merged":
-		return "merged"
 	default:
-		return ""
+		return "merging"
 	}
 }
 
@@ -188,16 +218,9 @@ func linkArm(s *wsState, session *wsm.Session) string {
 	}
 }
 
-// sessionArm names the lifecycle of a live, proven session. It is the last
-// step, so it always answers: every path below ends at `ready`.
-func sessionArm(s *wsState, log dlog.Logger) string {
+// thinkingArm names a turn in flight's arm, empty when none is.
+func thinkingArm(s *wsState, log dlog.Logger) string {
 	switch {
-	case s.vendorBlocked:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
-		return "vendor_blocked"
-	case len(s.permissions) > 0:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case len(s.permissions) > 0"})
-		return "permission"
 	case s.turn != nil && s.turn.Act == footer.ActClear:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil && s.turn.Act == footer.ActClear"})
 		return "clearing"
@@ -210,6 +233,18 @@ func sessionArm(s *wsState, log dlog.Logger) string {
 	case s.turn != nil:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil"})
 		return "thinking"
+	default:
+		return ""
+	}
+}
+
+// idleArm names the bottom rung's arm. It always answers: every path ends at
+// `ready`.
+func idleArm(s *wsState, session *wsm.Session, log dlog.Logger) string {
+	switch {
+	case noSessionArm(s, session) != "":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "no session was ever created"})
+		return "none"
 	case s.resultUnreadNow():
 		arm := s.turnEndArm()
 		if s.asyncLive() {

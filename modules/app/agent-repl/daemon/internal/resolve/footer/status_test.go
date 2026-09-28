@@ -353,7 +353,7 @@ func TestAParkedMergeDrawsTheOrchestratorsComposedLine(t *testing.T) {
 	h.r.SetMerge(testWS, MergeFacts{State: "parked", ParkedLine: "conflict in api.go needs you"})
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetMerging().GetParked().GetLine()
+	got := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine()
 	if got != "conflict in api.go needs you" {
 		t.Fatalf("parked line = %q, want the orchestrator's own sentence", got)
 	}
@@ -697,11 +697,12 @@ func TestAnOpenDegradedWindowDrawsAServingLinkAsDegraded(t *testing.T) {
 	}
 }
 
-func TestDisconnectedOutranksEveryOtherStatus(t *testing.T) {
-	// Arrange
+func TestDisconnectedOutranksATerminalMergeAndATurn(t *testing.T) {
+	// Arrange: a failed merge is over, so a broken route outranks it (the one
+	// ladder, resolve/ladder).
 	h := newHarness(t)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
+	h.r.SetMerge(testWS, MergeFacts{State: "failed"})
 
 	// Act
 	h.r.OnLink(testWS, shimclient.LinkDead)
@@ -709,6 +710,163 @@ func TestDisconnectedOutranksEveryOtherStatus(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "disconnected" {
 		t.Fatalf("status = %q, want disconnected", got)
+	}
+}
+
+func TestATurnAcceptedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
+	// Arrange: no link state has ever been seen.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+
+	// Act: the daemon accepts a prompt before the session is spawned.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert: the route is coming up, which the roster draws `init` from the
+	// same two facts (ladder.AwaitingBringUp).
+	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
+	}
+}
+
+func TestAMergeInFlightOutranksDisconnected(t *testing.T) {
+	// Arrange: a merge in flight is the daemon's own fact, knowable whatever
+	// the route does, so it outranks the link (the one ladder, resolve/ladder).
+	h := newHarness(t)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+// TestAStoppedMergeIsNeverMerging pins the owner's ruling of 2026-09-28: a
+// merge that stopped is its own arm, never a `merging` step, so it can close
+// no composer.
+func TestAStoppedMergeIsNeverMerging(t *testing.T) {
+	cases := []struct {
+		state string
+		want  string
+	}{
+		{state: "conflict", want: "merge_conflict"},
+		{state: "parked", want: "merge_conflict"},
+		{state: "failed", want: "merge_failed"},
+		{state: "merged", want: "merged"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, MergeFacts{State: tc.state})
+
+			// Assert
+			if got := h.status(t); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMergeStoppedOnAConflictHasNoFinerStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "conflict"})
+
+	// Assert
+	if sub := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetSubstatus(); sub != nil {
+		t.Fatalf("substatus = %+v, want unset: the conflict's name is the whole fact", sub)
+	}
+}
+
+func TestAFailedMergeOutranksATurnInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "failed"})
+
+	// Assert
+	if got := h.status(t); got != "merge_failed" {
+		t.Fatalf("status = %q, want merge_failed", got)
+	}
+}
+
+func TestAMergeInFlightOutranksAVendorBlock(t *testing.T) {
+	// Arrange: the roster always ranked the merge above vendor_blocked, and
+	// the one ladder keeps that order.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "queued", QueuePosition: 1, QueueDepth: 1})
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAMergeInFlightOutranksTheMomentaryInterrupted(t *testing.T) {
+	// Arrange: the momentary interrupted is a turn END, so it sits in the idle
+	// rung under every claim above it.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.SetMerge(testWS, MergeFacts{State: "enqueuing"})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAParkedSessionIsNeverDisconnectedWhateverItsLink(t *testing.T) {
+	// Arrange: the ladder skips the whole link rung for a parked session.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkRedialing)
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+func TestAVendorCompactionBeforeItsTurnIsThinking(t *testing.T) {
+	// Arrange: the roster draws `compacting` from this same fact the moment it
+	// lands, so the strip must not read idle beside it.
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
+		t.Fatalf("status = %q, want thinking · compacting", h.status(t))
 	}
 }
 
@@ -755,6 +913,7 @@ func TestEveryFooterStatusArmIsPaintedByTheVocabulary(t *testing.T) {
 	arms := []string{
 		"idle", "thinking", "waiting", "interrupted", "merging",
 		"background", "blocked", "disconnected", "closing", "loading",
+		"merge_conflict", "merge_failed", "merged",
 	}
 	emitted := map[string]bool{}
 	for _, arm := range arms {
@@ -790,6 +949,9 @@ func statusArmsFromProto() []string {
 		{Status: &frontendv1.FooterStatus_Disconnected{}},
 		{Status: &frontendv1.FooterStatus_Closing{}},
 		{Status: &frontendv1.FooterStatus_Loading{}},
+		{Status: &frontendv1.FooterStatus_MergeConflict{}},
+		{Status: &frontendv1.FooterStatus_MergeFailed{}},
+		{Status: &frontendv1.FooterStatus_Merged{}},
 	}
 	out := make([]string, 0, len(probes))
 	for _, probe := range probes {
@@ -1056,5 +1218,17 @@ func TestAShimsDeathEndsTheTurnTheStripDrew(t *testing.T) {
 				t.Fatalf("thinking = %v, want %v; status %v", got, tt.wantThinking, h.view(t).GetStrip().GetStatus())
 			}
 		})
+	}
+}
+
+// authFailure is a vendor refusal: the account's credentials were refused.
+func authFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
+					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
+			},
+		},
 	}
 }

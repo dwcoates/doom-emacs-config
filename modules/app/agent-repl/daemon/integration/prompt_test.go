@@ -903,7 +903,7 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 // has come to REST holding it, which is what a submission is refused against.
 //
 // WHY NOT THE MERGING ARM. `FooterStatus.merging` is the arm for every merge
-// substatus, ENQUEUING included -- and enqueuing is published by the
+// IN FLIGHT, ENQUEUING included -- and enqueuing is published by the
 // MergeWorkspace request itself, before the queue pump has admitted anything
 // and before any lease exists. Waiting on the arm therefore returned at
 // enqueuing, so every assertion past it raced a merge that was still running:
@@ -979,7 +979,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	pushConcludedTurn(f.shim, mainAgent, "merge-conflict-brief")
 	awaitFooter(t, f, footer, "the merge parked on its conflict", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
 
 	// Act
