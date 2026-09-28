@@ -220,15 +220,23 @@ func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Co
 // quarantine moves a malformed entry aside, where a person can still read what
 // was written. It is the ONE way an entry leaves the ingress without its
 // prompt reaching the queue, so it is a WARNING naming why.
+//
+// THE WARNING IS WRITTEN ONLY ONCE THE ENTRY HAS MOVED. It states a completed
+// quarantine, so a reader who sees it finds the file under quarantine/; a move
+// that fails is an ERROR instead, with the malformation named beside it.
 func (i *ingress) quarantine(log dlog.Logger, path string, cause error) {
-	log.Warn(opQuarantine, "quarantining a malformed held-prompt entry", dlog.Context{"cause": cause.Error()})
+	fields := dlog.Context{"cause": cause.Error()}
 	if err := os.MkdirAll(i.deps.QuarantineDir, 0o755); err != nil {
-		log.Error(opQuarantine, "could not create the quarantine directory", dlog.Context{"cause": err.Error()})
+		log.Error(opQuarantine, "could not create the quarantine directory for a malformed held-prompt entry; it stays for the next sweep",
+			dlog.Context{"cause": cause.Error(), "error": err.Error()})
 		return
 	}
 	if err := os.Rename(path, filepath.Join(i.deps.QuarantineDir, filepath.Base(path))); err != nil {
-		log.Error(opQuarantine, "could not quarantine the entry", dlog.Context{"cause": err.Error()})
+		log.Error(opQuarantine, "could not quarantine a malformed held-prompt entry; it stays for the next sweep",
+			dlog.Context{"cause": cause.Error(), "error": err.Error()})
+		return
 	}
+	log.Warn(opQuarantine, "quarantined a malformed held-prompt entry", fields)
 }
 
 // Compile-time proof that ingress is an Ingress.

@@ -338,6 +338,26 @@ func TestAMalformedEntryIsQuarantinedWithAWarning(t *testing.T) {
 	}
 }
 
+func TestAQuarantineThatCannotMoveTheEntryIsAnErrorNotAWarning(t *testing.T) {
+	// Arrange: a plain file where the quarantine directory belongs.
+	w := newWorld(t)
+	w.writeRaw("held_20260928T120001_a.json", `{"version":1`)
+	if err := os.WriteFile(filepath.Join(w.dir, "quarantine"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	if got := len(w.records("warn", opQuarantine)); got != 0 {
+		t.Fatalf("WARN %s records = %d, want 0: the entry never moved", opQuarantine, got)
+	}
+	if got := len(w.records("error", opQuarantine)); got != 1 {
+		t.Fatalf("ERROR %s records = %d, want 1", opQuarantine, got)
+	}
+}
+
 func TestATemporaryFileIsNeverRead(t *testing.T) {
 	// Arrange: a producer still writing, under its dot-prefixed temp name.
 	w := newWorld(t)
