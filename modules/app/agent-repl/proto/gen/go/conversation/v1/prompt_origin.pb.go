@@ -85,6 +85,23 @@ const (
 	// to report "resumed after restart" instead of presenting work the user did
 	// not just ask for as though they had.
 	PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART PromptOrigin = 28
+	// A turn the VENDOR started on its own, with no StartTurn behind it.
+	//
+	// The vendor runs turns nobody submitted: a background subagent's hand-back
+	// report arriving makes the main agent reply, and so does a background
+	// task's notification. The shim ADOPTS every such turn as a real turn: it
+	// mints the turn id itself and writes a prompt row of this origin as the
+	// turn's FIRST row, on the same ordered plane as everything the turn goes on
+	// to produce, so no frame and no terminal of the turn is ever without a turn
+	// id, and a consumer learns the turn opened before it sees any of its rows.
+	//
+	// THE ROW IS AN EDGE, NOT WORDS. `said` is empty: nobody said anything, and
+	// what drove the turn (a peer message, a task notification) is its own row.
+	// A feed draws no prompt bubble for it; a consumer that tracks the running
+	// turn opens the turn on it, once.
+	//
+	// Never submitted by a client: only the shim produces it.
+	PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED PromptOrigin = 29
 )
 
 // Enum value maps for PromptOrigin.
@@ -118,6 +135,7 @@ var (
 		25: "PROMPT_ORIGIN_MERGE_AFTER_ACTION",
 		26: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
 		28: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
+		29: "PROMPT_ORIGIN_VENDOR_STARTED",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -148,6 +166,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_AFTER_ACTION":          25,
 		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 26,
 		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        28,
+		"PROMPT_ORIGIN_VENDOR_STARTED":              29,
 	}
 )
 
@@ -182,7 +201,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xc6\b\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xe8\b\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -212,7 +231,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x18\x12$\n" +
 	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x19\x12-\n" +
 	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x12&\n" +
-	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1cB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c\x12 \n" +
+	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1dB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

@@ -209,6 +209,10 @@ type Queue interface {
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
+	// OnTurnAdopted is the LifecycleSink's vendor-started turn: its durable
+	// row is recorded and the roster takes its turn fact, exactly as for a
+	// turn the queue delivered, so its end closes through the one door.
+	OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation:
 	// each turn ended while no daemon was watching, so its durable row is
 	// closed as orphaned. Nothing is popped or delivered: none of them was the

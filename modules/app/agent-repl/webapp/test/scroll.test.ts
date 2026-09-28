@@ -16,6 +16,8 @@ import {
   movesToward,
   sectionTakesDelta,
   type ReanchorBox,
+  type AnchorRows,
+  feedAnchorRows,
   sectionFor,
   sectionTakesWheel,
   wheelDeltaPx,
@@ -2278,5 +2280,333 @@ describe("installIntentScroll: an open section keeps its whole wheel", () => {
     const e = wheelAt(feed, 40);
     // Assert — closed, and left to the browser to scroll the feed.
     expect([scroll.classList.contains("expanded"), e.defaultPrevented]).toEqual([false, false]);
+  });
+});
+
+/**
+ * A feed laid out as a stack of rows of HEIGHTS, the box's viewport top at 0,
+ * so a row's viewport top is its content top minus `scrollTop`. HIDDEN rows
+ * draw no box. The box does not clamp, and ROUND makes it round `scrollTop`
+ * the way a real box does.
+ */
+function anchoredFeed(heights: number[], scrollTop: number, opts: { round?: boolean } = {}) {
+  const host = document.createElement("div");
+  const h = [...heights];
+  const hidden = new Set<Element>();
+  const row = (i: number): HTMLElement => {
+    const el = document.createElement("div");
+    el.dataset.feedRow = `r${i.toString()}`;
+    return el;
+  };
+  heights.forEach((_, i) => host.append(row(i)));
+  let top = scrollTop;
+  const box = {
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(next: number) {
+      top = opts.round === true ? Math.round(next) : next;
+    },
+    clientHeight: 300,
+    get scrollHeight() {
+      return h.reduce((sum, x) => sum + x, 0);
+    },
+  };
+  const rows: AnchorRows = {
+    host,
+    viewportTop: () => 0,
+    edges: (el) => {
+      if (hidden.has(el)) return null;
+      const i = [...host.children].indexOf(el);
+      if (i < 0) return null;
+      const at = h.slice(0, i).reduce((sum, x) => sum + x, 0) - box.scrollTop;
+      return { top: at, bottom: at + (h[i] ?? 0) };
+    },
+  };
+  let onScroll = (): void => {};
+  let onResize = (): void => {};
+  let onInput = (): void => {};
+  const tail = new TailFollow(box, () => null, rows);
+  tail.observe(
+    (cb) => (onScroll = cb),
+    (cb) => (onResize = cb),
+    (cb) => (onInput = cb),
+  );
+  return {
+    box,
+    host,
+    h,
+    hidden,
+    tail,
+    scroll: () => onScroll(),
+    resize: () => onResize(),
+    input: () => onInput(),
+    /** Insert a row of HEIGHT at the top, as a prepend does. */
+    prepend: (height: number) => {
+      host.prepend(row(-1));
+      h.unshift(height);
+    },
+  };
+}
+
+describe("TailFollow's scroll anchoring", () => {
+  // Rows at content tops 0, 400, 800, 1200; the reader at 500 sees r1's tail
+  // and r2 from its top, so r2 is the anchor.
+  const rows = [400, 400, 400, 400];
+
+  it("shifts the view by exactly a growth above the reader", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act — r0, wholly above, lays out 200px taller.
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(700);
+  });
+
+  it("moves nothing for a growth below the reader", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.h[3] = 900;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("moves nothing when the anchor row itself grows, since its top stays put", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.h[2] = 700;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("keeps the rows below a partly visible row still when that row grows", () => {
+    // Arrange — r1 runs from above the viewport into it.
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.h[1] = 450;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(550);
+  });
+
+  it("keeps a reader who follows the tail at the tail", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.tail.promptSent();
+    // Act
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1800);
+  });
+
+  it("measures a growth the scroll event's layout already holds before taking a new anchor", () => {
+    // Arrange — THE PROTOTYPE'S FLAW: a row laid out between two frames, seen
+    // first by a scroll event rather than a resize.
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.h[0] = 600;
+    f.scroll();
+    // Assert
+    expect(f.box.scrollTop).toBe(700);
+  });
+
+  it("takes the anchor afresh after the reader scrolls", () => {
+    // Arrange — the reader moves down to 900: r3 becomes the anchor.
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    f.input();
+    f.box.scrollTop = 900;
+    f.scroll();
+    // Act — r2, now above the anchor, grows.
+    f.h[2] = 500;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1000);
+  });
+
+  it("counts a prepend's own measure once, not again at the next size change", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    f.prepend(300);
+    f.tail.prependCompensation(300);
+    // Act
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(800);
+  });
+
+  it("counts a thinking row's collapse once, not again at the next size change", () => {
+    // Arrange — r0 (bottom 400, 100px above the viewport) collapses to 100px.
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    f.h[0] = 100;
+    f.tail.collapseCompensation({ boxTop: 0, rowBottomBefore: -100, rowBottomAfter: -400 });
+    // Act
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(200);
+  });
+
+  it("follows the anchor when a caller's measure misses a change it did not make", () => {
+    // Arrange — r0 grew 50px as well, before the prepend's own 300px.
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    f.h[0] = 450;
+    f.prepend(300);
+    // Act
+    f.tail.prependCompensation(300);
+    // Assert
+    expect(f.box.scrollTop).toBe(850);
+  });
+
+  it("takes the caller's measure when it holds no anchor", () => {
+    // Arrange — no scroll event or resize yet, so no anchor was taken.
+    const f = anchoredFeed(rows, 500);
+    f.prepend(300);
+    // Act
+    f.tail.prependCompensation(300);
+    // Assert
+    expect(f.box.scrollTop).toBe(800);
+  });
+
+  it("anchors on the last row when none starts in view", () => {
+    // Arrange — the reader is inside r3, the last row; r2 then grows.
+    const f = anchoredFeed(rows, 1300);
+    f.scroll();
+    // Act
+    f.h[2] = 500;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1400);
+  });
+
+  it("skips a row that draws no box", () => {
+    // Arrange — r2 is hidden, so r3 anchors; r0 then grows.
+    const f = anchoredFeed(rows, 500);
+    f.hidden.add(f.host.children[2]);
+    f.scroll();
+    // Act
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(700);
+  });
+
+  it("carries what the box's rounding did not take into the next correction", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500, { round: true });
+    f.scroll();
+    // Act — two growths of 100.4px: rounded one at a time they would lose 0.8px.
+    f.h[0] = 500.4;
+    f.resize();
+    f.h[0] = 600.8;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(701);
+  });
+
+  it("records each correction at DEBUG with its cause, delta and anchor row", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.anchor-corrected");
+    expect([record.level.case, record.context]).toMatchObject([
+      "debug",
+      { cause: "prependCompensation", trigger: "resize", delta: 200, anchor: "r2", from: 500, to: 700 },
+    ]);
+  });
+
+  it("records a lost anchor at DEBUG and moves nothing", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    // Act
+    f.host.children[2]?.remove();
+    f.h.splice(2, 1);
+    f.resize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.anchor-lost");
+    expect([record.level.case, record.context?.anchor, f.box.scrollTop]).toEqual(["debug", "r2", 500]);
+  });
+
+  it("records an ERROR when a height changes off the tail with no row to anchor on", async () => {
+    // Arrange — every row is drawn but none draws a box.
+    const capture = captureLogRecords("debug");
+    const f = anchoredFeed(rows, 500);
+    for (const el of f.host.children) f.hidden.add(el);
+    // Act
+    f.resize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.anchor-missing");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("reports a missing anchor once per spell", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const f = anchoredFeed(rows, 500);
+    for (const el of f.host.children) f.hidden.add(el);
+    // Act
+    f.resize();
+    f.resize();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.anchor-missing")).toHaveLength(1);
+  });
+});
+
+describe("feedAnchorRows", () => {
+  it("reads a row that draws no box as null", () => {
+    // Arrange — jsdom draws no box for anything.
+    const box = document.createElement("div");
+    const host = document.createElement("div");
+    const row = document.createElement("div");
+    host.append(row);
+    // Act
+    const edges = feedAnchorRows(box, host).edges(row);
+    // Assert
+    expect(edges).toBeNull();
+  });
+
+  it("reads a drawn row's edges off its bounding rect", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const host = document.createElement("div");
+    const row = document.createElement("div");
+    row.getClientRects = () => [{}] as unknown as DOMRectList;
+    row.getBoundingClientRect = () => ({ top: 30, bottom: 90 }) as DOMRect;
+    // Act
+    const edges = feedAnchorRows(box, host).edges(row);
+    // Assert
+    expect(edges).toEqual({ top: 30, bottom: 90 });
+  });
+
+  it("reads the viewport top off the box", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.getBoundingClientRect = () => ({ top: 12 }) as DOMRect;
+    // Act
+    const top = feedAnchorRows(box, document.createElement("div")).viewportTop();
+    // Assert
+    expect(top).toBe(12);
   });
 });

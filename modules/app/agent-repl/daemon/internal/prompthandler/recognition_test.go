@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/sessioncommand"
 )
 
 func TestRecognizeReportsTheFourPanels(t *testing.T) {
@@ -45,6 +46,57 @@ func TestRecognizeFallsAnUnnamedCommandThroughToTheVendor(t *testing.T) {
 	// Assert
 	if got.kind != RecognizedNone {
 		t.Fatalf("recognition = %s, want it forwarded as an ordinary prompt", recognitionName(got.kind))
+	}
+}
+
+// TestRecognizeForwardsTheCommandsTheEnumNamesOnlyForTheSidecar pins that
+// /effort, /plugin and /low-priority -- named by SessionCommand so the sidecar
+// classifies their transcript envelopes, and forwarded to the vendor as
+// ordinary text before the enum named them -- are STILL forwarded, bare or
+// with an argument, never refused.
+func TestRecognizeForwardsTheCommandsTheEnumNamesOnlyForTheSidecar(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "/effort bare", text: "/effort"},
+		{name: "/effort with an argument", text: "/effort high"},
+		{name: "/plugin bare", text: "/plugin"},
+		{name: "/plugin with an argument", text: "/plugin install foo"},
+		{name: "/low-priority bare", text: "/low-priority"},
+		{name: "/low-priority with trailing text", text: "/low-priority please"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act
+			got := recognize(tc.text)
+			// Assert
+			if got.kind != RecognizedNone {
+				t.Fatalf("recognize(%q) = %s, want it forwarded as an ordinary prompt", tc.text, recognitionName(got.kind))
+			}
+		})
+	}
+}
+
+// TestForwardedCommandsAreNamedByTheEnum pins that every forwarded command is
+// one the SessionCommand table recognizes: an entry the enum does not name
+// would be dead, since an unnamed command is forwarded anyway.
+func TestForwardedCommandsAreNamedByTheEnum(t *testing.T) {
+	for command := range ForwardedCommands {
+		t.Run(command.String(), func(t *testing.T) {
+			// Arrange
+			found := false
+			// Act
+			for _, spec := range sessioncommand.Specs() {
+				if spec.Command == command {
+					found = true
+				}
+			}
+			// Assert
+			if !found {
+				t.Fatalf("%s is forwarded but the SessionCommand table does not name it", command)
+			}
+		})
 	}
 }
 

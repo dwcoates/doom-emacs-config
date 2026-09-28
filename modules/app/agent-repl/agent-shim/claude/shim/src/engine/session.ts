@@ -46,6 +46,7 @@ import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
+import { describeVendorTaskAnswer } from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
@@ -56,6 +57,8 @@ import {
   closingSubagentTerminal,
   findBashStart,
   findUnit,
+  resumedAgentAnnouncement,
+  resumedRecipient,
   stoppedBashTerminal,
 } from "../store/reconcile.js";
 import type {
@@ -115,6 +118,7 @@ import {
   KeepaliveCadence,
   KeepaliveRewind,
   KeepaliveScope,
+  isTopLevelReply,
   keepalivePromptText,
   REAL_SCHEDULER,
   type KeepaliveAttribution,
@@ -554,6 +558,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The one turn that may be open. Written ONLY through {@link setOpen}. */
   let open: OpenTurn | undefined;
   /**
+   * A turn the vendor started on its own WHILE THE KEEP-ALIVE HOLDS THE SLOT.
+   *
+   * The keep-alive's send waits in the vendor behind a turn the vendor runs
+   * first (a hand-back that arrived before the beat), so for that turn's length
+   * two turns are in play: the keep-alive, which nobody outside this process
+   * may see, and the vendor's own, which everyone must. The vendor's turn is
+   * adopted here rather than into the slot so the keep-alive's machinery (the
+   * StartTurn waiting behind it, its rewind watch) is untouched; it closes on
+   * its own result, which the vendor always delivers before the keep-alive's.
+   */
+  let besideKeepalive: OpenTurn | undefined;
+  /**
    * HOW the person commanded the last stop issued on the main thread, held for
    * the stopped turn's terminal (`KillTurnRequest.commanded_by`; `command` is
    * undefined when the caller stated none).
@@ -779,17 +795,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // FOREGROUND WORK INCLUDED: a synchronous subagent is a task the vendor
       // tracks too, and its asks name that task id exactly as a detached one's
       // do. `tracked` translates the id; it says nothing about liveness.
-      const byTask = live.tracked(vendorAgentId);
-      if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
-        return subagentId(byTask.toolUseId);
-      }
-      // A vendor that names the spawning call directly is taken at its word.
       //
-      // Only the LIVE set resolves: once the subagent has concluded there is no
-      // book still taking questions, and the ask falls back to the main agent
-      // with the log note, which is the contract for an unaddressable ask.
-      if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
-      return undefined;
+      // THE FOLD'S PAIRING COMES FIRST, because the task's own call is NOT
+      // always its spawn: a subagent RESUMED BY `SendMessage` runs a task whose
+      // call is the send, and crediting its asks to the send's id addressed a
+      // book nobody writes (2026-09-27). The fold names the agent from the join
+      // its spawn recorded, or from the store's answer at the resume.
+      const known = deps.fold.taskAgent(vendorAgentId);
+      if (known.kind === "named") return known.agent;
+      if (known.kind === "unknown") {
+        const byTask = live.tracked(vendorAgentId);
+        if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
+          return subagentId(byTask.toolUseId);
+        }
+        // A vendor that names the spawning call directly is taken at its word.
+        if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
+      }
+      // NOTHING ON THE STREAM NAMES IT: a resume whose agent is unpaired here,
+      // or an agent whose task this process never saw start (it restarted
+      // since). The id is the vendor's task locator, and the store holds its
+      // pairing. A miss is recorded there and the ask falls back to the main
+      // agent, which is the contract for an unaddressable ask.
+      return agentFromStore(vendorAgentId, "permission");
     },
     persist: (entries) => deps.persistence.write(entries),
     // THE RUNNING VENDOR TURN'S ATTRIBUTION, not the shim's open turn: a
@@ -818,11 +845,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * THE TURN A ROW PRODUCED NOW BELONGS TO, under its keep-alive attribution:
    * the open turn, except that while the keep-alive is the open turn only the
-   * keep-alive's own rows carry its id. A row produced with no turn open, or
-   * one the keep-alive did not produce while it is open, belongs to no turn.
+   * keep-alive's own rows carry its id, and a row it did not produce belongs
+   * to the vendor turn adopted beside it. With no turn open, a row belongs to
+   * the turn a kill just stopped while that turn's stop result is still owed,
+   * and otherwise to no turn -- which a vendor turn's own frames never meet,
+   * because {@link adoptVendorTurn} opens one for them first.
    */
   function turnFor(keepalive: boolean): conversationv1.TurnId | undefined {
-    return open !== undefined && (!open.keepalive || keepalive) ? open.id : undefined;
+    if (open !== undefined && (!open.keepalive || keepalive)) return open.id;
+    if (keepalive) return undefined;
+    if (besideKeepalive !== undefined) return besideKeepalive.id;
+    // THE STOPPED TURN'S TAIL. A kill clears the slot before the vendor's stop
+    // result arrives (engine/turn.ts), and everything the stopped turn still
+    // emits up to that result is its own -- its terminal above all.
+    return stopCommand?.turn;
   }
 
   function requireIdentity(): SessionIdentity {
@@ -1710,6 +1746,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // writes it into every row (the writer stores nothing tagged), and the push
     // plane drops every tagged session fact.
     const attribution = keepaliveScope.attribute(message);
+    adoptVendorTurn(message, attribution);
     noteRewindBoundary(message);
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
@@ -1717,6 +1754,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message);
+    // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
+    // before the fold, which cannot await: the pairing of its vendor task
+    // locator with its agent is the sidecar's, on record since the agent first
+    // ran. Awaited HERE, inside the one serial message loop, so no later
+    // message can be folded ahead of this one.
+    const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution));
+    if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext(attribution));
     if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
@@ -1731,10 +1775,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
     // rewind itself refuses everything that is not an assistant record of the
     // open real turn (see engine/keepalive.ts).
-    rewind.noteRecord(
-      message,
-      open === undefined ? undefined : { turnId: open.id.value, keepalive: open.keepalive },
-    );
+    rewind.noteRecord(message, recordTurn(attribution));
     if (output.turnEnded === undefined) return;
     // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
     // WHOLE length: the messages that follow the refused one are the same
@@ -1747,8 +1788,96 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A VENDOR TURN ENDING IS NOT THE KEEP-ALIVE ENDING. Only the result that
     // answers the keep-alive's own send closes it; a turn the vendor ran on its
     // own while the keep-alive waited leaves it open.
-    if (open?.keepalive === true && !attribution.endsKeepalive) return;
+    if (open?.keepalive === true && !attribution.endsKeepalive) {
+      if (!attribution.keepalive) closeBesideKeepalive();
+      return;
+    }
     await closeTurn();
+  }
+
+  /**
+   * The turn a vendor record arrived under, as the rewind anchor needs it: the
+   * open turn, or the vendor turn adopted beside the keep-alive for a record
+   * the keep-alive did not produce. That turn is real conversation, so its
+   * assistant records ARE anchors, and a rewind past the keep-alive keeps them.
+   */
+  function recordTurn(attribution: KeepaliveAttribution): { turnId: string; keepalive: boolean } | undefined {
+    if (open?.keepalive === true && !attribution.keepalive && besideKeepalive !== undefined) {
+      return { turnId: besideKeepalive.id.value, keepalive: false };
+    }
+    return open === undefined ? undefined : { turnId: open.id.value, keepalive: open.keepalive };
+  }
+
+  /**
+   * THE VENDOR STARTED A TURN ON ITS OWN, AND THE SHIM ADOPTS IT.
+   *
+   * The vendor runs turns no StartTurn asked for: a background subagent's
+   * hand-back arriving makes the main agent reply, and a background task's
+   * notification does the same. Such a turn used to run with no turn open
+   * here, so its frames and its terminal carried no turn id, and every
+   * consumer that tracks the running turn -- the daemon's session watcher,
+   * prompt queue, footer and roster, the feed's turn ending and final answer
+   * -- never learned it ran.
+   *
+   * SO THIS IS THE ONE PATH A VENDOR TURN WITH NO TURN OPEN TAKES. On the
+   * turn's first main-thread REPLY frame (or its result, when it produced
+   * none), with no turn in the slot, no keep-alive attribution and no stopped
+   * turn still owed its result, the shim mints a turn id and writes a
+   * `PromptOrigin.VENDOR_STARTED` prompt row as the turn's first row, ahead
+   * of everything the turn goes on to produce on the same ordered plane. A
+   * consumer therefore sees the turn open before any of its rows, and the
+   * turn's terminal carries its id like any queued turn's.
+   *
+   * THE REPLY, NOT THE PREAMBLE. A vendor turn's `init`, its hooks and the
+   * peer message that drove it carry nothing that says a turn is running, and
+   * detached work's frames (task lifecycles, a background subagent's stream)
+   * run between turns without starting one. A top-level reply or a result is
+   * only ever emitted inside a vendor turn, so only those adopt.
+   */
+  function adoptVendorTurn(message: SdkMessage, attribution: KeepaliveAttribution): void {
+    if (attribution.keepalive) return;
+    if (message.type !== "result" && !isTopLevelReply(message)) return;
+    if (turnFor(false) !== undefined) return;
+    const agentId = requireIdentity().agentId;
+    // NOT `newUuid`: that minter names keep-alive SENDS, which the vendor echoes
+    // back, and an adoption must never shift which uuid a send carries.
+    const turn = create(conversationv1.TurnIdSchema, { value: `adopted-${randomUUID()}` });
+    const adopted: OpenTurn = { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs() };
+    const besideTheKeepalive = open?.keepalive === true;
+    if (besideTheKeepalive) {
+      besideKeepalive = adopted;
+    } else {
+      setOpen(adopted);
+      cadence?.pause();
+    }
+    const prompt = buildPrompt(
+      turn,
+      agentId,
+      create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, {}) }),
+      conversationv1.PromptOrigin.VENDOR_STARTED,
+    );
+    deps.persistence.write([promptEntry(prompt, agentId, false)]);
+    LOGGER.info(
+      {
+        turn_id: turn.value,
+        cause: "the vendor started a turn with no StartTurn pending",
+        first_message: messageKind(message),
+        vendor_session_id: identity?.vendorSessionId ?? "",
+        beside_keepalive: besideTheKeepalive,
+      },
+      "adopted a turn the vendor started on its own; it runs as a real turn under a shim-minted id",
+    );
+  }
+
+  /** The vendor turn adopted beside the keep-alive ended on its own result. */
+  function closeBesideKeepalive(): void {
+    const ended = besideKeepalive;
+    if (ended === undefined) return;
+    besideKeepalive = undefined;
+    LOGGER.info(
+      { turn_id: ended.id.value, keepalive: false, adopted: true, beside_keepalive: true },
+      "closed a turn",
+    );
   }
 
   /**
@@ -2240,7 +2369,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function closeTurn(): Promise<void> {
     const ended = open;
-    setOpen(undefined);
+    // THE VENDOR ANSWERS ITS TURNS IN ORDER, so a turn it ran ahead of the
+    // keep-alive has always ended by the time the keep-alive does. One still
+    // standing means that order broke: it takes the slot, synchronously and
+    // before anything waiting behind the keep-alive can run, rather than
+    // losing its end -- and the break is said.
+    const promoted = ended?.keepalive === true ? besideKeepalive : undefined;
+    besideKeepalive = promoted === undefined ? besideKeepalive : undefined;
+    setOpen(promoted);
+    if (promoted !== undefined) {
+      LOGGER.error(
+        {
+          keepalive_turn: ended?.id.value ?? "",
+          turn_id: promoted.id.value,
+          detail: "the vendor answered the keep-alive before the turn it ran ahead of it",
+        },
+        "the keep-alive ended before the vendor turn adopted beside it; that turn takes the slot",
+      );
+    }
     // THE REQUEST ID DIES WITH ITS TURN. It named the vendor call this turn ran
     // under; carrying it past the end would attribute idle records and the next
     // turn to a request that is already answered.
@@ -2251,7 +2397,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // yield obligation must already see the keep-alive it has to rewind past;
     // counted after an await, that prompt would build on keep-alive context.
     if (ended.keepalive) rewind.noteKeepaliveTurn();
-    cadence?.resume();
+    if (promoted === undefined) cadence?.resume();
     await applyPendingModel();
     if (identity !== undefined) {
       backupTranscript({
@@ -3518,8 +3664,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * turns has no turn to conclude.
    */
   function writeQueryDeathTerminal(died: conversationv1.SessionQueryDied, detail: string): void {
-    const ended = open;
-    if (ended === undefined || identity === undefined) return;
+    // THE VENDOR TURN ADOPTED BESIDE THE KEEP-ALIVE IS OWED ONE TOO: it is a
+    // real turn a consumer is watching, and it ends with the query.
+    for (const ended of [open, besideKeepalive]) {
+      if (ended !== undefined) writeQueryDeathTerminalFor(ended, died, detail);
+    }
+    besideKeepalive = undefined;
+  }
+
+  function writeQueryDeathTerminalFor(ended: OpenTurn, died: conversationv1.SessionQueryDied, detail: string): void {
+    if (identity === undefined) return;
     const agentId = identity.agentId;
     const coordinate = `query-died-${ended.id.value}`;
     deps.persistence.write([
@@ -3570,8 +3724,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * decision tells the user they stopped something they never touched.
    */
   function writeHostShutdownTerminal(reason: string): void {
-    const ended = open;
-    if (ended === undefined || identity === undefined) return;
+    // THE VENDOR TURN ADOPTED BESIDE THE KEEP-ALIVE IS OWED ONE TOO: it is a
+    // real turn a consumer is watching, and it ends with the query.
+    for (const ended of [open, besideKeepalive]) {
+      if (ended !== undefined) writeHostShutdownTerminalFor(ended, reason);
+    }
+    besideKeepalive = undefined;
+  }
+
+  function writeHostShutdownTerminalFor(ended: OpenTurn, reason: string): void {
+    if (identity === undefined) return;
     const agentId = identity.agentId;
     const coordinate = `host-shutdown-${ended.id.value}`;
     deps.persistence.write([
@@ -3708,6 +3870,97 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHICH AGENT a vendor task locator names, AS THE STORE ANSWERS IT — the one
+   * lookup behind all three sites that must name an agent this process cannot:
+   * the announcement of a subagent resumed by a send whose spawn this process
+   * never saw, the restore that re-announces one, and the book an ask raised by
+   * one lands on.
+   *
+   * THE ANSWER IS HANDED TO THE FOLD whatever it is: a found agent becomes the
+   * task's join (so every later message of the task, and every later ask, is
+   * named without asking again), and a miss rides the refusal record the fold
+   * writes next. This is the ONE record of the lookup itself: INFO when the
+   * store named the agent, ERROR when it did not or could not.
+   */
+  async function agentFromStore(
+    vendorTaskId: string,
+    site: "announcement" | "restore" | "permission",
+  ): Promise<conversationv1.AgentId | undefined> {
+    const answer = await deps.persistence.agentByVendorTask(requireIdentity().agentId, vendorTaskId);
+    deps.fold.learnTaskAgent(vendorTaskId, answer);
+    if (answer.kind === "found") {
+      LOGGER.info(
+        { task_id: vendorTaskId, agent: answer.agent.value, site },
+        "the store named the agent a vendor task is running",
+      );
+      return answer.agent;
+    }
+    LOGGER.error(
+      { task_id: vendorTaskId, site, detail: describeVendorTaskAnswer(answer) },
+      "the store named no agent for a vendor task this process cannot name itself",
+    );
+    return undefined;
+  }
+
+  /**
+   * THE RESTORE OF A SUBAGENT RESUMED BY A SEND: live handles whose recorded
+   * unit is a `SendMessage` rather than anything describable.
+   *
+   * A resumed subagent is announced under the send that woke it, so after a
+   * bounce the handle's unit in the book is the send and `announceLiveWork`
+   * cannot describe it. The send's settle states the vendor's own id for the
+   * agent it reached — the locator the store pairs with the agent — and the
+   * agent's own spawn unit describes it. Each such handle is announced here or
+   * recorded at ERROR (by the lookup, or below for a record that cannot be
+   * followed); every handle that is NOT a send is handed back for the
+   * caller's own undescribed path.
+   */
+  async function announceResumedAgents(
+    owner: conversationv1.AgentId,
+    book: readonly conversationv1.HistoryEntryAt[],
+    handles: readonly conversationv1.DetachedWorkId[],
+  ): Promise<{ announced: conversationv1.AgentDetachedWork[]; notResumes: conversationv1.DetachedWorkId[] }> {
+    const announced: conversationv1.AgentDetachedWork[] = [];
+    const notResumes: conversationv1.DetachedWorkId[] = [];
+    for (const handle of handles) {
+      const recipient = resumedRecipient(book, handle);
+      if (recipient.kind === "not_a_send") {
+        notResumes.push(handle);
+        continue;
+      }
+      if (recipient.kind === "no_recipient") {
+        LOGGER.error(
+          { work_id: handle.value, detail: "the send's record states no recipient the vendor resolved" },
+          "a live handle is a send whose resumed agent the record cannot name; it cannot be re-announced",
+        );
+        continue;
+      }
+      const agent = await agentFromStore(recipient.vendorTaskId, "restore");
+      if (agent === undefined) continue;
+      // THE SPAWN IS OLDER THAN THE SEND, so the pages read for the handles may
+      // stop short of it; the book is walked again for the agent's own unit.
+      const described =
+        findUnit(book, toolCallActivityId(agent.value)) === undefined
+          ? await readBookFor(owner, [agent.value])
+          : book;
+      const announcement = resumedAgentAnnouncement(described, handle, owner, agent);
+      if (announcement === undefined) {
+        LOGGER.error(
+          { work_id: handle.value, agent: agent.value, detail: "the book holds no describable spawn of the agent" },
+          "a resumed subagent the store named cannot be described from its spawn; it cannot be re-announced",
+        );
+        continue;
+      }
+      LOGGER.info(
+        { work_id: handle.value, agent: agent.value },
+        "re-announced a subagent resumed by a send, named by the store and described by its spawn",
+      );
+      announced.push(announcement);
+    }
+    return { announced, notResumes };
+  }
+
+  /**
    * Whether the record plane ANSWERED "no rows under that agent yet".
    *
    * THE CLASS IS THE MEANING, never "any error". `unknown_agent` is the store
@@ -3824,9 +4077,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // conversation's. Nothing is written for it -- an announcement with an
     // invented description is worse than a missing one -- but it is stated as
     // the record-plane loss it is.
+    const undescribedSurvivors: conversationv1.DetachedWorkId[] = [];
     const readopted = announceLiveWork(book, open.liveDetached.filter(survives), agentId, (handle) => {
-      reportUndescribableWork(handle);
+      undescribedSurvivors.push(handle);
     });
+    // A SURVIVING SUBAGENT RESUMED BY A SEND is described from its spawn, named
+    // by the store; only what is not a send is the record-plane loss.
+    const resumed = await announceResumedAgents(agentId, book, undescribedSurvivors);
+    readopted.push(...resumed.announced);
+    for (const handle of resumed.notResumes) reportUndescribableWork(handle);
 
     for (const work of open.liveDetached) {
       if (survives(work)) continue;
@@ -4234,8 +4493,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const announcements = announceLiveWork(book, handles, agentId, (handle) => {
         undescribed.push(handle);
       });
-      for (const handle of undescribed) await recordUndescribedHandle(handle);
-      return announcements;
+      // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
+      // store; only a handle that is not a send takes the undescribed path.
+      const resumed = await announceResumedAgents(agentId, book, undescribed);
+      for (const handle of resumed.notResumes) await recordUndescribedHandle(handle);
+      return [...announcements, ...resumed.announced];
     } catch (err) {
       // NO BOOK YET IS NOT AN UNREACHABLE STORE. A workspace created moments
       // ago has written no row, so the store answers `unknown_agent` -- its
@@ -4338,7 +4600,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * the daemon about the open turn asks this, never `open` itself.
    */
   function servedOpenTurn(): OpenTurn | undefined {
-    return open === undefined || open.keepalive ? undefined : open;
+    // An adopted turn IS served: the daemon learns it from its prompt row and
+    // tracks it like any other, and a re-attaching daemon learns it here.
+    return open === undefined || open.keepalive ? besideKeepalive : open;
   }
 
   function servedTurnInFlight(): { turnInFlight?: conversationv1.TurnId } {

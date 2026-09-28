@@ -149,29 +149,32 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * because the tab-bar entry and this row are two drawings of ONE mode and may
  * never disagree.
  *
- * PARTIAL means "you have already seen this workspace's finished response".
+ * PARTIAL means "you have already read this workspace's last turn result".
  * Emacs reports a dwell (MarkWorkspaceViewed) once the user has dwelt on the
  * workspace's panels, and the marker changes nothing about the lifecycle: the
  * status dot keeps its colour in either mode, and only the row's NAME text
  * recedes to the muted colour while the marker stands.
  *
- * DONE-ONLY. The marker is PRESENT only on a row whose `status` is `done`,
- * never on any other arm, however long the user has looked at it: every other
- * arm is live work (thinking, a permission ask, a merge running) or an
- * exceptional state (severed, dead, vendor_blocked, a merge conflict), and
- * neither may ever be drawn deprioritized. The daemon decides this: a dwell
- * reported while the row is not `done` is DROPPED, not held for later, so a
- * row that goes on to finish is FULL until the user dwells on the finished
- * response. A row carrying this marker with any arm but `done` is a contract
- * breach.
+ * TURN-END-ONLY. The marker is PRESENT only on a row whose `status` is a turn
+ * end, `done` or `interrupted`, never on any other arm, however long the user
+ * has looked at it: every other arm is live work (thinking, a permission ask,
+ * detached work, a merge running) or an exceptional state (severed, dead,
+ * vendor_blocked, a merge conflict), and neither may ever be drawn
+ * deprioritized. The daemon decides this: a dwell reported while the row is
+ * not on a turn-end arm is DROPPED, not held for later, so a row that goes on
+ * to finish is FULL until the user dwells on the finished turn. A row carrying
+ * this marker with any other arm is a contract breach.
  *
- * THE DAEMON CLEARS IT ON ANY STATUS CHANGE, and that clear is the whole
- * reset rule: the moment a row resolves to a different `status` arm than the
- * one last published for it, the marker goes and the row is FULL again — new
- * activity is by definition not something the user has already seen. Nothing
- * else clears it, and no client waits to be told twice: a client that sees a
- * row's status change restores FULL itself, on the same rule, rather than
- * drawing a stale marker until the next push.
+ * THE MARKER IS DERIVED FROM A READ FACT, and the daemon resolves it in the
+ * same render as the row's `status`, so every push states the two in
+ * agreement and a client draws the marker as it arrives, with no rule of its
+ * own. A turn that completes or is interrupted leaves its result UNREAD; a
+ * dwell on the turn-end row READS it; the next turn resets it. While the
+ * result is unread the row holds its turn-end arm even over live detached
+ * work (see the `status` oneof's `idle_async`), FULL. Once read, the marker stands
+ * whenever the row is on its turn-end arm, including when it returns there
+ * from `idle_async`: a read result is never drawn as unread, and an unread
+ * one never as read.
  *
  * @generated from message frontend.v1.RosterRowViewed
  */
@@ -652,7 +655,8 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "permission";
   } | {
     /**
-     * The turn finished and its response is unread.
+     * The turn finished. While its result is UNREAD this arm outranks
+     * `idle_async`; once read it is drawn with `viewed` (see RosterRowViewed).
      *
      * @generated from field: frontend.v1.RosterRowStatusDone done = 8;
      */
@@ -660,7 +664,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "done";
   } | {
     /**
-     * The turn was interrupted by the user.
+     * The turn was interrupted by the user. The same read rule as `done`.
      *
      * @generated from field: frontend.v1.RosterRowStatusInterrupted interrupted = 9;
      */
@@ -677,7 +681,8 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "ready";
   } | {
     /**
-     * No foreground turn, but detached work is still running.
+     * No foreground turn, but detached work is still running, and the last
+     * turn's result (if any) has been read: an unread turn end outranks it.
      *
      * @generated from field: frontend.v1.RosterRowStatusIdleAsync idle_async = 11;
      */

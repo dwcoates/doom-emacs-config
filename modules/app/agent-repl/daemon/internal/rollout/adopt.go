@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -104,6 +105,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	}
 	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
+	c.recordDeployTakeover(m.Deploy)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
 	_, _, landed, err := c.reconcile(ctx, nil)
@@ -317,6 +319,7 @@ func (c *controller) armFromManifest() error {
 	}
 	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
+	c.recordDeployTakeover(m.Deploy)
 	added := c.armSessions(m.Daemon, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
@@ -1008,18 +1011,25 @@ func (c *controller) bounceStaleAdopted(fields dlog.Context) {
 		return
 	}
 	checked := 0
+	deferred := map[ids.WorkspaceID][]deployprogress.Note{}
 	for _, ws := range workspaces {
 		if _, live := c.deps.Shims.Client(ws.ID); !live {
 			continue
 		}
 		checked++
-		if _, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID)); err != nil {
+		check, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID))
+		if err != nil {
 			c.log.Error(opStaleness, "an adopted shim could not be judged against the installed build",
 				withCause(merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+			continue
+		}
+		if shimDeferred(check) {
+			deferred[ws.ID] = append(deferred[ws.ID], deployprogress.ShimWhenIdle)
 		}
 	}
 	c.log.Info(opStaleness, "judged every adopted shim against the installed build",
 		merge(fields, dlog.Context{"live_shims": checked}))
+	c.finishDeployStory(deferred, fields)
 }
 
 // retryAdvertise is advertise's retry loop, on the injected clock.

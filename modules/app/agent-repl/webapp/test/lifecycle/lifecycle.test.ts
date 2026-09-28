@@ -29,6 +29,7 @@ import {
   AdoptionFailed,
   adoptAtBoot,
   announceShutdown,
+  isDeployHandover,
   classifyAdoptionRefusal,
   drainReasonText,
   drawDrainNotice,
@@ -703,7 +704,8 @@ describe("startLifecycle: the daemon stream", () => {
   });
 
   it("draws the restarting notice from the announcement", async () => {
-    // ARRANGE
+    // ARRANGE: a plain bounce (no successor address). A deploy's handover
+    // draws no banner since 2026-09-27: its progress is the footer's.
     const host = document.createElement("div");
     const { client } = lifecycleClient({
       daemon: async function* () {
@@ -711,7 +713,6 @@ describe("startLifecycle: the daemon stream", () => {
           push: {
             case: "shutdownAnnounced",
             value: announced({
-              address: "127.0.0.1:9",
               cause: { kind: { case: "selfMergeRollout", value: {} } },
               outageMs: 8000,
               mintedAtMs: NOW,
@@ -1046,6 +1047,103 @@ describe("announceShutdown", () => {
     // ASSERT
     expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
     banner.dispose();
+  });
+});
+
+describe("announceShutdown: a deploy's handover is the footer's to show", () => {
+  const deployHandover = () =>
+    announced({
+      address: "127.0.0.1:9",
+      cause: { kind: { case: "selfMergeRollout", value: {} } },
+      outageMs: 8000,
+      mintedAtMs: NOW,
+    });
+
+  it("draws no banner for a deploy's handover", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const ctx = bannerContext(fakeTicker(), new RecordingSink());
+    const banner = mountBanner(host, ctx);
+    // ACT
+    announceShutdown(ctx, banner, deployHandover());
+    // ASSERT
+    expect(host.children.length).toBe(0);
+    banner.dispose();
+  });
+
+  it("still mutes the expected unreachable failure for a deploy's handover", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const ctx = bannerContext(fakeTicker(), sink);
+    const banner = mountBanner(host, ctx);
+    // ACT
+    announceShutdown(ctx, banner, deployHandover());
+    // ASSERT
+    expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
+    banner.dispose();
+  });
+
+  it("still draws the banner for an unplanned restart", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const ctx = bannerContext(fakeTicker(), new RecordingSink());
+    const banner = mountBanner(host, ctx);
+    // ACT
+    announceShutdown(
+      ctx,
+      banner,
+      announced({
+        cause: { kind: { case: "immediate", value: { reason: reason("maintenance") } } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+    );
+    // ASSERT
+    expect(host.querySelector("[data-shutdown-cause='immediate']")).not.toBeNull();
+    banner.dispose();
+  });
+
+  it("still draws the banner for a rollout with no successor address", () => {
+    // ARRANGE: the layout restart's plain bounce.
+    const host = document.createElement("div");
+    const ctx = bannerContext(fakeTicker(), new RecordingSink());
+    const banner = mountBanner(host, ctx);
+    // ACT
+    announceShutdown(
+      ctx,
+      banner,
+      announced({ cause: { kind: { case: "selfMergeRollout", value: {} } }, outageMs: 8000, mintedAtMs: NOW }),
+    );
+    // ASSERT
+    expect(host.querySelector("[data-shutdown-cause='selfMergeRollout']")).not.toBeNull();
+    banner.dispose();
+  });
+});
+
+describe("isDeployHandover", () => {
+  it.each([
+    ["the rollout with a successor", "selfMergeRollout", "127.0.0.1:9", true],
+    ["the rollout with no successor", "selfMergeRollout", undefined, false],
+  ])("answers %s", (_name, cause, address, want) => {
+    expect(
+      isDeployHandover(
+        announced({ address, cause: { kind: { case: cause, value: {} } }, outageMs: 1, mintedAtMs: NOW }),
+      ),
+    ).toBe(want);
+  });
+
+  it("answers an immediate shutdown with an address as no deploy handover", () => {
+    expect(
+      isDeployHandover(
+        announced({
+          address: "127.0.0.1:9",
+          cause: { kind: { case: "immediate", value: { reason: reason("deploy") } } },
+          outageMs: 1,
+          mintedAtMs: NOW,
+        }),
+      ),
+    ).toBe(false);
   });
 });
 

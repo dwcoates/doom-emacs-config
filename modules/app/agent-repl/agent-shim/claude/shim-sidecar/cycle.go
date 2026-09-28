@@ -53,6 +53,7 @@ import (
 	"sync"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
@@ -1523,7 +1524,7 @@ func (s *sidecar) pollAll() {
 		if !result.Changed {
 			continue
 		}
-		skips, err := s.writeBatch(result)
+		skips, err := s.writeBatch(w.target, result)
 		if err != nil {
 			if s.interrupted(err) {
 				// The process is going away; storeWrite stated the
@@ -1910,11 +1911,39 @@ func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 // the two either loses records (cursor advanced first) or duplicates them
 // (records first); only the second is survivable, by the deterministic write_id
 // on every record, which is a recovery rather than a guarantee.
-func (s *sidecar) writeBatch(result tail.PollResult) ([]storeclient.SkippedEntry, error) {
+//
+// A SUBAGENT'S BATCH STATES ITS LOCATOR. The vendor task id in the file's name
+// and the spawning call its meta file names are the two halves of the pairing
+// a shim needs to name an agent a SendMessage resumed (the resume names the
+// send, not the spawn). The sidecar is the one reader that sees both, so it
+// states the pairing on every batch of the transcript: it becomes durable with
+// the agent's first rows, and a re-statement is absorbed by the store.
+func (s *sidecar) writeBatch(target discover.Target, result tail.PollResult) ([]storeclient.SkippedEntry, error) {
 	return s.storeWrite("tailer batch", &storev1.EntryBatch{
 		Entries:       result.Entries,
 		CursorAdvance: result.Next,
+		AgentLocators: agentLocators(target),
 	})
+}
+
+// agentLocators is the vendor task pairing a batch read from `target` states:
+// one for a tool-spawned subagent's transcript, whose meta names its spawning
+// call, and none for anything else. A workflow agent is attributed to its run
+// and has no spawning call to pair; a main transcript or a spool names no
+// subagent at all. The pairing is read off the target exactly as discovery
+// resolved it — never re-derived — so the locator and the agent the batch's rows
+// are booked under cannot disagree. Discovery guarantees both halves for this
+// shape (the file name always has an `<id>`, and ReadMeta refuses a subagent
+// meta with no toolUseId); a pairing missing either would be refused by the
+// store as an invalid request, loudly, never dropped here.
+func agentLocators(target discover.Target) []*storev1.AgentLocator {
+	if target.Kind != tail.KindAgentTranscript || target.Meta.Shape != discover.ShapeSubagent {
+		return nil
+	}
+	return []*storev1.AgentLocator{{
+		VendorTaskId: target.VendorAgentID,
+		Agent:        &conversationv1.AgentId{Value: target.AgentID},
+	}}
 }
 
 // sweep states the LOST conclusions whose windows expired and writes their

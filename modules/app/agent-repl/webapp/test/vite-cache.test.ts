@@ -6,6 +6,7 @@ import buildConfig from "../vite.config";
 import unitConfig from "../vitest.config";
 import integrationConfig from "../vitest.integration.config";
 import webappLayerConfig from "../vitest.webapp-layer.config";
+import webkitConfig from "../vitest.webkit.config";
 
 /**
  * THE CACHE MUST NOT LIVE IN `node_modules`, and every config in this package
@@ -47,6 +48,7 @@ const configs: { name: string; config: { cacheDir?: string } }[] = [
   { name: "vitest.config.ts", config: unitConfig },
   { name: "vitest.integration.config.ts", config: integrationConfig },
   { name: "vitest.webapp-layer.config.ts", config: webappLayerConfig },
+  { name: "vitest.webkit.config.ts", config: webkitConfig },
 ];
 
 describe.each(configs)("$name", ({ config }) => {

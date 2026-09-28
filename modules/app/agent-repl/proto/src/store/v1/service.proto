@@ -12,6 +12,7 @@ syntax = "proto3";
 package store.v1;
 
 
+import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_live_work.proto";
 import "store/v1/endpoint_get_sidecar_cursors.proto";
 import "store/v1/endpoint_get_workflow.proto";
@@ -63,6 +64,13 @@ service ShimStore {
   // unscoped request is refused. The shim resolves each at session start —
   // re-adopt or close.
   rpc GetLiveWork(GetLiveWorkRequest) returns (GetLiveWorkResponse);
+
+  // WHICH AGENT a vendor task locator names, within the caller's lineage. The
+  // shim asks when a subagent task starts from a call that is not its spawn
+  // (a resume) and this process never saw the spawn, when it restores such an
+  // agent, and when that agent raises an ask. The pairing is the sidecar's,
+  // written with the agent's first rows (EntryBatch.agent_locators).
+  rpc GetAgentByVendorTask(GetAgentByVendorTaskRequest) returns (GetAgentByVendorTaskResponse);
 
   // ---- Writes: how a producer hands records to the store ----
 

@@ -194,6 +194,10 @@ type watcher struct {
 	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
 	// the turn ends.
 	pendingUnobserved []ids.TurnID
+	// pendingAdoptions are the vendor-started turns this watcher stood in
+	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
+	// them over ahead of the turn ends.
+	pendingAdoptions []ids.TurnID
 
 	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
 	// can join it. It is a WaitGroup rather than a sleep.
@@ -649,7 +653,10 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 // (applySessionStartedLocked). No stream row opens a turn: rows can be served
 // again, and a re-served prompt row once stood a finished turn back up in
 // flight in this watcher alone — the queue held every later prompt behind it
-// while the turn record, the footer and the roster all called it closed.
+// while the turn record, the footer and the roster all called it closed. The
+// one exception is a VENDOR_STARTED prompt row (adoptVendorTurnLocked), which
+// is the only statement of its turn's open, and which opens only a turn this
+// watcher has never had in hand.
 //
 // A TURN THAT ALREADY ENDED STAYS ENDED. Its end was already handed to every
 // observer, and nothing would ever end it a second time. It reports whether
@@ -1754,11 +1761,13 @@ type endedTurn struct {
 // the lock. Every site that routes under mu calls it right after unlocking.
 func (w *watcher) flushTurnEnds() {
 	w.mu.Lock()
+	adopted := w.pendingAdoptions
+	w.pendingAdoptions = nil
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
 	unobserved := w.pendingUnobserved
 	w.pendingUnobserved = nil
-	if len(pending) > 0 || len(unobserved) > 0 {
+	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -1770,6 +1779,11 @@ func (w *watcher) flushTurnEnds() {
 	w.mu.Unlock()
 	if len(unobserved) > 0 {
 		w.sinks.Lifecycle.OnTurnsEndedUnobserved(w.ws, unobserved)
+	}
+	// AN ADOPTION BEFORE ANY END: a vendor-started turn short enough to open
+	// and end within one flush is recorded before its close is stamped.
+	for _, turn := range adopted {
+		w.sinks.Lifecycle.OnTurnAdopted(w.ws, turn)
 	}
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)

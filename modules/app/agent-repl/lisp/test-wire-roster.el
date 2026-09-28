@@ -505,22 +505,35 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                  "{}")))
 
 (ert-deftest agent-repl-test-wire-roster-response-wraps-the-roster ()
-  "The response wraps `frontend.v1.WorkspaceRoster' itself, whole."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-watch-workspace-roster-response
-                             (format "{\"roster\":%s}"
-                                     agent-repl-test-wire-roster--roster-json))
-                            :roster)
-                 (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-workspace-roster
-                  agent-repl-test-wire-roster--roster-json))))
+  "The roster arm wraps `frontend.v1.WorkspaceRoster' itself, whole."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-watch-workspace-roster-response
+                  (format "{\"roster\":%s}" agent-repl-test-wire-roster--roster-json))
+                 (list :arm :roster
+                       :value (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-workspace-roster
+                               agent-repl-test-wire-roster--roster-json)))))
 
-(ert-deftest agent-repl-test-wire-roster-response-without-a-roster-is-a-breach ()
-  "A roster push carrying no roster is a breach, not an empty sidebar."
+(ert-deftest agent-repl-test-wire-roster-response-ending-decodes-to-its-arm ()
+  "The planned ending decodes to the `:ending' arm, carrying nothing."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-watch-workspace-roster-response
+                  "{\"ending\":{}}")
+                 '(:arm :ending :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-response-push-arms-pinned ()
+  "The response's push arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_workspace_roster.pb.go"
+                        "WatchWorkspaceRosterResponse")
+                       #'string<)
+                 (sort (list "roster" "ending") #'string<))))
+
+(ert-deftest agent-repl-test-wire-roster-response-without-an-arm-is-a-breach ()
+  "A roster push carrying neither arm is a breach, not an empty sidebar."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-watch-workspace-roster-response "{}")
-                 '("WatchWorkspaceRosterResponse" roster
-                   "required message field is absent"))))
+                 '("WatchWorkspaceRosterResponse" push "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-response-refuses-an-unknown-field ()
   "An unknown key on the response is refused."
