@@ -55,6 +55,13 @@ func newHandler(deps Deps) (*handler, error) {
 	return &handler{deps: deps, keys: newInflight()}, nil
 }
 
+// movedOn tells the wiring the workspace moved on, when anything listens.
+func (h *handler) movedOn(ctx context.Context, ws ids.WorkspaceID) {
+	if h.deps.MovedOn != nil {
+		h.deps.MovedOn(ctx, ws)
+	}
+}
+
 // Submit runs one submission, in the one order the contract fixes: the origin
 // is checked before anything is minted or mirrored, the addressed feed is
 // checked against the workspace, recognition forks the answer, and only an
@@ -106,6 +113,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if err := h.accept(ctx, ws, c, log); err != nil {
 		return Outcome{}, err
 	}
+	h.movedOn(ctx, ws)
 	log.Info(opSubmit, "the prompt was forwarded to the queue", dlog.Context{
 		"turn": string(turn), "delivered": disposition.Delivered, "parked": disposition.Parked(),
 	})
@@ -161,6 +169,7 @@ func (h *handler) act(ctx context.Context, ws ids.WorkspaceID, got recognized, i
 	if err := h.accept(ctx, ws, c, log); err != nil {
 		return Outcome{}, err
 	}
+	h.movedOn(ctx, ws)
 	log.Info(opSubmit, "a session-acting command went down the one delivery path",
 		dlog.Context{"command": got.literal, "act": act.Kind, "turn": string(act.Turn)})
 	return Outcome{Recognition: RecognizedAct, Turn: act.Turn, Act: act}, nil

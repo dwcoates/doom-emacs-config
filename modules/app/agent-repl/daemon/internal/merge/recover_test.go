@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -245,7 +246,7 @@ func TestLastTabDefaultsToTheQueue(t *testing.T) {
 // enqueueWorkspace queues one named workspace's merge.
 func enqueueWorkspace(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), ws); err != nil {
+	if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing %s: %v", ws, err)
 	}
 }
@@ -484,5 +485,35 @@ func TestRecoverWithNoDisplacedTurnsResubmitsNothing(t *testing.T) {
 	// Assert.
 	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
 		t.Fatalf("a boot with nothing displaced resubmitted %d turns, want none", n)
+	}
+}
+
+// TestRecoverSweepsTheQueueTreesADeadRunLeft covers the queue's scratch trees
+// across a crash: they are the queue's own, and the recovery removes them.
+func TestRecoverSweepsTheQueueTreesADeadRunLeft(t *testing.T) {
+	// Arrange: an interrupted merge whose run left two trees behind.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	lease := h.leaseID(t)
+	var want []string
+	for attempt := 1; attempt <= 2; attempt++ {
+		dir := treeFor(h.stateDir, lease, attempt)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("making a leftover tree: %v", err)
+		}
+		want = append(want, dir)
+	}
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if !equal(h.git.removedWorktrees, want) {
+		t.Fatalf("removed %v, want the dead run's trees %v", h.git.removedWorktrees, want)
 	}
 }

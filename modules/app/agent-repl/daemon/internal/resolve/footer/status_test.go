@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -353,7 +354,7 @@ func TestAParkedMergeDrawsTheOrchestratorsComposedLine(t *testing.T) {
 	h.r.SetMerge(testWS, MergeFacts{State: "parked", ParkedLine: "conflict in api.go needs you"})
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetMerging().GetParked().GetLine()
+	got := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine()
 	if got != "conflict in api.go needs you" {
 		t.Fatalf("parked line = %q, want the orchestrator's own sentence", got)
 	}
@@ -402,7 +403,30 @@ func TestAMergeOutranksWaiting(t *testing.T) {
 	}
 }
 
-func TestAQueryDeathBlocksTheSession(t *testing.T) {
+// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling, 2026-09-28):
+// `blocked` is only for the vendor or the account, and the next prompt
+// restarts a dead query.
+
+func TestAQueryDeathFailsTheTurnItCut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{
+			QueryDied: &conversationv1.SessionQueryDied{},
+		},
+	})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetTurnFailed() == nil {
+		t.Fatalf("status = %q, want idle · turn_failed", h.status(t))
+	}
+}
+
+func TestAQueryDeathWithNoTurnDoesNotBlock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -415,11 +439,26 @@ func TestAQueryDeathBlocksTheSession(t *testing.T) {
 	})
 
 	// Assert
-	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
-	if blocked.GetQueryDied() == nil {
-		t.Fatalf("substatus = %+v, want query_died", blocked.GetSubstatus())
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
 	}
-	if blocked.GetActivity().GetQueryDied().GetText() == "" {
+}
+
+func TestAQueryDeathStandsItsLineUnderTheFailedTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{
+			QueryDied: &conversationv1.SessionQueryDied{},
+		},
+	})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing")
 	}
 }
@@ -442,9 +481,9 @@ func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
 	})
 
 	// Assert
-	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
-	if blocked.GetActivity().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", blocked.GetActivity())
+	idle := h.view(t).GetStrip().GetStatus().GetIdle()
+	if idle.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", idle.GetActivity())
 	}
 }
 
@@ -456,10 +495,10 @@ func queryDiedFailure() *conversationv1.AgentFailure {
 	}
 }
 
-// TestAQueryDeathBlocksOnQueryDiedWhicheverStatementArrivesFirst: the session's
+// TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst: the session's
 // query_died push and the turn's query_died terminal travel by independent
-// channels, so the substatus must be query_died in either order.
-func TestAQueryDeathBlocksOnQueryDiedWhicheverStatementArrivesFirst(t *testing.T) {
+// channels, so the turn reads failed in either order.
+func TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst(t *testing.T) {
 	died := &conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
 	}
@@ -488,9 +527,8 @@ func TestAQueryDeathBlocksOnQueryDiedWhicheverStatementArrivesFirst(t *testing.T
 			tc.act(h, &turn)
 
 			// Assert
-			blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
-			if blocked.GetQueryDied() == nil {
-				t.Fatalf("substatus = %+v, want query_died", blocked.GetSubstatus())
+			if h.view(t).GetStrip().GetStatus().GetIdle().GetTurnFailed() == nil {
+				t.Fatalf("status = %q, want idle · turn_failed", h.status(t))
 			}
 		})
 	}
@@ -509,9 +547,9 @@ func TestAQueryDiedTerminalStandsTheDeadQueryLine(t *testing.T) {
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, queryDiedFailure())
 
 	// Assert
-	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
-	if blocked.GetActivity().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", blocked.GetActivity())
+	idle := h.view(t).GetStrip().GetStatus().GetIdle()
+	if idle.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", idle.GetActivity())
 	}
 }
 
@@ -584,7 +622,7 @@ func TestABlockingLimitBlocksOnUsage(t *testing.T) {
 	}
 }
 
-func TestAnUnclassifiedFailureBlocksOnVendorError(t *testing.T) {
+func TestAModelErrorBlocksOnVendorError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -593,9 +631,7 @@ func TestAnUnclassifiedFailureBlocksOnVendorError(t *testing.T) {
 
 	// Act
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{},
-		},
+		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
 	})
 
 	// Assert
@@ -604,20 +640,132 @@ func TestAnUnclassifiedFailureBlocksOnVendorError(t *testing.T) {
 	}
 }
 
+// TestEveryAgentFailureArmTakesItsClassifiedStatus walks every AgentFailure
+// arm (owner ruling, 2026-09-28): the vendor's or the account's block, the
+// turn's own failure, or an expected stop that reads as a completion.
+func TestEveryAgentFailureArmTakesItsClassifiedStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		want    string
+	}{
+		{name: "api_request_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: "blocked"},
+		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "blocked"},
+		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "blocked"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "blocked"},
+		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: "turn_failed"},
+		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: "turn_failed"},
+		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, want: "turn_failed"},
+		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, want: "done"},
+		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, want: "turn_failed"},
+		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, want: "done"},
+		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, want: "turn_failed"},
+		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, want: "turn_failed"},
+		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, want: "turn_failed"},
+		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, want: "turn_failed"},
+		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, want: "turn_failed"},
+		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, want: "turn_failed"},
+		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, want: "turn_failed"},
+		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, want: "turn_failed"},
+		{name: "query_died", failure: queryDiedFailure(), want: "turn_failed"},
+		{name: "an unset arm", failure: &conversationv1.AgentFailure{}, want: "turn_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			turn := testTurnID
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, tc.failure)
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			got := h.status(t)
+			switch {
+			case status.GetIdle().GetTurnFailed() != nil:
+				got = "turn_failed"
+			case status.GetIdle().GetDone() != nil:
+				got = "done"
+			}
+			if got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
+	// Arrange: a rejected verdict is the account refusing the session, which
+	// the roster draws vendor_blocked on the same event.
+	h := newHarness(t)
+	connected(h)
+	update := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
+	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
+		Rejected: &conversationv1.SessionRateLimitRejected{},
+	}
+
+	// Act
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetBlocked().GetUsageLimit() == nil {
+		t.Fatalf("status = %q, want blocked · usage_limit", h.status(t))
+	}
+}
+
+func TestAnAllowedRateLimitLiftsTheBlock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	rejected := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
+	rejected.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
+		Rejected: &conversationv1.SessionRateLimitRejected{},
+	}
+	h.r.OnSessionUpdate(testWS, rejected)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+func TestASessionStartLiftsAVendorBlock(t *testing.T) {
+	// Arrange: the roster lifts vendor_blocked on the same event.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
+
+	// Act
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
 func TestANewTurnClearsAStandingBlock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
-	})
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
 
 	// Act
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Assert
 	if got := h.status(t); got != "thinking" {
-		t.Fatalf("status = %q, want thinking: the next prompt restarts the query", got)
+		t.Fatalf("status = %q, want thinking: a new turn lifts the block", got)
 	}
 }
 
@@ -697,11 +845,12 @@ func TestAnOpenDegradedWindowDrawsAServingLinkAsDegraded(t *testing.T) {
 	}
 }
 
-func TestDisconnectedOutranksEveryOtherStatus(t *testing.T) {
-	// Arrange
+func TestDisconnectedOutranksATerminalMergeAndATurn(t *testing.T) {
+	// Arrange: a failed merge is over, so a broken route outranks it (the one
+	// ladder, resolve/ladder).
 	h := newHarness(t)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
+	h.r.SetMerge(testWS, MergeFacts{State: "failed"})
 
 	// Act
 	h.r.OnLink(testWS, shimclient.LinkDead)
@@ -709,6 +858,177 @@ func TestDisconnectedOutranksEveryOtherStatus(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "disconnected" {
 		t.Fatalf("status = %q, want disconnected", got)
+	}
+}
+
+func TestATurnAcceptedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
+	// Arrange: no link state has ever been seen.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+
+	// Act: the daemon accepts a prompt before the session is spawned.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert: the route is coming up, which the roster draws `init` from the
+	// same two facts (ladder.AwaitingBringUp).
+	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
+	}
+}
+
+func TestASessionAnnouncedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
+	// Arrange: no link state has ever been seen.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+
+	// Act
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert: the roster draws this window `init` from its own started fact.
+	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
+	}
+}
+
+func TestAMergeInFlightOutranksDisconnected(t *testing.T) {
+	// Arrange: a merge in flight is the daemon's own fact, knowable whatever
+	// the route does, so it outranks the link (the one ladder, resolve/ladder).
+	h := newHarness(t)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+// TestAStoppedMergeIsNeverMerging pins the owner's ruling of 2026-09-28: a
+// merge that stopped is its own arm, never a `merging` step, so it can close
+// no composer.
+func TestAStoppedMergeIsNeverMerging(t *testing.T) {
+	cases := []struct {
+		state string
+		want  string
+	}{
+		{state: "conflict", want: "merge_conflict"},
+		{state: "parked", want: "merge_conflict"},
+		{state: "failed", want: "merge_failed"},
+		{state: "merged", want: "merged"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, MergeFacts{State: tc.state})
+
+			// Assert
+			if got := h.status(t); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMergeStoppedOnAConflictHasNoFinerStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "conflict"})
+
+	// Assert
+	if sub := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetSubstatus(); sub != nil {
+		t.Fatalf("substatus = %+v, want unset: the conflict's name is the whole fact", sub)
+	}
+}
+
+func TestAFailedMergeOutranksATurnInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "failed"})
+
+	// Assert
+	if got := h.status(t); got != "merge_failed" {
+		t.Fatalf("status = %q, want merge_failed", got)
+	}
+}
+
+func TestAMergeInFlightOutranksAVendorBlock(t *testing.T) {
+	// Arrange: the roster always ranked the merge above vendor_blocked, and
+	// the one ladder keeps that order.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "queued", QueuePosition: 1, QueueDepth: 1})
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAMergeInFlightOutranksTheMomentaryInterrupted(t *testing.T) {
+	// Arrange: the momentary interrupted is a turn END, so it sits in the idle
+	// rung under every claim above it.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.SetMerge(testWS, MergeFacts{State: "enqueuing"})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAParkedSessionIsNeverDisconnectedWhateverItsLink(t *testing.T) {
+	// Arrange: the ladder skips the whole link rung for a parked session.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkRedialing)
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+func TestAVendorCompactionBeforeItsTurnIsThinking(t *testing.T) {
+	// Arrange: the roster draws `compacting` from this same fact the moment it
+	// lands, so the strip must not read idle beside it.
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
+		t.Fatalf("status = %q, want thinking · compacting", h.status(t))
 	}
 }
 
@@ -755,6 +1075,7 @@ func TestEveryFooterStatusArmIsPaintedByTheVocabulary(t *testing.T) {
 	arms := []string{
 		"idle", "thinking", "waiting", "interrupted", "merging",
 		"background", "blocked", "disconnected", "closing", "loading",
+		"merge_conflict", "merge_failed", "merged",
 	}
 	emitted := map[string]bool{}
 	for _, arm := range arms {
@@ -790,6 +1111,9 @@ func statusArmsFromProto() []string {
 		{Status: &frontendv1.FooterStatus_Disconnected{}},
 		{Status: &frontendv1.FooterStatus_Closing{}},
 		{Status: &frontendv1.FooterStatus_Loading{}},
+		{Status: &frontendv1.FooterStatus_MergeConflict{}},
+		{Status: &frontendv1.FooterStatus_MergeFailed{}},
+		{Status: &frontendv1.FooterStatus_Merged{}},
 	}
 	out := make([]string, 0, len(probes))
 	for _, probe := range probes {
@@ -1056,5 +1380,17 @@ func TestAShimsDeathEndsTheTurnTheStripDrew(t *testing.T) {
 				t.Fatalf("thinking = %v, want %v; status %v", got, tt.wantThinking, h.view(t).GetStrip().GetStatus())
 			}
 		})
+	}
+}
+
+// authFailure is a vendor refusal: the account's credentials were refused.
+func authFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
+					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
+			},
+		},
 	}
 }

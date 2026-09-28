@@ -62,17 +62,17 @@ type GateResult struct {
 	ExitCode int
 }
 
-// runGate runs the selected suites in the merge target and archives the run.
+// runGate runs the selected suites in the queue's tree and archives the run.
 //
 // An error means the run could not be CLASSIFIED: the script could not be
 // spawned, or its output could not be archived. A gate whose archive failed is
 // an unrunnable gate rather than a lost archive, because the file is the only
 // account of the failure that survives the run.
-func (o *orchestrator) runGate(ctx context.Context, lease ids.LeaseID, round int, targetDir string, sel SuiteSelection) (GateResult, error) {
+func (o *orchestrator) runGate(ctx context.Context, lease ids.LeaseID, round int, tree string, command []string, sel SuiteSelection) (GateResult, error) {
 	if err := validateSuites(sel.Suites); err != nil {
 		return GateResult{}, err
 	}
-	argv := append([]string(nil), o.deps.TestCommand...)
+	argv := append([]string(nil), command...)
 	if len(argv) == 0 {
 		return GateResult{}, fmt.Errorf("merge: no test command is configured for the gate")
 	}
@@ -82,9 +82,9 @@ func (o *orchestrator) runGate(ctx context.Context, lease ids.LeaseID, round int
 	if !sel.Full {
 		argv = append(argv, "--suites", strings.Join(sel.Suites, ","))
 	}
-	output, code, err := o.deps.TestRunner.Run(ctx, targetDir, argv)
+	output, code, err := o.deps.TestRunner.Run(ctx, tree, argv)
 	if err != nil {
-		return GateResult{}, fmt.Errorf("merge: the test gate could not run: %w", err)
+		return GateResult{}, &gateUnstartedError{err: err}
 	}
 	archive, err := o.archiveGate(lease, round, output)
 	if err != nil {
@@ -102,6 +102,16 @@ func (o *orchestrator) runGate(ctx context.Context, lease ids.LeaseID, round int
 		ExitCode:    code,
 	}, nil
 }
+
+// gateUnstartedError is a gate the runner could not start at all: the script
+// was never spawned, so there is no verdict and no output to archive.
+type gateUnstartedError struct{ err error }
+
+func (e *gateUnstartedError) Error() string {
+	return fmt.Sprintf("merge: the test gate could not run: %v", e.err)
+}
+
+func (e *gateUnstartedError) Unwrap() error { return e.err }
 
 // archiveGate writes one run's combined output under the state root's
 // merge-logs/, named by the lease and the round so a run is findable from the

@@ -235,6 +235,10 @@ type FooterSink interface {
 	// OnSessionUpdate carries context usage, the rate-limit status and the
 	// terminals the footer reflects.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
+	// OnSessionStarted is the session's (re)start, which lifts a standing
+	// vendor or account block exactly as it lifts the roster's vendor_blocked:
+	// the two surfaces must lift it on the same event (resolve/ladder).
+	OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted)
 	// OnHistoryPage is a watch's opening catch-up page — the frame a RESUMED
 	// session's whole prior conversation arrives as.
 	//

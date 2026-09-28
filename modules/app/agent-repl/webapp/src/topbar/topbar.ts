@@ -62,7 +62,11 @@ import {
   drawTopbarConnectivity,
   drawTopbarTitle,
 } from "./strip.js";
-import { drawLocalWarningStrip, drawTopbarWarningStrip } from "./warnings.js";
+import {
+  drawLocalWarningStrip,
+  drawTopbarWarningStrip,
+  reportAppearedDeployFailures,
+} from "./warnings.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -159,6 +163,7 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
         onPush: (response) => {
           const next = requireMessage(response.topbar, "WatchTopbarResponse.topbar");
           show(drawTopbarView(next, watching));
+          reportAppearedDeployFailures(view?.warnings, requireMessage(next.warnings, "TopbarView.warnings"));
           // Remembered only once it drew, so a malformed push never becomes
           // the view a failure change redraws over.
           view = next;

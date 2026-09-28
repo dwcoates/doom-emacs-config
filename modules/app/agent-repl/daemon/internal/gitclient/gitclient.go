@@ -149,6 +149,46 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 	return nil
 }
 
+// AddDetachedWorktree checks commit out at worktreeDir with a detached HEAD.
+// No branch is created, so nothing but the directory names the tree and its
+// removal leaves no ref behind. It is NOT a workspace: no log sink is attached
+// to it, because no workspace's records belong inside it.
+func (c *client) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, commit string) error {
+	_, err := c.run(ctx, "daemon.gitclient.add_detached_worktree", repoDir,
+		"worktree", "add", "--detach", worktreeDir, commit)
+	return err
+}
+
+// FastForward moves dir's checked-out branch and its tree forward to commit.
+// `--ff-only` is the whole contract: a branch that moved since commit was
+// built on is REFUSED by git rather than merged into, so the caller can never
+// land a tree it did not test.
+func (c *client) FastForward(ctx context.Context, dir, commit string) error {
+	_, err := c.run(ctx, "daemon.gitclient.fast_forward", dir, "merge", "--ff-only", commit)
+	return err
+}
+
+// IsAncestor reports whether ancestor is reachable from descendant, through
+// `merge-base --is-ancestor`: exit 0 is yes and exit 1 is no, both ANSWERS.
+// Any other exit is git failing to tell (an unknown ref, a broken repository),
+// which is never read as either answer.
+func (c *client) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	const operation = "daemon.gitclient.is_ancestor"
+	in, err := c.runRaw(ctx, operation, dir, "merge-base", "--is-ancestor", ancestor, descendant)
+	if err != nil {
+		return false, err
+	}
+	switch in.exitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	}
+	failure := in.fail()
+	c.log.Global().Error(operation, "git could not tell whether one commit is an ancestor of another", in.logContext())
+	return false, failure
+}
+
 // RemoveWorktree removes a worktree and leaves its branch alone.
 //
 // THE POSTCONDITION DECIDES SUCCESS, not the exit status of any one step. A

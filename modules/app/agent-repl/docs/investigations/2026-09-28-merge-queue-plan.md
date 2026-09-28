@@ -1,8 +1,8 @@
 # Plan: the merge queue becomes the one path to master
 
-Status: PLANNED, not started. The owner asked (2026-09-28) to circle back to it once the
-outstanding work lands. Written by the lead from its analysis of the first one-shot
-merge (workspace `prompt-bubble-height`, lease `c8a3a664006f46c1`, 2026-09-28 14:08–14:20).
+Status: fixes 1–5 DONE (branch `fix/merge-queue-core`, 2026-09-28); fixes 6–8 not started.
+Written by the lead from its analysis of the first one-shot merge (workspace
+`prompt-bubble-height`, lease `c8a3a664006f46c1`, 2026-09-28 14:08–14:20).
 
 ## What happened (evidence)
 
@@ -60,27 +60,46 @@ integration.
 
 ## Fixes (in order; each an agent branch, merged on green)
 
-1. **Park properly.**
+1. **Park properly.** DONE.
    - A parked run stays alive until it is resolved.
    - Every guidance is delivered (`deliverGuidance`) and answered.
    - Resolution is resume-with-guidance, abandon, or dequeue, and every exit releases the
      lease, the ledger and the repo lock through ONE release path. Dequeue of a RUNNING merge
      is an abandon, never a silent entry removal.
    - Summaries must be true (no "without running").
-2. **One-shot merges never kill the requester.**
+   - Landed: `parkUntilResumed` listens until a guidance is delivered and answered; a parked
+     run yields its repository's slot (`slot.go`) and, resumed, merges afresh on the new tip;
+     evict / dequeue / workspace close abandon a running merge through the one teardown.
+     "The ledger" is read as the merge's open ledger intervals (closed as `abandoned`) and
+     its queue entry; the ledger's history rows are kept.
+2. **One-shot merges never kill the requester.** DONE.
    - When the lease's requester is the workspace's own in-flight turn, the lease waits for
      that turn to end instead of `CaptureDisplaced`.
    - Nothing is marked for resubmission, and no "interrupted" row appears.
-3. **A broken gate is not a test failure.**
+   - Landed: `merge.Requester`. The command-file ingress carries no requester identity, so a
+     command-file merge is taken as the agent's own ask and never displaces; only the user's
+     MergeWorkspace rpc does. A merge whose requester is unknown (a boot recovery) never
+     displaces either.
+3. **A broken gate is not a test failure.** DONE.
    - A gate exit that means the gate itself failed to run (127, or a missing script)
      parks at once with a plain line: "the test gate itself failed to run".
    - No repair rounds.
    - Consider a separate gate-health preflight.
-4. **The queue owns master.**
+   - Landed: a missing script (preflight), an unstartable runner, and exit 127/126 park at
+     once. A repair that changes `daemon/internal/merge/` or `bin/test-all.sh` is refused and
+     parks (owner ruling below).
+4. **The queue owns master.** DONE.
    - The queue merges in a worktree of its own and fast-forwards master only after the gate
      passes.
    - master never carries a half-finished merge, and concurrent writers can't interleave.
-5. **Fix the undecodable merge feed row** (`WatchFeedResponse.row`, a required field unset).
+   - Landed: each attempt is a detached tree `<state>/merge-trees/<lease>-<n>` at the target's
+     tip; the gate runs the tree's own `bin/test-all.sh`; the target moves only by
+     `merge --ff-only` to the tested commit, and a target that moved is merged onto again.
+     Repairs (conflicts and test fixes) are the agent's commits on its own branch. Hand
+     commits to master still are not refused (that is fix 8).
+5. **Fix the undecodable merge feed row** (`WatchFeedResponse.row`, a required field unset). DONE.
+   - Landed: every sub-feed tail is replayed the feed-text-scale frame on accept, and
+     `mountBubble` required a row on every frame; it now applies the scale.
 6. **Skill: agents enqueue their own branch merges.**
    - A new skill enqueues a branch into the merge queue (through the daemon's command-file
      ingress) and waits for the outcome: landed, parked or failed.
@@ -140,3 +159,13 @@ Order: 1–5 first (the queue must be trustworthy before everything depends on i
 - On a failed deploy:
   - roll back;
   - surface the error in the topbar's error section and in every workspace's footer.
+
+## Added to fixes 1–5 (2026-09-28, lease `9cf657a4654d4c93`, 15:28:24)
+
+- A branch already contained in the target concludes as merged ("already on <target>;
+  nothing to merge"), found with `merge-base --is-ancestor`; it used to abort on the landed
+  range of a one-parent commit and draw "merge failed". DONE.
+- A concluded (failed or merged) merge's footer and roster state retires at the workspace's
+  next accepted submission (`RetireConcluded`, told by the prompt handler). It does not fit
+  inside the one release path: that path runs at the merge's end, and the concluded state is
+  what a reader should see until the workspace moves on. DONE.
