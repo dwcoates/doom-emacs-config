@@ -93,6 +93,9 @@ daemon/
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
     commandfile/   the command-file ingress ($AGENT_REPL_STATE_DIR/output/workspace_commands_*.json)
                    mapped onto the same internal paths as the rpcs
+    heldingress/   the held-prompt ingress ($AGENT_REPL_STATE_DIR/held-prompts/held_*.json): prompts a
+                   client could not hand to a live daemon, submitted through the prompt handler under
+                   their own idempotency keys once one serves
     server/        Connect handlers (validation via base functions, delegation), publishers wiring,
                    static asset origin, unowned-workspace refusal, h2c + HTTP/1.1
     boot/          boot sequence and adoption reconciliation (surviving shims, intent manifest, holds restore)
@@ -105,7 +108,7 @@ below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
 feedid, prompts, publish, apiresponses, flock, clock, sessioncommand  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
-health, commandfile, worktreereap  <  server, boot  <  cmd. The shim client and git
+health, commandfile, heldingress, worktreereap  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
 and drain controller never import each other; they meet at wsm (the
 lease) and at the shim client.
@@ -123,6 +126,8 @@ lease) and at the shim client.
 - `intent/manifest.json` — the stand-down intent manifest (pid + intent per
   session), written by the outgoing daemon, reconciled by the incoming one.
 - `output/workspace_commands_*.json` — the command-file ingress.
+- `held-prompts/held_*.json` — the held-prompt ingress ("heldingress" below);
+  `held-prompts/quarantine/` keeps a malformed entry where a person can read it.
 - `logs/agent-repl-<workspace-log-id>-<sink>-*.log` — the per-workspace durable
   sink TARGETS. The sinks themselves are symlinks at
   `<workspace>/.claude/emacs/{daemon,shim,webapp,sidecar}.log` per
@@ -816,3 +821,50 @@ topbar swap imports):
   182000→"182k", 999949→"999.9k", 999950→"1M", 1200000→"1.2M".
 - Suffixes composed by the call site ("18.2k in", "12.4k tok") wrap this
   value; the formatter emits only the figure.
+
+## heldingress
+
+A client whose `SubmitPrompt` the daemon did not answer — no daemon, a stuck
+one, a handover refusal — never holds the prompt in its own memory. It writes
+ONE file per prompt into `$AGENT_REPL_STATE_DIR/held-prompts/`, under a
+dot-prefixed temporary name renamed into place, named
+`held_<UTC %Y%m%dT%H%M%S.%N>_<md5hex(dir)[:8]>_<idempotency key>.json` so
+name order is write order and a client can count a workspace's waiting prompts
+from the names alone:
+
+```json
+{
+  "version": 1,
+  "project_dir": "/abs/path/of/the/workspace/worktree",
+  "idempotency_key": "the key of the SubmitPrompt attempt it re-drives",
+  "origin": "PROMPT_ORIGIN_USER_SENT",
+  "said": { "content": { "blocks": [ { "text": { "text": "..." } } ] } },
+  "queued_at": "2026-09-28T12:00:00.000000000Z"
+}
+```
+
+`said` is the request's `UserSaid` in protojson and `origin` the
+`PromptOrigin` value name. Unknown fields, another version, a relative
+directory, a missing key or an unspecified origin make the file malformed.
+
+The daemon sweeps the directory at start and every 250ms, in name order, and
+hands each entry to `prompthandler.Handler.Submit` — the rpc's own body — under
+the entry's key. So the queue holds, classifies and delivers it by its ordinary
+rules and it appears in the held tray like any held prompt. An entry leaves the
+directory in exactly two ways:
+
+- its prompt was ACCEPTED (INFO `daemon.heldingress.ingest`) or the key was
+  already accepted, by this daemon or an earlier one (INFO
+  `daemon.heldingress.dedupe`) — the file is removed only after that answer,
+  and the workspace's host state is then re-pushed so a client re-counting the
+  directory reads the removal;
+- it is malformed: moved to `quarantine/` at WARN.
+
+A crash before the removal leaves the file; the next sweep resubmits it under
+the same key and the durable claim answers it as a duplicate, so a crash
+mid-ingest neither loses nor duplicates. A refusal (a merge in flight, a cold
+gate, no session, an unregistered directory, a fault) leaves the entry and
+every later entry for the same workspace, so order is kept; it is retried after
+a delay doubling from the interval to 10s, recorded once at its level (INFO for
+the queue's answers, WARN for an unregistered directory, ERROR for a fault) and
+at DEBUG on each retry.

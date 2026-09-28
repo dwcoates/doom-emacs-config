@@ -422,7 +422,8 @@ the conversation then — and the daemon relays that `LockHolderFailure` whole o
 See ARCHITECTURE.md "State root layout": `daemon.addr`, `wsm.db`,
 `logs/daemon.run.log`, the per-workspace sink targets in `logs/`,
 `sock/<workspace-id>.sock`, `intent/manifest.json`,
-`output/workspace_commands_*.json`, `merge-logs/`.
+`output/workspace_commands_*.json`, `held-prompts/held_*.json` (the
+held-prompt ingress: ARCHITECTURE.md "heldingress"), `merge-logs/`.
 
 ## Wiring (wave 3: the graph is complete)
 

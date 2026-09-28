@@ -25,6 +25,7 @@ import (
 	"claude-repld/internal/handover"
 	"claude-repld/internal/headless"
 	"claude-repld/internal/health"
+	"claude-repld/internal/heldingress"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/imageorigin"
 	"claude-repld/internal/lockwatch"
@@ -69,7 +70,8 @@ import (
 //  4. the prompt queue, which delivers through the fleet;
 //  5. the rollout and drain controllers, whose server halves are forwarders;
 //  6. the merge orchestrator, the workspace verbs, the health reporter, the
-//     login manager, the prompt handler and the command-file ingress;
+//     login manager, the prompt handler, the command-file ingress and the
+//     held-prompt ingress;
 //  7. the boot sequence's dependencies and the server's, returned together
 //     with the late bindings and the background loops.
 //
@@ -777,7 +779,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	verbsRef.bind(verbs)
 
-	// ---- the two ingresses ----
+	// ---- the three ingresses ----
 
 	handler, err := prompthandler.New(prompthandler.Deps{
 		Queue:    queue,
@@ -805,6 +807,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the command-file ingress: %w", err)
+	}
+
+	// THE HELD-PROMPT INGRESS is where a client leaves a prompt it could not
+	// hand to a live daemon. It submits through the same handler the rpc
+	// does, under the prompt's own idempotency key, so a prompt this daemon
+	// (or its predecessor) already accepted is never delivered twice.
+	held, err := heldingress.New(heldingress.Deps{
+		Dir:            p.Layout.HeldPromptDir(),
+		WorkspaceByDir: p.DB.WorkspaceByDir,
+		Prompts:        handler,
+		PublishHost:    relay.PublishHostWorkspace,
+		Log:            p.Surfaces,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the held-prompt ingress: %w", err)
 	}
 
 	// THE LANDED-WORKTREE REAPER reads the registry and the fleet's live set
@@ -891,6 +908,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Background: []backgroundLoop{
 			{Name: "drain", Run: drainController.Run},
 			{Name: "command_file_ingress", Run: ingress.Run},
+			{Name: "held_prompt_ingress", Run: held.Run},
 			{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 			}},
