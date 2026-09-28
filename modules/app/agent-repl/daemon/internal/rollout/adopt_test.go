@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/wsm"
@@ -1416,5 +1417,41 @@ func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
 	}
 	if owner == nil || *owner != selfInstance {
 		t.Fatalf("serving owner = %q, want this daemon once the adoption promoted its handle", ownerText(owner))
+	}
+}
+
+// A DIALED ADOPTION IS A HEALTHY ATTACH (health/lifetime.go), so the faults
+// whose lifetime ends there close, and the others stand.
+func TestADialedAdoptionClosesTheHealthyAttachsFaults(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"an undetermined bounce", health.KindBounceUnknown, true},
+		{"an expired adoption window", health.KindAdoptionWindowExpired, true},
+		{"a refused resume waits for a started session", health.KindResumeFailed, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if _, err := h.db.OpenFault(context.Background(), wsm.Fault{Workspace: &ws, Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Act
+			arm(t, h, ws, Participants{})
+			open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: tt.kind})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenFaults: %v", err)
+			}
+			if closed := len(open) == 0; closed != tt.closes {
+				t.Fatalf("%s closed = %v, want %v", tt.kind, closed, tt.closes)
+			}
+		})
 	}
 }

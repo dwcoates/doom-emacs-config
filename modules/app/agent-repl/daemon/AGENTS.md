@@ -757,9 +757,11 @@ that did not restore the previous build opens its OWN `deploy_failed` fault
 under the `rollback` step (`DeployRollbackFailed`: the first component that
 failed and every failure), which only a deploy that gets all the way through
 closes. A step a later deploy gets through closes every fault of that step,
-and a non-joining daemon closes the ones an earlier daemon left at boot
+and a non-joining daemon fires the daemon-boot recovery edge at boot
 (`Deployer.CloseEarlierFailures`), since no strip of the new process draws
-them. Records go under `daemon.deploy.fault`.
+them. Each close goes through `health.CloseOnEdge` on the edge the kind's
+lifetime declares (`internal/health/lifetime.go`) and is recorded under
+`daemon.health.close_on_edge`; opens go under `daemon.deploy.fault`.
 
 A daemon-scoped `deploy_failed` fault stands on the TOPBAR's warning strip as
 well as on every footer (owner ruling, 2026-09-28): `health.FaultTopbarLine`

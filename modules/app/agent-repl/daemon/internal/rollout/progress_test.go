@@ -155,6 +155,52 @@ func TestASuccessorThatServesClosesTheStandingFault(t *testing.T) {
 	}
 }
 
+// A SERVING SUCCESSOR IS THE RECOVERY EDGE of every daemon-scoped fault whose
+// lifetime ends there (health/lifetime.go), and of no workspace's.
+func TestAServingSuccessorClosesTheDaemonFaultsWhoseLifetimeEndsThere(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      string
+		workspace bool
+		closes    bool
+	}{
+		{"an unclaimed handover", health.KindAdoptionWindowExpired, false, true},
+		{"a workspace the incumbent took back waits for its own attach", health.KindAdoptionWindowExpired, true, false},
+		{"a missing prompts directory waits for a served brief", health.KindPromptsDirMissing, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			fault := wsm.Fault{Kind: tt.kind}
+			if tt.workspace {
+				fault.Workspace = &ws
+			}
+			id, err := h.db.OpenFault(context.Background(), fault)
+			if err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Act
+			h.c.closeSuccessorFaults(context.Background(), nil)
+			open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Kind: tt.kind})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenFaults: %v", err)
+			}
+			stands := false
+			for _, f := range open {
+				stands = stands || f.ID == id
+			}
+			if closed := !stands; closed != tt.closes {
+				t.Fatalf("%s closed = %v, want %v", tt.kind, closed, tt.closes)
+			}
+		})
+	}
+}
+
 func TestAHandoverThatCannotFinishTakesTheLineDown(t *testing.T) {
 	// Arrange: the quiesce fails, so the transfer does.
 	h := newHarness(t, func(d *Deps) {

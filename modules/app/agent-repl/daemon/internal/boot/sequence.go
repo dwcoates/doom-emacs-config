@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
@@ -99,6 +100,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.reconcileManifest(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		s.adoptedAttachedHealthy(ctx, log, &report)
 		if err := s.restoreHolds(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
@@ -506,6 +508,23 @@ func (s *sequence) reconcileManifest(ctx context.Context, log dlog.Logger, repor
 	}
 	report.Dispositions = dispositions
 	return nil
+}
+
+// adoptedAttachedHealthy fires the healthy-attach recovery edge for every
+// workspace this boot adopted. An adoption IS a healthy attach, but it runs
+// BEFORE the manifest is reconciled, and the reconcile is what opens an
+// undetermined bounce's fault; so the edge is fired here, after it, or an
+// adopted and serving workspace would carry a `bounce_unknown` line until
+// its next bring-up (it stood for over 30 minutes on 2026-09-27). A fault
+// the edge cannot close is ERROR in health.CloseOnEdge and stands; the boot
+// goes on, because a standing fault is a line on a strip, not a workspace
+// that cannot be served.
+func (s *sequence) adoptedAttachedHealthy(ctx context.Context, log dlog.Logger, report *Report) {
+	for _, ws := range report.Adopted {
+		workspace := ws
+		health.CloseOnEdge(ctx, s.deps.DB, log.With(dlog.Context{"workspace_id": string(ws)}),
+			health.EdgeHealthyAttach, health.EdgeScope{Workspace: &workspace}, s.now())
+	}
 }
 
 // restoreHolds reloads every standing hold. It is ALL-OR-NOTHING: a corrupt

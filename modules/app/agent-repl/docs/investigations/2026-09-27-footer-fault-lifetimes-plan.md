@@ -1,8 +1,10 @@
 # Deferred plan: every footer fault has a defined end
 
-Status: DEFERRED by the owner (2026-09-27). This is a more involved fix, to be
-picked up once the smaller items in flight have landed. Tracked in
-`2026-09-23-agents-in-flight.md` under "Deferred".
+Status: DONE (2026-09-28, branch `feat/footer-fault-lifetimes`). Approved by
+the owner on 2026-09-28 after being deferred on 2026-09-27. The table is
+`daemon/internal/health/lifetime.go`, the one close function is
+`daemon/internal/health/faultclose.go`, and the guard is
+`daemon/internal/health/lifetime_test.go`. See "As landed" at the end.
 
 ## The symptom
 
@@ -65,3 +67,29 @@ Several fault kinds have NO closing edge anywhere in the daemon.
 
 - The 14:47:37 handover whose successor did not claim five workspaces within
   the 30 s adoption window. That is a handover defect in its own right.
+
+## As landed (2026-09-28)
+
+- Every kind in `health/kinds.go` (plus `cold_gate_reopen_failed` and the
+  `bounce_disposition` accounting kind, now `health.KindBounceDisposition`)
+  has one row. Kinds added to master after the plan are covered:
+  - `deploy_failed` stands until the step's next success, a newer failure of
+    the same step (superseded), or a daemon boot;
+  - `successor_spawn_failed` stands until a successor proves it is serving.
+- Kinds the reporter DERIVES per answer and never records
+  (`session_absent`, `daemon_state_unreadable`) are declared MOMENTARY: there
+  is no record to stand.
+- `log_sink_poisoned` and `wsm_read_only` are opened by nothing today; they
+  are declared standing until a daemon boot, the next process opening its own
+  handle and sinks.
+- `conversation_abandoned` and `classifier_failed` stand until the next turn
+  the daemon OPENS; a turn replayed from history retires only the final-answer
+  fault.
+- The healthy-attach edge fires at `Fleet.Start`'s bring-up, a relaunch's
+  installed replacement, a successor's dialed adoption, and the boot's own
+  adoptions AFTER the manifest reconcile. The last one is a judgement call:
+  the boot adopts before it reconciles, so an undetermined bounce recorded for
+  a workspace the boot already adopted is closed at once (recorded, WARN, then
+  closed at INFO). That is the 30-minute symptom above; the integration test
+  that asserted the fault stood open on the host stream was amended to assert
+  the record and its close.

@@ -1497,8 +1497,16 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 // TestCrashBootWithNoManifestRecordsBounceUnknown covers BOUNCE ACCOUNTABILITY
 // for the case the manifest cannot describe: the outgoing daemon crashed or was
 // force-killed, so it wrote NO manifest at all. Every session that survived
-// into this boot is one whose bounce nobody accounted for, and each is surfaced
-// per workspace as an OPEN bounce_unknown fault rather than passed over.
+// into this boot is one whose bounce nobody accounted for, and each is
+// RECORDED per workspace as a bounce_unknown fault rather than passed over.
+//
+// THE FAULT'S LIFETIME ENDS AT THE WORKSPACE'S HEALTHY ATTACH (owner-approved
+// plan docs/investigations/2026-09-27-footer-fault-lifetimes-plan.md): the
+// boot's own adoption of the surviving shim IS that attach, fired after the
+// reconcile that records the fault, so the record is closed by it and no line
+// stands on a workspace that is serving. Before the plan, this test asserted
+// the fault stood OPEN on the host stream, and that is the line that stood on
+// a strip for over 30 minutes on 2026-09-27.
 func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
@@ -1515,12 +1523,16 @@ func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
 	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
 	successor.ExpectWarnings("daemon.rollout.reconcile")
 
-	// Assert: the successor's host stream carries a bounce_unknown fault.
-	host := successor.WatchHost(f.ws)
-	awaitHostFault(t, successor, host, "a bounce_unknown fault", func(hf *agentreplv1.HostFault) bool {
-		return hf.GetBounceUnknown() != nil
+	// Assert: the successor recorded the undetermined bounce, and its own
+	// adoption's healthy attach closed it.
+	successor.AwaitLogRecord(successor.RunLogPath(), "the undetermined bounce recorded", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.reconcile" && r.Level == "warn" &&
+			r.Message == "a session's bounce disposition needs a human"
 	})
-	successor.ExpectWarnings("daemon.rollout.reconcile")
+	successor.AwaitLogRecord(successor.RunLogPath(), "the bounce_unknown closed by the adoption's healthy attach", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.health.close_on_edge" && r.Level == "info" &&
+			r.Context["kind"] == "bounce_unknown" && r.Context["edge"] == "healthy_attach"
+	})
 }
 
 func TestCrashBootWithADeadManifestPidTakesTheOrdinaryDeadShimPath(t *testing.T) {
