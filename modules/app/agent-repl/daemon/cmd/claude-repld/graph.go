@@ -614,6 +614,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Runner:     scripts,
 		Store:      p.Opts.storeSocket,
 		Workspace:  fleet.Workspaces,
+		Progress:   footerResolver,
 		Getenv:     os.Getenv,
 	})
 	if err != nil {

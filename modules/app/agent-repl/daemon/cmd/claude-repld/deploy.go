@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/deploy"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -55,7 +56,9 @@ type deployerParams struct {
 	Store string
 	// Workspace answers every workspace with a live session.
 	Workspace func() []ids.WorkspaceID
-	Getenv    func(string) string
+	// Progress is the footer's update line, where the deploy states each phase.
+	Progress deployprogress.Sink
+	Getenv   func(string) string
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -135,6 +138,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, err
 		Services:  restarter,
 		ReportDir: where.reportDir,
 		Lifetime:  ctx,
+		Progress:  p.Progress,
 		Log:       p.Surfaces,
 	})
 	if err != nil {
