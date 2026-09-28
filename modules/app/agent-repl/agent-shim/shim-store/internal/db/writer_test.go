@@ -2,13 +2,17 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"agentrepl/shim-store/internal/logging"
 )
 
 // ---- the invariant: the store's own writes never contend ----
@@ -491,4 +495,135 @@ func TestAWithdrawnBulkWriterEndsTheBurstCount(t *testing.T) {
 		t.Fatalf("after the withdrawal streak=%d bulk queued=%d, want 0 and 0", streak, bulk)
 	}
 	release()
+}
+
+// ---- endTx: the one way a transaction ends ----
+
+func TestEndTxAfterACommitWritesNoRecord(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	tx, release, err := d.beginWrite(ctx(), WriteBulk)
+	if err != nil {
+		t.Fatalf("beginWrite: %v", err)
+	}
+	defer release()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	s.file.Reset()
+
+	// Act
+	d.endTx(tx, logging.Fields{Operation: "store.db.test"})
+
+	// Assert
+	if s.file.Len() != 0 {
+		t.Fatalf("endTx after a Commit wrote a record:\n%s", s.file.String())
+	}
+}
+
+func TestEndTxOfAnOpenReadWritesNoRecord(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	tx, err := d.beginRead(ctx())
+	if err != nil {
+		t.Fatalf("beginRead: %v", err)
+	}
+	s.file.Reset()
+
+	// Act
+	d.endTx(tx, logging.Fields{Operation: "store.db.test"})
+
+	// Assert
+	if s.file.Len() != 0 {
+		t.Fatalf("a clean rollback wrote a record:\n%s", s.file.String())
+	}
+}
+
+// failedRollbackTx is a transaction whose Rollback reaches SQLite and fails
+// there: its own COMMIT already ended the transaction behind database/sql's
+// back, so SQLite answers the ROLLBACK with "no transaction is active".
+func failedRollbackTx(t *testing.T, d *DB) *sql.Tx {
+	t.Helper()
+	tx, err := d.beginRead(ctx())
+	if err != nil {
+		t.Fatalf("beginRead: %v", err)
+	}
+	var one int
+	if err := tx.QueryRowContext(ctx(), `SELECT 1`).Scan(&one); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx(), `COMMIT`); err != nil {
+		t.Fatalf("COMMIT: %v", err)
+	}
+	return tx
+}
+
+func TestEndTxRecordsAFailedRollbackAtError(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	tx := failedRollbackTx(t, d)
+	s.file.Reset()
+
+	// Act
+	d.endTx(tx, logging.Fields{Operation: "store.db.open-page", Table: "entry", BookAgentID: "book-1"})
+
+	// Assert
+	s.assertLogged(t, "error", "ending the transaction")
+	s.assertContext(t, "book_agent_id", "book-1")
+	s.assertContext(t, "table", "entry")
+}
+
+func TestEndTxFailedRollbackRecordNamesTheCause(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	tx := failedRollbackTx(t, d)
+	s.file.Reset()
+
+	// Act
+	d.endTx(tx, logging.Fields{Operation: "store.db.open-page"})
+
+	// Assert
+	for _, record := range s.records(t) {
+		context, _ := record["context"].(map[string]any)
+		if cause, _ := context["error"].(string); strings.Contains(cause, "no transaction is active") {
+			return
+		}
+	}
+	t.Fatalf("no record carries the SQLite cause; log was:\n%s", s.file.String())
+}
+
+// Every transaction this package opens is ended through endTx, so no site can
+// quietly drop a failed rollback again. The source is the evidence: exactly one
+// Rollback call (endTx's own), and one deferred endTx per beginRead or
+// beginWrite call site.
+func TestEveryTransactionEndsThroughEndTx(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	var rollbacks, begins, ends int
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+		src := string(body)
+
+		// Act
+		rollbacks += strings.Count(src, ".Rollback()")
+		begins += strings.Count(src, "= d.beginRead(") + strings.Count(src, "= d.beginWrite(")
+		ends += strings.Count(src, "defer d.endTx(tx, ")
+	}
+
+	// Assert
+	if rollbacks != 1 {
+		t.Errorf("production source calls Rollback %d times; only endTx may", rollbacks)
+	}
+	if begins == 0 || begins != ends {
+		t.Errorf("%d transaction begin sites but %d deferred endTx calls", begins, ends)
+	}
 }
