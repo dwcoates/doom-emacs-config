@@ -36,27 +36,32 @@ const PlainClass = ""
 // color. A side landing without a color is a divergence, not a default.
 var FailureSides = []string{"machinery", "vendor", "client_local"}
 
-// RenderColors is render-colors.json: which of the five colors each state
-// takes, plus the glyph names the merge states carry instead of a color.
+// RenderColors is render-colors.json: which of the six colors each state
+// takes, plus the glyph names the merge states carry beside their color.
 // Values are the names the file spells; nothing here holds a hex value,
 // because each renderer keeps its own.
 type RenderColors struct {
 	// Colors is the closed set of color names.
 	Colors []string
-	// Precedence is the five-color precedence, strongest claim first.
+	// Precedence is the six-color precedence, strongest claim first.
 	Precedence []string
 	// RosterStatus maps each RosterRow.status arm name to its color.
 	RosterStatus map[string]string
 	// MergeGlyphs maps each merge arm of RosterRow.status to a glyph NAME.
 	MergeGlyphs map[string]string
 	// ColoredMergeArms are the merge arms DECLARED to spend a lifecycle color
-	// beside their glyph (owner ruling, 2026-09-28). Every other merge arm
+	// beside their glyph (owner rulings, 2026-09-28). Every other merge arm
 	// takes ColorNone.
 	ColoredMergeArms []string
 	// FeedMergeHeadGlyph is the glyph name a merge bubble's head carries.
 	FeedMergeHeadGlyph string
 	// FooterStatus maps each FooterStatus.status arm name to its color.
 	FooterStatus map[string]string
+	// ComposerClosedColors are the footer status colors under which a
+	// composer is CLOSED (owner ruling, 2026-09-28): blue, an unusable
+	// workspace, and purple, a merge holding it. Every other color is a
+	// usable workspace whose composer is open.
+	ComposerClosedColors []string
 	// FooterAllowance maps each FooterAllowance.status arm name to its color.
 	FooterAllowance map[string]string
 	// TopbarConnectivity maps each daemon link state to a topbar tone.
@@ -74,18 +79,19 @@ type RenderColors struct {
 // renderColorsJSON is the file's on-disk shape. It is separate from
 // RenderColors so an absent table is distinguishable from an empty one.
 type renderColorsJSON struct {
-	Colors             []string                     `json:"colors"`
-	Precedence         []string                     `json:"precedence"`
-	RosterStatus       map[string]string            `json:"roster_status"`
-	MergeGlyphs        map[string]string            `json:"merge_glyphs"`
-	ColoredMergeArms   []string                     `json:"colored_merge_arms"`
-	FeedMergeHeadGlyph string                       `json:"feed_merge_head_glyph"`
-	FooterStatus       map[string]string            `json:"footer_status"`
-	FooterAllowance    map[string]string            `json:"footer_allowance"`
-	TopbarConnectivity map[string]string            `json:"topbar_connectivity"`
-	TopbarTones        []string                     `json:"topbar_tones"`
-	SurfaceOverrides   map[string]map[string]string `json:"surface_overrides"`
-	FailureSides       map[string]string            `json:"failure_sides"`
+	Colors               []string                     `json:"colors"`
+	Precedence           []string                     `json:"precedence"`
+	RosterStatus         map[string]string            `json:"roster_status"`
+	MergeGlyphs          map[string]string            `json:"merge_glyphs"`
+	ColoredMergeArms     []string                     `json:"colored_merge_arms"`
+	FeedMergeHeadGlyph   string                       `json:"feed_merge_head_glyph"`
+	FooterStatus         map[string]string            `json:"footer_status"`
+	ComposerClosedColors []string                     `json:"composer_closed_colors"`
+	FooterAllowance      map[string]string            `json:"footer_allowance"`
+	TopbarConnectivity   map[string]string            `json:"topbar_connectivity"`
+	TopbarTones          []string                     `json:"topbar_tones"`
+	SurfaceOverrides     map[string]map[string]string `json:"surface_overrides"`
+	FailureSides         map[string]string            `json:"failure_sides"`
 }
 
 // PaintClasses is paint-classes.json: the closed inventory of paint_class
@@ -155,6 +161,14 @@ func (c RenderColors) validate() error {
 			if !c.knownColor(color) {
 				return fmt.Errorf("%s[%q] = %q, which is not a color", table.name, state, color)
 			}
+		}
+	}
+	if len(c.ComposerClosedColors) == 0 {
+		return fmt.Errorf("composer_closed_colors is empty")
+	}
+	for _, color := range c.ComposerClosedColors {
+		if color == ColorNone || !c.knownColor(color) {
+			return fmt.Errorf("composer_closed_colors names %q, which is not a color", color)
 		}
 	}
 	if len(c.MergeGlyphs) == 0 {

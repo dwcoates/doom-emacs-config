@@ -75,7 +75,8 @@ describe("arm coverage", () => {
 
   it.each([
     ["mergeConflict", "green"],
-    ["mergeFailed", "blue"],
+    ["mergeFailed", "turquoise"],
+    ["merging", "purple"],
   ])("paints the colored merge arm %s %s", (arm, color) => {
     expect(rosterStatusColor(arm)).toBe(color);
   });

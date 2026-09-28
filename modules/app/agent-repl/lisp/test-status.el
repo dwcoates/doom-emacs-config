@@ -164,11 +164,11 @@ response, never the in-flight purple and never blue."
   (should (equal agent-repl--color-done-green
                  (plist-get (agent-repl--tab-spec :merge-conflict nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-failed-is-blue ()
-  "`:merge-failed' paints the tab BLUE (owner ruling, 2026-09-28): blue says
-something is wrong with the workspace."
+(ert-deftest agent-repl-test-tab-spec-merge-failed-is-turquoise ()
+  "`:merge-failed' paints the tab TURQUOISE (owner ruling, 2026-09-28):
+something went wrong, but the workspace is usable."
   ;; Act / Assert
-  (should (equal agent-repl--color-init-blue
+  (should (equal agent-repl--color-usable-fault-turquoise
                  (plist-get (agent-repl--tab-spec :merge-failed nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-merged-is-green ()
@@ -200,24 +200,30 @@ They can no more act on the workspace than during the merge itself."
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-blue ()
-  "A vendor-blocked tab paints BLUE, not the purple every other surface gives it.
-Purple is spent on the merge pipeline here, and a tab bar carries no
-glyph to tell two purples apart."
+  "A vendor-blocked tab paints BLUE: a vendor or account block makes the
+workspace unusable until it is resolved (owner ruling, 2026-09-28)."
   ;; Act / Assert
   (should (equal agent-repl--color-init-blue
                  (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
-(ert-deftest agent-repl-test-status-color-table-turn-failed-is-blue ()
-  "A failed turn end takes BLUE in the shared assignment (owner ruling,
-2026-09-28), where done and interrupted take green."
+(ert-deftest agent-repl-test-status-color-table-turn-failed-is-turquoise ()
+  "A failed turn end takes TURQUOISE in the shared assignment (owner
+ruling, 2026-09-28), where done and interrupted take green."
   ;; Act / Assert
-  (should (equal (alist-get :turn-failed agent-repl-status-color-table) "blue")))
+  (should (equal (alist-get :turn-failed agent-repl-status-color-table) "turquoise")))
 
-(ert-deftest agent-repl-test-tab-spec-turn-failed-is-blue ()
-  "A turn-failed tab paints BLUE on the tab bar, unselected."
+(ert-deftest agent-repl-test-tab-spec-turn-failed-is-turquoise ()
+  "A turn-failed tab paints TURQUOISE on the tab bar, unselected."
   ;; Act / Assert
-  (should (equal agent-repl--color-init-blue
+  (should (equal agent-repl--color-usable-fault-turquoise
                  (plist-get (agent-repl--tab-spec :turn-failed nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-degraded-is-turquoise ()
+  "A degraded tab paints TURQUOISE: the session serves, so the workspace
+is usable, but the daemon's view of it is compromised."
+  ;; Act / Assert
+  (should (equal agent-repl--color-usable-fault-turquoise
+                 (plist-get (agent-repl--tab-spec :degraded nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-not-purple ()
   "Nothing but the merge states may paint purple on this surface.
@@ -1365,6 +1371,15 @@ is held to the same number so a later edit cannot quietly break it."
     ;; Act / Assert
     (should (>= (agent-repl-color-contrast-ratio fg bg)
                 agent-repl-tab-contrast-floor))))
+
+(ert-deftest agent-repl-test-a-hex-color-is-measured-by-its-digits-not-the-display ()
+  "A `#rrggbb' color's luminance is its own, whatever the display: a batch
+run rounds `#0891b2' to pure cyan through `color-name-to-rgb', and white on
+that measured 1.25:1 where the declared turquoise is about 3.7:1."
+  ;; Act
+  (let ((ratio (agent-repl-color-contrast-ratio "white" "#0891b2")))
+    ;; Assert
+    (should (< 3.6 ratio 3.8))))
 
 (ert-deftest agent-repl-test-every-palette-row-unselected-pair-meets-the-contrast-floor ()
   "EVERY armed row is held to the same floor as the un-armed one, so the
@@ -3297,14 +3312,20 @@ test can assert the re-assertion left an already-correct frame alone."
   (dolist (arm agent-repl-wire-roster-row-status-keywords)
     (should (stringp (agent-repl-status-tab-color arm)))))
 
-(ert-deftest agent-repl-test-status-the-blue-band-is-the-compromised-route ()
-  "Blue is every way the route to a working session is compromised —
-`vendor_blocked' included, by this surface's declared override."
+(ert-deftest agent-repl-test-status-the-blue-band-is-the-unusable-workspace ()
+  "Blue is every way the workspace is UNUSABLE right now (owner ruling,
+2026-09-28): a route that is not up, and a vendor or account block."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :degraded :start-failed
-                             :vendor-blocked :turn-failed :merge-failed)
+                 (sort (list :init :severed :dead :start-failed :vendor-blocked)
                        #'string<))))
+
+(ert-deftest agent-repl-test-status-the-turquoise-band-is-the-usable-fault ()
+  "Turquoise is every way something went wrong while the workspace stays
+usable (owner ruling, 2026-09-28)."
+  ;; Act / Assert
+  (should (equal (sort (agent-repl-test-status--arms-taking "turquoise") #'string<)
+                 (sort (list :degraded :turn-failed :merge-failed) #'string<))))
 
 (ert-deftest agent-repl-test-status-purple-is-the-in-flight-merge ()
   "Purple is spent on the three merge arms with no verdict yet, and on
@@ -3838,7 +3859,7 @@ green stays green and blue stays blue across the extent change."
 (ert-deftest agent-repl-test-blue-is-reserved-for-link-faults ()
   "Only the link-fault arms take blue; a live session's arms never do."
   ;; Link faults are blue.
-  (dolist (arm '(:init :severed :dead :degraded :start-failed))
+  (dolist (arm '(:init :severed :dead :start-failed))
     (should (equal (agent-repl-status-tab-color arm) "blue")))
   ;; A live idle/ready session is not.
   (dolist (arm '(:ready :done :interrupted :permission))

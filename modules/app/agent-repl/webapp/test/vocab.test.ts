@@ -100,7 +100,9 @@ describe("rosterStatusColor", () => {
     ["thinking", "red"],
     ["idleAsync", "yellow"],
     ["ready", "green"],
-    ["merging", "none"],
+    ["merging", "purple"],
+    ["turnFailed", "turquoise"],
+    ["none", "none"],
   ];
   for (const [arm, color] of cases) {
     it(`paints ${arm} ${color}`, () => {
@@ -114,9 +116,19 @@ describe("rosterStatusColor", () => {
 });
 
 describe("footerStatusColor", () => {
-  it("paints merging purple, unlike the roster's none", () => {
+  it("paints merging purple, the same as the roster's merging", () => {
     expect(footerStatusColor("merging")).toBe("purple");
-    expect(rosterStatusColor("merging")).toBe("none");
+    expect(rosterStatusColor("merging")).toBe("purple");
+  });
+
+  it("paints a failed turn turquoise, the same as the roster's turn_failed", () => {
+    expect(footerStatusColor("turnFailed")).toBe("turquoise");
+    expect(rosterStatusColor("turnFailed")).toBe("turquoise");
+  });
+
+  it("paints a degraded view turquoise, the same as the roster's degraded", () => {
+    expect(footerStatusColor("degraded")).toBe("turquoise");
+    expect(rosterStatusColor("degraded")).toBe("turquoise");
   });
 
   it("paints blocked blue, the same as the roster's vendor_blocked", () => {

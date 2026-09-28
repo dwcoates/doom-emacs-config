@@ -263,7 +263,7 @@ func testColors() vocab.RenderColors {
 			"loading": "grey", "blocked": "grey", "merging": "grey",
 			"waiting": "grey", "thinking": "grey", "background": "grey",
 			"idle": "grey", "merge_conflict": "grey", "merge_failed": "grey",
-			"merged": "grey",
+			"merged": "grey", "turn_failed": "grey", "degraded": "grey",
 		},
 		FooterAllowance: map[string]string{
 			"allowed": "grey", "allowed_warning": "grey", "rejected": "grey",
