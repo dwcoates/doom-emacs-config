@@ -822,6 +822,28 @@ Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
   a test that exercises a merge's phases commits work first
   (`harness.CommitWork`), and a scripted conflict stands until its branch moves.
 
+## `claude-repld merge-queue` is how an agent enqueues a merge and reads its outcome
+
+`cmd/claude-repld/mergequeueverb.go`, the merge-queue skill's one tool
+(`.claude/skills/merge-queue/SKILL.md`). It decides nothing and never runs git.
+
+- It ENQUEUES through the command-file ingress (`commandfile.Write`), so the
+  merge is an agent's ask (`merge.RequestedByAgent`) exactly as a skill-written
+  file is.
+- `-dir WORKTREE` merges a workspace. `-branch B -repo MAIN` merges a branch that
+  is no workspace: one command file creates `merge-queue/<bare>-landing` cut
+  from `B` and merges that, so repairs have a session of their own.
+- It READS the outcome off `WatchWorkspaceRoster`: the row's status as it stood
+  BEFORE the command was written is the baseline, and a concluded status that is
+  still the baseline's (and, for `merged`, no newer `when.merged`) is an earlier
+  merge's. A parked merge's line is read from the footer; a failure's reason is
+  the `daemon.merge.abort` record, which the verb names the query for. A
+  quarantined command file is a refusal. A planned stream ending reattaches.
+- Exits: 0 landed (or in the queue, without `-wait`), 4 parked, 5 failed,
+  6 refused, 2 the verb itself failed. `-wait` from inside the target worktree
+  is REFUSED: an agent-requested merge starts only when the requesting turn
+  ends, and that turn is the one that would wait.
+
 ## A lease dies with the process that took it
 
 A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)
