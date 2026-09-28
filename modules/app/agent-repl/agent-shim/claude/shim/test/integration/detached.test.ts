@@ -1340,6 +1340,148 @@ describe("a subagent resumed by SendMessage after the shim restarted", () => {
   });
 });
 
+/**
+ * A SUBAGENT A NETWORK OUTAGE CUT OFF (owner ruling 2026-09-27;
+ * engine/network-resume.ts), end to end through the built shim and the mocked
+ * vendor. The outage is the reachability GATE: absent, the API is down;
+ * written, it is back. The probe beat and the window are the `--fake`-only
+ * overrides, so nothing here rides the production five seconds or thirty
+ * minutes, and nothing touches a network.
+ */
+describe("a subagent a network outage cut off", () => {
+  const NETWORK_RESUME_OP = "shim.engine.network_resume";
+  /** Every gate directory a test made, removed after it. */
+  const gateDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of gateDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A shim whose API is down until the returned gate is written. */
+  async function outageShim(windowMs = 60_000): Promise<{ shim: Awaited<ReturnType<typeof spawnShim>>; gate: string }> {
+    const dir = mkdtempSync(join(tmpdir(), "shim-api-gate-"));
+    gateDirs.push(dir);
+    const gate = join(dir, "reachable");
+    const shim = await spawnShim({
+      env: {
+        AGENT_REPL_FAKE_API_REACHABLE_GATE: gate,
+        AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS: "20",
+        AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS: String(windowMs),
+      },
+    });
+    await shim.clients.h1.startSession(freshSession());
+    return { shim, gate };
+  }
+
+  /** The network-resume record whose outcome is `outcome`. */
+  function outcome(value: string): (record: { operation?: unknown; context: Record<string, unknown> }) => boolean {
+    return (record) => record.operation === NETWORK_RESUME_OP && record.context.outcome === value;
+  }
+
+  test("waits while the API is unreachable", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+
+    // Assert
+    const waiting = await shim.log.record(outcome("waiting"));
+    expect(waiting.level).toBe("info");
+  });
+
+  test("resumes the SAME agent once the API is reachable again", async () => {
+    // Arrange
+    const { shim, gate } = await outageShim();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const waiting = await shim.log.record(outcome("waiting"));
+
+    // Act
+    writeFileSync(gate, "");
+
+    // Assert
+    const resumed = await shim.log.record(outcome("resumed"));
+    expect(resumed.context.task_id).toBe(waiting.context.task_id);
+  });
+
+  test("the resumed agent runs to completion", async () => {
+    // Arrange
+    const { shim, gate } = await outageShim();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const waiting = await shim.log.record(outcome("waiting"));
+
+    // Act
+    writeFileSync(gate, "");
+
+    // Assert
+    const ended = await shim.log.record(
+      (record) =>
+        record.operation === NETWORK_RESUME_OP &&
+        record.message === "an agent resumed after a network outage ended without failing again",
+    );
+    expect(ended.context).toMatchObject({ task_id: waiting.context.task_id, status: "completed" });
+  });
+
+  test("the resume path records no warning and no error", async () => {
+    // Arrange
+    const { shim, gate } = await outageShim();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.log.record(outcome("waiting"));
+
+    // Act
+    writeFileSync(gate, "");
+    await shim.log.record(
+      (record) =>
+        record.operation === NETWORK_RESUME_OP &&
+        record.message === "an agent resumed after a network outage ended without failing again",
+    );
+
+    // Assert
+    const loud = shim.log
+      .records()
+      .filter((record) => record.level === "warn" || record.level === "error")
+      .map((record) => `${String(record.operation)}: ${record.message}`);
+    expect(loud).toEqual([]);
+  });
+
+  test("gives up at ERROR when the API stays unreachable for the whole window", async () => {
+    // Arrange
+    const { shim } = await outageShim(200);
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+
+    // Assert
+    const gaveUp = await shim.log.record(outcome("gave_up"));
+    expect(gaveUp.level).toBe("error");
+  });
+
+  test("an agent that failed for another reason is not resumed", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-failed" }));
+
+    // Assert
+    const notResumed = await shim.log.record(outcome("not_resumed"));
+    expect(notResumed.level).toBe("info");
+  });
+
+  test("stand-down abandons the wait", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.log.record(outcome("waiting"));
+
+    // Act
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const abandoned = await shim.log.record(outcome("abandoned"));
+    expect(abandoned.level).toBe("info");
+  });
+});
+
 describe("DetachForeground", () => {
   test("a vendor-backgrounded unit is CONFIRMED and announced", async () => {
     // A vendor-side detach cannot be INITIATED on the pinned SDK: `!vendor-
