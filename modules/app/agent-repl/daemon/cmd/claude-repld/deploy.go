@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/deploy"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -55,7 +56,15 @@ type deployerParams struct {
 	Store string
 	// Workspace answers every workspace with a live session.
 	Workspace func() []ids.WorkspaceID
-	Getenv    func(string) string
+	// Progress is the footer's update line, where the deploy states each phase.
+	Progress deployprogress.Sink
+	// Faults is the OBSERVED state client a failed deploy stands on as a
+	// fault, so the footer draws it.
+	Faults deploy.Faults
+	// Joining is a successor still joining: its state handle is read-only, so
+	// it leaves the standing deploy faults alone.
+	Joining bool
+	Getenv  func(string) string
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -135,10 +144,17 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, err
 		Services:  restarter,
 		ReportDir: where.reportDir,
 		Lifetime:  ctx,
+		Progress:  p.Progress,
+		Faults:    p.Faults,
 		Log:       p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the deploy: %w", err)
+	}
+	if p.Joining {
+		log.Debug(graphOperation, "a joining successor leaves the standing deploy faults to the incumbent that opened them", nil)
+	} else {
+		deployer.CloseEarlierFailures(ctx)
 	}
 	log.Info(graphOperation, "the deploy is wired", dlog.Context{
 		"daemon_build": selfBuild, "checkout": p.Checkout, "staging": filepath.Join(deployDir, "staging"),

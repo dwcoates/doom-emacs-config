@@ -788,7 +788,11 @@ wire."
                                            :value (:turn-in-flight t :detached-work 2)))))))
                ("\"reloadPushed\":{\"recipients\":4}"
                 (:arm :reload-pushed :value (:recipients 4)))
-               ("\"deferredToSuccessor\":{}" (:arm :deferred-to-successor :value nil))))
+               ("\"deferredToSuccessor\":{}" (:arm :deferred-to-successor :value nil))
+               ("\"restarting\":{\"runningStateLayout\":7,\"freshStateLayout\":8,\"workspaces\":3,\"busy\":1,\"forced\":true}"
+                (:arm :restarting
+                 :value (:running-state-layout 7 :fresh-state-layout 8
+                         :workspaces 3 :busy 1 :forced t)))))
       (should (equal (list (car case)
                            (plist-get
                             (car (plist-get
@@ -953,7 +957,7 @@ wire."
   "Every Deploy oneof carries exactly the arms this codec decodes."
   (dolist (case '(("DeployComponentOutcome"
                    ("upToDate" "restarted" "handingOver" "shims" "reloadPushed"
-                    "deferredToSuccessor"))
+                    "deferredToSuccessor" "restarting"))
                   ("DeployShimBounce" ("bouncedNow" "registered"))
                   ("DeployError"
                    ("buildFailed" "alreadyDeploying" "alreadyRollingOut" "joining"
@@ -2623,12 +2627,47 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"daemonStateUnreadable\":{\"cause\":\"state client refused\"}}"))
                    '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "state client refused")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-failed-kind ()
+  "DaemonFault's `deploy_failed' kind decodes each failed step with the very
+refusal the Deploy rpc answers for it."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case
+             '(("{\"build\":{\"step\":\"webapp\",\"detail\":\"tsc\",\"log\":\"/l\"}}"
+                (:arm :build :value (:step "webapp" :detail "tsc" :log "/l")))
+               ("{\"install\":{\"component\":\"DEPLOY_COMPONENT_DAEMON\",\"detail\":\"EACCES\"}}"
+                (:arm :install :value (:component :daemon :detail "EACCES")))
+               ("{\"restartServices\":{\"component\":\"DEPLOY_COMPONENT_STORE\",\"detail\":\"exit 78\"}}"
+                (:arm :restart-services :value (:component :store :detail "exit 78")))))
+      (should (equal (list (car case)
+                           (agent-repl-wire-decode-daemon-fault
+                            (agent-repl-test-wire-verbs--parse
+                             (format "{\"deployFailed\":%s}" (car case)))))
+                     (list (car case)
+                           (list :detail ""
+                                 :kind (list :arm :deploy-failed
+                                             :value (list :step (cadr case))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-failed-without-a-step-is-a-breach ()
+  "A failed deploy names the step that failed; an unset step is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-daemon-fault
+                   (agent-repl-test-wire-verbs--parse "{\"deployFailed\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-failed-step-arms-pinned ()
+  "DaemonFaultDeployFailed's step oneof has exactly the three arms decoded
+here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFaultDeployFailed")
+                       #'string<)
+                 (sort (list "build" "install" "restartServices") #'string<))))
+
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the six arms decoded here."
+  "DaemonFault's kind oneof has exactly the seven arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable" "deployFailed")
                        #'string<))))
 
 ;;;; ---- Interrupt -------------------------------------------------------

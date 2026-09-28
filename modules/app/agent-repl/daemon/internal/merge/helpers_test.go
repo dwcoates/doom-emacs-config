@@ -660,6 +660,7 @@ func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptque
 	return nil
 }
 func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
+func (q *fakeQueue) OnTurnAdopted(ids.WorkspaceID, ids.TurnID)              {}
 func (q *fakeQueue) OnTurnsEndedUnobserved(ids.WorkspaceID, []ids.TurnID)   {}
 func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                          { return false }
 func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {

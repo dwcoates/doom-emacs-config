@@ -94,6 +94,7 @@
          (agent-repl-link--reconnect-interval nil)
          (agent-repl-link--quiet-until-ms nil)
          (agent-repl-link--bounce-cause nil)
+         (agent-repl-link--ending-conn nil)
          (agent-repl-link-drain nil)
          (agent-repl-link-drain-segment nil)
          (agent-repl-link-no-daemon-functions nil)
@@ -335,6 +336,75 @@ gate is the point, so it is exercised here rather than bypassed."
       (agent-repl-test-link--close conn '(:ended))
       ;; Assert
       (should (assq :down agent-repl-test-link--hooks)))))
+
+(defun agent-repl-test-link--end-planned (conn)
+  "Deliver the planned ending on CONN's `WatchDaemon' stream, then its clean end."
+  (agent-repl-test-link--push conn '(:arm :ending :value nil))
+  (agent-repl-test-link--close conn '(:ended)))
+
+(ert-deftest agent-repl-test-link-ending-push-is-recorded-at-info ()
+  "The planned-ending frame itself is on the record, at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push conn '(:arm :ending :value nil))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :info "elisp.link.stream-ending")))))
+
+(ert-deftest agent-repl-test-link-planned-end-is-recorded-at-info ()
+  "A clean end after the planned ending takes the link down at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :info "elisp.link.down-planned")))))
+
+(ert-deftest agent-repl-test-link-planned-end-writes-no-warning ()
+  "A planned end never writes the unannounced link-down WARNING."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should-not (agent-repl-test-link--logged-p :warn "elisp.link.down")))))
+
+(ert-deftest agent-repl-test-link-planned-end-runs-the-down-hook ()
+  "A planned end takes the same walk as a loss: the down hooks run."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-down-functions
+                (agent-repl-test-link--record-hook :down))
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should (equal (cdr (assq :down agent-repl-test-link--hooks)) (list conn))))))
+
+(ert-deftest agent-repl-test-link-planned-end-schedules-a-reconnect ()
+  "A planned end arms the reconnect poll that resolves the live daemon."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (setq agent-repl-test-link--timers nil)
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should agent-repl-test-link--timers))))
+
+(ert-deftest agent-repl-test-link-error-after-ending-is-still-a-warning ()
+  "A transport error after the ending is unannounced: only a CLEAN end is planned."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push conn '(:arm :ending :value nil))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :warn "elisp.link.down")))))
 
 (ert-deftest agent-repl-test-link-death-schedules-a-reconnect ()
   "The link going down arms the reconnect poll."

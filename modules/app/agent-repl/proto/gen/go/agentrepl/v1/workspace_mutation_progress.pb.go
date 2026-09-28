@@ -36,77 +36,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// The stages an open passes through while its rpc is in flight. Emitted only
-// for the stages the open actually reaches: a workspace that was not
-// hibernated never emits `REVIVING`, and one that was not closed never emits
-// `CLEARING_CLOSED`.
-type WorkspaceOpenStage int32
-
-const (
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_UNSPECIFIED WorkspaceOpenStage = 0
-	// The daemon is confirming the workspace's worktree is still on disk. An
-	// open whose directory is gone is refused here.
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE WorkspaceOpenStage = 1
-	// The daemon is bringing the session up — spawning the shim and resuming
-	// the vendor conversation. THE SLOW STAGE, and the reason this enum exists.
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION WorkspaceOpenStage = 2
-	// The daemon is lifting a hibernation park off the workspace.
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_REVIVING WorkspaceOpenStage = 3
-	// The daemon is clearing the workspace's closed flag, which is what puts
-	// its row back among the open ones.
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CLEARING_CLOSED WorkspaceOpenStage = 4
-	// The daemon is checking the shim against the deployed build and bouncing
-	// it when stale.
-	WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_BUILD WorkspaceOpenStage = 5
-)
-
-// Enum value maps for WorkspaceOpenStage.
-var (
-	WorkspaceOpenStage_name = map[int32]string{
-		0: "WORKSPACE_OPEN_STAGE_UNSPECIFIED",
-		1: "WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE",
-		2: "WORKSPACE_OPEN_STAGE_STARTING_SESSION",
-		3: "WORKSPACE_OPEN_STAGE_REVIVING",
-		4: "WORKSPACE_OPEN_STAGE_CLEARING_CLOSED",
-		5: "WORKSPACE_OPEN_STAGE_CHECKING_BUILD",
-	}
-	WorkspaceOpenStage_value = map[string]int32{
-		"WORKSPACE_OPEN_STAGE_UNSPECIFIED":       0,
-		"WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE": 1,
-		"WORKSPACE_OPEN_STAGE_STARTING_SESSION":  2,
-		"WORKSPACE_OPEN_STAGE_REVIVING":          3,
-		"WORKSPACE_OPEN_STAGE_CLEARING_CLOSED":   4,
-		"WORKSPACE_OPEN_STAGE_CHECKING_BUILD":    5,
-	}
-)
-
-func (x WorkspaceOpenStage) Enum() *WorkspaceOpenStage {
-	p := new(WorkspaceOpenStage)
-	*p = x
-	return p
-}
-
-func (x WorkspaceOpenStage) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (WorkspaceOpenStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_enumTypes[0].Descriptor()
-}
-
-func (WorkspaceOpenStage) Type() protoreflect.EnumType {
-	return &file_agentrepl_v1_workspace_mutation_progress_proto_enumTypes[0]
-}
-
-func (x WorkspaceOpenStage) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use WorkspaceOpenStage.Descriptor instead.
-func (WorkspaceOpenStage) EnumDescriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{0}
-}
-
 // One staged-progress push for one in-flight workspace mutation.
 type WorkspaceMutationProgress struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -215,7 +144,7 @@ func (*WorkspaceMutationProgress_Open) isWorkspaceMutationProgress_Event() {}
 type WorkspaceOpenProgress struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The stage the open has just entered.
-	Stage         WorkspaceOpenStage `protobuf:"varint,1,opt,name=stage,proto3,enum=agentrepl.v1.WorkspaceOpenStage" json:"stage,omitempty"`
+	EnteredStage  *WorkspaceOpenStage `protobuf:"bytes,2,opt,name=entered_stage,json=enteredStage,proto3" json:"entered_stage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -250,11 +179,349 @@ func (*WorkspaceOpenProgress) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *WorkspaceOpenProgress) GetStage() WorkspaceOpenStage {
+func (x *WorkspaceOpenProgress) GetEnteredStage() *WorkspaceOpenStage {
+	if x != nil {
+		return x.EnteredStage
+	}
+	return nil
+}
+
+// The stages an open passes through while its rpc is in flight. Emitted only
+// for the stages the open actually reaches: a workspace that was not
+// hibernated never emits `REVIVING`, and one that was not closed never emits
+// `CLEARING_CLOSED`.
+// A stage an open passes through. THE SET ARM IS THE STAGE. A client words each
+// arm as one minibuffer line; a stage that is entered replaces the line of the
+// one before it.
+type WorkspaceOpenStage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The stage just entered. An open enters only the stages its workspace
+	// needs: a workspace that is not parked never enters `reviving`, and one
+	// that is not closed never enters `clearing_closed`.
+	//
+	// Types that are valid to be assigned to Stage:
+	//
+	//	*WorkspaceOpenStage_CheckingWorktree
+	//	*WorkspaceOpenStage_StartingSession
+	//	*WorkspaceOpenStage_Reviving
+	//	*WorkspaceOpenStage_ClearingClosed
+	//	*WorkspaceOpenStage_CheckingBuild
+	Stage         isWorkspaceOpenStage_Stage `protobuf_oneof:"stage"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStage) Reset() {
+	*x = WorkspaceOpenStage{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStage) ProtoMessage() {}
+
+func (x *WorkspaceOpenStage) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStage.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStage) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WorkspaceOpenStage) GetStage() isWorkspaceOpenStage_Stage {
 	if x != nil {
 		return x.Stage
 	}
-	return WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_UNSPECIFIED
+	return nil
+}
+
+func (x *WorkspaceOpenStage) GetCheckingWorktree() *WorkspaceOpenStageCheckingWorktree {
+	if x != nil {
+		if x, ok := x.Stage.(*WorkspaceOpenStage_CheckingWorktree); ok {
+			return x.CheckingWorktree
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceOpenStage) GetStartingSession() *WorkspaceOpenStageStartingSession {
+	if x != nil {
+		if x, ok := x.Stage.(*WorkspaceOpenStage_StartingSession); ok {
+			return x.StartingSession
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceOpenStage) GetReviving() *WorkspaceOpenStageReviving {
+	if x != nil {
+		if x, ok := x.Stage.(*WorkspaceOpenStage_Reviving); ok {
+			return x.Reviving
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceOpenStage) GetClearingClosed() *WorkspaceOpenStageClearingClosed {
+	if x != nil {
+		if x, ok := x.Stage.(*WorkspaceOpenStage_ClearingClosed); ok {
+			return x.ClearingClosed
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceOpenStage) GetCheckingBuild() *WorkspaceOpenStageCheckingBuild {
+	if x != nil {
+		if x, ok := x.Stage.(*WorkspaceOpenStage_CheckingBuild); ok {
+			return x.CheckingBuild
+		}
+	}
+	return nil
+}
+
+type isWorkspaceOpenStage_Stage interface {
+	isWorkspaceOpenStage_Stage()
+}
+
+type WorkspaceOpenStage_CheckingWorktree struct {
+	// The daemon is confirming the workspace's worktree is still on disk. An
+	// open whose directory is gone is refused here.
+	CheckingWorktree *WorkspaceOpenStageCheckingWorktree `protobuf:"bytes,1,opt,name=checking_worktree,json=checkingWorktree,proto3,oneof"`
+}
+
+type WorkspaceOpenStage_StartingSession struct {
+	// The daemon is bringing the session up — spawning the shim and resuming
+	// the vendor conversation. Usually the slowest stage.
+	StartingSession *WorkspaceOpenStageStartingSession `protobuf:"bytes,2,opt,name=starting_session,json=startingSession,proto3,oneof"`
+}
+
+type WorkspaceOpenStage_Reviving struct {
+	// The daemon is lifting a hibernation park off the workspace.
+	Reviving *WorkspaceOpenStageReviving `protobuf:"bytes,3,opt,name=reviving,proto3,oneof"`
+}
+
+type WorkspaceOpenStage_ClearingClosed struct {
+	// The daemon is clearing the workspace's closed flag, which is what puts
+	// its row back among the open ones.
+	ClearingClosed *WorkspaceOpenStageClearingClosed `protobuf:"bytes,4,opt,name=clearing_closed,json=clearingClosed,proto3,oneof"`
+}
+
+type WorkspaceOpenStage_CheckingBuild struct {
+	// The daemon is checking the shim against the deployed build and bouncing
+	// it when stale.
+	CheckingBuild *WorkspaceOpenStageCheckingBuild `protobuf:"bytes,5,opt,name=checking_build,json=checkingBuild,proto3,oneof"`
+}
+
+func (*WorkspaceOpenStage_CheckingWorktree) isWorkspaceOpenStage_Stage() {}
+
+func (*WorkspaceOpenStage_StartingSession) isWorkspaceOpenStage_Stage() {}
+
+func (*WorkspaceOpenStage_Reviving) isWorkspaceOpenStage_Stage() {}
+
+func (*WorkspaceOpenStage_ClearingClosed) isWorkspaceOpenStage_Stage() {}
+
+func (*WorkspaceOpenStage_CheckingBuild) isWorkspaceOpenStage_Stage() {}
+
+// The worktree check. It carries nothing: the arm being set is the whole fact.
+type WorkspaceOpenStageCheckingWorktree struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStageCheckingWorktree) Reset() {
+	*x = WorkspaceOpenStageCheckingWorktree{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStageCheckingWorktree) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStageCheckingWorktree) ProtoMessage() {}
+
+func (x *WorkspaceOpenStageCheckingWorktree) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStageCheckingWorktree.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStageCheckingWorktree) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{3}
+}
+
+// The session bring-up. It carries nothing: the arm being set is the whole
+// fact.
+type WorkspaceOpenStageStartingSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStageStartingSession) Reset() {
+	*x = WorkspaceOpenStageStartingSession{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStageStartingSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStageStartingSession) ProtoMessage() {}
+
+func (x *WorkspaceOpenStageStartingSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStageStartingSession.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStageStartingSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{4}
+}
+
+// The hibernation revival. It carries nothing: the arm being set is the whole
+// fact.
+type WorkspaceOpenStageReviving struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStageReviving) Reset() {
+	*x = WorkspaceOpenStageReviving{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStageReviving) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStageReviving) ProtoMessage() {}
+
+func (x *WorkspaceOpenStageReviving) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStageReviving.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStageReviving) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{5}
+}
+
+// The closed-flag clear. It carries nothing: the arm being set is the whole
+// fact.
+type WorkspaceOpenStageClearingClosed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStageClearingClosed) Reset() {
+	*x = WorkspaceOpenStageClearingClosed{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStageClearingClosed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStageClearingClosed) ProtoMessage() {}
+
+func (x *WorkspaceOpenStageClearingClosed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStageClearingClosed.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStageClearingClosed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{6}
+}
+
+// The build check. It carries nothing: the arm being set is the whole fact.
+type WorkspaceOpenStageCheckingBuild struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceOpenStageCheckingBuild) Reset() {
+	*x = WorkspaceOpenStageCheckingBuild{}
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceOpenStageCheckingBuild) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceOpenStageCheckingBuild) ProtoMessage() {}
+
+func (x *WorkspaceOpenStageCheckingBuild) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceOpenStageCheckingBuild.ProtoReflect.Descriptor instead.
+func (*WorkspaceOpenStageCheckingBuild) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{7}
 }
 
 // The progress of one CreateWorkspace, from just after the ack to the terminal
@@ -276,7 +543,7 @@ type WorkspaceCreateProgress struct {
 
 func (x *WorkspaceCreateProgress) Reset() {
 	*x = WorkspaceCreateProgress{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +555,7 @@ func (x *WorkspaceCreateProgress) String() string {
 func (*WorkspaceCreateProgress) ProtoMessage() {}
 
 func (x *WorkspaceCreateProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -301,7 +568,7 @@ func (x *WorkspaceCreateProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCreateProgress.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateProgress) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WorkspaceCreateProgress) GetStep() isWorkspaceCreateProgress_Step {
@@ -389,7 +656,7 @@ type WorkspaceCreateFailed struct {
 
 func (x *WorkspaceCreateFailed) Reset() {
 	*x = WorkspaceCreateFailed{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -401,7 +668,7 @@ func (x *WorkspaceCreateFailed) String() string {
 func (*WorkspaceCreateFailed) ProtoMessage() {}
 
 func (x *WorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -414,7 +681,7 @@ func (x *WorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCreateFailed.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WorkspaceCreateFailed) GetCause() isWorkspaceCreateFailed_Cause {
@@ -486,7 +753,7 @@ type WorkspaceCreateStage struct {
 
 func (x *WorkspaceCreateStage) Reset() {
 	*x = WorkspaceCreateStage{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -498,7 +765,7 @@ func (x *WorkspaceCreateStage) String() string {
 func (*WorkspaceCreateStage) ProtoMessage() {}
 
 func (x *WorkspaceCreateStage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -511,7 +778,7 @@ func (x *WorkspaceCreateStage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCreateStage.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateStage) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WorkspaceCreateStage) GetStage() isWorkspaceCreateStage_Stage {
@@ -591,7 +858,7 @@ type WorkspaceCreateStageDerivingName struct {
 
 func (x *WorkspaceCreateStageDerivingName) Reset() {
 	*x = WorkspaceCreateStageDerivingName{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -603,7 +870,7 @@ func (x *WorkspaceCreateStageDerivingName) String() string {
 func (*WorkspaceCreateStageDerivingName) ProtoMessage() {}
 
 func (x *WorkspaceCreateStageDerivingName) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -616,7 +883,7 @@ func (x *WorkspaceCreateStageDerivingName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCreateStageDerivingName.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateStageDerivingName) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{11}
 }
 
 // The worktree stage. It carries nothing: the arm being set is the whole fact.
@@ -628,7 +895,7 @@ type WorkspaceCreateStageCreatingWorktree struct {
 
 func (x *WorkspaceCreateStageCreatingWorktree) Reset() {
 	*x = WorkspaceCreateStageCreatingWorktree{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +907,7 @@ func (x *WorkspaceCreateStageCreatingWorktree) String() string {
 func (*WorkspaceCreateStageCreatingWorktree) ProtoMessage() {}
 
 func (x *WorkspaceCreateStageCreatingWorktree) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +920,7 @@ func (x *WorkspaceCreateStageCreatingWorktree) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use WorkspaceCreateStageCreatingWorktree.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateStageCreatingWorktree) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{12}
 }
 
 // The session bring-up stage. It carries nothing: the arm being set is the
@@ -666,7 +933,7 @@ type WorkspaceCreateStageStartingSession struct {
 
 func (x *WorkspaceCreateStageStartingSession) Reset() {
 	*x = WorkspaceCreateStageStartingSession{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -678,7 +945,7 @@ func (x *WorkspaceCreateStageStartingSession) String() string {
 func (*WorkspaceCreateStageStartingSession) ProtoMessage() {}
 
 func (x *WorkspaceCreateStageStartingSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -691,7 +958,7 @@ func (x *WorkspaceCreateStageStartingSession) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use WorkspaceCreateStageStartingSession.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateStageStartingSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{13}
 }
 
 // The terminal success of a create, on the progress channel.
@@ -711,7 +978,7 @@ type WorkspaceCreateSucceeded struct {
 
 func (x *WorkspaceCreateSucceeded) Reset() {
 	*x = WorkspaceCreateSucceeded{}
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +990,7 @@ func (x *WorkspaceCreateSucceeded) String() string {
 func (*WorkspaceCreateSucceeded) ProtoMessage() {}
 
 func (x *WorkspaceCreateSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +1003,7 @@ func (x *WorkspaceCreateSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCreateSucceeded.ProtoReflect.Descriptor instead.
 func (*WorkspaceCreateSucceeded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *WorkspaceCreateSucceeded) GetWorkspace() *v1.WorkspaceRef {
@@ -762,9 +1029,21 @@ const file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc = "" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\x12?\n" +
 	"\x06create\x18\x02 \x01(\v2%.agentrepl.v1.WorkspaceCreateProgressH\x00R\x06create\x129\n" +
 	"\x04open\x18\x03 \x01(\v2#.agentrepl.v1.WorkspaceOpenProgressH\x00R\x04openB\a\n" +
-	"\x05event\"O\n" +
-	"\x15WorkspaceOpenProgress\x126\n" +
-	"\x05stage\x18\x01 \x01(\x0e2 .agentrepl.v1.WorkspaceOpenStageR\x05stage\"\x80\x02\n" +
+	"\x05event\"k\n" +
+	"\x15WorkspaceOpenProgress\x12E\n" +
+	"\rentered_stage\x18\x02 \x01(\v2 .agentrepl.v1.WorkspaceOpenStageR\fenteredStageJ\x04\b\x01\x10\x02R\x05stage\"\xd7\x03\n" +
+	"\x12WorkspaceOpenStage\x12_\n" +
+	"\x11checking_worktree\x18\x01 \x01(\v20.agentrepl.v1.WorkspaceOpenStageCheckingWorktreeH\x00R\x10checkingWorktree\x12\\\n" +
+	"\x10starting_session\x18\x02 \x01(\v2/.agentrepl.v1.WorkspaceOpenStageStartingSessionH\x00R\x0fstartingSession\x12F\n" +
+	"\breviving\x18\x03 \x01(\v2(.agentrepl.v1.WorkspaceOpenStageRevivingH\x00R\breviving\x12Y\n" +
+	"\x0fclearing_closed\x18\x04 \x01(\v2..agentrepl.v1.WorkspaceOpenStageClearingClosedH\x00R\x0eclearingClosed\x12V\n" +
+	"\x0echecking_build\x18\x05 \x01(\v2-.agentrepl.v1.WorkspaceOpenStageCheckingBuildH\x00R\rcheckingBuildB\a\n" +
+	"\x05stage\"$\n" +
+	"\"WorkspaceOpenStageCheckingWorktree\"#\n" +
+	"!WorkspaceOpenStageStartingSession\"\x1c\n" +
+	"\x1aWorkspaceOpenStageReviving\"\"\n" +
+	" WorkspaceOpenStageClearingClosed\"!\n" +
+	"\x1fWorkspaceOpenStageCheckingBuild\"\x80\x02\n" +
 	"\x17WorkspaceCreateProgress\x12I\n" +
 	"\rentered_stage\x18\x04 \x01(\v2\".agentrepl.v1.WorkspaceCreateStageH\x00R\fenteredStage\x12F\n" +
 	"\tsucceeded\x18\x02 \x01(\v2&.agentrepl.v1.WorkspaceCreateSucceededH\x00R\tsucceeded\x12=\n" +
@@ -784,14 +1063,7 @@ const file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc = "" +
 	"#WorkspaceCreateStageStartingSession\"h\n" +
 	"\x18WorkspaceCreateSucceeded\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name*\x87\x02\n" +
-	"\x12WorkspaceOpenStage\x12$\n" +
-	" WORKSPACE_OPEN_STAGE_UNSPECIFIED\x10\x00\x12*\n" +
-	"&WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE\x10\x01\x12)\n" +
-	"%WORKSPACE_OPEN_STAGE_STARTING_SESSION\x10\x02\x12!\n" +
-	"\x1dWORKSPACE_OPEN_STAGE_REVIVING\x10\x03\x12(\n" +
-	"$WORKSPACE_OPEN_STAGE_CLEARING_CLOSED\x10\x04\x12'\n" +
-	"#WORKSPACE_OPEN_STAGE_CHECKING_BUILD\x10\x05B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x04name\x18\x02 \x01(\tR\x04nameB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_workspace_mutation_progress_proto_rawDescOnce sync.Once
@@ -805,39 +1077,48 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_mutation_progress_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_mutation_progress_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_workspace_mutation_progress_proto_goTypes = []any{
-	(WorkspaceOpenStage)(0),                      // 0: agentrepl.v1.WorkspaceOpenStage
-	(*WorkspaceMutationProgress)(nil),            // 1: agentrepl.v1.WorkspaceMutationProgress
-	(*WorkspaceOpenProgress)(nil),                // 2: agentrepl.v1.WorkspaceOpenProgress
-	(*WorkspaceCreateProgress)(nil),              // 3: agentrepl.v1.WorkspaceCreateProgress
-	(*WorkspaceCreateFailed)(nil),                // 4: agentrepl.v1.WorkspaceCreateFailed
-	(*WorkspaceCreateStage)(nil),                 // 5: agentrepl.v1.WorkspaceCreateStage
-	(*WorkspaceCreateStageDerivingName)(nil),     // 6: agentrepl.v1.WorkspaceCreateStageDerivingName
-	(*WorkspaceCreateStageCreatingWorktree)(nil), // 7: agentrepl.v1.WorkspaceCreateStageCreatingWorktree
-	(*WorkspaceCreateStageStartingSession)(nil),  // 8: agentrepl.v1.WorkspaceCreateStageStartingSession
-	(*WorkspaceCreateSucceeded)(nil),             // 9: agentrepl.v1.WorkspaceCreateSucceeded
-	(*CreateWorkspaceError)(nil),                 // 10: agentrepl.v1.CreateWorkspaceError
-	(*v1.WorkspaceRef)(nil),                      // 11: workspace.v1.WorkspaceRef
+	(*WorkspaceMutationProgress)(nil),            // 0: agentrepl.v1.WorkspaceMutationProgress
+	(*WorkspaceOpenProgress)(nil),                // 1: agentrepl.v1.WorkspaceOpenProgress
+	(*WorkspaceOpenStage)(nil),                   // 2: agentrepl.v1.WorkspaceOpenStage
+	(*WorkspaceOpenStageCheckingWorktree)(nil),   // 3: agentrepl.v1.WorkspaceOpenStageCheckingWorktree
+	(*WorkspaceOpenStageStartingSession)(nil),    // 4: agentrepl.v1.WorkspaceOpenStageStartingSession
+	(*WorkspaceOpenStageReviving)(nil),           // 5: agentrepl.v1.WorkspaceOpenStageReviving
+	(*WorkspaceOpenStageClearingClosed)(nil),     // 6: agentrepl.v1.WorkspaceOpenStageClearingClosed
+	(*WorkspaceOpenStageCheckingBuild)(nil),      // 7: agentrepl.v1.WorkspaceOpenStageCheckingBuild
+	(*WorkspaceCreateProgress)(nil),              // 8: agentrepl.v1.WorkspaceCreateProgress
+	(*WorkspaceCreateFailed)(nil),                // 9: agentrepl.v1.WorkspaceCreateFailed
+	(*WorkspaceCreateStage)(nil),                 // 10: agentrepl.v1.WorkspaceCreateStage
+	(*WorkspaceCreateStageDerivingName)(nil),     // 11: agentrepl.v1.WorkspaceCreateStageDerivingName
+	(*WorkspaceCreateStageCreatingWorktree)(nil), // 12: agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+	(*WorkspaceCreateStageStartingSession)(nil),  // 13: agentrepl.v1.WorkspaceCreateStageStartingSession
+	(*WorkspaceCreateSucceeded)(nil),             // 14: agentrepl.v1.WorkspaceCreateSucceeded
+	(*CreateWorkspaceError)(nil),                 // 15: agentrepl.v1.CreateWorkspaceError
+	(*v1.WorkspaceRef)(nil),                      // 16: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs = []int32{
-	3,  // 0: agentrepl.v1.WorkspaceMutationProgress.create:type_name -> agentrepl.v1.WorkspaceCreateProgress
-	2,  // 1: agentrepl.v1.WorkspaceMutationProgress.open:type_name -> agentrepl.v1.WorkspaceOpenProgress
-	0,  // 2: agentrepl.v1.WorkspaceOpenProgress.stage:type_name -> agentrepl.v1.WorkspaceOpenStage
-	5,  // 3: agentrepl.v1.WorkspaceCreateProgress.entered_stage:type_name -> agentrepl.v1.WorkspaceCreateStage
-	9,  // 4: agentrepl.v1.WorkspaceCreateProgress.succeeded:type_name -> agentrepl.v1.WorkspaceCreateSucceeded
-	4,  // 5: agentrepl.v1.WorkspaceCreateProgress.failed:type_name -> agentrepl.v1.WorkspaceCreateFailed
-	10, // 6: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
-	6,  // 7: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
-	7,  // 8: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
-	8,  // 9: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
-	11, // 10: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	8,  // 0: agentrepl.v1.WorkspaceMutationProgress.create:type_name -> agentrepl.v1.WorkspaceCreateProgress
+	1,  // 1: agentrepl.v1.WorkspaceMutationProgress.open:type_name -> agentrepl.v1.WorkspaceOpenProgress
+	2,  // 2: agentrepl.v1.WorkspaceOpenProgress.entered_stage:type_name -> agentrepl.v1.WorkspaceOpenStage
+	3,  // 3: agentrepl.v1.WorkspaceOpenStage.checking_worktree:type_name -> agentrepl.v1.WorkspaceOpenStageCheckingWorktree
+	4,  // 4: agentrepl.v1.WorkspaceOpenStage.starting_session:type_name -> agentrepl.v1.WorkspaceOpenStageStartingSession
+	5,  // 5: agentrepl.v1.WorkspaceOpenStage.reviving:type_name -> agentrepl.v1.WorkspaceOpenStageReviving
+	6,  // 6: agentrepl.v1.WorkspaceOpenStage.clearing_closed:type_name -> agentrepl.v1.WorkspaceOpenStageClearingClosed
+	7,  // 7: agentrepl.v1.WorkspaceOpenStage.checking_build:type_name -> agentrepl.v1.WorkspaceOpenStageCheckingBuild
+	10, // 8: agentrepl.v1.WorkspaceCreateProgress.entered_stage:type_name -> agentrepl.v1.WorkspaceCreateStage
+	14, // 9: agentrepl.v1.WorkspaceCreateProgress.succeeded:type_name -> agentrepl.v1.WorkspaceCreateSucceeded
+	9,  // 10: agentrepl.v1.WorkspaceCreateProgress.failed:type_name -> agentrepl.v1.WorkspaceCreateFailed
+	15, // 11: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
+	11, // 12: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
+	12, // 13: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+	13, // 14: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
+	16, // 15: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_mutation_progress_proto_init() }
@@ -851,15 +1132,22 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_init() {
 		(*WorkspaceMutationProgress_Open)(nil),
 	}
 	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[2].OneofWrappers = []any{
+		(*WorkspaceOpenStage_CheckingWorktree)(nil),
+		(*WorkspaceOpenStage_StartingSession)(nil),
+		(*WorkspaceOpenStage_Reviving)(nil),
+		(*WorkspaceOpenStage_ClearingClosed)(nil),
+		(*WorkspaceOpenStage_CheckingBuild)(nil),
+	}
+	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[8].OneofWrappers = []any{
 		(*WorkspaceCreateProgress_EnteredStage)(nil),
 		(*WorkspaceCreateProgress_Succeeded)(nil),
 		(*WorkspaceCreateProgress_Failed)(nil),
 	}
-	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[9].OneofWrappers = []any{
 		(*WorkspaceCreateFailed_Refusal)(nil),
 		(*WorkspaceCreateFailed_Internal)(nil),
 	}
-	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[10].OneofWrappers = []any{
 		(*WorkspaceCreateStage_DerivingName)(nil),
 		(*WorkspaceCreateStage_CreatingWorktree)(nil),
 		(*WorkspaceCreateStage_StartingSession)(nil),
@@ -869,14 +1157,13 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc), len(file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      0,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_agentrepl_v1_workspace_mutation_progress_proto_goTypes,
 		DependencyIndexes: file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs,
-		EnumInfos:         file_agentrepl_v1_workspace_mutation_progress_proto_enumTypes,
 		MessageInfos:      file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes,
 	}.Build()
 	File_agentrepl_v1_workspace_mutation_progress_proto = out.File

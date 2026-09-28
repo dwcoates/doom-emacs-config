@@ -311,7 +311,7 @@ describe("mounting the rail", () => {
       service(AgentRepl, {
         watchWorkspaceRoster: async function* () {
           requests += 1;
-          yield create(WatchWorkspaceRosterResponseSchema, { roster: roster() });
+          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster() } });
           await new Promise<never>(() => undefined);
         },
       });
@@ -326,6 +326,41 @@ describe("mounting the rail", () => {
     mountSidebar(document.createElement("nav"), ctx, { storage: null, timers: fakeTimers() });
     await settle();
     expect(requests).toBe(1);
+  });
+});
+
+describe("the roster stream's planned ending", () => {
+  it("files no failure and reopens when the daemon ends the stream as planned", async () => {
+    // ARRANGE: run 1 carries a roster, then the planned ending, then ends
+    // cleanly; the reopened run 2 stands, as a live daemon's stream does.
+    const reported: string[] = [];
+    let requests = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchWorkspaceRoster: async function* () {
+          requests += 1;
+          if (requests === 1) {
+            yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster() } });
+            yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "ending", value: {} } });
+            return;
+          }
+          await new Promise<never>(() => undefined);
+        },
+      });
+    });
+    const ctx = testAppContext({
+      client: createAgentReplClient(transport),
+      workspace: WORKSPACE,
+      ticker: fakeTicker(NOW),
+      failures: { report: (kind) => void reported.push(kind.kind.case ?? "unset"), retract: () => undefined },
+      composerEnabled: false,
+    });
+    // ACT
+    const handle = mountSidebar(document.createElement("nav"), ctx, { storage: null, timers: fakeTimers() });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect({ reported, requests }).toEqual({ reported: [], requests: 2 });
   });
 });
 
