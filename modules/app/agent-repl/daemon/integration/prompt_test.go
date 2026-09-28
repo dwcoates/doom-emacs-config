@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -2187,4 +2188,92 @@ func (f *fixture) openFeedOn(d *harness.Daemon) (*frontendv1.FeedPage, *agentrep
 func awaitView[T any](t *testing.T, f *fixture, s *harness.Stream[T], what string, pred func(T) bool) T {
 	t.Helper()
 	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
+}
+
+// ---- a deferred prompt (agentrepl.v1 SubmitPromptDelivery.DEFERRED) ----
+
+// submitDeferred sends one deferred submission, as `SPC j RET` does.
+func (f *fixture) submitDeferred(text, key string) *agentreplv1.SubmitPromptResponse {
+	f.t.Helper()
+	deferred := agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED
+	return f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace:      f.ws,
+		Said:           said(text),
+		IdempotencyKey: key,
+		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT,
+		Delivery:       &deferred,
+	})
+}
+
+// TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn pins the delivery
+// end to end. The -fake heuristic interjects a prompt beginning "stop", so an
+// ORDINARY one would interrupt the running turn (see
+// TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunningTurn);
+// the deferred one is held for the turn's end, unjudged, and starts only once
+// that turn has ended, as a turn of its own.
+func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	holds := f.d.WatchHolds(f.ws)
+
+	// Act
+	resp := f.submitDeferred("stop and rebase once this is done", "k-deferred")
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+
+	// Assert: held for the turn's end, never classifying, never interjected.
+	tray := awaitView(t, f, holds, "the deferred prompt in the tray", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn) != nil
+	})
+	if p := promptHeldEntry(tray, turn); p.GetHoldForTurnEnd() == nil {
+		t.Fatalf("held entry for the deferred prompt = %v, want hold_for_turn_end from the start", p)
+	}
+	expectNoRPC(t, f.shim, harness.RPCKillTurn, harness.ProbeWindow)
+
+	// Act: the running turn ends on its own.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the deferred prompt starts now, as its own turn.
+	if st := f.shim.ExpectStartTurn(); st.GetTurn().GetValue() != turn.GetValue() {
+		t.Fatalf("StartTurn after the turn ended = %q, want the deferred turn %q", st.GetTurn().GetValue(), turn.GetValue())
+	}
+}
+
+// TestADeferredHoldSurvivesADaemonRestartStillDeferred pins durability: the
+// hold and its delivery are rows in wsm.db, so the restarted daemon restores
+// it as the deferred hold it was.
+func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	turn := f.submitDeferred("run the tests afterwards", "k-deferred").GetSuccess().GetTurn().GetTurn()
+
+	// Act
+	nd := promptRestartDaemon(t, f)
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+
+	// Assert
+	holds := nd.WatchHolds(f.ws)
+	got := awaitView(t, f, holds, "the restored deferred hold", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn) != nil
+	})
+	if p := promptHeldEntry(got, turn); p.GetHoldForTurnEnd() == nil {
+		t.Fatalf("restored entry = %v, want the deferred hold_for_turn_end", p)
+	}
+	var deferredRows int
+	nd.WithDB(func(db *sql.DB) {
+		if err := db.QueryRow(`SELECT count(*) FROM held_prompts WHERE delivery = 1 AND tombstone_kind IS NULL`).Scan(&deferredRows); err != nil {
+			t.Fatalf("count the deferred holds: %v", err)
+		}
+	})
+	if deferredRows != 1 {
+		t.Fatalf("standing deferred held_prompts rows after the restart = %d, want 1", deferredRows)
+	}
 }

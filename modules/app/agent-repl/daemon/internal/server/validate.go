@@ -171,6 +171,18 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 			return err
 		}
 	}
+	// AN ABSENT delivery is the ordinary one; a present one must name a
+	// delivery the daemon honors. UNSPECIFIED is never sent, and a value this
+	// build does not know is never read as the ordinary delivery.
+	if req.Delivery != nil {
+		switch req.GetDelivery() {
+		case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED:
+		case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED:
+			return invalid("delivery", "a delivery, when set, is never UNSPECIFIED: the ordinary delivery is an absent field")
+		default:
+			return invalid("delivery", fmt.Sprintf("delivery %d is not a delivery this daemon honors", req.GetDelivery()))
+		}
+	}
 	return nil
 }
 

@@ -152,7 +152,7 @@ type fakePrompts struct {
 	err         error
 }
 
-func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	if p.err != nil {
 		return prompthandler.Outcome{}, p.err
 	}

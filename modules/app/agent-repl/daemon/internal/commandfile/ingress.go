@@ -334,7 +334,7 @@ func (i *ingress) applyPrompt(ctx context.Context, file string, index int, entry
 		return err
 	}
 	key := fmt.Sprintf("%s:%d", file, index)
-	_, err = i.deps.Prompts.Submit(ctx, ws, workspace.SaidText(entry.Prompt), key, commandFileOrigin, nil)
+	_, err = i.deps.Prompts.Submit(ctx, ws, workspace.SaidText(entry.Prompt), key, commandFileOrigin, wsm.DeliveryOrdinary, nil)
 	return err
 }
 

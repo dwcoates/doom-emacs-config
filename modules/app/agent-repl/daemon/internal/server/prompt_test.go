@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
+	"claude-repld/internal/wsm"
 )
 
 // submitRequest is one well-formed submission.
@@ -588,5 +589,39 @@ func TestSubmitRefusalCarriesTheModelRefusedArm(t *testing.T) {
 	// Assert.
 	if cerr != nil || resp.GetError().GetModelRefused().GetDetail() != "the vendor refused" {
 		t.Fatalf("refuse = %v, error = %v, want the model_refused arm with its sentence", cerr, resp.GetError())
+	}
+}
+
+// TestSubmitPromptHandsTheHandlerItsDelivery pins the mapping of the optional
+// delivery onto the queue's: absent is ordinary, DEFERRED is deferred.
+func TestSubmitPromptHandsTheHandlerItsDelivery(t *testing.T) {
+	deferred := agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED
+	tests := []struct {
+		name     string
+		delivery *agentreplv1.SubmitPromptDelivery
+		want     wsm.Delivery
+	}{
+		{name: "an absent delivery is ordinary", delivery: nil, want: wsm.DeliveryOrdinary},
+		{name: "DEFERRED is deferred", delivery: &deferred, want: wsm.DeliveryDeferred},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Prompts.outcome = prompthandler.Outcome{Recognition: prompthandler.RecognizedNone, Turn: "turn-7"}
+			h.Prompts.lastDelivery = wsm.Delivery(-1)
+			req := submitRequest()
+			req.Delivery = tc.delivery
+
+			// Act.
+			if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+
+			// Assert.
+			if h.Prompts.lastDelivery != tc.want {
+				t.Fatalf("delivery handed to the handler = %v, want %v", h.Prompts.lastDelivery, tc.want)
+			}
+		})
 	}
 }

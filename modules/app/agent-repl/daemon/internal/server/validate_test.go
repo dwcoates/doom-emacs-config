@@ -96,6 +96,35 @@ func TestUnspecifiedPromptOriginIsInvalidArgument(t *testing.T) {
 	}
 }
 
+// TestAPresentDeliveryMustNameOneTheDaemonHonors pins SubmitPromptRequest's
+// optional delivery: absent is the ordinary delivery, UNSPECIFIED is never
+// sent, and an unknown value is never read as the ordinary delivery.
+func TestAPresentDeliveryMustNameOneTheDaemonHonors(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery agentreplv1.SubmitPromptDelivery
+	}{
+		{name: "UNSPECIFIED is never sent", delivery: agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED},
+		{name: "an unknown value is refused", delivery: agentreplv1.SubmitPromptDelivery(99)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			req := submitRequest()
+			req.Delivery = &tc.delivery
+
+			// Act.
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+		})
+	}
+}
+
 // TestEmptyPromptBlocksIsInvalidArgument pins that a prompt with no blocks is
 // refused: a submission that says nothing is not a submission.
 func TestEmptyPromptBlocksIsInvalidArgument(t *testing.T) {
