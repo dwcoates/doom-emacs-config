@@ -83,6 +83,11 @@ const (
 	// KindResumeFailed and renders through the same arm; only records written
 	// before the spelling was unified still carry it.
 	KindRelaunchResumeFailed = "relaunch_resume_failed"
+	// KindBounceDisposition is an ORDINARY reconciled bounce disposition: a
+	// session the bounce preserved or rolled, recorded and closed in one
+	// breath so the per-session accounting survives without polluting the
+	// open fault set.
+	KindBounceDisposition = "bounce_disposition"
 )
 
 // armlessSessionKinds are the recorded fault kinds the SessionFault / HostFault
@@ -101,7 +106,7 @@ var armlessSessionKinds = map[string]struct{}{
 	// An ordinary reconciled bounce disposition, opened and closed in one
 	// breath. It needs no arm: it is per-session accounting, never a standing
 	// condition a host view should draw.
-	"bounce_disposition": {},
+	KindBounceDisposition: {},
 }
 
 // ArmlessSessionKind reports whether kind is one the SessionFault / HostFault
