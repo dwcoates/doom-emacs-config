@@ -16,23 +16,43 @@ const (
 	pStatZombie = 5 // SZOMB
 )
 
-// readProcessState reads pid's p_stat from the kernel's process table.
+// pWExit is <sys/proc.h>'s P_WEXIT, the p_flag bit the kernel reports once a
+// process has begun to exit.
+const pWExit = 0x00002000
+
+// readProcessState reads pid's p_stat and p_flag from the kernel's process
+// table.
 func readProcessState(pid int) (processState, error) {
 	info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	// THE KERNEL ANSWERS A PID IT HAS NO ENTRY FOR WITH AN EMPTY RECORD, which
 	// SysctlKinfoProc reports as EIO: the process is gone, and a process that
 	// is gone cannot run.
 	if errors.Is(err, unix.EIO) {
-		return processState{frozen: true, name: "gone"}, nil
+		return processState{frozen: true, exited: true, name: "gone"}, nil
 	}
 	if err != nil {
 		return processState{}, err
 	}
-	switch stat := info.Proc.P_stat; stat {
+	return stateOf(info.Proc.P_stat, info.Proc.P_flag)
+}
+
+// stateOf classifies a process-table entry.
+//
+// A PROCESS WHOSE EXIT IS UNDER WAY HAS EXITED, whatever its p_stat says. The
+// kernel sets P_WEXIT on the dying thread's own way out, after which it never
+// returns to user mode, and it posts the exit event (the one WaitProcessExit
+// waits on) before p_stat turns SZOMB: Kill read its SIGKILLed leader as
+// running, with P_WEXIT set, in 4 of 2000 reads taken the moment that event
+// arrived. Neither a stop nor anything else can bring such a process back.
+func stateOf(stat int8, flag int32) (processState, error) {
+	if flag&pWExit != 0 {
+		return processState{frozen: true, exited: true, name: "exiting"}, nil
+	}
+	switch stat {
 	case pStatStop:
 		return processState{frozen: true, name: "stopped"}, nil
 	case pStatZombie:
-		return processState{frozen: true, name: "a zombie"}, nil
+		return processState{frozen: true, exited: true, name: "a zombie"}, nil
 	case pStatIdle:
 		return processState{name: "being created"}, nil
 	case pStatRun:
@@ -42,4 +62,23 @@ func readProcessState(pid int) (processState, error) {
 	default:
 		return processState{}, fmt.Errorf("unknown p_stat %d", stat)
 	}
+}
+
+// groupExited reports whether every process in process group pgid has
+// exited: a group of zombies, or no group at all.
+func groupExited(pgid int) (bool, error) {
+	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
+	if err != nil {
+		return false, fmt.Errorf("list process group %d: %w", pgid, err)
+	}
+	for _, m := range members {
+		state, err := stateOf(m.Proc.P_stat, m.Proc.P_flag)
+		if err != nil {
+			return false, fmt.Errorf("process %d of group %d: %w", m.Proc.P_pid, pgid, err)
+		}
+		if !state.exited {
+			return false, nil
+		}
+	}
+	return true, nil
 }

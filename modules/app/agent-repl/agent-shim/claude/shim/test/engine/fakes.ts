@@ -29,6 +29,8 @@ import type {
   Persistence,
 } from "../../src/store/persistence.js";
 import { PersistenceError } from "../../src/store/persistence.js";
+import type { VendorTaskAnswer } from "../../src/store/locator.js";
+import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
 import type { ReachabilityProbe } from "../../src/engine/network-resume.js";
@@ -469,6 +471,17 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve(this.live);
   }
   /**
+   * The store's answer per vendor task locator; an unlisted locator answers
+   * `not_found`, which is what a store that never heard of it says.
+   */
+  readonly vendorTasks = new Map<string, VendorTaskAnswer>();
+  /** Every locator lookup, as `<session>/<locator>`, in order. */
+  readonly vendorTaskLookups: string[] = [];
+  agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
+    this.vendorTaskLookups.push(`${session.value}/${vendorTaskId}`);
+    return Promise.resolve(this.vendorTasks.get(vendorTaskId) ?? { kind: "not_found" });
+  }
+  /**
    * The durable writes and shell-run opens, in the order they were made — so a
    * suite can say the start was made durable BEFORE the run was opened.
    */
@@ -568,6 +581,26 @@ export class RecordingFold implements EngineFold {
 
   endQuery(why: string): void {
     this.queryEnds.push(why);
+  }
+
+  /** The task a message awaits the store for; none unless a suite says so. */
+  awaitingFor: (message: SdkMessage) => string | undefined = () => undefined;
+  /** Every store answer the engine handed back, in order. */
+  readonly learned: { taskId: string; answer: VendorTaskAnswer }[] = [];
+  /** What the fold knows per task; a found answer is remembered here, as the real fold does. */
+  readonly knowledge = new Map<string, TaskAgentKnowledge>();
+
+  taskAwaitingAgent(message: SdkMessage): string | undefined {
+    return this.awaitingFor(message);
+  }
+
+  learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void {
+    this.learned.push({ taskId, answer });
+    if (answer.kind === "found") this.knowledge.set(taskId, { kind: "named", agent: answer.agent });
+  }
+
+  taskAgent(taskId: string): TaskAgentKnowledge {
+    return this.knowledge.get(taskId) ?? { kind: "unknown" };
   }
 }
 

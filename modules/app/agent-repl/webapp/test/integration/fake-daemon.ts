@@ -276,6 +276,12 @@ export interface FakeDaemon {
    * meets one skips it quietly, exactly as it skips any arm it cannot draw.
    */
   pushReloadElisp(moduleRoot: string, build: string): void;
+  /**
+   * Push the planned-ending arm (`DaemonStreamEnding`) on every live stream of
+   * RPC: the frame a daemon standing down in a PLANNED exit sends as a
+   * stream's last, just before its clean end (`endStream`).
+   */
+  pushPlannedEnding(rpc: "watchDaemon" | "watchWorkspaceRoster"): void;
 
   // --- the login pty -------------------------------------------------------
   /** The buffer WatchLoginTerminal replays before any live byte. */
@@ -420,25 +426,34 @@ const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: ob
   watchWorkspaceRoster: {
     path: "RosterRow.status",
     strip: (message) => {
-      const response = message as { roster?: { repository?: { sections?: readonly object[] } } };
-      const roster = required(response.roster, "WatchWorkspaceRosterResponse.roster");
+      const response = message as {
+        push?: { case?: string; value?: { repository?: { sections?: readonly object[] } } };
+      };
+      const push = required(response.push, "WatchWorkspaceRosterResponse.push");
+      const roster = required(
+        push.case === "roster" ? push.value : undefined,
+        "WatchWorkspaceRosterResponse.roster",
+      );
       const repository = required(roster.repository, "WorkspaceRoster.repository");
       const sections = required(repository.sections, "RosterGrouping.sections");
       return {
         ...response,
-        roster: {
-          ...roster,
-          repository: {
-            ...repository,
-            sections: sections.map((section) => {
-              const held = section as { rows?: { rows?: readonly object[] } };
-              const rows = required(held.rows, "RosterSection.rows");
-              const list = required(rows.rows, "RosterRows.rows");
-              return {
-                ...held,
-                rows: { ...rows, rows: list.map((row) => ({ ...row, status: { case: undefined } })) },
-              };
-            }),
+        push: {
+          case: "roster",
+          value: {
+            ...roster,
+            repository: {
+              ...repository,
+              sections: sections.map((section) => {
+                const held = section as { rows?: { rows?: readonly object[] } };
+                const rows = required(held.rows, "RosterSection.rows");
+                const list = required(rows.rows, "RosterRows.rows");
+                return {
+                  ...held,
+                  rows: { ...rows, rows: list.map((row) => ({ ...row, status: { case: undefined } })) },
+                };
+              }),
+            },
           },
         },
       };
@@ -823,7 +838,7 @@ export function createFakeDaemon(): FakeDaemon {
     record("watchWorkspaceRoster", request);
     consumeFailure("watchWorkspaceRoster");
     const { channel, iterate } = openStream("watchWorkspaceRoster", "", signal);
-    channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { roster })));
+    channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster } })));
     return iterate();
   };
 
@@ -1638,7 +1653,7 @@ export function createFakeDaemon(): FakeDaemon {
         "watchWorkspaceRoster",
         undefined,
         undefined,
-        create(WatchWorkspaceRosterResponseSchema, { roster: next }),
+        create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: next } }),
       );
     },
     setTray(workspace, tray) {
@@ -1715,6 +1730,16 @@ export function createFakeDaemon(): FakeDaemon {
         create(WatchDaemonResponseSchema, {
           push: { case: "mutationProgress", value: { opId } },
         }),
+      );
+    },
+    pushPlannedEnding(rpc) {
+      broadcast(
+        rpc,
+        undefined,
+        undefined,
+        rpc === "watchDaemon"
+          ? create(WatchDaemonResponseSchema, { push: { case: "ending", value: {} } })
+          : create(WatchWorkspaceRosterResponseSchema, { push: { case: "ending", value: {} } }),
       );
     },
     pushReloadElisp(moduleRoot, build) {

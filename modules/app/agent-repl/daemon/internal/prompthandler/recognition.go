@@ -25,6 +25,19 @@ var ActCommands = map[conversationv1.SessionCommand]string{
 	conversationv1.SessionCommand_SESSION_COMMAND_MODEL:   promptqueue.ActSetModel,
 }
 
+// ForwardedCommands are commands the SessionCommand enum names that the daemon
+// still FORWARDS to the vendor as ordinary text, exactly as it did before the
+// enum named them. They are in the enum so the sidecar classifies their
+// transcript envelopes as CLI-answered commands (conversation.v1's
+// slash_command.proto), not so the daemon refuses them: /effort, /plugin and
+// /low-priority reached the vendor as prompts while the enum lacked them, and
+// learning their names must not start refusing them.
+var ForwardedCommands = map[conversationv1.SessionCommand]bool{
+	conversationv1.SessionCommand_SESSION_COMMAND_EFFORT:       true,
+	conversationv1.SessionCommand_SESSION_COMMAND_PLUGIN:       true,
+	conversationv1.SessionCommand_SESSION_COMMAND_LOW_PRIORITY: true,
+}
+
 // recognized is the whole of what recognition made of a submission.
 type recognized struct {
 	kind Recognition
@@ -58,6 +71,9 @@ func recognize(text string) recognized {
 		// command_refused is for a command the daemon RECOGNIZES and neither
 		// answers nor forwards. Refusing here would suppress every vendor and
 		// user-authored slash command the enum has not been taught.
+		return recognized{kind: RecognizedNone}
+	}
+	if ForwardedCommands[matched.Command] {
 		return recognized{kind: RecognizedNone}
 	}
 	// A CONTEXT CUT IS AN ACT WHATEVER TEXT FOLLOWS IT, /clear and its aliases

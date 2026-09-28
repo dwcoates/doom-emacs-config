@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 )
 
@@ -372,6 +373,10 @@ type startFailedState struct {
 // wsState is one workspace's whole footer accumulation. It is in-memory only:
 // a resolver aggregates, it never stores.
 type wsState struct {
+	// id is the workspace this accumulation belongs to, stated once at its
+	// creation. It is what a resolver-wide fact keyed by workspace (a
+	// deploy's per-workspace notes) is read against.
+	id ids.WorkspaceID
 	// dir is the workspace directory, bound before any frame arrives.
 	dir string
 	// log is the workspace-bound logger, nil until the directory is bound.
@@ -608,10 +613,17 @@ func newWSState() *wsState {
 // rest of the session, and the strip reported a background task the roster —
 // which reads the watcher's set — said was over.
 func (s *wsState) detachedLive() bool {
+	return s.detachedCount() > 0
+}
+
+// detachedCount is how many detached items are running right now, read from
+// the same authority detachedLive reads: the watcher's set once it has stated
+// one, the footer's own rows until then.
+func (s *wsState) detachedCount() int {
 	if s.liveWorkSeen {
-		return !s.liveWork.Empty()
+		return len(s.liveWork.Agents) + len(s.liveWork.Shells) + len(s.liveWork.Monitors)
 	}
-	return len(s.agents)+len(s.shells)+len(s.monitors) > 0
+	return len(s.agents) + len(s.shells) + len(s.monitors)
 }
 
 // observeArm folds the published view's status arm in, answering the arm and

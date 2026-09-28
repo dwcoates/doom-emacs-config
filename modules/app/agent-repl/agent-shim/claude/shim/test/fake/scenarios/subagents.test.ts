@@ -693,3 +693,38 @@ describe("a detached subagent streaming INTO the main agent's open blocks", () =
     expect(logs.filter((record) => record.message.startsWith("invariant violated: a streamed unit"))).toEqual([]);
   });
 });
+
+describe("a subagent resumed by a send", () => {
+  /** The `task_started` a resume emits. */
+  const resumeStart = (driven: Awaited<ReturnType<typeof driveScenario>>): Record<string, unknown> | undefined =>
+    (driven.messages as unknown as Record<string, unknown>[]).find(
+      (m) => m.type === "system" && m.subtype === "task_started",
+    );
+
+  it("starts the agent's task under the task id the prompt names", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-resumed a5583c88f8f4d5a90"]);
+
+    // Assert
+    expect(resumeStart(driven)?.task_id).toBe("a5583c88f8f4d5a90");
+  });
+
+  it("starts the resumed task from the SEND, never from a spawn", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-resumed a5583c88f8f4d5a90"]);
+    const send = (driven.messages as unknown as Record<string, unknown>[])
+      .flatMap((m) => ((m.message as { content?: unknown[] } | undefined)?.content ?? []) as Record<string, unknown>[])
+      .find((block) => block.type === "tool_use" && block.name === "SendMessage");
+
+    // Assert
+    expect(resumeStart(driven)?.tool_use_id).toBe(send?.id);
+  });
+
+  it("mints a task id when the prompt names none", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-resumed"]);
+
+    // Assert
+    expect(resumeStart(driven)?.task_id).toEqual(matching(/./));
+  });
+});

@@ -1643,6 +1643,271 @@ describe("the turn loop", () => {
   });
 });
 
+/**
+ * A TURN THE VENDOR STARTED ON ITS OWN IS ADOPTED (owner ruling 2026-09-27).
+ *
+ * The vendor runs turns no StartTurn asked for -- a background subagent's
+ * hand-back arriving makes the main agent reply. Those turns used to run with
+ * no turn open, so their frames and terminal carried no turn id and nothing
+ * downstream learned they ran. Each is now opened as a real turn under a
+ * shim-minted id, announced by a `VENDOR_STARTED` prompt row.
+ */
+describe("a turn the vendor started on its own", () => {
+  /** Every adoption row the engine wrote, in order. */
+  const adoptions = (h: Harness): conversationv1.AgentPrompt[] =>
+    h.persistence.buffered.flatMap((entry) =>
+      entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED
+        ? [entry.item.prompt]
+        : [],
+    );
+
+  /** A top-level stream event: a reply frame of the running turn. */
+  const streamEvent = (uuid: string): SdkMessage =>
+    ({ type: "stream_event", uuid, session_id: "s", parent_tool_use_id: null, event: { type: "message_start" } }) as never;
+
+  /** An assistant frame of a subagent: it names the work it belongs to. */
+  const subagentReply = (uuid: string): SdkMessage =>
+    ({ ...assistantMessage(uuid), parent_tool_use_id: "toolu_spawn" }) as never;
+
+  /** A background task starting: detached work, which starts no turn. */
+  const taskStarted = (uuid: string): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-1",
+      tool_use_id: "toolu_bg",
+      description: "background",
+      uuid,
+      session_id: "s",
+    }) as never;
+
+  it.each([
+    { name: "a top-level assistant reply", message: assistantMessage("m-1"), adopts: 1 },
+    { name: "a top-level stream event", message: streamEvent("m-1"), adopts: 1 },
+    { name: "a result with no reply before it", message: resultMessage("m-1"), adopts: 1 },
+    { name: "a subagent's reply", message: subagentReply("m-1"), adopts: 0 },
+    { name: "a background task's start", message: taskStarted("m-1"), adopts: 0 },
+    { name: "the vendor's init", message: initMessage(), adopts: 0 },
+  ])("adopts a turn on $name with no turn open: $adopts", async ({ message, adopts }) => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.onSdkMessage(message);
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(adopts);
+  });
+
+  it("writes the adoption row ahead of the rows the turn's first message produced", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) => [foldEntry({ kind: "frame", frame: create(conversationv1.AgentFrameSchema, {}) }, `row-${message.uuid}`)];
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("first-reply"));
+
+    // Assert
+    expect(h.persistence.buffered.map((entry) => entry.item.kind)).toEqual(["prompt", "frame"]);
+  });
+
+  it("writes the adoption row with no words said", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("first-reply"));
+
+    // Assert
+    expect(adoptions(h)[0]?.said?.content?.blocks).toEqual([]);
+  });
+
+  it("names the adopted turn to the fold for the turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("result"));
+
+    // Assert
+    const adopted = adoptions(h)[0]?.id?.value;
+    expect([adopted?.startsWith("adopted-"), h.fold.contexts.at(-1)?.turnId?.value === adopted]).toEqual([true, true]);
+  });
+
+  it("leaves a StartTurn's own turn unadopted and named to the fold", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Assert
+    expect([adoptions(h).length, h.fold.contexts.at(-1)?.turnId?.value]).toEqual([0, "turn-1"]);
+  });
+
+  it("gives two consecutive vendor-started turns distinct ids", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("first"));
+    await h.engine.onSdkMessage(resultMessage("first-result"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("second"));
+
+    // Assert
+    const [first, second] = adoptions(h).map((prompt) => prompt.id?.value);
+    expect([adoptions(h).length, first === second]).toEqual([2, false]);
+  });
+
+  it("adopts nothing further on the running turn's later replies", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("first"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("second"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(1);
+  });
+
+  it("refuses a StartTurn while the adopted turn runs, so nothing is delivered into it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    const response = await startDuring(h, "turn-1");
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+  });
+
+  it("frees the slot on the adopted turn's result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+    await h.engine.onSdkMessage(resultMessage("result"));
+
+    // Act
+    const response = await startDuring(h, "turn-1");
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("names the adopted turn as the turn in flight", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    const adopted = adoptions(h)[0]?.id?.value;
+    const inFlight = failure?.cause.case === "live" ? failure.cause.value.turnInFlight?.value : undefined;
+    expect([adopted?.startsWith("adopted-"), inFlight === adopted]).toEqual([true, true]);
+  });
+
+  it("charges a killed turn's stop result to the killed turn and adopts nothing", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }) }),
+    );
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stopped-result"));
+
+    // Assert
+    expect([adoptions(h).length, h.fold.contexts.at(-1)?.turnId?.value]).toEqual([0, "turn-1"]);
+  });
+
+  it("records the adoption at INFO with the turn id, the cause and the vendor session", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("adopted a turn the vendor started"));
+    expect({
+      level: record?.level,
+      turn: record?.context.turn_id,
+      cause: typeof record?.context.cause,
+      session: typeof record?.context.vendor_session_id,
+    }).toEqual({ level: "info", turn: adoptions(h)[0]?.id?.value, cause: "string", session: "string" });
+  });
+
+  it("adopts a vendor turn beside the keep-alive as a served, untagged turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Assert
+    const row = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED,
+    );
+    expect(row?.keepalive).toBe(false);
+  });
+
+  it("names the turn adopted beside the keep-alive to the fold for that turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Assert
+    const adopted = adoptions(h)[0]?.id?.value;
+    expect([adopted?.startsWith("adopted-"), h.fold.contexts.at(-1)?.turnId?.value === adopted]).toEqual([true, true]);
+  });
+
+  it("adopts the next vendor turn beside the keep-alive afresh once the first closed", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply-2"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(2);
+  });
+});
+
 describe("the keep-alive turn", () => {
   it("submits a marker-prefixed prompt when the session is idle", async () => {
     const h = harness();
@@ -1944,8 +2209,10 @@ describe("the keep-alive turn serves nothing", () => {
     expect(rowsFor(h, "vendor-reply").map((row) => row.keepalive)).toEqual([false, false]);
   });
 
-  it("names no turn to the fold for a turn the vendor ran while the keep-alive waited", async () => {
-    // Arrange: the keep-alive's turn id must reach no served row.
+  it("names the adopted turn, never the keep-alive's, to the fold for a turn the vendor ran while the keep-alive waited", async () => {
+    // Arrange: the keep-alive's turn id must reach no served row; the vendor's
+    // own turn is adopted beside it (owner ruling 2026-09-27: every
+    // vendor-started turn is a real turn with an id).
     const h = harness();
     await started(h);
     await beat(h);
@@ -1954,7 +2221,7 @@ describe("the keep-alive turn serves nothing", () => {
     await h.engine.onSdkMessage(vendorReply("vendor-reply"));
 
     // Assert
-    expect(h.fold.contexts.at(-1)?.turnId).toBeUndefined();
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toMatch(/^adopted-/);
   });
 
   it("keeps the keep-alive open across the result of a turn the vendor ran first", async () => {
@@ -10121,5 +10388,291 @@ describe("a background agent a network outage cut off", () => {
 
     // Assert
     expect(h.networkScheduler.cleared).toBe(1);
+  });
+});
+
+/**
+ * A SUBAGENT RESUMED BY `SendMessage` AFTER THE SHIM RESTARTED (2026-09-27).
+ *
+ * The resume's `task_started` names the send, not the spawn, and a restarted
+ * shim never saw the spawn — so its memory holds no pairing of the vendor task
+ * locator with the agent. The store holds it (the sidecar wrote it with the
+ * agent's rows), and the engine asks the store before the fold, at the
+ * restore, and for the book an ask raised by the agent lands on.
+ */
+describe("a subagent resumed by a send whose spawn this process never saw", () => {
+  const LOCATOR = "a5583";
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+  const resumeStarted = {
+    type: "system",
+    subtype: "task_started",
+    task_id: LOCATOR,
+    tool_use_id: "toolu_send",
+    task_type: "local_agent",
+    description: "resumed",
+    uuid: "00000000-0000-4000-8000-0000000000d1",
+    session_id: "s",
+  } as never as SdkMessage;
+
+  /** A harness whose fold says the resume awaits the store, as the real fold would. */
+  async function resumeHarness(options: Parameters<typeof harness>[0] = {}): Promise<Harness> {
+    const h = harness(options);
+    h.fold.awaitingFor = (message) => (message === resumeStarted ? LOCATOR : undefined);
+    await started(h);
+    return h;
+  }
+
+  it("hands the fold the store's agent BEFORE folding the resume", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    let learnedWhenFolded = -1;
+    h.fold.entriesFor = (message) => {
+      if (message === resumeStarted) learnedWhenFolded = h.fold.learned.length;
+      return [];
+    };
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    expect(learnedWhenFolded).toBe(1);
+  });
+
+  it("asks the store scoped to this session's main agent, naming the locator", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual([`${mainAgentId(sessionId).value}/${LOCATOR}`]);
+  });
+
+  it("records the store naming the agent at INFO", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    const named = logRecordsSince(before).filter(
+      (record) => record.message === "the store named the agent a vendor task is running",
+    );
+    expect(named.map((record) => [record.level, record.context.agent, record.context.site])).toEqual([
+      ["info", "toolu_spawn", "announcement"],
+    ]);
+  });
+
+  it("records a store that names no agent at ERROR, with its answer", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    const missed = logRecordsSince(before).filter(
+      (record) => record.message === "the store named no agent for a vendor task this process cannot name itself",
+    );
+    expect(missed.map((record) => [record.level, record.context.detail])).toEqual([
+      ["error", "not_found: no agent of this session's lineage is paired with the locator"],
+    ]);
+  });
+
+  it("asks the store nothing for a message no task awaits", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000d2"));
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual([]);
+  });
+
+  /** The ask a subagent raises under its vendor task id; its book is returned. */
+  async function askBook(h: Harness): Promise<string | undefined> {
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_asked",
+      agentID: LOCATOR,
+      requestId: "req_1",
+    });
+    await vi.waitFor(() => {
+      expect(h.persistence.buffered.some((entry) => entry.source.discriminator.includes("permission"))).toBe(true);
+    });
+    await h.engine.standDown("SIGTERM");
+    await pending;
+    const entry = h.persistence.buffered.find((buffered) => buffered.source.discriminator.includes("permission"));
+    return entry?.agentId.value;
+  }
+
+  it("credits a resumed agent's ask to the agent the fold named", async () => {
+    // Arrange: the fold holds the pairing — its spawn, or the store's answer at the resume.
+    const h = await resumeHarness();
+    h.fold.knowledge.set(LOCATOR, { kind: "named", agent: SPAWN });
+
+    // Act, Assert.
+    expect(await askBook(h)).toBe("toolu_spawn");
+  });
+
+  it("credits a resumed agent's ask to the agent the store names, never to the send", async () => {
+    // Arrange: the live table holds the task under the SEND that resumed it.
+    const h = await resumeHarness();
+    await h.engine.onSdkMessage(resumeStarted);
+    h.fold.knowledge.set(LOCATOR, { kind: "not_its_spawn" });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+
+    // Act, Assert.
+    expect(await askBook(h)).toBe("toolu_spawn");
+  });
+
+  it("lands an ask the store cannot name on the main agent, recorded at ERROR", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.fold.knowledge.set(LOCATOR, { kind: "not_its_spawn" });
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    const before = logSinkMark();
+
+    // Act.
+    const book = await askBook(h);
+
+    // Assert.
+    expect(book).toBe(mainAgentId(sessionId).value);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.site),
+    ).toEqual(["permission"]);
+  });
+
+  /** One unit in the main book, as the store holds it. */
+  function bookUnit(at: string, unit: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: at }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** The main book after a resume: the send that reached `a5583`, and the spawn of `toolu_spawn`. */
+  function resumedBook(): conversationv1.HistoryPage {
+    return create(conversationv1.HistoryPageSchema, {
+      entries: [
+        bookUnit("2", "toolu_send", {
+          case: "sendMessage",
+          value: create(conversationv1.AgentSendMessageSchema, {
+            result: {
+              case: "success",
+              value: create(conversationv1.AgentSendMessageSuccessSchema, {
+                recipientAgentId: create(conversationv1.AgentIdSchema, { value: LOCATOR }),
+              }),
+            },
+          }),
+        }),
+        bookUnit("1", "toolu_spawn", {
+          case: "subagent",
+          value: create(conversationv1.AgentSubagentSchema, {
+            result: {
+              case: "start",
+              value: create(conversationv1.AgentSubagentStartSchema, { createdAgentId: SPAWN }),
+            },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+  }
+
+  /** A restarted session whose store holds the resumed agent's send as live work. */
+  function restoredHarness(): Harness {
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" })],
+    });
+    h.persistence.page = resumedBook();
+    return h;
+  }
+
+  it("re-announces a surviving resumed agent at StartSession, named by the store and described by its spawn", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(
+      live.map((work) => [
+        work.work?.value,
+        work.kind?.kind.case === "subagent" ? work.kind.kind.value.agentId?.value : "",
+        work.origin.case,
+      ]),
+    ).toEqual([["toolu_send", "toolu_spawn", "created"]]);
+  });
+
+  it("re-announces a resumed agent to a new watch", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    await started(h);
+    const watch = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await watch.next();
+
+    // Act.
+    const second = await nextPush(watch);
+    await watch.return?.();
+
+    // Assert.
+    const live = second.frame.case === "sessionStarted" ? second.frame.value.liveWork : [];
+    expect(live.map((work) => work.work?.value)).toEqual(["toolu_send"]);
+  });
+
+  it("announces nothing for a resumed handle the store names no agent for, recorded at ERROR", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    const before = logSinkMark();
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(live).toEqual([]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.site),
+    ).toEqual(["restore"]);
   });
 });

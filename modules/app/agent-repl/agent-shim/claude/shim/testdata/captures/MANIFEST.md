@@ -358,6 +358,9 @@ the narrower/alternate state**:
   one.
 - `!send-message-refused` — declared `SendMessage` refusal; no capture
   recorded one.
+- `!subagent-resumed` — declared resume of an idle agent by `SendMessage`,
+  whose `task_started` names the send rather than the spawn; no capture
+  recorded one (the shape is a live session's log, 2026-09-27).
 - `!subagent-detached-live`, `!subagent-detached-hold`, `!subagent-failed` —
   declared subagent states; no capture recorded any of the three.
 - `!subagent-network-failed` — GROUNDED IN PRODUCTION RECORDS, not a capture:

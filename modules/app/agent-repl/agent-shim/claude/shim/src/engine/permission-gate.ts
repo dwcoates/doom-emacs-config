@@ -425,8 +425,12 @@ interface PermissionGateDeps {
    * A DETACHED SUBAGENT RAISES ITS OWN GATED CALL, and `canUseTool` carries its
    * `agentID`. Writing that ask on the main agent's book put a subagent's
    * question in front of the wrong conversation.
+   *
+   * SYNCHRONOUS WHEN THIS PROCESS KNOWS, A PROMISE ONLY WHEN IT MUST ASK THE
+   * STORE (an agent whose spawn it never saw). The ordinary ask is registered
+   * in the same tick it arrives, exactly as before; only the rare one waits.
    */
-  agentFor(vendorAgentId: string): conversationv1.AgentId | undefined;
+  agentFor(vendorAgentId: string): conversationv1.AgentId | undefined | Promise<conversationv1.AgentId | undefined>;
   /** Record a frame. Enqueued, never awaited: the vendor is blocked on us. */
   persist(entries: PersistEntry[]): void;
   /**
@@ -481,6 +485,11 @@ type AnswerOutcome = "delivered" | "no_open_ask" | "answer_mismatch";
 export class PermissionGate {
   private readonly pendingByToolUse = new Map<string, Pending>();
 
+  /** How many times the gate has stood down, so an ask can tell one spanned it. */
+  private standDowns = 0;
+  /** The reason the most recent stand-down gave. */
+  private lastStandDownReason = "";
+
   constructor(private readonly deps: PermissionGateDeps) {}
 
   /**
@@ -490,15 +499,56 @@ export class PermissionGate {
    * blocks the vendor and still has to reach somebody, so it lands on the main
    * agent with the vendor's own spelling recorded in the log.
    */
-  private bookFor(vendorAgentId: string | undefined): conversationv1.AgentId {
+  private bookFor(vendorAgentId: string | undefined): conversationv1.AgentId | Promise<conversationv1.AgentId> {
     if (vendorAgentId === undefined || vendorAgentId === "") return this.deps.mainAgentId();
     const resolved = this.deps.agentFor(vendorAgentId);
+    return resolved instanceof Promise
+      ? resolved.then((agent) => this.bookOrMain(vendorAgentId, agent))
+      : this.bookOrMain(vendorAgentId, resolved);
+  }
+
+  /** The resolved book, or the main agent's for an ask nothing could name. */
+  private bookOrMain(vendorAgentId: string, resolved: conversationv1.AgentId | undefined): conversationv1.AgentId {
     if (resolved !== undefined) return resolved;
     LOGGER.debug(
       { vendor_agent_id: vendorAgentId },
       "the vendor raised an ask under an agent this session never announced; it lands on the main agent",
     );
     return this.deps.mainAgentId();
+  }
+
+  /**
+   * Open an ask on its book: at once when the book is known, after the lookup
+   * when it is not.
+   *
+   * A STAND-DOWN DURING THE LOOKUP STILL REACHES THE ASK. `standDown` resolves
+   * every REGISTERED ask, and one still resolving its book is not registered
+   * yet — left alone it would register after the teardown and block the vendor
+   * with nobody left to answer. So an ask whose lookup spanned a stand-down is
+   * opened and immediately stood down with that stand-down's reason.
+   */
+  private openOnBook(
+    book: conversationv1.AgentId | Promise<conversationv1.AgentId>,
+    toolUseId: string,
+    open: (agentId: conversationv1.AgentId) => Promise<PermissionResultLike>,
+  ): Promise<PermissionResultLike> {
+    if (!(book instanceof Promise)) return open(book);
+    const epoch = this.standDowns;
+    return book.then((agentId) => {
+      const answer = open(agentId);
+      if (this.standDowns !== epoch) {
+        const pending = this.pendingByToolUse.get(toolUseId);
+        if (pending !== undefined) {
+          this.pendingByToolUse.delete(toolUseId);
+          this.standDownOne(pending, this.lastStandDownReason);
+          LOGGER.info(
+            { tool_use_id: toolUseId, reason: this.lastStandDownReason },
+            "an ask whose book was still being resolved when the gate stood down is resolved as denied",
+          );
+        }
+      }
+      return answer;
+    });
   }
 
   /** The callback handed to the SDK. */
@@ -607,7 +657,19 @@ export class PermissionGate {
     const batch = toQuestionBatch(input);
     const id = questionId(options.toolUseID);
     const startedAtMs = this.deps.nowMs();
-    const agentId = this.bookFor(options.agentID);
+    return this.openOnBook(this.bookFor(options.agentID), options.toolUseID, (agentId) =>
+      this.openQuestionOn(agentId, input, options, batch, id, startedAtMs),
+    );
+  }
+
+  private openQuestionOn(
+    agentId: conversationv1.AgentId,
+    input: Record<string, unknown>,
+    options: { toolUseID: string; agentID?: string },
+    batch: conversationv1.AgentQuestionBatch,
+    id: conversationv1.AgentQuestionId,
+    startedAtMs: number,
+  ): Promise<PermissionResultLike> {
     return new Promise<PermissionResultLike>((resolve) => {
       this.pendingByToolUse.set(options.toolUseID, {
         kind: "question",
@@ -710,7 +772,28 @@ export class PermissionGate {
   ): Promise<PermissionResultLike> {
     const id = permissionId(options.toolUseID);
     const startedAtMs = this.deps.nowMs();
-    const agentId = this.bookFor(options.agentID);
+    return this.openOnBook(this.bookFor(options.agentID), options.toolUseID, (agentId) =>
+      this.openPermissionOn(agentId, toolName, options, id, startedAtMs),
+    );
+  }
+
+  private openPermissionOn(
+    agentId: conversationv1.AgentId,
+    toolName: string,
+    options: {
+      toolUseID: string;
+      suggestions?: PermissionUpdateLike[];
+      blockedPath?: string;
+      decisionReason?: string;
+      title?: string;
+      displayName?: string;
+      description?: string;
+      agentID?: string;
+      matchedAskRule?: { source: string; toolName: string; ruleContent?: string };
+    },
+    id: conversationv1.AgentPermissionId,
+    startedAtMs: number,
+  ): Promise<PermissionResultLike> {
     const offeredStanding =
       options.suggestions === undefined || options.suggestions.length === 0
         ? undefined
@@ -886,24 +969,11 @@ export class PermissionGate {
    * query is closed, and before the process exits — never after.
    */
   standDown(reason: string): number {
+    this.standDowns += 1;
+    this.lastStandDownReason = reason;
     const pending = [...this.pendingByToolUse.values()];
     this.pendingByToolUse.clear();
-    for (const ask of pending) {
-      if (ask.kind === "question") {
-        this.settleQuestion(ask, undefined);
-      } else {
-        this.settlePermission(ask, {
-          case: "denied",
-          value: create(conversationv1.AgentPermissionDeniedSchema, {
-            by: {
-              case: "user",
-              value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: reason }),
-            },
-          }),
-        });
-      }
-      ask.resolve({ behavior: "deny", message: reason });
-    }
+    for (const ask of pending) this.standDownOne(ask, reason);
     if (pending.length > 0) {
       LOGGER.info(
         { reason, resolved: pending.length },
@@ -911,6 +981,24 @@ export class PermissionGate {
       );
     }
     return pending.length;
+  }
+
+  /** Settle one ask as the stand-down's denial, and release the vendor. */
+  private standDownOne(ask: Pending, reason: string): void {
+    if (ask.kind === "question") {
+      this.settleQuestion(ask, undefined);
+    } else {
+      this.settlePermission(ask, {
+        case: "denied",
+        value: create(conversationv1.AgentPermissionDeniedSchema, {
+          by: {
+            case: "user",
+            value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: reason }),
+          },
+        }),
+      });
+    }
+    ask.resolve({ behavior: "deny", message: reason });
   }
 
   private entry(

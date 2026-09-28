@@ -223,6 +223,7 @@ type WatchDaemonResponse struct {
 	//	*WatchDaemonResponse_DrainCancelled
 	//	*WatchDaemonResponse_MutationProgress
 	//	*WatchDaemonResponse_ReloadElisp
+	//	*WatchDaemonResponse_Ending
 	Push          isWatchDaemonResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -310,6 +311,15 @@ func (x *WatchDaemonResponse) GetReloadElisp() *DaemonReloadElisp {
 	return nil
 }
 
+func (x *WatchDaemonResponse) GetEnding() *DaemonStreamEnding {
+	if x != nil {
+		if x, ok := x.Push.(*WatchDaemonResponse_Ending); ok {
+			return x.Ending
+		}
+	}
+	return nil
+}
+
 type isWatchDaemonResponse_Push interface {
 	isWatchDaemonResponse_Push()
 }
@@ -351,6 +361,13 @@ type WatchDaemonResponse_ReloadElisp struct {
 	ReloadElisp *DaemonReloadElisp `protobuf:"bytes,5,opt,name=reload_elisp,json=reloadElisp,proto3,oneof"`
 }
 
+type WatchDaemonResponse_Ending struct {
+	// The daemon is standing down in a planned exit and this is the stream's
+	// last frame; the client reattaches to the live daemon without treating
+	// the end as a fault. See the message.
+	Ending *DaemonStreamEnding `protobuf:"bytes,6,opt,name=ending,proto3,oneof"`
+}
+
 func (*WatchDaemonResponse_ShutdownAnnounced) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainScheduled) isWatchDaemonResponse_Push() {}
@@ -360,6 +377,8 @@ func (*WatchDaemonResponse_DrainCancelled) isWatchDaemonResponse_Push() {}
 func (*WatchDaemonResponse_MutationProgress) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_ReloadElisp) isWatchDaemonResponse_Push() {}
+
+func (*WatchDaemonResponse_Ending) isWatchDaemonResponse_Push() {}
 
 // Hot-load the checkout's elisp. EMACS OWNS THE LOAD: the daemon has no route
 // into the editor's runtime beyond this push.
@@ -831,7 +850,7 @@ var File_agentrepl_v1_endpoint_watch_daemon_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\n" +
-	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/drain_reason.proto\x1a.agentrepl/v1/workspace_mutation_progress.proto\"\x94\x01\n" +
+	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a\x1fagentrepl/v1/drain_reason.proto\x1a.agentrepl/v1/workspace_mutation_progress.proto\"\x94\x01\n" +
 	"\x12WatchDaemonRequest\x126\n" +
 	"\x05emacs\x18\x01 \x01(\v2\x1e.agentrepl.v1.WatchDaemonEmacsH\x00R\x05emacs\x12<\n" +
 	"\awebview\x18\x02 \x01(\v2 .agentrepl.v1.WatchDaemonWebviewH\x00R\awebviewB\b\n" +
@@ -839,13 +858,14 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x10WatchDaemonEmacs\x12\x1f\n" +
 	"\velisp_build\x18\x01 \x01(\tR\n" +
 	"elispBuild\"\x14\n" +
-	"\x12WatchDaemonWebview\"\xb1\x03\n" +
+	"\x12WatchDaemonWebview\"\xed\x03\n" +
 	"\x13WatchDaemonResponse\x12V\n" +
 	"\x12shutdown_announced\x18\x01 \x01(\v2%.agentrepl.v1.DaemonShutdownAnnouncedH\x00R\x11shutdownAnnounced\x12M\n" +
 	"\x0fdrain_scheduled\x18\x02 \x01(\v2\".agentrepl.v1.DaemonDrainScheduledH\x00R\x0edrainScheduled\x12M\n" +
 	"\x0fdrain_cancelled\x18\x03 \x01(\v2\".agentrepl.v1.DaemonDrainCancelledH\x00R\x0edrainCancelled\x12V\n" +
 	"\x11mutation_progress\x18\x04 \x01(\v2'.agentrepl.v1.WorkspaceMutationProgressH\x00R\x10mutationProgress\x12D\n" +
-	"\freload_elisp\x18\x05 \x01(\v2\x1f.agentrepl.v1.DaemonReloadElispH\x00R\vreloadElispB\x06\n" +
+	"\freload_elisp\x18\x05 \x01(\v2\x1f.agentrepl.v1.DaemonReloadElispH\x00R\vreloadElisp\x12:\n" +
+	"\x06ending\x18\x06 \x01(\v2 .agentrepl.v1.DaemonStreamEndingH\x00R\x06endingB\x06\n" +
 	"\x04push\"J\n" +
 	"\x11DaemonReloadElisp\x12\x1f\n" +
 	"\vmodule_root\x18\x01 \x01(\tR\n" +
@@ -901,7 +921,8 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*DaemonDrainScheduled)(nil),           // 10: agentrepl.v1.DaemonDrainScheduled
 	(*DaemonDrainCancelled)(nil),           // 11: agentrepl.v1.DaemonDrainCancelled
 	(*WorkspaceMutationProgress)(nil),      // 12: agentrepl.v1.WorkspaceMutationProgress
-	(*DrainReason)(nil),                    // 13: agentrepl.v1.DrainReason
+	(*DaemonStreamEnding)(nil),             // 13: agentrepl.v1.DaemonStreamEnding
+	(*DrainReason)(nil),                    // 14: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WatchDaemonRequest.emacs:type_name -> agentrepl.v1.WatchDaemonEmacs
@@ -911,18 +932,19 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	11, // 4: agentrepl.v1.WatchDaemonResponse.drain_cancelled:type_name -> agentrepl.v1.DaemonDrainCancelled
 	12, // 5: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
 	4,  // 6: agentrepl.v1.WatchDaemonResponse.reload_elisp:type_name -> agentrepl.v1.DaemonReloadElisp
-	6,  // 7: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
-	7,  // 8: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
-	8,  // 9: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
-	9,  // 10: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
-	13, // 11: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
-	13, // 12: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
-	13, // 13: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	13, // 7: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	6,  // 8: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
+	7,  // 9: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
+	8,  // 10: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
+	9,  // 11: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
+	14, // 12: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
+	14, // 13: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
+	14, // 14: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_daemon_proto_init() }
@@ -930,6 +952,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 	if File_agentrepl_v1_endpoint_watch_daemon_proto != nil {
 		return
 	}
+	file_agentrepl_v1_daemon_stream_ending_proto_init()
 	file_agentrepl_v1_drain_reason_proto_init()
 	file_agentrepl_v1_workspace_mutation_progress_proto_init()
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[0].OneofWrappers = []any{
@@ -942,6 +965,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 		(*WatchDaemonResponse_DrainCancelled)(nil),
 		(*WatchDaemonResponse_MutationProgress)(nil),
 		(*WatchDaemonResponse_ReloadElisp)(nil),
+		(*WatchDaemonResponse_Ending)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[5].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[6].OneofWrappers = []any{

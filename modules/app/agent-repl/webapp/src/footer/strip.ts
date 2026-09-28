@@ -58,6 +58,9 @@ import type {
   FooterStatusActivityRateLimited,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
+  FooterStatusActivityUpdate,
+  FooterStatusActivityUpdateComponent,
+  FooterStatusActivityUpdateWaiting,
   FooterStatusActivityWakeup,
   FooterStatusBackground,
   FooterStatusBackgroundActivity,
@@ -553,6 +556,8 @@ function drawActivityKind(
       return drawFooterStatusActivityStartFailed(kind.value);
     case "fault":
       return drawFooterStatusActivityFault(kind.value);
+    case "update":
+      return drawFooterStatusActivityUpdate(kind.value, path);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
     default: {
@@ -662,6 +667,82 @@ export function drawFooterStatusActivityFault(u: FooterStatusActivityFault): HTM
   const kind = u.kind.replace(/_/g, " ");
   if (u.detail === "") return textLine("footer-activity-fault", kind);
   return textLine("footer-activity-fault", `${kind} · ${u.detail}`);
+}
+
+/**
+ * A DEPLOY'S PROGRESS: the phase, then what it acts on, then what the deploy
+ * left for later on this workspace — "building · shim, webapp, daemon",
+ * "waiting · 1 turn, 2 background", "updated · shim when idle".
+ *
+ * Every word is an arm NAME, rendered lowercase with spaces by the same rule
+ * the status cells follow (footer.proto); the daemon composes no sentence for
+ * this line and this end adds only the separators and the count nouns. The
+ * counts are the line's typed figures, so they wear the figure colour.
+ */
+export function drawFooterStatusActivityUpdate(
+  u: FooterStatusActivityUpdate,
+  path: string,
+): HTMLElement {
+  const line = document.createElement("span");
+  line.className = "footer-activity-update";
+  const phase = requireCase(u.phase, `${path}.phase`);
+  line.setAttribute("data-phase", phase.case);
+  line.appendChild(document.createTextNode(statusWords(phase.case)));
+  switch (phase.case) {
+    case "building":
+      appendComponents(line, phase.value.components, `${path}.building.components`);
+      break;
+    case "restartingServices":
+      appendComponents(line, phase.value.services, `${path}.restarting_services.services`);
+      break;
+    case "waiting":
+      appendWaitingCounts(line, phase.value);
+      break;
+    case "installing":
+    case "handingOver":
+    case "updated":
+      break;
+    default: {
+      const other: { case: string } = phase;
+      return unreachableArm(`${path}.phase`, other.case);
+    }
+  }
+  u.notes.forEach((note, i) => {
+    const arm = requireCase(note.note, `${path}.notes[${i}].note`);
+    line.appendChild(document.createTextNode(` · ${statusWords(arm.case)}`));
+  });
+  return line;
+}
+
+/** " · shim, webapp" — the components a phase acts on, by arm name. */
+function appendComponents(
+  line: HTMLElement,
+  components: FooterStatusActivityUpdateComponent[],
+  path: string,
+): void {
+  if (components.length === 0) return;
+  const names = components.map((c, i) => statusWords(requireCase(c.component, `${path}[${i}].component`).case));
+  line.appendChild(document.createTextNode(` · ${names.join(", ")}`));
+}
+
+/** " · 1 turn, 2 background" — what the workspace's move waits on. */
+function appendWaitingCounts(line: HTMLElement, waiting: FooterStatusActivityUpdateWaiting): void {
+  const figures: [number, string, string][] = [
+    [waiting.turns, "turn", "turns"],
+    [waiting.background, "background", "background"],
+  ];
+  let first = true;
+  for (const [count, one, many] of figures) {
+    if (count === 0) continue;
+    line.appendChild(document.createTextNode(first ? " · " : ", "));
+    first = false;
+    const figure = document.createElement("span");
+    figure.className = activityDatumClass("count");
+    figure.setAttribute("data-datum", "count");
+    figure.textContent = String(count);
+    line.appendChild(figure);
+    line.appendChild(document.createTextNode(` ${count === 1 ? one : many}`));
+  }
 }
 
 /** The close-blocked reasons, verbatim. */

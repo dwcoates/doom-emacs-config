@@ -129,6 +129,14 @@ type fakeStore struct {
 	liveFor   string
 	liveAsked bool
 
+	// the locator lookup's answer, and what the last lookup asked for
+	byTaskAgent   string
+	byTaskFound   bool
+	byTaskErr     error
+	byTaskSession string
+	byTaskID      string
+	byTaskAsked   bool
+
 	cursors      []*storev1.CursorState
 	cursorsErr   error
 	cursorsFor   *string
@@ -219,6 +227,14 @@ func (f *fakeStore) LiveWork(_ context.Context, session string) (*storev1.GetLiv
 	f.liveFor = session
 	f.mu.Unlock()
 	return f.live, f.liveErr
+}
+
+func (f *fakeStore) AgentByVendorTask(_ context.Context, session, vendorTaskID string) (string, bool, error) {
+	f.mu.Lock()
+	f.byTaskAsked = true
+	f.byTaskSession, f.byTaskID = session, vendorTaskID
+	f.mu.Unlock()
+	return f.byTaskAgent, f.byTaskFound, f.byTaskErr
 }
 
 func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
@@ -1433,6 +1449,121 @@ func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
 	}
 	if res.Msg.GetFailure() == nil {
 		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetAgentByVendorTask ----
+
+// scopedAgentByVendorTask is a lookup naming a session and a locator.
+func scopedAgentByVendorTask() *storev1.GetAgentByVendorTaskRequest {
+	return &storev1.GetAgentByVendorTaskRequest{Session: &conversationv1.AgentId{Value: "main-1"}, VendorTaskId: "a1b2"}
+}
+
+func TestGetAgentByVendorTaskServesTheFoundAgent(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.byTaskAgent, store.byTaskFound = "toolu_spawn", true
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if got := res.Msg.GetSuccess().GetAgent().GetValue(); got != "toolu_spawn" {
+		t.Fatalf("result = %v, want the success arm naming toolu_spawn", res.Msg.GetResult())
+	}
+}
+
+func TestGetAgentByVendorTaskAnswersNotFoundWhenNoAgentIsPaired(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if res.Msg.GetNotFound() == nil {
+		t.Fatalf("result = %v, want the not_found arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetAgentByVendorTaskScopesTheStoreReadToTheRequestedSessionAndLocator(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask())); err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.byTaskSession != "main-1" || store.byTaskID != "a1b2" {
+		t.Fatalf("store read (%q, %q), want (main-1, a1b2)", store.byTaskSession, store.byTaskID)
+	}
+}
+
+func TestGetAgentByVendorTaskMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.byTaskErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetAgentByVendorTaskRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetAgentByVendorTaskRequest
+		field   string
+	}{
+		{name: "session unset", request: &storev1.GetAgentByVendorTaskRequest{VendorTaskId: "a1b2"}, field: "session"},
+		{name: "session with an empty value", request: &storev1.GetAgentByVendorTaskRequest{Session: &conversationv1.AgentId{}, VendorTaskId: "a1b2"}, field: "session"},
+		{name: "locator empty", request: &storev1.GetAgentByVendorTaskRequest{Session: &conversationv1.AgentId{Value: "main-1"}}, field: "vendor_task_id"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != test.field {
+				t.Fatalf("result = %v, want invalid_request naming %s", res.Msg.GetResult(), test.field)
+			}
+			store.mu.Lock()
+			asked := store.byTaskAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
 	}
 }
 

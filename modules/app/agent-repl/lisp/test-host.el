@@ -2621,6 +2621,97 @@ callback must still run rather than resolve to nil."
   (seq-filter (lambda (call) (and (equal (car call) method) (eq (nth 1 call) conn)))
               agent-repl-test-host--calls))
 
+;;;; ---- A planned ending: the daemon's last frame says the end is expected ----
+
+(defun agent-repl-test-host--end-planned (ws)
+  "Deliver the planned ending on WS's host stream, then its clean end."
+  (let ((stream (agent-repl-host-stream ws)))
+    (funcall (plist-get stream :on-push) '(:arm :ending :value nil))
+    (funcall (plist-get stream :on-close) '(:ended))))
+
+(ert-deftest agent-repl-test-host-ending-push-is-recorded-at-info ()
+  "The planned-ending frame itself is on the record, at INFO."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" '(:arm :ending :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.stream-ending ws=ws-1"))))
+
+(ert-deftest agent-repl-test-host-planned-end-is-recorded-at-info ()
+  "A clean end after the planned ending is INFO, never the ERROR of a loss."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--end-planned "ws-1")
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.stream-ended-planned ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-planned-end-writes-no-stream-lost ()
+  "A planned end never writes the stream-lost ERROR."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--end-planned "ws-1")
+      ;; Assert
+      (should-not (agent-repl-test-host--logged-p :error "elisp.host.stream-lost")))))
+
+(ert-deftest agent-repl-test-host-planned-end-reattaches-on-the-live-daemon ()
+  "A planned end takes the single reattach walk, with trigger planned-ending."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" old)
+        (setq agent-repl-test-host--live live)
+        ;; Act
+        (agent-repl-test-host--end-planned "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.reattached ws=ws-1 address=\"127.0.0.1:58175\" trigger=planned-ending"))))))
+
+(ert-deftest agent-repl-test-host-clean-end-without-ending-is-still-lost ()
+  "A clean end the daemon did NOT announce stays the stream-lost ERROR."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (funcall (plist-get (agent-repl-host-stream "ws-1") :on-close) '(:ended))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-error-after-ending-is-still-lost ()
+  "A transport error after the ending is a loss: only a CLEAN end is planned."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      (agent-repl-test-host--push "ws-1" '(:arm :ending :value nil))
+      ;; Act
+      (agent-repl-test-host--lose "ws-1")
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-ending-on-an-old-stream-does-not-plan-the-new-one ()
+  "The ending marks only the stream that carried it, never its replacement."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-test-host--subscribe "ws-1")))
+        (funcall (plist-get old :on-push) '(:arm :ending :value nil))
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (funcall (plist-get (agent-repl-host-stream "ws-1") :on-close) '(:ended))
+        ;; Assert
+        (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1"))))))
+
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."
   (agent-repl-test-host--with-harness

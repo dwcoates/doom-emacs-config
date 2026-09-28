@@ -777,6 +777,51 @@ const SUBAGENT_NETWORK_FAILED = scenario({
   },
 });
 
+const SUBAGENT_RESUMED = scenario({
+  name: "subagent-resumed",
+  prompt: "!subagent-resumed",
+  emits:
+    "a `SendMessage` that RESUMES an idle background agent — its task id is the prompt's argument, else a minted " +
+    "one: `task_started` naming the agent's task id and the SEND's tool_use_id, the send's `resumedAgentId` " +
+    "result, then a completed `task_notification`",
+  writes: "the main transcript's lines",
+  arms:
+    "AgentDetachedWork(kind=subagent) detached from the send, naming the agent its spawn created + " +
+    "AgentSendMessage.delivery=resumed_recipient",
+  async run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-resumed" }, "fake resumed-subagent turn");
+    // THE RESUME'S TASK ID IS THE AGENT'S OWN, stated when the agent was
+    // spawned, so a suite names it to resume an agent an earlier turn spawned.
+    const agentId = ctx.args === "" ? ctx.mintAgentTaskId() : ctx.args;
+    const description = "Resume the sweep";
+    const call = ctx.toolUse("SendMessage", { to: agentId, summary: "resume the sweep" });
+    // THE VENDOR STARTS THE RESUMED AGENT'S TASK FROM THE SEND, not from its
+    // spawn: the task id comes back, the call is the send.
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    ctx.toolResult(call, "Agent resumed from transcript.", {
+      success: true,
+      message:
+        `Agent "${agentId}" had no active task; resumed from transcript in the background with your message. ` +
+        `You'll be notified when it finishes. Output: ${ctx.files.spoolPathFor(agentId)}`,
+      resumedAgentId: agentId,
+      pin: { id: agentId, name: agentId, ref: "2175c2" },
+    });
+    conclude(ctx, "Resumed the idle agent with the message.");
+    await ctx.tick();
+    ctx.endTask(agentId);
+    ctx.systemMessage("task_notification", {
+      task_id: agentId,
+      tool_use_id: call.toolUseId,
+      status: "completed",
+      output_file: ctx.files.spoolPathFor(agentId),
+      summary: "Sweep resumed and finished.",
+      usage: { total_tokens: 3_100, tool_uses: 1, duration_ms: 700 },
+    });
+    ctx.announceLiveTasks();
+  },
+});
+
 export const NETWORK_RESUME = scenario({
   name: "network-resume",
   prompt: NETWORK_RESUME_MARKER,
@@ -841,6 +886,7 @@ export const SUBAGENT_SCENARIOS = [
   SUBAGENT_DETACHED,
   SUBAGENT_INTERLEAVED,
   SUBAGENT_DETACHED_LIVE,
+  SUBAGENT_RESUMED,
   SUBAGENT_DETACHED_HOLD,
   SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,

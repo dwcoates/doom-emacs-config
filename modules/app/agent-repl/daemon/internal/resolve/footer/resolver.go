@@ -26,8 +26,12 @@ type resolver struct {
 	// workspace and so stand on every workspace's strip, because it is every
 	// workspace that is owed the service the daemon cannot give.
 	daemonFaults []Fault
-	states       map[ids.WorkspaceID]*wsState
-	topics       map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
+	// deploy is the DEPLOY'S PROGRESS, resolver-wide like the daemon-scoped
+	// faults: a deploy moves what serves every workspace, so its line stands
+	// on every strip. Nil when no deploy is in flight. See update.go.
+	deploy *deployState
+	states map[ids.WorkspaceID]*wsState
+	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -127,6 +131,7 @@ func (r *resolver) stateLocked(ws ids.WorkspaceID) *wsState {
 	s, ok := r.states[ws]
 	if !ok {
 		s = newWSState()
+		s.id = ws
 		r.states[ws] = s
 	}
 	return s

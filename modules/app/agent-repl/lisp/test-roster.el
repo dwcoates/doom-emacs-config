@@ -154,7 +154,7 @@ whose calls are the observation."
                                   agent-repl--log-context-workspace
                                   agent-repl--log-context-request-id)))))
       ;; Act
-      (agent-repl-roster-on-push '(:roster roster-value))
+      (agent-repl-roster-on-push '(:arm :roster :value roster-value))
       ;; Assert
       (should (equal seen
                      (list 'roster-value agent-repl--global-log-scope
@@ -1526,17 +1526,19 @@ on finishes would miss a workspace going back to work."
 
 (defmacro agent-repl-test-roster--with-stream (live &rest body)
   "Run BODY with the stubbed link answering LIVE and a roster stream recorder.
-Each subscribe answers a fresh stream record `(:conn C :on-close F
-:on-open F)', newest first in `streams'."
+Each subscribe answers a fresh stream record `(:conn C :on-push F
+:on-close F :on-open F)', newest first in `streams'."
   (declare (indent 1))
   `(let ((streams nil)
          (agent-repl-roster--stream nil)
-         (agent-repl-roster--accepted nil))
+         (agent-repl-roster--accepted nil)
+         (agent-repl-roster--ending-stream nil))
      (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,live))
                ((symbol-function 'agent-repl-connect-stream-cancel) #'ignore)
                ((symbol-function 'agent-repl-rpc-watch-workspace-roster)
-                (lambda (conn _on-push on-close &optional on-open)
-                  (let ((record (list :conn conn :on-close on-close :on-open on-open)))
+                (lambda (conn on-push on-close &optional on-open)
+                  (let ((record (list :conn conn :on-push on-push
+                                      :on-close on-close :on-open on-open)))
                     (push record streams)
                     record))))
        ,@body)))
@@ -1613,6 +1615,124 @@ Each subscribe answers a fresh stream record `(:conn C :on-close F
           (funcall (plist-get old :on-close) '(:ended))
           ;; Assert
           (should (eq agent-repl-roster--stream (car streams))))))))
+
+;;;; ---- A planned ending: the daemon's last frame says the end is expected ----
+
+(defmacro agent-repl-test-roster--capturing (level &rest body)
+  "Run BODY collecting every LEVEL record's formatted text into `logs'.
+LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function ,level)
+              (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+     ,@body))
+
+(defun agent-repl-test-roster--end-planned (record)
+  "Deliver the planned ending on the stubbed stream RECORD, then its clean end."
+  (funcall (plist-get record :on-push) '(:arm :ending :value nil))
+  (funcall (plist-get record :on-close) '(:ended)))
+
+(ert-deftest agent-repl-test-roster-ending-push-is-recorded-at-info ()
+  "The planned-ending frame itself is on the record, at INFO."
+  ;; Arrange
+  (let ((logs nil)
+        (agent-repl-roster--stream 'standing)
+        (agent-repl-roster--ending-stream nil))
+    (agent-repl-test-roster--capturing 'agent-repl--info
+      ;; Act
+      (agent-repl-roster-on-push '(:arm :ending :value nil) 'standing))
+    ;; Assert
+    (should (member "elisp.roster.stream-ending" logs))))
+
+(ert-deftest agent-repl-test-roster-an-unknown-push-arm-is-an-error ()
+  "A push arm this consumer does not hold is recorded at ERROR, never applied."
+  ;; Arrange
+  (let ((logs nil) (applied nil))
+    (cl-letf (((symbol-function 'agent-repl-roster-apply) (lambda (_) (setq applied t))))
+      (agent-repl-test-roster--capturing 'agent-repl--error
+        ;; Act
+        (agent-repl-roster-on-push '(:arm :teleport :value nil))))
+    ;; Assert
+    (should (and (not applied)
+                 (seq-some (lambda (l) (string-prefix-p "elisp.roster.unknown-push" l)) logs)))))
+
+(ert-deftest agent-repl-test-roster-planned-end-is-recorded-at-info ()
+  "A clean end after the planned ending is INFO, not the dropped-stream ERROR."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe old)
+        (funcall (plist-get (car streams) :on-open))
+        (agent-repl-test-roster--capturing 'agent-repl--info
+          ;; Act
+          (agent-repl-test-roster--end-planned (car streams)))
+        ;; Assert
+        (should (member "elisp.roster.stream-close: reason=planned-ending" logs))))))
+
+(ert-deftest agent-repl-test-roster-planned-end-writes-no-error ()
+  "A planned end never writes an ERROR."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe old)
+        (funcall (plist-get (car streams) :on-open))
+        (agent-repl-test-roster--capturing 'agent-repl--error
+          ;; Act
+          (agent-repl-test-roster--end-planned (car streams)))
+        ;; Assert
+        (should (null logs))))))
+
+(ert-deftest agent-repl-test-roster-planned-end-resubscribes-on-the-live-daemon ()
+  "A planned end follows the live daemon, exactly as a loss does."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe old)
+        (funcall (plist-get (car streams) :on-open))
+        ;; Act
+        (agent-repl-test-roster--end-planned (car streams))
+        ;; Assert
+        (should (eq (plist-get agent-repl-roster--stream :conn) live))))))
+
+(ert-deftest agent-repl-test-roster-clean-end-without-ending-is-still-an-error ()
+  "A clean end the daemon did NOT announce stays the dropped-stream ERROR."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe old)
+        (funcall (plist-get (car streams) :on-open))
+        (agent-repl-test-roster--capturing 'agent-repl--error
+          ;; Act
+          (funcall (plist-get (car streams) :on-close) '(:ended)))
+        ;; Assert
+        (should (seq-some (lambda (l) (string-search "reason=ended-without-cancel" l)) logs))))))
+
+(ert-deftest agent-repl-test-roster-error-after-ending-is-still-an-error ()
+  "A transport error after the ending is a loss: only a CLEAN end is planned."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+          (live (agent-repl-connect-open "127.0.0.1:58175"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe old)
+        (funcall (plist-get (car streams) :on-open))
+        (funcall (plist-get (car streams) :on-push) '(:arm :ending :value nil))
+        (agent-repl-test-roster--capturing 'agent-repl--error
+          ;; Act
+          (funcall (plist-get (car streams) :on-close) '(:error (:kind :transport))))
+        ;; Assert
+        (should logs)))))
 
 ;;; test-roster.el ends here
 

@@ -111,6 +111,10 @@ func TestTheDeployVerbPrintsEveryDecision(t *testing.T) {
 		{name: "handing over", outcome: &agentreplv1.DeployComponentOutcome{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Build: "b",
 			Outcome: &agentreplv1.DeployComponentOutcome_HandingOver{HandingOver: &agentreplv1.DeployHandingOver{Workspaces: 3, Busy: 1}}},
 			want: "daemon build=b handing-over workspaces=3 busy=1 forced=false"},
+		{name: "restarting across a layout change", outcome: &agentreplv1.DeployComponentOutcome{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Build: "b",
+			Outcome: &agentreplv1.DeployComponentOutcome_Restarting{Restarting: &agentreplv1.DeployRestarting{
+				RunningStateLayout: 7, FreshStateLayout: 8, Workspaces: 3, Busy: 1, Forced: true}}},
+			want: "daemon build=b restarting layout=7→8 workspaces=3 busy=1 forced=true"},
 		{name: "shims", outcome: &agentreplv1.DeployComponentOutcome{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM, Build: "b",
 			Outcome: &agentreplv1.DeployComponentOutcome_Shims{Shims: &agentreplv1.DeployShimBounces{Bounces: []*agentreplv1.DeployShimBounce{
 				{Workspace: "w1", When: &agentreplv1.DeployShimBounce_BouncedNow{BouncedNow: &agentreplv1.DeployBouncedNow{}}},

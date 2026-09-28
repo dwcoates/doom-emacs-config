@@ -29,6 +29,7 @@ const (
 	opAccept      = "daemon.promptqueue.accept"
 	opAct         = "daemon.promptqueue.session_act"
 	opTurnEnded   = "daemon.promptqueue.turn_ended"
+	opTurnAdopted = "daemon.promptqueue.turn_adopted"
 	opLeaseChange = "daemon.promptqueue.lease_changed"
 	opRestore     = "daemon.promptqueue.restore_holds"
 	opRevive      = "daemon.promptqueue.revive"
