@@ -74,6 +74,7 @@ func TestLayoutPaths(t *testing.T) {
 		{name: "intent manifest", got: l.IntentManifest(), want: "/state/intent/manifest.json"},
 		{name: "output dir", got: l.OutputDir(), want: "/state/output"},
 		{name: "command file glob", got: l.CommandFileGlob(), want: "/state/output/workspace_commands_*.json"},
+		{name: "held prompt dir", got: l.HeldPromptDir(), want: "/state/held-prompts"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
