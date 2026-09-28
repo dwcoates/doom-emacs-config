@@ -46,6 +46,7 @@ import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
+import { describeVendorTaskAnswer } from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
@@ -56,6 +57,8 @@ import {
   closingSubagentTerminal,
   findBashStart,
   findUnit,
+  resumedAgentAnnouncement,
+  resumedRecipient,
   stoppedBashTerminal,
 } from "../store/reconcile.js";
 import type {
@@ -779,17 +782,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // FOREGROUND WORK INCLUDED: a synchronous subagent is a task the vendor
       // tracks too, and its asks name that task id exactly as a detached one's
       // do. `tracked` translates the id; it says nothing about liveness.
-      const byTask = live.tracked(vendorAgentId);
-      if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
-        return subagentId(byTask.toolUseId);
-      }
-      // A vendor that names the spawning call directly is taken at its word.
       //
-      // Only the LIVE set resolves: once the subagent has concluded there is no
-      // book still taking questions, and the ask falls back to the main agent
-      // with the log note, which is the contract for an unaddressable ask.
-      if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
-      return undefined;
+      // THE FOLD'S PAIRING COMES FIRST, because the task's own call is NOT
+      // always its spawn: a subagent RESUMED BY `SendMessage` runs a task whose
+      // call is the send, and crediting its asks to the send's id addressed a
+      // book nobody writes (2026-09-27). The fold names the agent from the join
+      // its spawn recorded, or from the store's answer at the resume.
+      const known = deps.fold.taskAgent(vendorAgentId);
+      if (known.kind === "named") return known.agent;
+      if (known.kind === "unknown") {
+        const byTask = live.tracked(vendorAgentId);
+        if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
+          return subagentId(byTask.toolUseId);
+        }
+        // A vendor that names the spawning call directly is taken at its word.
+        if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
+      }
+      // NOTHING ON THE STREAM NAMES IT: a resume whose agent is unpaired here,
+      // or an agent whose task this process never saw start (it restarted
+      // since). The id is the vendor's task locator, and the store holds its
+      // pairing. A miss is recorded there and the ask falls back to the main
+      // agent, which is the contract for an unaddressable ask.
+      return agentFromStore(vendorAgentId, "permission");
     },
     persist: (entries) => deps.persistence.write(entries),
     // THE RUNNING VENDOR TURN'S ATTRIBUTION, not the shim's open turn: a
@@ -1717,6 +1731,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message);
+    // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
+    // before the fold, which cannot await: the pairing of its vendor task
+    // locator with its agent is the sidecar's, on record since the agent first
+    // ran. Awaited HERE, inside the one serial message loop, so no later
+    // message can be folded ahead of this one.
+    const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution));
+    if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext(attribution));
     if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
@@ -3708,6 +3729,97 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHICH AGENT a vendor task locator names, AS THE STORE ANSWERS IT — the one
+   * lookup behind all three sites that must name an agent this process cannot:
+   * the announcement of a subagent resumed by a send whose spawn this process
+   * never saw, the restore that re-announces one, and the book an ask raised by
+   * one lands on.
+   *
+   * THE ANSWER IS HANDED TO THE FOLD whatever it is: a found agent becomes the
+   * task's join (so every later message of the task, and every later ask, is
+   * named without asking again), and a miss rides the refusal record the fold
+   * writes next. This is the ONE record of the lookup itself: INFO when the
+   * store named the agent, ERROR when it did not or could not.
+   */
+  async function agentFromStore(
+    vendorTaskId: string,
+    site: "announcement" | "restore" | "permission",
+  ): Promise<conversationv1.AgentId | undefined> {
+    const answer = await deps.persistence.agentByVendorTask(requireIdentity().agentId, vendorTaskId);
+    deps.fold.learnTaskAgent(vendorTaskId, answer);
+    if (answer.kind === "found") {
+      LOGGER.info(
+        { task_id: vendorTaskId, agent: answer.agent.value, site },
+        "the store named the agent a vendor task is running",
+      );
+      return answer.agent;
+    }
+    LOGGER.error(
+      { task_id: vendorTaskId, site, detail: describeVendorTaskAnswer(answer) },
+      "the store named no agent for a vendor task this process cannot name itself",
+    );
+    return undefined;
+  }
+
+  /**
+   * THE RESTORE OF A SUBAGENT RESUMED BY A SEND: live handles whose recorded
+   * unit is a `SendMessage` rather than anything describable.
+   *
+   * A resumed subagent is announced under the send that woke it, so after a
+   * bounce the handle's unit in the book is the send and `announceLiveWork`
+   * cannot describe it. The send's settle states the vendor's own id for the
+   * agent it reached — the locator the store pairs with the agent — and the
+   * agent's own spawn unit describes it. Each such handle is announced here or
+   * recorded at ERROR (by the lookup, or below for a record that cannot be
+   * followed); every handle that is NOT a send is handed back for the
+   * caller's own undescribed path.
+   */
+  async function announceResumedAgents(
+    owner: conversationv1.AgentId,
+    book: readonly conversationv1.HistoryEntryAt[],
+    handles: readonly conversationv1.DetachedWorkId[],
+  ): Promise<{ announced: conversationv1.AgentDetachedWork[]; notResumes: conversationv1.DetachedWorkId[] }> {
+    const announced: conversationv1.AgentDetachedWork[] = [];
+    const notResumes: conversationv1.DetachedWorkId[] = [];
+    for (const handle of handles) {
+      const recipient = resumedRecipient(book, handle);
+      if (recipient.kind === "not_a_send") {
+        notResumes.push(handle);
+        continue;
+      }
+      if (recipient.kind === "no_recipient") {
+        LOGGER.error(
+          { work_id: handle.value, detail: "the send's record states no recipient the vendor resolved" },
+          "a live handle is a send whose resumed agent the record cannot name; it cannot be re-announced",
+        );
+        continue;
+      }
+      const agent = await agentFromStore(recipient.vendorTaskId, "restore");
+      if (agent === undefined) continue;
+      // THE SPAWN IS OLDER THAN THE SEND, so the pages read for the handles may
+      // stop short of it; the book is walked again for the agent's own unit.
+      const described =
+        findUnit(book, toolCallActivityId(agent.value)) === undefined
+          ? await readBookFor(owner, [agent.value])
+          : book;
+      const announcement = resumedAgentAnnouncement(described, handle, owner, agent);
+      if (announcement === undefined) {
+        LOGGER.error(
+          { work_id: handle.value, agent: agent.value, detail: "the book holds no describable spawn of the agent" },
+          "a resumed subagent the store named cannot be described from its spawn; it cannot be re-announced",
+        );
+        continue;
+      }
+      LOGGER.info(
+        { work_id: handle.value, agent: agent.value },
+        "re-announced a subagent resumed by a send, named by the store and described by its spawn",
+      );
+      announced.push(announcement);
+    }
+    return { announced, notResumes };
+  }
+
+  /**
    * Whether the record plane ANSWERED "no rows under that agent yet".
    *
    * THE CLASS IS THE MEANING, never "any error". `unknown_agent` is the store
@@ -3824,9 +3936,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // conversation's. Nothing is written for it -- an announcement with an
     // invented description is worse than a missing one -- but it is stated as
     // the record-plane loss it is.
+    const undescribedSurvivors: conversationv1.DetachedWorkId[] = [];
     const readopted = announceLiveWork(book, open.liveDetached.filter(survives), agentId, (handle) => {
-      reportUndescribableWork(handle);
+      undescribedSurvivors.push(handle);
     });
+    // A SURVIVING SUBAGENT RESUMED BY A SEND is described from its spawn, named
+    // by the store; only what is not a send is the record-plane loss.
+    const resumed = await announceResumedAgents(agentId, book, undescribedSurvivors);
+    readopted.push(...resumed.announced);
+    for (const handle of resumed.notResumes) reportUndescribableWork(handle);
 
     for (const work of open.liveDetached) {
       if (survives(work)) continue;
@@ -4234,8 +4352,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const announcements = announceLiveWork(book, handles, agentId, (handle) => {
         undescribed.push(handle);
       });
-      for (const handle of undescribed) await recordUndescribedHandle(handle);
-      return announcements;
+      // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
+      // store; only a handle that is not a send takes the undescribed path.
+      const resumed = await announceResumedAgents(agentId, book, undescribed);
+      for (const handle of resumed.notResumes) await recordUndescribedHandle(handle);
+      return [...announcements, ...resumed.announced];
     } catch (err) {
       // NO BOOK YET IS NOT AN UNREACHABLE STORE. A workspace created moments
       // ago has written no row, so the store answers `unknown_agent` -- its

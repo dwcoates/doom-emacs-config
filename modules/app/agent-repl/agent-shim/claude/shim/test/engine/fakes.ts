@@ -30,6 +30,7 @@ import type {
 } from "../../src/store/persistence.js";
 import { PersistenceError } from "../../src/store/persistence.js";
 import type { VendorTaskAnswer } from "../../src/store/locator.js";
+import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
 
@@ -579,6 +580,26 @@ export class RecordingFold implements EngineFold {
 
   endQuery(why: string): void {
     this.queryEnds.push(why);
+  }
+
+  /** The task a message awaits the store for; none unless a suite says so. */
+  awaitingFor: (message: SdkMessage) => string | undefined = () => undefined;
+  /** Every store answer the engine handed back, in order. */
+  readonly learned: { taskId: string; answer: VendorTaskAnswer }[] = [];
+  /** What the fold knows per task; a found answer is remembered here, as the real fold does. */
+  readonly knowledge = new Map<string, TaskAgentKnowledge>();
+
+  taskAwaitingAgent(message: SdkMessage): string | undefined {
+    return this.awaitingFor(message);
+  }
+
+  learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void {
+    this.learned.push({ taskId, answer });
+    if (answer.kind === "found") this.knowledge.set(taskId, { kind: "named", agent: answer.agent });
+  }
+
+  taskAgent(taskId: string): TaskAgentKnowledge {
+    return this.knowledge.get(taskId) ?? { kind: "unknown" };
   }
 }
 
