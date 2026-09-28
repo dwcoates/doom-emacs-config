@@ -5,13 +5,18 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 )
 
-// THE STAMP IS THIS TURN'S OWN WORK, not the context window. Usage rides
-// exactly one unit per API response — the unit for its FIRST content block — so
-// the prose bubble's stamp comes from a sibling unit far more often than from
-// its own envelope, and it SUMS across every API response of the turn while
-// EXCLUDING the two cached-context buckets (cache_read, cache_creation).
+// THE STAMP IS FRESH INPUT, ONE AGENT AT A TIME (usage.go). Usage rides exactly
+// one unit per API response — the unit for its FIRST content block — so the
+// prose bubble's stamp comes from a sibling unit far more often than from its
+// own envelope. A bubble's stamp is its agent's fresh input since the agent's
+// previous bubble landed, frozen when it lands; the final answer carries the
+// turn's whole tally.
 
 // thinkingFrame builds the withheld-thinking unit the vendor's observed
 // `[thinking, text]` response opens with. It draws no row of its own; it is
@@ -89,173 +94,231 @@ func (h *harness) proseForTurn(turn string) *frontendv1.FeedResponse {
 	return nil
 }
 
-func TestSingleResponseTurnStampsFreshInputPlusOutput(t *testing.T) {
-	// Arrange: a turn is running.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "do the thing")
-
-	// Act: one API response — fresh input 240 + output 500, no cached context.
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 500)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), nil, noAddress())
-
-	// Assert: the bubble stamps input_tokens + output_tokens (740), not
-	// cache_creation and not a per-response context-window sum.
-	if got := h.soleProse().GetUsage().GetText(); got != "740" {
-		t.Fatalf("usage stamp = %q, want the turn's 240+500 = 740", got)
-	}
+// main sends one activity under the main agent.
+func (h *harness) main(act *conversationv1.AgentActivity) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, noAddress())
 }
 
-func TestMultiResponseTurnSumsTokensAcrossTheTurn(t *testing.T) {
-	// Arrange: a turn is running.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "do the thing")
+// settledProse is a settled prose frame carrying no usage of its own.
+func settledProse(unit, markdown string) *conversationv1.AgentActivity {
+	return responseFrame(unit, &conversationv1.AgentResponseSuccess{
+		Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
+	}, nil)
+}
 
-	// Act: a tool-use loop yields TWO API responses in the one turn.
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-think-1", turnUsage(200, 0, 0, 300)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose-1", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "first"},
-		}, nil), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-think-2", turnUsage(100, 0, 0, 400)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose-2", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "second"},
-		}, nil), nil, noAddress())
-
-	// Assert: every bubble in the turn shows the TURN TOTAL (200+300+100+400 =
-	// 1000), summed across both API responses.
-	bubbles := h.proseBubbles()
-	if len(bubbles) != 2 {
-		t.Fatalf("prose bubbles = %d, want the two prose bubbles", len(bubbles))
+// stamps answers the usage stamp of every prose bubble on the root feed, in
+// feed order.
+func (h *harness) stamps() []string {
+	h.t.Helper()
+	var out []string
+	for _, bubble := range h.proseBubbles() {
+		out = append(out, bubble.GetUsage().GetText())
 	}
-	for _, bubble := range bubbles {
-		if got := bubble.GetUsage().GetText(); got != "1k" {
-			t.Fatalf("usage stamp = %q, want the turn total 1k on every bubble", got)
+	return out
+}
+
+// wantStamps fails unless the root feed's prose bubbles carry exactly WANT.
+func (h *harness) wantStamps(want ...string) {
+	h.t.Helper()
+	got := h.stamps()
+	if len(got) != len(want) {
+		h.t.Fatalf("stamps = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			h.t.Fatalf("stamps = %q, want %q", got, want)
 		}
 	}
 }
 
-func TestCacheReadAndCreationAreExcludedFromTheTurnStamp(t *testing.T) {
+func TestABubbleStampsItsAgentsFreshInput(t *testing.T) {
 	// Arrange: a turn is running.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 
-	// Act: one API response over a HUGE cached context — 99k cache_read and
-	// 18k cache_creation — but only 240 fresh input and 260 output.
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 18_000, 99_000, 260)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), nil, noAddress())
+	// Act: one API response — 240 uncached, 18k cache writes, 900k cache
+	// reads, 500 output — its usage riding the thinking unit.
+	h.main(thinkingFrame("unit-thinking", turnUsage(240, 18_000, 900_000, 500)))
+	h.main(settledProse("unit-prose", "an answer"))
 
-	// Assert: the bubble shows the SMALL turn figure (240+260 = 500), not the
-	// ~117k context window that cache_read + cache_creation would sum to.
-	if got := h.soleProse().GetUsage().GetText(); got != "500" {
-		t.Fatalf("usage stamp = %q, want the turn's 500 with cached context excluded", got)
-	}
+	// Assert: fresh input is the cache writes plus the uncached input.
+	h.wantStamps("18.2k")
 }
 
-func TestANewTurnResetsTheTurnTokenSum(t *testing.T) {
-	// Arrange: a first turn with a large bill, ended.
+func TestAnArrivingBubbleGrowsAsItsUsageIsRestated(t *testing.T) {
+	// Arrange: a bubble opens stating its usage.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(responseFrame("unit-prose", &conversationv1.AgentResponseStart{}, misses(0, 1_000)))
+
+	// Act: the same unit restates a larger usage.
+	h.main(responseFrame("unit-prose", &conversationv1.AgentResponseUpdate{NewMarkdown: "hi"}, misses(0, 3_000)))
+
+	// Assert: the restated figure replaces the first, never adds to it.
+	h.wantStamps("3k")
+}
+
+func TestAnArrivingBubbleGrowsWhenUsageLandsOnASibling(t *testing.T) {
+	// Arrange: a bubble opens with no usage yet.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(responseFrame("unit-prose", &conversationv1.AgentResponseStart{}, nil))
+
+	// Act: the API response's usage lands on a sibling unit.
+	h.main(thinkingFrame("unit-thinking", misses(2_000, 0)))
+
+	// Assert: the still-arriving bubble is re-stamped from its agent's tally.
+	h.wantStamps("2k")
+}
+
+func TestTheNextBubbleStampsOnlyTheFreshInputSinceThePreviousLanded(t *testing.T) {
+	// Arrange: a first API response lands its bubble.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProse("unit-prose-1", "looking"))
+
+	// Act: a second API response of the same turn.
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+	h.main(settledProse("unit-prose-2", "found it"))
+
+	// Assert: the bubbles partition the turn's 1.4k.
+	h.wantStamps("1k", "400")
+}
+
+func TestALandedBubbleNeverMovesAgain(t *testing.T) {
+	// Arrange: a bubble lands.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProse("unit-prose-1", "looking"))
+
+	// Act: a later API response's usage arrives.
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+
+	// Assert: the landed bubble keeps the figure it landed with.
+	h.wantStamps("1k")
+}
+
+func TestASettleRestatedByTheOtherPlaneKeepsTheFrozenFigure(t *testing.T) {
+	// Arrange: a bubble lands, then more usage arrives.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProse("unit-prose-1", "looking"))
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+
+	// Act: the other store plane restates the same settle.
+	h.main(settledProse("unit-prose-1", "looking"))
+
+	// Assert: the first settle's figure stands.
+	h.wantStamps("1k")
+}
+
+func TestTheFinalAnswerCarriesTheTurnsWholeFreshInput(t *testing.T) {
+	// Arrange: two bubbles land in one turn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProse("unit-prose-1", "looking"))
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+	h.main(settledProse("unit-prose-2", "found it"))
+
+	// Act: the turn concludes on the second bubble.
+	turn := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-prose-2"), nil, noAddress())
+
+	// Assert: the green bubble carries the turn's 1.4k; the earlier one keeps
+	// its delta.
+	h.wantStamps("1k", "1.4k")
+}
+
+func TestANewTurnStartsTheMainTallyAgain(t *testing.T) {
+	// Arrange: a first turn spends 1k.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "first")
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-t1", turnUsage(4_000, 0, 0, 5_000)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-p1", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "first answer"},
-		}, nil), nil, noAddress())
-	h.terminal("turn-1", &conversationv1.AgentSuccess{}, nil)
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProse("unit-prose-1", "one"))
 
-	// Act: a SECOND turn with a small bill of its own.
+	// Act: a second turn spends 400.
 	h.deliverPrompt("turn-2", "second")
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-t2", turnUsage(100, 0, 0, 200)), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-p2", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "second answer"},
-		}, nil), nil, noAddress())
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+	h.main(settledProse("unit-prose-2", "two"))
 
-	// Assert: turn 2's bubble stamps only turn 2 (100+200 = 300); it does not
-	// carry turn 1's 9k.
-	if got := h.proseForTurn("turn-2").GetUsage().GetText(); got != "300" {
-		t.Fatalf("usage stamp = %q, want turn 2's own 300, reset from turn 1", got)
-	}
-	// And turn 1's own bubble keeps turn 1's total (4_000+5_000 = 9k), never
-	// summed with turn 2.
-	if got := h.proseForTurn("turn-1").GetUsage().GetText(); got != "9k" {
-		t.Fatalf("turn 1 usage stamp = %q, want turn 1's own 9k", got)
+	// Assert: the second turn's bubble counts only its own turn.
+	if got := h.proseForTurn("turn-2").GetUsage().GetText(); got != "400" {
+		t.Fatalf("turn-2 stamp = %q, want only its own 400", got)
 	}
 }
 
-func TestUsageRidesTheThinkingUnitAndTheProseBubbleReadsTheTurnTotal(t *testing.T) {
-	// Arrange: a turn is running; the response's FIRST content block is the
-	// thinking unit, and it is the one carrying the usage.
+func TestASubagentsUsageNeverReachesTheMainBubbles(t *testing.T) {
+	// Arrange: a main bubble is arriving while a subagent runs.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 260)), nil, noAddress())
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(responseFrame("unit-prose-1", &conversationv1.AgentResponseStart{}, nil))
 
-	// Act: the prose unit of that same API response carries no usage at all.
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), nil, noAddress())
+	// Act: the subagent spends 5k.
+	h.resolver.OnActivity(testWorkspace, created, thinkingFrame("sub-think-1", misses(5_000, 0)), nil, noAddress())
 
-	// Assert: the prose bubble reads the sibling thinking unit's usage as the
-	// turn total (240+260 = 500).
-	if got := h.soleProse().GetUsage().GetText(); got != "500" {
-		t.Fatalf("usage stamp = %q, want the sibling's turn total 500", got)
-	}
+	// Assert: the main bubble counts only the main agent's fresh input.
+	h.wantStamps("1k")
 }
 
-func TestAturnWithNoStatedUsageDrawsNoStamp(t *testing.T) {
-	// Arrange, Act: a turn runs but nothing in it ever states a figure.
+func TestASubFeedsBubblesPartitionTheirSubagentsFreshInput(t *testing.T) {
+	// Arrange: a subagent runs.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", nil), nil, noAddress())
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), nil, noAddress())
-
-	// Assert: absence draws no stamp, never an invented zero.
-	if usage := h.soleProse().GetUsage(); usage != nil {
-		t.Fatalf("usage = %+v, want unset", usage)
-	}
-}
-
-func TestEveryProseUnitOfOneApiResponseStampsTheTurnTotalOnce(t *testing.T) {
-	// Arrange: a turn running; one API response yielding SEVERAL units — the
-	// thinking block that carries the usage, then two prose blocks.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(4_000, 0, 0, 100)), nil, noAddress())
-	for _, unit := range []string{"unit-prose-1", "unit-prose-2"} {
-		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseFrame(unit, &conversationv1.AgentResponseSuccess{
-				Prose: &conversationv1.AgentResponseProse{Markdown: unit},
-			}, nil), nil, noAddress())
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	sub := func(act *conversationv1.AgentActivity) {
+		h.resolver.OnActivity(testWorkspace, created, act, nil, noAddress())
 	}
 
-	// Assert: each bubble states the turn total once (4000+100 = 4.1k); a
-	// second prose unit of the SAME response does not double the charge.
-	bubbles := h.proseBubbles()
-	if len(bubbles) != 2 {
-		t.Fatalf("prose bubbles = %d, want the two prose bubbles", len(bubbles))
-	}
-	for _, bubble := range bubbles {
-		if got := bubble.GetUsage().GetText(); got != "4.1k" {
-			t.Fatalf("usage stamp = %q, want the turn total 4.1k on every bubble", got)
+	// Act: two of its API responses land two bubbles in its sub-feed.
+	sub(thinkingFrame("sub-think-1", misses(300, 0)))
+	sub(settledProse("sub-prose-1", "reading"))
+	sub(thinkingFrame("sub-think-2", misses(200, 0)))
+	sub(settledProse("sub-prose-2", "done"))
+
+	// Assert: each bubble froze its own delta.
+	var got []string
+	for _, row := range h.rows(feedid.Feed{Agent: created}) {
+		if resp := row.GetActivity().GetResponse(); resp != nil && !resp.GetThinking() {
+			got = append(got, resp.GetUsage().GetText())
 		}
 	}
+	if len(got) != 2 || got[0] != "300" || got[1] != "200" {
+		t.Fatalf("sub-feed stamps = %q, want [300 200]", got)
+	}
+}
+
+func TestARegressedFreshInputIsRecordedAndTheTallyTakesTheRestatement(t *testing.T) {
+	// Arrange: a unit states 3k.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(responseFrame("unit-prose", &conversationv1.AgentResponseStart{}, misses(0, 3_000)))
+
+	// Act: the same unit restates a smaller figure.
+	h.main(responseFrame("unit-prose", &conversationv1.AgentResponseUpdate{NewMarkdown: "hi"}, misses(0, 1_000)))
+
+	// Assert: the contradiction is recorded with its figures, and the tally
+	// takes the restated one.
+	var found *dlog.Record
+	for _, rec := range h.records() {
+		if rec.Level == dlog.LevelError && rec.Operation == "daemon.feed.fresh_input_regressed" {
+			rec := rec
+			found = &rec
+		}
+	}
+	if found == nil {
+		t.Fatalf("records = %+v, want ERROR daemon.feed.fresh_input_regressed", h.records())
+	}
+	if found.Context["unit"] != "unit-prose" || found.Context["previous"] != uint64(3_000) || found.Context["restated"] != uint64(1_000) {
+		t.Fatalf("context = %+v, want the unit and both figures", found.Context)
+	}
+	h.wantStamps("1k")
 }
