@@ -3,7 +3,13 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
+
+	"claude-repld/internal/health"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/topbar"
 
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
@@ -327,6 +333,102 @@ func TestResolveFactsBound(t *testing.T) {
 			// Assert
 			if err != nil || got != tc.want {
 				t.Fatalf("resolveFactsBound(%q) = (%v, %v), want %v", tc.value, got, err, tc.want)
+			}
+		})
+	}
+}
+
+// recordingFooter records the faults the sink drew on the footer.
+type recordingFooter struct {
+	footer.Resolver
+	opened []string
+	closed []string
+}
+
+func (f *recordingFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
+	f.opened = append(f.opened, fault.ID)
+}
+
+func (f *recordingFooter) CloseFault(_ ids.WorkspaceID, id string) {
+	f.closed = append(f.closed, id)
+}
+
+// recordingTopbar records the daemon-scoped warnings the sink raised.
+type recordingTopbar struct {
+	topbar.Resolver
+	raised    map[string]string
+	retracted []string
+}
+
+func (t *recordingTopbar) RaiseDaemonWarning(key, line string) { t.raised[key] = line }
+
+func (t *recordingTopbar) RetractDaemonWarning(key string) { t.retracted = append(t.retracted, key) }
+
+func TestTheFaultSinkDrawsEachFaultWhereHealthSays(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         ids.WorkspaceID
+		line       health.FaultLine
+		wantTopbar map[string]string
+	}{
+		{"a daemon-scoped fault with a topbar line stands on the footer and the topbar",
+			"", health.FaultLine{ID: "f-1", Kind: health.KindDeployFailed, Topbar: "deploy failed: build: x"},
+			map[string]string{"f-1": "deploy failed: build: x"}},
+		{"a daemon-scoped fault with no topbar line stands on the footer alone",
+			"", health.FaultLine{ID: "f-2", Kind: health.KindPromptsDirMissing}, map[string]string{}},
+		{"a workspace fault never reaches the daemon's topbar set",
+			"ws-1", health.FaultLine{ID: "f-3", Kind: health.KindDeployFailed, Topbar: "deploy failed: build: x"},
+			map[string]string{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &recordingFooter{}
+			tb := &recordingTopbar{raised: map[string]string{}}
+			sink := newFaultSurfaces(f, tb)
+
+			// Act
+			sink.FaultOpened(tc.ws, tc.line)
+
+			// Assert
+			if len(f.opened) != 1 || f.opened[0] != string(tc.line.ID) {
+				t.Fatalf("footer opened = %v, want the one fault", f.opened)
+			}
+			if !reflect.DeepEqual(tb.raised, tc.wantTopbar) {
+				t.Fatalf("topbar raised = %v, want %v", tb.raised, tc.wantTopbar)
+			}
+		})
+	}
+}
+
+func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
+	tests := []struct {
+		name          string
+		line          health.FaultLine
+		wantRetracted []string
+	}{
+		{"a fault raised on the topbar is retracted from it",
+			health.FaultLine{ID: "f-1", Kind: health.KindDeployFailed, Topbar: "deploy failed: build: x"}, []string{"f-1"}},
+		{"a fault the topbar never carried is retracted from the footer alone",
+			health.FaultLine{ID: "f-2", Kind: health.KindPromptsDirMissing}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &recordingFooter{}
+			tb := &recordingTopbar{raised: map[string]string{}}
+			sink := newFaultSurfaces(f, tb)
+			sink.FaultOpened("", tc.line)
+
+			// Act
+			sink.FaultClosed("", tc.line.ID)
+
+			// Assert
+			if len(f.closed) != 1 || f.closed[0] != string(tc.line.ID) {
+				t.Fatalf("footer closed = %v, want the one fault", f.closed)
+			}
+			if !reflect.DeepEqual(tb.retracted, tc.wantRetracted) {
+				t.Fatalf("topbar retracted = %v, want %v", tb.retracted, tc.wantRetracted)
 			}
 		})
 	}
