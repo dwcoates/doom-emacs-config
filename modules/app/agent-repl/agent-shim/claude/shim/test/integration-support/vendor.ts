@@ -99,6 +99,28 @@ export function findSubagentMetaByToolUseId(
   vendorSessionId: string,
   toolUseId: string,
 ): Record<string, unknown> {
+  return subagentMetaEntry(dirs, vendorSessionId, toolUseId).meta;
+}
+
+/**
+ * The vendor task LOCATOR of the subagent `toolUseId` spawned: the `<id>` of
+ * the `agent-<id>.meta.json` that names that call — read exactly as the
+ * sidecar reads it, from the file's name, to pair it with the agent.
+ */
+export function findSubagentLocatorByToolUseId(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+  toolUseId: string,
+): string {
+  return subagentMetaEntry(dirs, vendorSessionId, toolUseId).locator;
+}
+
+/** The one scan both lookups share: the meta naming `toolUseId`, and its file's locator. */
+function subagentMetaEntry(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+  toolUseId: string,
+): { readonly locator: string; readonly meta: Record<string, unknown> } {
   const dir = path.dirname(
     subagentMetaPath(dirs.configDir, workspaceRealPath(dirs), vendorSessionId, "probe"),
   );
@@ -106,7 +128,9 @@ export function findSubagentMetaByToolUseId(
   const metas = readdirSync(dir).filter((name) => name.endsWith(".meta.json"));
   for (const name of metas) {
     const meta = JSON.parse(readFileSync(path.join(dir, name), "utf8")) as Record<string, unknown>;
-    if (meta.toolUseId === toolUseId) return meta;
+    if (meta.toolUseId === toolUseId) {
+      return { locator: name.replace(/^agent-/, "").replace(/\.meta\.json$/, ""), meta };
+    }
   }
   throw new Error(
     `no subagent meta names tool_use_id ${toolUseId}; the directory holds ${metas.join(", ")}`,

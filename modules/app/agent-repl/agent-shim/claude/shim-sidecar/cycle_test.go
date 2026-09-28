@@ -318,6 +318,89 @@ func TestWriteCarriesTheCursorAdvance(t *testing.T) {
 	}
 }
 
+func TestASubagentTranscriptsBatchCarriesItsLocator(t *testing.T) {
+	// Arrange: the meta names the spawning call toolu_a1; the file names the
+	// vendor task a1.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-live", promptLine)
+	path := h.subagentTranscript(t, "sess-live", "a1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	for _, batch := range store.writes {
+		if batch.GetCursorAdvance().GetPath() != path {
+			continue
+		}
+		locators := batch.GetAgentLocators()
+		if len(locators) != 1 || locators[0].GetVendorTaskId() != "a1" || locators[0].GetAgent().GetValue() != "toolu_a1" {
+			t.Fatalf("locators = %v, want the one pairing a1 -> toolu_a1", locators)
+		}
+		return
+	}
+	t.Fatalf("no batch was written for the subagent transcript %s: %+v", path, store.writes)
+}
+
+func TestAMainTranscriptsBatchCarriesNoLocator(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if len(store.writes) != 1 || len(store.writes[0].GetAgentLocators()) != 0 {
+		t.Fatalf("batches = %+v, want one batch stating no locator", store.writes)
+	}
+}
+
+func TestAgentLocatorsPairsOnlyAToolSpawnedSubagent(t *testing.T) {
+	tests := []struct {
+		name   string
+		target discover.Target
+		want   int
+	}{
+		{
+			name: "a tool-spawned subagent's transcript",
+			target: discover.Target{Kind: tail.KindAgentTranscript, VendorAgentID: "a1", AgentID: "toolu_a1",
+				Meta: discover.Meta{Shape: discover.ShapeSubagent, ToolUseID: "toolu_a1"}},
+			want: 1,
+		},
+		{
+			name: "a workflow agent's transcript",
+			target: discover.Target{Kind: tail.KindWorkflowJournal, VendorAgentID: "a1", RunID: "wf_1",
+				Meta: discover.Meta{Shape: discover.ShapeWorkflow}},
+			want: 0,
+		},
+		{
+			name:   "a main session transcript",
+			target: discover.Target{Kind: tail.KindSessionTranscript, SessionID: "sess-1"},
+			want:   0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got := agentLocators(test.target)
+
+			// Assert.
+			if len(got) != test.want {
+				t.Fatalf("locators = %v, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestSuspensionDropsEveryTailer(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
