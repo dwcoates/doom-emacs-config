@@ -275,3 +275,38 @@ func unsetEnv(t *testing.T) {
 		t.Fatalf("Unsetenv(%s) = %v", Env, err)
 	}
 }
+
+// TestRepoRoot verifies the repository root is the module root less the
+// marker, and that a root not ending in the marker is refused.
+func TestRepoRoot(t *testing.T) {
+	tests := []struct {
+		name    string
+		root    string
+		want    string
+		wantErr bool
+	}{
+		{name: "a module root answers its repository", root: "/home/u/.config/doom/modules/app/agent-repl", want: "/home/u/.config/doom"},
+		{name: "a trailing separator is cleaned first", root: "/repo/modules/app/agent-repl/", want: "/repo"},
+		{name: "an unmarked root is refused", root: "/pinned", wantErr: true},
+		{name: "a partial marker is refused", root: "/repo/app/agent-repl", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: tt.root.
+
+			// Act.
+			got, err := RepoRoot(tt.root)
+
+			// Assert.
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), tt.root) {
+					t.Fatalf("RepoRoot(%q) = %q, %v; want an error naming the root", tt.root, got, err)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("RepoRoot(%q) = %q, %v; want %q", tt.root, got, err, tt.want)
+			}
+		})
+	}
+}
