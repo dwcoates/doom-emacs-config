@@ -3008,3 +3008,37 @@ func TestAReplayedBringUpConnectedIsNotAReconnect(t *testing.T) {
 		t.Fatal("a replayed bring-up edge was taken for a reconnect")
 	}
 }
+
+// TestAReplayedConnectedHeardAfterTheSeveringIsNotAReconnect pins the other
+// order the replay and a stream's end do not share: the end is heard FIRST,
+// so the fleet is degraded when the bring-up's replayed `connected` arrives.
+// That edge names no connection newer than the broken fleet's, so it neither
+// re-opens the fleet nor paints the link connected. It did both, and
+// TestAReplayedBringUpConnectedIsNotAReconnect failed 6 runs in 40.
+func TestAReplayedConnectedHeardAfterTheSeveringIsNotAReconnect(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "the replayed connected edge follows the severing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the session stream's end is heard before the replay.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.session.fail(errors.New("connection reset"))
+			awaitLinkChanged(t, h, false)
+
+			// Act: the bring-up's replayed edges arrive.
+			h.client.links <- shimclient.LinkDialing
+			h.client.links <- shimclient.LinkConnected
+			h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_not_a_reconnect")
+
+			// Assert.
+			h.client.noSessionOpen(t)
+			if got := h.w.Link(); got != shimclient.LinkRedialing {
+				t.Fatalf("link = %v, want redialing: the fleet's streams are still down", got)
+			}
+		})
+	}
+}
