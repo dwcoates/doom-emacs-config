@@ -1035,6 +1035,30 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
     );
   });
 
+  // A FAILED DEPLOY. The daemon names the step and its last line of output;
+  // the strip draws it through the same line, with no table keyed on it.
+  it("draws a failed deploy with the step it failed at", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "deploy_failed",
+        detail: "build webapp: error TS2322",
+      }),
+    });
+    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
+      "deploy failed \u00b7 build webapp: error TS2322",
+    );
+  });
+
+  it("leaves the idle status standing under a failed deploy", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "deploy_failed",
+        detail: "restart services store: exit 5",
+      }),
+    });
+    expect(row.querySelector(".footer-status")?.textContent?.toLowerCase()).toContain("idle");
+  });
+
   // IT NEVER ESCALATES THE STATUS. The session is serving and the prose is on
   // screen; `disconnected` would close the composer over a healthy session.
   it("stands as the activity line under an ordinary idle status", () => {
