@@ -376,3 +376,17 @@ func TestRetirableAnswersPerItem(t *testing.T) {
 		})
 	}
 }
+
+func TestARetiredLineIsPublishedAtItsPlace(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{placed(filePageEntry("w1", "prompt:u1", "agent-1", promptItem("agent-1"), 1), 500, 2)})
+
+	// Act
+	result := healBatch(t, d, 200, 2, nil, retirement("prompt:u1", 2))
+
+	// Assert
+	if got := result.Lines[0].Line.GetRecordedPlace(); got.GetAtMs() != 500 || got.GetOrdinal() != 2 {
+		t.Fatalf("retired line's place = %v, want 500.2", got)
+	}
+}

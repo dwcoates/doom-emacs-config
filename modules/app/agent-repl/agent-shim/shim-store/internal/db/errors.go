@@ -94,6 +94,13 @@ const (
 	// or a batch carrying retirements with no cursor advance to commit them
 	// beside.
 	SiteRetirementInvalid = "retirement_invalid"
+	// SitePlaceNotPositive is an entry whose stated conversation place has a
+	// non-positive at_ms. A place is an instant in the host's wall clock, and
+	// zero or less names none; absence is spelled by leaving the place unset.
+	SitePlaceNotPositive = "place_not_positive"
+	// SiteThroughNotPositive is a page read bounded by a ConversationThrough
+	// whose at_ms is not positive, which names no instant.
+	SiteThroughNotPositive = "through_not_positive"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name

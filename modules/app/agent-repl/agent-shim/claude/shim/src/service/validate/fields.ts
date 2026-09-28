@@ -87,6 +87,20 @@ export function validateHistoryPointer(
   if (value.value === "") throw emptyIdentity(`${path}.value`);
 }
 
+/**
+ * `conversation.v1.ConversationThrough` — an inclusive bound on conversation
+ * places, which must name a positive instant: a zero bound would read a book
+ * as it stood before anything was said, which is a malformed request rather
+ * than an empty page.
+ */
+export function validateConversationThrough(
+  value: conversationv1.ConversationThrough | undefined,
+  path: string,
+): void {
+  if (value === undefined) throw unsetField(path);
+  if (value.atMs <= 0n) throw invalidArgument(`${path}.at_ms is ${value.atMs}; a bound on conversation places is a positive instant`);
+}
+
 /** `conversation.v1.AgentModel` — a model must be named to be selected. */
 export function validateAgentModel(
   value: conversationv1.AgentModel | undefined,

@@ -8,11 +8,16 @@
 // stays a serialized blob: the activity vocabulary is conversation CONTENT, and
 // unpacking it here would drag every conversation.v1 change into DDL.
 //
-// TWO ORDERINGS, AND THEY ARE NOT THE SAME ORDERING.
-//   - `position` is FIRST-INSERT order. It is the page order and it is what a
-//     StoreItemPointer encodes, so a unit that settles mid-walk cannot teleport
-//     across a continuation and a pointer stays valid across every upsert of
-//     the row it names.
+// THREE ORDERINGS, AND THEY ARE NOT THE SAME ORDERING.
+//   - The CONVERSATION PLACE (`entry_place`: at_ms, ordinal, then position as
+//     a stable tiebreak) is the PAGE order: where each line sits in its
+//     conversation, which a producer states and the store keeps from the first
+//     write that stated it. Arrival order diverges from it whenever records
+//     reach the store out of their own order.
+//   - `position` is FIRST-INSERT order. It is what a StoreItemPointer encodes
+//     — a pointer names an ITEM, never a place — so a pointer stays valid across
+//     every upsert of the row it names, and a catch-up asks for exactly the
+//     rows first written after the caller's mark.
 //   - `write_seq` is a GLOBAL monotonic write ordinal, bumped on every insert
 //     AND every upsert. It is the watch pin, it never reaches the wire, and it
 //     is what makes an upsert of an OLD row stream to a live watcher at its
@@ -808,7 +813,13 @@ var lineageIndexes = []struct{ name, ddl string }{
 // 2026-09-27: the stale rows go and nothing else changes). Nuking the database
 // would also throw away every stream-plane row the shim wrote live — asks,
 // stream-only frames — which no producer can rebuild.
-var inPlaceTables = []struct{ name, ddl string }{
+//
+// A TABLE MAY CARRY A BACKFILL, run in the SAME transaction as its create and
+// only then: the statement that gives the rows already stored the bookkeeping
+// the table would have held had it existed when they were written. A fresh
+// database runs it too, over no rows. It never runs against a database that
+// already carries the table, so it is a one-time step per database.
+var inPlaceTables = []struct{ name, ddl, backfill string }{
 	// THE FILE PLANE'S CONVERSION BOOKKEEPING, one row per cursor (store.v1
 	// CursorConversion): the conversion version every byte below the cursor's
 	// offset was converted under, and — while a re-derivation is in progress —
@@ -820,7 +831,39 @@ var inPlaceTables = []struct{ name, ddl string }{
   file_id         TEXT    PRIMARY KEY,
   version         INTEGER NOT NULL,
   healing_through INTEGER
-)`},
+)`, ""},
+	// THE CONVERSATION PLACE EVERY BOOK IS ORDERED BY (conversation.v1
+	// ConversationPlace), one row per row that has a book: the `entry` row at
+	// `position`, its book (copied, because the page order is an index over
+	// book-then-place and an index cannot span two tables), the place, and
+	// whether a producer STATED it (`recorded` = 1: the row's first stated
+	// StoreEntry.place) or the store's first-insert receipt instant stands in
+	// (`recorded` = 0: `entry.first_inserted_at_ms`, ordinal 0). It is THE ONE
+	// HOME of the served place: every page, catch-up, replay and live line reads
+	// its place arm from here, and placeRow (write.go) is the one writer, in the
+	// transaction of the write that decided it.
+	//
+	// WHY IN PLACE AND NOT A VERSION BUMP: a bump nukes the owner's database,
+	// and with it every stream-plane row the shim wrote live, which no producer
+	// can rebuild.
+	//
+	// THE BACKFILL'S STAND-IN FOR A ROW STORED BEFORE PLACES EXISTED IS EXACT.
+	// Such a row was written by a producer that stated no place (the field did
+	// not exist), so its served arm is `received_place`, and its receipt instant
+	// is not a guess: `entry.first_inserted_at_ms` has recorded every row's
+	// first-insert instant since the table existed, and no upsert rewrites it.
+	// The file plane's next re-derivation states the recorded place of every
+	// row it re-reads, and the row takes it then (the first stated place).
+	{"entry_place", `CREATE TABLE IF NOT EXISTS entry_place (
+  position      INTEGER PRIMARY KEY,
+  book_agent_id TEXT    NOT NULL,
+  at_ms         INTEGER NOT NULL,
+  ordinal       INTEGER NOT NULL,
+  recorded      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS entry_place_book_order ON entry_place(book_agent_id, at_ms, ordinal, position)`,
+		`INSERT INTO entry_place (position, book_agent_id, at_ms, ordinal, recorded)
+  SELECT position, book_agent_id, first_inserted_at_ms, 0, 0 FROM entry WHERE book_agent_id IS NOT NULL`},
 }
 
 // indexMigrationError is a failure to build a missing lineage index or
@@ -837,7 +880,7 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "residue_shapes", "schema_meta", "vendor_task", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "residue_shapes", "schema_meta", "vendor_task", "workflow", "write_ledger"}
 
 // shapeTables is a table set with the in-place tables taken out: the part of a
 // database's shape that must match EXACTLY, because the in-place tables are the
@@ -1002,8 +1045,8 @@ func (d *DB) createSchema(ctx context.Context) error {
 	// SAME transaction as the rest, so no database this binary creates is ever
 	// without them.
 	for _, table := range inPlaceTables {
-		if _, err := tx.ExecContext(ctx, table.ddl); err != nil {
-			return storagef(err, "creating table %s", table.name)
+		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill); err != nil {
+			return err
 		}
 	}
 	for _, index := range lineageIndexes {
@@ -1109,8 +1152,8 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 		if !contains(missing, table.name) {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, table.ddl); err != nil {
-			return fail(storagef(err, "creating table %s", table.name))
+		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill); err != nil {
+			return fail(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1118,6 +1161,22 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 	}
 	d.log.Log(fields, "built the missing in-place tables tables=%v duration_ms=%d",
 		missing, d.mono().Sub(started).Milliseconds())
+	return nil
+}
+
+// createInPlaceTable creates one in-place table and runs its backfill, if it
+// has one, inside the caller's transaction, so the table never exists without
+// the bookkeeping its reader relies on.
+func createInPlaceTable(ctx context.Context, tx *sql.Tx, name, ddl, backfill string) error {
+	if _, err := tx.ExecContext(ctx, ddl); err != nil {
+		return storagef(err, "creating table %s", name)
+	}
+	if backfill == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, backfill); err != nil {
+		return storagef(err, "backfilling table %s", name)
+	}
 	return nil
 }
 

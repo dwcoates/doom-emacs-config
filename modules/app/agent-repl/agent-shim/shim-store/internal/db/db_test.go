@@ -1541,3 +1541,66 @@ func TestOpenKeepsTheRowsOfADatabaseItBuildsAnInPlaceTableOn(t *testing.T) {
 		t.Fatalf("rows = %d, want the stored row kept", got)
 	}
 }
+
+// prePlaceDatabase writes a database carrying one booked row and one unbooked
+// row but NOT entry_place — the shape the owner's events.db had before
+// conversation places — and returns its path, closed. The rows are written at
+// the receipt instant `receivedAt`.
+func prePlaceDatabase(t *testing.T, receivedAt int64) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return receivedAt }})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	writeOK(t, d, sessionUpdateEntry("w2", "u2"))
+	if _, err := d.sql.Exec(`DROP TABLE entry_place`); err != nil {
+		t.Fatalf("dropping entry_place: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return path
+}
+
+func TestOpenPlacesEveryBookedRowAtItsReceiptInstantWhenItBuildsThePlaceIndex(t *testing.T) {
+	// Arrange
+	path := prePlaceDatabase(t, 1234)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	lines, err := d.LinesSince(ctx(), "agent-1", 0)
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if got := lines[0].Line.GetReceivedPlace(); got.GetAtMs() != 1234 || got.GetOrdinal() != 0 {
+		t.Fatalf("place = %v, want received 1234.0", lines[0].Line.GetPlace())
+	}
+}
+
+func TestOpenLeavesUnbookedRowsUnplacedWhenItBuildsThePlaceIndex(t *testing.T) {
+	// Arrange
+	path := prePlaceDatabase(t, 1234)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry_place`); got != 1 {
+		t.Fatalf("place rows = %d, want only the booked row's", got)
+	}
+}

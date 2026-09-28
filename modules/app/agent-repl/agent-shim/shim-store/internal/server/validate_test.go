@@ -314,9 +314,26 @@ func TestValidateOpenAgentSessionRequestAcceptsAnOmittedKnownThrough(t *testing.
 	}
 }
 
-func TestValidateReadAgentPageRequestRequiresTheAfterPointer(t *testing.T) {
-	// Arrange. There is no first-page arm on this verb.
+func TestValidateReadAgentPageRequestRequiresAPosition(t *testing.T) {
+	// Arrange. There is no first-page arm on this verb, so an unset position
+	// asks for nothing.
 	req := &storev1.ReadAgentPageRequest{Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10}
+
+	// Act.
+	ref := validateReadAgentPageRequest(req)
+
+	// Assert.
+	if siteOf(ref) != SitePositionUnset || ref.field != "position" {
+		t.Fatalf("site, field = %q, %q; want %q, %q", siteOf(ref), ref.field, SitePositionUnset, "position")
+	}
+}
+
+func TestValidateReadAgentPageRequestRefusesAnEmptyAfterPointer(t *testing.T) {
+	// Arrange.
+	req := &storev1.ReadAgentPageRequest{
+		Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+		Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{}},
+	}
 
 	// Act.
 	ref := validateReadAgentPageRequest(req)
@@ -324,6 +341,49 @@ func TestValidateReadAgentPageRequestRequiresTheAfterPointer(t *testing.T) {
 	// Assert.
 	if siteOf(ref) != SitePointerEmpty {
 		t.Fatalf("site = %q, want %q", siteOf(ref), SitePointerEmpty)
+	}
+}
+
+func TestValidateReadAgentPageRequestRefusesANonPositiveThrough(t *testing.T) {
+	tests := []struct {
+		name string
+		atMs int64
+	}{
+		{name: "zero", atMs: 0},
+		{name: "negative", atMs: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			req := &storev1.ReadAgentPageRequest{
+				Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+				Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: test.atMs}},
+			}
+
+			// Act.
+			ref := validateReadAgentPageRequest(req)
+
+			// Assert.
+			if siteOf(ref) != SiteThroughNotPositive || ref.field != "through.at_ms" {
+				t.Fatalf("site, field = %q, %q; want %q, %q", siteOf(ref), ref.field, SiteThroughNotPositive, "through.at_ms")
+			}
+		})
+	}
+}
+
+func TestValidateReadAgentPageRequestAcceptsAPositiveThrough(t *testing.T) {
+	// Arrange.
+	req := &storev1.ReadAgentPageRequest{
+		Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1}},
+	}
+
+	// Act.
+	ref := validateReadAgentPageRequest(req)
+
+	// Assert.
+	if ref != nil {
+		t.Fatalf("refusal = %v, want nil", ref)
 	}
 }
 

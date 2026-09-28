@@ -651,7 +651,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        },
       }),
     );
 
@@ -670,7 +673,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "2" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "2" }),
+        },
       }),
     );
 
@@ -692,7 +698,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 1,
-        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        },
       }),
     );
 
@@ -1079,7 +1088,10 @@ describe("typed read refusals", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "9" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "9" }),
+        },
       }),
     );
 
@@ -1382,5 +1394,187 @@ describe("the open-tail ledger", () => {
 
     // Assert.
     expect(fake.openTails()).toEqual([success.watch?.value]);
+  });
+});
+
+describe("the conversation place", () => {
+  /** A page line stating a place. */
+  const placedLine = (book: string, upsertKey: string, text: string, atMs: bigint, ordinal = 0): storev1.StoreEntry => {
+    const entry = pageLineEntry(book, upsertKey, text);
+    entry.place = create(conversationv1.ConversationPlaceSchema, { atMs, ordinal });
+    return entry;
+  };
+
+  /** The prompt texts of a page's lines, in the order served. */
+  const texts = (lines: readonly storev1.StoreLineAt[]): string[] =>
+    lines.map((line) => {
+      const item = line.line?.agentItem?.item;
+      return item?.case === "agentPrompt" ? (item.value.id?.value ?? "") : "";
+    });
+
+  /** A ReadAgentPage through an instant. */
+  const readThrough = (client: StoreClient, book: string, atMs: bigint): Promise<storev1.ReadAgentPageResponse> =>
+    client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId(book),
+        pageSize: 10,
+        position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs }) },
+      }),
+    );
+
+  it("serves a row stated with a place on the recorded arm", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "one", 500n, 2));
+
+    // Act.
+    const opened = await open(client, "a", 10);
+
+    // Assert.
+    const place = opened.page?.lines[0]?.place;
+    expect([place?.case, place?.value?.atMs, place?.value?.ordinal]).toEqual(["recordedPlace", 500n, 2]);
+  });
+
+  it("serves a row stated with no place on the received arm", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+
+    // Act.
+    const opened = await open(client, "a", 10);
+
+    // Assert.
+    expect(opened.page?.lines[0]?.place.case).toBe("receivedPlace");
+  });
+
+  it("keeps a row's first stated place across a write stating another", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "one", 500n));
+    await write(client, placedLine("a", "prompt:t1", "two", 900n));
+
+    // Act.
+    const opened = await open(client, "a", 10);
+
+    // Assert.
+    expect(opened.page?.lines[0]?.place.value?.atMs).toBe(500n);
+  });
+
+  it("gives an unplaced row the first place a later write states", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+    await write(client, placedLine("a", "prompt:t1", "two", 900n));
+
+    // Act.
+    const opened = await open(client, "a", 10);
+
+    // Assert.
+    const place = opened.page?.lines[0]?.place;
+    expect([place?.case, place?.value?.atMs]).toEqual(["recordedPlace", 900n]);
+  });
+
+  it("serves a book in descending place, not in the order it was written", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "later", 900n));
+    await write(client, placedLine("a", "prompt:t2", "earlier", 500n));
+
+    // Act.
+    const opened = await open(client, "a", 10);
+
+    // Assert.
+    expect(texts(opened.page?.lines ?? [])).toEqual(["later", "earlier"]);
+  });
+
+  it("catches up on rows first written after the mark, even one placed before it", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "mark", 900n));
+    const mark = (await open(client, "a", 10)).page?.lines[0]?.at;
+    await write(client, placedLine("a", "prompt:t2", "late", 500n));
+
+    // Act.
+    const opened = await open(client, "a", 10, mark);
+
+    // Assert.
+    expect(texts(opened.page?.lines ?? [])).toEqual(["late"]);
+  });
+
+  it("walks to the lines placed before the named line", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "low", 100n));
+    await write(client, placedLine("a", "prompt:t2", "named", 200n));
+    await write(client, placedLine("a", "prompt:t3", "high", 300n));
+    const named = (await open(client, "a", 10)).page?.lines[1]?.at;
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 10,
+        position: { case: "after", value: named ?? create(storev1.StoreItemPointerSchema, {}) },
+      }),
+    );
+
+    // Assert.
+    expect(texts(response.result.case === "success" ? response.result.value.lines : [])).toEqual(["low"]);
+  });
+
+  it("refuses an after pointer that names no line of the book as stale", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "one", 100n));
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 10,
+        position: { case: "after", value: create(storev1.StoreItemPointerSchema, { value: "99" }) },
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "").toBe("stalePointer");
+  });
+
+  it("reads a book as it stood at an instant", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, placedLine("a", "prompt:t1", "before", 100n));
+    await write(client, placedLine("a", "prompt:t2", "at", 200n, 7));
+    await write(client, placedLine("a", "prompt:t3", "after", 300n));
+
+    // Act.
+    const response = await readThrough(client, "a", 200n);
+
+    // Assert.
+    expect(texts(response.result.case === "success" ? response.result.value.lines : [])).toEqual(["at", "before"]);
+  });
+
+  it("refuses a through read of a book it holds no agent row for as unknown", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const response = await readThrough(client, "nobody", 200n);
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "").toBe("unknownAgent");
+  });
+
+  it("refuses a read that names no position", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "").toBe("invalidRequest");
   });
 });

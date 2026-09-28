@@ -1943,6 +1943,39 @@ describe("ReadHistory", () => {
     expect(failureKind(await h.turns.readHistory(first()))).toBe("storeUnavailable");
   });
 
+  it("forwards a through read's bound to the store's own through read", async () => {
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 10,
+        position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
+      }),
+    );
+
+    // Assert.
+    expect([response.result.case, h.persistence.throughBounds]).toEqual(["success", [2_500n]]);
+  });
+
+  it("maps a through read of a book the store never heard of onto the unknown-agent arm", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.readError = new PersistenceError("unknown_agent", "no such book");
+
+    // Act.
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 10,
+        position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
+      }),
+    );
+
+    // Assert.
+    expect(failureKind(response)).toBe("unknownAgent");
+  });
+
   it("REPORTS an unreachable store as a session fault, not only to its caller", async () => {
     // A refusal tells the caller its own call failed; every other consumer --
     // the daemon deciding whether to trust what it is painting -- learns
