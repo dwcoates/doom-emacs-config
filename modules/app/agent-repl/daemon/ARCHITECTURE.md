@@ -96,6 +96,8 @@ daemon/
     heldingress/   the held-prompt ingress ($AGENT_REPL_STATE_DIR/held-prompts/held_*.json): prompts a
                    client could not hand to a live daemon, submitted through the prompt handler under
                    their own idempotency keys once one serves
+    intakegate/    whether THIS daemon takes the two on-disk intakes: only the daemon that serves (not a
+                   successor still joining, not an incumbent handing over)
     server/        Connect handlers (validation via base functions, delegation), publishers wiring,
                    static asset origin, unowned-workspace refusal, h2c + HTTP/1.1
     boot/          boot sequence and adoption reconciliation (surviving shims, intent manifest, holds restore)
@@ -108,7 +110,7 @@ below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
 feedid, prompts, publish, apiresponses, flock, clock, sessioncommand  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
-health, commandfile, heldingress, worktreereap  <  server, boot  <  cmd. The shim client and git
+health, intakegate  <  commandfile, heldingress, worktreereap  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
 and drain controller never import each other; they meet at wsm (the
 lease) and at the shim client.
@@ -863,8 +865,25 @@ directory in exactly two ways:
 A crash before the removal leaves the file; the next sweep resubmits it under
 the same key and the durable claim answers it as a duplicate, so a crash
 mid-ingest neither loses nor duplicates. A refusal (a merge in flight, a cold
-gate, no session, an unregistered directory, a fault) leaves the entry and
-every later entry for the same workspace, so order is kept; it is retried after
-a delay doubling from the interval to 10s, recorded once at its level (INFO for
-the queue's answers, WARN for an unregistered directory, ERROR for a fault) and
-at DEBUG on each retry.
+gate, no session, a move sealed toward another daemon, an unregistered
+directory, a fault) leaves the entry and every later entry for the same
+workspace, so order is kept; it is retried after a delay doubling from the
+interval to 10s, recorded once PER KIND at its level (INFO for the queue's
+answers, WARN for an unregistered directory, ERROR for a fault) and at DEBUG on
+each retry of a kind already stated. The submission carries
+`prompthandler.WithRedrive`, so the queue records its own side of a standing
+refusal at DEBUG: the ingress's record is the one that says it.
+
+ONLY THE DAEMON THAT SERVES SWEEPS (`intakegate`, answered by
+`rollout.Controller.ServesIntake`): not a successor still joining, and not an
+incumbent whose handover or restart has begun. The ingress calls the handler
+directly, so the server's handover refusals never reach it; without the gate a
+joining successor would revive a session its incumbent still runs. Between the
+incumbent's stop and the successor's start nothing is taken and every entry
+waits on disk. A sweep is also EXCLUSIVE across daemons, under the kernel lock
+`held-prompts/.sweep.lock` (`flock`), because a sweep the incumbent began before
+its handover can still be submitting when the successor's gate opens, and an
+entry submitted by both before either accepted its key would be delivered
+twice. The command-file ingress takes the same gate; its per-file exclusivity is
+the claim rename, and a claim lost to the other daemon is DEBUG, never an
+ERROR.

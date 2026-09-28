@@ -807,7 +807,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:      p.DB,
 		Merge:   mergeOrchestrator,
 		Prompts: handler,
-		Log:     p.Surfaces,
+		// ONLY THE DAEMON THAT SERVES TAKES INTAKE (internal/intakegate): not
+		// a successor still joining, not an incumbent handing over.
+		Serves: rolloutController.ServesIntake,
+		Log:    p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the command-file ingress: %w", err)
@@ -822,6 +825,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		WorkspaceByDir: p.DB.WorkspaceByDir,
 		Prompts:        handler,
 		PublishHost:    relay.PublishHostWorkspace,
+		Serves:         rolloutController.ServesIntake,
 		Log:            p.Surfaces,
 	})
 	if err != nil {

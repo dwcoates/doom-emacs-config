@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/flock"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 )
@@ -26,6 +27,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			WorkspaceByDir: w.ingressLookup(),
 			Prompts:        w.handler,
 			PublishHost:    func(ids.WorkspaceID) {},
+			Serves:         func() bool { return true },
 			Log:            w.log,
 		}
 	}
@@ -38,6 +40,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "no prompt handler", mutate: func(d *Deps) { d.Prompts = nil }},
 		{name: "no host publisher", mutate: func(d *Deps) { d.PublishHost = nil }},
 		{name: "no log surfaces", mutate: func(d *Deps) { d.Log = nil }},
+		{name: "no serving answer", mutate: func(d *Deps) { d.Serves = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -418,6 +421,7 @@ func TestRunSweepsAtStartBeforeTheFirstTick(t *testing.T) {
 		WorkspaceByDir: w.ingressLookup(),
 		Prompts:        w.handler,
 		PublishHost:    func(ws ids.WorkspaceID) { published <- ws },
+		Serves:         func() bool { return true },
 		Log:            w.log,
 		Interval:       time.Hour,
 	})
@@ -438,5 +442,87 @@ func TestRunSweepsAtStartBeforeTheFirstTick(t *testing.T) {
 	}
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run = %v, want context.Canceled", err)
+	}
+}
+
+// ---- only the daemon that serves takes the intake, one sweep at a time ----
+
+func TestASweepTakesTheIntakeOnlyWhileThisDaemonServes(t *testing.T) {
+	tests := []struct {
+		name      string
+		serves    bool
+		wantCalls int
+		wantLeft  int
+	}{
+		{name: "a serving daemon ingests the entry", serves: true, wantCalls: 1, wantLeft: 0},
+		{name: "a daemon that does not serve leaves it on disk", serves: false, wantCalls: 0, wantLeft: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.serves = tc.serves
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			if got := len(w.handler.calls); got != tc.wantCalls {
+				t.Fatalf("submissions = %d, want %d", got, tc.wantCalls)
+			}
+			if got := len(w.entries()); got != tc.wantLeft {
+				t.Fatalf("entries left = %d, want %d", got, tc.wantLeft)
+			}
+		})
+	}
+}
+
+func TestASweepTakesNothingWhileAnotherDaemonHoldsTheSweepLock(t *testing.T) {
+	// Arrange: another daemon on this state root is mid-sweep.
+	w := newWorld(t)
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+	other, held, err := flock.TryExclusiveIn(filepath.Join(w.dir, LockName))
+	if err != nil || !held {
+		t.Fatalf("TryExclusive = (%v, %v), want the lock", held, err)
+	}
+	t.Cleanup(func() { _ = other.Release() })
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	if len(w.handler.calls) != 0 || len(w.entries()) != 1 {
+		t.Fatalf("calls = %v, entries = %d: a sweep under another daemon's lock must take nothing", w.handler.calls, len(w.entries()))
+	}
+}
+
+func TestASweepReleasesItsLockSoTheNextOneRuns(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	in := w.ingress()
+	w.sweep(in)
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+	// Act
+	w.sweep(in)
+
+	// Assert
+	if got := w.handler.delivered("k-1"); got != 1 {
+		t.Fatalf("deliveries = %d, want the second sweep to run and ingest the entry", got)
+	}
+}
+
+func TestASweepOfAMissingDirectoryNeverCreatesIt(t *testing.T) {
+	// Arrange: nothing was ever written, so the ingress directory is absent.
+	w := newWorld(t)
+	w.dir = filepath.Join(w.dir, "held-prompts")
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	if _, err := os.Stat(w.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v, want the sweep to leave the directory absent", w.dir, err)
 	}
 }
