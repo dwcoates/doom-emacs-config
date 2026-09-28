@@ -1921,10 +1921,30 @@ FEEDID is the decoded `frontend.v1.FeedId' plist SelectResponse acked; it
 is echoed back verbatim, never a value Emacs builds."
   (agent-repl-wire-encode-feed-id feedid))
 
+(defconst agent-repl-wire-submit-prompt-deliveries
+  '((:deferred . "SUBMIT_PROMPT_DELIVERY_DEFERRED"))
+  "The SubmitPromptDelivery vocabulary Emacs sends, keyword to wire name.
+UNSPECIFIED is deliberately ABSENT: the ordinary delivery is the field's
+ABSENCE, and a request carrying the zero value is refused as
+InvalidArgument, so it has no elisp spelling to reach for by accident.")
+
+(defun agent-repl-wire-encode-submit-prompt-delivery (value)
+  "Encode the SubmitPromptDelivery keyword VALUE as its protojson enum name.
+The one spelling of a delivery Emacs writes: the request encoder and the
+held-prompt ingress's entry (`held-ingress.el') both read it, so the two
+can never name a deferral differently.  The vocabulary is closed; an
+unknown keyword is refused before anything is built."
+  (let ((name (cdr (assq value agent-repl-wire-submit-prompt-deliveries))))
+    (unless name
+      (agent-repl-wire-verbs--fail "SubmitPromptRequest" "delivery" "unknown delivery"))
+    name))
+
 (defun agent-repl-wire-encode-submit-prompt-request (request)
   "Encode SubmitPromptRequest from plist REQUEST.
 REQUEST is (:workspace REF :said SAID :idempotency-key STRING :origin
-KEYWORD) plus the OPTIONAL :reference-response-feedid FEEDID.  The first
+KEYWORD) plus the OPTIONAL :reference-response-feedid FEEDID and the
+OPTIONAL :delivery KEYWORD (`agent-repl-wire-submit-prompt-deliveries';
+absent is the ordinary delivery, so it is appended only when set).  The first
 four are required: the workspace names WHICH workspace the submission
 belongs to and is echoed verbatim like every other per-workspace request
 (it is required even though `feed' is not, because the root feed has no id
@@ -1941,9 +1961,10 @@ response before delivering.  It rides ALONGSIDE `said' — the user still
 authored a prompt — and its ABSENCE is an ordinary prompt, so the field is
 appended only when set rather than sent empty."
   (let ((message "SubmitPromptRequest")
-        (feedid (plist-get request :reference-response-feedid)))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s reply-to=%s"
-                      (plist-get request :origin) (and feedid t))
+        (feedid (plist-get request :reference-response-feedid))
+        (delivery (plist-get request :delivery)))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s reply-to=%s delivery=%S"
+                      (plist-get request :origin) (and feedid t) delivery)
     (append
      (list (cons 'workspace
                  (agent-repl-wire-encode-submit-prompt-request-workspace
@@ -1963,7 +1984,10 @@ appended only when set rather than sent empty."
      (when feedid
        (list (cons 'referenceResponseFeedid
                    (agent-repl-wire-encode-submit-prompt-request-reference-response-feedid
-                    feedid)))))))
+                    feedid))))
+     ;; OPTIONAL field: its absence is the ordinary delivery.
+     (when delivery
+       (list (cons 'delivery (agent-repl-wire-encode-submit-prompt-delivery delivery)))))))
 
 
 ;;;; ---- SubmitPrompt: decode -------------------------------------------
