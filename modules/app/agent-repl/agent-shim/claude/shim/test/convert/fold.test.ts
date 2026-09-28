@@ -1069,6 +1069,45 @@ describe("permission", () => {
   });
 });
 
+describe("the terminal of a turn the vendor absorbed", () => {
+  it("concludes the absorbed turn as COMPLETED", () => {
+    // Arrange
+    const fold = createFold();
+
+    // Act
+    const output = fold.concludeAbsorbedTurn(foldContext(), "absorbed-adopted-1");
+
+    // Assert
+    expect(output.turnEnded?.frame.result.case === "success" ? output.turnEnded.frame.result.value.outcome.case : "").toBe(
+      "completed",
+    );
+  });
+
+  it("names the last top-level prose the absorbed turn produced as its ANSWER", () => {
+    // Arrange
+    const fold = createFold();
+    fold.onSdkMessage(assistant("msg-v", [{ type: "text", text: "the hand-back is in" }]), foldContext());
+
+    // Act
+    const output = fold.concludeAbsorbedTurn(foldContext(), "absorbed-adopted-1");
+
+    // Assert
+    const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
+    expect((success.outcome.value as conversationv1.AgentCompleted).answer?.value).toBe("msg-v:0");
+  });
+
+  it("keys the terminal row by the coordinate it was given", () => {
+    // Arrange
+    const fold = createFold();
+
+    // Act
+    const output = fold.concludeAbsorbedTurn(foldContext(), "absorbed-adopted-1");
+
+    // Assert
+    expect(output.entries.map((entry) => entry.source.vendorUuid)).toEqual(["absorbed-adopted-1"]);
+  });
+});
+
 describe("the turn's terminal", () => {
   it("completes a turn from the vendor's own result record", () => {
     const fold = createFold();

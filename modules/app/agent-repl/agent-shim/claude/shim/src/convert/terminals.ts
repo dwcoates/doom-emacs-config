@@ -349,6 +349,43 @@ export function isUserStop(message: Extract<SdkMessage, { type: "result" }>): bo
 }
 
 /**
+ * The terminal of a turn the vendor ABSORBED into another turn.
+ *
+ * A turn the vendor started on its own (a hand-back, a task notification) can
+ * take one of the shim's queued sends in between its tool rounds, and from
+ * that frame on the vendor turn answers the send (engine/sends.ts, "the
+ * fold"). The absorbed turn's own `result` therefore never comes, but it is a
+ * turn every consumer is watching, so it is concluded here: COMPLETED, since
+ * it ran to the point where the vendor moved on, naming the last top-level
+ * prose it produced as its answer.
+ */
+export function absorbedTurnTerminal(
+  context: FoldContext,
+  coordinate: string,
+  lastAnswer: conversationv1.AgentActivityId | undefined,
+): FoldOutput {
+  LOGGER.info(
+    { turn: context.turnId?.value, coordinate, answer: lastAnswer?.value },
+    "the turn was absorbed into another vendor turn; it is concluded as completed",
+  );
+  const result: conversationv1.AgentFrame["result"] = {
+    case: "success",
+    value: create(conversationv1.AgentSuccessSchema, {
+      outcome: {
+        case: "completed",
+        value: create(conversationv1.AgentCompletedSchema, { answer: lastAnswer }),
+      },
+    }),
+  };
+  return finish(
+    context,
+    { agentId: context.mainAgentId, vendorUuid: coordinate, discriminator: "" },
+    "agent_frame.success.completed.absorbed",
+    result,
+  );
+}
+
+/**
  * The turn's terminal frame.
  *
  * `turnEnded` is set on the output because the ENGINE needs the same fact the

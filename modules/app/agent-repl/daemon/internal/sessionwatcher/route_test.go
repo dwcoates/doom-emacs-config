@@ -2398,3 +2398,196 @@ func TestAnAdoptionIsHandedOverBeforeATurnEndOnTheSameFlush(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{"lifecycle.OnTurnAdopted", "lifecycle.OnTurnEnded"})
 }
+
+// A TURN WAITS BEHIND A VENDOR-STARTED TURN (ruled 2026-09-28). The shim
+// matches every reply to its send by id and never refuses a StartTurn because
+// the vendor started a turn of its own: the daemon's turn is delivered into the
+// vendor's queue and runs after the vendor's turn. These tests hold the
+// watcher to standing the running turn in flight and the daemon's turn behind
+// it, rather than displacing either.
+
+// acceptQueuedTurn hands the queue's accepted turn to the watcher, as a
+// successful StartTurn does.
+func acceptQueuedTurn(h *harness, turn string) {
+	h.t.Helper()
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: turn}, Agent: agentID("main-1")}, nil)
+	h.drainNow()
+}
+
+// raceBehindAdopted stands the daemon's turn-q as opening or accepted, then
+// routes the vendor-started turn-v's prompt row ahead of it.
+func raceBehindAdopted(t *testing.T, accepted bool) *harness {
+	t.Helper()
+	h := adoptionHarness(t)
+	h.w.OnTurnOpening("ws-1", "turn-q")
+	if accepted {
+		acceptQueuedTurn(h, "turn-q")
+	}
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+	return h
+}
+
+// endAdopted routes turn-v's own stamped terminal.
+func endAdopted(h *harness) []event {
+	h.t.Helper()
+	return h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-v-end", "turn-v"))
+}
+
+func TestADaemonTurnStandsInFlightAgainWhenTheAdoptedTurnAheadOfItEnds(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		accepted bool
+	}{
+		{name: "a turn still opening", accepted: false},
+		{name: "an accepted turn", accepted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := raceBehindAdopted(t, tt.accepted)
+
+			// Act.
+			endAdopted(h)
+
+			// Assert.
+			if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-q" {
+				t.Fatalf("turn in flight = %v, want the waiting turn-q", turn)
+			}
+		})
+	}
+}
+
+func TestTheAdoptedTurnsEndIsHandedOverWithTheWaitingTurnAlreadyInFlight(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, true)
+	var running *ids.TurnID
+	h.lifecycle.onTurnEnded = func() { running = h.w.TurnInFlight() }
+
+	// Act.
+	endAdopted(h)
+
+	// Assert: the queue, told of turn-v's end, finds turn-q running and pops
+	// nothing into it.
+	if running == nil || *running != "turn-q" {
+		t.Fatalf("turn in flight when the end was handed over = %v, want turn-q", running)
+	}
+}
+
+func TestAWaitingTurnTakesItsOpenEdgesWhenItStandsInFlightOnlyIfAccepted(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		accepted bool
+		want     []string
+	}{
+		{name: "accepted, the views are given its open edge", accepted: true, want: []string{"footer.OnTurnOpened", "feed.OnTurnOpened"}},
+		{name: "still opening, its own OnTurnOpened gives it later", accepted: false, want: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := raceBehindAdopted(t, tt.accepted)
+
+			// Act.
+			got := endAdopted(h)
+
+			// Assert.
+			var opened []string
+			for _, e := range got {
+				if (e.name() == "footer.OnTurnOpened" || e.name() == "feed.OnTurnOpened") && e.detail == "turn-q" {
+					opened = append(opened, e.name())
+				}
+			}
+			if !slices.Equal(opened, tt.want) {
+				t.Fatalf("open edges for turn-q = %v, want %v", opened, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnAcceptedTurnLandingBehindTheAdoptedTurnDisplacesNothing(t *testing.T) {
+	// Arrange: the vendor's row beat StartTurn's answer back.
+	h := raceBehindAdopted(t, false)
+
+	// Act.
+	acceptQueuedTurn(h, "turn-q")
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-v" {
+		t.Fatalf("turn in flight = %v, want the running vendor-started turn-v", turn)
+	}
+}
+
+func TestAWaitingTurnsOwnTerminalEndsItAndLeavesTheAdoptedTurnRunning(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, true)
+
+	// Act.
+	got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-q-end", "turn-q"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	running := h.w.TurnInFlight()
+	if ended.turn == nil || *ended.turn != "turn-q" || running == nil || *running != "turn-v" {
+		t.Fatalf("ended %v with %v in flight, want turn-q ended and turn-v running", ended.turn, running)
+	}
+}
+
+func TestAWaitingTurnTheShimRefusedStandsNothingWhenTheAdoptedTurnEnds(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, false)
+	h.w.OnTurnOpenFailed("ws-1", "turn-q")
+
+	// Act.
+	endAdopted(h)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none", *turn)
+	}
+}
+
+func TestTheWorkspaceIsNotFreeWhileATurnWaitsBehindTheAdoptedOne(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, true)
+
+	// Act.
+	endAdopted(h)
+
+	// Assert.
+	if h.w.Free() {
+		t.Fatal("the workspace reads free while the waiting turn-q still runs")
+	}
+}
+
+func TestTheAdoptionRecordNamesTheTurnWaitingBehindIt(t *testing.T) {
+	// Arrange / Act.
+	h := raceBehindAdopted(t, true)
+
+	// Assert.
+	var behind any
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.sessionwatcher.turn_adopted" && r.Level == "info" {
+			behind = r.Context["behind"]
+		}
+	}
+	if behind != "turn-q" {
+		t.Fatalf("the adoption record names %v behind it, want turn-q", behind)
+	}
+}
+
+func TestTheQuerysDeathEndsTheAdoptedTurnAndTheTurnWaitingBehindIt(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, true)
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(queryDiedUpdate()) })
+
+	// Assert.
+	var ended []string
+	for _, e := range got {
+		if e.name() == "lifecycle.OnTurnEnded" && e.turn != nil {
+			ended = append(ended, string(*e.turn))
+		}
+	}
+	if !slices.Equal(ended, []string{"turn-v", "turn-q"}) {
+		t.Fatalf("turns ended = %v, want turn-v then turn-q", ended)
+	}
+}

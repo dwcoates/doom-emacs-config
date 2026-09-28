@@ -67,6 +67,7 @@
  */
 import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
+import type { SendVerdict } from "./sends.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
 
@@ -239,53 +240,6 @@ interface PendingKeepalive {
 const NOT_KEEPALIVE: KeepaliveAttribution = { keepalive: false, endsKeepalive: false };
 
 /**
- * The client uuids a vendor frame names as the send(s) it answers, or absence
- * when the frame names none.
- *
- * THE SDK'S OWN ATTRIBUTION (sdk.d.ts, `user_message_uuid` /
- * `user_message_uuids`): a send that carries a client `uuid` has it echoed on
- * its turn's first top-level assistant message, its first non-ping stream
- * event, every `thinking_tokens` frame and its `result`, and a queued send a
- * running turn folds in takes the echo over from there. The list is the
- * complete one — "a consumer that sent any of them can bind this reply to its
- * own send by finding its uuid anywhere in the list" — and the single field is
- * the fallback the SDK names for older producers.
- *
- * Read off the SDK's DECLARED fields, never an index signature, so an SDK that
- * stops declaring them is a type error here rather than a keep-alive that
- * silently stops being recognized.
- */
-function answeredSends(message: SdkMessage): readonly string[] | undefined {
-  let stamps: { user_message_uuid?: string; user_message_uuids?: string[] } | undefined;
-  if (message.type === "assistant" || message.type === "stream_event") {
-    // Subagent frames are never stamped; they belong to whatever turn is running.
-    if (message.parent_tool_use_id !== null) return undefined;
-    stamps = message;
-  } else if (message.type === "result") {
-    stamps = message;
-  } else if (message.type === "system" && message.subtype === "thinking_tokens") {
-    stamps = message;
-  }
-  if (stamps === undefined) return undefined;
-  if (Array.isArray(stamps.user_message_uuids) && stamps.user_message_uuids.length > 0) {
-    return stamps.user_message_uuids;
-  }
-  if (typeof stamps.user_message_uuid === "string" && stamps.user_message_uuid !== "") {
-    return [stamps.user_message_uuid];
-  }
-  return undefined;
-}
-
-/** A frame that is a turn's REPLY rather than its preamble: the vendor stamps the first of these. */
-export function isTopLevelReply(message: SdkMessage): boolean {
-  if (message.type === "assistant") return message.parent_tool_use_id === null;
-  // Every declared stream event is a reply frame: the SDK's event union has no
-  // `ping` arm, which is the one kind the vendor leaves unstamped.
-  if (message.type === "stream_event") return message.parent_tool_use_id === null;
-  return message.type === "system" && message.subtype === "thinking_tokens";
-}
-
-/**
  * THE KEEP-ALIVE TURN SCOPE: which vendor messages the keep-alive produced.
  *
  * WHY THE SHIM'S OWN "OPEN TURN" IS NOT THE ANSWER (the leak of 2026-09-23).
@@ -300,13 +254,16 @@ export function isTopLevelReply(message: SdkMessage): boolean {
  * and was drawn as a green final answer.
  *
  * SO THE VENDOR ATTRIBUTES, NOT THE ARRIVAL ORDER. Every keep-alive send
- * carries a client uuid the shim mints ({@link begin}); the vendor echoes it on
- * the replies to that send ({@link answeredSends}). A vendor turn is the
- * keep-alive's from its first frame naming the keep-alive's uuid until its
- * `result`; a frame naming some other send, or a turn whose first reply names
- * none, is not the keep-alive's. Frames that carry no stamp — a turn's later
- * blocks, its tool traffic, its subagents — belong to whichever vendor turn is
- * running, which is what {@link attribute} carries from message to message.
+ * carries a client uuid the shim mints ({@link begin}), registered in the
+ * session's one send ledger like every other send (engine/sends.ts, ruled
+ * 2026-09-28), and the vendor echoes it on the replies to that send. A vendor
+ * turn is the keep-alive's from its first frame naming the keep-alive's uuid
+ * until its `result`; a frame naming some other send, or a turn whose first
+ * reply names none, is not the keep-alive's. Frames that carry no stamp — a
+ * turn's later blocks, its tool traffic, its subagents — belong to whichever
+ * vendor turn is running. The LEDGER reads the echo and says which turn that
+ * is; this scope only asks whether the answer is the keep-alive
+ * ({@link attribute} takes the ledger's verdict, never the stamps).
  *
  * NEVER FROM THE TEXT. A reply is never classified by what it says — the
  * model's "." is evidence of nothing — only by the send it answers.
@@ -339,11 +296,8 @@ export function isTopLevelReply(message: SdkMessage): boolean {
  */
 export class KeepaliveScope {
   private send: PendingKeepalive | undefined;
-  /**
-   * The vendor turn now running, as its frames have stated it: not yet, some
-   * other send's (or nobody's), or the pending keep-alive's own.
-   */
-  private running: "unstated" | "other" | PendingKeepalive = "unstated";
+  /** Whether the vendor turn now running is the pending keep-alive's own, as the ledger stated it. */
+  private running = false;
   /**
    * The tool_use ids the keep-alive's own frames opened, nested subagents'
    * included: the only work whose frames are the keep-alive's. Emptied when the
@@ -378,7 +332,7 @@ export class KeepaliveScope {
   abandon(reason: string): void {
     const held = this.send;
     this.send = undefined;
-    this.running = "unstated";
+    this.running = false;
     this.forgetSpawns();
     if (held === undefined) return;
     LOGGER.info(
@@ -393,12 +347,12 @@ export class KeepaliveScope {
    * onto the new query, uuid and all.
    */
   queryBound(): void {
-    this.running = "unstated";
+    this.running = false;
   }
 
   /** Whether the vendor turn now running is the keep-alive's. For callbacks between messages. */
   producing(): boolean {
-    return typeof this.running === "object";
+    return this.running;
   }
 
   /**
@@ -410,40 +364,30 @@ export class KeepaliveScope {
   }
 
   /**
-   * Tag one vendor message, in arrival order. Called ONCE per message, before
-   * anything else reads it, so every consumer sees the same answer.
+   * Tag one vendor message, under the send ledger's verdict for it. Called
+   * ONCE per message, before anything else reads it, so every consumer sees
+   * the same answer.
    */
-  attribute(message: SdkMessage): KeepaliveAttribution {
+  attribute(message: SdkMessage, verdict: SendVerdict): KeepaliveAttribution {
     const held = this.send;
-    const sends = answeredSends(message);
-    if (sends !== undefined) {
-      const next = held !== undefined && sends.includes(held.uuid) ? held : "other";
-      if (next !== this.running) {
-        LOGGER.debug(
-          {
-            answers: sends.join(","),
-            keepalive_pending: held !== undefined,
-            attributed: next === "other" ? "other" : "keepalive",
-          },
-          "a vendor frame named the send it answers; the running vendor turn is attributed",
-        );
-      }
-      this.running = next;
-    } else if (this.running === "unstated" && isTopLevelReply(message)) {
-      // THE FIRST REPLY OF A TURN STARTED BY A STAMPED SEND IS ALWAYS STAMPED
-      // (sdk.d.ts). An unstamped one opens a turn no send of the shim's started.
-      this.running = "other";
+    const turn = verdict.turn;
+    const ownTurn = held !== undefined && turn.kind === "send" && turn.send.uuid === held.uuid;
+    if (ownTurn !== this.running && !verdict.ended) {
+      LOGGER.debug(
+        { keepalive_pending: held !== undefined, attributed: ownTurn ? "keepalive" : "other" },
+        "the running vendor turn's keep-alive attribution changed",
+      );
     }
-    const running = this.running;
     if (message.type !== "result") {
+      this.running = ownTurn;
       const work = workOf(message);
-      const keepalive = work === undefined ? typeof running === "object" : this.ownsWork(work);
+      const keepalive = work === undefined ? ownTurn : this.ownsWork(work);
       if (keepalive) this.noteSpawns(message);
       return keepalive ? { keepalive: true, endsKeepalive: false } : NOT_KEEPALIVE;
     }
     // A RESULT ENDS THE VENDOR TURN, whoever's it was.
-    this.running = "unstated";
-    if (typeof running !== "object") {
+    this.running = false;
+    if (!ownTurn) {
       if (held !== undefined) {
         LOGGER.info(
           { keepalive_turn: held.turnId },
@@ -455,7 +399,7 @@ export class KeepaliveScope {
     this.send = undefined;
     this.forgetSpawns();
     LOGGER.debug(
-      { turn: running.turnId, client_uuid: running.uuid },
+      { turn: held.turnId, client_uuid: held.uuid },
       "the keep-alive's own result closed its turn scope",
     );
     return { keepalive: true, endsKeepalive: true };

@@ -377,16 +377,20 @@ type isStartTurnFailure_Kind interface {
 }
 
 type StartTurnFailure_TurnAlreadyOpen struct {
-	// A turn is already open, or another StartTurn is still being started,
-	// under a DIFFERENT turn id (a repeat of the same id is answered
-	// `success`; see StartTurnRequest.turn). The DAEMON's fault, since it is
-	// the only queue, with ONE exception: a turn the vendor started on its own
-	// (PromptOrigin.VENDOR_STARTED), which the shim adopted before the daemon
-	// could see its prompt row. That turn holds the slot like any other, and a
-	// StartTurn landing in it is refused undelivered. The shim's own cache
-	// keep-alive NEVER produces this arm — a StartTurn that arrives while a
-	// keep-alive runs waits inside the shim for the keep-alive to end and then
-	// opens its turn, so no keep-alive is ever visible on this wire.
+	// A turn of the DAEMON'S is already open, or another StartTurn is still
+	// being started, under a DIFFERENT turn id (a repeat of the same id is
+	// answered `success`; see StartTurnRequest.turn). Always the DAEMON's
+	// fault, since it is the only queue. A turn the shim adopted
+	// (PromptOrigin.VENDOR_STARTED) NEVER produces this arm (ruled
+	// 2026-09-28): the shim stamps every send with a client uuid and matches
+	// each vendor reply to its send by the vendor's echo of it, so a turn the
+	// vendor started on its own runs BESIDE the StartTurn, whose prompt is
+	// delivered rather than refused; and a StartTurn landing while the shim's
+	// own network-resume turn runs waits inside the shim for it to end. The
+	// shim's own cache keep-alive never produces it either -- a StartTurn that
+	// arrives while a keep-alive runs waits inside the shim for the keep-alive
+	// to end and then opens its turn, so no keep-alive is ever visible on this
+	// wire.
 	TurnAlreadyOpen *StartTurnTurnAlreadyOpen `protobuf:"bytes,2,opt,name=turn_already_open,json=turnAlreadyOpen,proto3,oneof"`
 }
 

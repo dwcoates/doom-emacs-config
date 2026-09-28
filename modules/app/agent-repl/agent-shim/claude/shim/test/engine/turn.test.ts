@@ -49,6 +49,8 @@ interface Harness {
   readonly foreground: ForegroundUnitTable;
   readonly submitted: { said: conversationv1.UserSaid; keepalive: boolean }[];
   open: OpenTurn | undefined;
+  /** What `SessionContext.adoptedTurn()` answers: a turn the vendor started beside the slot. */
+  adopted: OpenTurn | undefined;
   identity: SessionIdentity | undefined;
   submitRejects: Error | undefined;
   /** Every store_unreachable the turn verbs reported to the session. */
@@ -59,7 +61,7 @@ interface Harness {
   knows: boolean;
   /** When set, `SessionContext.query()` answers absence, as a dead query does. */
   queryDead: boolean;
-  /** What `SessionContext.keepaliveEnded()` answers; set by {@link openKeepalive}. */
+  /** What `SessionContext.shimTurnEnded()` answers; set by {@link openKeepalive}. */
   keepaliveEnd: Promise<void> | undefined;
   /** What `SessionContext.keepaliveYieldBudgetMs` answers. */
   yieldBudgetMs: number;
@@ -109,6 +111,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     foreground,
     submitted: [],
     open: undefined,
+    adopted: undefined,
     identity,
     submitRejects: undefined,
     storeFaults: [] as string[],
@@ -130,7 +133,9 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
-    keepaliveEnded: () => (state.open?.keepalive === true ? state.keepaliveEnd : undefined),
+    adoptedTurn: () => state.adopted,
+    shimTurnEnded: () =>
+      state.open?.keepalive === true || state.open?.adopted === true ? state.keepaliveEnd : undefined,
     get keepaliveYieldBudgetMs() {
       return state.yieldBudgetMs;
     },
@@ -144,13 +149,17 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     knowsAgent: () => state.knows,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
     reportStoreReadable: () => state.storeRecoveries.push(1),
-    submit: (said, keepalive) => {
+    submit: (said, turn) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
-      state.submitted.push({ said, keepalive });
+      state.submitted.push({ said, keepalive: turn.keepalive });
       return Promise.resolve();
     },
     setOpenTurn: (turn) => {
       state.open = turn;
+    },
+    releaseTurn: (turn) => {
+      if (state.open === turn) state.open = undefined;
+      if (state.adopted === turn) state.adopted = undefined;
     },
     noteStopCommand: (turn, command) => {
       state.stopCommands.push({ turn: turn.value, command, afterInterrupt: query.calls.includes("interrupt") });
@@ -349,7 +358,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
       expect.objectContaining({
         level: "info",
         message:
-          "a StartTurn arrived while the shim's own keep-alive runs; it waits for the keep-alive to end, then opens its turn",
+          "a StartTurn arrived while the shim's own turn runs; it waits for that turn to end, then opens its turn",
       }),
     );
   });
@@ -395,7 +404,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
       expect.objectContaining({
         level: "error",
         message:
-          "a StartTurn waited out its budget behind the shim's own keep-alive; refusing the turn undelivered",
+          "a StartTurn waited out its budget behind the shim's own turn; refusing the turn undelivered",
       }),
     );
   });
@@ -463,7 +472,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
       expect.objectContaining({
         level: "info",
         message:
-          "the caller abandoned a StartTurn while it waited behind the shim's own keep-alive; nothing was delivered",
+          "the caller abandoned a StartTurn while it waited behind the shim's own turn; nothing was delivered",
       }),
     );
   });
@@ -846,21 +855,83 @@ function repeatRecord(before: number): LogRecord | undefined {
 }
 
 describe("StartTurn racing a turn the vendor started on its own", () => {
+  // RULED 2026-09-28: a turn the vendor started on its own is adopted BESIDE
+  // the send slot, and a StartTurn is never refused because of it: its prompt
+  // is delivered, and each turn's reply is matched by the vendor's echo.
   const ADOPTED = create(conversationv1.TurnIdSchema, { value: "adopted-1" });
 
-  /** Adopt a vendor turn into the slot while the start writes its prompt row. */
+  /** Adopt a vendor turn beside the slot while the start writes its prompt row. */
   function adoptDuringPromptWrite(h: Harness): void {
     const durable = h.persistence.writeDurable.bind(h.persistence);
     h.persistence.writeDurable = async (entries) => {
       await durable(entries);
-      h.open = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+      h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
     };
   }
 
-  it("refuses the start turn_already_open when the vendor's turn was adopted during its awaits", async () => {
+  it.each<[string, (h: Harness) => void]>([
+    ["adopted during the start's awaits", adoptDuringPromptWrite],
+    [
+      "already running when the start arrives",
+      (h) => {
+        h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+      },
+    ],
+  ])("accepts the start when the vendor's turn was %s", async (_name, adopt) => {
+    // Arrange
+    const h = await harness();
+    adopt(h);
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("delivers the prompt while the vendor's turn runs", async () => {
     // Arrange
     const h = await harness();
     adoptDuringPromptWrite(h);
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.submitted).toHaveLength(1);
+  });
+
+  it("opens the started turn in the send slot beside the adopted turn", async () => {
+    // Arrange
+    const h = await harness();
+    adoptDuringPromptWrite(h);
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect([h.open?.id.value, h.adopted?.id.value]).toEqual([TURN.value, "adopted-1"]);
+  });
+});
+
+describe("StartTurn finding the send slot taken during its awaits", () => {
+  // AN INVARIANT BREAK: the start mark keeps the beat and the network resume
+  // out of the send slot, so one found there is refused, never pushed into.
+  const TAKEN = create(conversationv1.TurnIdSchema, { value: "taken-1" });
+
+  /** Put a turn in the send slot while the start writes its prompt row. */
+  function takeSlotDuringPromptWrite(h: Harness): void {
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await durable(entries);
+      h.open = { id: TAKEN, keepalive: false, startedAtMs: 1 };
+    };
+  }
+
+  it("refuses the start turn_already_open", async () => {
+    // Arrange
+    const h = await harness();
+    takeSlotDuringPromptWrite(h);
 
     // Act
     const response = await h.turns.startTurn(startTurn());
@@ -869,10 +940,10 @@ describe("StartTurn racing a turn the vendor started on its own", () => {
     expect(failureKind(response)).toBe("turnAlreadyOpen");
   });
 
-  it("delivers nothing into the adopted turn", async () => {
+  it("delivers nothing", async () => {
     // Arrange
     const h = await harness();
-    adoptDuringPromptWrite(h);
+    takeSlotDuringPromptWrite(h);
 
     // Act
     await h.turns.startTurn(startTurn());
@@ -881,16 +952,71 @@ describe("StartTurn racing a turn the vendor started on its own", () => {
     expect(h.submitted).toEqual([]);
   });
 
-  it("leaves the adopted turn in the slot", async () => {
+  it("records the break at ERROR", async () => {
     // Arrange
     const h = await harness();
-    adoptDuringPromptWrite(h);
+    takeSlotDuringPromptWrite(h);
+    const before = logSinkMark();
 
     // Act
     await h.turns.startTurn(startTurn());
 
     // Assert
-    expect(h.open?.id.value).toBe("adopted-1");
+    expect(logRecordsSince(before).map((record) => [record.level, record.message])).toContainEqual([
+      "error",
+      "the send slot was taken while a StartTurn was being started; refusing the turn undelivered",
+    ]);
+  });
+});
+
+describe("StartTurn behind the network-resume turn", () => {
+  it("waits for the shim's own network-resume turn to leave the slot", async () => {
+    // Arrange
+    const h = await harness();
+    let release = (): void => {};
+    h.keepaliveEnd = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const resume = { id: create(conversationv1.TurnIdSchema, { value: "adopted-resume" }), keepalive: false, adopted: true, startedAtMs: 1 };
+    h.open = resume;
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    const answeredWhileHeld = await settled(starting);
+    h.open = undefined;
+    h.keepaliveEnd = undefined;
+    release();
+
+    // Assert
+    expect([answeredWhileHeld, (await starting).result.case]).toEqual([false, "success"]);
+  });
+});
+
+describe("KillTurn with a vendor-started turn beside the send slot", () => {
+  const ADOPTED = create(conversationv1.TurnIdSchema, { value: "adopted-1" });
+
+  function killRequest(turn: string): shimv1.KillTurnRequest {
+    return create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: turn }) });
+  }
+
+  it.each<[string, string, string | undefined, string | undefined]>([
+    ["the adopted turn it names leaves its slot", "adopted-1", TURN.value, undefined],
+    ["the send slot's turn it names leaves the slot", TURN.value, undefined, "adopted-1"],
+  ])("kills by name: %s", async (_name, named, openAfter, adoptedAfter) => {
+    // Arrange
+    const h = await harness();
+    h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
+    h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+
+    // Act
+    const response = await h.turns.killTurn(killRequest(named));
+
+    // Assert
+    expect([response.result.case, h.open?.id.value, h.adopted?.id.value]).toEqual([
+      "success",
+      openAfter,
+      adoptedAfter,
+    ]);
   });
 });
 
