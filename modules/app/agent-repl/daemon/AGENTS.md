@@ -787,7 +787,11 @@ Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
   detached scratch tree of the queue's own (`<state>/merge-trees/<lease>-<n>`,
   `gitclient.AddDetachedWorktree`) at the target's tip, merges and gates
   there, and moves the target only by `gitclient.FastForward` to the commit
-  the gate passed. A target that moved meanwhile is merged onto again. Repairs
+  the gate passed. That fast-forward is the ONE git carrying
+  `gitclient.MergeQueueMarker` (`AGENT_REPL_MERGE_QUEUE=1`), which is how the
+  repository's `.githooks/reference-transaction` tells the queue's move of
+  master from a hand merge; every other git has the marker scrubbed. A target
+  that moved meanwhile is merged onto again. Repairs
   are the workspace agent's commits on ITS OWN branch; the next attempt merges
   the branch afresh. The daemon commits nothing of its own.
 - **ONE SLOT PER REPOSITORY, ONE GRANTOR** (`slot.go`). The admission pump
@@ -817,6 +821,28 @@ Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's phases commits work first
   (`harness.CommitWork`), and a scripted conflict stands until its branch moves.
+
+## `claude-repld merge-queue` is how an agent enqueues a merge and reads its outcome
+
+`cmd/claude-repld/mergequeueverb.go`, the merge-queue skill's one tool
+(`.claude/skills/merge-queue/SKILL.md`). It decides nothing and never runs git.
+
+- It ENQUEUES through the command-file ingress (`commandfile.Write`), so the
+  merge is an agent's ask (`merge.RequestedByAgent`) exactly as a skill-written
+  file is.
+- `-dir WORKTREE` merges a workspace. `-branch B -repo MAIN` merges a branch that
+  is no workspace: one command file creates `merge-queue/<bare>-landing` cut
+  from `B` and merges that, so repairs have a session of their own.
+- It READS the outcome off `WatchWorkspaceRoster`: the row's status as it stood
+  BEFORE the command was written is the baseline, and a concluded status that is
+  still the baseline's (and, for `merged`, no newer `when.merged`) is an earlier
+  merge's. A parked merge's line is read from the footer; a failure's reason is
+  the `daemon.merge.abort` record, which the verb names the query for. A
+  quarantined command file is a refusal. A planned stream ending reattaches.
+- Exits: 0 landed (or in the queue, without `-wait`), 4 parked, 5 failed,
+  6 refused, 2 the verb itself failed. `-wait` from inside the target worktree
+  is REFUSED: an agent-requested merge starts only when the requesting turn
+  ends, and that turn is the one that would wait.
 
 ## A lease dies with the process that took it
 
