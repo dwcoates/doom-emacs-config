@@ -839,3 +839,47 @@ func TestARefusedWorkspaceMovesOnceItFallsFree(t *testing.T) {
 		t.Fatalf("the transfer at freeness was carried mid-work")
 	}
 }
+
+func TestATakeBackLearnsTheReAttachedShimsFactsBeforeAskingForTheTransferAtFreeness(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.registry.order = h.order
+	handOverUntilWindow(t, h)
+
+	// Act
+	refusedBySuccessor(t, h, ws)
+	h.registry.awaitRequest(t, isFreenessTransfer)
+
+	// Assert
+	taken := h.order.Taken()
+	facts := indexOf(taken, "await_facts")
+	request := indexOf(taken, "request:"+string(ReasonHandoverTransfer)+":freeness")
+	if facts < 0 || request < facts {
+		t.Fatalf("steps = %v, want the re-attached shim's facts awaited before freeness is judged", taken)
+	}
+}
+
+func TestATakeBackWhoseReAttachedShimNeverReAnnouncesIsNotTransferredAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.fleet.factsErr[ws] = context.DeadlineExceeded
+	handOverUntilWindow(t, h)
+
+	// Act
+	refusedBySuccessor(t, h, ws)
+	awaitRecord(t, h, opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again")
+
+	// Assert
+	for _, call := range h.registry.Requests() {
+		if isFreenessTransfer(call) {
+			t.Fatalf("requests = %+v, want no transfer judged against a shim whose turn this daemon cannot see", h.registry.Requests())
+		}
+	}
+	if !hasRecord(h, opTransfer, "error", "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight") {
+		t.Fatalf("records = %+v, want the missing facts at ERROR", records(h.log, opTransfer))
+	}
+}
