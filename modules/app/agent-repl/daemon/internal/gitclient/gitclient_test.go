@@ -485,6 +485,151 @@ func TestCreateWorktreeAttachFailureIsReturnedAndLogged(t *testing.T) {
 	}
 }
 
+func TestAddDetachedWorktreeChecksTheCommitOutWithNoBranch(t *testing.T) {
+	// Arrange: the merge queue's scratch tree names no branch.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.AddDetachedWorktree(context.Background(), "/repo", "/queue-tree", "abc123"); err != nil {
+		t.Fatalf("AddDetachedWorktree: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "add", "--detach", "/queue-tree", "abc123")
+}
+
+func TestAddDetachedWorktreeFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: '/queue-tree' already exists\n"))
+
+	// Act.
+	err := git.AddDetachedWorktree(context.Background(), "/repo", "/queue-tree", "abc123")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "already exists") {
+		t.Fatalf("AddDetachedWorktree error = %v (%T), want git's own refusal as a *gitclient.Error", err, err)
+	}
+}
+
+func TestAddDetachedWorktreeAttachesNoLogSink(t *testing.T) {
+	// Arrange: the scratch tree is no workspace, so no workspace sink is in it.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.AddDetachedWorktree(context.Background(), "/repo", "/queue-tree", "abc123"); err != nil {
+		t.Fatalf("AddDetachedWorktree: %v", err)
+	}
+
+	// Assert.
+	if len(surfaces.dirEvents) != 0 {
+		t.Fatalf("log sink directory events = %v, want none for the queue's scratch tree", surfaces.dirEvents)
+	}
+}
+
+func TestFastForwardRefusesAnythingButAFastForward(t *testing.T) {
+	// Arrange: --ff-only is what keeps an untested tree off the branch.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "merge", "--ff-only", "abc123")
+}
+
+func TestFastForwardRunsInTheTargetCheckout(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert.
+	if got := fake.only().dashCDir(); got != "/target" {
+		t.Fatalf("FastForward ran in %q, want the target checkout", got)
+	}
+}
+
+func TestFastForwardRefusalPropagatesTheGitEvidence(t *testing.T) {
+	// Arrange: a branch that moved is git's refusal, never a merge.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: Not possible to fast-forward, aborting.\n"))
+
+	// Act.
+	err := git.FastForward(context.Background(), "/target", "abc123")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "Not possible to fast-forward") {
+		t.Fatalf("FastForward error = %v (%T), want git's own refusal as a *gitclient.Error", err, err)
+	}
+}
+
+func TestIsAncestorAsksMergeBase(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.IsAncestor(context.Background(), "/repo", "feature", "abc123"); err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "merge-base", "--is-ancestor", "feature", "abc123")
+}
+
+func TestIsAncestorAnswers(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		want    bool
+	}{
+		{name: "exit 0 is an ancestor", fixture: ok(""), want: true},
+		{name: "exit 1 is not an ancestor", fixture: fails(1, ""), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			newFakeGit(t, tc.fixture)
+
+			// Act.
+			got, err := git.IsAncestor(context.Background(), "/repo", "feature", "abc123")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("IsAncestor = %v, %v; want %v with no error", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsAncestorThatCannotTellIsAFailure(t *testing.T) {
+	// Arrange: an unknown ref is neither answer.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: Not a valid object name feature\n"))
+
+	// Act.
+	_, err := git.IsAncestor(context.Background(), "/repo", "feature", "abc123")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("IsAncestor error = %v (%T), want git's own exit-128 failure", err, err)
+	}
+}
+
 func TestRemoveWorktreeDetachesTheDirectoryBeforeGitRuns(t *testing.T) {
 	// Arrange: a sink opened mid-removal must not re-create the directory.
 	git, surfaces := newTestClient(t)

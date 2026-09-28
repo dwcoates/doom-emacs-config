@@ -159,6 +159,24 @@ func TestMergeWorkspaceMapsAPreStateRefusal(t *testing.T) {
 	}
 }
 
+// TestMergeWorkspaceEnqueuesAsTheUsersAsk pins who an rpc merge is from: the
+// user, whose ask alone may displace the turn in flight (merge.Requester).
+func TestMergeWorkspaceEnqueuesAsTheUsersAsk(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("MergeWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.enqueuedBy) != 1 || h.Merge.enqueuedBy[0] != merge.RequestedByUser {
+		t.Fatalf("the merge was enqueued as %v, want the user's ask", h.Merge.enqueuedBy)
+	}
+}
+
 // TestCreateWorkspaceRefusesAnUnknownRepository pins that a repository ref
 // matching nothing registered is refused rather than materialized somewhere.
 func TestCreateWorkspaceRefusesAnUnknownRepository(t *testing.T) {

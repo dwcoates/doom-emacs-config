@@ -87,12 +87,18 @@ type Repo struct {
 	Worktrees   []*Worktree       `json:"worktrees"`
 }
 
-// Conflict scripts one merge attempt: the next `merge --no-ff` of Branch inside
-// Dir leaves these paths conflicted instead of landing.
+// Conflict scripts a conflict between Branch and the repository Dir belongs
+// to: a `merge --no-ff` of Branch leaves these paths conflicted instead of
+// landing. It STANDS WHILE THE BRANCH DOES NOT MOVE -- merging the same two
+// histories again conflicts again, as it would in git -- and is gone once
+// the branch's head moved (its author resolved it on the branch).
 type Conflict struct {
 	Dir    string   `json:"dir"`
 	Branch string   `json:"branch"`
 	Paths  []string `json:"paths"`
+	// SourceHead is the branch head the conflict was first met at, empty
+	// until then.
+	SourceHead string `json:"source_head,omitempty"`
 }
 
 // Failure scripts one command failing: the next invocation whose subject starts
