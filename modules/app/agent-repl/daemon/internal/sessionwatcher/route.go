@@ -410,12 +410,22 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 // again: when the store ends a standing watch, the shim re-opens the book and
 // re-serves rows it already served, and a re-served prompt row once stood a
 // finished turn back up in flight here while every other observer had closed it.
+//
+// THE ONE EXCEPTION IS A VENDOR-STARTED TURN. Its prompt row is the only
+// statement anywhere that the turn opened -- no queue delivered it, and the
+// shim writes the row as the turn's first, on the stream that then carries
+// every row of the turn -- so it opens the turn here, once: only on the main
+// watch, only live, and only for a turn this watcher has never had in hand, so
+// a re-served row stands nothing back up. See adoptVendorTurnLocked.
 func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentPrompt) {
 	if a.id == nil {
 		w.adoptMainAgentLocked(prompt.GetAgent(), "live_prompt")
 		// The main agent is named, so a terminal held for the naming can be
 		// replayed against the turn the queue stated.
 		w.releaseHeldTerminalLocked()
+	}
+	if a.id == nil && prompt.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED {
+		w.adoptVendorTurnLocked(prompt)
 	}
 	if turn := prompt.GetId().GetValue(); turn != "" {
 		w.knownTurns[ids.TurnID(turn)] = struct{}{}
@@ -424,6 +434,46 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
 	})
 	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, w.addr)
+}
+
+// adoptVendorTurnLocked opens the turn a VENDOR_STARTED prompt row announces.
+//
+// Every observer a queued turn's open edge reaches is told the same here: the
+// turn stands in flight (so a submission is held behind it and freeness waits
+// on it), the footer and the feed take the turn-open edge, and the queue --
+// told off the lock -- records the turn's durable row and the roster's turn
+// fact, so the turn's terminal closes it through the one door and draws its
+// ending, final answer included.
+//
+// A TURN OF THE DAEMON'S OWN STILL OPENING is displaced, not kept. The shim
+// adopts only into an empty slot, so a StartTurn still in flight here is one
+// the shim refuses; the adopted turn is the one actually running.
+func (w *watcher) adoptVendorTurnLocked(prompt *conversationv1.AgentPrompt) {
+	turn := ids.TurnID(prompt.GetId().GetValue())
+	if turn == "" {
+		w.log.Error("daemon.sessionwatcher.turn_adopted_unidentified", "a vendor-started turn's prompt row named no turn; nothing was opened", dlog.Context{
+			"agent_id": prompt.GetAgent().GetValue(),
+		})
+		return
+	}
+	if w.turnKnownLocked(turn) {
+		w.log.Debug("daemon.sessionwatcher.turn_adopted_again", "a vendor-started turn's prompt row was served again; the turn was already taken up", dlog.Context{
+			"turn_id": string(turn), "turn_in_flight": turnValue(w.turn),
+		})
+		return
+	}
+	displaced := turnValue(w.turn)
+	if !w.standTurnLocked(turn, "daemon.sessionwatcher.state_transition", "the vendor-started turn became the turn in flight") {
+		return
+	}
+	w.sinks.Footer.OnTurnOpened(w.ws, turn)
+	w.sinks.Feed.OnTurnOpened(w.ws, turn)
+	w.pendingAdoptions = append(w.pendingAdoptions, turn)
+	w.log.Info("daemon.sessionwatcher.turn_adopted", "the vendor started a turn on its own; it is tracked as the turn in flight", dlog.Context{
+		"turn_id":   string(turn),
+		"agent_id":  prompt.GetAgent().GetValue(),
+		"displaced": displaced,
+	})
 }
 
 // routePeerMessageLocked routes a message another Claude session sent into the

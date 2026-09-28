@@ -9,6 +9,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { DeployBuildFailed, DeployInstallFailed, DeployServiceRestartFailed } from "./endpoint_deploy_pb";
+import { file_agentrepl_v1_endpoint_deploy } from "./endpoint_deploy_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -17,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_daemon_health.proto.
  */
 export const file_agentrepl_v1_endpoint_daemon_health: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiiQQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SAASUQoXZGFlbW9uX3N0YXRlX3VucmVhZGFibGUYCCABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIAEIGCgRraW5kSgQIBBAFUhRkZXBsb3lfc2NyaXB0X2ZhaWxlZCJRCiBEYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIjEKIERhZW1vbkZhdWx0RGFlbW9uU3RhdGVVbnJlYWRhYmxlEg0KBWNhdXNlGAEgASgJIioKGkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkEgwKBHNpbmsYASABKAkiMQofRGFlbW9uRmF1bHRTdWNjZXNzb3JTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAkiLAocRGFlbW9uRmF1bHRQcm9tcHRzRGlyTWlzc2luZxIMCgRwYXRoGAEgASgJIhgKFkRhZW1vbkZhdWx0V3NtUmVhZE9ubHkiEwoRRGFlbW9uSGVhbHRoRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiyQQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SAASUQoXZGFlbW9uX3N0YXRlX3VucmVhZGFibGUYCCABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABI+Cg1kZXBsb3lfZmFpbGVkGAkgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0RGVwbG95RmFpbGVkSABCBgoEa2luZEoECAQQBVIUZGVwbG95X3NjcmlwdF9mYWlsZWQiUQogRGFlbW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiIxCiBEYWVtb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZRINCgVjYXVzZRgBIAEoCSIqChpEYWVtb25GYXVsdExvZ1NpbmtQb2lzb25lZBIMCgRzaW5rGAEgASgJIjEKH0RhZW1vbkZhdWx0U3VjY2Vzc29yU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJIiwKHERhZW1vbkZhdWx0UHJvbXB0c0Rpck1pc3NpbmcSDAoEcGF0aBgBIAEoCSIYChZEYWVtb25GYXVsdFdzbVJlYWRPbmx5Is8BChdEYWVtb25GYXVsdERlcGxveUZhaWxlZBIwCgVidWlsZBgBIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lCdWlsZEZhaWxlZEgAEjQKB2luc3RhbGwYAiABKAsyIS5hZ2VudHJlcGwudjEuRGVwbG95SW5zdGFsbEZhaWxlZEgAEkQKEHJlc3RhcnRfc2VydmljZXMYAyABKAsyKC5hZ2VudHJlcGwudjEuRGVwbG95U2VydmljZVJlc3RhcnRGYWlsZWRIAEIGCgRzdGVwIhMKEURhZW1vbkhlYWx0aEVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_deploy, file_workspace_v1_workspace]);
 
 /**
  * Nothing to ask beyond "you?".
@@ -242,6 +244,18 @@ export type DaemonFault = Message<"agentrepl.v1.DaemonFault"> & {
      */
     value: DaemonFaultDaemonStateUnreadable;
     case: "daemonStateUnreadable";
+  } | {
+    /**
+     * A deploy's build, install or service restart did not go through. It
+     * stands until a later deploy gets through the step that failed, and a
+     * daemon that boots closes the ones an earlier daemon left standing. A
+     * handover whose successor would not start is `successor_spawn_failed`
+     * instead.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultDeployFailed deploy_failed = 9;
+     */
+    value: DaemonFaultDeployFailed;
+    case: "deployFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -368,6 +382,52 @@ export const DaemonFaultWsmReadOnlySchema: GenMessage<DaemonFaultWsmReadOnly> = 
   messageDesc(file_agentrepl_v1_endpoint_daemon_health, 12);
 
 /**
+ * @generated from message agentrepl.v1.DaemonFaultDeployFailed
+ */
+export type DaemonFaultDeployFailed = Message<"agentrepl.v1.DaemonFaultDeployFailed"> & {
+  /**
+   * THE ARM IS THE STEP THAT FAILED, and it carries the very refusal the
+   * Deploy rpc answered its caller with, so the fault and the answer cannot
+   * say two different things about one failure. Exactly one; unset is
+   * malformed.
+   *
+   * @generated from oneof agentrepl.v1.DaemonFaultDeployFailed.step
+   */
+  step: {
+    /**
+     * The build did not stage every artifact: nothing was installed.
+     *
+     * @generated from field: agentrepl.v1.DeployBuildFailed build = 1;
+     */
+    value: DeployBuildFailed;
+    case: "build";
+  } | {
+    /**
+     * A staged artifact could not be installed: nothing was restarted.
+     *
+     * @generated from field: agentrepl.v1.DeployInstallFailed install = 2;
+     */
+    value: DeployInstallFailed;
+    case: "install";
+  } | {
+    /**
+     * A launchd service did not come back onto the installed build.
+     *
+     * @generated from field: agentrepl.v1.DeployServiceRestartFailed restart_services = 3;
+     */
+    value: DeployServiceRestartFailed;
+    case: "restartServices";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultDeployFailed.
+ * Use `create(DaemonFaultDeployFailedSchema)` to create a new message.
+ */
+export const DaemonFaultDeployFailedSchema: GenMessage<DaemonFaultDeployFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 13);
+
+/**
  * No arms: DaemonHealth has no refusal site (landing 4).
  *
  * @generated from message agentrepl.v1.DaemonHealthError
@@ -380,5 +440,5 @@ export type DaemonHealthError = Message<"agentrepl.v1.DaemonHealthError"> & {
  * Use `create(DaemonHealthErrorSchema)` to create a new message.
  */
 export const DaemonHealthErrorSchema: GenMessage<DaemonHealthError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 13);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 14);
 

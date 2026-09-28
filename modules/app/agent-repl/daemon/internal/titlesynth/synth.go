@@ -346,21 +346,55 @@ func quoteTemplateBraces(s string) string {
 }
 
 // composeDigest is ComposeDigest's text before its braces are opened.
+//
+// It applies the per-item caps first (the summary at MaxPromptRunes*4, each
+// prompt at MaxPromptRunes, and the tail of at most MaxPrompts of them), then
+// renders and checks the WHOLE result against MaxDigestTotalRunes. Trimming
+// to that total cap drops the oldest material first — the summary, then the
+// oldest surviving prompt, one at a time — so the newest prompts are what
+// survive, which is what a title should reflect.
 func composeDigest(summary string, all []string) string {
-	var b strings.Builder
+	trimmedSummary := ""
 	if strings.TrimSpace(summary) != "" {
-		b.WriteString("A summary of the earlier conversation:\n")
-		b.WriteString(truncateRunes(strings.TrimSpace(summary), MaxPromptRunes*4))
-		b.WriteString("\n\n")
+		trimmedSummary = truncateRunes(strings.TrimSpace(summary), MaxPromptRunes*4)
 	}
 	recent := all
 	if len(recent) > MaxPrompts {
 		recent = recent[len(recent)-MaxPrompts:]
 	}
+	trimmedPrompts := make([]string, len(recent))
+	for i, p := range recent {
+		trimmedPrompts[i] = truncateRunes(strings.TrimSpace(p), MaxPromptRunes)
+	}
+
+	for utf8.RuneCountInString(renderDigest(trimmedSummary, trimmedPrompts)) > MaxDigestTotalRunes {
+		if trimmedSummary != "" {
+			trimmedSummary = ""
+			continue
+		}
+		if len(trimmedPrompts) == 0 {
+			// Nothing left to drop; the bare "The user's requests:" header is as
+			// small as this can get.
+			break
+		}
+		trimmedPrompts = trimmedPrompts[1:]
+	}
+	return renderDigest(trimmedSummary, trimmedPrompts)
+}
+
+// renderDigest is composeDigest's rendering step, factored out so the total
+// cap can measure it repeatedly without duplicating the layout.
+func renderDigest(summary string, prompts []string) string {
+	var b strings.Builder
+	if summary != "" {
+		b.WriteString("A summary of the earlier conversation:\n")
+		b.WriteString(summary)
+		b.WriteString("\n\n")
+	}
 	b.WriteString("The user's requests:\n")
-	for _, p := range recent {
+	for _, p := range prompts {
 		b.WriteString("- ")
-		b.WriteString(truncateRunes(strings.TrimSpace(p), MaxPromptRunes))
+		b.WriteString(p)
 		b.WriteString("\n")
 	}
 	return b.String()

@@ -1,0 +1,84 @@
+// endpoint_get_agent_by_vendor_task.proto — GetAgentByVendorTask: WHICH AGENT
+// a vendor task locator names, within the lineage of the caller's main agent.
+//
+// WHY THE SHIM ASKS. A subagent's vendor task id is the agent's own LOCATOR
+// (the `<id>` of `agent-<id>.jsonl`), and it comes back when the agent is
+// RESUMED — but the resume's `task_started` names the call that woke it (a
+// `SendMessage`), not the spawn whose `tool_use_id` IS the agent under the
+// cross-plane minting rule. A shim that saw the spawn remembers the pairing;
+// a shim that restarted since did not, and could not name the running agent at
+// all (2026-09-27: the resumed agent never reached the live set or the footer).
+//
+// WHY THE STORE CAN ANSWER. The sidecar reads both halves of the pairing from
+// the vendor's own files — the locator from the transcript's file name, the
+// spawning `tool_use_id` from its meta file — and writes them with the agent's
+// first rows (`EntryBatch.agent_locators`). An agent can only be resumed after
+// it has run, so its pairing is on record long before a resume asks for it,
+// and the shim never reads a vendor file itself.
+//
+// SCOPED LIKE GetLiveWork. The store is shared by every session on the host,
+// so the answer is confined to the caller's lineage: a locator paired with an
+// agent of another session answers `not_found` here, never that agent.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask which agent one vendor task locator names.
+message GetAgentByVendorTaskRequest {
+  // REQUIRED. The caller's MAIN agent id — the root of its session's lineage,
+  // exactly as GetLiveWorkRequest.session. UNSET or empty is refused with
+  // `invalid_request`; there is no unscoped answer.
+  conversation.v1.AgentId session = 1;
+  // REQUIRED. The vendor's task locator, verbatim (AgentLocator.vendor_task_id).
+  // Empty is refused with `invalid_request`.
+  string vendor_task_id = 2;
+}
+
+// The agent, the statement that none is on record, or why neither could be
+// said. THE ARM IS THE ANSWER.
+message GetAgentByVendorTaskResponse {
+  oneof result {
+    GetAgentByVendorTaskSuccess success = 1;
+    GetAgentByVendorTaskNotFound not_found = 2;
+    GetAgentByVendorTaskFailure failure = 3;
+  }
+}
+
+// The locator names exactly one agent within the lineage.
+message GetAgentByVendorTaskSuccess {
+  // The agent, under the cross-plane minting rule: the spawning call's
+  // `tool_use_id`, as every plane books it.
+  conversation.v1.AgentId agent = 1;
+}
+
+// No agent within the lineage is paired with this locator. An ANSWER, not a
+// failure: the record was read and holds no such pairing — the locator is
+// unknown to the store, or paired only with another session's agent, or the
+// agent's own row is not on record under this lineage yet.
+message GetAgentByVendorTaskNotFound {}
+
+// The pairing could not be read. THE ARM IS WHY.
+message GetAgentByVendorTaskFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // `session` or `vendor_task_id` unset or empty.
+    GetAgentByVendorTaskInvalidRequest invalid_request = 2;
+    // The database failed, or the record breaks the pairing's invariant (one
+    // locator paired with two agents of one lineage); `detail` says which.
+    GetAgentByVendorTaskStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed or violated the validation invariant.
+message GetAgentByVendorTaskInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message GetAgentByVendorTaskStorageFailure {}

@@ -683,6 +683,8 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	h.Verbs.openStages = []workspace.OpenStage{
 		workspace.OpenStageCheckingWorktree,
 		workspace.OpenStageStartingSession,
+		workspace.OpenStageReviving,
+		workspace.OpenStageClearingClosed,
 		workspace.OpenStageCheckingBuild,
 	}
 	stream := proveDaemonSubscription(t, h)
@@ -698,11 +700,7 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	}
 
 	// Assert.
-	wantStages := []agentreplv1.WorkspaceOpenStage{
-		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE,
-		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION,
-		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_BUILD,
-	}
+	wantStages := []string{"checking_worktree", "starting_session", "reviving", "clearing_closed", "checking_build"}
 	for i, want := range wantStages {
 		if !stream.Receive() {
 			t.Fatalf("receive stage %d: %v", i, stream.Err())
@@ -711,9 +709,31 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 		if prog.GetOpId() != "op-open" {
 			t.Fatalf("stage %d op_id = %q, want op-open", i, prog.GetOpId())
 		}
-		if got := prog.GetOpen().GetStage(); got != want {
-			t.Fatalf("stage %d = %v, want %v", i, got, want)
+		if got := openStageArm(prog.GetOpen().GetEnteredStage()); got != want {
+			t.Fatalf("stage %d = %q, want %q", i, got, want)
 		}
+	}
+}
+
+// openStageArm names the arm set on an open's entered_stage, so a test compares
+// the stage a push carried by name. An unset or unknown arm names itself as
+// such.
+func openStageArm(stage *agentreplv1.WorkspaceOpenStage) string {
+	switch stage.GetStage().(type) {
+	case *agentreplv1.WorkspaceOpenStage_CheckingWorktree:
+		return "checking_worktree"
+	case *agentreplv1.WorkspaceOpenStage_StartingSession:
+		return "starting_session"
+	case *agentreplv1.WorkspaceOpenStage_Reviving:
+		return "reviving"
+	case *agentreplv1.WorkspaceOpenStage_ClearingClosed:
+		return "clearing_closed"
+	case *agentreplv1.WorkspaceOpenStage_CheckingBuild:
+		return "checking_build"
+	case nil:
+		return "<unset>"
+	default:
+		return "<unknown>"
 	}
 }
 

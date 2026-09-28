@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +14,11 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/buildid"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/wsm"
 )
 
 // instant is the fixed instant every test's arithmetic starts from.
@@ -180,6 +183,9 @@ type fakeRollout struct {
 	checks     []bool
 	stale      map[ids.WorkspaceID]bool
 	checkErr   map[ids.WorkspaceID]error
+	// registered are the stale workspaces whose bounce the registry
+	// REGISTERS behind their work rather than taking now.
+	registered map[ids.WorkspaceID]bool
 	acceptance rollout.HandoverAcceptance
 }
 
@@ -211,7 +217,8 @@ func (r *fakeRollout) CheckStaleness(_ context.Context, ws ids.WorkspaceID, forc
 	if !r.stale[ws] {
 		return rollout.StaleCheck{Reported: "fresh", Installed: "fresh"}, nil
 	}
-	return rollout.StaleCheck{Stale: true, Reported: "old", Installed: "fresh", Bounce: bounce.Decision{Now: true, Forced: force}}, nil
+	now := force || !r.registered[ws]
+	return rollout.StaleCheck{Stale: true, Reported: "old", Installed: "fresh", Bounce: bounce.Decision{Now: now, Forced: force}}, nil
 }
 
 func (r *fakeRollout) Joining() bool {
@@ -313,6 +320,115 @@ type harness struct {
 	freshLayout int
 	layoutErr   error
 	layoutAsked []string
+	progress    *fakeProgress
+	faults      *fakeFaults
+}
+
+// fakeFaults is the state client's fault table: every fault ever opened, in
+// order, with whether it is still open.
+type fakeFaults struct {
+	mu       sync.Mutex
+	recorded []wsm.Fault
+	closed   map[ids.FaultID]bool
+	openErr  error
+	readErr  error
+	closeErr error
+}
+
+func newFakeFaults() *fakeFaults { return &fakeFaults{closed: map[ids.FaultID]bool{}} }
+
+func (f *fakeFaults) OpenFault(_ context.Context, fault wsm.Fault) (ids.FaultID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.openErr != nil {
+		return "", f.openErr
+	}
+	fault.ID = ids.FaultID(fmt.Sprintf("fault-%d", len(f.recorded)+1))
+	f.recorded = append(f.recorded, fault)
+	return fault.ID, nil
+}
+
+func (f *fakeFaults) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	var out []wsm.Fault
+	for _, fault := range f.recorded {
+		if !f.closed[fault.ID] && (scope.Kind == "" || fault.Kind == scope.Kind) {
+			out = append(out, fault)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeFaults) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	f.closed[id] = true
+	return nil
+}
+
+// standing answers the open faults of every kind.
+func (f *fakeFaults) standing(t *testing.T) []wsm.Fault {
+	t.Helper()
+	open, err := f.OpenFaults(context.Background(), wsm.FaultScope{})
+	if err != nil {
+		t.Fatalf("read the standing faults: %v", err)
+	}
+	return open
+}
+
+// seed records a standing fault as an earlier deploy or daemon left it.
+func (f *fakeFaults) seed(t *testing.T, fault wsm.Fault) ids.FaultID {
+	t.Helper()
+	id, err := f.OpenFault(context.Background(), fault)
+	if err != nil {
+		t.Fatalf("seed a fault: %v", err)
+	}
+	return id
+}
+
+// fakeProgress records every statement the deploy made on the update line,
+// nil (a clear) included.
+type fakeProgress struct {
+	mu     sync.Mutex
+	stated []*deployprogress.Progress
+}
+
+func (f *fakeProgress) SetDeployProgress(p *deployprogress.Progress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stated = append(f.stated, p)
+}
+
+// phases names every statement in order, "cleared" for a clear.
+func (f *fakeProgress) phases() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.stated))
+	for _, p := range f.stated {
+		if p == nil {
+			out = append(out, "cleared")
+			continue
+		}
+		out = append(out, p.Phase.String())
+	}
+	return out
+}
+
+// last is the newest statement.
+func (f *fakeProgress) last() *deployprogress.Progress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.stated) == 0 {
+		return nil
+	}
+	return f.stated[len(f.stated)-1]
 }
 
 // runningLayout is the state layout the harness's running daemon writes.
@@ -349,6 +465,8 @@ func newHarness(t *testing.T) *harness {
 		elisp:     elisp,
 
 		freshLayout: runningLayout,
+		progress:    &fakeProgress{},
+		faults:      newFakeFaults(),
 	}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -369,8 +487,10 @@ func newHarness(t *testing.T) *harness {
 		Alive: func(pid int) bool {
 			return h.alive[pid]
 		},
-		Clock: newStepClock(),
-		Log:   h.log,
+		Clock:    newStepClock(),
+		Progress: h.progress,
+		Faults:   h.faults,
+		Log:      h.log,
 		StateLayout: func(_ context.Context, bin string) (int, error) {
 			h.layoutAsked = append(h.layoutAsked, bin)
 			return h.freshLayout, h.layoutErr

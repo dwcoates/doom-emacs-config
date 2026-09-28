@@ -820,6 +820,24 @@ link bounce.  Nothing here calls `agent-repl-roster-subscribe'."
         (should (equal 1 (length (agent-repl-itest--subscribers
                                   successor "roster"))))))))
 
+(ert-deftest agent-repl-itest-link-clean-end-after-the-planned-ending-is-info ()
+  "A clean end after the daemon's planned ending takes the link down at INFO.
+The daemon's last frame (`DaemonStreamEnding') says the end is PLANNED:
+the same down walk as a loss, recorded at INFO instead of the WARN."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((downs nil))
+        (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push t downs)))
+        ;; Act: the planned ending, then a clean end frame.
+        (agent-repl-itest--push primary "daemon" '((ending . ())))
+        (agent-repl-itest--await-log primary "elisp.link.stream-ending" "info")
+        (agent-repl-itest--end primary "daemon")
+        ;; Assert.
+        (agent-repl-itest--await-log primary "elisp.link.down-planned" "info")
+        (agent-repl-itest--wait-until (lambda () downs) nil "the down hooks")
+        (should-not (agent-repl-itest--logged-p primary "elisp.link.down" "warn"))))))
+
 ;; audit-2 #2
 (ert-deftest agent-repl-itest-link-clean-end-frame-is-link-down ()
   "A CLEAN end frame on the standing WatchDaemon is a failure, not a close.

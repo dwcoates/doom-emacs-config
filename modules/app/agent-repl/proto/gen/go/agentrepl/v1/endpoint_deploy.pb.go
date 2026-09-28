@@ -320,6 +320,7 @@ type DeployComponentOutcome struct {
 	//	*DeployComponentOutcome_Shims
 	//	*DeployComponentOutcome_ReloadPushed
 	//	*DeployComponentOutcome_DeferredToSuccessor
+	//	*DeployComponentOutcome_Restarting
 	Outcome       isDeployComponentOutcome_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -430,6 +431,15 @@ func (x *DeployComponentOutcome) GetDeferredToSuccessor() *DeployDeferredToSucce
 	return nil
 }
 
+func (x *DeployComponentOutcome) GetRestarting() *DeployRestarting {
+	if x != nil {
+		if x, ok := x.Outcome.(*DeployComponentOutcome_Restarting); ok {
+			return x.Restarting
+		}
+	}
+	return nil
+}
+
 type isDeployComponentOutcome_Outcome interface {
 	isDeployComponentOutcome_Outcome()
 }
@@ -467,6 +477,13 @@ type DeployComponentOutcome_DeferredToSuccessor struct {
 	DeferredToSuccessor *DeployDeferredToSuccessor `protobuf:"bytes,8,opt,name=deferred_to_successor,json=deferredToSuccessor,proto3,oneof"`
 }
 
+type DeployComponentOutcome_Restarting struct {
+	// The daemon is being replaced by a stop-then-start restart instead of a
+	// handover, because the fresh build expects a different state-database
+	// layout than the running one and only a sole writer may migrate it.
+	Restarting *DeployRestarting `protobuf:"bytes,9,opt,name=restarting,proto3,oneof"`
+}
+
 func (*DeployComponentOutcome_UpToDate) isDeployComponentOutcome_Outcome() {}
 
 func (*DeployComponentOutcome_Restarted) isDeployComponentOutcome_Outcome() {}
@@ -478,6 +495,8 @@ func (*DeployComponentOutcome_Shims) isDeployComponentOutcome_Outcome() {}
 func (*DeployComponentOutcome_ReloadPushed) isDeployComponentOutcome_Outcome() {}
 
 func (*DeployComponentOutcome_DeferredToSuccessor) isDeployComponentOutcome_Outcome() {}
+
+func (*DeployComponentOutcome_Restarting) isDeployComponentOutcome_Outcome() {}
 
 // Presence is the fact.
 type DeployUpToDate struct {
@@ -618,6 +637,95 @@ func (x *DeployHandingOver) GetForced() bool {
 	return false
 }
 
+// A stop-then-start restart of the daemon began. Each workspace stands down at
+// its own freeness (its shim is detached and left running), the daemon exits,
+// and the fresh binary takes the boot lock, migrates the state database as its
+// only writer, and adopts the running shims. Clients see the daemon go away
+// and come back rather than a handover's transfer notice.
+type DeployRestarting struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The state-database layout version the running daemon serves.
+	RunningStateLayout uint32 `protobuf:"varint,1,opt,name=running_state_layout,json=runningStateLayout,proto3" json:"running_state_layout,omitempty"`
+	// The state-database layout version the fresh build requires. Always
+	// different from `running_state_layout`; that difference is why this
+	// outcome is a restart and not a handover.
+	FreshStateLayout uint32 `protobuf:"varint,2,opt,name=fresh_state_layout,json=freshStateLayout,proto3" json:"fresh_state_layout,omitempty"`
+	// How many workspaces this daemon serves and will stand down.
+	Workspaces uint32 `protobuf:"varint,3,opt,name=workspaces,proto3" json:"workspaces,omitempty"`
+	// How many of them were NOT free at the decision. Their stand-down waits for
+	// their work to end unless the deploy is forced.
+	Busy uint32 `protobuf:"varint,4,opt,name=busy,proto3" json:"busy,omitempty"`
+	// The restart does not wait for freeness.
+	Forced        bool `protobuf:"varint,5,opt,name=forced,proto3" json:"forced,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeployRestarting) Reset() {
+	*x = DeployRestarting{}
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeployRestarting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeployRestarting) ProtoMessage() {}
+
+func (x *DeployRestarting) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeployRestarting.ProtoReflect.Descriptor instead.
+func (*DeployRestarting) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DeployRestarting) GetRunningStateLayout() uint32 {
+	if x != nil {
+		return x.RunningStateLayout
+	}
+	return 0
+}
+
+func (x *DeployRestarting) GetFreshStateLayout() uint32 {
+	if x != nil {
+		return x.FreshStateLayout
+	}
+	return 0
+}
+
+func (x *DeployRestarting) GetWorkspaces() uint32 {
+	if x != nil {
+		return x.Workspaces
+	}
+	return 0
+}
+
+func (x *DeployRestarting) GetBusy() uint32 {
+	if x != nil {
+		return x.Busy
+	}
+	return 0
+}
+
+func (x *DeployRestarting) GetForced() bool {
+	if x != nil {
+		return x.Forced
+	}
+	return false
+}
+
 // The out-of-date shims and what became of each.
 type DeployShimBounces struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -628,7 +736,7 @@ type DeployShimBounces struct {
 
 func (x *DeployShimBounces) Reset() {
 	*x = DeployShimBounces{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +748,7 @@ func (x *DeployShimBounces) String() string {
 func (*DeployShimBounces) ProtoMessage() {}
 
 func (x *DeployShimBounces) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +761,7 @@ func (x *DeployShimBounces) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployShimBounces.ProtoReflect.Descriptor instead.
 func (*DeployShimBounces) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeployShimBounces) GetBounces() []*DeployShimBounce {
@@ -681,7 +789,7 @@ type DeployShimBounce struct {
 
 func (x *DeployShimBounce) Reset() {
 	*x = DeployShimBounce{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +801,7 @@ func (x *DeployShimBounce) String() string {
 func (*DeployShimBounce) ProtoMessage() {}
 
 func (x *DeployShimBounce) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +814,7 @@ func (x *DeployShimBounce) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployShimBounce.ProtoReflect.Descriptor instead.
 func (*DeployShimBounce) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeployShimBounce) GetWorkspace() string {
@@ -770,7 +878,7 @@ type DeployBouncedNow struct {
 
 func (x *DeployBouncedNow) Reset() {
 	*x = DeployBouncedNow{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +890,7 @@ func (x *DeployBouncedNow) String() string {
 func (*DeployBouncedNow) ProtoMessage() {}
 
 func (x *DeployBouncedNow) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +903,7 @@ func (x *DeployBouncedNow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployBouncedNow.ProtoReflect.Descriptor instead.
 func (*DeployBouncedNow) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeployBouncedNow) GetForced() bool {
@@ -820,7 +928,7 @@ type DeployBounceRegistered struct {
 
 func (x *DeployBounceRegistered) Reset() {
 	*x = DeployBounceRegistered{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +940,7 @@ func (x *DeployBounceRegistered) String() string {
 func (*DeployBounceRegistered) ProtoMessage() {}
 
 func (x *DeployBounceRegistered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +953,7 @@ func (x *DeployBounceRegistered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployBounceRegistered.ProtoReflect.Descriptor instead.
 func (*DeployBounceRegistered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeployBounceRegistered) GetTurnInFlight() bool {
@@ -874,7 +982,7 @@ type DeployReloadPushed struct {
 
 func (x *DeployReloadPushed) Reset() {
 	*x = DeployReloadPushed{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -886,7 +994,7 @@ func (x *DeployReloadPushed) String() string {
 func (*DeployReloadPushed) ProtoMessage() {}
 
 func (x *DeployReloadPushed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -899,7 +1007,7 @@ func (x *DeployReloadPushed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployReloadPushed.ProtoReflect.Descriptor instead.
 func (*DeployReloadPushed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeployReloadPushed) GetRecipients() uint32 {
@@ -918,7 +1026,7 @@ type DeployDeferredToSuccessor struct {
 
 func (x *DeployDeferredToSuccessor) Reset() {
 	*x = DeployDeferredToSuccessor{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -930,7 +1038,7 @@ func (x *DeployDeferredToSuccessor) String() string {
 func (*DeployDeferredToSuccessor) ProtoMessage() {}
 
 func (x *DeployDeferredToSuccessor) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -943,7 +1051,7 @@ func (x *DeployDeferredToSuccessor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployDeferredToSuccessor.ProtoReflect.Descriptor instead.
 func (*DeployDeferredToSuccessor) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{13}
 }
 
 type DeployError struct {
@@ -963,7 +1071,7 @@ type DeployError struct {
 
 func (x *DeployError) Reset() {
 	*x = DeployError{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -975,7 +1083,7 @@ func (x *DeployError) String() string {
 func (*DeployError) ProtoMessage() {}
 
 func (x *DeployError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -988,7 +1096,7 @@ func (x *DeployError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployError.ProtoReflect.Descriptor instead.
 func (*DeployError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeployError) GetCause() isDeployError_Cause {
@@ -1109,7 +1217,7 @@ type DeployBuildFailed struct {
 
 func (x *DeployBuildFailed) Reset() {
 	*x = DeployBuildFailed{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1121,7 +1229,7 @@ func (x *DeployBuildFailed) String() string {
 func (*DeployBuildFailed) ProtoMessage() {}
 
 func (x *DeployBuildFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1134,7 +1242,7 @@ func (x *DeployBuildFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployBuildFailed.ProtoReflect.Descriptor instead.
 func (*DeployBuildFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeployBuildFailed) GetStep() string {
@@ -1168,7 +1276,7 @@ type DeployAlreadyDeploying struct {
 
 func (x *DeployAlreadyDeploying) Reset() {
 	*x = DeployAlreadyDeploying{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +1288,7 @@ func (x *DeployAlreadyDeploying) String() string {
 func (*DeployAlreadyDeploying) ProtoMessage() {}
 
 func (x *DeployAlreadyDeploying) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,7 +1301,7 @@ func (x *DeployAlreadyDeploying) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployAlreadyDeploying.ProtoReflect.Descriptor instead.
 func (*DeployAlreadyDeploying) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{16}
 }
 
 // A handover is already in flight — typically waiting on a busy workspace —
@@ -1209,7 +1317,7 @@ type DeployAlreadyRollingOut struct {
 
 func (x *DeployAlreadyRollingOut) Reset() {
 	*x = DeployAlreadyRollingOut{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1221,7 +1329,7 @@ func (x *DeployAlreadyRollingOut) String() string {
 func (*DeployAlreadyRollingOut) ProtoMessage() {}
 
 func (x *DeployAlreadyRollingOut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1234,7 +1342,7 @@ func (x *DeployAlreadyRollingOut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployAlreadyRollingOut.ProtoReflect.Descriptor instead.
 func (*DeployAlreadyRollingOut) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DeployAlreadyRollingOut) GetWaitingOn() []string {
@@ -1253,7 +1361,7 @@ type DeployJoining struct {
 
 func (x *DeployJoining) Reset() {
 	*x = DeployJoining{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1373,7 @@ func (x *DeployJoining) String() string {
 func (*DeployJoining) ProtoMessage() {}
 
 func (x *DeployJoining) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1386,7 @@ func (x *DeployJoining) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployJoining.ProtoReflect.Descriptor instead.
 func (*DeployJoining) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{18}
 }
 
 // A launchd service did not come back onto the fresh build. The artifacts are
@@ -1295,7 +1403,7 @@ type DeployServiceRestartFailed struct {
 
 func (x *DeployServiceRestartFailed) Reset() {
 	*x = DeployServiceRestartFailed{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1307,7 +1415,7 @@ func (x *DeployServiceRestartFailed) String() string {
 func (*DeployServiceRestartFailed) ProtoMessage() {}
 
 func (x *DeployServiceRestartFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1320,7 +1428,7 @@ func (x *DeployServiceRestartFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployServiceRestartFailed.ProtoReflect.Descriptor instead.
 func (*DeployServiceRestartFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeployServiceRestartFailed) GetComponent() DeployComponent {
@@ -1350,7 +1458,7 @@ type DeployInstallFailed struct {
 
 func (x *DeployInstallFailed) Reset() {
 	*x = DeployInstallFailed{}
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1470,7 @@ func (x *DeployInstallFailed) String() string {
 func (*DeployInstallFailed) ProtoMessage() {}
 
 func (x *DeployInstallFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_deploy_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1483,7 @@ func (x *DeployInstallFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployInstallFailed.ProtoReflect.Descriptor instead.
 func (*DeployInstallFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DeployInstallFailed) GetComponent() DeployComponent {
@@ -1406,7 +1514,7 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\rDeploySuccess\x12D\n" +
 	"\n" +
 	"components\x18\x01 \x03(\v2$.agentrepl.v1.DeployComponentOutcomeR\n" +
-	"components\"\xa1\x04\n" +
+	"components\"\xe3\x04\n" +
 	"\x16DeployComponentOutcome\x12;\n" +
 	"\tcomponent\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.DeployComponentR\tcomponent\x12\x14\n" +
 	"\x05build\x18\x02 \x01(\tR\x05build\x12<\n" +
@@ -1416,7 +1524,10 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\fhanding_over\x18\x05 \x01(\v2\x1f.agentrepl.v1.DeployHandingOverH\x00R\vhandingOver\x127\n" +
 	"\x05shims\x18\x06 \x01(\v2\x1f.agentrepl.v1.DeployShimBouncesH\x00R\x05shims\x12G\n" +
 	"\rreload_pushed\x18\a \x01(\v2 .agentrepl.v1.DeployReloadPushedH\x00R\freloadPushed\x12]\n" +
-	"\x15deferred_to_successor\x18\b \x01(\v2'.agentrepl.v1.DeployDeferredToSuccessorH\x00R\x13deferredToSuccessorB\t\n" +
+	"\x15deferred_to_successor\x18\b \x01(\v2'.agentrepl.v1.DeployDeferredToSuccessorH\x00R\x13deferredToSuccessor\x12@\n" +
+	"\n" +
+	"restarting\x18\t \x01(\v2\x1e.agentrepl.v1.DeployRestartingH\x00R\n" +
+	"restartingB\t\n" +
 	"\aoutcome\"\x10\n" +
 	"\x0eDeployUpToDate\"\x18\n" +
 	"\x16DeployServiceRestarted\"_\n" +
@@ -1425,7 +1536,15 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"workspaces\x18\x01 \x01(\rR\n" +
 	"workspaces\x12\x12\n" +
 	"\x04busy\x18\x02 \x01(\rR\x04busy\x12\x16\n" +
-	"\x06forced\x18\x03 \x01(\bR\x06forced\"M\n" +
+	"\x06forced\x18\x03 \x01(\bR\x06forced\"\xbe\x01\n" +
+	"\x10DeployRestarting\x120\n" +
+	"\x14running_state_layout\x18\x01 \x01(\rR\x12runningStateLayout\x12,\n" +
+	"\x12fresh_state_layout\x18\x02 \x01(\rR\x10freshStateLayout\x12\x1e\n" +
+	"\n" +
+	"workspaces\x18\x03 \x01(\rR\n" +
+	"workspaces\x12\x12\n" +
+	"\x04busy\x18\x04 \x01(\rR\x04busy\x12\x16\n" +
+	"\x06forced\x18\x05 \x01(\bR\x06forced\"M\n" +
 	"\x11DeployShimBounces\x128\n" +
 	"\abounces\x18\x01 \x03(\v2\x1e.agentrepl.v1.DeployShimBounceR\abounces\"\xc3\x01\n" +
 	"\x10DeployShimBounce\x12\x1c\n" +
@@ -1491,7 +1610,7 @@ func file_agentrepl_v1_endpoint_deploy_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_endpoint_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentrepl_v1_endpoint_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_agentrepl_v1_endpoint_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentrepl_v1_endpoint_deploy_proto_goTypes = []any{
 	(DeployComponent)(0),               // 0: agentrepl.v1.DeployComponent
 	(*DeployRequest)(nil),              // 1: agentrepl.v1.DeployRequest
@@ -1501,47 +1620,49 @@ var file_agentrepl_v1_endpoint_deploy_proto_goTypes = []any{
 	(*DeployUpToDate)(nil),             // 5: agentrepl.v1.DeployUpToDate
 	(*DeployServiceRestarted)(nil),     // 6: agentrepl.v1.DeployServiceRestarted
 	(*DeployHandingOver)(nil),          // 7: agentrepl.v1.DeployHandingOver
-	(*DeployShimBounces)(nil),          // 8: agentrepl.v1.DeployShimBounces
-	(*DeployShimBounce)(nil),           // 9: agentrepl.v1.DeployShimBounce
-	(*DeployBouncedNow)(nil),           // 10: agentrepl.v1.DeployBouncedNow
-	(*DeployBounceRegistered)(nil),     // 11: agentrepl.v1.DeployBounceRegistered
-	(*DeployReloadPushed)(nil),         // 12: agentrepl.v1.DeployReloadPushed
-	(*DeployDeferredToSuccessor)(nil),  // 13: agentrepl.v1.DeployDeferredToSuccessor
-	(*DeployError)(nil),                // 14: agentrepl.v1.DeployError
-	(*DeployBuildFailed)(nil),          // 15: agentrepl.v1.DeployBuildFailed
-	(*DeployAlreadyDeploying)(nil),     // 16: agentrepl.v1.DeployAlreadyDeploying
-	(*DeployAlreadyRollingOut)(nil),    // 17: agentrepl.v1.DeployAlreadyRollingOut
-	(*DeployJoining)(nil),              // 18: agentrepl.v1.DeployJoining
-	(*DeployServiceRestartFailed)(nil), // 19: agentrepl.v1.DeployServiceRestartFailed
-	(*DeployInstallFailed)(nil),        // 20: agentrepl.v1.DeployInstallFailed
+	(*DeployRestarting)(nil),           // 8: agentrepl.v1.DeployRestarting
+	(*DeployShimBounces)(nil),          // 9: agentrepl.v1.DeployShimBounces
+	(*DeployShimBounce)(nil),           // 10: agentrepl.v1.DeployShimBounce
+	(*DeployBouncedNow)(nil),           // 11: agentrepl.v1.DeployBouncedNow
+	(*DeployBounceRegistered)(nil),     // 12: agentrepl.v1.DeployBounceRegistered
+	(*DeployReloadPushed)(nil),         // 13: agentrepl.v1.DeployReloadPushed
+	(*DeployDeferredToSuccessor)(nil),  // 14: agentrepl.v1.DeployDeferredToSuccessor
+	(*DeployError)(nil),                // 15: agentrepl.v1.DeployError
+	(*DeployBuildFailed)(nil),          // 16: agentrepl.v1.DeployBuildFailed
+	(*DeployAlreadyDeploying)(nil),     // 17: agentrepl.v1.DeployAlreadyDeploying
+	(*DeployAlreadyRollingOut)(nil),    // 18: agentrepl.v1.DeployAlreadyRollingOut
+	(*DeployJoining)(nil),              // 19: agentrepl.v1.DeployJoining
+	(*DeployServiceRestartFailed)(nil), // 20: agentrepl.v1.DeployServiceRestartFailed
+	(*DeployInstallFailed)(nil),        // 21: agentrepl.v1.DeployInstallFailed
 }
 var file_agentrepl_v1_endpoint_deploy_proto_depIdxs = []int32{
 	3,  // 0: agentrepl.v1.DeployResponse.success:type_name -> agentrepl.v1.DeploySuccess
-	14, // 1: agentrepl.v1.DeployResponse.error:type_name -> agentrepl.v1.DeployError
+	15, // 1: agentrepl.v1.DeployResponse.error:type_name -> agentrepl.v1.DeployError
 	4,  // 2: agentrepl.v1.DeploySuccess.components:type_name -> agentrepl.v1.DeployComponentOutcome
 	0,  // 3: agentrepl.v1.DeployComponentOutcome.component:type_name -> agentrepl.v1.DeployComponent
 	5,  // 4: agentrepl.v1.DeployComponentOutcome.up_to_date:type_name -> agentrepl.v1.DeployUpToDate
 	6,  // 5: agentrepl.v1.DeployComponentOutcome.restarted:type_name -> agentrepl.v1.DeployServiceRestarted
 	7,  // 6: agentrepl.v1.DeployComponentOutcome.handing_over:type_name -> agentrepl.v1.DeployHandingOver
-	8,  // 7: agentrepl.v1.DeployComponentOutcome.shims:type_name -> agentrepl.v1.DeployShimBounces
-	12, // 8: agentrepl.v1.DeployComponentOutcome.reload_pushed:type_name -> agentrepl.v1.DeployReloadPushed
-	13, // 9: agentrepl.v1.DeployComponentOutcome.deferred_to_successor:type_name -> agentrepl.v1.DeployDeferredToSuccessor
-	9,  // 10: agentrepl.v1.DeployShimBounces.bounces:type_name -> agentrepl.v1.DeployShimBounce
-	10, // 11: agentrepl.v1.DeployShimBounce.bounced_now:type_name -> agentrepl.v1.DeployBouncedNow
-	11, // 12: agentrepl.v1.DeployShimBounce.registered:type_name -> agentrepl.v1.DeployBounceRegistered
-	15, // 13: agentrepl.v1.DeployError.build_failed:type_name -> agentrepl.v1.DeployBuildFailed
-	16, // 14: agentrepl.v1.DeployError.already_deploying:type_name -> agentrepl.v1.DeployAlreadyDeploying
-	17, // 15: agentrepl.v1.DeployError.already_rolling_out:type_name -> agentrepl.v1.DeployAlreadyRollingOut
-	18, // 16: agentrepl.v1.DeployError.joining:type_name -> agentrepl.v1.DeployJoining
-	19, // 17: agentrepl.v1.DeployError.service_restart_failed:type_name -> agentrepl.v1.DeployServiceRestartFailed
-	20, // 18: agentrepl.v1.DeployError.install_failed:type_name -> agentrepl.v1.DeployInstallFailed
-	0,  // 19: agentrepl.v1.DeployServiceRestartFailed.component:type_name -> agentrepl.v1.DeployComponent
-	0,  // 20: agentrepl.v1.DeployInstallFailed.component:type_name -> agentrepl.v1.DeployComponent
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	9,  // 7: agentrepl.v1.DeployComponentOutcome.shims:type_name -> agentrepl.v1.DeployShimBounces
+	13, // 8: agentrepl.v1.DeployComponentOutcome.reload_pushed:type_name -> agentrepl.v1.DeployReloadPushed
+	14, // 9: agentrepl.v1.DeployComponentOutcome.deferred_to_successor:type_name -> agentrepl.v1.DeployDeferredToSuccessor
+	8,  // 10: agentrepl.v1.DeployComponentOutcome.restarting:type_name -> agentrepl.v1.DeployRestarting
+	10, // 11: agentrepl.v1.DeployShimBounces.bounces:type_name -> agentrepl.v1.DeployShimBounce
+	11, // 12: agentrepl.v1.DeployShimBounce.bounced_now:type_name -> agentrepl.v1.DeployBouncedNow
+	12, // 13: agentrepl.v1.DeployShimBounce.registered:type_name -> agentrepl.v1.DeployBounceRegistered
+	16, // 14: agentrepl.v1.DeployError.build_failed:type_name -> agentrepl.v1.DeployBuildFailed
+	17, // 15: agentrepl.v1.DeployError.already_deploying:type_name -> agentrepl.v1.DeployAlreadyDeploying
+	18, // 16: agentrepl.v1.DeployError.already_rolling_out:type_name -> agentrepl.v1.DeployAlreadyRollingOut
+	19, // 17: agentrepl.v1.DeployError.joining:type_name -> agentrepl.v1.DeployJoining
+	20, // 18: agentrepl.v1.DeployError.service_restart_failed:type_name -> agentrepl.v1.DeployServiceRestartFailed
+	21, // 19: agentrepl.v1.DeployError.install_failed:type_name -> agentrepl.v1.DeployInstallFailed
+	0,  // 20: agentrepl.v1.DeployServiceRestartFailed.component:type_name -> agentrepl.v1.DeployComponent
+	0,  // 21: agentrepl.v1.DeployInstallFailed.component:type_name -> agentrepl.v1.DeployComponent
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_deploy_proto_init() }
@@ -1560,12 +1681,13 @@ func file_agentrepl_v1_endpoint_deploy_proto_init() {
 		(*DeployComponentOutcome_Shims)(nil),
 		(*DeployComponentOutcome_ReloadPushed)(nil),
 		(*DeployComponentOutcome_DeferredToSuccessor)(nil),
+		(*DeployComponentOutcome_Restarting)(nil),
 	}
-	file_agentrepl_v1_endpoint_deploy_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_deploy_proto_msgTypes[9].OneofWrappers = []any{
 		(*DeployShimBounce_BouncedNow)(nil),
 		(*DeployShimBounce_Registered)(nil),
 	}
-	file_agentrepl_v1_endpoint_deploy_proto_msgTypes[13].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_deploy_proto_msgTypes[14].OneofWrappers = []any{
 		(*DeployError_BuildFailed)(nil),
 		(*DeployError_AlreadyDeploying)(nil),
 		(*DeployError_AlreadyRollingOut)(nil),
@@ -1579,7 +1701,7 @@ func file_agentrepl_v1_endpoint_deploy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_deploy_proto_rawDesc), len(file_agentrepl_v1_endpoint_deploy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

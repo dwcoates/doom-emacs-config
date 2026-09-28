@@ -838,3 +838,74 @@ func TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn(t *testing.T) {
 		t.Fatalf("parked route turns = %v, want the submission's own t1", h.parkedTurns)
 	}
 }
+
+// TestARevivedSessionThatHasSinceDepartedIsNotAFailedRevival is the race the
+// integration suite caught: the shim a revival brought up died and was reaped
+// before the revival read the workspace's client back.
+func TestARevivedSessionThatHasSinceDepartedIsNotAFailedRevival(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() {
+		h.noSession = false
+		h.clientReaped = true
+		h.watcher.depart(sessionwatcher.Departure{Cause: "exit"})
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("a revival whose session came up and died was recorded as a failed revival")
+	}
+	if !logged(h.log.Records(), "info", opSubmit, "the revived session came up and has since departed; its departure decides what follows") {
+		t.Fatalf("records = %+v, want the departure named at INFO", h.log.Records())
+	}
+}
+
+func TestARevivedSessionThatHasSinceDepartedKeepsItsHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() {
+		h.noSession = false
+		h.clientReaped = true
+		h.watcher.depart(sessionwatcher.Departure{Cause: "exit"})
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 {
+		t.Fatalf("standing holds = %+v, want the prompt still held for the next bring-up", standing)
+	}
+}
+
+func TestARevivalThatLeavesNoSessionAtAllIsRecordedAtError(t *testing.T) {
+	// Arrange: the revival answers success and nothing serves the workspace.
+	h := newHarness(t)
+	h.noSession = true
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
+	}
+}

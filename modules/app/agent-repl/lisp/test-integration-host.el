@@ -1803,6 +1803,26 @@ because an outage the reconnect will cover must not blank the editor."
       (should (null (agent-repl-host-stream agent-repl-itest-host--ws)))
       (should (agent-repl-host-state agent-repl-itest-host--ws)))))
 
+(ert-deftest agent-repl-itest-host-stream-ended-after-the-planned-ending-is-info ()
+  "A clean end after the daemon's planned ending is a stand-down, not a loss.
+The daemon's last frame (`DaemonStreamEnding') says the end is PLANNED, so
+host.el records it at INFO and drops the stream to follow the live daemon."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (agent-repl-itest-host--push-host
+       daemon (plist-get ref :id) (agent-repl-itest-host--live 'open))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-host-state agent-repl-itest-host--ws))
+       nil "the host push to apply")
+      ;; Act: the planned ending, then a clean end frame.
+      (agent-repl-itest--push daemon "host" '((ending . ())) (plist-get ref :id))
+      (agent-repl-itest--await-log daemon "elisp.host.stream-ending" "info")
+      (agent-repl-itest--end daemon "host" (plist-get ref :id))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.host.stream-ended-planned" "info")
+      (should-not (agent-repl-itest--logged-p daemon "elisp.host.stream-lost" "error")))))
+
 ;; audit-2 #12
 (ert-deftest agent-repl-itest-host-stream-aborted-by-the-producer-is-an-error ()
   "A producer-side ABORT of a standing host stream is a failure too.

@@ -1538,6 +1538,22 @@ describe("keep-alives", () => {
     expect(answer.upsertKey).not.toBe("");
   });
 
+  test("the vendor's own turn is adopted: a VENDOR_STARTED prompt row opens it and its answer carries its id", async () => {
+    // A TURN NOBODY'S SEND STARTED IS A REAL TURN. The shim mints its id and
+    // writes a VENDOR_STARTED prompt row as its first row, so the daemon learns
+    // it opened and its rows and terminal are attributable to it.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+
+    const answer = await servedLanded(shim, "A background task finished.");
+
+    const opened = storedCarrying(shim, "PROMPT_ORIGIN_VENDOR_STARTED");
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.turn?.value).toMatch(/^adopted-/);
+    expect(answer.turn?.value).toBe(opened[0]?.turn?.value);
+  });
+
   test("a StartTurn sent the moment a keep-alive is submitted opens its turn exactly once", async () => {
     // THE KEEP-ALIVE IS INVISIBLE OUTSIDE THE SHIM. A StartTurn landing while
     // the keep-alive is still open is not refused: it waits inside the shim

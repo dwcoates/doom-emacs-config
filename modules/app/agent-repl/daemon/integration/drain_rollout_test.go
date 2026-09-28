@@ -20,7 +20,6 @@ import (
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/rollout"
-	"claude-repld/internal/stateroot"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -1169,10 +1168,20 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	// (internal/rollout/handover.go), and the successor arms its rendezvous
 	// from that manifest — so an adopt call made the instant shutdown_announced
 	// lands reaches a successor with nothing to arm from and is refused
-	// no_transfer_announced, which is the OTHER arm of this same endpoint. The
-	// manifest's atomic installation is the edge that makes this call reach an
-	// armed successor and so exercise the arm this test names.
-	d.AwaitFileExists(drainIntentManifest(t, d))
+	// no_transfer_announced, which is the OTHER arm of this same endpoint.
+	//
+	// THE EDGE IS THE SUCCESSOR'S ARMING, NEVER THE MANIFEST'S EXISTENCE. The
+	// successor polls for the manifest, arms from it and at once RETIRES it
+	// (internal/rollout/adopt.go joinFromManifest): a failing run measured the
+	// file installed at 36.376 and removed at 36.379, a 3ms lifetime a 5ms
+	// existence poll could miss entirely and then wait out its whole bound for
+	// a file that would never come back. The arming record is written by the
+	// successor into the run log its own boot opened, so the incumbent's
+	// rotated-inode hazard does not reach it, and it is written only once the
+	// rendezvous this call needs is armed.
+	d.AwaitRunLogRecordFromAnyProcess("the successor's rendezvous armed from the intent manifest", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.join" && strings.HasPrefix(r.Message, "armed the adopt rendezvous from ")
+	})
 	successor := drainDial(announced.GetAddress())
 
 	// Act: the never-open web client attempts to join anyway.
@@ -1448,20 +1457,4 @@ func drainDial(addr string) agentreplv1connect.AgentReplClient {
 		},
 	}
 	return agentreplv1connect.NewAgentReplClient(client, "http://"+addr)
-}
-
-// drainIntentManifest answers a daemon's stand-down intent manifest path.
-//
-// A handover's manifest is the successor's ONLY input — there is no
-// daemon-to-daemon channel — and it is installed by rename, so its existence is
-// a sound synchronizing edge for any call that needs an armed rendezvous. The
-// incumbent's run log is not: the successor's own boot rotates that file out
-// from under the incumbent, which keeps appending to the rotated inode.
-func drainIntentManifest(t *testing.T, d *harness.Daemon) string {
-	t.Helper()
-	layout, err := stateroot.Root(d.StateDir, "")
-	if err != nil {
-		t.Fatalf("harness: resolve the state root layout for %q: %v", d.StateDir, err)
-	}
-	return layout.IntentManifest()
 }

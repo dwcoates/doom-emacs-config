@@ -103,6 +103,10 @@ message DeployComponentOutcome {
     // bounce registry, and a handed-over webview's fresh attach loads the
     // fresh assets.
     DeployDeferredToSuccessor deferred_to_successor = 8;
+    // The daemon is being replaced by a stop-then-start restart instead of a
+    // handover, because the fresh build expects a different state-database
+    // layout than the running one and only a sole writer may migrate it.
+    DeployRestarting restarting = 9;
   }
 }
 
@@ -121,6 +125,27 @@ message DeployHandingOver {
   uint32 busy = 2;
   // The handover does not wait for freeness.
   bool forced = 3;
+}
+
+// A stop-then-start restart of the daemon began. Each workspace stands down at
+// its own freeness (its shim is detached and left running), the daemon exits,
+// and the fresh binary takes the boot lock, migrates the state database as its
+// only writer, and adopts the running shims. Clients see the daemon go away
+// and come back rather than a handover's transfer notice.
+message DeployRestarting {
+  // The state-database layout version the running daemon serves.
+  uint32 running_state_layout = 1;
+  // The state-database layout version the fresh build requires. Always
+  // different from `running_state_layout`; that difference is why this
+  // outcome is a restart and not a handover.
+  uint32 fresh_state_layout = 2;
+  // How many workspaces this daemon serves and will stand down.
+  uint32 workspaces = 3;
+  // How many of them were NOT free at the decision. Their stand-down waits for
+  // their work to end unless the deploy is forced.
+  uint32 busy = 4;
+  // The restart does not wait for freeness.
+  bool forced = 5;
 }
 
 // The out-of-date shims and what became of each.
