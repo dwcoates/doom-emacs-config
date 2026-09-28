@@ -87,6 +87,10 @@ export interface StoreClient {
   ): Promise<storev1.GetSidecarCursorsResponse>;
   /** The open obligations: everything started and never concluded, per the record. */
   getLiveWork(request: storev1.GetLiveWorkRequest): Promise<storev1.GetLiveWorkResponse>;
+  /** Which agent of the caller's lineage a vendor task locator names. */
+  getAgentByVendorTask(
+    request: storev1.GetAgentByVendorTaskRequest,
+  ): Promise<storev1.GetAgentByVendorTaskResponse>;
   /** One batch, durable or nothing, cursor advance in the same transaction. */
   writeBatch(request: storev1.WriteBatchRequest): Promise<storev1.WriteBatchResponse>;
 }
@@ -142,6 +146,8 @@ export function createStoreClient(socketPath: string): StoreClient {
     getWorkflow: (request) => unaryRoundTrip("GetWorkflow", () => client.getWorkflow(request)),
     getSidecarCursors: (request) => unaryRoundTrip("GetSidecarCursors", () => client.getSidecarCursors(request)),
     getLiveWork: (request) => unaryRoundTrip("GetLiveWork", () => client.getLiveWork(request)),
+    getAgentByVendorTask: (request) =>
+      unaryRoundTrip("GetAgentByVendorTask", () => client.getAgentByVendorTask(request)),
     writeBatch: (request) => unaryRoundTrip("WriteBatch", () => client.writeBatch(request)),
   };
 }
