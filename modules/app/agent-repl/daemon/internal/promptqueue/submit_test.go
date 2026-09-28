@@ -227,6 +227,26 @@ func TestSubmitMirrorsAParkedLeasesGuidanceAsAUserPromptRow(t *testing.T) {
 	}
 }
 
+func TestSubmitRecordsAParkedLeasesGuidanceAsATurnBeforeRoutingIt(t *testing.T) {
+	// Arrange: the route looks for the record the moment it is asked.
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	var recordedFirst bool
+	h.onParkedRoute = func() {
+		h.db.mu.Lock()
+		_, recordedFirst = h.db.turns["t1"]
+		h.db.mu.Unlock()
+	}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert: the guidance turn's end has a row to close.
+	if !recordedFirst {
+		t.Fatal("the guidance turn was routed before its record went down")
+	}
+}
+
 func TestSubmitSurfacesAParkedRouteFailure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

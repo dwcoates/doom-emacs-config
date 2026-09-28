@@ -485,9 +485,14 @@ type fakeMerge struct {
 	pauseScope       *merge.RepositoryScope
 	answerDequeueErr error
 	evictErr         error
+	// enqueuedBy records who each enqueue said asked for the merge.
+	enqueuedBy []merge.Requester
 }
 
-func (f *fakeMerge) Enqueue(context.Context, ids.WorkspaceID) error { return f.enqueueErr }
+func (f *fakeMerge) Enqueue(_ context.Context, _ ids.WorkspaceID, by merge.Requester) error {
+	f.enqueuedBy = append(f.enqueuedBy, by)
+	return f.enqueueErr
+}
 
 func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error {
 	return f.answerDequeueErr
