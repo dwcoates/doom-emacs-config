@@ -1964,6 +1964,26 @@ classified separately and never reach this predicate as an anomaly."
             (should (eq (agent-repl--ws-get "test-ws" :input-buffer) buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+(ert-deftest agent-repl-test-initialize-input-buffer-draws-the-held-prompt-waiting-line ()
+  "A composer born after an Emacs restart re-reads the held-prompt ingress."
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-input-waiting*"))
+          (refreshed nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'agent-repl-input-mode) #'ignore)
+                    ((symbol-function 'agent-repl--history-restore) #'ignore)
+                    ((symbol-function 'agent-repl-held-ingress-refresh)
+                     (lambda (ws) (push ws refreshed))))
+            ;; Arrange
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
+            ;; Act
+            (agent-repl--initialize-input-buffer "test-ws")
+            ;; Assert
+            (should (equal refreshed '("test-ws"))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 (ert-deftest agent-repl-test-initialize-input-buffer-carries-an-already-pushed-title ()
   "A title the daemon pushed BEFORE the composer existed still names it.
 `agent-repl-host--apply-naming' runs on a push, so a buffer born after
