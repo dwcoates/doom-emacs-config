@@ -76,6 +76,11 @@ EOF
 printf 'logs-harness\n' >>"$STUB_LOG"
 EOF
 
+    cat >"$tree/modules/app/agent-repl/bin/test-check-go-deps.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'go-deps-harness\n' >>"$STUB_LOG"
+EOF
+
     cat >"$tree/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'doctor-harness\n' >>"$STUB_LOG"
@@ -159,6 +164,7 @@ EOF
         "$tree/modules/app/agent-repl/bin/test-store-reset.sh" \
         "$tree/modules/app/agent-repl/bin/test-readiness-report.sh" \
         "$tree/modules/app/agent-repl/bin/test-logs.sh" \
+        "$tree/modules/app/agent-repl/bin/test-check-go-deps.sh" \
         "$tree/modules/app/agent-repl/bin/test-e2e.sh" \
         "$tree/modules/app/agent-repl/bin/test-e2e-emacs.sh" \
         "$tree/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh" \
@@ -195,7 +201,7 @@ test_default_runs_every_suite_without_recording() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 23 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 24 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
         grep -q "timing: proto" "$tree/stdout" &&
         grep -q "timings were not recorded" "$tree/stdout"; then
@@ -211,7 +217,7 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 24 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 25 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,logging,' "$tree/modules/app/agent-repl/test_time.csv" &&
@@ -233,7 +239,7 @@ test_failure_continues_and_summarizes_every_failure() {
         grep -q '^logging-density$' "$tree/stub.log" &&
         grep -q "store failed after .*with exit code 7" "$tree/stderr" &&
         grep -q "logging failed after .*with exit code 9" "$tree/stderr" &&
-        grep -q "failure summary, 2 of 23 suites failed" "$tree/stderr" &&
+        grep -q "failure summary, 2 of 24 suites failed" "$tree/stderr" &&
         grep -q "failed: store exit code 7 after" "$tree/stderr" &&
         grep -q "failed: logging exit code 9 after" "$tree/stderr"; then
         pass "suite failures run every later suite and summarize each failure"
@@ -358,7 +364,7 @@ test_no_suites_argument_still_runs_everything() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 23 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 24 ] &&
         ! grep -q "not selected" "$tree/stdout"; then
         pass "an absent --suites leaves the run at every suite"
     else
