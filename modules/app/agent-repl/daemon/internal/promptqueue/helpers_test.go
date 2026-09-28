@@ -954,6 +954,9 @@ type harness struct {
 	reviveErr  error
 	reviveHook func()
 	noSession  bool
+	// clientReaped answers no client while the watcher stays: the shim a
+	// revival brought up has since died and been reaped.
+	clientReaped bool
 	// coldGate is the standing gate's own account, empty when no gate stands.
 	coldGate string
 
@@ -999,7 +1002,7 @@ func newHarness(t *testing.T) *harness {
 		Footer:  h.footer,
 		Sidebar: h.sidebar,
 		Holds:   h.holds,
-		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
 			h.revivals++
 			if h.reviveErr != nil {

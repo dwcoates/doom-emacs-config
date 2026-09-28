@@ -10,6 +10,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -705,5 +706,207 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("New accepted a Deployer with no builder")
+	}
+}
+
+// ---- the update line --------------------------------------------------------
+
+func TestADeployThatStaysStatesEveryPhaseAndEndsUpdated(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    []string
+	}{
+		{"nothing to restart", func(*testing.T, *harness) {}, []string{"building", "installing", "updated"}},
+		{"a stale store", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+		}, []string{"building", "installing", "restarting_services", "updated"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if got := strings.Join(h.progress.phases(), ","); got != strings.Join(tc.want, ",") {
+				t.Fatalf("phases = %s, want %s", got, strings.Join(tc.want, ","))
+			}
+		})
+	}
+}
+
+func TestTheBuildingLineNamesTheBuiltComponents(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	first := h.progress.stated[0]
+	if first.Phase != deployprogress.Building || len(first.Components) != len(builtComponents) {
+		t.Fatalf("first statement = %+v, want building naming %v", first, builtComponents)
+	}
+}
+
+func TestAStoreRestartNamesTheStoreAndTheSidecar(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	restart := h.progress.stated[2]
+	if restart.Phase != deployprogress.RestartingServices || len(restart.Components) != 2 ||
+		restart.Components[0] != deployprogress.Store || restart.Components[1] != deployprogress.Sidecar {
+		t.Fatalf("restart statement = %+v, want the store then the sidecar", restart)
+	}
+}
+
+func TestAShimRegisteredBehindItsWorkIsNotedOnItsWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.rollout.stale["ws-a"] = true
+	h.rollout.stale["ws-b"] = true
+	h.rollout.registered = map[ids.WorkspaceID]bool{"ws-b": true}
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	notes := h.progress.last().Notes
+	if len(notes["ws-a"]) != 0 || len(notes["ws-b"]) != 1 || notes["ws-b"][0] != deployprogress.ShimWhenIdle {
+		t.Fatalf("notes = %v, want shim_when_idle on ws-b alone", notes)
+	}
+}
+
+func TestAHandoverLeavesUpdatedToItsSuccessor(t *testing.T) {
+	tests := []struct {
+		name         string
+		force        bool
+		wantDraining bool
+	}{
+		{name: "an unforced handover drains", wantDraining: true},
+		{name: "a forced handover does not", force: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), tc.force); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			last := h.progress.last()
+			if last.Phase != deployprogress.HandingOver || last.Draining != tc.wantDraining {
+				t.Fatalf("last statement = %+v, want handing_over with draining=%v", last, tc.wantDraining)
+			}
+		})
+	}
+}
+
+func TestALayoutRestartStatesTheDaemonRestart(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.freshLayout = runningLayout + 1
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	last := h.progress.last()
+	if last.Phase != deployprogress.RestartingServices || len(last.Components) != 1 ||
+		last.Components[0] != deployprogress.Daemon || !last.Draining {
+		t.Fatalf("last statement = %+v, want the daemon restarting at freeness", last)
+	}
+}
+
+func TestAFailedDeployClearsItsLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{"a failed build", func(t *testing.T, h *harness) {
+			h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc", Log: "/logs"}
+		}},
+		{"a refused handover", func(t *testing.T, h *harness) {
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+			h.rollout.handErr = errors.New("the successor never proved it was serving")
+		}},
+		{"a failed service restart", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+			h.services.storeErr = errors.New("launchctl refused")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("Deploy succeeded, want the failure")
+			}
+			if h.progress.last() != nil {
+				t.Fatalf("last statement = %+v, want the line cleared", h.progress.last())
+			}
+		})
+	}
+}
+
+func TestARefusedDeployLeavesTheLineAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.rollout.joining = true
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the refusal")
+	}
+	if got := h.progress.phases(); len(got) != 0 {
+		t.Fatalf("phases = %v, want none: a refused deploy owns no line", got)
+	}
+}
+
+func TestNewRefusesAMissingProgressSink(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.d.deps
+	deps.Progress = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a Deployer with no progress sink")
 	}
 }

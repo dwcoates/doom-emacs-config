@@ -500,6 +500,15 @@ How the daemon puts each component into service:
      `config.el` load order, then the heartbeat and timer re-arm check), and a
      stale webview `reload_webapp`.
 
+EVERY PHASE IS ON THE FOOTER (owner request, 2026-09-27). The deploy states
+each phase through ONE entry point (`internal/deployprogress.Sink`, the footer
+resolver) and the line stands on every workspace's strip, below a fault and
+above everything else: building, installing, restarting services, handing over,
+a busy workspace's `waiting` (its own turn and background counts), and a
+momentary `updated` the daemon that stays says, or the successor says after a
+handover (it reads `Manifest.deploy`). A deploy's handover draws no webapp
+banner; a successor that will not start is the `successor_spawn_failed` fault.
+
 `force` does not wait: every stale shim is bounced at once and a stale daemon
 hands every workspace over at once, ENDING RUNNING TURNS. Emacs asks before a
 forced deploy; the CLI's `-force` says so in its help.
