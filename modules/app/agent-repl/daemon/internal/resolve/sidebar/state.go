@@ -13,7 +13,7 @@ import (
 // without a color fails there rather than drawing an unpainted dot.
 var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
-	"interrupted", "ready", "idle_async", "vendor_blocked", "init", "severed",
+	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
 	"start_failed", "degraded", "dead", "merge_enqueuing", "merging",
 	"merge_queued", "merge_conflict", "merge_failed", "merged", "none",
 	"inactive",

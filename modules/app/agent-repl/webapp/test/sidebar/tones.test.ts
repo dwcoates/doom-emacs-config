@@ -57,6 +57,10 @@ describe("the status mark", () => {
     expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "" });
   });
 
+  it("draws a failed turn end as a blue dot", () => {
+    expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-blue", glyph: "dot", char: "" });
+  });
+
   it("draws a question mark for a perspective-less workspace", () => {
     expect(rosterArmMark("inactive")).toEqual({
       toneClass: "tone-none",
@@ -82,7 +86,7 @@ describe("the rail's two animations", () => {
     },
   );
 
-  it.each(["ready", "done", "interrupted", "dead", "merged", "none", "inactive"] as const)(
+  it.each(["ready", "done", "interrupted", "turnFailed", "dead", "merged", "none", "inactive"] as const)(
     "is still on %s",
     (arm) => {
       expect(armBreathes(arm)).toBe(false);

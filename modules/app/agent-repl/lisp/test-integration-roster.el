@@ -209,6 +209,7 @@ unstubbed."
     (permission . :permission)
     (done . :done)
     (interrupted . :interrupted)
+    (turnFailed . :turn-failed)
     (ready . :ready)
     (idleAsync . :idle-async)
     (vendorBlocked . :vendor-blocked)
@@ -226,7 +227,7 @@ unstubbed."
     (none . :none)
     (inactive . :inactive))
   "Every RosterRow.status arm frontend/v1/sidebar.proto declares, and the
-keyword §8 pins for it.  The list is EXHAUSTIVE by contract: 23 arms, and
+keyword §8 pins for it.  The list is EXHAUSTIVE by contract: 24 arms, and
 the roster's vocabulary is the ONE source for tab coloring and the sidebar
 dot.  A 24th arm appearing on the wire must be a loud failure, not a
 silent default, which is why the suite pins the count as well as the
@@ -237,10 +238,10 @@ mapping.")
 A drifted table would let a new arm ship untested, and the coloring would
 silently fall through to `none'."
   ;; Arrange / Act / Assert.
-  (should (equal 23 (length agent-repl-itest-roster--status-arms))))
+  (should (equal 24 (length agent-repl-itest-roster--status-arms))))
 
 (ert-deftest agent-repl-itest-roster-every-status-arm-decodes-to-its-keyword ()
-  "Each of the 23 status arms resolves to exactly one tab-state keyword.
+  "Each of the 24 status arms resolves to exactly one tab-state keyword.
 The roster's per-row state vocabulary is the ONE source for tab coloring;
 there is no HostWorkspace lifecycle axis to fall back on."
   ;; Arrange.
