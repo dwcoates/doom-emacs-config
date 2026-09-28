@@ -71,11 +71,13 @@ type Resolver interface {
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)
-	// SetViewed raises the workspace's VIEWED marker, which draws its row
-	// PARTIAL — the editor's report that the user has now SEEN this
-	// workspace. It takes only on a DONE row; a report on any other arm is
-	// dropped. There is no lowering setter: the marker is cleared by the
-	// row's next status change, which is the reset rule every surface shares.
+	// SetViewed records that the user has READ the last turn's result — the
+	// editor's report that the user has now SEEN this workspace. It takes
+	// only on a turn-end row (done or interrupted); a report on any other arm
+	// is dropped. A read result draws the row PARTIAL whenever it stands on
+	// its turn-end arm, and lets an unread-held row yield to idle_async while
+	// detached work runs. There is no lowering setter: the next turn is what
+	// makes a new result unread.
 	SetViewed(ws ids.WorkspaceID)
 	// SetReviving raises (true) or lowers (false) the workspace's REVIVING
 	// marker: its parked session is being brought back up. The workspace
