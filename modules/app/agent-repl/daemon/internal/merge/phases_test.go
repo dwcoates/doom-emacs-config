@@ -13,6 +13,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitclient"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
@@ -356,7 +358,7 @@ func TestParkedSubmissionRoutesToTheResolutionAgent(t *testing.T) {
 	waitForParked(t, h)
 
 	// Act.
-	err := h.o.RouteParked(ctx, theWorkspace, "guidance-turn", saidText("try resolving it this way"))
+	err := route(h, ctx, "guidance-turn", "try resolving it this way")
 
 	// Assert.
 	if err != nil {
@@ -389,13 +391,15 @@ func TestParkedGuidanceRunsUnderTheSubmissionsTurn(t *testing.T) {
 	waitForParked(t, h)
 
 	// Act.
-	err := h.o.RouteParked(ctx, theWorkspace, "submitted-turn", saidText("try resolving it this way"))
+	err := route(h, ctx, "submitted-turn", "try resolving it this way")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("RouteParked failed: %v", err)
 	}
 	<-done
+	// The run asks for its slot back only once the guidance turn has ended.
+	<-h.waiting
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.parkedTurns) != 1 || h.parkedTurns[0] != "submitted-turn" {
@@ -1050,5 +1054,565 @@ func TestAStatedBeforePolicyThatWillNotReadFailsTheRun(t *testing.T) {
 	}
 	if h.git.seen("merge_no_ff") {
 		t.Fatal("the merge ran despite an unreadable before-merge policy")
+	}
+}
+
+// --- a park stays alive until it is resolved (2026-09-28, lease c8a3a664006f46c1)
+
+// TestGuidanceWhileParkedIsDeliveredToTheWorkspacesAgent covers the first half
+// of "every guidance is delivered": the park that received a prompt used to
+// discard it, so the agent never saw it.
+func TestGuidanceWhileParkedIsDeliveredToTheWorkspacesAgent(t *testing.T) {
+	// Arrange: a merge parked on its gate.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parkOnABrokenGate(t, h, ctx, 2)
+
+	// Act.
+	err := route(h, ctx, "g-1", "the gate is broken on master; drop it")
+
+	// Assert.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err != nil || len(h.parkedTurns) != 1 || h.parkedTurns[0] != "g-1" {
+		t.Fatalf("RouteParked = %v, routed %v; want the guidance delivered under its own turn", err, h.parkedTurns)
+	}
+}
+
+// TestAParkedMergeAnswersEveryPromptNotOnlyTheFirst covers the second half:
+// after a resume the merge parks again, and the next prompt still has a
+// receiver that delivers and answers it (the owner's second prompt had none).
+func TestAParkedMergeAnswersEveryPromptNotOnlyTheFirst(t *testing.T) {
+	// Arrange: a merge parked on a gate that stays broken, guided once and
+	// resumed, so it parks a second time.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parkOnABrokenGate(t, h, ctx, 2)
+	if err := route(h, ctx, "g-1", "try again"); err != nil {
+		t.Fatalf("the first guidance: %v", err)
+	}
+	resume(t, h, ctx)
+	waitForParked(t, h)
+
+	// Act.
+	err := route(h, ctx, "g-2", "and again")
+
+	// Assert.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err != nil || len(h.parkedTurns) != 2 || h.parkedTurns[1] != "g-2" {
+		t.Fatalf("RouteParked = %v, routed %v; want the second prompt delivered too", err, h.parkedTurns)
+	}
+}
+
+// TestARefusedGuidanceRouteIsAnsweredAndTheMergeStaysParked covers the refusal:
+// the caller is told, and the park keeps listening for the next prompt.
+func TestARefusedGuidanceRouteIsAnsweredAndTheMergeStaysParked(t *testing.T) {
+	// Arrange: a parked merge whose session refuses the route once.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parkOnABrokenGate(t, h, ctx, 2)
+	h.mu.Lock()
+	h.parkedErr = errors.New("the workspace has no live session")
+	h.mu.Unlock()
+	if err := route(h, ctx, "g-1", "first"); err == nil {
+		t.Fatal("a refused route was answered as delivered")
+	}
+	h.mu.Lock()
+	h.parkedErr = nil
+	h.mu.Unlock()
+
+	// Act.
+	err := route(h, ctx, "g-2", "second")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the prompt after a refused route = %v, want it delivered by the park still listening", err)
+	}
+}
+
+// TestAParkedMergeResumesByMakingItsMergeAgain covers what resuming is: on the
+// guidance turn's end, the merge is made afresh rather than carried on from a
+// stale tree.
+func TestAParkedMergeResumesByMakingItsMergeAgain(t *testing.T) {
+	// Arrange: a parked merge whose gate passes after the guidance.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parkOnABrokenGate(t, h, ctx, 1)
+	h.gatePasses("daemon")
+	if err := route(h, ctx, "g-1", "the gate is fixed now"); err != nil {
+		t.Fatalf("the guidance: %v", err)
+	}
+
+	// Act.
+	resume(t, h, ctx)
+
+	// Assert.
+	h.git.mu.Lock()
+	merges := len(h.git.mergeDirs)
+	h.git.mu.Unlock()
+	facts, _ := h.o.Facts(theWorkspace)
+	if merges != 2 || facts.State != StateMerged {
+		t.Fatalf("merges made = %d, state = %q; want the merge made again and landed", merges, facts.State)
+	}
+}
+
+// --- a broken gate is not a test failure --------------------------------
+
+// TestAGateThatFailedToRunParksWithNoRepairRound covers every way a gate can
+// fail to run: none of them is a failure the branch's agent can repair.
+func TestAGateThatFailedToRunParksWithNoRepairRound(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(h *harness)
+	}{
+		{name: "the shell could not find the command (exit 127)", setup: func(h *harness) { h.gateBroken(1) }},
+		{name: "the shell could not execute the command (exit 126)", setup: func(h *harness) {
+			h.runner.runs = append(h.runner.runs, scriptedRun{Code: 126})
+		}},
+		{name: "the gate's script is not there", setup: func(h *harness) { h.script = filepath.Join(h.stateDir, "absent.sh") }},
+		{name: "the gate could not be started", setup: func(h *harness) {
+			h.runner.runs = append(h.runner.runs, scriptedRun{Err: errors.New("fork/exec bash: resource temporarily unavailable")})
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			tc.setup(h)
+			enqueue(t, h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act.
+			if err := h.admit(ctx); err != nil {
+				t.Fatalf("admitting: %v", err)
+			}
+
+			// Assert.
+			facts := h.footer.last()
+			repairs := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)
+			if facts.State != StateParked || repairs != 0 {
+				t.Fatalf("state = %q with %d repair round(s), want parked with none", facts.State, repairs)
+			}
+		})
+	}
+}
+
+// TestABrokenGateParksWithAPlainLine pins the line the user reads.
+func TestABrokenGateParksWithAPlainLine(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	parkOnABrokenGate(t, h, ctx, 1)
+
+	// Assert.
+	if line := h.footer.last().ParkedLine; !strings.Contains(line, "the test gate itself failed to run") {
+		t.Fatalf("the parked line is %q, want it to say the gate itself failed to run", line)
+	}
+}
+
+// TestAFailingSuiteIsStillATestFailure is the other side of the line: a gate
+// that RAN and failed goes to the repair round as before.
+func TestAFailingSuiteIsStillATestFailure(t *testing.T) {
+	// Arrange: a gate that ran and failed, then passes.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); n != 1 {
+		t.Fatalf("%d repair round(s) for a failing suite, want 1", n)
+	}
+}
+
+// --- the queue owns the target ------------------------------------------
+
+// TestTheMergeIsNeverMadeInTheTarget covers where the merge is made: the
+// queue's own tree, so the live checkout never carries a half-made merge.
+func TestTheMergeIsNeverMadeInTheTarget(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if slices.Contains(h.git.mergeDirs, h.targetD) || !equal(h.git.mergeDirs, h.git.queueTrees) {
+		t.Fatalf("merges were made in %v, want only the queue's trees %v", h.git.mergeDirs, h.git.queueTrees)
+	}
+}
+
+// TestAPassingGateFastForwardsTheTargetToTheTestedCommit covers the landing:
+// one fast-forward, to exactly the commit the gate passed.
+func TestAPassingGateFastForwardsTheTargetToTheTestedCommit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if want := []string{h.targetD + "@abc123def4567"}; !equal(h.git.fastForwards, want) {
+		t.Fatalf("fast-forwards = %v, want %v", h.git.fastForwards, want)
+	}
+}
+
+// TestAFailedMergeLeavesTheTargetUntouched covers each way a merge can stop
+// short of landing: none moves the target.
+func TestAFailedMergeLeavesTheTargetUntouched(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(h *harness)
+	}{
+		{name: "the agent escalates a failing gate", setup: func(h *harness) {
+			h.landsCleanly("abc123def4567")
+			h.gateFails("daemon")
+			h.escalate("the storage layer needs redesigning")
+		}},
+		{name: "the merge conflicts and the agent resolves nothing", setup: func(h *harness) {
+			h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+		}},
+		{name: "the gate itself is broken", setup: func(h *harness) {
+			h.landsCleanly("abc123def4567")
+			h.gateBroken(1)
+		}},
+		{name: "git refuses the merge", setup: func(h *harness) {
+			h.git.mergeErr = errors.New("refusing to merge unrelated histories")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			tc.setup(h)
+			enqueue(t, h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act.
+			if err := h.admit(ctx); err != nil {
+				t.Fatalf("admitting: %v", err)
+			}
+
+			// Assert.
+			h.git.mu.Lock()
+			defer h.git.mu.Unlock()
+			if len(h.git.fastForwards) != 0 || slices.Contains(h.git.mergeDirs, h.targetD) || len(h.git.commitMessages) != 0 {
+				t.Fatalf("the target was touched: fast-forwards %v, merges in %v, commits %v",
+					h.git.fastForwards, h.git.mergeDirs, h.git.commitMessages)
+			}
+		})
+	}
+}
+
+// TestATargetThatMovedUnderTheGateIsMergedOntoAgain covers the landing's
+// guard: a tip that moved while the merge was tested is never overwritten; the
+// merge is made again on it and tested again.
+func TestATargetThatMovedUnderTheGateIsMergedOntoAgain(t *testing.T) {
+	// Arrange: the target's tip reads "base" for the first attempt, then moves.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.refSeqs["HEAD"] = []string{"base", "moved", "moved"}
+	h.git.outcomes = append(h.git.outcomes,
+		gitclient.MergeOutcome{Landed: &gitclient.Commit{SHA: "first-merge"}},
+		gitclient.MergeOutcome{Landed: &gitclient.Commit{SHA: "second-merge"}})
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if want := []string{h.targetD + "@second-merge"}; !equal(h.git.fastForwards, want) || !equal(h.git.queueBases, []string{"base", "moved"}) {
+		t.Fatalf("fast-forwards %v on bases %v, want only the merge made on the moved tip", h.git.fastForwards, h.git.queueBases)
+	}
+}
+
+// TestEveryAttemptsTreeIsRemoved covers the scratch trees' lifetime: none
+// outlives its attempt.
+func TestEveryAttemptsTreeIsRemoved(t *testing.T) {
+	// Arrange: a failing gate, a repair, and a landing: two attempts.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if len(h.git.queueTrees) != 2 || !equal(h.git.removedQueueTrees, h.git.queueTrees) {
+		t.Fatalf("trees made %v, removed %v; want every attempt's tree removed", h.git.queueTrees, h.git.removedQueueTrees)
+	}
+}
+
+// TestALandingWhoseRangeWillNotReadStillConcludesAsMerged covers the account
+// of a landing that has happened: a fault in reading it is not a failed merge.
+func TestALandingWhoseRangeWillNotReadStillConcludesAsMerged(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.landedErr = errors.New("fatal: bad revision")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("the merge is %q, want merged: the target had already moved", facts.State)
+	}
+}
+
+// --- a branch already on the target (2026-09-28 15:28:24, lease 9cf657a4654d4c93)
+
+// TestABranchAlreadyOnTheTargetConcludesAsMerged covers the no-op merge: it
+// landed long ago, and says so honestly rather than failing.
+func TestABranchAlreadyOnTheTargetConcludesAsMerged(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.contained = true
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateMerged || facts.Detail != "already on master; nothing to merge" {
+		t.Fatalf("facts = %q / %q, want merged, already on master", facts.State, facts.Detail)
+	}
+}
+
+// TestABranchAlreadyOnTheTargetMakesNoMerge covers what the no-op merge does
+// NOT do: no merge commit, no landed-range read of a one-parent commit, no
+// fast-forward.
+func TestABranchAlreadyOnTheTargetMakesNoMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.contained = true
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if h.git.seen("merge_no_ff") || h.git.seen("landed_range") || h.git.seen("fast_forward") {
+		t.Fatalf("git was asked %v, want no merge, range or fast-forward", h.git.calls)
+	}
+}
+
+// --- a repair never changes the merge machinery mid-merge ----------------
+
+// TestARepairThatChangesTheMergeMachineryIsRefusedAndParks covers the owner's
+// ruling: the gate judging the merge must not be edited by the merge.
+func TestARepairThatChangesTheMergeMachineryIsRefusedAndParks(t *testing.T) {
+	// Arrange: the branch changes no machinery before the repair, and the
+	// repair adds a change to the merge package.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.git.changedIn["master...feature"] = [][]string{
+		{"modules/app/agent-repl/webapp/src/a.ts"},
+		{"modules/app/agent-repl/webapp/src/a.ts", "modules/app/agent-repl/daemon/internal/merge/testgate.go"},
+	}
+	h.gateFails("daemon")
+	enqueue(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	if err := h.admit(ctx); err != nil {
+		t.Fatalf("admitting: %v", err)
+	}
+
+	// Assert.
+	facts := h.footer.last()
+	if facts.State != StateParked || !strings.Contains(facts.ParkedLine, "internal/merge/testgate.go") {
+		t.Fatalf("state = %q, line = %q; want parked naming the machinery the repair changed", facts.State, facts.ParkedLine)
+	}
+}
+
+// TestMachineryTheBranchAlreadyChangedIsNotARepairsChange covers the other
+// side: a branch whose own work is in the merge package still merges.
+func TestMachineryTheBranchAlreadyChangedIsNotARepairsChange(t *testing.T) {
+	// Arrange: the branch's own work touches the merge package throughout.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/internal/merge/run.go"}
+	h.git.changedIn["master...feature"] = [][]string{{"modules/app/agent-repl/daemon/internal/merge/run.go"}}
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("the merge is %q, want the author's own machinery change landed", facts.State)
+	}
+}
+
+// TestTheRepairBriefForbidsChangingTheMergeMachinery pins the brief's half of
+// the ruling: the agent is told before it is refused.
+func TestTheRepairBriefForbidsChangingTheMergeMachinery(t *testing.T) {
+	tests := []struct{ brief string }{{brief: BriefConflictResolve}, {brief: BriefTestFailureResolve}}
+	for _, tc := range tests {
+		t.Run(tc.brief, func(t *testing.T) {
+			// Arrange.
+			dir := filepath.Join("..", "..", "..", "prompts")
+
+			// Act.
+			brief, err := LoadBrief(dir, tc.brief)
+
+			// Assert.
+			if err != nil || !strings.Contains(brief.Body, "daemon/internal/merge/") || !strings.Contains(brief.Body, "bin/test-all.sh") {
+				t.Fatalf("the %s brief (err %v) does not forbid changing the merge machinery", tc.brief, err)
+			}
+		})
+	}
+}
+
+// --- the escalation record is answered once ------------------------------
+
+// TestTheEscalationRecordIsRemovedOnceRead covers the record's lifetime: it is
+// consumed, so it neither lingers in a tree nor re-parks the next attempt.
+func TestTheEscalationRecordIsRemovedOnceRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.escalate("the storage layer needs redesigning")
+	enqueue(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	if err := h.admit(ctx); err != nil {
+		t.Fatalf("admitting: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Stat(filepath.Join(h.sourceD, EscalationFile)); !os.IsNotExist(err) {
+		t.Fatalf("the escalation record is still there (stat err %v), want it consumed", err)
+	}
+}
+
+// --- the shim that resolves a merge is the workspace agent's own ----------
+
+// TestEveryMergeDeliveryReachesTheWorkspacesOwnSession is the owner's stated
+// invariant (2026-09-28): every brief and every guidance a merge sends goes to
+// the merging workspace's own session, never another.
+func TestEveryMergeDeliveryReachesTheWorkspacesOwnSession(t *testing.T) {
+	// Arrange: another workspace registered beside it, a conflict brief, a
+	// fixes brief and a guidance.
+	h := newHarness(t)
+	h.register("ws-2", "ws-two")
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.escalate("needs a human")
+	enqueue(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := h.admit(ctx); err != nil {
+		t.Fatalf("admitting: %v", err)
+	}
+
+	// Act.
+	if err := route(h, ctx, "g-1", "carry on"); err != nil {
+		t.Fatalf("the guidance: %v", err)
+	}
+
+	// Assert.
+	h.queue.mu.Lock()
+	var reached []ids.WorkspaceID
+	for _, sub := range h.queue.submissions {
+		reached = append(reached, sub.WS)
+	}
+	h.queue.mu.Unlock()
+	h.mu.Lock()
+	reached = append(reached, h.parkedWS...)
+	h.mu.Unlock()
+	if len(reached) != 3 {
+		t.Fatalf("deliveries reached %v, want the conflict brief, the fixes brief and the guidance", reached)
+	}
+	for _, ws := range reached {
+		if ws != theWorkspace {
+			t.Fatalf("a merge delivery reached %s, want only the merging workspace's own session", ws)
+		}
 	}
 }
