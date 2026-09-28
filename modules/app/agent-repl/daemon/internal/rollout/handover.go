@@ -440,7 +440,8 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 		c.log.Debug(opTransfer, "the workspace has no live shim to detach from", fields)
 	}
 
-	if err := c.releaseServing(ctx, ws.ID, fields); err != nil {
+	moved, err := c.releaseServing(ctx, ws.ID, fields)
+	if err != nil {
 		return errors.Join(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
 	}
@@ -461,10 +462,18 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
 		merge(fields, dlog.Context{"expected_host": expected.Host, "expected_web": expected.Web}))
 
+	// THE HOLD THE SUCCESSOR DRAINS is the one this transfer took, unless the
+	// row had already moved before this release: then the successor claimed
+	// (and drained) ahead of this quiesce, nothing will drain the hold taken
+	// here, and waiting on it would only hold the exit for the whole window.
+	handedHold := lease
+	if moved {
+		handedHold = ""
+	}
 	windows.Add(1)
 	go func() {
 		defer windows.Done()
-		if c.timeAdoption(ctx, ws.ID, lease, handed, fields) {
+		if c.timeAdoption(ctx, ws.ID, lease, handedHold, handed, fields) {
 			plan.reclaimed.Add(1)
 		}
 	}()
@@ -564,29 +573,30 @@ func (c *controller) releaseHold(ctx context.Context, ws ids.WorkspaceID, lease 
 // releaseServing clears this daemon's serving claim. The successor waits for
 // this release before beginning adoption, so the normal path owns and clears
 // the row here. The already-released and already-moved arms preserve a durable
-// completed edge if an incumbent resumes after losing an operation's answer.
-func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+// completed edge if an incumbent resumes after losing an operation's answer;
+// moved reports the second, where another instance already serves it.
+func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (moved bool, err error) {
 	owner, err := c.deps.DB.Serving(ctx, ws)
 	if err != nil {
 		c.log.Error(opTransfer, "could not read serving ownership before releasing it", withCause(fields, err))
-		return err
+		return false, err
 	}
 	if owner == nil {
 		c.log.Debug(opTransfer, "serving ownership was already released", fields)
-		return nil
+		return false, nil
 	}
 	if *owner != c.deps.Instance {
 		c.log.Info(opTransfer, "the successor already owns the workspace", merge(fields, dlog.Context{
 			"owner": string(*owner),
 		}))
-		return nil
+		return true, nil
 	}
 	if err := c.deps.DB.ReleaseServing(ctx, ws, c.deps.Instance); err != nil {
 		c.log.Error(opTransfer, "could not release serving ownership", withCause(fields, err))
-		return err
+		return false, err
 	}
 	c.log.Debug(opTransfer, "released serving ownership", fields)
-	return nil
+	return false, nil
 }
 
 // timeAdoption gives the successor its window, and TAKES THE WORKSPACE BACK
@@ -600,10 +610,14 @@ func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fie
 // that adopted in the last instant keeps it, and otherwise this daemon serves
 // it again with its hold released. The fault is still opened, as the record
 // of an adoption that never landed.
-func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, detached bool, fields dlog.Context) bool {
+//
+// lease is the hold this transfer took, which a reclaim releases; handedHold
+// is the hold the successor is expected to drain, which the window waits on
+// (see adopted), empty when nothing will drain one.
+func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease, handedHold ids.LeaseID, detached bool, fields dlog.Context) bool {
 	// An adoption that already landed needs no window: the headless case claims
 	// serving inside Join, before the push it is answering was even read.
-	if c.adopted(ctx, ws, fields) {
+	if c.adopted(ctx, ws, handedHold, fields) {
 		return false
 	}
 	// THE WINDOW IS A DEADLINE, NOT A DELAY. The rendezvous closes the moment
@@ -615,14 +629,16 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 	//
 	// Two things end the wait early: the rendezvous closing (the participants
 	// adopted through this daemon's own handlers) and serving ownership moving
-	// to the successor (the headless case, claimed inside the successor's
-	// Join, which this daemon can only observe by looking). The look is a real
+	// to the successor with the handed hold drained (the headless case,
+	// claimed inside the successor's Join, which this daemon can only observe
+	// by looking; see adopted for why the claim alone is not enough). The look is a real
 	// ticker rather than the injected clock: the clock times the WINDOW, which
 	// a test drives; the look only ever shortens the wait.
 	expired := c.deps.Clock.After(c.deps.AdoptionWindow)
 	done := c.rendezvousDone(ws)
 	look := time.NewTicker(adoptionPoll)
 	defer look.Stop()
+	claimSeen := false
 	for waiting := true; waiting; {
 		select {
 		case <-ctx.Done():
@@ -632,8 +648,13 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 			c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
 			return false
 		case <-look.C:
-			if c.adopted(ctx, ws, fields) {
+			landed, draining := c.adoptionState(ctx, ws, handedHold, fields)
+			if landed {
 				return false
+			}
+			if draining && !claimSeen {
+				claimSeen = true
+				c.log.Debug(opAdoption, "the successor claimed the workspace; the window stays open until it drains the handover hold", fields)
 			}
 		case <-expired:
 			waiting = false
@@ -684,22 +705,52 @@ func (c *controller) rendezvousDone(ws ids.WorkspaceID) <-chan struct{} {
 	return nil
 }
 
-// adopted reports whether some OTHER daemon instance now serves the workspace,
-// which is the only evidence of a completed adoption the outgoing daemon has:
-// there is no daemon-to-daemon channel, so serving ownership in WSM is the
-// whole of the signal.
-func (c *controller) adopted(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) bool {
+// adopted reports whether some OTHER daemon instance now serves the workspace
+// AND has drained the hold this transfer handed it. Both are WSM facts, which
+// is the only evidence of a completed adoption the outgoing daemon has: there
+// is no daemon-to-daemon channel.
+//
+// SERVING OWNERSHIP ALONE IS NOT A FINISHED ADOPTION. The successor claims the
+// row BEFORE it dials the shim and drains the handover hold (adopt.go), and
+// from that claim on the hold is the successor's to release. Ending the window
+// at the claim let this daemon exit while the successor was still dialing, and
+// its state handle's close released the hold it took -- so the successor's
+// drain found its lease gone (`wsm: not found`) and the adoption failed
+// (TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsInOrder,
+// ~1 in 2600 at -parallel 8). The window now stays open until the hold is gone
+// too, so the successor's drain always happens before this daemon exits. An
+// empty lease is another holder's hold, which this transfer never took and so
+// never waits on.
+func (c *controller) adopted(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) bool {
+	done, _ := c.adoptionState(ctx, ws, lease, fields)
+	return done
+}
+
+// adoptionState is adopted's answer plus whether the successor has CLAIMED the
+// workspace but not yet drained the hold, so a window can say so once.
+func (c *controller) adoptionState(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) (done, draining bool) {
 	owner, err := c.deps.DB.Serving(ctx, ws)
 	if err != nil {
 		c.log.Error(opAdoption, "could not read serving ownership", withCause(fields, err))
-		return false
+		return false, false
 	}
 	if owner == nil || *owner == c.deps.Instance {
-		return false
+		return false, false
 	}
-	c.log.Debug(opAdoption, "the successor owns the workspace",
-		merge(fields, dlog.Context{"owner": string(*owner)}))
-	return true
+	fields = merge(fields, dlog.Context{"owner": string(*owner)})
+	if lease != "" {
+		standing, held, err := c.deps.DB.Lease(ctx, ws)
+		if err != nil {
+			c.log.Error(opAdoption, "could not read whether the successor drained the handover hold", withCause(fields, err))
+			return false, false
+		}
+		if held && standing.ID == lease {
+			// Recorded once per window by the caller, not once per look.
+			return false, true
+		}
+	}
+	c.log.Debug(opAdoption, "the successor owns the workspace and drained the handover hold", fields)
+	return true, false
 }
 
 // served lists the workspaces this daemon currently serves, SPLIT IN TWO:

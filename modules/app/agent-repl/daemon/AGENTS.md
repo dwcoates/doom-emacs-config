@@ -790,6 +790,13 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   `wsm.ClaimUnownedServing` (claim only if unowned or already ours), and only
   the side whose claim stood dials the shim -- the successor now claims BEFORE
   it dials, and drains the handover hold on every path past a won claim.
+- **An adoption is finished when the hold is drained, not when the row is
+  claimed.** The successor claims serving, then dials the shim, then drains
+  the transfer's quiesce hold; the incumbent's adoption window
+  (`timeAdoption`/`adopted`) ends only once serving is another instance's AND
+  the hold it handed over is gone. Ending it at the claim let the incumbent
+  exit mid-adoption, and its handle's close released the hold under the
+  successor's drain (`handover: drain ...: release the hold: wsm: not found`).
 - **An expired adoption window reclaims.** The incumbent takes the workspace
   back: claim, re-adopt the detached shim (a handed-over client leaves the
   fleet's session map with its detach, so `Adopt` really dials), release the
