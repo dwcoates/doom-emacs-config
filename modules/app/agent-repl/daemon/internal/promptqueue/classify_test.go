@@ -3,7 +3,9 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1010,5 +1012,58 @@ func TestTheJudgeRefusesADeferredPromptAtItsOwnCallSite(t *testing.T) {
 	// Assert
 	if interject || verdict.Arm != wsm.ArmHoldForTurnEnd || askedCount(h) != 0 {
 		t.Fatalf("verdictFor = (%+v, %v) after %d asks, want hold_for_turn_end and the model never asked", verdict, interject, askedCount(h))
+	}
+}
+
+func TestNeverJudgedAnswersEveryPromptTheModelIsNeverAsked(t *testing.T) {
+	tests := []struct {
+		name   string
+		sub    Submission
+		wantOK bool
+	}{
+		{name: "a session act", sub: submission("t1", "/compact"), wantOK: true},
+		{name: "a deferred prompt", sub: deferredSubmission("t1", "later"), wantOK: true},
+		{name: "an ordinary prompt", sub: submission("t1", "and also this"), wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			verdict, why, ok := h.q.neverJudged(tc.sub)
+
+			// Assert
+			if ok != tc.wantOK {
+				t.Fatalf("neverJudged ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && (verdict.Arm != wsm.ArmHoldForTurnEnd || why == nil) {
+				t.Fatalf("neverJudged = (%+v, why set %v), want hold_for_turn_end with its record", verdict, why != nil)
+			}
+		})
+	}
+}
+
+// TestEveryUnjudgedVerdictIsReadThroughNeverJudged pins that hold,
+// classifyHeld and verdictFor share ONE reading: a site calling
+// sessionActVerdict or deferredVerdict directly could keep a kind of prompt
+// from the model on one path and hand it over on another.
+func TestEveryUnjudgedVerdictIsReadThroughNeverJudged(t *testing.T) {
+	// Arrange
+	body, err := os.ReadFile("classify.go")
+	if err != nil {
+		t.Fatalf("read classify.go: %v", err)
+	}
+
+	// Act
+	calls := map[string]int{}
+	for _, name := range []string{"q.sessionActVerdict(", "q.deferredVerdict(", "q.neverJudged("} {
+		calls[name] = strings.Count(string(body), name)
+	}
+
+	// Assert: each primitive is read once, inside neverJudged, and the three
+	// deciding sites read neverJudged.
+	if calls["q.sessionActVerdict("] != 1 || calls["q.deferredVerdict("] != 1 || calls["q.neverJudged("] != 3 {
+		t.Fatalf("call counts = %v, want sessionActVerdict 1, deferredVerdict 1 (both in neverJudged) and neverJudged 3", calls)
 	}
 }
