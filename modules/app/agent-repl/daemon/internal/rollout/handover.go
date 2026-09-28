@@ -562,6 +562,8 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 			c.log.Error(opTransfer, "the taken-back workspace's running shim could not be re-attached; it is served without a session until its next prompt revives one",
 				withCause(fields, err))
 			failures = append(failures, fmt.Errorf("rollout: reclaim %q: re-attach the shim: %w", ws, err))
+		} else if err := c.awaitReattachedFacts(ctx, ws, fields); err != nil {
+			failures = append(failures, err)
 		}
 	}
 	if err := c.unseal(ctx, ws, move, fields); err != nil {
@@ -584,6 +586,28 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	}
 	c.log.Info(opTransfer, "took the workspace back; this daemon serves it again", fields)
 	return true, errors.Join(failures...)
+}
+
+// awaitReattachedFacts waits, bounded by Deps.FactsBound, for a re-attached
+// shim's re-announced session facts to be taken up.
+//
+// NOTHING IS JUDGED AGAINST A RE-ATTACHED SHIM BEFORE ITS FACTS ARE IN. Until
+// the new watcher takes up the re-announcement it answers no turn in flight
+// for a turn the shim is running, and the take-back's next steps -- the drain
+// it ends, the replacements it asks for again, a refused move's transfer at
+// freeness -- read that as free. The fallback transfer at "freeness" then ran
+// mid-turn (TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout,
+// ~1 in 15 under -parallel 8: asked at .372, facts in at .374).
+func (c *controller) awaitReattachedFacts(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
+	defer cancel()
+	if err := c.deps.Shims.AwaitFacts(facts, ws); err != nil {
+		c.log.Error(opTransfer, "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight",
+			withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+		return fmt.Errorf("rollout: reclaim %q: await the re-attached shim's facts: %w", ws, err)
+	}
+	c.log.Debug(opTransfer, "the re-attached shim's session facts are taken up", fields)
+	return nil
 }
 
 // releaseHold releases the quiesce hold a transfer took -- by its own id, never
