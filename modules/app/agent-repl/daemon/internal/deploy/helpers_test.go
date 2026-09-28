@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/wsm"
 )
 
 // instant is the fixed instant every test's arithmetic starts from.
@@ -319,6 +321,76 @@ type harness struct {
 	layoutErr   error
 	layoutAsked []string
 	progress    *fakeProgress
+	faults      *fakeFaults
+}
+
+// fakeFaults is the state client's fault table: every fault ever opened, in
+// order, with whether it is still open.
+type fakeFaults struct {
+	mu       sync.Mutex
+	recorded []wsm.Fault
+	closed   map[ids.FaultID]bool
+	openErr  error
+	readErr  error
+	closeErr error
+}
+
+func newFakeFaults() *fakeFaults { return &fakeFaults{closed: map[ids.FaultID]bool{}} }
+
+func (f *fakeFaults) OpenFault(_ context.Context, fault wsm.Fault) (ids.FaultID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.openErr != nil {
+		return "", f.openErr
+	}
+	fault.ID = ids.FaultID(fmt.Sprintf("fault-%d", len(f.recorded)+1))
+	f.recorded = append(f.recorded, fault)
+	return fault.ID, nil
+}
+
+func (f *fakeFaults) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	var out []wsm.Fault
+	for _, fault := range f.recorded {
+		if !f.closed[fault.ID] && (scope.Kind == "" || fault.Kind == scope.Kind) {
+			out = append(out, fault)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeFaults) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	f.closed[id] = true
+	return nil
+}
+
+// standing answers the open faults of every kind.
+func (f *fakeFaults) standing(t *testing.T) []wsm.Fault {
+	t.Helper()
+	open, err := f.OpenFaults(context.Background(), wsm.FaultScope{})
+	if err != nil {
+		t.Fatalf("read the standing faults: %v", err)
+	}
+	return open
+}
+
+// seed records a standing fault as an earlier deploy or daemon left it.
+func (f *fakeFaults) seed(t *testing.T, fault wsm.Fault) ids.FaultID {
+	t.Helper()
+	id, err := f.OpenFault(context.Background(), fault)
+	if err != nil {
+		t.Fatalf("seed a fault: %v", err)
+	}
+	return id
 }
 
 // fakeProgress records every statement the deploy made on the update line,
@@ -394,6 +466,7 @@ func newHarness(t *testing.T) *harness {
 
 		freshLayout: runningLayout,
 		progress:    &fakeProgress{},
+		faults:      newFakeFaults(),
 	}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -416,6 +489,7 @@ func newHarness(t *testing.T) *harness {
 		},
 		Clock:    newStepClock(),
 		Progress: h.progress,
+		Faults:   h.faults,
 		Log:      h.log,
 		StateLayout: func(_ context.Context, bin string) (int, error) {
 			h.layoutAsked = append(h.layoutAsked, bin)

@@ -616,6 +616,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Store:      p.Opts.storeSocket,
 		Workspace:  fleet.Workspaces,
 		Progress:   footerResolver,
+		Faults:     p.DB,
+		Joining:    p.Opts.joining != "",
 		Getenv:     os.Getenv,
 	})
 	if err != nil {
