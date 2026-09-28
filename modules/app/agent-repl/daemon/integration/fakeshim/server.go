@@ -183,6 +183,12 @@ type server struct {
 	// real shim's reannounceStart does, so an adopting daemon learns from the
 	// shim which of its open turn rows are still running.
 	turnInFlight *conversationv1.TurnId
+	// adoptedTurn is the turn a VENDOR_STARTED prompt pushed to the main agent
+	// opened, beside turnInFlight, until its own main-agent terminal. It runs
+	// AHEAD of turnInFlight, so the re-announcement states it as
+	// turn_in_flight and turnInFlight as the turn waiting behind it, as the
+	// real shim's reannounceStart does.
+	adoptedTurn *conversationv1.TurnId
 	// liveNow, once set_live_work has stated it, is the live membership every
 	// later re-announcement states, as the real shim's reannounceStart
 	// recomputes it; until then the re-announcement states what StartSession
@@ -476,6 +482,13 @@ func (s *server) startedSession() *conversationv1.SessionStarted {
 	}
 	started := proto.Clone(s.started).(*conversationv1.SessionStarted)
 	started.TurnInFlight = s.turnInFlight
+	started.TurnsWaiting = nil
+	if s.adoptedTurn != nil {
+		started.TurnInFlight = s.adoptedTurn
+		if s.turnInFlight != nil {
+			started.TurnsWaiting = []*conversationv1.TurnId{s.turnInFlight}
+		}
+	}
 	if s.liveNowSet {
 		started.LiveWork = make([]*conversationv1.AgentDetachedWork, 0, len(s.liveNow))
 		for _, item := range s.liveNow {
@@ -492,9 +505,22 @@ func (s *server) openTurn(turn *conversationv1.TurnId) {
 	s.turnInFlight = turn
 }
 
-// settleTurn ends the turn in flight when a pushed frame is the MAIN agent's
-// terminal. A subagent's terminal, or any other frame, leaves it standing.
-func (s *server) settleTurn(agent string, frame *conversationv1.AgentFrame) {
+// adoptTurn records the turn a VENDOR_STARTED prompt pushed to the main agent
+// opened. Any other prompt opens nothing.
+func (s *server) adoptTurn(agent string, prompt *conversationv1.AgentPrompt) {
+	if agent != MainAgentID || prompt.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED || prompt.GetId() == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.adoptedTurn = prompt.GetId()
+}
+
+// settleTurn ends a turn when a pushed frame is the MAIN agent's terminal: the
+// turn its stamp names, or, unstamped, the RUNNING one (the adopted turn ahead
+// of the turn in flight, when there is one). A subagent's terminal, or any
+// other frame, leaves every turn standing.
+func (s *server) settleTurn(agent, turn string, frame *conversationv1.AgentFrame) {
 	if agent != MainAgentID {
 		return
 	}
@@ -502,7 +528,12 @@ func (s *server) settleTurn(agent string, frame *conversationv1.AgentFrame) {
 	case *conversationv1.AgentFrame_Success, *conversationv1.AgentFrame_Failure:
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.turnInFlight = nil
+		switch {
+		case s.adoptedTurn != nil && (turn == "" || turn == s.adoptedTurn.GetValue()):
+			s.adoptedTurn = nil
+		case turn == "" || turn == s.turnInFlight.GetValue():
+			s.turnInFlight = nil
+		}
 	}
 }
 
@@ -865,7 +896,7 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 			}},
 		}},
 	}
-	s.settleTurn(MainAgentID, terminal)
+	s.settleTurn(MainAgentID, req.Msg.GetTurn().GetValue(), terminal)
 	s.agents.publish(agentFrame{agent: MainAgentID, frame: terminal})
 	return connect.NewResponse(&shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{

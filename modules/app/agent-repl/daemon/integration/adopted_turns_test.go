@@ -213,3 +213,61 @@ func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 		})
 	}
 }
+
+// A TURN WAITING BEHIND A VENDOR-STARTED TURN SURVIVES A RE-ATTACH. The
+// daemon's own turn was accepted, the vendor then started a turn of its own
+// that runs ahead of it, and the daemon died with both held by the shim. The
+// successor learns the running turn from turn_in_flight and the waiting one
+// from turns_waiting: it keeps both open, the waiting turn stands in flight
+// when the vendor's turn ends, and each is closed by its own terminal. Told
+// only of the running turn, it closed the waiting one as ended unobserved.
+func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: the daemon's turn is accepted, the vendor starts one ahead of
+	// it, and the daemon dies with the shim running both.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	waiting := openTurnOn(t, f, "k-waiting-behind-vendor")
+	const vendorTurn = "turn-vendor-ahead"
+	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: vendorTurn},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record of the adopted turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
+	})
+	info := f.shim.Info()
+	f.d.Kill()
+	writeIntentManifest(t, f.d, rollout.ManifestSession{
+		Workspace: ids.WorkspaceID(f.ws.GetId()), Dir: f.repo.Dir, ShimPID: info.PID,
+		VendorSessionID: info.VendorSessionID, Intent: rollout.IntentPreserve,
+	})
+
+	// Act: the successor boots and adopts the survivor, then the vendor's
+	// turn ends and the waiting turn after it.
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
+		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
+		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+	})
+	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the INFO record keeping the waiting turn open", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.sessionwatcher.turn_open_at_attach" && r.Level == "info" && r.Context["turn_id"] == string(waiting)
+	})
+	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, successFrame(mainAgent, nil))
+	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the waiting turn standing in flight at the vendor turn's end", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.sessionwatcher.turn_resumed" && r.Level == "info" && r.Context["turn_id"] == string(waiting)
+	})
+	f.shim.PushAgentFrameIn(mainAgent, string(waiting), successFrame(mainAgent, nil))
+
+	// Assert
+	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the waiting turn's own completed close", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == string(waiting) && r.Context["close"] == "completed"
+	})
+	for _, r := range harness.ReadCumulativeWorkspaceLog(t, f.repo.Dir, "daemon") {
+		if r.Operation == "daemon.sessionwatcher.turn_ended_unobserved" && r.Context["turn_id"] == string(waiting) {
+			t.Fatalf("the waiting turn %s was closed as unobserved: %v", waiting, r)
+		}
+	}
+	expectNoWorkspaceWarnings(t, f)
+}

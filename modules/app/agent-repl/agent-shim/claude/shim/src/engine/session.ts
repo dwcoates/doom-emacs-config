@@ -4754,6 +4754,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         : { permissionMode: announcedStart.permissionMode }),
       modelCatalog: announcedStart.modelCatalog,
       ...servedTurnInFlight(),
+      turnsWaiting: servedTurnsWaiting(),
       liveWork: await announceLiveWorkNow(),
     });
   }
@@ -4902,14 +4903,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // An adopted turn IS served: the daemon learns it from its prompt row and
     // tracks it like any other, and a re-attaching daemon learns it here. It is
     // the vendor turn RUNNING, so it is served ahead of a daemon turn whose
-    // send waits in the vendor's queue behind it -- the one field states one
-    // turn, and the daemon stands the waiting one behind it on its own.
+    // send waits in the vendor's queue behind it; that one is served as
+    // WAITING (servedTurnsWaiting).
     return adopted ?? (open === undefined || open.keepalive ? undefined : open);
   }
 
   function servedTurnInFlight(): { turnInFlight?: conversationv1.TurnId } {
     const served = servedOpenTurn();
     return served === undefined ? {} : { turnInFlight: served.id };
+  }
+
+  /**
+   * The turns WAITING behind the served turn in flight, in the order they will
+   * run: the send slot's turn while an adopted turn runs ahead of it. A keep-
+   * alive is never served, waiting or not.
+   *
+   * A daemon that re-attaches while a StartTurn's send waits behind the vendor's
+   * own turn was told only of the adopted turn, and closed the waiting one as
+   * ended unobserved while the shim went on to run it.
+   */
+  function servedTurnsWaiting(): conversationv1.TurnId[] {
+    if (adopted === undefined || open === undefined || open.keepalive || open === adopted) return [];
+    return [open.id];
   }
 
   function sessionLive(): conversationv1.SessionLive {

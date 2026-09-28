@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -405,7 +406,7 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			name: "the main agent's success ends it",
 			act: func(srv *server) {
 				srv.openTurn(turn)
-				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
+				srv.settleTurn(MainAgentID, "", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
 			},
 			want: "",
 		},
@@ -413,7 +414,7 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			name: "the main agent's failure ends it",
 			act: func(srv *server) {
 				srv.openTurn(turn)
-				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{}}})
+				srv.settleTurn(MainAgentID, "", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{}}})
 			},
 			want: "",
 		},
@@ -421,7 +422,7 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			name: "a subagent's terminal leaves it standing",
 			act: func(srv *server) {
 				srv.openTurn(turn)
-				srv.settleTurn("sub-1", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
+				srv.settleTurn("sub-1", "", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
 			},
 			want: "turn-1",
 		},
@@ -429,7 +430,7 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			name: "a main-agent frame that is no terminal leaves it standing",
 			act: func(srv *server) {
 				srv.openTurn(turn)
-				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{}}})
+				srv.settleTurn(MainAgentID, "", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{}}})
 			},
 			want: "turn-1",
 		},
@@ -452,6 +453,103 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			}
 			if got.GetTurnInFlight().GetValue() != tt.want {
 				t.Fatalf("re-announced turn_in_flight = %q, want %q", got.GetTurnInFlight().GetValue(), tt.want)
+			}
+		})
+	}
+}
+
+// TestTheReannouncementStatesTheTurnWaitingBehindTheAdoptedTurn covers the
+// adopted turn the fake models as the real shim does: a VENDOR_STARTED prompt
+// to the main agent opens a turn that runs AHEAD of a started one, so the
+// re-announcement names it in flight and the started turn as waiting.
+func TestTheReannouncementStatesTheTurnWaitingBehindTheAdoptedTurn(t *testing.T) {
+	started := &conversationv1.TurnId{Value: "turn-1"}
+	vendor := &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-v"},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	}
+	success := &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}}
+	tests := []struct {
+		name         string
+		act          func(srv *server)
+		wantInFlight string
+		wantWaiting  []string
+	}{
+		{
+			name:         "a vendor-started turn runs ahead of the started one",
+			act:          func(srv *server) { srv.openTurn(started); srv.adoptTurn(MainAgentID, vendor) },
+			wantInFlight: "turn-v",
+			wantWaiting:  []string{"turn-1"},
+		},
+		{
+			name:         "a vendor-started turn alone waits for nothing",
+			act:          func(srv *server) { srv.adoptTurn(MainAgentID, vendor) },
+			wantInFlight: "turn-v",
+		},
+		{
+			name: "the vendor-started turn's own terminal leaves the started one running",
+			act: func(srv *server) {
+				srv.openTurn(started)
+				srv.adoptTurn(MainAgentID, vendor)
+				srv.settleTurn(MainAgentID, "turn-v", success)
+			},
+			wantInFlight: "turn-1",
+		},
+		{
+			name: "an unstamped terminal ends the running vendor-started turn",
+			act: func(srv *server) {
+				srv.openTurn(started)
+				srv.adoptTurn(MainAgentID, vendor)
+				srv.settleTurn(MainAgentID, "", success)
+			},
+			wantInFlight: "turn-1",
+		},
+		{
+			name: "the waiting turn's own terminal leaves the vendor-started one running",
+			act: func(srv *server) {
+				srv.openTurn(started)
+				srv.adoptTurn(MainAgentID, vendor)
+				srv.settleTurn(MainAgentID, "turn-1", success)
+			},
+			wantInFlight: "turn-v",
+		},
+		{
+			name: "a prompt of another origin adopts nothing",
+			act: func(srv *server) {
+				srv.openTurn(started)
+				srv.adoptTurn(MainAgentID, &conversationv1.AgentPrompt{
+					Id:     &conversationv1.TurnId{Value: "turn-u"},
+					Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+				})
+			},
+			wantInFlight: "turn-1",
+		},
+		{
+			name:         "a subagent's vendor-started prompt adopts nothing",
+			act:          func(srv *server) { srv.openTurn(started); srv.adoptTurn("sub-1", vendor) },
+			wantInFlight: "turn-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			srv := newServer(NewRecorder(), Profile{}, nil)
+			srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+				Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1"},
+			}}})
+
+			// Act
+			tt.act(srv)
+
+			// Assert
+			got := srv.startedSession()
+			var waiting []string
+			for _, turn := range got.GetTurnsWaiting() {
+				waiting = append(waiting, turn.GetValue())
+			}
+			if got.GetTurnInFlight().GetValue() != tt.wantInFlight || !slices.Equal(waiting, tt.wantWaiting) {
+				t.Fatalf("re-announced (turn_in_flight, turns_waiting) = (%q, %v), want (%q, %v)",
+					got.GetTurnInFlight().GetValue(), waiting, tt.wantInFlight, tt.wantWaiting)
 			}
 		})
 	}
