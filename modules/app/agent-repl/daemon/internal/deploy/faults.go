@@ -67,7 +67,7 @@ func (d *Deployer) recordFailure(ctx context.Context, err error) {
 	}
 	ctx = context.WithoutCancel(ctx)
 	fields := dlog.Context{"step": failure.Step}
-	d.closeStepFaults(ctx, failure.Step, "a later failure of the same step supersedes it")
+	d.closeStepFaults(ctx, failure.Step, health.EdgeSuperseded)
 	id, openErr := d.deps.Faults.OpenFault(ctx, wsm.Fault{
 		Kind:     health.KindDeployFailed,
 		Detail:   fmt.Sprintf("the deploy failed at its %s step; the running build keeps serving: %v", failure.Step, err),
@@ -84,38 +84,32 @@ func (d *Deployer) recordFailure(ctx context.Context, err error) {
 // stepSucceeded closes every standing fault of a step this deploy got
 // through.
 func (d *Deployer) stepSucceeded(ctx context.Context, step string) {
-	d.closeStepFaults(context.WithoutCancel(ctx), step, "a deploy got through the step")
+	d.closeStepFaults(context.WithoutCancel(ctx), step, health.EdgeDeployStepSucceeded)
 }
 
-// CloseEarlierFailures closes every `deploy_failed` fault standing when this
-// daemon boots: an earlier daemon opened it, and no strip of this one draws
-// it. A deploy that fails again reopens it. It is called once, by a daemon
-// that owns its state (never a successor still joining, whose handle is
-// read-only and whose incumbent closed each step's faults as its deploy got
-// through them).
+// CloseEarlierFailures fires the daemon-boot recovery edge: every
+// daemon-scoped fault standing when this daemon boots whose lifetime ends at a
+// boot (health/lifetime.go: `deploy_failed`, and a poisoned sink or a
+// read-only handle, which were an earlier PROCESS's) is closed, because an
+// earlier daemon opened it and no strip of this one draws it. A deploy that
+// fails again reopens it. It is called once, by a daemon that owns its state
+// (never a successor still joining, whose handle is read-only and whose
+// incumbent closed each step's faults as its deploy got through them).
 func (d *Deployer) CloseEarlierFailures(ctx context.Context) {
-	d.closeStepFaults(ctx, "", "an earlier daemon left it standing, and no strip of this one draws it")
+	d.closeStepFaults(ctx, "", health.EdgeDaemonBoot)
 }
 
-// closeStepFaults closes the standing daemon-scoped `deploy_failed` faults of
-// one step, or of every step when step is empty. A read or a close that fails
-// is ERROR and leaves the fault standing.
-func (d *Deployer) closeStepFaults(ctx context.Context, step, why string) {
-	fields := dlog.Context{"step": step, "why": why}
-	open, err := d.deps.Faults.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindDeployFailed})
-	if err != nil {
-		d.log.Error(opFault, "could not read the standing deploy faults to close them", withCause(fields, err))
-		return
-	}
-	for _, f := range open {
-		if f.Workspace != nil || (step != "" && health.DeployFailureOf(f).Step != step) {
-			continue
+// closeStepFaults fires one recovery edge over the standing daemon-scoped
+// faults: those of one step when step is named, every one whose lifetime ends
+// at the edge when it is empty. The kinds are the lifetime table's. A read or
+// a close that fails is ERROR in health.CloseOnEdge and leaves the fault
+// standing.
+func (d *Deployer) closeStepFaults(ctx context.Context, step string, edge health.Edge) {
+	scope := health.EdgeScope{DaemonOnly: true}
+	if step != "" {
+		scope.Match = func(f wsm.Fault) bool {
+			return f.Kind == health.KindDeployFailed && health.DeployFailureOf(f).Step == step
 		}
-		faultFields := merge(fields, dlog.Context{"fault": string(f.ID), "fault_step": health.DeployFailureOf(f).Step})
-		if err := d.deps.Faults.CloseFault(ctx, f.ID, d.deps.Clock.Now()); err != nil {
-			d.log.Error(opFault, "could not close a standing deploy fault", withCause(faultFields, err))
-			continue
-		}
-		d.log.Info(opFault, "closed a standing deploy fault", faultFields)
 	}
+	health.CloseOnEdge(ctx, d.deps.Faults, d.log.With(dlog.Context{"step": step}), edge, scope, d.deps.Clock.Now())
 }
