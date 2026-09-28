@@ -289,6 +289,7 @@ func TestMergeLeaseRefusesSubmit(t *testing.T) {
 
 	// Act: enqueue the merge (admits immediately — an empty queue) and wait
 	// for the conflict-repair turn to be genuinely open.
+	harness.CommitWork(t, child.GetDir())
 	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -380,6 +381,7 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 			defer root.Close()
 
 			// Act: a clean merge (no conflict, a passing test gate) lands.
+			harness.CommitWork(t, child.GetDir())
 			if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 				t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 			}
@@ -446,6 +448,7 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-parked")
 	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
+	harness.CommitWork(t, child.GetDir())
 	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -589,6 +592,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// workspace while it is open.
 	turn := SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
+	harness.CommitWork(t, child.GetDir())
 	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -928,6 +932,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		w.ExpectWarnings("daemon.merge.abort")
 
 		// Act
+		harness.CommitWork(t, child.GetDir())
 		if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 			t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 		}
@@ -1040,6 +1045,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 			w.ExpectWarnings("daemon.merge.post_prompt")
 
 			// Act
+			harness.CommitWork(t, child.GetDir())
 			if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 				t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 			}
