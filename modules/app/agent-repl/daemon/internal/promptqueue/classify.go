@@ -27,6 +27,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		Origin:    sub.Origin.String(),
 		Target:    sub.Target,
 		QueuedAt:  q.deps.Now(),
+		Delivery:  sub.Delivery,
 	}
 	if lease != nil {
 		kind := lease.kind
@@ -44,6 +45,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// reason: it is queued, never classified (sessionActVerdict).
 	var cut runningCut
 	underCut := false
+	deferred := false
 	ownAct := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 	if running != "" {
 		if cut, underCut = q.runningCut(sub.WS); underCut {
@@ -55,6 +57,9 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 			}
 		} else if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
 			ownAct = command
+			held.Classification = &verdict
+		} else if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
+			deferred = true
 			held.Classification = &verdict
 		} else {
 			held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
@@ -83,6 +88,10 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	}
 	if ownAct != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
 		neverClassified(log, sub.Turn, ownAct, running)
+		return disposition, nil
+	}
+	if deferred {
+		deferredNeverClassified(log, sub.Turn, running)
 		return disposition, nil
 	}
 
@@ -121,6 +130,11 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		q.record(ctx, sub, verdict, log)
 		return
 	}
+	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
+		deferredNeverClassified(log, sub.Turn, running)
+		q.record(ctx, sub, verdict, log)
+		return
+	}
 	q.record(ctx, sub, wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}, log)
 	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
@@ -148,6 +162,30 @@ func (q *queue) sessionActVerdict(sub Submission) (wsm.Classification, conversat
 		Reason: "the prompt is " + literal + ", a session act: it is queued behind the running turn and never classified",
 		At:     q.deps.Now(),
 	}, command, true
+}
+
+// deferredVerdict answers the verdict a DEFERRED prompt earns while a turn
+// runs: hold for that turn's end. It is QUEUED AND NEVER CLASSIFIED, like a
+// session act, because what the user asked for is "after this turn, as its
+// own turn", and a classifier's interject is exactly what that excludes. A
+// turn end delivers held prompts one at a time, so it runs as its own turn.
+func (q *queue) deferredVerdict(sub Submission) (wsm.Classification, bool) {
+	if sub.Delivery != wsm.DeliveryDeferred {
+		return wsm.Classification{}, false
+	}
+	return wsm.Classification{
+		Arm:    wsm.ArmHoldForTurnEnd,
+		Reason: "the prompt was deferred: it runs as its own turn after the running one, and is never classified",
+		At:     q.deps.Now(),
+	}, true
+}
+
+// deferredNeverClassified records, at INFO, a deferred prompt kept from the
+// classifier.
+func deferredNeverClassified(log dlog.Logger, held, running ids.TurnID) {
+	log.Info(opClassify, "the prompt was deferred; it waits for the running turn to end and is never classified", dlog.Context{
+		"held_turn": string(held), "running_turn": string(running),
+	})
 }
 
 // neverClassified records, at INFO, a session act kept from the classifier.
@@ -188,6 +226,13 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	// call site's own refusal, so no path to Judge can carry one.
 	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
 		neverClassified(log, sub.Turn, command, running)
+		return verdict, false
+	}
+	// NOR DOES A DEFERRED PROMPT, for the same reason: hold, classifyHeld and
+	// every re-judgement decide it first, and this is the call site's own
+	// refusal.
+	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
+		deferredNeverClassified(log, sub.Turn, running)
 		return verdict, false
 	}
 

@@ -115,9 +115,12 @@ type Handler interface {
 	// Submit runs one submission: recognize it, mirror what it produced into
 	// the root feed, and forward an ordinary prompt to the queue. origin is
 	// REQUIRED — an UNSPECIFIED origin is refused here, before anything is
-	// minted or mirrored. feed, when set, addresses a subagent bubble's
-	// composer; recognition is unchanged either way.
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, target *feedid.Ref) (Outcome, error)
+	// minted or mirrored. delivery is how the prompt asked to be delivered
+	// (agentrepl.v1 SubmitPromptDelivery; wsm.DeliveryOrdinary for an absent
+	// field) and is carried to the queue, which stores it on any hold. feed,
+	// when set, addresses a subagent bubble's composer; recognition is
+	// unchanged either way.
+	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error)
 	// Recognize reports what the daemon makes of a submission's text without
 	// acting on it. It is exported so the recognition table has one home and
 	// one test surface.

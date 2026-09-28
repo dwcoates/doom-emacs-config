@@ -8,7 +8,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/wsm"
 )
 
 // FormatVersion is the one entry format this ingress reads. A file naming any
@@ -24,8 +27,13 @@ const FormatVersion = 1
 //	  "idempotency_key": "the key of the SubmitPrompt attempt it re-drives",
 //	  "origin": "PROMPT_ORIGIN_USER_SENT",
 //	  "said": { ...the SubmitPromptRequest.said UserSaid, in protojson... },
-//	  "queued_at": "2026-09-28T12:00:00.000000000Z"
+//	  "queued_at": "2026-09-28T12:00:00.000000000Z",
+//	  "delivery": "SUBMIT_PROMPT_DELIVERY_DEFERRED"
 //	}
+//
+// `delivery` is OPTIONAL and mirrors SubmitPromptRequest.delivery: absent is
+// the ordinary delivery, and a present one names the agentrepl.v1
+// SubmitPromptDelivery value the attempt asked for.
 //
 // One file holds one prompt, so a file is removed exactly when its one prompt
 // was accepted. Files are ingested in NAME order, and a producer names them
@@ -46,13 +54,17 @@ type Entry struct {
 	// QueuedAt is when the producer wrote the entry. It is carried for the
 	// record only; order is the file name's.
 	QueuedAt string `json:"queued_at"`
+	// Delivery is the SubmitPromptDelivery value NAME, as protojson spells
+	// it, empty for the ordinary delivery.
+	Delivery string `json:"delivery,omitempty"`
 }
 
 // decoded is an entry with its wire fields decoded.
 type decoded struct {
 	Entry
-	origin conversationv1.PromptOrigin
-	said   *conversationv1.UserSaid
+	origin   conversationv1.PromptOrigin
+	said     *conversationv1.UserSaid
+	delivery wsm.Delivery
 }
 
 // parse decodes one entry file, refusing anything the ingress could only act
@@ -89,5 +101,23 @@ func parse(data []byte) (decoded, error) {
 	if len(said.GetContent().GetBlocks()) == 0 {
 		return decoded{}, fmt.Errorf("said carries no content blocks")
 	}
-	return decoded{Entry: entry, origin: conversationv1.PromptOrigin(value), said: said}, nil
+	delivery, err := deliveryOf(entry.Delivery)
+	if err != nil {
+		return decoded{}, err
+	}
+	return decoded{Entry: entry, origin: conversationv1.PromptOrigin(value), said: said, delivery: delivery}, nil
+}
+
+// deliveryOf reads an entry's delivery. Absent is the ordinary one; a name
+// this reader does not honor is malformed, never read as the ordinary
+// delivery: a deferred prompt misread would be classified and could interject.
+func deliveryOf(name string) (wsm.Delivery, error) {
+	switch name {
+	case "":
+		return wsm.DeliveryOrdinary, nil
+	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED.String():
+		return wsm.DeliveryDeferred, nil
+	default:
+		return 0, fmt.Errorf("delivery %q is not a delivery this ingress honors", name)
+	}
 }

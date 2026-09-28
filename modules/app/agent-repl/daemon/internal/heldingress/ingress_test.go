@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/flock"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/wsm"
 )
 
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
@@ -524,5 +525,31 @@ func TestASweepOfAMissingDirectoryNeverCreatesIt(t *testing.T) {
 	// Assert
 	if _, err := os.Stat(w.dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stat %s = %v, want the sweep to leave the directory absent", w.dir, err)
+	}
+}
+
+func TestSweepSubmitsAnEntryUnderItsOwnDelivery(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery string
+		want     wsm.Delivery
+	}{
+		{name: "an ordinary entry", delivery: "", want: wsm.DeliveryOrdinary},
+		{name: "a deferred entry stays deferred", delivery: "SUBMIT_PROMPT_DELIVERY_DEFERRED", want: wsm.DeliveryDeferred},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.writeDelivered("held_20260928T120001_a.json", "/work/one", "k-1", "first", tc.delivery)
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			if len(w.handler.calls) != 1 || w.handler.calls[0].Delivery != tc.want {
+				t.Fatalf("submissions = %+v, want one delivered %s", w.handler.calls, tc.want)
+			}
+		})
 	}
 }
