@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# reference-transaction — master moves only through the agent-repl merge queue.
+#
+# Git runs this hook for every ref transaction, once per phase. In the
+# `prepared` phase a nonzero exit aborts the whole transaction, so this is the
+# ONE place that sees every way master can move: a commit, a merge (fast-forward
+# or not), a rebase, a cherry-pick, a reset, a pull, `branch -f`, `update-ref`.
+# A pre-commit or pre-merge-commit hook would miss the fast-forward, which runs
+# no other hook at all.
+#
+# THE RULE, when the repository enforces it:
+#   - A transaction that moves refs/heads/master is refused unless the merge
+#     queue made it. The queue's fast-forward (daemon/internal/gitclient
+#     FastForward) runs git with AGENT_REPL_MERGE_QUEUE=1; nothing else sets it.
+#   - AGENT_REPL_OWNER_OVERRIDE=1 is the owner's escape hatch: the move goes
+#     through, and the hook says it bypassed the queue.
+#   - Every other ref (another branch, HEAD itself, ORIG_HEAD, AUTO_MERGE) is
+#     never looked at.
+#
+# ENFORCEMENT IS OFF BY DEFAULT. The hook does nothing, silently, unless the
+# repository opts in:
+#   git config agentrepl.mergeQueueEnforce true
+# The key is read from the repository the hook runs in, so a repository that
+# inherits this hooks directory without setting the key is untouched too.
+#
+# Installed through `git config core.hooksPath .githooks`, like pre-commit.
+# AGENT_REPL_MANAGED_HOOK: agent-repl-merge-queue-guard
+set -euo pipefail
+
+readonly PROTECTED_REF="refs/heads/master"
+readonly ENFORCE_KEY="agentrepl.mergeQueueEnforce"
+readonly QUEUE_MARKER="AGENT_REPL_MERGE_QUEUE"
+readonly OWNER_OVERRIDE="AGENT_REPL_OWNER_OVERRIDE"
+readonly SKILL=".claude/skills/merge-queue/SKILL.md"
+
+# Only the prepared phase can refuse; committed and aborted are reports.
+[ "${1:-}" = "prepared" ] || exit 0
+
+moves_master=0
+while read -r old new ref; do
+  if [ "$ref" = "$PROTECTED_REF" ] && [ "$old" != "$new" ]; then
+    moves_master=1
+  fi
+done
+[ "$moves_master" -eq 1 ] || exit 0
+
+# `git config --get` exits 1 for an unset key, which is enforcement off. Any
+# other failure is a value git cannot read as a boolean, and a guard whose
+# switch is unreadable refuses rather than guessing which way it was meant.
+set +e
+enforce="$(git config --type=bool --get "$ENFORCE_KEY" 2>&1)"
+status=$?
+set -e
+case "$status" in
+  0) ;;
+  1) exit 0 ;;
+  *)
+    echo "[merge-queue] $ENFORCE_KEY is set but unreadable ($enforce); refusing to move master." >&2
+    echo "[merge-queue] Set it to true or false: git config $ENFORCE_KEY false" >&2
+    exit 1
+    ;;
+esac
+[ "$enforce" = "true" ] || exit 0
+
+if [ "${!QUEUE_MARKER:-}" = "1" ]; then
+  exit 0
+fi
+
+if [ "${!OWNER_OVERRIDE:-}" = "1" ]; then
+  echo "[merge-queue] $OWNER_OVERRIDE=1: master moved by hand, BYPASSING the merge queue." >&2
+  exit 0
+fi
+
+cat >&2 <<EOF
+[merge-queue] Refused: master moves only through the agent-repl merge queue.
+[merge-queue] Enqueue the branch with the merge-queue skill ($SKILL), which
+[merge-queue] merges, gates and fast-forwards master for you.
+[merge-queue] A refused fast-forward leaves its tree checked out; \`git reset --merge\` puts the checkout back.
+[merge-queue] Owner only: $OWNER_OVERRIDE=1 lets this one through.
+EOF
+exit 1
