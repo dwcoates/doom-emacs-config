@@ -2,22 +2,16 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"strings"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
-	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/stateroot"
 )
@@ -40,16 +34,9 @@ type deployCaller interface {
 // deployDialer builds a client for the daemon at a loopback address.
 type deployDialer func(address string) deployCaller
 
-// dialDaemon is the production dialer: h2c on the daemon's one origin.
+// dialDaemon is the production dialer.
 func dialDaemon(address string) deployCaller {
-	client := &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, network, addr)
-		},
-	}}
-	return agentreplv1connect.NewAgentReplClient(client, "http://"+address)
+	return newDaemonClient(address)
 }
 
 // runDeployVerb runs the verb and answers the process's exit status.
@@ -70,18 +57,14 @@ func runDeployVerb(ctx context.Context, args []string, dial deployDialer, out, e
 		fmt.Fprintf(errOut, "claude-repld deploy: resolve the state root: %v\n", err)
 		return exitFailure
 	}
-	advert, err := daemonaddr.ReadAdvertisement(layout.DaemonAddr())
+	address, err := servingAddress(layout)
 	if err != nil {
-		fmt.Fprintf(errOut, "claude-repld deploy: no daemon is serving: read %s: %v\n", layout.DaemonAddr(), err)
+		fmt.Fprintf(errOut, "claude-repld deploy: %v\n", err)
 		return exitFailure
 	}
-	if advert.Address == "" {
-		fmt.Fprintf(errOut, "claude-repld deploy: no daemon is serving: %s names no address\n", layout.DaemonAddr())
-		return exitFailure
-	}
-	resp, err := dial(advert.Address).Deploy(ctx, connect.NewRequest(&agentreplv1.DeployRequest{Force: *force}))
+	resp, err := dial(address).Deploy(ctx, connect.NewRequest(&agentreplv1.DeployRequest{Force: *force}))
 	if err != nil {
-		fmt.Fprintf(errOut, "claude-repld deploy: the daemon at %s failed the deploy: %v\n", advert.Address, err)
+		fmt.Fprintf(errOut, "claude-repld deploy: the daemon at %s failed the deploy: %v\n", address, err)
 		return exitFailure
 	}
 	switch result := resp.Msg.GetResult().(type) {
