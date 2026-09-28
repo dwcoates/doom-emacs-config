@@ -97,6 +97,29 @@ Each has a project directory; ws-one has a live composer buffer."
       (should (equal (alist-get 'text (alist-get 'text (aref (alist-get 'blocks (alist-get 'content (alist-get 'said body))) 0)))
                      "hello")))))
 
+(defun agent-repl-test-hi--body-delivery (delivery)
+  "Write one entry under DELIVERY and return its body's `delivery' member.
+Answers the symbol `absent' when the body carries no such member."
+  (let* ((path (agent-repl-held-ingress-write
+                "ws-one" (agent-repl-test-hi--said "hi") :deferred-prompt "k-1" delivery))
+         (body (with-temp-buffer
+                 (insert-file-contents path)
+                 (json-parse-buffer :object-type 'alist))))
+    (if (assq 'delivery body) (alist-get 'delivery body) 'absent)))
+
+(ert-deftest agent-repl-held-ingress-write-omits-an-ordinary-delivery ()
+  "An ordinary prompt's entry carries no `delivery': absence is the fact."
+  (agent-repl-test-hi--with
+    ;; Act / Assert
+    (should (eq (agent-repl-test-hi--body-delivery nil) 'absent))))
+
+(ert-deftest agent-repl-held-ingress-write-carries-a-deferred-delivery ()
+  "A deferred prompt's entry names its delivery, so the daemon keeps it deferred."
+  (agent-repl-test-hi--with
+    ;; Act / Assert
+    (should (equal (agent-repl-test-hi--body-delivery :deferred)
+                   "SUBMIT_PROMPT_DELIVERY_DEFERRED"))))
+
 (ert-deftest agent-repl-held-ingress-write-keeps-non-ascii-words-intact ()
   "The file is UTF-8, so words outside ASCII reach the daemon unchanged."
   (agent-repl-test-hi--with
