@@ -2979,7 +2979,8 @@ on the roster stream — and it clears the row's viewed marker on that same
 edge, in that same push.  A report back would be Emacs telling the daemon
 a fact the daemon has just told Emacs.
 
-The daemon clears the marker on any changed arm, from any origin."
+The daemon drops the marker whenever the row leaves a read turn-end state,
+from any origin."
   (agent-repl--tab-dwell-arm ws now))
 
 (defun agent-repl--tab-dwell-on-activation (&rest _)
@@ -3004,9 +3005,9 @@ same reason."
 (defun agent-repl--tab-view-restore-on-viewed-cleared (ws)
   "React to the daemon clearing WS's viewed marker: restore FULL.
 Registered on `agent-repl-roster-viewed-cleared-functions', which fires
-once per row whose marker went present->absent.  The daemon clears the
-marker on any status change from any origin, so this reaction never has
-to enumerate origins."
+once per row whose marker went present->absent.  The daemon drops the
+marker on any change that leaves a read turn-end state, from any origin,
+so this reaction never has to enumerate origins."
   (agent-repl--log ws "tab-view: FULL ws=%s reason=viewed-cleared" ws)
   (agent-repl--tab-view-restore-full ws (current-time)))
 
@@ -3017,8 +3018,8 @@ to enumerate origins."
   "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
 Registered on `agent-repl-roster-status-change-functions'.
 
-The daemon holds the viewed marker on a DONE row only: a dwell reported
-while WS is thinking, waiting, severed or anything else is dropped, so
+The daemon takes a dwell on a turn-end row (done or interrupted) only: one
+reported while WS is thinking, waiting, severed or anything else is dropped, so
 there is no marker for the viewed-cleared edge to announce later.  Without
 this, a user who watched a turn run to done would have spent the one-shot
 dwell on the running turn, and the finished response would never go

@@ -463,11 +463,11 @@ func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 
 // ---- The VIEWED marker: the row's display mode ----------------------------
 //
-// PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a DONE
-// row, and the only thing that lowers it there is the row's next STATUS
-// CHANGE. These lock all three halves, because a marker that never clears, a
-// marker that clears on every push and a marker drawn on live or exceptional
-// work are the three ways this feature fails.
+// PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a
+// turn-end row (done or interrupted), and it is derived from the read-result
+// fact, which only the next turn resets. These lock all three halves, because
+// a marker that never clears, a marker that clears on every push and a marker
+// drawn on live or exceptional work are the three ways this feature fails.
 
 // finished brings the workspace to a DONE row: a live session whose turn
 // completed.
@@ -505,7 +505,7 @@ func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	}
 }
 
-func TestViewedReportNeverDrawsANonDoneRowPartial(t *testing.T) {
+func TestViewedReportNeverDrawsANonTurnEndRowPartial(t *testing.T) {
 	cases := []struct {
 		name    string
 		arrange func(t *testing.T, r sidebarResolver)
@@ -537,16 +537,12 @@ func TestViewedReportNeverDrawsANonDoneRowPartial(t *testing.T) {
 			live(t, r)
 			r.OnPermission(theWS, agent("a1"), permissionAsk("p1"))
 		}, want: "permission"},
-		{name: "interrupted", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-			r.SetTurnEnded(theWS, wsm.CloseKilled)
-		}, want: "interrupted"},
 		{name: "idle_async", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+			r.SetViewed(theWS) // read, so the unread done yields to idle_async
 		}, want: "idle_async"},
 		{name: "vendor_blocked", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)
@@ -605,7 +601,7 @@ func TestViewedReportNeverDrawsANonDoneRowPartial(t *testing.T) {
 
 			// Assert: live work and exceptional states are never deprioritized.
 			if got := onlyRow(t, r).GetViewed(); got != nil {
-				t.Fatalf("viewed = %v on a %s row, want unset: only a done row goes PARTIAL", got, tc.want)
+				t.Fatalf("viewed = %v on a %s row, want unset: only a turn-end row goes PARTIAL", got, tc.want)
 			}
 		})
 	}
@@ -815,5 +811,24 @@ func TestRevivingMarkerIsPerRow(t *testing.T) {
 	}
 	if got := row.GetReviving(); got != nil {
 		t.Fatalf("reviving = %v, want a neighbour's revival to leave this row unmarked", got)
+	}
+}
+
+func TestAReadResultStaysReadAcrossALinkBlip(t *testing.T) {
+	// Arrange: a done row the user has read.
+	r := finished(t, arrange(t))
+	r.SetViewed(theWS)
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Act: the route comes back; no new result arrived in between.
+	r.OnLink(theWS, shimclient.LinkConnected)
+
+	// Assert: the result is still read, so the row is PARTIAL again.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not restore the link", got)
+	}
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want a read result to stay read across an arm change that is not a new result")
 	}
 }
