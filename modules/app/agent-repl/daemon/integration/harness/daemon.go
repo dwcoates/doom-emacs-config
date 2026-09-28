@@ -298,10 +298,15 @@ type Daemon struct {
 	waitBound  time.Duration
 	cmd        *exec.Cmd
 	stderrPath string
-	// afterFreeze, when set, runs inside Kill between the confirmed freeze and
-	// the SIGKILL: the one instant at which the harness's own tests can read
-	// the kernel's state of a group that is frozen and not yet killed.
-	afterFreeze func()
+	// afterGroupStopped, when set, runs inside Kill between the group's
+	// SIGSTOP and the leader's SIGKILL: the instant at which the harness's own
+	// tests can undo the stop, as the kernel does for a member inside execve.
+	afterGroupStopped func()
+	// afterLeaderExit, when set, runs inside Kill between the kernel's report
+	// that the leader exited and the group's SIGKILL: the one instant at which
+	// the harness's own tests can read a group whose leader is dead and whose
+	// members this harness has not yet signaled to die.
+	afterLeaderExit func()
 	// afterStraysFrozen, when set, runs inside ReapStrays once every stray is
 	// confirmed stopped and before any is killed: the instant at which the
 	// harness's own tests can kill one stray first, as a racing sweep would.
@@ -1009,21 +1014,37 @@ func (d *Daemon) standDownStraysForCoverage() {
 // Kill ends the process group without warning, for crash simulation and for
 // the cleanup every test gets.
 //
-// THE GROUP IS FROZEN BEFORE ANY OF IT IS KILLED, so the daemon can never
-// observe a death this harness caused. Every git the daemon runs, and every
-// shim in the instant between its fork and its own setpgid, is a member of the
-// daemon's group, and kill(-pgid, SIGKILL) is not one atomic event: the kernel
-// walks the group, newest member first, and the walk can be preempted between
-// members. Under load the daemon was still running when its git or its
+// THE LEADER HAS EXITED BEFORE ANY MEMBER IS SIGNALED TO DIE, so the daemon can
+// never observe a death this harness caused. Every git the daemon runs, and
+// every shim in the instant between its fork and its own setpgid, is a member
+// of the daemon's group, and kill(-pgid, SIGKILL) is not one atomic event: the
+// kernel walks the group, newest member first, and the walk can be preempted
+// between members. Under load the daemon was still running when its git or its
 // just-forked shim had already died, and it recorded exactly that at ERROR —
 // "git was killed by a signal", "shim died during bring-up" — before its own
 // SIGKILL landed; the warning sweep then failed the test on records its own
-// teardown manufactured. MEASURED with a stand-in for the daemon (a Go parent
-// running short-lived children back to back, killed as a group at nice 19 on
-// a loaded host): 8 of 3000 group kills let the parent record a signalled
-// child, and 0 of 3000 once the group was stopped and the stop confirmed
-// first. A stopped daemon runs no instruction, so whatever order the kill
-// then reaches its members in, nothing is left to observe it.
+// teardown manufactured. A process that has exited runs no instruction, and
+// exiting is irrevocable, so once the kernel reports the leader's exit,
+// whatever order the group kill reaches the members in, nothing is left to
+// observe it.
+//
+// THE ORDERING RESTS ON THE LEADER'S EXIT, NEVER ON A STOP, because a stop is
+// revocable. On Darwin a SIGSTOP that reaches a process inside execve is
+// DISCARDED when the exec completes: the kernel reports the process stopped
+// while its thread is still in the kernel finishing the exec, then the new
+// image runs, with no signal pending. MEASURED under 16 CPU loads: a member
+// SIGSTOPped just after its fork read stopped and then running again, as the
+// exec'd program, in 453 of 3000 runs; one already past its exec, in 0 of
+// 3000. No state the kernel exports tells that transient stop from a real
+// one, so no stop, and no confirmation of one, can guarantee a frozen group.
+// The leader's stop was the old ordering's premise, and a leader killed in
+// the instant after its Start is exactly such a process.
+//
+// The group is still stopped first, as containment: a member that is not
+// inside execve, such as a shim between its fork and its setpgid, is held in
+// the group while the leader dies rather than leaving it. The leader's exit
+// orphans the group, and the kernel then sends its stopped members SIGHUP and
+// SIGCONT, so the group kill follows the leader's exit at once.
 func (d *Daemon) Kill() {
 	d.t.Helper()
 	if d.cmd == nil || d.cmd.Process == nil {
@@ -1035,7 +1056,8 @@ func (d *Daemon) Kill() {
 	// pid was recycled into. This is the ordinary state of every test that
 	// waits for its daemon to leave on its own (a refused second daemon, a
 	// joining daemon) before the cleanup kill runs. Until the reap below, the
-	// leader is ours and unreaped, so both signals name our group exactly.
+	// leader is ours and unreaped — a zombie at worst — so every signal names
+	// our process and our group exactly.
 	if d.reaped() {
 		return
 	}
@@ -1043,31 +1065,39 @@ func (d *Daemon) Kill() {
 	if !d.signalGroup(pgid, syscall.SIGSTOP) {
 		return
 	}
-	// A freeze the kernel will not confirm is REPORTED, and the kill still
-	// goes ahead: a daemon left running is worse than one that might have
-	// seen its group go.
-	if err := awaitFrozen(pgid, freezeBound); err != nil {
-		d.t.Errorf("harness: the daemon's group was not frozen before the kill: %v", err)
+	if d.afterGroupStopped != nil {
+		d.afterGroupStopped()
 	}
-	if d.afterFreeze != nil {
-		d.afterFreeze()
+	if !d.signalLeader(syscall.SIGKILL) {
+		return
+	}
+	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
+	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
+	// it, so the leader WILL exit; only its scheduling is left, and a leader
+	// that never exits after an accepted SIGKILL is a kernel fault the test
+	// binary's own -timeout reports with every stack. The event does not reap
+	// it, so the group id stays ours for the group kill below. A wait that
+	// fails is REPORTED and the kill still goes ahead: a group left running is
+	// worse than one whose leader might have seen a member go.
+	if err := WaitProcessExit(context.Background(), pgid); err != nil {
+		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
+	}
+	if d.afterLeaderExit != nil {
+		d.afterLeaderExit()
 	}
 	if !d.signalGroup(pgid, syscall.SIGKILL) {
 		return
 	}
-	// THE REAP IS AWAITED ON THE REAP ITSELF, NOT RACED AGAINST A CLOCK.
-	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
-	// it, so the process WILL exit; what a wall-clock bound measured here was
-	// only how soon a nice-19 process, just released from SIGSTOP, got a CPU
-	// to run its own exit on — and on a saturated host that is seconds.
-	// TestReselectingAWorkspaceProducesNoDuplicatePush failed on "still
-	// unreaped 2s after SIGKILL" for a kill that had done exactly its job. A
-	// process that never exits after an accepted SIGKILL is a kernel fault,
-	// and the test binary's own -timeout reports it with every stack.
+	// THE REAP IS AWAITED ON THE REAP ITSELF, NOT RACED AGAINST A CLOCK. The
+	// leader has already exited, so what a wall-clock bound measured here was
+	// only how soon the reap got scheduled; on a saturated host that is
+	// seconds. TestReselectingAWorkspaceProducesNoDuplicatePush failed on
+	// "still unreaped 2s after SIGKILL" for a kill that had done exactly its
+	// job.
 	began := time.Now()
 	d.waitOnce.Do(d.wait)
 	if took := time.Since(began); took > reapGrace {
-		d.t.Logf("harness: the SIGKILLed daemon group took %s to be reaped; the host was starving its exit", took)
+		d.t.Logf("harness: the SIGKILLed daemon took %s to be reaped; the host was starving it", took)
 	}
 }
 
@@ -1114,6 +1144,21 @@ func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 		d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
 		return false
 	}
+}
+
+// signalLeader sends sig to the daemon's own process, and only to it, and
+// reports whether the kill should go on. Kill found the leader unreaped, so
+// its pid is still ours, exactly as the group id is for signalGroup: ESRCH is
+// a leader that already exited, which is what the caller awaits next. Every
+// other error is a real fault, reported, and ends the kill.
+func (d *Daemon) signalLeader(sig syscall.Signal) bool {
+	d.t.Helper()
+	err := syscall.Kill(d.cmd.Process.Pid, sig)
+	if err == nil || errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+	d.t.Errorf("harness: %v the daemon %d: %v", sig, d.cmd.Process.Pid, err)
+	return false
 }
 
 // reaped reports whether cmd.Wait has already returned for this process, which
