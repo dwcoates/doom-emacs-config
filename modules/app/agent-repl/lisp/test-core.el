@@ -417,7 +417,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports why the user's prompt was not accepted")
     ("input.el" agent-repl--input-on-failure
      "agent-repl: the daemon did not answer; the prompt is held"
-     "tells the user their submitted text remains queued")
+     "tells the user their submitted text is held for the daemon")
+    ("input.el" agent-repl--input-hold
+     "agent-repl: the prompt could not be saved for the daemon (%s); it is in the input history: %s"
+     "tells the user their prompt could not be held, with its words")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
     ("magit.el" +dwc/magit-toggle-tags-in-log "magit commit-list tags %s"
