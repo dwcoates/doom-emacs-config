@@ -10,6 +10,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"claude-repld/internal/prompthandler"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one
@@ -174,14 +176,8 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 	// AN ABSENT delivery is the ordinary one; a present one must name a
 	// delivery the daemon honors. UNSPECIFIED is never sent, and a value this
 	// build does not know is never read as the ordinary delivery.
-	if req.Delivery != nil {
-		switch req.GetDelivery() {
-		case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED:
-		case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED:
-			return invalid("delivery", "a delivery, when set, is never UNSPECIFIED: the ordinary delivery is an absent field")
-		default:
-			return invalid("delivery", fmt.Sprintf("delivery %d is not a delivery this daemon honors", req.GetDelivery()))
-		}
+	if _, err := prompthandler.DeliveryOf(req.Delivery); err != nil {
+		return invalid("delivery", err.Error())
 	}
 	return nil
 }

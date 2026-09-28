@@ -11,6 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/wsm"
 )
 
@@ -108,16 +109,17 @@ func parse(data []byte) (decoded, error) {
 	return decoded{Entry: entry, origin: conversationv1.PromptOrigin(value), said: said, delivery: delivery}, nil
 }
 
-// deliveryOf reads an entry's delivery. Absent is the ordinary one; a name
-// this reader does not honor is malformed, never read as the ordinary
-// delivery: a deferred prompt misread would be classified and could interject.
+// deliveryOf reads an entry's delivery by its value NAME through the one
+// mapping (prompthandler.DeliveryOf). Absent is the ordinary one; a name this
+// reader does not know is malformed, never read as the ordinary delivery.
 func deliveryOf(name string) (wsm.Delivery, error) {
-	switch name {
-	case "":
-		return wsm.DeliveryOrdinary, nil
-	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED.String():
-		return wsm.DeliveryDeferred, nil
-	default:
+	if name == "" {
+		return prompthandler.DeliveryOf(nil)
+	}
+	value, ok := agentreplv1.SubmitPromptDelivery_value[name]
+	if !ok {
 		return 0, fmt.Errorf("delivery %q is not a delivery this ingress honors", name)
 	}
+	delivery := agentreplv1.SubmitPromptDelivery(value)
+	return prompthandler.DeliveryOf(&delivery)
 }

@@ -85,9 +85,9 @@ func (s *server) SubmitPrompt(
 		consumedReference = true
 	}
 
-	// VALIDATED ABOVE, so a failure here is the two readings of one field
-	// disagreeing -- a defect, surfaced as one.
-	delivery, err := deliveryOf(req.Msg)
+	// VALIDATED ABOVE through the same mapping, so a failure here is a
+	// defect, surfaced as one.
+	delivery, err := prompthandler.DeliveryOf(req.Msg.Delivery)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -359,20 +359,4 @@ func bubbleRefused(r refusal) refusal {
 	fields["kind"] = nestedArm(kind)
 	r.Fields = fields
 	return r
-}
-
-// deliveryOf maps a VALIDATED SubmitPromptRequest.delivery onto the queue's
-// delivery: an absent field is the ordinary one. validateSubmitPromptRequest
-// refuses every other value, so reaching the default is the two readings of
-// one field disagreeing -- a defect, surfaced as an error.
-func deliveryOf(req *agentreplv1.SubmitPromptRequest) (wsm.Delivery, error) {
-	if req.Delivery == nil {
-		return wsm.DeliveryOrdinary, nil
-	}
-	switch req.GetDelivery() {
-	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED:
-		return wsm.DeliveryDeferred, nil
-	default:
-		return 0, fmt.Errorf("delivery %s passed validation but has no mapping", req.GetDelivery())
-	}
 }
