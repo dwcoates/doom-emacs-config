@@ -126,6 +126,13 @@ message FooterStrip {
 //   OUTRANKS every competing activity; the status-bound kinds rank next, by
 //   the daemon's judgment; rate_limited is SECOND-LOWEST; context_budget is
 //   LOWEST — shown only when nothing else stands.
+// - TWO MORE KINDS ARE STATUS-INDEPENDENT and ride every arm's oneof beside
+//   those three: `fault` (a standing daemon fault) and `update` (a deploy's
+//   progress, FooterStatusActivityUpdate). A fault OUTRANKS every other kind;
+//   the update line ranks directly below a fault and above everything else,
+//   because a deploy moving under the session is the thing the reader is
+//   waiting on while it stands. `start_failed` is the one fault family with a
+//   leaf of its own, and it ranks as the fault it is.
 //
 // THE FAULT PARTITION — where every daemon fault kind lands on the strip.
 //
@@ -257,6 +264,11 @@ message FooterStatusIdleActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 5;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 6;
   }
 }
 // Never ran a turn this session.
@@ -307,6 +319,11 @@ message FooterStatusThinkingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 8;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 10;
     // A COMPACTION'S OWN PROGRESS, phase by phase. Both compactions speak
     // through it — the vendor's auto-compaction and the cold gate's
     // `compact and resume` remediation — so the two read the same under the
@@ -404,6 +421,11 @@ message FooterStatusWaitingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 11;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 12;
   }
 }
 // The composed interrupting line.
@@ -464,6 +486,11 @@ message FooterStatusInterruptedActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 5;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 6;
   }
 }
 
@@ -554,6 +581,11 @@ message FooterStatusMergingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 6;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 7;
   }
 }
 
@@ -585,6 +617,11 @@ message FooterStatusBackgroundActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 5;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 6;
   }
 }
 
@@ -651,6 +688,11 @@ message FooterStatusBlockedActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 7;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 8;
   }
 }
 // The daemon itself is impaired; the fault line says how.
@@ -697,6 +739,104 @@ message FooterStatusActivityFault {
   // invented sentence.
   string detail = 2;
 }
+
+// A DEPLOY'S PROGRESS, as one drawn line (owner request, 2026-09-27: deploy
+// feedback moves out of the webapp's restarting banner and into this cell).
+//
+// THE DAEMON PUBLISHES IT ON EVERY WORKSPACE'S STRIP while a deploy runs,
+// because a deploy moves what serves every workspace. Each phase replaces the
+// last. The daemon that ran the deploy says every phase up to the handover;
+// its streams end at the transfer, so the SUCCESSOR says `updated`, which is
+// MOMENTARY and retired by the daemon's own successor push like `interrupted`
+// and `loading`. A deploy that FAILS says so through the fault line, never
+// through this one.
+//
+// EVERYTHING HERE IS TYPED. The client renders a phase's arm name lowercase
+// with spaces, the same rule the status cells follow, and the typed data
+// beside it (the components, the counts) is what colors the line; the daemon
+// composes no sentence for it.
+message FooterStatusActivityUpdate {
+  // Where the deploy has got to. Exactly one; unset is malformed.
+  oneof phase {
+    // The components are being built into staging.
+    FooterStatusActivityUpdateBuilding building = 1;
+    // The fresh build is being installed over the running one.
+    FooterStatusActivityUpdateInstalling installing = 2;
+    // Out-of-date services are being restarted onto the fresh build.
+    FooterStatusActivityUpdateRestartingServices restarting_services = 3;
+    // The daemon is handing this workspace to its successor.
+    FooterStatusActivityUpdateHandingOver handing_over = 4;
+    // THIS workspace's move waits on its own in-flight work: nothing is
+    // interrupted to hurry it, and the counts fall as the work drains.
+    FooterStatusActivityUpdateWaiting waiting = 5;
+    // The deploy is done for this workspace. MOMENTARY.
+    FooterStatusActivityUpdateUpdated updated = 6;
+  }
+  // What the deploy left for later on THIS workspace. Empty when nothing was
+  // deferred.
+  repeated FooterStatusActivityUpdateNote notes = 7;
+}
+// The components being built.
+message FooterStatusActivityUpdateBuilding {
+  // Every component the build stages, in build order.
+  repeated FooterStatusActivityUpdateComponent components = 1;
+}
+// The fresh build is being installed.
+message FooterStatusActivityUpdateInstalling {}
+// Out-of-date services are being restarted.
+message FooterStatusActivityUpdateRestartingServices {
+  // The services being restarted, in restart order.
+  repeated FooterStatusActivityUpdateComponent services = 1;
+}
+// The daemon is handing the workspace to its successor.
+message FooterStatusActivityUpdateHandingOver {}
+// The workspace's move waits on its own work.
+message FooterStatusActivityUpdateWaiting {
+  // The turns in flight, zero or one.
+  uint32 turns = 1;
+  // The detached items still running: background subagents, background
+  // shells and monitors.
+  uint32 background = 2;
+}
+// The deploy is done for this workspace.
+message FooterStatusActivityUpdateUpdated {}
+// One deployable component, by name. The client renders the arm name
+// lowercase with spaces.
+message FooterStatusActivityUpdateComponent {
+  oneof component {
+    // The record store service.
+    FooterStatusActivityUpdateComponentStore store = 1;
+    // The transcript sidecar service.
+    FooterStatusActivityUpdateComponentSidecar sidecar = 2;
+    // The daemon.
+    FooterStatusActivityUpdateComponentDaemon daemon = 3;
+    // The session shim.
+    FooterStatusActivityUpdateComponentShim shim = 4;
+    // This webapp.
+    FooterStatusActivityUpdateComponentWebapp webapp = 5;
+  }
+}
+// The record store service.
+message FooterStatusActivityUpdateComponentStore {}
+// The transcript sidecar service.
+message FooterStatusActivityUpdateComponentSidecar {}
+// The daemon.
+message FooterStatusActivityUpdateComponentDaemon {}
+// The session shim.
+message FooterStatusActivityUpdateComponentShim {}
+// This webapp.
+message FooterStatusActivityUpdateComponentWebapp {}
+// One thing the deploy deferred on this workspace.
+message FooterStatusActivityUpdateNote {
+  oneof note {
+    // The session's shim is replaced once its work has ended: it has a turn
+    // or detached work in flight, and a deploy never ends a turn unless it
+    // is forced.
+    FooterStatusActivityUpdateNoteShimWhenIdle shim_when_idle = 1;
+  }
+}
+// The shim updates when the session is idle.
+message FooterStatusActivityUpdateNoteShimWhenIdle {}
 
 // The daemon's link to the session's shim is not serving.
 message FooterStatusDisconnected {
@@ -753,6 +893,11 @@ message FooterStatusDisconnectedActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 6;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 7;
   }
 }
 
@@ -794,6 +939,11 @@ message FooterStatusClosingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 6;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 7;
   }
 }
 
@@ -845,6 +995,11 @@ message FooterStatusLoadingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 6;
+    // A DEPLOY'S PROGRESS, the update line. STATUS-INDEPENDENT: every status
+    // arm carries it, because a deploy reaches every workspace whatever the
+    // session is doing. It ranks directly BELOW a fault and ABOVE every other
+    // kind. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 7;
   }
 }
 

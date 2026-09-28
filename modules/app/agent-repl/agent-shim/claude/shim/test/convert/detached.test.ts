@@ -35,6 +35,8 @@ import {
   shellRunStartEntry,
   shellRunTerminalEntry,
   startedInForeground,
+  taskAgentKnowledge,
+  taskAwaitingAgent,
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
@@ -1670,6 +1672,182 @@ describe("bashDetachmentEntry: the announcement's kind", () => {
 
     // Assert.
     expect(kindOf(entry).case).toBe("bash");
+  });
+});
+
+/** Whether the store must name `fields`' task before the fold converts it. */
+function awaiting(
+  fields: Record<string, unknown>,
+  registry = createTaskKindRegistry(),
+  calls: CallRegistry = createCallRegistry(),
+): string | undefined {
+  return taskAwaitingAgent(taskMessage(fields), foldContext({}), registry, calls);
+}
+
+const RESUME_STARTED = { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" };
+
+describe("taskAwaitingAgent: the resume the store must name", () => {
+  it("names the task of a subagent resumed by a call that is not its spawn, with no join", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, createTaskKindRegistry(), calls)).toBe("a5583");
+  });
+
+  it("names nothing when the task's call is its spawn", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "Agent");
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("names nothing when a join already names the task's agent", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, registry, calls)).toBeUndefined();
+  });
+
+  it("names nothing when this fold never saw the task's call", () => {
+    // Arrange, Act, Assert: the minting rule reads the call as the spawn.
+    expect(awaiting(RESUME_STARTED)).toBeUndefined();
+  });
+
+  it("names nothing for a task that is not a subagent", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, task_type: "local_bash" }, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("names nothing for a task message that does not name an agent", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, subtype: "task_progress" }, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("names nothing for an ambient task", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, skip_transcript: true }, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("records nothing: asking twice answers the same", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    awaiting(RESUME_STARTED, registry, calls);
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, registry, calls)).toBe("a5583");
+  });
+});
+
+describe("convertDetached: a resume the store named", () => {
+  it("announces the resumed subagent with the agent the store named", () => {
+    // Arrange: a restarted process — no spawn seen — whose engine asked the store.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act.
+    const entries = convert(RESUME_STARTED, {}, registry, calls);
+
+    // Assert.
+    expect(subagentOf(entries[0])).toBe("toolu_spawn");
+  });
+
+  it("states the store's answer in the refusal when the store named none", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberStoreAnswer("a5583", "not_found: no agent of this session's lineage is paired with the locator");
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    const before = logSinkMark();
+
+    // Act.
+    convert(RESUME_STARTED, {}, registry, calls);
+
+    // Assert.
+    const refused = logRecordsSince(before).filter((record) => record.level === "error");
+    expect(refused.map((record) => record.context.store_answer)).toEqual([
+      "not_found: no agent of this session's lineage is paired with the locator",
+    ]);
+  });
+
+  it("states that the store was not asked when it was not", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    const before = logSinkMark();
+
+    // Act.
+    convert(RESUME_STARTED, {}, createTaskKindRegistry(), calls);
+
+    // Assert.
+    const refused = logRecordsSince(before).filter((record) => record.level === "error");
+    expect(refused.map((record) => record.context.store_answer)).toEqual(["not asked"]);
+  });
+});
+
+describe("taskAgentKnowledge", () => {
+  it("names the agent a join holds", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act, Assert.
+    expect(taskAgentKnowledge(registry, "a5583")).toMatchObject({ kind: "named", agent: { value: "toolu_spawn" } });
+  });
+
+  it("names the task's own spawning call when no join holds one", () => {
+    // Arrange: a foreground spawn's task, whose call the fold saw open.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_spawn", "Agent");
+    convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent", is_backgrounded: false },
+      {},
+      registry,
+      calls,
+    );
+
+    // Act, Assert.
+    expect(taskAgentKnowledge(registry, "a5583")).toMatchObject({ kind: "named", agent: { value: "toolu_spawn" } });
+  });
+
+  it("says a task started from a call that is not its spawn names no agent", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    convert(RESUME_STARTED, {}, registry, calls);
+
+    // Act, Assert.
+    expect(taskAgentKnowledge(registry, "a5583")).toEqual({ kind: "not_its_spawn" });
+  });
+
+  it("knows nothing of a task it never saw", () => {
+    // Arrange, Act, Assert.
+    expect(taskAgentKnowledge(createTaskKindRegistry(), "a5583")).toEqual({ kind: "unknown" });
   });
 });
 

@@ -13,6 +13,7 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/buildid"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -180,6 +181,9 @@ type fakeRollout struct {
 	checks     []bool
 	stale      map[ids.WorkspaceID]bool
 	checkErr   map[ids.WorkspaceID]error
+	// registered are the stale workspaces whose bounce the registry
+	// REGISTERS behind their work rather than taking now.
+	registered map[ids.WorkspaceID]bool
 	acceptance rollout.HandoverAcceptance
 }
 
@@ -211,7 +215,8 @@ func (r *fakeRollout) CheckStaleness(_ context.Context, ws ids.WorkspaceID, forc
 	if !r.stale[ws] {
 		return rollout.StaleCheck{Reported: "fresh", Installed: "fresh"}, nil
 	}
-	return rollout.StaleCheck{Stale: true, Reported: "old", Installed: "fresh", Bounce: bounce.Decision{Now: true, Forced: force}}, nil
+	now := force || !r.registered[ws]
+	return rollout.StaleCheck{Stale: true, Reported: "old", Installed: "fresh", Bounce: bounce.Decision{Now: now, Forced: force}}, nil
 }
 
 func (r *fakeRollout) Joining() bool {
@@ -313,6 +318,45 @@ type harness struct {
 	freshLayout int
 	layoutErr   error
 	layoutAsked []string
+	progress    *fakeProgress
+}
+
+// fakeProgress records every statement the deploy made on the update line,
+// nil (a clear) included.
+type fakeProgress struct {
+	mu     sync.Mutex
+	stated []*deployprogress.Progress
+}
+
+func (f *fakeProgress) SetDeployProgress(p *deployprogress.Progress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stated = append(f.stated, p)
+}
+
+// phases names every statement in order, "cleared" for a clear.
+func (f *fakeProgress) phases() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.stated))
+	for _, p := range f.stated {
+		if p == nil {
+			out = append(out, "cleared")
+			continue
+		}
+		out = append(out, p.Phase.String())
+	}
+	return out
+}
+
+// last is the newest statement.
+func (f *fakeProgress) last() *deployprogress.Progress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.stated) == 0 {
+		return nil
+	}
+	return f.stated[len(f.stated)-1]
 }
 
 // runningLayout is the state layout the harness's running daemon writes.
@@ -349,6 +393,7 @@ func newHarness(t *testing.T) *harness {
 		elisp:     elisp,
 
 		freshLayout: runningLayout,
+		progress:    &fakeProgress{},
 	}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -369,8 +414,9 @@ func newHarness(t *testing.T) *harness {
 		Alive: func(pid int) bool {
 			return h.alive[pid]
 		},
-		Clock: newStepClock(),
-		Log:   h.log,
+		Clock:    newStepClock(),
+		Progress: h.progress,
+		Log:      h.log,
 		StateLayout: func(_ context.Context, bin string) (int, error) {
 			h.layoutAsked = append(h.layoutAsked, bin)
 			return h.freshLayout, h.layoutErr

@@ -57,6 +57,14 @@ upgrade is involved.
   success arm. Failure means NOTHING was committed, so the sidecar does not
   advance, holds NO retry buffer and spills NOTHING: its sources are durable
   files it re-reads from the last committed cursor.
+- A SUBAGENT TRANSCRIPT'S BATCH STATES ITS LOCATOR (`EntryBatch.agent_locators`,
+  `agentLocators` in `cycle.go`): the vendor task id of `agent-<id>.jsonl`
+  paired with the spawning call its meta names. Every batch of the file states
+  it, so it is durable with the agent's first rows and the store absorbs the
+  re-statements. The shim resolves a SendMessage-resumed agent it never saw
+  spawn through the store's `GetAgentByVendorTask` over this pairing, and never
+  reads a vendor file itself. A workflow agent (no spawning call), a main
+  transcript and a spool state none.
 - Producer string: `shim-claude-sidecar` (`storeclient.Producer`).
 - THE AGENT REGISTER IS SOMETHING THE SIDECAR WRITES, NOT SOMETHING IT READS.
   A book comes into existence when a page-line write (or a spawn frame) first

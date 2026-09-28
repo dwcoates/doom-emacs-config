@@ -27,6 +27,8 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import type { SdkMessage } from "../sdk/types.js";
+import type { TaskAgentKnowledge } from "../convert/detached.js";
+import type { VendorTaskAnswer } from "../store/locator.js";
 
 /**
  * A change to a file the agent made, as the diagnostics join remembers it.
@@ -184,6 +186,16 @@ export interface EngineFold {
    * still holds for it is let go (convert/fold.ts `endQuery`).
    */
   endQuery(why: string): void;
+  /**
+   * The vendor task whose agent the STORE must name before `message` is
+   * folded — a subagent resumed by a call that is not its spawn, whose spawn
+   * this process never saw — or `undefined`. A read: it records nothing.
+   */
+  taskAwaitingAgent(message: SdkMessage, context: FoldContext): string | undefined;
+  /** Hand the fold the store's answer for a task {@link EngineFold.taskAwaitingAgent} named. */
+  learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /** Which agent a vendor task is running, as the fold knows it. */
+  taskAgent(taskId: string): TaskAgentKnowledge;
 }
 
 /**
@@ -213,5 +225,10 @@ export function turnBoundaryOnlyFold(): EngineFold {
         : { entries: [] },
     // HOLDS NOTHING, so a query's end has nothing to let go.
     endQuery: (): void => undefined,
+    // NAMES NOTHING: it converts no task, so no task awaits an agent and it
+    // knows none.
+    taskAwaitingAgent: (): undefined => undefined,
+    learnTaskAgent: (): void => undefined,
+    taskAgent: (): TaskAgentKnowledge => ({ kind: "unknown" }),
   };
 }
