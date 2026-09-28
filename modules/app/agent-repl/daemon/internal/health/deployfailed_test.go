@@ -150,3 +150,54 @@ func TestRollbackClauseSaysWhatBecameOfTheInstall(t *testing.T) {
 		})
 	}
 }
+
+func TestDeployFailedOverlaySaysWhatFailed(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure DeployFailure
+		want    DeployOverlay
+	}{
+		{
+			name:    "a build names its build step and its archived log",
+			failure: DeployFailure{Step: DeployStepBuild, BuildStep: "webapp", Detail: "tsc\nerror TS2322", Log: "/s/build.log"},
+			want:    DeployOverlay{Step: "build", Component: "webapp", Rollback: "nothing was installed", Detail: "tsc\nerror TS2322", Log: "/s/build.log"},
+		},
+		{
+			name:    "a restart names the component and the rollback in words",
+			failure: DeployFailure{Step: DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "exit 5", Rollback: RollbackRestored},
+			want:    DeployOverlay{Step: "restart services", Component: "sidecar", Rollback: "it was rolled back to the previous build", Detail: "exit 5"},
+		},
+		{
+			name:    "a rollback's own fault says the rollback itself failed",
+			failure: DeployFailure{Step: DeployStepRollback, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Detail: "EROFS"},
+			want:    DeployOverlay{Step: "rollback", Component: "daemon", Rollback: "the rollback itself failed; the previous build was not restored", Detail: "EROFS"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			fault := wsm.Fault{Kind: KindDeployFailed, Evidence: tt.failure.Evidence()}
+
+			// Act.
+			got, ok := DeployFailedOverlay(fault)
+
+			// Assert.
+			if !ok || got != tt.want {
+				t.Fatalf("DeployFailedOverlay = (%+v, %v), want (%+v, true)", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeployFailedOverlayOfARecordWithNoStepIsNone(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindDeployFailed, Detail: "an older daemon's prose"}
+
+	// Act.
+	_, ok := DeployFailedOverlay(fault)
+
+	// Assert.
+	if ok {
+		t.Fatal("DeployFailedOverlay answered an overlay for a record naming no step")
+	}
+}

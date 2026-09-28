@@ -597,3 +597,19 @@ func TestFinalAnswerUnresolvedCarriesTheTurnTheUnitAndTheWhy(t *testing.T) {
 		t.Fatalf("arm = %+v, want the recorded turn, unit and why", arm)
 	}
 }
+
+func TestDaemonFaultOfIsTheHealthAnswersOwnRendering(t *testing.T) {
+	// Arrange
+	fault := wsm.Fault{
+		Kind:     KindDeployFailed,
+		Evidence: DeployFailure{Step: DeployStepInstall, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "EACCES", Rollback: RollbackRestored}.Evidence(),
+	}
+
+	// Act
+	got := DaemonFaultOf(fault)
+
+	// Assert
+	if want := daemonFault(fault); !proto.Equal(got, want) {
+		t.Fatalf("DaemonFaultOf = %v, want DaemonHealth's own rendering %v", got, want)
+	}
+}

@@ -116,6 +116,13 @@ func ArmlessSessionKind(kind string) bool {
 	return ok
 }
 
+// DaemonFaultOf renders one recorded daemon-scoped fault as the typed
+// DaemonFault every wire that carries one states: DaemonHealth's answer, and
+// the standing loud faults WatchDaemon tells Emacs.
+func DaemonFaultOf(f wsm.Fault) *agentreplv1.DaemonFault {
+	return daemonFault(f)
+}
+
 // daemonFault renders one recorded fault as the typed DaemonFault the wire
 // carries. A kind with no typed arm answers with the detail line alone rather
 // than being dropped: an unreportable fault is still a fault.
