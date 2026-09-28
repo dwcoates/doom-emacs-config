@@ -1623,6 +1623,271 @@ describe("the turn loop", () => {
   });
 });
 
+/**
+ * A TURN THE VENDOR STARTED ON ITS OWN IS ADOPTED (owner ruling 2026-09-27).
+ *
+ * The vendor runs turns no StartTurn asked for -- a background subagent's
+ * hand-back arriving makes the main agent reply. Those turns used to run with
+ * no turn open, so their frames and terminal carried no turn id and nothing
+ * downstream learned they ran. Each is now opened as a real turn under a
+ * shim-minted id, announced by a `VENDOR_STARTED` prompt row.
+ */
+describe("a turn the vendor started on its own", () => {
+  /** Every adoption row the engine wrote, in order. */
+  const adoptions = (h: Harness): conversationv1.AgentPrompt[] =>
+    h.persistence.buffered.flatMap((entry) =>
+      entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED
+        ? [entry.item.prompt]
+        : [],
+    );
+
+  /** A top-level stream event: a reply frame of the running turn. */
+  const streamEvent = (uuid: string): SdkMessage =>
+    ({ type: "stream_event", uuid, session_id: "s", parent_tool_use_id: null, event: { type: "message_start" } }) as never;
+
+  /** An assistant frame of a subagent: it names the work it belongs to. */
+  const subagentReply = (uuid: string): SdkMessage =>
+    ({ ...assistantMessage(uuid), parent_tool_use_id: "toolu_spawn" }) as never;
+
+  /** A background task starting: detached work, which starts no turn. */
+  const taskStarted = (uuid: string): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-1",
+      tool_use_id: "toolu_bg",
+      description: "background",
+      uuid,
+      session_id: "s",
+    }) as never;
+
+  it.each([
+    { name: "a top-level assistant reply", message: assistantMessage("m-1"), adopts: 1 },
+    { name: "a top-level stream event", message: streamEvent("m-1"), adopts: 1 },
+    { name: "a result with no reply before it", message: resultMessage("m-1"), adopts: 1 },
+    { name: "a subagent's reply", message: subagentReply("m-1"), adopts: 0 },
+    { name: "a background task's start", message: taskStarted("m-1"), adopts: 0 },
+    { name: "the vendor's init", message: initMessage(), adopts: 0 },
+  ])("adopts a turn on $name with no turn open: $adopts", async ({ message, adopts }) => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.onSdkMessage(message);
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(adopts);
+  });
+
+  it("writes the adoption row ahead of the rows the turn's first message produced", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) => [foldEntry({ kind: "frame", frame: create(conversationv1.AgentFrameSchema, {}) }, `row-${message.uuid}`)];
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("first-reply"));
+
+    // Assert
+    expect(h.persistence.buffered.map((entry) => entry.item.kind)).toEqual(["prompt", "frame"]);
+  });
+
+  it("writes the adoption row with no words said", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("first-reply"));
+
+    // Assert
+    expect(adoptions(h)[0]?.said?.content?.blocks).toEqual([]);
+  });
+
+  it("names the adopted turn to the fold for the turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("result"));
+
+    // Assert
+    const adopted = adoptions(h)[0]?.id?.value;
+    expect([adopted?.startsWith("adopted-"), h.fold.contexts.at(-1)?.turnId?.value === adopted]).toEqual([true, true]);
+  });
+
+  it("leaves a StartTurn's own turn unadopted and named to the fold", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Assert
+    expect([adoptions(h).length, h.fold.contexts.at(-1)?.turnId?.value]).toEqual([0, "turn-1"]);
+  });
+
+  it("gives two consecutive vendor-started turns distinct ids", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("first"));
+    await h.engine.onSdkMessage(resultMessage("first-result"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("second"));
+
+    // Assert
+    const [first, second] = adoptions(h).map((prompt) => prompt.id?.value);
+    expect([adoptions(h).length, first === second]).toEqual([2, false]);
+  });
+
+  it("adopts nothing further on the running turn's later replies", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("first"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("second"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(1);
+  });
+
+  it("refuses a StartTurn while the adopted turn runs, so nothing is delivered into it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    const response = await startDuring(h, "turn-1");
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+  });
+
+  it("frees the slot on the adopted turn's result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+    await h.engine.onSdkMessage(resultMessage("result"));
+
+    // Act
+    const response = await startDuring(h, "turn-1");
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("names the adopted turn as the turn in flight", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    const adopted = adoptions(h)[0]?.id?.value;
+    const inFlight = failure?.cause.case === "live" ? failure.cause.value.turnInFlight?.value : undefined;
+    expect([adopted?.startsWith("adopted-"), inFlight === adopted]).toEqual([true, true]);
+  });
+
+  it("charges a killed turn's stop result to the killed turn and adopts nothing", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }) }),
+    );
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stopped-result"));
+
+    // Assert
+    expect([adoptions(h).length, h.fold.contexts.at(-1)?.turnId?.value]).toEqual([0, "turn-1"]);
+  });
+
+  it("records the adoption at INFO with the turn id, the cause and the vendor session", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("adopted a turn the vendor started"));
+    expect({
+      level: record?.level,
+      turn: record?.context.turn_id,
+      cause: typeof record?.context.cause,
+      session: typeof record?.context.vendor_session_id,
+    }).toEqual({ level: "info", turn: adoptions(h)[0]?.id?.value, cause: "string", session: "string" });
+  });
+
+  it("adopts a vendor turn beside the keep-alive as a served, untagged turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Assert
+    const row = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED,
+    );
+    expect(row?.keepalive).toBe(false);
+  });
+
+  it("names the turn adopted beside the keep-alive to the fold for that turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Assert
+    const adopted = adoptions(h)[0]?.id?.value;
+    expect([adopted?.startsWith("adopted-"), h.fold.contexts.at(-1)?.turnId?.value === adopted]).toEqual([true, true]);
+  });
+
+  it("adopts the next vendor turn beside the keep-alive afresh once the first closed", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply-2"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(2);
+  });
+});
+
 describe("the keep-alive turn", () => {
   it("submits a marker-prefixed prompt when the session is idle", async () => {
     const h = harness();
@@ -1924,8 +2189,10 @@ describe("the keep-alive turn serves nothing", () => {
     expect(rowsFor(h, "vendor-reply").map((row) => row.keepalive)).toEqual([false, false]);
   });
 
-  it("names no turn to the fold for a turn the vendor ran while the keep-alive waited", async () => {
-    // Arrange: the keep-alive's turn id must reach no served row.
+  it("names the adopted turn, never the keep-alive's, to the fold for a turn the vendor ran while the keep-alive waited", async () => {
+    // Arrange: the keep-alive's turn id must reach no served row; the vendor's
+    // own turn is adopted beside it (owner ruling 2026-09-27: every
+    // vendor-started turn is a real turn with an id).
     const h = harness();
     await started(h);
     await beat(h);
@@ -1934,7 +2201,7 @@ describe("the keep-alive turn serves nothing", () => {
     await h.engine.onSdkMessage(vendorReply("vendor-reply"));
 
     // Assert
-    expect(h.fold.contexts.at(-1)?.turnId).toBeUndefined();
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toMatch(/^adopted-/);
   });
 
   it("keeps the keep-alive open across the result of a turn the vendor ran first", async () => {
