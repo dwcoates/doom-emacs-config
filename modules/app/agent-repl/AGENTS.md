@@ -1236,6 +1236,34 @@ agents chip opens and closes it rather than dropping a roster of its own, and
 the per-bubble agent strips inside feed cards are a different thing entirely:
 they are scoped to one bubble's own call.
 
+## "Fresh input" is the one token quantity every spend figure counts
+
+**Fresh input** is every input token of an API response that was NOT a cache
+hit: the vendor's `input_tokens` plus `cache_creation_input_tokens`, which the
+wire carries as `conversation.v1.TokenCacheMisses` (unwritten plus written).
+Cache reads are not fresh; output is not fresh (it comes back as input on the
+next request, and is counted there). Cache writes ARE fresh on purpose: they
+are the expensive part of a turn, so a cold cache re-writing the whole prefix
+must show up as a big figure. The daemon computes it in exactly one place,
+`daemon/internal/freshinput`, and a test fails any other site that sums the two
+misses by hand.
+
+Every figure is ONE agent's fresh input, never its subagents':
+
+- the footer's tokens cell (`frontend.v1.FooterTokensCell`) is the MAIN agent's
+  fresh input for the in-flight turn, colored on a green → yellow → orange →
+  red gradient with stops at 0, 30k, 50k and 100k;
+- a response bubble's cost corner (`frontend.v1.FeedResponseUsageStamp`) is
+  the fresh input its agent added since that agent's previous bubble landed,
+  frozen when it lands, so a turn's bubbles partition the footer's figure; the
+  green final-answer bubble carries the turn's whole figure;
+- a subagent card's figure (`frontend.v1.FeedSubagentTokens`) is that
+  subagent's fresh input over its whole lifetime.
+
+The topbar's context chip is a different fact — the context window's size —
+and none of the above is derived from it. With a warm cache the footer stays
+below the chip; after a cold cache it can exceed it.
+
 ## Every daemon fault kind reaches the footer, and this is where each lands
 
 The owner's ruling of 2026-09-13. Before it, three of the nineteen fault kinds

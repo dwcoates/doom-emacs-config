@@ -7,7 +7,6 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
-	"claude-repld/internal/figures"
 	"claude-repld/internal/sessionwatcher"
 )
 
@@ -258,11 +257,6 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 	case *conversationv1.AgentSubagent_Update:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Update"})
 		applyPrompt(bubble, frame.Update.GetPrompt())
-		progress := frame.Update.GetProgress()
-		if progress.GetTotalTokens() > 0 {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "progress.GetTotalTokens() > 0"})
-			bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(progress.GetTotalTokens()) + " tok"}
-		}
 		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{
 			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
 		}}
@@ -278,7 +272,6 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 			state.created = created
 		}
 		applyPrompt(bubble, frame.Success.GetPrompt())
-		applyTotals(bubble, frame.Success.GetTotals())
 		applyRestatedStart(bubble, spawn)
 		// THE SETTLED SPAN, kept so a settled-only replay (no start frame) can
 		// reconstruct the clock's start as end − duration. See subagentStart.
@@ -322,6 +315,10 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{}
 	}
 	bubble.Runtime.StartedAtMs = start
+	// THE FIGURE IS THE SUBAGENT'S LIFETIME FRESH INPUT, read off its account
+	// on every compose (usage.go), so no frame of the spawn can draw another
+	// quantity over it.
+	bubble.Tokens = s.subagentFigure(state.created)
 	if bubble.Label == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Label == nil"})
 		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
@@ -526,41 +523,6 @@ func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state
 		"a spawn's commission was drawn on the subagent's own feed",
 		dlog.Context{"unit": unitID, "agent": state.created.GetValue()})
 	r.upsert(s, placement{feed: sub}, row, true)
-}
-
-// applyTotals folds a settled run's token sum onto the head. The two usage
-// arms are the spawn path's honesty: a sync run states the full breakdown, an
-// async one at most a total.
-func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSubagentTotals) {
-	if totals == nil {
-		return
-	}
-	switch usage := totals.GetUsage().(type) {
-	case *conversationv1.AgentSubagentTotals_Full:
-		// THE RUN'S TOTAL, every token it consumed — cache reads included. The
-		// head draws ONE figure standing for the whole run, the same quantity
-		// the live path shows (AgentSubagentProgress.total_tokens, the vendor's
-		// running grand total) and the async path shows (total_only.total_tokens),
-		// so the number does not change basis when a live bubble settles. The
-		// cache-read bucket is CHEAP but it is still tokens the run consumed:
-		// dropping it (as this once did) understated the total by the cached
-		// context a subagent reads, which for a Claude Code run is most of it.
-		// This is deliberately NOT the footer's "expensive sum" — that cell
-		// answers "what did this turn cost", a different question with its own
-		// component breakdown; this answers "how big was this run".
-		full := usage.Full
-		hits := full.GetInputHits()
-		misses := full.GetInputMisses()
-		sum := hits.GetRead() + misses.GetWritten() + misses.GetUnwritten() + full.GetOutputTokens()
-		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(sum) + " tok"}
-	case *conversationv1.AgentSubagentTotals_TotalOnly:
-		if usage.TotalOnly.TotalTokens == nil {
-			return
-		}
-		bubble.Tokens = &frontendv1.FeedSubagentTokens{
-			Text: figures.Tokens(usage.TotalOnly.GetTotalTokens()) + " tok",
-		}
-	}
 }
 
 // subagentFailureOutcome picks the settled treatment. A person's stop is NOT a
