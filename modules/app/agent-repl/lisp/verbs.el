@@ -1267,15 +1267,32 @@ component's decision."
                (plist-get value :detail)))
       (arm (format "the daemon refused with %S" arm)))))
 
+(defconst agent-repl-verbs--deploy-fault-arms
+  '(:build-failed :install-failed :service-restart-failed)
+  "The DeployError arms the daemon ALSO stands as a `deploy_failed' fault.
+A build, an install or a service restart that did not go through opens
+the daemon-scoped fault, which WatchDaemon tells this Emacs as a standing
+loud fault and daemon-link.el echoes (`agent-repl-link--faults-standing')
+-- whoever started the deploy.  So for these arms THE PUSHED LINE IS THE
+ONE ECHO: the verb records its refusal and leaves the minibuffer to it,
+rather than saying one failure twice.")
+
 (defun agent-repl-verbs--deploy-on-error (value)
   "Report the DeployError VALUE loudly, and claim it.
-Every arm is an ERROR record carrying its fields and an echo-area line
-carrying its detail."
-  (let ((cause (plist-get value :cause)))
-    (agent-repl--error '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-refused arm=%S fields=%S"
-                       (plist-get cause :arm) (plist-get cause :value))
-    (message "agent-repl: deploy refused: %s"
-             (agent-repl-verbs--deploy-refusal-sentence cause))
+Every arm is an ERROR record carrying its fields.  An arm the daemon also
+stands as a `deploy_failed' fault (`agent-repl-verbs--deploy-fault-arms')
+is echoed by that fault's push; every other arm is echoed here, with its
+detail."
+  (let* ((cause (plist-get value :cause))
+         (arm (plist-get cause :arm))
+         (central '(:agent-repl-central "a deploy is daemon administration spanning every workspace")))
+    (agent-repl--error central "elisp.verbs.deploy-refused arm=%S fields=%S"
+                       arm (plist-get cause :value))
+    (if (memq arm agent-repl-verbs--deploy-fault-arms)
+        (agent-repl--log central "elisp.verbs.deploy-refusal-echoed-by-its-fault arm=%S sentence=%S"
+                         arm (agent-repl-verbs--deploy-refusal-sentence cause))
+      (message "agent-repl: deploy refused: %s"
+               (agent-repl-verbs--deploy-refusal-sentence cause)))
     t))
 
 (defun agent-repl-deploy (&optional force)

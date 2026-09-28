@@ -111,6 +111,10 @@ type Deps struct {
 	Sidebar sidebar.Resolver
 	// Holds backs WatchDaemonHolds.
 	Holds holds.Resolver
+	// LoudFaults is the daemon's standing loud faults, the `faults_standing`
+	// state every Emacs WatchDaemon stream subscribes to (a webview's never
+	// does: its topbar and footer views carry the same faults).
+	LoudFaults *publish.Topic[*agentreplv1.DaemonFaultsStanding]
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -351,6 +355,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a sidebar resolver")
 	case deps.Holds == nil:
 		return nil, missing("a holds resolver")
+	case deps.LoudFaults == nil:
+		return nil, missing("the standing loud faults")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:

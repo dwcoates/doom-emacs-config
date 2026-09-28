@@ -6391,6 +6391,11 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   font-size: 0.95em;
 }
+/* A failed deploy's whole account: its lines kept, a long path wrapped. */
+.topbar-warning-whole {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* ---- login overlay (src/login) ----------------------------------------- */
 

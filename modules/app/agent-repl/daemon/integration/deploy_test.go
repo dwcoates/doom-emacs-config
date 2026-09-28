@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -449,4 +450,185 @@ func TestADeployWhoseRollbackFailsStandsAsItsOwnFaultOnTheTopbar(t *testing.T) {
 		}
 		return step && rollback
 	})
+}
+
+// ---- a failed deploy: every client is told --------------------------------
+
+// awaitStanding reads an Emacs daemon stream until a faults_standing push
+// satisfies the predicate.
+func awaitStanding(t *testing.T, d *harness.Daemon, s *harness.Stream[*agentreplv1.WatchDaemonResponse], what string, pred func([]*agentreplv1.DaemonStandingFault) bool) []*agentreplv1.DaemonStandingFault {
+	t.Helper()
+	ctx, cancel := d.WaitCtx()
+	defer cancel()
+	return harness.AwaitView(t, ctx, s, what, func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetFaultsStanding() != nil && pred(r.GetFaultsStanding().GetFaults())
+	}).GetFaultsStanding().GetFaults()
+}
+
+// standsLine reports whether a standing fault carries line.
+func standsLine(faults []*agentreplv1.DaemonStandingFault, line string) bool {
+	for _, f := range faults {
+		if f.GetLine() == line {
+			return true
+		}
+	}
+	return false
+}
+
+// failDeploy asks the daemon for a deploy whose build fails.
+func failDeploy(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	d.StageDeployBuild(harness.DeployFails)
+	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+	resp, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil || resp.Msg.GetError().GetBuildFailed() == nil {
+		t.Fatalf("Deploy = (%v, %v), want the build_failed refusal", resp, err)
+	}
+}
+
+func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
+	t.Parallel()
+	// Arrange: an Emacs holds the daemon stream, and the deploy is the CLI's.
+	d := harness.StartDaemon(t, harness.Opts{})
+	emacs := d.WatchDaemonStream()
+	d.StageDeployBuild(harness.DeployFails)
+	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+	ctx, cancel := d.WaitCtx()
+	defer cancel()
+	cli := exec.CommandContext(ctx, harness.DaemonBinary(t), "deploy", "-state-dir", d.StateDir)
+	cli.Env = append(os.Environ(), "AGENT_REPL_STATE_DIR="+d.StateDir, "AGENT_REPL_FORBID_VENDOR_CALLS=1")
+
+	// Act
+	out, err := cli.CombinedOutput()
+
+	// Assert: the verb failed with the daemon's words, and Emacs was told.
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || !strings.Contains(string(out), harness.FakeDeployBuildRefusal) {
+		t.Fatalf("claude-repld deploy = (%v, %q), want a non-zero exit carrying the build's words", err, out)
+	}
+	faults := awaitStanding(t, d, emacs, "the failed deploy on the Emacs stream", func(f []*agentreplv1.DaemonStandingFault) bool {
+		return standsLine(f, buildFailedTopbarLine)
+	})
+	if got := faults[0]; got.GetFaultId() == "" || got.GetFault().GetDeployFailed().GetBuild().GetStep() != "build" {
+		t.Fatalf("standing fault = %v, want its id and the typed build arm", got)
+	}
+}
+
+func TestAnEmacsThatResubscribesIsToldTheStandingDeployFailure(t *testing.T) {
+	t.Parallel()
+	// Arrange: the deploy failed before this Emacs stream existed.
+	d := harness.StartDaemon(t, harness.Opts{})
+	failDeploy(t, d)
+
+	// Act
+	emacs := d.WatchDaemonStream()
+
+	// Assert
+	awaitStanding(t, d, emacs, "the standing failure replayed", func(f []*agentreplv1.DaemonStandingFault) bool {
+		return standsLine(f, buildFailedTopbarLine)
+	})
+}
+
+func TestALaterDeployThatBuildsTellsEmacsTheFailureClosed(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+	emacs := d.WatchDaemonStream()
+	failDeploy(t, d)
+	awaitStanding(t, d, emacs, "the failed deploy", func(f []*agentreplv1.DaemonStandingFault) bool {
+		return standsLine(f, buildFailedTopbarLine)
+	})
+	d.StageDeployBuild(harness.DeployCurrent)
+
+	// Act
+	deployOutcomes(t, d, false)
+
+	// Assert
+	awaitStanding(t, d, emacs, "the empty standing set", func(f []*agentreplv1.DaemonStandingFault) bool {
+		return len(f) == 0
+	})
+}
+
+func TestAFailedRollbackReachesEmacsAsItsOwnFault(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+	emacs := d.WatchDaemonStream()
+	failSidecarRestart(t, d)
+
+	// Act
+	if _, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+
+	// Assert: the step's fault and the rollback's own both stand.
+	awaitStanding(t, d, emacs, "the step's and the rollback's faults", func(f []*agentreplv1.DaemonStandingFault) bool {
+		var step, rollback bool
+		for _, fault := range f {
+			step = step || strings.HasPrefix(fault.GetLine(), "deploy failed: restart services sidecar, rollback failed: ")
+			rollback = rollback || fault.GetFault().GetDeployFailed().GetRollback() != nil
+		}
+		return step && rollback
+	})
+}
+
+func TestAWorkspaceOpenedAfterAFailedDeployDrawsItOnItsFooter(t *testing.T) {
+	t.Parallel()
+	// Arrange: the deploy failed while only the first workspace was open.
+	f := newOpened(t, harness.Opts{})
+	failDeploy(t, f.d)
+
+	// Act
+	later := secondWorkspaceOn(t, f.d)
+	footer := f.d.WatchFooter(later.ws)
+
+	// Assert
+	view := awaitFooter(t, later, footer, "the deploy_failed activity on the later workspace", func(v *frontendv1.FooterView) bool {
+		return footerFault(v).GetKind() == "deploy_failed"
+	})
+	if detail := footerFault(view).GetDetail(); detail != "build: "+harness.FakeDeployBuildRefusal {
+		t.Fatalf("fault detail = %q, want the step and the build's own words", detail)
+	}
+}
+
+func TestAWorkspaceOpenedAfterAFailedDeployDrawsItOnItsTopbar(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	failDeploy(t, f.d)
+
+	// Act
+	later := secondWorkspaceOn(t, f.d)
+	topbar := f.d.WatchTopbar(later.ws)
+
+	// Assert
+	awaitTopbar(t, later, topbar, "the deploy_failed warning on the later workspace", func(v *frontendv1.TopbarView) bool {
+		return topbarHasLine(v, buildFailedTopbarLine)
+	})
+}
+
+func TestAFailedDeploysTopbarRowOpensWhatFailed(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Act
+	failDeploy(t, f.d)
+
+	// Assert
+	var overlay *frontendv1.TopbarDeployFailedWarningDetail
+	awaitTopbar(t, f, topbar, "the failed deploy's overlay", func(v *frontendv1.TopbarView) bool {
+		for _, w := range v.GetWarnings().GetWarnings() {
+			if w.GetLine().GetText() == buildFailedTopbarLine {
+				overlay = w.GetDeployFailed()
+				return true
+			}
+		}
+		return false
+	})
+	if overlay.GetStep().GetText() != "build" || overlay.GetRollback().GetText() != "nothing was installed" ||
+		!strings.Contains(overlay.GetDetail().GetText(), harness.FakeDeployBuildRefusal) || overlay.GetLog().GetText() == "" {
+		t.Fatalf("overlay = %v, want the step, the rollback, the build's words and its archived log", overlay)
+	}
 }

@@ -6,10 +6,12 @@ import (
 	"reflect"
 	"strings"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/wsm"
 
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
@@ -357,10 +359,16 @@ func (f *recordingFooter) CloseFault(_ ids.WorkspaceID, id string) {
 type recordingTopbar struct {
 	topbar.Resolver
 	raised    map[string]string
+	warnings  map[string]topbar.DaemonWarning
 	retracted []string
 }
 
-func (t *recordingTopbar) RaiseDaemonWarning(key, line string) { t.raised[key] = line }
+func (t *recordingTopbar) RaiseDaemonWarning(key string, w topbar.DaemonWarning) {
+	t.raised[key] = w.Line
+	if t.warnings != nil {
+		t.warnings[key] = w
+	}
+}
 
 func (t *recordingTopbar) RetractDaemonWarning(key string) { t.retracted = append(t.retracted, key) }
 
@@ -385,7 +393,7 @@ func TestTheFaultSinkDrawsEachFaultWhereHealthSays(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, tb)
+			sink := newFaultSurfaces(f, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -417,7 +425,7 @@ func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, tb)
+			sink := newFaultSurfaces(f, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 			sink.FaultOpened("", tc.line)
 
 			// Act
@@ -431,5 +439,103 @@ func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
 				t.Fatalf("topbar retracted = %v, want %v", tb.retracted, tc.wantRetracted)
 			}
 		})
+	}
+}
+
+func TestTheFaultSinkGivesAFailedDeploysTopbarRowItsOverlay(t *testing.T) {
+	tests := []struct {
+		name string
+		line health.FaultLine
+		want *topbar.DeployFailedOverlay
+	}{
+		{"a failed deploy's row opens what failed",
+			health.FaultLine{ID: "f-1", Kind: health.KindDeployFailed, Topbar: "deploy failed: build webapp: tsc",
+				Record: wsm.Fault{Kind: health.KindDeployFailed, Evidence: health.DeployFailure{
+					Step: health.DeployStepBuild, BuildStep: "webapp", Detail: "tsc", Log: "/s/build.log"}.Evidence()}},
+			&topbar.DeployFailedOverlay{Step: "build", Component: "webapp", Rollback: "nothing was installed", Detail: "tsc", Log: "/s/build.log"}},
+		{"a failed deploy whose record names no step is its line alone",
+			health.FaultLine{ID: "f-2", Kind: health.KindDeployFailed, Topbar: "deploy failed: prose",
+				Record: wsm.Fault{Kind: health.KindDeployFailed, Detail: "prose"}},
+			nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			tb := &recordingTopbar{raised: map[string]string{}, warnings: map[string]topbar.DaemonWarning{}}
+			sink := newFaultSurfaces(&recordingFooter{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+
+			// Act
+			sink.FaultOpened("", tc.line)
+
+			// Assert
+			if got := tb.warnings[string(tc.line.ID)].DeployFailed; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("overlay = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// loudIDs answers the standing loud faults' ids, nil when none was ever
+// published.
+func loudIDs(l *health.LoudFaults) []string {
+	latest, ok := l.Topic().Latest()
+	if !ok {
+		return nil
+	}
+	out := []string{}
+	for _, f := range latest.GetFaults() {
+		out = append(out, f.GetFaultId())
+	}
+	return out
+}
+
+// failedBuildLine is a failed deploy's daemon-scoped fault line.
+func failedBuildLine(id ids.FaultID) health.FaultLine {
+	record := wsm.Fault{Kind: health.KindDeployFailed, Evidence: health.DeployFailure{
+		Step: health.DeployStepBuild, BuildStep: "webapp", Detail: "tsc"}.Evidence()}
+	return health.FaultLine{ID: id, Kind: health.KindDeployFailed, Record: record, Topbar: health.FaultTopbarLine(record, true)}
+}
+
+func TestTheFaultSinkTellsEmacsExactlyTheTopbarsFaults(t *testing.T) {
+	tests := []struct {
+		name string
+		ws   ids.WorkspaceID
+		line health.FaultLine
+		want []string
+	}{
+		{"a failed deploy is told", "", failedBuildLine("f-1"), []string{"f-1"}},
+		{"a daemon-scoped fault the topbar does not carry is not", "",
+			health.FaultLine{ID: "f-2", Kind: health.KindPromptsDirMissing}, nil},
+		{"a workspace fault is not", "ws-1", failedBuildLine("f-3"), nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			loud := health.NewLoudFaults(dlog.NewTestLogger())
+			sink := newFaultSurfaces(&recordingFooter{}, &recordingTopbar{raised: map[string]string{}}, loud)
+
+			// Act
+			sink.FaultOpened(tc.ws, tc.line)
+
+			// Assert
+			if got := loudIDs(loud); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("loud faults = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheFaultSinkRetractsAClosedFaultFromEmacs(t *testing.T) {
+	// Arrange
+	loud := health.NewLoudFaults(dlog.NewTestLogger())
+	sink := newFaultSurfaces(&recordingFooter{}, &recordingTopbar{raised: map[string]string{}}, loud)
+	sink.FaultOpened("", failedBuildLine("f-1"))
+
+	// Act
+	sink.FaultClosed("", "f-1")
+
+	// Assert
+	if got := loudIDs(loud); got == nil || len(got) != 0 {
+		t.Fatalf("loud faults = %v, want the empty set published", got)
 	}
 }
