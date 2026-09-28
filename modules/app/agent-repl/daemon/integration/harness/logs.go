@@ -119,10 +119,42 @@ func awaitLogRecord(t *testing.T, wait context.Context, path, what string, pred 
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			t.Fatalf("waiting for %s in %s: %v", what, path, wait.Err())
+			t.Fatalf("waiting for %s in %s: %v\n%s", what, path, wait.Err(), logTail(readLog(t, path), failureTailRecords))
 			return LogRecord{}
 		}
 	}
+}
+
+// failureTailRecords is how many of the awaited log's last records a failed
+// wait prints.
+const failureTailRecords = 40
+
+// logTail renders the last n records, oldest first, one line each.
+//
+// A FAILED WAIT CARRIES THE LOG IT WAITED ON. The log lives in the test's temp
+// directory, which is deleted when the test ends, so a failure that named only
+// the path left nothing to diagnose from: on 2026-09-28 a reconciliation wait
+// timed out under a loaded machine and the record of what the daemon did
+// instead was gone with the directory.
+func logTail(records []LogRecord, n int) string {
+	if len(records) == 0 {
+		return "the log held no records"
+	}
+	start := max(len(records)-n, 0)
+	var b strings.Builder
+	fmt.Fprintf(&b, "last %d of %d records:", len(records)-start, len(records))
+	for _, r := range records[start:] {
+		fmt.Fprintf(&b, "\n  %s %s %s: %s", r.Timestamp, r.Level, r.Operation, r.Message)
+		if len(r.Context) != 0 {
+			context, err := json.Marshal(r.Context)
+			if err != nil {
+				fmt.Fprintf(&b, " (context unrenderable: %v)", err)
+				continue
+			}
+			fmt.Fprintf(&b, " %s", context)
+		}
+	}
+	return b.String()
 }
 
 // AwaitRunLogOperation waits for a run-log record with an exact operation.
