@@ -1871,6 +1871,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (attribution.keepalive) return;
     if (message.type !== "result" && !isTopLevelReply(message)) return;
     if (turnFor(false) !== undefined) return;
+    adoptTurn("the vendor started a turn with no StartTurn pending", messageKind(message));
+  }
+
+  /**
+   * Open an ADOPTED turn: a shim-minted id and a `PromptOrigin.VENDOR_STARTED`
+   * prompt row as its first row. The one opening shared by a turn the vendor
+   * started on its own ({@link adoptVendorTurn}) and the turn the shim itself
+   * asks of the main agent to resume a network-killed subagent
+   * ({@link deliverNetworkResume}), so the two cannot open a turn differently.
+   */
+  function adoptTurn(cause: string, firstMessage: string): OpenTurn {
     const agentId = requireIdentity().agentId;
     // NOT `newUuid`: that minter names keep-alive SENDS, which the vendor echoes
     // back, and an adoption must never shift which uuid a send carries.
@@ -1893,13 +1904,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     LOGGER.info(
       {
         turn_id: turn.value,
-        cause: "the vendor started a turn with no StartTurn pending",
-        first_message: messageKind(message),
+        cause,
+        first_message: firstMessage,
         vendor_session_id: identity?.vendorSessionId ?? "",
         beside_keepalive: besideTheKeepalive,
       },
       "adopted a turn the vendor started on its own; it runs as a real turn under a shim-minted id",
     );
+    return adopted;
   }
 
   /** The vendor turn adopted beside the keep-alive ended on its own result. */
@@ -4243,12 +4255,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    *
    * ONLY ON AN IDLE MAIN AGENT: an open turn (a keep-alive's included) or a
    * `StartTurn` being processed answers `busy`, and the loop asks again on its
-   * next beat. The prompt goes in as the vendor's OWN kind of turn — no shim
-   * turn is opened and no prompt row is written — exactly as a background
-   * task's notification starts one, because a turn id is the daemon's to mint
-   * and this turn has no daemon behind it. What the turn DOES (the
+   * next beat.
+   *
+   * THE TURN IS ADOPTED BEFORE THE PROMPT IS PUSHED ({@link adoptTurn}), as a
+   * turn the vendor starts on its own is: a shim-minted id and a
+   * `PromptOrigin.VENDOR_STARTED` row, because a turn id is the daemon's to
+   * mint and this turn has no daemon behind it. Adopting it FIRST, in the same
+   * synchronous step as the push, is what keeps a `StartTurn` arriving before
+   * the vendor's first reply out of it: that start finds the slot taken and is
+   * refused `turnAlreadyOpen`, so the daemon holds the prompt behind this turn
+   * rather than riding the resume's reply. What the turn DOES (the
    * `SendMessage` per agent, the resumed agents' own work) is folded and
-   * served as any vendor-run turn's work is.
+   * served as any adopted turn's work is.
    *
    * THE KEEP-ALIVE ROLLBACK IS OWED FIRST, as it is before any real prompt:
    * the resume must not build on keep-alive context.
@@ -4269,10 +4287,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (queue === undefined) {
       return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
     }
-    queue.push(userMessage(text, undefined));
+    const adopted = adoptTurn("the shim asked the main agent to resume network-killed agents", "network_resume");
+    try {
+      queue.push(userMessage(text, undefined));
+    } catch (err) {
+      // THE ADOPTED TURN LEAVES THE SLOT WITH THE PUSH THAT FAILED: nothing
+      // will ever end it, and a slot held by it would refuse every StartTurn.
+      if (open === adopted) setOpen(undefined);
+      cadence?.resume();
+      LOGGER.error(
+        { turn_id: adopted.id.value, cause: err instanceof Error ? err.message : String(err) },
+        "the vendor refused the network-resume prompt; the adopted turn is released",
+      );
+      throw err;
+    }
     LOGGER.info(
-      { characters: text.length },
-      "submitted the network-resume prompt; the main agent continues the cut-off agents in a turn of its own",
+      { turn_id: adopted.id.value, characters: text.length },
+      "submitted the network-resume prompt; the main agent continues the cut-off agents in an adopted turn",
     );
     return { kind: "delivered" };
   }

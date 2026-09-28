@@ -10349,12 +10349,62 @@ describe("a background agent a network outage cut off", () => {
     expect(delivered.filter(isNetworkResumePrompt)).toHaveLength(1);
   });
 
-  it("opens no shim turn: a StartTurn right after the resume is accepted", async () => {
+  /** Every adoption row the engine wrote, in order. */
+  const adoptions = (h: Harness): conversationv1.AgentPrompt[] =>
+    h.persistence.buffered.flatMap((entry) =>
+      entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED
+        ? [entry.item.prompt]
+        : [],
+    );
+
+  it("adopts the resume's turn before its first reply: a StartTurn right after it is refused", async () => {
     // Arrange
     const h = harness({ drainPrompts: [] });
     await started(h);
     await cutOff(h);
     await beat(h);
+
+    // Act
+    const response = await startDuring(h, "turn-2");
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+  });
+
+  it("writes one VENDOR_STARTED prompt row for the resume's turn", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(1);
+  });
+
+  it("the resume turn's first reply adopts no second turn", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("resume-reply"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(1);
+  });
+
+  it("the resume turn's result frees the slot for a StartTurn", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    await beat(h);
+    await h.engine.onSdkMessage(resultMessage("resume-result"));
 
     // Act
     const response = await startDuring(h, "turn-2");
