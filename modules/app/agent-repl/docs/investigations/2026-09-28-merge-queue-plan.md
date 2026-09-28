@@ -115,10 +115,10 @@ Order: 1–5 first (the queue must be trustworthy before everything depends on i
   - two writers on master at once;
   - the warning chip from the undecodable merge row.
 
-## Open decision for the owner
+## Owner decision (settled 2026-09-28)
 
 - Does a parked merge block the rest of its repo's queue?
-- Recommendation: NO. Later merges proceed. A parked merge, when resumed, rebases onto the
+- RULED NO (owner agreed with the recommendation). Later merges proceed. A parked merge, when resumed, rebases onto the
   new master and re-runs the gate.
 - The alternative, strict order, is simpler but lets one stuck merge stall everyone.
 
