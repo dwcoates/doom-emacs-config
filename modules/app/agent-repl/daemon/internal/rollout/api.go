@@ -29,6 +29,7 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/clock"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -238,6 +239,11 @@ type Deps struct {
 	ShimBuild ShimBuildFunc
 	// ColdGate raises the ordinary cold gate when a resume answers `cold`.
 	ColdGate ColdGateFunc
+	// Progress is the footer's update line. A SUCCESSOR says `updated` on it
+	// once it has taken over from a deploy's handover (the old daemon's
+	// streams ended at the transfer), and an incumbent whose handover or
+	// restart cannot finish takes the deploy's line down.
+	Progress deployprogress.Sink
 	// Exit performs the daemon's orderly exit after the last transfer.
 	Exit ExitFunc
 	// ExpectedOutage is the bounded outage the announcement states, so clients
@@ -498,6 +504,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.ShimBuild == nil {
 		return nil, errors.New("rollout: the installed shim build is required; a reported build is judged against it")
+	}
+	if deps.Progress == nil {
+		return nil, errors.New("rollout: the deploy progress sink is required; a successor ends the deploy's story on it")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

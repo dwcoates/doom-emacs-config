@@ -101,6 +101,7 @@ import {
   type PersistenceRetryPolicy,
 } from "./persistence.js";
 import { createReader } from "./reader.js";
+import { lookupAgentByVendorTask, type VendorTaskAnswer } from "./locator.js";
 import { createReconciler } from "./reconcile.js";
 
 const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
@@ -1070,6 +1071,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
       return reconciler.liveWork(session);
+    },
+
+    agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
+      return lookupAgentByVendorTask({ client: options.client, retry, sleep }, session, vendorTaskId);
     },
 
     openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>> {

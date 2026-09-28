@@ -238,12 +238,19 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
 
 /**
  * Read the announcement: size the quiet window, mute the expected failure, and
- * draw the restarting notice.
+ * draw the restarting notice — unless the announcement is a DEPLOY'S HANDOVER.
  *
  * WITH `address` SET this is a handover, and the per-workspace `transferred`
  * push is what actually moves the page — so only the notice is drawn here.
  * WITHOUT it this is a plain bounce: the streams will die, the rpc core's own
  * reconnect handles it, and the notice clears on the first push after.
+ *
+ * A DEPLOY'S HANDOVER DRAWS NO BANNER (owner request, 2026-09-27): its
+ * progress is the footer's update line, which the daemon publishes on every
+ * workspace's strip and the successor finishes with `updated`. The expected
+ * `daemonUnreachable` is still muted for the announced window, because the
+ * link does drop at the transfer. Every other announcement — an unplanned
+ * restart, a scheduled drain firing, a plain bounce — keeps the banner.
  */
 export function announceShutdown(
   ctx: AppContext,
@@ -269,7 +276,26 @@ export function announceShutdown(
       operation: "lifecycle.suppress-unavailable",
     });
   }
+  if (isDeployHandover(announced)) {
+    log.info("a deploy's handover: its progress is on the footer, so no banner is drawn", {
+      operation: "lifecycle.deploy-handover",
+      context: { address: announced.address ?? "" },
+    });
+    return;
+  }
   banner.showRestarting(announced, nowMs + quietMs);
+}
+
+/**
+ * Whether an announcement is a DEPLOY'S HANDOVER: the rollout cause with a
+ * successor's address. The daemon hands over only for a deploy, and the same
+ * cause WITHOUT an address is a plain bounce (a layout restart), which keeps
+ * its banner. A causeless announcement is malformed and refused here.
+ */
+export function isDeployHandover(announced: DaemonShutdownAnnounced): boolean {
+  const cause = requireMessage(announced.cause, "DaemonShutdownAnnounced.cause");
+  const arm = requireCase(cause.kind, "DaemonShutdownCause.kind");
+  return arm.case === "selfMergeRollout" && announced.address !== undefined;
 }
 
 /**

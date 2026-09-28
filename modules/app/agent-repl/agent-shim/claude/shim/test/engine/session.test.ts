@@ -10205,3 +10205,289 @@ describe("the held stop command (KillTurn.commanded_by)", () => {
     expect(h.fold.contexts.at(-1)?.stopCommand).toBeUndefined();
   });
 });
+
+/**
+ * A SUBAGENT RESUMED BY `SendMessage` AFTER THE SHIM RESTARTED (2026-09-27).
+ *
+ * The resume's `task_started` names the send, not the spawn, and a restarted
+ * shim never saw the spawn — so its memory holds no pairing of the vendor task
+ * locator with the agent. The store holds it (the sidecar wrote it with the
+ * agent's rows), and the engine asks the store before the fold, at the
+ * restore, and for the book an ask raised by the agent lands on.
+ */
+describe("a subagent resumed by a send whose spawn this process never saw", () => {
+  const LOCATOR = "a5583";
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+  const resumeStarted = {
+    type: "system",
+    subtype: "task_started",
+    task_id: LOCATOR,
+    tool_use_id: "toolu_send",
+    task_type: "local_agent",
+    description: "resumed",
+    uuid: "00000000-0000-4000-8000-0000000000d1",
+    session_id: "s",
+  } as never as SdkMessage;
+
+  /** A harness whose fold says the resume awaits the store, as the real fold would. */
+  async function resumeHarness(options: Parameters<typeof harness>[0] = {}): Promise<Harness> {
+    const h = harness(options);
+    h.fold.awaitingFor = (message) => (message === resumeStarted ? LOCATOR : undefined);
+    await started(h);
+    return h;
+  }
+
+  it("hands the fold the store's agent BEFORE folding the resume", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    let learnedWhenFolded = -1;
+    h.fold.entriesFor = (message) => {
+      if (message === resumeStarted) learnedWhenFolded = h.fold.learned.length;
+      return [];
+    };
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    expect(learnedWhenFolded).toBe(1);
+  });
+
+  it("asks the store scoped to this session's main agent, naming the locator", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual([`${mainAgentId(sessionId).value}/${LOCATOR}`]);
+  });
+
+  it("records the store naming the agent at INFO", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    const named = logRecordsSince(before).filter(
+      (record) => record.message === "the store named the agent a vendor task is running",
+    );
+    expect(named.map((record) => [record.level, record.context.agent, record.context.site])).toEqual([
+      ["info", "toolu_spawn", "announcement"],
+    ]);
+  });
+
+  it("records a store that names no agent at ERROR, with its answer", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(resumeStarted);
+
+    // Assert.
+    const missed = logRecordsSince(before).filter(
+      (record) => record.message === "the store named no agent for a vendor task this process cannot name itself",
+    );
+    expect(missed.map((record) => [record.level, record.context.detail])).toEqual([
+      ["error", "not_found: no agent of this session's lineage is paired with the locator"],
+    ]);
+  });
+
+  it("asks the store nothing for a message no task awaits", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000d2"));
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual([]);
+  });
+
+  /** The ask a subagent raises under its vendor task id; its book is returned. */
+  async function askBook(h: Harness): Promise<string | undefined> {
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_asked",
+      agentID: LOCATOR,
+      requestId: "req_1",
+    });
+    await vi.waitFor(() => {
+      expect(h.persistence.buffered.some((entry) => entry.source.discriminator.includes("permission"))).toBe(true);
+    });
+    await h.engine.standDown("SIGTERM");
+    await pending;
+    const entry = h.persistence.buffered.find((buffered) => buffered.source.discriminator.includes("permission"));
+    return entry?.agentId.value;
+  }
+
+  it("credits a resumed agent's ask to the agent the fold named", async () => {
+    // Arrange: the fold holds the pairing — its spawn, or the store's answer at the resume.
+    const h = await resumeHarness();
+    h.fold.knowledge.set(LOCATOR, { kind: "named", agent: SPAWN });
+
+    // Act, Assert.
+    expect(await askBook(h)).toBe("toolu_spawn");
+  });
+
+  it("credits a resumed agent's ask to the agent the store names, never to the send", async () => {
+    // Arrange: the live table holds the task under the SEND that resumed it.
+    const h = await resumeHarness();
+    await h.engine.onSdkMessage(resumeStarted);
+    h.fold.knowledge.set(LOCATOR, { kind: "not_its_spawn" });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+
+    // Act, Assert.
+    expect(await askBook(h)).toBe("toolu_spawn");
+  });
+
+  it("lands an ask the store cannot name on the main agent, recorded at ERROR", async () => {
+    // Arrange.
+    const h = await resumeHarness();
+    h.fold.knowledge.set(LOCATOR, { kind: "not_its_spawn" });
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    const before = logSinkMark();
+
+    // Act.
+    const book = await askBook(h);
+
+    // Assert.
+    expect(book).toBe(mainAgentId(sessionId).value);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.site),
+    ).toEqual(["permission"]);
+  });
+
+  /** One unit in the main book, as the store holds it. */
+  function bookUnit(at: string, unit: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: at }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** The main book after a resume: the send that reached `a5583`, and the spawn of `toolu_spawn`. */
+  function resumedBook(): conversationv1.HistoryPage {
+    return create(conversationv1.HistoryPageSchema, {
+      entries: [
+        bookUnit("2", "toolu_send", {
+          case: "sendMessage",
+          value: create(conversationv1.AgentSendMessageSchema, {
+            result: {
+              case: "success",
+              value: create(conversationv1.AgentSendMessageSuccessSchema, {
+                recipientAgentId: create(conversationv1.AgentIdSchema, { value: LOCATOR }),
+              }),
+            },
+          }),
+        }),
+        bookUnit("1", "toolu_spawn", {
+          case: "subagent",
+          value: create(conversationv1.AgentSubagentSchema, {
+            result: {
+              case: "start",
+              value: create(conversationv1.AgentSubagentStartSchema, { createdAgentId: SPAWN }),
+            },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+  }
+
+  /** A restarted session whose store holds the resumed agent's send as live work. */
+  function restoredHarness(): Harness {
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" })],
+    });
+    h.persistence.page = resumedBook();
+    return h;
+  }
+
+  it("re-announces a surviving resumed agent at StartSession, named by the store and described by its spawn", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(
+      live.map((work) => [
+        work.work?.value,
+        work.kind?.kind.case === "subagent" ? work.kind.kind.value.agentId?.value : "",
+        work.origin.case,
+      ]),
+    ).toEqual([["toolu_send", "toolu_spawn", "created"]]);
+  });
+
+  it("re-announces a resumed agent to a new watch", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    await started(h);
+    const watch = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await watch.next();
+
+    // Act.
+    const second = await nextPush(watch);
+    await watch.return?.();
+
+    // Assert.
+    const live = second.frame.case === "sessionStarted" ? second.frame.value.liveWork : [];
+    expect(live.map((work) => work.work?.value)).toEqual(["toolu_send"]);
+  });
+
+  it("announces nothing for a resumed handle the store names no agent for, recorded at ERROR", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    const before = logSinkMark();
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(live).toEqual([]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.site),
+    ).toEqual(["restore"]);
+  });
+});
