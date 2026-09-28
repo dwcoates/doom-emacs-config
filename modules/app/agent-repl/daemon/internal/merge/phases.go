@@ -52,6 +52,9 @@ func parkAt(tab string, round int, line string) step {
 // that moved while the gate ran is merged onto afresh rather than overwritten.
 func (r *run) attempt(ctx context.Context) (step, error) {
 	const op = "daemon.merge.merge_tab"
+	if err := stillWanted(ctx); err != nil {
+		return step{}, err
+	}
 	target := r.job.Layout.TargetDir
 	branch, err := r.o.deps.Git.CurrentBranch(ctx, target)
 	if err != nil {
@@ -113,6 +116,9 @@ func (r *run) attempt(ctx context.Context) (step, error) {
 		"workspace": string(r.ws), "commit": commit, "tree": tree})
 
 	verdict, err := r.gate(ctx, tree, commit)
+	if err == nil {
+		err = stillWanted(ctx)
+	}
 	if err != nil {
 		r.dropTree(ctx)
 		return step{}, err
@@ -161,6 +167,11 @@ func (r *run) land(ctx context.Context, base, commit, branch string) (step, erro
 			"workspace": string(r.ws), "target": branch, "tested_on": base, "tip": now})
 		return step{}, nil
 	}
+	// AN ABANDONED MERGE NEVER MOVES THE TARGET, whatever its phases managed to
+	// finish before the abandon reached them.
+	if err := stillWanted(ctx); err != nil {
+		return step{}, err
+	}
 	if err := r.o.deps.Git.FastForward(ctx, target, commit); err != nil {
 		return step{}, fmt.Errorf("merge: fast-forwarding %s to %s: %w", branch, commit, err)
 	}
@@ -176,6 +187,17 @@ func (r *run) land(ctx context.Context, base, commit, branch string) (step, erro
 		commits = nil
 	}
 	return step{done: &outcome{landed: commit, commits: commits}}, nil
+}
+
+// stillWanted answers the reason a run must stop -- an abandon, the daemon's
+// exit -- and nil while it may go on. Git and the shim stop on a cancelled
+// context by themselves; this is the check at the steps that must not be
+// taken at all once the run is no longer wanted.
+func stillWanted(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	return nil
 }
 
 // settleMergeTab settles an attempt's merge tab as failed.
@@ -265,6 +287,9 @@ func (r *run) conflicts(ctx context.Context, files []string, targetBranch string
 		return step{}, fmt.Errorf("merge: composing the conflict brief: %w", err)
 	}
 	if _, err := r.submit(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); err != nil {
+		return step{}, err
+	}
+	if err := stillWanted(ctx); err != nil {
 		return step{}, err
 	}
 	line, refused, err := r.machineryChanged(ctx, targetBranch)
@@ -427,6 +452,9 @@ func (r *run) fixes(ctx context.Context, failing GateResult, tree, targetBranch 
 		return step{}, fmt.Errorf("merge: composing the test-failure brief: %w", err)
 	}
 	if _, err := r.submit(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
+		return step{}, err
+	}
+	if err := stillWanted(ctx); err != nil {
 		return step{}, err
 	}
 	if why, gaveUp := r.consumeEscalation(ctx); gaveUp {
