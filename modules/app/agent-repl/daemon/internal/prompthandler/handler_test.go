@@ -167,6 +167,44 @@ func TestSubmitRefusesADuplicateIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestADuplicateIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive(t *testing.T) {
+	tests := []struct {
+		name      string
+		ctx       func(context.Context) context.Context
+		wantLevel string
+	}{
+		{name: "an ordinary submission", ctx: func(ctx context.Context) context.Context { return ctx }, wantLevel: "warn"},
+		{name: "a re-drive of an earlier attempt", ctx: WithRedrive, wantLevel: "info"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if _, err := h.submit("hello"); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			// Act
+			_, err := h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), "key-1",
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+			// Assert
+			if !errors.Is(err, ErrDuplicateSubmission) {
+				t.Fatalf("err = %v, want ErrDuplicateSubmission", err)
+			}
+			var levels []string
+			for _, r := range h.log.Records() {
+				if r.Operation == opSubmit && (r.Level == "warn" || r.Level == "info") && r.Context["existing_turn"] != nil {
+					levels = append(levels, r.Level)
+				}
+			}
+			if len(levels) != 1 || levels[0] != tc.wantLevel {
+				t.Fatalf("duplicate records = %v, want exactly one at %s", levels, tc.wantLevel)
+			}
+		})
+	}
+}
+
 func TestSubmitForwardsWithoutAKeyWhenNoneWasSupplied(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
