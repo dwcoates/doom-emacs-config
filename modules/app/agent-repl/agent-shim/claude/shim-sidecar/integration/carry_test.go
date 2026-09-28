@@ -130,10 +130,11 @@ func TestASeededCarryIsResumedFromTheStoreOnBoot(t *testing.T) {
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendRaw([]byte(line))
 	fake.SeedCursors(&storev1.CursorState{
-		FileId: fileID(t, g.Path()),
-		Path:   resolved(g.Path()),
-		Offset: int64(len(head)),
-		Carry:  []byte(head),
+		FileId:     fileID(t, g.Path()),
+		Path:       resolved(g.Path()),
+		Offset:     int64(len(head)),
+		Carry:      []byte(head),
+		Conversion: currentConversion(),
 	})
 
 	// Act.

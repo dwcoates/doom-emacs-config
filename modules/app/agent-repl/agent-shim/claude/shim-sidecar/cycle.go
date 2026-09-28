@@ -63,6 +63,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
+	"google.golang.org/protobuf/proto"
 )
 
 // The recovery ladder: an immediate first attempt, then 250ms doubling to a
@@ -140,6 +141,10 @@ type watched struct {
 	// afterwards took nothing with it, which is what keeps a reaped task spool
 	// out of the WARNINGs.
 	terminated bool
+	// heal is this transcript's re-derivation under the current conversion,
+	// nil when it owes none (heal.go). While it is set the poll pass leaves the
+	// file to healStep.
+	heal *healState
 }
 
 // missClearInterval bounds how long a remembered identity miss can outlive a
@@ -525,6 +530,10 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 			// the cursors that suspension just dropped.
 			s.producing(s.discoverChanged)
 			s.producing(s.pollAll)
+			// THE RE-DERIVATIONS COME AFTER THE PASS, on a budget of their own,
+			// so re-reading a transcript from its start never holds a live file
+			// back (heal.go).
+			s.producing(s.healStep)
 			s.endCatchupOnFirstDrainedPass()
 		case <-sweepT.C:
 			s.producing(s.sweep)
@@ -945,12 +954,20 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 			continue
 		}
 		if !s.admits(target) {
-			// NO ACTIVE WORKSPACE OWNS IT, so it is not read, not attributed and
-			// not polled (active.go). This is before resolveTarget on purpose:
-			// attribution reads the transcript, and that is a per-file cost the
-			// gate exists to avoid.
-			s.goDormant(target)
-			continue
+			if !s.owesHeal(target) {
+				// NO ACTIVE WORKSPACE OWNS IT, so it is not read, not attributed
+				// and not polled (active.go). This is before resolveTarget on
+				// purpose: attribution reads the transcript, and that is a
+				// per-file cost the gate exists to avoid.
+				s.goDormant(target)
+				continue
+			}
+			// ITS ROWS PREDATE THE CURRENT CONVERSION, so it is watched for its
+			// re-derivation although no active workspace owns it (heal.go), and
+			// drops back to dormant once that is done and it has drained.
+			s.log.With(logging.Context{
+				Operation: "watch-admit", Path: target.Path, VendorSessionID: target.SessionID,
+			}).LogVerbose("admitted for its conversion re-derivation; no active workspace owns it")
 		}
 		resolved, ok := s.resolveTarget(target, now)
 		if !ok {
@@ -1136,11 +1153,20 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		RunActivityID:     s.owners.activityFor(target.TaskID),
 	}
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
-	if cursor != nil {
+	heal := healOwed(target.Kind, cursor)
+	switch {
+	case heal != nil:
+		s.beginHeal(target, identity, tailer, cursor, heal, now)
+	case cursor != nil:
+		if cursor.GetConversion().GetVersion() > convert.ConversionVersion {
+			bound.With(logging.Context{Operation: "conversion-heal", FileID: identity}).Log(
+				"this file's cursor was written by conversion version %d, newer than this binary's %d; nothing is re-derived and its rows are left as that conversion wrote them",
+				cursor.GetConversion().GetVersion(), convert.ConversionVersion)
+		}
 		tailer.Restore(cursor)
 		s.rewindOnce(target, identity, tailer, now)
 	}
-	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
+	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx, heal: heal}
 	delete(s.dormant, target.Path)
 	s.trackDetached(target, now)
 	// PER FILE, SO VERBOSE. This process watches every transcript under both
@@ -1513,67 +1539,17 @@ func (s *sidecar) pollAll() {
 			continue
 		}
 		polled++
-		if s.parked[path] {
+		if w.heal != nil {
+			// A RE-DERIVATION IS NOT READ BY THE PASS. It re-reads a whole
+			// transcript, and reading it here would hold every live file behind
+			// it; healStep reads it on a budget of its own after this pass.
 			continue
 		}
-		result, err := w.tailer.Poll()
-		if err != nil {
-			s.pollFailed(path, w, err, nowMs)
-			continue
-		}
-		if !result.Changed {
-			continue
-		}
-		skips, err := s.writeBatch(w.target, result)
-		if err != nil {
-			if s.interrupted(err) {
-				// The process is going away; storeWrite stated the
-				// interrupted write, and THIS reader's cursor stayed where it
-				// was — whatever the store ends up doing with the batch, the
-				// next boot resumes from the cursor the store holds.
-				return
-			}
-			if field, invalid := storeclient.InvalidRequest(err); invalid {
-				// A PRODUCER DEFECT, NOT AN OUTAGE (ruling R-S2). The store can
-				// never accept these bytes, so retrying them is a tight
-				// identical loop; the file is parked and every other file
-				// keeps being read. Production is NOT suspended — nothing is
-				// wrong with the store.
-				s.park(path, w, result, field, err)
-				continue
-			}
-			// Honest sad path: nothing was committed, so the cursor does not
-			// move and the same durable bytes are re-read next cycle.
-			s.log.With(logging.Context{
-				Operation: "store-write", Path: path, TaskID: w.target.TaskID,
-				Offset: logging.Off(result.Next.GetOffset()), Level: "error",
-			}).Log("cursor not advanced after %d record(s): %v", len(result.Entries), err)
-			// The write did not merely fail, it suspended production. Abandon
-			// the pass rather than reading the rest with nowhere to put it.
+		more, abandon := s.pollOnce(path, w, nowMs)
+		if abandon {
 			return
 		}
-		w.tailer.Commit(result)
-		s.noteSkips(path, skips, nowMs)
-		s.applySettled()
-		// A stop that arrived before this file had a reader is applied HERE,
-		// once a batch of it is durable: only now does its handler hold the
-		// output the cancelled terminal owes and the file position the
-		// terminal's write identity is digested from.
-		if w.target.TaskID != "" {
-			s.applyStop(w.target.TaskID)
-			s.applyConclusion(w.target.TaskID)
-		}
-		if w.vanished {
-			// A file that is readable again was a rename race; the tracker
-			// clears its own grace clock on the activity below.
-			w.vanished = false
-		}
-		s.tracker.Activity(path, fileActivityMs(path, nowMs))
-		s.log.With(logging.Context{
-			Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
-			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
-		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
-		if result.More && s.pass != nil {
+		if more && s.pass != nil {
 			// THE BATCH STOPPED AT ITS BOUND, NOT AT THE FILE'S END. The file goes
 			// back to the head of the pass, so it is read again on this tick in
 			// the next bounded write rather than one poll interval later — each
@@ -1582,7 +1558,7 @@ func (s *sidecar) pollAll() {
 			s.pass.pending = append([]string{path}, s.pass.pending...)
 			s.log.With(logging.Context{
 				Operation: "tail-bounded", Path: path, TaskID: w.target.TaskID,
-				Offset: logging.Off(result.Next.GetOffset()),
+				Offset: logging.Off(w.tailer.Offset()),
 			}).LogVerbose("the batch stopped at its bound with bytes unread past it; the file is read again at once")
 		}
 	}
@@ -1600,6 +1576,86 @@ func (s *sidecar) pollAll() {
 	// the next tick enrolls the watched set afresh.
 	s.pass = nil
 	s.drainedPass = true
+}
+
+// pollOnce reads one bounded batch of one watched file, writes it, and commits
+// the cursor only once the write was DURABLE. It answers whether the batch
+// stopped at its bound with more to read, and whether the caller must abandon
+// what it is walking because production was suspended or the process is going
+// away. A parked file, a failed read, and a batch with nothing in it are all
+// neither.
+func (s *sidecar) pollOnce(path string, w *watched, nowMs int64) (more, abandon bool) {
+	if s.parked[path] {
+		return false, false
+	}
+	result, err := w.tailer.Poll()
+	if err != nil {
+		s.pollFailed(path, w, err, nowMs)
+		return false, false
+	}
+	if !result.Changed {
+		return false, false
+	}
+	skips, retired, err := s.writeBatch(w, result)
+	if err != nil {
+		if s.interrupted(err) {
+			// The process is going away; storeWrite stated the
+			// interrupted write, and THIS reader's cursor stayed where it
+			// was — whatever the store ends up doing with the batch, the
+			// next boot resumes from the cursor the store holds.
+			return false, true
+		}
+		if field, invalid := storeclient.InvalidRequest(err); invalid {
+			// A PRODUCER DEFECT, NOT AN OUTAGE (ruling R-S2). The store can
+			// never accept these bytes, so retrying them is a tight
+			// identical loop; the file is parked and every other file
+			// keeps being read. Production is NOT suspended — nothing is
+			// wrong with the store.
+			s.park(path, w, result, field, err)
+			return false, false
+		}
+		// Honest sad path: nothing was committed, so the cursor does not
+		// move and the same durable bytes are re-read next cycle.
+		s.log.With(logging.Context{
+			Operation: "store-write", Path: path, TaskID: w.target.TaskID,
+			Offset: logging.Off(result.Next.GetOffset()), Level: "error",
+		}).Log("cursor not advanced after %d record(s): %v", len(result.Entries), err)
+		// The write did not merely fail, it suspended production. Abandon
+		// the walk rather than reading the rest with nowhere to put it.
+		return false, true
+	}
+	w.tailer.Commit(result)
+	// THE CYCLE'S CURSOR INDEX FOLLOWS EVERY DURABLE ADVANCE. The store now
+	// holds exactly this position, so a file dropped and later watched again
+	// in this cycle resumes here — and, above all, from the conversion this
+	// batch stated, rather than from the snapshot's older one, which would
+	// start a re-derivation this file has already done.
+	s.cursors[result.Next.GetFileId()] = result.Next
+	if w.heal != nil {
+		s.noteHealProgress(path, w, result, len(skips), retired)
+	} else {
+		s.noteSkips(path, skips, nowMs)
+	}
+	s.applySettled()
+	// A stop that arrived before this file had a reader is applied HERE,
+	// once a batch of it is durable: only now does its handler hold the
+	// output the cancelled terminal owes and the file position the
+	// terminal's write identity is digested from.
+	if w.target.TaskID != "" {
+		s.applyStop(w.target.TaskID)
+		s.applyConclusion(w.target.TaskID)
+	}
+	if w.vanished {
+		// A file that is readable again was a rename race; the tracker
+		// clears its own grace clock on the activity below.
+		w.vanished = false
+	}
+	s.tracker.Activity(path, fileActivityMs(path, nowMs))
+	s.log.With(logging.Context{
+		Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
+		FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
+	}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
+	return result.More, false
 }
 
 // pollSliceFraction is the share of ONE poll interval a single pass may spend
@@ -1918,12 +1974,24 @@ func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 // send, not the spawn). The sidecar is the one reader that sees both, so it
 // states the pairing on every batch of the transcript: it becomes durable with
 // the agent's first rows, and a re-statement is absorbed by the store.
-func (s *sidecar) writeBatch(target discover.Target, result tail.PollResult) ([]storeclient.SkippedEntry, error) {
-	return s.storeWrite("tailer batch", &storev1.EntryBatch{
+func (s *sidecar) writeBatch(w *watched, result tail.PollResult) ([]storeclient.SkippedEntry, int, error) {
+	// THE ADVANCE STATES THE CONVERSION IT WAS READ UNDER, and a re-derivation
+	// still short of where the older conversion stopped says so (heal.go), so
+	// a restart resumes it rather than forgetting it.
+	result.Next.Conversion = w.conversionAt(result.Next.GetOffset())
+	batch := &storev1.EntryBatch{
 		Entries:       result.Entries,
 		CursorAdvance: result.Next,
-		AgentLocators: agentLocators(target),
-	})
+		AgentLocators: agentLocators(w.target),
+	}
+	// ONLY A RE-READ OF AN OLDER CONVERSION'S BYTES RETIRES ANYTHING. Bytes
+	// read for the first time produced no row to retire, so a live batch names
+	// none and the store is asked nothing.
+	if w.heal != nil && w.tailer.Offset() < w.heal.through {
+		batch.Retirements = retirementsOf(result.Retired)
+	}
+	skips, err := s.storeWrite("tailer batch", batch)
+	return skips, len(batch.Retirements), err
 }
 
 // agentLocators is the vendor task pairing a batch read from `target` states:
@@ -2102,6 +2170,12 @@ func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) ([]*storev1.StoreEn
 func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storeclient.SkippedEntry, error) {
 	kept, shapes := s.withholdResidue(batch)
 	batch.Entries = kept
+	// EVERY ROW RECORDS THE CONVERSION THAT PRODUCED IT, stamped here at the
+	// one door so no producer of an entry can forget it: it is what a later
+	// conversion change reads to decide the row is stale (heal.go).
+	for _, entry := range batch.Entries {
+		entry.ConversionVersion = proto.Uint32(convert.ConversionVersion)
+	}
 	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil && len(shapes) == 0 {
 		// Nothing to store, no position to advance and no shape to catalogue. A
 		// batch that was ONLY residue is not an empty write to make: the store
