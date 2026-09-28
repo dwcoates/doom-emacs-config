@@ -3,8 +3,6 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"google.golang.org/protobuf/proto"
-
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 )
@@ -100,23 +98,20 @@ func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit st
 		// upsert it would produce is churn.
 		return true
 	}
-	clone, ok := proto.Clone(existing).(*frontendv1.FeedRow)
-	if !ok {
-		r.logger(s.id).Error("daemon.feed.final_answer_restamp_unclonable",
-			"the recorded answer row could not be cloned to stamp final_answer",
-			dlog.Context{"unit": unit, "row": fold.row.GetValue()})
-		return false
-	}
-	bubble := clone.GetActivity().GetResponse()
-	bubble.FinalAnswer = true
-	// THE FINAL ANSWER CARRIES THE TURN'S WHOLE FRESH INPUT. The bubble landed
-	// with its own frozen delta; turning green re-stamps it ONCE with the main
-	// agent's turn tally (usage.go), keeping its settled instant.
-	if s.stampFinalAnswerTotal(fold) {
-		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage, AtMs: bubble.GetUsage().GetAtMs()}
-	}
-	r.upsert(s, placement{feed: fold.feed}, clone, true)
-	return true
+	return r.restateRow(s, placement{feed: fold.feed}, existing, true, unclonable{
+		operation: "daemon.feed.final_answer_restamp_unclonable",
+		message:   "the recorded answer row could not be cloned to stamp final_answer",
+		context:   dlog.Context{"unit": unit, "row": fold.row.GetValue()},
+	}, func(clone *frontendv1.FeedRow) {
+		bubble := clone.GetActivity().GetResponse()
+		bubble.FinalAnswer = true
+		// THE FINAL ANSWER CARRIES THE TURN'S WHOLE FRESH INPUT. The bubble
+		// landed with its own frozen delta; turning green re-stamps it ONCE with
+		// the main agent's turn tally (usage.go), keeping its settled instant.
+		if s.stampFinalAnswerTotal(fold) {
+			bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage, AtMs: bubble.GetUsage().GetAtMs()}
+		}
+	})
 }
 
 // FinalResponses answers the workspace's ordered selectable final-response

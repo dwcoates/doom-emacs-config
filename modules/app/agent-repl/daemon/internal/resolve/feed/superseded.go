@@ -3,8 +3,6 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"google.golang.org/protobuf/proto"
-
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 )
@@ -162,12 +160,9 @@ func (r *resolver) republishSuperseded(s *wsState, addr feedid.Feed, id string) 
 			dlog.Context{"feed": f.key, "row": id})
 		return
 	}
-	clone, ok := proto.Clone(existing).(*frontendv1.FeedRow)
-	if !ok {
-		r.logger(s.id).Error("daemon.feed.superseded_row_unclonable",
-			"a thinking row whose superseded flag changed could not be cloned; it was not re-pushed",
-			dlog.Context{"feed": f.key, "row": id})
-		return
-	}
-	r.upsert(s, placement{feed: addr}, clone, !f.nonDurable[id])
+	r.restateRow(s, placement{feed: addr}, existing, !f.nonDurable[id], unclonable{
+		operation: "daemon.feed.superseded_row_unclonable",
+		message:   "a thinking row whose superseded flag changed could not be cloned; it was not re-pushed",
+		context:   dlog.Context{"feed": f.key, "row": id},
+	}, func(*frontendv1.FeedRow) {})
 }
