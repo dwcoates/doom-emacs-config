@@ -417,8 +417,16 @@ type wsState struct {
 
 	// turn is the accepted turn in flight, nil when the main thread is idle.
 	turn *TurnStarted
+	// sessionStarted reports that the session has announced itself, which on
+	// a route never seen is the bring-up window (ladder.AwaitingBringUp).
+	sessionStarted bool
 	// turnEverRan distinguishes idle·ready from idle·done.
 	turnEverRan bool
+	// turnFailed reports that the last turn ended by FAILING — its own
+	// failure or the vendor's (ladder.ClassifyFailure) — which is what draws
+	// idle·turn_failed rather than idle·done once nothing outranks it. The
+	// next turn resets it.
+	turnFailed bool
 	// sawActivity reports whether this turn has produced an activity yet,
 	// which is what moves `submitting` to `thinking`.
 	sawActivity bool
@@ -467,7 +475,10 @@ type wsState struct {
 	// opened. The strongest of them, folded together with the resolver's
 	// daemon-scoped ones, is what the strip draws.
 	faults []Fault
-	// blocked is the standing block, nil when nothing blocks the session.
+	// blocked is the standing VENDOR OR ACCOUNT block, nil when nothing
+	// blocks the session. It is raised and lifted by exactly the facts the
+	// roster's vendor_blocked is (ladder.ClassifyFailure, ladder.RateLimitBlocks,
+	// a session start, a turn start), so the strip and the dot move together.
 	blocked *blockedState
 
 	// interrupted is the momentary interrupted status, nil when it is not

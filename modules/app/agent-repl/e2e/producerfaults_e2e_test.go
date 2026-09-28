@@ -220,16 +220,15 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 }
 
-// TestQueryDiedBlocksTheFooter is the same death seen on the FOOTER, whose
-// own arm is separate from the feed's: FooterSubStatusBlockedQueryDied, "the
-// vendor query died while the shim stayed healthy and nothing has restarted
-// it ... Distinct from disconnected, which is the daemon<->shim link"
-// (footer.proto). The blocked activity line is the daemon-composed
+// TestQueryDiedFailsTheFootersTurn is the same death seen on the FOOTER. A
+// dead query is a FAILED TURN, not a block (owner ruling, 2026-09-28): the
+// strip draws `idle · turn_failed`, the same turn end the roster draws
+// `turn_failed`, and the idle activity line is the daemon-composed
 // FooterStatusActivityQueryDied.
-func TestQueryDiedBlocksTheFooter(t *testing.T) {
+func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 	t.Parallel()
-	// Arrange: the footer stream is opened BEFORE the prompt so the blocked
-	// push is queued in order rather than possibly missed.
+	// Arrange: the footer stream is opened BEFORE the prompt so the failed
+	// turn's push is queued in order rather than possibly missed.
 	w := NewWorld(t, WorldOpts{})
 	pfQueryDiedWarnings(w)
 	ws, _ := pfNewWorkspace(t, w)
@@ -240,15 +239,15 @@ func TestQueryDiedBlocksTheFooter(t *testing.T) {
 	SubmitPrompt(t, w, ws, "!query-eof")
 
 	// Assert
-	view := pfAwaitView(t, w, footer.Stream, "the footer's query-died blocked status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBlocked().GetQueryDied() != nil
+	view := pfAwaitView(t, w, footer.Stream, "the footer's failed turn after the query died", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetTurnFailed() != nil
 	})
-	blocked := view.GetStrip().GetStatus().GetBlocked()
-	if blocked.GetQueryDied() == nil {
-		t.Fatalf("footer push matched the query-died sub-status but re-reading it found none: %v", view)
+	idle := view.GetStrip().GetStatus().GetIdle()
+	if idle.GetTurnFailed() == nil {
+		t.Fatalf("footer push matched the failed turn but re-reading it found none: %v", view)
 	}
-	if got := blocked.GetActivity().GetQueryDied().GetText(); got == "" {
-		t.Errorf("footer blocked activity query_died text = %q, want the daemon's composed dead-query line", got)
+	if got := idle.GetActivity().GetQueryDied().GetText(); got == "" {
+		t.Errorf("footer idle activity query_died text = %q, want the daemon's composed dead-query line", got)
 	}
 }
 

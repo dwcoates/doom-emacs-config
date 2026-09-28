@@ -574,10 +574,10 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 	// Assert: footer, host composer.
 	footer := f.d.WatchFooter(f.ws)
 	fv := awaitFooter(t, f, footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
-	if fv.GetStrip().GetStatus().GetMerging().GetParked().GetLine() == "" {
-		t.Fatalf("footer parked = %v, want a composed line", fv.GetStrip().GetStatus().GetMerging().GetParked())
+	if fv.GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine() == "" {
+		t.Fatalf("footer parked = %v, want a composed line", fv.GetStrip().GetStatus().GetMergeConflict().GetParked())
 	}
 	host := f.d.WatchHost(f.ws)
 	hv := awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
@@ -728,9 +728,9 @@ func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *tes
 	// Assert: the run parks.
 	footer := f.d.WatchFooter(f.ws)
 	fv := awaitFooter(t, f, footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
-	if fv.GetStrip().GetStatus().GetMerging().GetParked() == nil {
+	if fv.GetStrip().GetStatus().GetMergeConflict().GetParked() == nil {
 		t.Fatalf("footer = %v, want merging.parked after the fixes escalation", fv.GetStrip().GetStatus())
 	}
 }
@@ -807,8 +807,8 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	}
 
 	// Assert: footer merged, roster merged + recently_merged.
-	awaitFooter(t, f, footer, "the footer's merged substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetMerged() != nil
+	awaitFooter(t, f, footer, "the footer's merged status", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerged() != nil
 	})
 	// THE STATUS IS PART OF THE PREDICATE, NOT A SECOND READ OF WHATEVER
 	// SNAPSHOT THE FIRST ONE MATCHED. The row enters recently_merged as
@@ -1467,7 +1467,7 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
 
 	// Assert: with the run settled on park, still exactly one StartTurn was
