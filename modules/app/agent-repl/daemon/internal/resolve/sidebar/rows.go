@@ -27,12 +27,12 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
 
 	armName := statusArm(s, rec, session, rowLog)
-	// THE STATUS CHANGE IS THE RESET, AND DONE IS THE ONLY ARM THAT HOLDS THE
-	// MARKER. Recording the arm here is what clears a standing viewed marker,
-	// so the row's display mode is decided in the same breath as its status
-	// and cannot lag it by a push.
-	wasViewed := s.viewed
+	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
+	// status, so the row's display mode cannot lag its status by a push and a
+	// read result is never drawn as unread (`wsState.viewedOn`).
+	wasViewed := s.lastArmSeen && s.viewedOn(s.lastArm)
 	armChanged := s.noteArm(armName)
+	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 
@@ -40,17 +40,20 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		"status":   armName,
 		"current":  current,
 		"closed":   closed,
-		"viewed":   s.viewed,
+		"viewed":   viewed,
+		"result":   s.result.String(),
 		"reviving": s.reviving,
 	})
-	if armChanged {
+	switch {
+	case wasViewed && !viewed:
 		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-			"the row's status changed, so it is drawn FULL again", dlog.Context{
+			"the row left its read turn-end state, so it is drawn FULL", dlog.Context{
 				"status": armName,
+				"result": s.result.String(),
 			})
-	} else if wasViewed && !s.viewed {
-		rowLog.Debug("daemon.sidebar.row_viewed_refused",
-			"the row is not done, so the viewed report was dropped and the row stays FULL", dlog.Context{
+	case armChanged && !wasViewed && viewed:
+		rowLog.Debug("daemon.sidebar.row_viewed_restored",
+			"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL", dlog.Context{
 				"status": armName,
 			})
 	}
@@ -74,7 +77,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	}
 	// PRESENCE IS THE MODE: the marker is set for PARTIAL and omitted for
 	// FULL, exactly as `frontend.v1.RosterRowViewed` states it.
-	if s.viewed {
+	if viewed {
 		out.Viewed = &frontendv1.RosterRowViewed{}
 	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowReviving` states it: set
