@@ -125,3 +125,28 @@ func TestDeployFailedDetailOfARecordWithNoEvidenceIsItsProse(t *testing.T) {
 		t.Fatalf("DeployFailedDetail = %q, want the record's own prose", got)
 	}
 }
+
+func TestRollbackClauseSaysWhatBecameOfTheInstall(t *testing.T) {
+	tests := []struct {
+		name     string
+		rollback string
+		want     string
+	}{
+		{"nothing was installed", RollbackNone, "nothing was installed"},
+		{"the rollback restored the previous build", RollbackRestored, "it was rolled back to the previous build"},
+		{"the rollback did not restore it", RollbackIncomplete, "its rollback did NOT restore the previous build"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the rollback state is the input.
+
+			// Act.
+			got := RollbackClause(tt.rollback)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("RollbackClause(%q) = %q, want %q", tt.rollback, got, tt.want)
+			}
+		})
+	}
+}
