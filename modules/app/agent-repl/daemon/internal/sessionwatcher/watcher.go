@@ -1150,25 +1150,31 @@ func (w *watcher) severedLocked(operation, detail string, err error, extra ...dl
 		}
 	}
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	// THE LINK MAY ALREADY BE BACK. A transport break ends the client's own
+	// liveness stream and this fleet's streams at once, but the client's
+	// redial reaches runLink on the connectivity feed while this ending
+	// arrives on the stream's own goroutine, and nothing orders the two. When
+	// the redial's LinkConnected was consumed first, the fleet was not yet
+	// degraded, so it re-opened nothing; walking the link to redialing now
+	// would wait on a LinkConnected that never comes again. MEASURED, the
+	// integration suite 2026-09-28 (1 run in 24 under load, ~1 in 50 idle):
+	// the session watch stayed down for good, its re-announcement never came,
+	// and the registered bounce waited forever behind a shell the shim had
+	// already concluded.
+	//
+	// THE CLIENT'S OWN CONNECTION COUNT DECIDES IT, not the edges this watcher
+	// consumed. The count is advanced before LinkConnected is published, so it
+	// is never behind a reconnect whatever order the goroutines ran in, and
+	// the feed's replay of bring-up edges to a new watcher never moves it.
+	if now := w.client.Connections(); now > w.fleetConnections {
+		w.log.Info("daemon.sessionwatcher.reopen_after_reconnect", "the link came back before this stream's end was seen; re-opening now", dlog.Context{
+			"stream_operation": operation, "fleet_connections": w.fleetConnections, "client_connections": now,
+		})
+		w.reopenLocked("a stream ended after the link had already come back")
+		return
+	}
 	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
-	// THE LINK MAY ALREADY BE BACK. A transport break ends the client's own
-	// liveness stream and this fleet's streams at once, and the two are
-	// handled on different goroutines: when the client's redial wins, runLink
-	// consumes its LinkConnected while degraded is still false and re-opens
-	// nothing, and no second LinkConnected ever comes. The fleet then stayed
-	// dark for good -- on 2026-09-28 a hung shell's conclusion was never
-	// reconciled, and the bounce registered behind it never ran, because the
-	// re-announcement that carries it rides a session watch nobody re-opened.
-	// The client's connection count says which order it was, whatever order
-	// the two goroutines ran in.
-	if now := w.client.Connections(); now > w.fleetConnections {
-		w.log.Info("daemon.sessionwatcher.link", "the link came back before this watcher heard its stream end; re-opening now", dlog.Context{
-			"fleet_connections": w.fleetConnections, "client_connections": now,
-		})
-		w.setLinkLocked(shimclient.LinkConnected)
-		w.reopenLocked("the link came back before the stream's end was heard")
-	}
 }
 
 // reopenLocked tears the fleet down and opens it again, each watch catching up
