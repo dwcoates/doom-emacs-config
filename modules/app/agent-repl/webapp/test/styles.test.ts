@@ -3116,3 +3116,16 @@ describe("the colored merge glyphs", () => {
     expect(last?.declarations).toContain(`color: ${color}`);
   });
 });
+
+// A LANDED MERGE IS GREEN (owner ruling, 2026-09-28): a merge in progress is
+// purple, and one that merged successfully draws the --ok disc of every other
+// green status.
+describe("the merged disc", () => {
+  it("paints #ws-sidebar .st-merged with var(--ok)", () => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.length === 1 && rule.selectors[0] === "#ws-sidebar .st-merged",
+    );
+    const last = rules.at(-1);
+    expect(last?.declarations).toContain("background: var(--ok)");
+  });
+});

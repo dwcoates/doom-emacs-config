@@ -171,6 +171,13 @@ something is wrong with the workspace."
   (should (equal agent-repl--color-init-blue
                  (plist-get (agent-repl--tab-spec :merge-failed nil) :bg))))
 
+(ert-deftest agent-repl-test-tab-spec-merged-is-green ()
+  "`:merged' paints the tab GREEN (owner ruling, 2026-09-28): a merge in
+progress is purple, and one that landed successfully is green."
+  ;; Act / Assert
+  (should (equal agent-repl--color-done-green
+                 (plist-get (agent-repl--tab-spec :merged nil) :bg))))
+
 (ert-deftest agent-repl-test-tab-spec-merging-is-purple ()
   "A merge the daemon is RUNNING paints the tab purple.
 Purple is the tab bar\='s merge color: the work in flight is the SYSTEM\='s
@@ -264,12 +271,12 @@ the color this surface actually assigns the state."
     ;; Act / Assert
     (should (equal agent-repl--color-done-green (plist-get spec :bracket-bg)))))
 
-(ert-deftest agent-repl-test-tab-spec-merged-falls-back-to-default ()
-  "`:merged\=' takes no tab color, so its spec is the default one.
+(ert-deftest agent-repl-test-tab-spec-none-falls-back-to-default ()
+  "`:none\=' takes no tab color, so its spec is the default one.
 The default\='s unselected background is the TAB BAR\='s own, so a tab with
 no arm sits flush on the bar instead of painting a ground of its own."
   ;; Arrange
-  (let ((spec (agent-repl--tab-spec :merged nil)))
+  (let ((spec (agent-repl--tab-spec :none nil)))
     ;; Act / Assert
     (should (equal (plist-get spec :bg) (agent-repl--tab-bar-background)))))
 
@@ -3319,19 +3326,20 @@ nothing else: a surface with no status word can carry one purple."
   (should (equal (agent-repl-test-status--arms-taking "yellow") '(:idle-async))))
 
 (ert-deftest agent-repl-test-status-green-is-the-session-yours-to-use ()
-  "Green covers ready, done, interrupted, permission and a merge conflict
-alike: a pending permission, like a merge stopped on a conflict, means the
+  "Green covers ready, done, interrupted, permission, a merge conflict and a
+landed merge alike: a pending permission, like a merge stopped on a conflict, means the
 workspace is ready for the user."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "green") #'string<)
-                 (sort (list :ready :done :interrupted :permission :merge-conflict)
+                 (sort (list :ready :done :interrupted :permission :merge-conflict
+                             :merged)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()
-  "The settled merge arms and the two sessionless arms take no colour."
+  "Only the two sessionless arms take no colour."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "none") #'string<)
-                 (sort (list :none :inactive :merged)
+                 (sort (list :none :inactive)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-an-unknown-arm-paints-nothing ()
@@ -3366,6 +3374,13 @@ says something is wrong, and the glyph says it is the merge."
   (agent-repl-test--with-clean-state
     ;; Act / Assert
     (should (equal (agent-repl-status-tab-glyph "alpha" :merge-conflict) "≠"))))
+
+(ert-deftest agent-repl-test-status-a-merged-tab-draws-its-check ()
+  "A `:merged\=' tab draws its ✓ glyph as well as its green."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merged) "✓"))))
 
 (ert-deftest agent-repl-test-status-an-inactive-row-draws-a-question-mark ()
   "A perspective-less workspace has no lifecycle a dot could report."
