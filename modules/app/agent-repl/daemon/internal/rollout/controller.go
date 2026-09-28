@@ -105,6 +105,9 @@ type controller struct {
 	// forcedTakeover is the handover the successor joined was FORCED, so the
 	// stale shims it adopts are bounced at once too.
 	forcedTakeover bool
+	// deployTakeover is the handover the successor joined was a DEPLOY's, so
+	// this daemon says `updated` on the footer once it has taken over.
+	deployTakeover bool
 	// stragglerAdoptions counts the adoptions becomeIncumbent started for
 	// workspaces whose handover never finished, for the same reason.
 	stragglerAdoptions sync.WaitGroup

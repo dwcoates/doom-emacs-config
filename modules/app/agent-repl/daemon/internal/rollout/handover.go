@@ -178,6 +178,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	if err != nil {
 		c.log.Error(opHandover, "the successor did not come up; nothing was announced",
 			withCause(merge(fields, dlog.Context{"successor_started": successor != nil}), err))
+		c.openSuccessorFault(ctx, err, fields)
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
@@ -196,10 +197,12 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	if err != nil {
 		c.log.Error(opHandover, "the successor never proved it was serving; the handover is abandoned before any workspace was quiesced or announced, and this daemon keeps serving",
 			withCause(merge(fields, dlog.Context{"ready_bound": c.deps.ReadyBound.String()}), err))
+		c.openSuccessorFault(ctx, err, fields)
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, fmt.Errorf("rollout: handover: the successor never proved it was serving: %w", err)
 	}
 	c.log.Info(opHandover, "the successor answered its health probe; it is serving in joining mode", fields)
+	c.closeSuccessorFaults(ctx, fields)
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
@@ -244,6 +247,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 
 	manifest := c.manifest(ctx, address, workspaces, snapshot)
 	manifest.Forced = force
+	manifest.Deploy = true
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		// THE ANNOUNCEMENT HAS GONE OUT, and there is no arm that retracts it:
 		// a client that dialed the successor sees it stop, and goes on being
@@ -371,6 +375,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		// exactly as a failed transfer would.
 		c.log.Error(opHandover, "the handover cannot finish: workspaces whose adoption never landed were reclaimed and are served here again; not exiting",
 			merge(fields, dlog.Context{"reclaimed": reclaimed, "untransferred": failed}))
+		c.clearDeployLine("workspaces were reclaimed", fields)
 		return
 	}
 	if failed > 0 {
@@ -379,6 +384,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		// state the ruling accepts, loudly.
 		c.log.Error(opHandover, "the handover cannot finish: workspaces that did not transfer are still served here; not exiting",
 			merge(fields, dlog.Context{"untransferred": failed}))
+		c.clearDeployLine("workspaces did not transfer", fields)
 		return
 	}
 

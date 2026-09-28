@@ -14,6 +14,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -812,6 +813,7 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 // harness is one controller under test with every fake reachable.
 type harness struct {
 	c            *controller
+	progress     *fakeProgress
 	db           wsm.DB
 	clock        *fakeClock
 	spawner      *fakeSpawner
@@ -878,6 +880,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		lockStates:   make(map[string]sessionlock.State),
 		lockErr:      make(map[string]error),
 		shimBuild:    "installed-build",
+		progress:     &fakeProgress{},
 	}
 	deps := Deps{
 		SelfExe:        filepath.Join(state, "claude-repld"),
@@ -968,6 +971,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		HoldoutWarnEvery: 10 * time.Minute,
 		StandDownWindow:  30 * time.Second,
 		Clock:            h.clock,
+		Progress:         h.progress,
 		Log:              log,
 	}
 	for _, a := range adjust {
@@ -1108,4 +1112,24 @@ func (h *harness) successorAdopts(t *testing.T) {
 		}
 		e.settle(nil)
 	}
+}
+
+// fakeProgress records every statement the rollout made on the update line,
+// nil (a take-down) included.
+type fakeProgress struct {
+	mu     sync.Mutex
+	stated []*deployprogress.Progress
+}
+
+func (f *fakeProgress) SetDeployProgress(p *deployprogress.Progress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stated = append(f.stated, p)
+}
+
+// statements answers a copy of every statement, in order.
+func (f *fakeProgress) statements() []*deployprogress.Progress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*deployprogress.Progress(nil), f.stated...)
 }
