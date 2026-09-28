@@ -725,7 +725,7 @@ func TestSeveredLinkReopensFromTheTrackedPointer(t *testing.T) {
 	if h.w.Connected() {
 		t.Fatal("the link is connected while a standing stream is down")
 	}
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 
 	// Assert.
 	h.client.nextSessionOpen(t)
@@ -808,7 +808,7 @@ func TestReopenRestoresEveryDetachedWatch(t *testing.T) {
 	// Act.
 	h.session.fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 
 	// Assert: the session, the main watch and the subagent all come back.
 	h.client.nextSessionOpen(t)
@@ -1215,7 +1215,7 @@ func TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight(t *testing.T) {
 	// Act: sever the link and bring it back, which re-opens the fleet.
 	h.session.fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 	h.client.nextSessionOpen(t)
 
 	answered := make(chan struct{})
@@ -1326,7 +1326,7 @@ func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
 
 	// Act.
 	h.client.links <- shimclient.LinkRedialing
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 
 	// Assert: the connected edge reaches the views, and no fault rides with it.
 	h.rec.until(t, "lifecycle.OnLinkChanged")
@@ -2572,7 +2572,7 @@ func (h *harness) relinkWith(t *testing.T) {
 	t.Helper()
 	h.session.fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
-	h.client.links <- shimclient.LinkConnected
+	h.client.linkBack()
 }
 
 // TestAHungWatchOpenHoldsNoLock is the 2026-09-27T14:00:44 wedge. A detached
@@ -2870,5 +2870,81 @@ func TestAWedgedWatcherMutexIsReportedInTheWorkspaceLog(t *testing.T) {
 	if len(stalls) != 1 || stalls[0].Level != dlog.LevelError ||
 		stalls[0].Context["lock"] != "sessionwatcher.watcher" || stalls[0].Context["workspace_id"] != "ws-1" {
 		t.Fatalf("stall records = %+v, want one ERROR naming the watcher's lock in ws-1", stalls)
+	}
+}
+
+// ---- a severing heard after the link already came back ----
+
+// linkBackBeforeTheSevering replays the losing order of the 2026-09-28 race:
+// the client's redial wins, so runLink consumes redialing and then connected
+// while every stream still looks standing, and only then does the watcher
+// hear its own session stream end.
+func linkBackBeforeTheSevering(t *testing.T, h *harness) {
+	t.Helper()
+	h.client.links <- shimclient.LinkRedialing
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.linkBack()
+	h.rec.until(t, "sidebar.OnLink")
+	h.session.fail(errors.New("connection reset"))
+}
+
+func TestASeveringHeardAfterTheLinkCameBackReopensTheFleet(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	linkBackBeforeTheSevering(t, h)
+
+	// Assert: nothing else will ever say the link is back, yet the fleet is
+	// opened again.
+	h.client.nextSessionOpen(t)
+	h.client.nextAgentOpen(t)
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.link")
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.sessionwatcher.link" && r.Context["client_connections"] == uint64(2) && r.Context["fleet_connections"] == uint64(1) {
+			return
+		}
+	}
+	t.Fatalf("no record names the fleet's and the client's connection counts; records: %+v", h.log.Records())
+}
+
+func TestASeveringHeardAfterTheLinkCameBackLeavesTheLinkConnected(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	linkBackBeforeTheSevering(t, h)
+	h.client.nextSessionOpen(t)
+
+	// Assert
+	h.w.mu.Lock()
+	degraded, link := h.w.degraded, h.w.link
+	h.w.mu.Unlock()
+	if degraded || link != shimclient.LinkConnected {
+		t.Fatalf("degraded=%v link=%v after the re-open, want a whole fleet on a connected link", degraded, link)
+	}
+}
+
+func TestASeveringWithNoNewConnectionWaitsForTheLinkToComeBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the stream ends before the client has noticed anything.
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+
+	// Assert: the severing's critical section is over once mu is free, and it
+	// left the fleet degraded, waiting on the LinkConnected still to come.
+	h.w.mu.Lock()
+	degraded, link := h.w.degraded, h.w.link
+	h.w.mu.Unlock()
+	if !degraded || link != shimclient.LinkRedialing {
+		t.Fatalf("degraded=%v link=%v, want a degraded fleet on a redialing link", degraded, link)
+	}
+	if h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
+		t.Fatal("the fleet was re-opened with no new connection to open it on")
 	}
 }
