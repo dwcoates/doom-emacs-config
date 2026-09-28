@@ -159,3 +159,13 @@ Order: 1–5 first (the queue must be trustworthy before everything depends on i
 - On a failed deploy:
   - roll back;
   - surface the error in the topbar's error section and in every workspace's footer.
+
+## Added to fixes 1–5 (2026-09-28, lease `9cf657a4654d4c93`, 15:28:24)
+
+- A branch already contained in the target concludes as merged ("already on <target>;
+  nothing to merge"), found with `merge-base --is-ancestor`; it used to abort on the landed
+  range of a one-parent commit and draw "merge failed". DONE.
+- A concluded (failed or merged) merge's footer and roster state retires at the workspace's
+  next accepted submission (`RetireConcluded`, told by the prompt handler). It does not fit
+  inside the one release path: that path runs at the merge's end, and the concluded state is
+  what a reader should see until the workspace moves on. DONE.
