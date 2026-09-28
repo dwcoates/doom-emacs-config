@@ -372,6 +372,127 @@ func TestRaiseColdGateRefusesWithoutColdFacts(t *testing.T) {
 	}
 }
 
+func TestAwaitFactsAnswersAtOnceForAWorkspaceWithNoWatcher(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client})
+
+	// Act.
+	err := f.fleet.AwaitFacts(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AwaitFacts with no watcher = %v, want nil: there is no conversation to announce", err)
+	}
+}
+
+func TestAwaitFactsSurfacesTheWatchersRefusal(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: &fakeWatcher{factsErr: errFake}})
+
+	// Act.
+	err := f.fleet.AwaitFacts(context.Background(), ws.ID)
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("AwaitFacts = %v, want the watcher's refusal surfaced", err)
+	}
+}
+
+func TestColdGateStandingAnswersTheRaisedGatesFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	cold := &conversationv1.SessionCold{ContextTokens: 123456}
+	if err := f.fleet.RaiseColdGate(context.Background(), ws.ID, cold); err != nil {
+		t.Fatalf("RaiseColdGate: %v", err)
+	}
+
+	// Act.
+	got, standing := f.fleet.ColdGateStanding(ws.ID)
+
+	// Assert.
+	if !standing || got.GetContextTokens() != 123456 {
+		t.Fatalf("ColdGateStanding = (%v, %v), want the raised gate's facts", got, standing)
+	}
+}
+
+func TestColdGateStandingAnswersFalseWithNoGate(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	_, standing := f.fleet.ColdGateStanding(ws.ID)
+
+	// Assert.
+	if standing {
+		t.Fatal("ColdGateStanding reports a gate nobody raised")
+	}
+}
+
+func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1"}
+	cold := &conversationv1.SessionCold{ContextTokens: 123456}
+
+	// Act.
+	if _, err := f.fleet.AdoptParked(context.Background(), ws.ID, cold); err != nil {
+		t.Fatalf("AdoptParked: %v", err)
+	}
+
+	// Assert.
+	f.fleet.mu.RLock()
+	entry := f.fleet.sessions[ws.ID]
+	f.fleet.mu.RUnlock()
+	if entry == nil || entry.watcher != nil || entry.hostSessionID != "host-1" {
+		t.Fatalf("session entry = %+v, want the parked client held with no watcher under its host identity", entry)
+	}
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.VendorSessionID != "vendor-1" {
+		t.Fatalf("ColdGate = (%+v, %v), want the carried gate raised on the parked conversation", gate, standing)
+	}
+}
+
+func TestAdoptParkedRefusesWithNoColdFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	_, err := f.fleet.AdoptParked(context.Background(), ws.ID, nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("AdoptParked accepted a parked shim with no cold facts")
+	}
+	if len(f.supervisor.adopts) != 0 {
+		t.Fatalf("adoptions = %v, want nothing dialed", f.supervisor.adopts)
+	}
+}
+
+func TestAdoptParkedWhoseClaimIsRefusedLetsTheDialedShimGo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = errFake
+
+	// Act.
+	_, err := f.fleet.AdoptParked(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 1})
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("AdoptParked = %v, want the refused claim surfaced", err)
+	}
+	if f.client.detached != 1 || len(f.client.kills) != 0 {
+		t.Fatalf("detaches = %d, kills = %d; want the link let go and the shim left running", f.client.detached, len(f.client.kills))
+	}
+}
+
 // TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts covers the seam the
 // host stream's HostSessionExisting arm is composed from.
 func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {

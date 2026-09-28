@@ -167,6 +167,69 @@ func TestAwaitFreeOnAClosedWatcherRefuses(t *testing.T) {
 	}
 }
 
+func TestAwaitSessionFactsAnswersAtOnceForAStartedSession(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+
+	// Act.
+	err := h.w.AwaitSessionFacts(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AwaitSessionFacts on a started session = %v, want nil", err)
+	}
+}
+
+func TestAwaitSessionFactsIsReleasedByTheReannouncementWithItsTurn(t *testing.T) {
+	// Arrange: an adopting daemon's pure attach.
+	h := newHarnessAttachingPurely(t)
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitSessionFacts(context.Background()) }()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-1"))
+
+	// Assert: the waiter reads the adopted turn once it is released.
+	if err := <-answered; err != nil {
+		t.Fatalf("AwaitSessionFacts = %v, want nil once the facts arrived", err)
+	}
+	if got := h.w.TurnInFlight(); got == nil || *got != "turn-1" {
+		t.Fatalf("TurnInFlight after the facts = %v, want turn-1", got)
+	}
+}
+
+func TestAwaitSessionFactsAnswersItsContext(t *testing.T) {
+	// Arrange.
+	h := newHarnessAttachingPurely(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := h.w.AwaitSessionFacts(ctx)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitSessionFacts on an ended context = %v, want context.Canceled", err)
+	}
+}
+
+func TestAwaitSessionFactsAnswersACloseLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarnessAttachingPurely(t)
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitSessionFacts(context.Background()) }()
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if err := <-answered; !errors.Is(err, ErrWatcherClosed) {
+		t.Fatalf("AwaitSessionFacts after Close = %v, want ErrWatcherClosed", err)
+	}
+}
+
 // TestAwaitTurnEndIsReleasedByTheTerminal covers the ordinary wait: the
 // terminal that closes the turn reports HOW it closed.
 func TestAwaitTurnEndIsReleasedByTheTerminal(t *testing.T) {
