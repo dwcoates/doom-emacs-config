@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"sort"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -92,6 +95,44 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// from "the queue was told and had nothing to do".
 		log.Info(opTurnEnded, "the turn ended; nothing is waiting to be delivered", nil)
 	}
+}
+
+// OnTurnAdopted is the LifecycleSink's vendor-started turn: a turn the vendor
+// ran with no prompt through this queue, which the shim adopted. The queue owns
+// the turn rows and the roster's turn fact, so it records both exactly as it
+// does for a turn it delivered -- the durable row first, so the turn's end
+// closes it through the door and draws its ending, then the roster's thinking.
+// The watcher already stands the turn in flight, which is what holds every
+// submission behind it.
+//
+// NOTHING IS DELIVERED AND NO LOCK IS TAKEN: nothing waits on an adoption, and
+// the watcher tells this before the same turn's OnTurnEnded on the same flush.
+// A failed durable write is recorded at ERROR, and the roster still takes the
+// turn: it is running whether or not its row was written.
+func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
+	ctx := context.Background()
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		log = q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	}
+	log = log.With(dlog.Context{"turn": string(turn)})
+	at := q.deps.Now()
+	record := wsm.Turn{
+		ID:        turn,
+		Workspace: ws,
+		Origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED.String(),
+		StartedAt: at,
+	}
+	if err := q.deps.DB.PutTurn(ctx, record); err != nil {
+		log.Error(opTurnAdopted, "could not record the vendor-started turn; its close will find no row", dlog.Context{
+			"cause": err.Error(),
+		})
+	}
+	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Taken and acknowledged in one
+	// step: the vendor is already answering, so there is no submitting window.
+	q.deps.Sidebar.SetTurn(ws, &footer.TurnStarted{At: at, Act: footer.ActPrompt})
+	q.deps.Sidebar.AckTurn(ws)
+	log.Info(opTurnAdopted, "recorded a turn the vendor started on its own; what is held waits behind it", nil)
 }
 
 // OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation: the
