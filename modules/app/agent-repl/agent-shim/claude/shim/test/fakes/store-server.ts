@@ -702,7 +702,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           });
         }
         const bookId = request.book?.value ?? "";
-        const after = Number(request.after?.value ?? "0");
+        const after = Number(
+          request.position.case === "after" ? request.position.value.value : "0",
+        );
         // Strictly OLDER than `after`, newest first.
         const older = rowsOf(bookId).filter((row) => Number(row.pointer) < after);
         const window = older.slice(Math.max(0, older.length - request.pageSize));

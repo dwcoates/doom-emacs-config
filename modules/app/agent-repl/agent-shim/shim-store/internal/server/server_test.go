@@ -1397,7 +1397,7 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	}))
 
 	// Assert.
@@ -1421,7 +1421,7 @@ func TestReadAgentPageRecordsCarryTheAgentAndBook(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("agent-1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+		Book: agentID("agent-1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	})); err != nil {
 		t.Fatalf("ReadAgentPage = %v, want nil", err)
 	}
@@ -1468,7 +1468,7 @@ func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	}))
 
 	// Assert.

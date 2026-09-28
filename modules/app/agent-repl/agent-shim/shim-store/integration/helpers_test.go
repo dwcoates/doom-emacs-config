@@ -1648,7 +1648,7 @@ func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreCli
 	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 		Book:     agentID(book),
 		PageSize: pageSize,
-		After:    after,
+		Position: &storev1.ReadAgentPageRequest_After{After: after},
 	}))
 	if err != nil {
 		t.Fatalf("ReadAgentPage(%q) transport error: %v", book, err)
