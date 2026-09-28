@@ -96,26 +96,12 @@ func (c *controller) openSuccessorFault(ctx context.Context, cause error, fields
 	c.log.Info(opProgress, "recorded the successor that would not start as a fault", withCause(fields, cause))
 }
 
-// closeSuccessorFaults closes every standing `successor_spawn_failed` fault
-// once a successor has proved it is serving: the condition they record is
-// over. A read or a close that fails is ERROR and leaves the fault standing.
+// closeSuccessorFaults fires the successor-serving recovery edge once a
+// successor has proved it is serving: every daemon-scoped fault whose lifetime
+// ends there (`successor_spawn_failed`, an unclaimed handover's
+// `adoption_window_expired`) records a condition that is over. A read or a
+// close that fails is ERROR and leaves the fault standing.
 func (c *controller) closeSuccessorFaults(ctx context.Context, fields dlog.Context) {
-	ctx = context.WithoutCancel(ctx)
-	open, err := c.deps.DB.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindSuccessorSpawnFailed})
-	if err != nil {
-		c.log.Error(opProgress, "could not read the standing successor faults to close them", withCause(fields, err))
-		return
-	}
-	for _, f := range open {
-		if f.Workspace != nil {
-			continue
-		}
-		if err := c.deps.DB.CloseFault(ctx, f.ID, c.deps.Clock.Now()); err != nil {
-			c.log.Error(opProgress, "could not close a successor fault a serving successor answered",
-				withCause(merge(fields, dlog.Context{"fault": string(f.ID)}), err))
-			continue
-		}
-		c.log.Info(opProgress, "closed the successor fault: a successor proved it is serving",
-			merge(fields, dlog.Context{"fault": string(f.ID)}))
-	}
+	health.CloseOnEdge(context.WithoutCancel(ctx), c.deps.DB, c.log.With(fields), health.EdgeSuccessorServing,
+		health.EdgeScope{DaemonOnly: true}, c.deps.Clock.Now())
 }
