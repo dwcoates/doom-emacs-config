@@ -293,6 +293,24 @@ describe("the main agent answering the shim's network-resume prompt", () => {
     ]);
   });
 
+  it("starts each resumed agent's task before its send's result, as the vendor does", async () => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+    const messages = driven.messages as unknown as Record<string, unknown>[];
+    const firstStart = messages.findIndex((m) => m.type === "system" && m.subtype === "task_started");
+    const firstResult = messages.findIndex((m) => {
+      const content = (m.message as { content?: unknown } | undefined)?.content;
+      return (
+        m.type === "user" &&
+        Array.isArray(content) &&
+        (content as Record<string, unknown>[]).some((block) => block.type === "tool_result")
+      );
+    });
+
+    // Assert
+    expect(firstStart).toBeLessThan(firstResult);
+  });
+
   it("completes each resumed agent", async () => {
     // Arrange + Act
     const driven = await driveScenario([prompt]);

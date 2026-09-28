@@ -827,7 +827,7 @@ export const NETWORK_RESUME = scenario({
   prompt: NETWORK_RESUME_MARKER,
   emits:
     "the MAIN agent answering the shim's own network-resume prompt: one `SendMessage` per agent the prompt names, " +
-    "each answered WITH `resumedAgentId` (the vendor resuming that SAME agent from its transcript), then that " +
+    "each answered WITH `resumedAgentId` (the vendor resuming that SAME agent from its transcript) after that " +
     "agent's `task_started` under the `SendMessage` call, and — after the turn — one model-authored message of " +
     "the resumed agent and its completed `task_notification`",
   writes: "the tool_use and tool_result lines, the closing text line, and each resumed agent's reply in its own transcript",
@@ -842,6 +842,9 @@ export const NETWORK_RESUME = scenario({
         summary: "Resume after network outage",
         message: NETWORK_RESUME_MESSAGE,
       });
+      // THE VENDOR STARTS THE RESUMED AGENT'S TASK FROM THE SEND, before the
+      // send's result, exactly as `subagent-resumed` replays it.
+      ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description: "resumed" });
       ctx.toolResult(call, "Agent resumed from transcript.", {
         success: true,
         message:
@@ -850,7 +853,6 @@ export const NETWORK_RESUME = scenario({
         resumedAgentId: agentId,
         pin: { id: agentId, name: agentId, ref: "2175c2" },
       });
-      ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description: "resumed" });
       return { agentId, call };
     });
     ctx.announceLiveTasks();
