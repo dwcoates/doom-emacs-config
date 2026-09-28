@@ -29,6 +29,7 @@
  * snapping shut under a reader who opened it is the whole failure R2 names.
  */
 import { log } from "../log.js";
+import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -370,6 +371,18 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       schema: WatchFeedResponseSchema,
       open: (client, signal) => tail(client, signal),
       onPush: (response) => {
+        // THE FEED TEXT ZOOM RIDES EVERY FEED'S WATCH, sub-feeds included
+        // (endpoint_watch_feed.proto), and the daemon replays the current
+        // scale the instant a tail is accepted. So a sub-feed's first frame is
+        // ordinarily a scale push with no row, and it must be routed BEFORE
+        // `requireMessage(response.row)`. Regression, 2026-09-28: every merge
+        // bubble's tail filed `rpc.stream-frame-undecodable` on
+        // `WatchFeedResponse.row` for exactly that frame. A selection push is
+        // root-only by contract, so one here still fails loudly below.
+        if (response.feedTextScale !== undefined) {
+          applyFeedTextScale(response.feedTextScale.scale);
+          return;
+        }
         child?.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
       },
     });
