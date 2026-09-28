@@ -25,6 +25,9 @@ import (
 //	              hide the condition the user has to be told about. It is the
 //	              same exception `start_failed` already held, generalized to
 //	              every fault kind by the owner's ruling of 2026-09-13.
+//	update        ranks next: a DEPLOY'S PROGRESS (update.go) is what the reader
+//	              is waiting on while a deploy moves under the session, and it
+//	              ranks directly below a fault (owner request, 2026-09-27).
 //	notification  ranks next.
 //	rate_limited  is SECOND-LOWEST.
 //	context_budget is LOWEST — shown only when nothing else stands.
@@ -151,6 +154,12 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 			Kind: &frontendv1.FooterStatusIdleActivity_Fault{Fault: line},
 		}
 	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusIdleActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusIdleActivity_Update{Update: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusIdleActivity{
 			At:   stamp(s.notification.at),
@@ -178,6 +187,12 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinking
 		return &frontendv1.FooterStatusThinkingActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusThinkingActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusThinkingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusThinkingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
@@ -245,6 +260,12 @@ func (r *resolver) waitingActivity(s *wsState) *frontendv1.FooterStatusWaitingAc
 		return &frontendv1.FooterStatusWaitingActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusWaitingActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusWaitingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusWaitingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
@@ -330,6 +351,12 @@ func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInter
 			Kind: &frontendv1.FooterStatusInterruptedActivity_Fault{Fault: line},
 		}
 	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusInterruptedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusInterruptedActivity_Update{Update: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusInterruptedActivity{
 			At:   stamp(s.notification.at),
@@ -357,6 +384,12 @@ func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingAc
 		return &frontendv1.FooterStatusMergingActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusMergingActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusMergingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusMergingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
@@ -398,6 +431,12 @@ func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgr
 			Kind: &frontendv1.FooterStatusBackgroundActivity_Fault{Fault: line},
 		}
 	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusBackgroundActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusBackgroundActivity_Update{Update: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusBackgroundActivity{
 			At:   stamp(s.notification.at),
@@ -425,6 +464,12 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 		return &frontendv1.FooterStatusBlockedActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusBlockedActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusBlockedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusBlockedActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
@@ -501,6 +546,12 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 			Kind: &frontendv1.FooterStatusDisconnectedActivity_Fault{Fault: line},
 		}
 	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusDisconnectedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusDisconnectedActivity_Update{Update: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusDisconnectedActivity{
 			At:   stamp(s.notification.at),
@@ -529,6 +580,12 @@ func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingAc
 		return &frontendv1.FooterStatusClosingActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusClosingActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusClosingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusClosingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
@@ -566,6 +623,12 @@ func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingAc
 		return &frontendv1.FooterStatusLoadingActivity{
 			At:   stamp(at),
 			Kind: &frontendv1.FooterStatusLoadingActivity_Fault{Fault: line},
+		}
+	}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusLoadingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusLoadingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
