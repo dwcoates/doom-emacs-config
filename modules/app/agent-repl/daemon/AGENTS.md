@@ -1159,6 +1159,29 @@ It is decided in one place, `internal/resolve/feed/superseded.go`:
 - Pages serve the stored rows, so replay, pages and live agree; a sub-feed
   follows the rule within itself and never across feeds.
 
+## A feed row is ordered by where its entry sits in the conversation
+
+Owner ruling 2026-09-27: a late row is placed where it would have been had it
+not been late (`docs/investigations/2026-09-27-feed-row-order-plan.md`).
+
+- Every row carries `frontend.v1 FeedRow.order`, minted ONCE at first draw by
+  `internal/resolve/feed/order.go` and never changed; the feed's own order,
+  every page, every push and every removal carry that one key, and clients
+  draw it verbatim.
+- A row drawn from an entry is keyed from the entry's conversation place
+  (`HistoryEntryAt.place`, handed to every entry-driven feed call by the
+  sessionwatcher) plus its sub-index among that entry's rows, so a restarted
+  daemon mints the identical key. A row the daemon makes itself, or one from
+  an entry whose serving side stated no place, follows the row before it.
+- The delivery bound (`boundHides`) and a reader's page walk are judged by
+  key, so a late row older than a reader's loaded page reaches it in place on
+  the next page.
+- A restated row carrying another key is `daemon.feed.order_changed` at
+  ERROR; a non-positive place is `daemon.feed.place_invalid` at ERROR;
+  `daemon.feed.row_placed` (INFO) records each key and how it was minted, and
+  `daemon.feed.row_republished` records every re-push of a placed row to open
+  tails (INFO, DEBUG for a live entry growing its own row).
+
 ## A retired entry removes what the feed drew for it
 
 `WatchAgentResponse.retired` is a page line the store RETIRED: the sidecar's
