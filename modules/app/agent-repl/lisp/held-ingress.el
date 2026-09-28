@@ -51,6 +51,7 @@
 (declare-function agent-repl--input-waiting "agent-repl-input" (ws))
 (declare-function agent-repl-wire-encode-user-said "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-encode-prompt-origin "agent-repl-wire-common" (value))
+(declare-function agent-repl-wire-encode-submit-prompt-delivery "agent-repl-wire-verbs" (value))
 
 (defvar agent-repl-host-update-functions)
 
@@ -110,24 +111,33 @@ Returns the count."
       (agent-repl--input-set-waiting ws text))
     count))
 
-(defun agent-repl-held-ingress--body (ws said origin key)
+(defun agent-repl-held-ingress--body (ws said origin key &optional delivery)
   "Return the JSON body of WS's entry for SAID under ORIGIN and KEY.
+DELIVERY is the attempt's own `SubmitPromptDelivery' keyword, nil for the
+ordinary delivery; a set one rides the entry as `delivery', so the daemon
+re-drives the prompt exactly as it was asked for -- a deferred prompt stays
+deferred, never classified and never interjected.
 `json-serialize' answers UTF-8 BYTES; they are decoded to text here so
 the file is written as the UTF-8 it already is, never re-encoded byte by
 byte."
   (decode-coding-string
    (json-serialize
-   `((version . ,agent-repl-held-ingress-format-version)
-     (project_dir . ,(directory-file-name
-                      (expand-file-name (agent-repl--ws-get ws :project-dir))))
-     (idempotency_key . ,key)
-     (origin . ,(agent-repl-wire-encode-prompt-origin origin))
-     (said . ,(agent-repl-wire-encode-user-said said))
-     (queued_at . ,(format-time-string "%Y-%m-%dT%H:%M:%S.%NZ" nil t))))
+    (append
+     `((version . ,agent-repl-held-ingress-format-version)
+       (project_dir . ,(directory-file-name
+                        (expand-file-name (agent-repl--ws-get ws :project-dir))))
+       (idempotency_key . ,key)
+       (origin . ,(agent-repl-wire-encode-prompt-origin origin))
+       (said . ,(agent-repl-wire-encode-user-said said))
+       (queued_at . ,(format-time-string "%Y-%m-%dT%H:%M:%S.%NZ" nil t)))
+     (when delivery
+       `((delivery . ,(agent-repl-wire-encode-submit-prompt-delivery delivery))))))
    'utf-8))
 
-(defun agent-repl-held-ingress-write (ws said origin key)
+(defun agent-repl-held-ingress-write (ws said origin key &optional delivery)
   "Write SAID, submitted for WS under ORIGIN and KEY, into the ingress.
+DELIVERY is the attempt's `SubmitPromptDelivery' keyword, nil for the
+ordinary delivery (see `agent-repl-held-ingress--body').
 Returns the entry's path.  An entry already written under KEY for WS is
 left as it is and its path returned: one attempt is one prompt, however
 many failure paths report it.  A failure to write SIGNALS -- the caller
@@ -148,14 +158,14 @@ owns telling the user their words were not saved."
                            (format-time-string "%Y%m%dT%H%M%S.%N" nil t) hash key))
              (path (expand-file-name name dir))
              (tmp (expand-file-name (concat "." name ".tmp") dir))
-             (body (agent-repl-held-ingress--body ws said origin key)))
+             (body (agent-repl-held-ingress--body ws said origin key delivery)))
         (make-directory dir t)
         (let ((coding-system-for-write 'utf-8-unix))
           (with-temp-file tmp
             (insert body)))
         (rename-file tmp path)
-        (agent-repl--info ws "elisp.held-ingress.written ws=%s key=%s origin=%S file=%s"
-                          ws key origin path)
+        (agent-repl--info ws "elisp.held-ingress.written ws=%s key=%s origin=%S delivery=%S file=%s"
+                          ws key origin delivery path)
         (agent-repl-held-ingress-refresh ws)
         path))))
 
