@@ -1020,26 +1020,22 @@ describe("the row's display mode", () => {
     expect(dot(partial)).toBe(dot(full));
   });
 
-  it("draws FULL despite the marker when this row's status just changed", () => {
-    // Arrange: the page applies the restore rule itself rather than waiting
-    // for the daemon's next push to drop the marker.
+  it("draws PARTIAL on the push that changes the status when the marker is set", () => {
+    // Arrange: the row was last drawn FULL at idle_async.
     const sc = sidebarContext();
-    sc.viewed.beginPass();
-    drawRosterRow(row({ id: "ws-1", status: { case: "ready", value: {} }, viewed: true }), sc, "R");
-    sc.viewed.endPass();
+    drawRosterRow(row({ id: "ws-1", status: { case: "idleAsync", value: {} } }), sc, "R");
 
-    // Act.
-    sc.viewed.beginPass();
+    // Act: the detached work ended and the daemon says the result is read.
     const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "thinking", value: {} }, viewed: true }),
+      row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }),
       sc,
       "R",
     );
-    sc.viewed.endPass();
 
-    // Assert.
+    // Assert: the daemon resolves the marker with the status, so the page
+    // draws what the wire says.
     const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
-    expect(name.classList.contains("viewed")).toBe(false);
+    expect(name.classList.contains("viewed")).toBe(true);
   });
 });
 

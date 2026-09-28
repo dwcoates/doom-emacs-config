@@ -7,7 +7,7 @@
  * derived: the highlight comes from `RosterRowCurrent.current` (never from
  * comparing against `WorkspaceRoster.current`), the receded styling from
  * `RosterRowClosed.closed`, the display mode from `RosterRowViewed` (see
- * `viewed.ts`, which owns the one rule that restores FULL), the badge from the
+ * `viewed.ts`, which decides it from the wire alone), the badge from the
  * resolver-composed label, and
  * the when-column from whichever arm the daemon chose — this end applies no
  * precedence of its own.
@@ -51,6 +51,7 @@ import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { markReviving } from "./reviving.js";
+import { viewedMode } from "./viewed.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
@@ -162,10 +163,9 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = name;
-  // THE DISPLAY MODE IS THE NAME'S ALONE. `viewed.ts` decides it — the wire's
-  // marker unless this row's status has changed since the last draw, in which
-  // case FULL, on the same rule the daemon clears the marker by.
-  const mode = sc.viewed.modeFor(
+  // THE DISPLAY MODE IS THE NAME'S ALONE. `viewed.ts` decides it, from the
+  // wire's marker alone: the daemon resolves it with the status it rides on.
+  const mode = viewedMode(
     workspace.id,
     status.case,
     u.viewed !== undefined && drawRosterRowViewed(u.viewed, `${path}.viewed`),
@@ -247,8 +247,7 @@ export function drawRosterRowCurrent(u: RosterRowCurrent, path: string): boolean
  *
  * The message is EMPTY — presence is the fact — so this answers `true` for a
  * marker that is there at all. Whether the row actually DRAWS partial is not
- * decided here: `viewed.ts` weighs it against the status change that restores
- * FULL.
+ * decided here: `viewed.ts` owns that decision.
  */
 export function drawRosterRowViewed(u: RosterRowViewed, path: string): boolean {
   void u;

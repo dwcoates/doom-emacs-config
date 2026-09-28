@@ -1085,26 +1085,33 @@ authorizes it: today the confirm challenge (`interruptTurn`), a restart
 (`forceEndTurn`), and the two adapters that forward their caller's force. A new
 forced site fails the unit suite until it is listed with its reason.
 
-## The roster row's viewed mode is cleared by the RENDER, not by a setter
+## The roster row's viewed mode is DERIVED from a read fact, never stored
 
 `RosterRowViewed` is the row's display mode: present is PARTIAL (the client
-recedes the row's NAME), absent is FULL. `sidebar.Resolver.SetViewed` raises it
-— the editor's `MarkWorkspaceViewed` is the only caller, because dwell is an
-editor fact — and there is deliberately NO setter that lowers it.
+recedes the row's NAME), absent is FULL. It is not a field anywhere: `row()`
+computes it from `wsState.viewedOn(arm)`, which is true exactly when the arm is
+a turn end (`isTurnEndArm`: `done` or `interrupted`) and `wsState.result` is
+`resultRead`.
 
-It is lowered in exactly one place: `wsState.noteArm`, called from `row()` as
-each row's status arm is resolved for publication, which clears the marker
-whenever the arm differs from the one last published for that workspace.
-**Hanging the clear off the render rather than off any particular fact-setter
-is the point**: every origin of a status change — an accepted turn, a shim
-frame, a merge, a dead session — reaches the row through that one funnel, so
-"any status change restores FULL" holds without every present and future setter
-having to remember to clear anything.
+The fact, `wsState.result`, has three writers and no others:
 
-The mode is in-memory only and writes no durable record: it is a view fact and
-must not outlive a restart. The editor's tab-bar draws the same mode from its
-own latch, on the same reset rule; the module-root AGENTS.md section "The
-viewed mode" owns the cross-surface invariant.
+- `SetTurnEnded` sets it `resultUnread` on a completed or killed close, and
+  `resultNone` on any other close.
+- `SetViewed` (the editor's `MarkWorkspaceViewed`) sets it `resultRead`, but
+  only when the arm LAST PUBLISHED for the row is a turn end; otherwise it is
+  refused and recorded (`daemon.sidebar.row_viewed_refused`).
+- `startTurn` (a new prompt) resets it to `resultNone`.
+
+An unread result outranks `idle_async` in `statusArm` (see the precedence in
+status.go). **Deriving the marker rather than clearing it on an arm change is
+the point**: the read fact outlives the arm changes that are not a new result
+(detached work starting or ending, a link blip, a merge), so a read turn end
+returning from `idle_async` is PARTIAL on the very push that changes its arm,
+and a client draws the marker as it arrives with no rule of its own.
+
+The fact is in-memory only and writes no durable record: it is a view fact and
+must not outlive a restart. The module-root AGENTS.md section "The viewed
+mode" owns the cross-surface invariant.
 
 ## THE LIVE-SHIM INVARIANT: a workspace whose shim is live carries NO terminal session record
 
