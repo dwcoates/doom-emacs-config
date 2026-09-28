@@ -29,6 +29,7 @@ import {
 } from "../../../src/feed/asks/question.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
+import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
 
@@ -826,7 +827,7 @@ function unalteredQuestion(answer: AnswerQuestionResponse): {
         composerEnabled: false,
       }),
       feed: "root",
-      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }), order: orderFor(ROW_ID) }),
       revealRow: async () => false,
     },
   };
