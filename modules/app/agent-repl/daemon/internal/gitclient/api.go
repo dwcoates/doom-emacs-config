@@ -4,7 +4,8 @@
 // GIT_WORK_TREE, GIT_INDEX_FILE, GIT_COMMON_DIR, GIT_PREFIX,
 // GIT_OBJECT_DIRECTORY and GIT_ALTERNATE_OBJECT_DIRECTORIES STRIPPED — a
 // leaked GIT_DIR is a real, previously-observed source of bogus work-tree
-// errors. Operations are local only: the client never fetches and never
+// errors. The hook markers (MergeQueueMarker, OwnerOverride) are stripped
+// too, and only FastForward sets the queue's marker. Operations are local only: the client never fetches and never
 // pushes. Every failure carries git's stdout and stderr as evidence.
 // See ARCHITECTURE.md "gitclient".
 package gitclient

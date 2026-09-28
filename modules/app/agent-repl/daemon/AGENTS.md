@@ -787,7 +787,11 @@ Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
   detached scratch tree of the queue's own (`<state>/merge-trees/<lease>-<n>`,
   `gitclient.AddDetachedWorktree`) at the target's tip, merges and gates
   there, and moves the target only by `gitclient.FastForward` to the commit
-  the gate passed. A target that moved meanwhile is merged onto again. Repairs
+  the gate passed. That fast-forward is the ONE git carrying
+  `gitclient.MergeQueueMarker` (`AGENT_REPL_MERGE_QUEUE=1`), which is how the
+  repository's `.githooks/reference-transaction` tells the queue's move of
+  master from a hand merge; every other git has the marker scrubbed. A target
+  that moved meanwhile is merged onto again. Repairs
   are the workspace agent's commits on ITS OWN branch; the next attempt merges
   the branch afresh. The daemon commits nothing of its own.
 - **ONE SLOT PER REPOSITORY, ONE GRANTOR** (`slot.go`). The admission pump
