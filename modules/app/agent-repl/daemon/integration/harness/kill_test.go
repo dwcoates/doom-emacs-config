@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestKillNeverSignalsAReapedProcess pins the property that keeps the cleanup
@@ -44,7 +45,8 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			// Arrange: a real child in a group of its own, under a bare
 			// Daemon carrying only the fields the kill path touches. The
 			// reaped flag is set directly, because the assertion is about
-			// what Kill DOES with it, not about how it comes to be set.
+			// what Kill DOES with it, not about how it comes to be set. The
+			// mark Kill reads is reapBegun, set before cmd.Wait frees the pid.
 			cmd := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
@@ -52,9 +54,9 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			}
 			d := &Daemon{t: t, cmd: cmd}
 			if tc.reaped {
-				d.mu.Lock()
-				d.exited = true
-				d.mu.Unlock()
+				d.sigMu.Lock()
+				d.reapBegun = true
+				d.sigMu.Unlock()
 				t.Cleanup(func() {
 					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 					_ = cmd.Wait()
@@ -200,6 +202,31 @@ func TestKillEndsTheLeaderBeforeSignalingAnyMember(t *testing.T) {
 	}
 }
 
+// TestKillOwnsTheReapARacingWaitLeftInFlight is Stop giving up on SIGTERM and
+// falling through to Kill: the bounded wait it gave up on leaves a reap in
+// flight, and that reap must not free the leader's pid, and with it the group
+// id, between the leader's SIGKILL and the group's.
+func TestKillOwnsTheReapARacingWaitLeftInFlight(t *testing.T) {
+	// Arrange: a reap in flight, as Stop's expired wait leaves one.
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	d.awaitReapWithin(0)
+	reapedDuringKill := false
+	d.afterLeaderExit = func() {
+		reapedDuringKill = d.awaitReapWithin(50 * time.Millisecond)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if reapedDuringKill {
+		t.Fatal("the in-flight reap freed the leader between its SIGKILL and the group's, want it held until the group kill")
+	}
+	if !d.reaped() {
+		t.Fatal("the leader is unreaped after Kill")
+	}
+}
+
 // TestKillEndsEveryMemberOfTheGroup pins that ending the leader first still
 // kills the whole group, not only its leader.
 func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
@@ -268,8 +295,9 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold(t *testin
 // started (a layout change's replacement): a process naming stateDir that
 // spawns a child naming it too, and spawns another the moment that child
 // dies, the way a daemon revives a shim that died on its own. It answers the
-// respawner and its first child's pid.
-func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
+// respawner, its first child's pid, and a read that blocks until the
+// respawner reports its next child and answers that child's pid.
+func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int, func() int) {
 	t.Helper()
 	script := `while :; do /bin/sh -c 'while :; do /bin/sleep 1; done' "$0/child" & echo $!; wait $!; done`
 	cmd := exec.Command("/bin/sh", "-c", script, stateDir)
@@ -284,16 +312,21 @@ func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	})
-	line, err := bufio.NewReader(out).ReadString('\n')
-	if err != nil {
-		t.Fatalf("read the child's pid: %v", err)
+	pids := bufio.NewReader(out)
+	next := func() int {
+		t.Helper()
+		line, err := pids.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read the child's pid: %v", err)
+		}
+		child, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			t.Fatalf("the child's pid %q: %v", line, err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+		return child
 	}
-	child, err := strconv.Atoi(strings.TrimSpace(line))
-	if err != nil {
-		t.Fatalf("the child's pid %q: %v", line, err)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
-	return cmd, child
+	return cmd, next(), next
 }
 
 // TestReapStraysFreezesEveryStrayBeforeKillingAny pins the ordering that
@@ -303,7 +336,7 @@ func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
 func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
-	respawner, child := respawningStray(t, stateDir)
+	respawner, child, _ := respawningStray(t, stateDir)
 	d := &Daemon{t: t, StateDir: stateDir}
 	var respawnerState processState
 	var stateErr, exitErr error
@@ -338,7 +371,7 @@ func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
-	_, child := respawningStray(t, stateDir)
+	_, child, _ := respawningStray(t, stateDir)
 	d := &Daemon{t: t, StateDir: stateDir}
 	d.afterStraysFrozen = func() { _ = syscall.Kill(child, syscall.SIGKILL) }
 
@@ -346,6 +379,47 @@ func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
 	d.ReapStrays()
 
 	// Assert
+	if err := d.leakedStrays(); err != nil {
+		t.Fatalf("leakedStrays after the reap = %v, want none", err)
+	}
+}
+
+// TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop is the hole a
+// freeze alone left: a stray whose stop the kernel discards, as it does for a
+// process inside execve, runs on through the sweep and spawns a replacement
+// no listing so far has named. The respawner is continued once it is stopped
+// and its child killed, and the sweep begins its kills only once the
+// replacement exists, so the replacement is certain, not raced for.
+func TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	respawner, child, next := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	escaped := false
+	var escapeErr error
+	d.afterStraysFrozen = func() {
+		if escaped {
+			return
+		}
+		escaped = true
+		if err := syscall.Kill(respawner.Process.Pid, syscall.SIGCONT); err != nil {
+			escapeErr = err
+			return
+		}
+		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+			escapeErr = err
+			return
+		}
+		next()
+	}
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if escapeErr != nil {
+		t.Fatalf("letting the respawner escape its stop: %v", escapeErr)
+	}
 	if err := d.leakedStrays(); err != nil {
 		t.Fatalf("leakedStrays after the reap = %v, want none", err)
 	}
