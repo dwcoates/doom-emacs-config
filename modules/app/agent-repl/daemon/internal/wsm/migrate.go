@@ -55,7 +55,20 @@ var migrations = []migration{
 	{To: 9, Name: "workspaces_last_activity_at", DDL: lastActivityAtDDL},
 	{To: 10, Name: "feed_text_scale", DDL: feedTextScaleDDL},
 	{To: 11, Name: "idempotency_keys_accepted_at", DDL: acceptedAtDDL},
+	{To: 12, Name: "held_prompts_delivery", DDL: heldPromptsDeliveryDDL},
 }
+
+// heldPromptsDeliveryDDL adds how a held prompt asked to be delivered
+// (agentrepl.v1 SubmitPromptDelivery, as wsm.Delivery: 0 ordinary, 1
+// deferred). Every existing row is 0, the ordinary
+// delivery, by the column default -- exactly right: no build before this one
+// could hold a prompt any other way.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the column inline in schema.go.
+const heldPromptsDeliveryDDL = `
+ALTER TABLE held_prompts ADD COLUMN delivery INTEGER NOT NULL DEFAULT 0;
+`
 
 // acceptedAtDDL adds when the prompt queue ACCEPTED an idempotency claim's
 // submission. A claim was once final the instant it was written, BEFORE the
