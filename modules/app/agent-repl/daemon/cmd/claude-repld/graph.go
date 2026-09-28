@@ -1368,7 +1368,22 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	f.mu.Lock()
 	f.onTopbar[line.ID] = true
 	f.mu.Unlock()
-	f.topbar.RaiseDaemonWarning(string(line.ID), topbar.DaemonWarning{Line: line.Topbar})
+	f.topbar.RaiseDaemonWarning(string(line.ID), topbarWarning(line))
+}
+
+// topbarWarning is a daemon-scoped fault's topbar row: its line, and for a
+// failed deploy the overlay saying what failed.
+func topbarWarning(line health.FaultLine) topbar.DaemonWarning {
+	warning := topbar.DaemonWarning{Line: line.Topbar}
+	if line.Kind != health.KindDeployFailed {
+		return warning
+	}
+	if o, ok := health.DeployFailedOverlay(line.Record); ok {
+		warning.DeployFailed = &topbar.DeployFailedOverlay{
+			Step: o.Step, Component: o.Component, Rollback: o.Rollback, Detail: o.Detail, Log: o.Log,
+		}
+	}
+	return warning
 }
 
 // FaultClosed retracts it again, from the topbar too when it was raised
