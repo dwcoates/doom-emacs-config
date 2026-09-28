@@ -16,6 +16,7 @@ import {
   type FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { SubfeedView } from "../../../src/feed/renderers.js";
+import { orderFor } from "../../feed-order.js";
 
 /** A feed id. */
 export function id(value: string): FeedId {
@@ -83,6 +84,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
       : (spec.payload ?? {});
   return create(FeedRowSchema, {
     id: id(rowId),
+    order: orderFor(rowId),
     row: {
       case: "mergeTab",
       value: create(FeedMergeTabSchema, {
@@ -143,6 +145,7 @@ export function mergeHead(
 export function childRow(rowId: string, parent: string, text = "hi"): FeedRow {
   return create(FeedRowSchema, {
     id: id(rowId),
+    order: orderFor(rowId),
     parent: { row: id(parent) },
     row: {
       case: "activity",

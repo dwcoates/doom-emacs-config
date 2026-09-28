@@ -36,11 +36,12 @@ import { drawFeedAgentPrompt } from "../../src/feed/rows/agent-prompt.js";
 import { mountBubble } from "../../src/feed/bubble.js";
 import { defaultBubbleBody } from "../../src/feed/renderers.js";
 import { feedId, harness, rowContext, stubRenderers, subagentRow } from "./harness.js";
+import { orderFor } from "../feed-order.js";
 
 /** A row context on ROW, with no verb of its own scripted. */
 function rc(id: string) {
   const h = harness();
-  return rowContext(h.ctx, create(FeedRowSchema, { id: feedId(id) }));
+  return rowContext(h.ctx, create(FeedRowSchema, { id: feedId(id), order: orderFor(id) }));
 }
 
 /** One bubble kind: what it draws, and the two elements the ruling names. */

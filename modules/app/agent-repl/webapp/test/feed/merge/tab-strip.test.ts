@@ -20,6 +20,7 @@ import {
 } from "../../../src/feed/merge/tab-strip.js";
 import { oneofArms } from "../../arms.js";
 import { id, tabRow } from "./fixtures.js";
+import { orderFor } from "../../feed-order.js";
 
 describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", () => {
   it("keeps the served order rather than sorting by kind", () => {
@@ -32,7 +33,7 @@ describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", (
 
   it("ignores every row that is not a tab", () => {
     const tabs = mergeTabsOf([
-      create(FeedRowSchema, { id: id("r1"), row: { case: "userPrompt", value: {} } }),
+      create(FeedRowSchema, { id: id("r1"), order: orderFor("r1"), row: { case: "userPrompt", value: {} } }),
       tabRow("t1", { kind: "tests", state: "live" }),
     ]);
     expect(tabs.map((t) => t.id)).toEqual(["t1"]);
@@ -61,6 +62,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
   it("refuses a tab whose kind oneof is unset", () => {
     const row = create(FeedRowSchema, {
       id: id("t1"),
+      order: orderFor("t1"),
       row: { case: "mergeTab", value: create(FeedMergeTabSchema, { label: { text: "x" } }) },
     });
     expect(() => mergeTabsOf([row])).toThrow(MalformedView);
@@ -69,6 +71,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
   it("refuses a tab whose state oneof is unset", () => {
     const row = create(FeedRowSchema, {
       id: id("t1"),
+      order: orderFor("t1"),
       row: {
         case: "mergeTab",
         value: create(FeedMergeTabSchema, {
@@ -83,6 +86,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
   it("refuses a settled tab whose outcome oneof is unset", () => {
     const row = create(FeedRowSchema, {
       id: id("t1"),
+      order: orderFor("t1"),
       row: {
         case: "mergeTab",
         value: create(FeedMergeTabSchema, {
