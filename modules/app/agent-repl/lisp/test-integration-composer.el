@@ -45,8 +45,7 @@
 (declare-function agent-repl-send-with-postfix "input")
 (declare-function agent-repl-send-with-prefix "input")
 (declare-function agent-repl-prompt-queue-pending "prompt-queue")
-(declare-function agent-repl-prompt-queue-drain "prompt-queue")
-(declare-function agent-repl--prompt-queue-on-link-up "prompt-queue")
+(declare-function agent-repl--input-waiting "input")
 (declare-function agent-repl-link-up-p "daemon-link")
 (defvar agent-repl-send-posthooks)
 (defvar agent-repl-host-update-functions)
@@ -179,6 +178,25 @@ drives on link-up.  Pushes no host state; the caller decides the gate."
     (agent-repl-host-subscribe conn agent-repl-itest-composer--ws ref)
     (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
     (cons conn ref)))
+
+;;;; ---- The durable held-prompt ingress ----
+
+(declare-function agent-repl-held-ingress-entries "held-ingress" (ws))
+
+(defun agent-repl-itest-composer--held-entries (ws)
+  "Return WS's held-prompt ingress entries as parsed alists, oldest first.
+The files are read from the scenario's own `AGENT_REPL_STATE_DIR', exactly
+where the daemon's ingress sweeps them."
+  (mapcar (lambda (path)
+            (with-temp-buffer
+              (let ((coding-system-for-read 'utf-8))
+                (insert-file-contents path))
+              (json-parse-buffer :object-type 'alist)))
+          (agent-repl-held-ingress-entries ws)))
+
+(defun agent-repl-itest-composer--held-text (entry)
+  "Return the first text block of ENTRY's said."
+  (alist-get 'text (alist-get 'text (aref (alist-get 'blocks (alist-get 'content (alist-get 'said entry))) 0))))
 
 ;;;; ---- Reading the fixture workspace's OWN log ----
 ;;
@@ -826,8 +844,8 @@ untouched."
               ;; Assert: the composer keeps every word.
               (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
               ;; Assert: a refusal is an ANSWER, so nothing is held for resend.
-              (should-not (agent-repl-prompt-queue-pending
-                           agent-repl-itest-composer--ws :outage)))
+              (should-not (agent-repl-itest-composer--held-entries
+                           agent-repl-itest-composer--ws)))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-merging-refusal-preserves-the-text ()
@@ -1031,10 +1049,11 @@ daemon is the authority and answers with its own refusal arms\"."
         (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-composer--ws))
         (agent-repl-connect-close conn)))))
 
-(ert-deftest agent-repl-itest-composer-transport-failure-defers-the-prompt ()
-  "A transport failure keeps the text and hands it to the outage queue.
-Undelivered user intent may never be silently discarded; the queue drains
-on link-up."
+;; owner ruling 2026-09-28: held prompts survive outages and restarts
+(ert-deftest agent-repl-itest-composer-transport-failure-writes-the-held-prompt-ingress ()
+  "A transport failure writes the prompt to the durable held-prompt ingress.
+Undelivered user intent may never be silently discarded, nor kept only in
+Emacs's memory: the entry waits on disk for the daemon to ingest it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -1044,14 +1063,13 @@ on link-up."
       ;; Act.
       (ignore-errors (agent-repl--send :user-sent "run the tests"
                                        agent-repl-itest-composer--ws))
-      ;; Assert: the OUTAGE queue holds it -- link-up releases it, not the
-      ;; roster's finish edge, so `agent-repl-queue-deferred-prompt' is the
-      ;; wrong sink to watch.
+      ;; Assert.
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
-       nil "the prompt to reach the outage queue")
-      (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage)))))
-
+       (lambda () (agent-repl-itest-composer--held-entries agent-repl-itest-composer--ws))
+       nil "the prompt to reach the held-prompt ingress")
+      (should (equal (length (agent-repl-itest-composer--held-entries
+                              agent-repl-itest-composer--ws))
+                     1)))))
 ;;;; ---- Finding 91 (partial): the submit log names its origin ----
 
 (ert-deftest agent-repl-itest-composer-submit-log-carries-the-origin ()
@@ -1072,145 +1090,56 @@ the editor situation that caused it."
       (should (agent-repl-itest-composer--log-names-arm-p
                daemon "elisp.input.submit" ":user-sent-with-prefix")))))
 
-;;;; ---- Findings 66-68: the outage queue, end to end ----
+;;;; ---- Findings 66-68, re-ruled 2026-09-28: the durable held-prompt ingress ----
 
-(ert-deftest agent-repl-itest-composer-outage-drain-reuses-the-failed-attempts-idempotency-key ()
-  "A prompt re-sent from the outage queue reuses the failed attempt's key.
+;; owner ruling 2026-09-28
+(ert-deftest agent-repl-itest-composer-held-entry-carries-the-failed-attempts-idempotency-key ()
+  "The held entry carries the failed attempt's idempotency key.
 endpoint_submit_prompt.proto: \"a retried request is not a second turn\" --
-ruled: a re-drive is a RETRY, so it must carry the SAME idempotency key as
-the failed attempt, letting the daemon's duplicate refusal do its job."
+the daemon ingests the entry under this key, so an attempt that DID land
+before the transport failed is answered as a duplicate, never run twice."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let (failed-key successor adopted)
-        (unwind-protect
-            (progn
-              ;; The daemon goes away mid-composition.
-              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
-              ;; Act: the failed attempt -- `agent-repl--send' returns its key
-              ;; synchronously even though the transport fails asynchronously.
-              (setq failed-key
-                    (agent-repl--send :user-sent "run the tests"
-                                      agent-repl-itest-composer--ws))
-              (should failed-key)
-              (agent-repl-itest--wait-until
-               (lambda () (agent-repl-prompt-queue-pending
-                           agent-repl-itest-composer--ws :outage))
-               nil "the prompt to reach the outage queue")
-              ;; The successor comes up and the workspace re-attaches to it,
-              ;; then the link-up edge drains the outage queue.
-              (setq adopted (agent-repl-itest-composer--reattach successor))
-              (agent-repl-itest--push
-               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
-               (plist-get (cdr adopted) :id))
-              (agent-repl-itest--wait-until
-               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
-                              :open))
-               nil "the successor's composer gate to open")
-              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-                (agent-repl--prompt-queue-on-link-up))
-              (agent-repl-itest--await-call successor "SubmitPrompt")
-              ;; Assert.
-              (let ((drained-key (agent-repl-itest--body-field
-                                  (car (agent-repl-itest--call-bodies successor "SubmitPrompt"))
-                                  'idempotencyKey)))
-                (should (equal drained-key failed-key))))
-          (when adopted (agent-repl-connect-close (car adopted)))
-          (when successor (agent-repl-itest--stop-daemon successor t)))))))
-
-(ert-deftest agent-repl-itest-composer-outage-drain-reaches-the-successor-end-to-end ()
-  "A held outage prompt is really delivered on link-up, to the SUCCESSOR daemon.
-§10: \"transport failure -> keep the text and offer it to prompt-queue.el
-(drained on link-up)\" -- this exercises the real drain, not a stubbed
-queue, and pins the drained request's origin and text."
+      (agent-repl-itest--stop-daemon daemon t)
+      ;; Act: `agent-repl--send' returns its key synchronously even though
+      ;; the transport fails asynchronously.
+      (let ((failed-key (agent-repl--send :user-sent "run the tests"
+                                          agent-repl-itest-composer--ws)))
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-itest-composer--held-entries agent-repl-itest-composer--ws))
+         nil "the prompt to reach the held-prompt ingress")
+        ;; Assert.
+        (should failed-key)
+        (should (equal (alist-get 'idempotency_key
+                                  (car (agent-repl-itest-composer--held-entries
+                                        agent-repl-itest-composer--ws)))
+                       failed-key))))))
+;; owner ruling 2026-09-28
+(ert-deftest agent-repl-itest-composer-held-entry-carries-the-prompts-origin-and-words ()
+  "The held entry carries the send's own origin and its words, in protojson.
+The daemon resubmits exactly this, so a stored turn still traces back to
+the editor situation that caused it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let (successor adopted)
-        (unwind-protect
-            (progn
-              ;; The daemon goes away mid-composition.
-              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
-              ;; Act.
-              (ignore-errors
-                (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-              (agent-repl-itest--wait-until
-               (lambda () (agent-repl-prompt-queue-pending
-                           agent-repl-itest-composer--ws :outage))
-               nil "the prompt to reach the outage queue")
-              (setq adopted (agent-repl-itest-composer--reattach successor))
-              (agent-repl-itest--push
-               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
-               (plist-get (cdr adopted) :id))
-              (agent-repl-itest--wait-until
-               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
-                              :open))
-               nil "the successor's composer gate to open")
-              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-                (agent-repl--prompt-queue-on-link-up))
-              ;; Assert: it landed on the SUCCESSOR (the original daemon is
-              ;; dead and cannot have received anything).
-              (agent-repl-itest--await-call successor "SubmitPrompt")
-              (let* ((body (car (agent-repl-itest--call-bodies successor "SubmitPrompt")))
-                     (texts (agent-repl-itest-composer--text-blocks body)))
-                (should (equal (agent-repl-itest--body-field body 'origin)
-                               "PROMPT_ORIGIN_DEFERRED_PROMPT"))
-                (should (equal (car texts) "run the tests"))))
-          (when adopted (agent-repl-connect-close (car adopted)))
-          (when successor (agent-repl-itest--stop-daemon successor t)))))))
-
-(ert-deftest agent-repl-itest-composer-outage-drain-waits-for-the-gate-to-open ()
-  "Link-up alone does not drain into a refusing gate; the gate must open too.
-§10: \"Its liveness gate is `agent-repl-link-up-p' and the composer
-gate\" -- both facts, not just link-up, must hold before a drain sends."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'open ref
-      (ignore ref)
-      (let (successor adopted)
-        (unwind-protect
-            (progn
-              ;; The daemon goes away mid-composition, with the queue outage.
-              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
-              (ignore-errors
-                (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-              (agent-repl-itest--wait-until
-               (lambda () (agent-repl-prompt-queue-pending
-                           agent-repl-itest-composer--ws :outage))
-               nil "the prompt to reach the outage queue")
-              ;; The successor comes up, but its composer gate is `merging'.
-              (setq adopted (agent-repl-itest-composer--reattach successor))
-              (agent-repl-itest--push
-               successor "host" `((host . ,(agent-repl-itest-composer--live 'merging)))
-               (plist-get (cdr adopted) :id))
-              (agent-repl-itest--wait-until
-               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
-                              :merging))
-               nil "the successor's composer gate to read :merging")
-              ;; Act: the link-up edge fires.
-              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-                (agent-repl--prompt-queue-on-link-up))
-              ;; Assert: the merging gate refused the drain -- nothing sent.
-              (should (null (agent-repl-itest--calls successor "SubmitPrompt")))
-              (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
-              ;; Act: the gate opens.
-              (agent-repl-itest--push
-               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
-               (plist-get (cdr adopted) :id))
-              (agent-repl-itest--wait-until
-               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
-                              :open))
-               nil "the successor's composer gate to open")
-              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-                (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
-              ;; Assert: NOW the drain sends.
-              (agent-repl-itest--await-call successor "SubmitPrompt")
-              (should (agent-repl-itest--calls successor "SubmitPrompt")))
-          (when adopted (agent-repl-connect-close (car adopted)))
-          (when successor (agent-repl-itest--stop-daemon successor t)))))))
-
+      (agent-repl-itest--stop-daemon daemon t)
+      ;; Act.
+      (ignore-errors
+        (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-composer--held-entries agent-repl-itest-composer--ws))
+       nil "the prompt to reach the held-prompt ingress")
+      ;; Assert.
+      (let ((entry (car (agent-repl-itest-composer--held-entries
+                         agent-repl-itest-composer--ws))))
+        (should (equal (alist-get 'origin entry) "PROMPT_ORIGIN_USER_SENT"))
+        (should (equal (agent-repl-itest-composer--held-text entry) "run the tests"))
+        (should (equal (alist-get 'project_dir entry)
+                       (directory-file-name
+                        (expand-file-name agent-repl-itest-composer--dir))))))))
 ;;;; ---- Audit-2 additions (R-SUITE-2) ----
 ;;
 ;; Findings 32-38 of docs/overhaul/reports/elisp-suite-audit-2.md.  Kept in
@@ -1356,54 +1285,36 @@ than a refusal to report to the user."
                                         "the handover refusal to be routed")
           (should (eq (plist-get (car refusals) :arm) :not-yet-adopted)))))))
 
-;; audit-2 #33
-(ert-deftest agent-repl-itest-composer-outage-drain-runs-off-the-real-link-up-hook ()
-  "The outage queue drains off the REAL `agent-repl-link-up-functions' edge.
-fanout §10: \"the outage queue (drained on `agent-repl-link-up-functions')\".
-Every other drain test stubs `agent-repl-link-up-p' and calls
-`agent-repl--prompt-queue-on-link-up' by hand, so prompt-queue.el's own
-`add-hook' — and the whole reconnect path host.el drives beside it — is
-unpinned.  NOTHING here drains by hand: the link's own reconnect onto the
-successor is the only trigger."
-  ;; Arrange: production's link hooks are LIVE (not scratch-bound), so
-  ;; host.el re-registers and prompt-queue.el drains for real.
-  (agent-repl-itest--with-fake-daemon primary
-    (let ((agent-repl-link-reconnect-interval-seconds 0.05)
-          (agent-repl-link-reconnect-max-interval-seconds 0.2)
-          (successor nil))
-      (agent-repl--ws-put agent-repl-itest-composer--ws
-                          :project-dir agent-repl-itest-composer--dir)
-      (unwind-protect
-          (progn
-            (agent-repl-link-connect)
-            (agent-repl-itest--await-subscriber primary "daemon")
-            (agent-repl-itest--wait-until
-             (lambda () (agent-repl-host-ref agent-repl-itest-composer--ws))
-             nil "host.el's own register+subscribe on the primary")
-            ;; The daemon goes away mid-composition.
-            (setq successor (agent-repl-itest-composer--restart-on-same-dir primary))
-            ;; Act: the send fails at the transport and is held.
-            (ignore-errors
-              (agent-repl--send :user-sent "run the tests"
-                                agent-repl-itest-composer--ws))
-            (agent-repl-itest--wait-until
-             (lambda () (agent-repl-prompt-queue-pending
-                         agent-repl-itest-composer--ws :outage))
-             nil "the prompt to reach the outage queue")
-            ;; Assert: the link's own reconnect drains it onto the successor.
-            (agent-repl-itest--await-subscriber successor "daemon")
-            (agent-repl-itest--await-call successor "SubmitPrompt")
-            (should (equal
-                     (car (agent-repl-itest-composer--text-blocks
-                           (car (agent-repl-itest--call-bodies successor "SubmitPrompt"))))
-                     "run the tests"))
-            (should (null (agent-repl-prompt-queue-pending
-                           agent-repl-itest-composer--ws :outage))))
-        (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
-        (ignore-errors (agent-repl-link-teardown))
-        (ignore-errors (agent-repl-link--cancel-reconnect))
-        (when successor (agent-repl-itest--stop-daemon successor t))))))
-
+;; owner ruling 2026-09-28
+(ert-deftest agent-repl-itest-composer-host-push-after-ingestion-clears-the-waiting-line ()
+  "The waiting line clears on the daemon's host push once the entry is gone.
+The daemon removes an ingested entry and THEN re-pushes the workspace's
+host state; that real push, down the real WatchHostWorkspace stream, is
+the edge the composer re-counts on."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "")))
+        (unwind-protect
+            (progn
+              (agent-repl-itest--script daemon "SubmitPrompt"
+                                        '((error . ((notYetAdopted . ())))))
+              (cl-letf (((symbol-function 'agent-repl-host-handle-refusal) #'ignore))
+                (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl--input-waiting agent-repl-itest-composer--ws))
+               nil "the waiting line to be drawn")
+              ;; Act: the daemon ingests the entry, then pushes.
+              (mapc #'delete-file (agent-repl-held-ingress-entries agent-repl-itest-composer--ws))
+              (agent-repl-itest--push
+               daemon "host" `((host . ,(agent-repl-itest-composer--live 'open)))
+               (plist-get ref :id))
+              ;; Assert.
+              (agent-repl-itest--wait-until
+               (lambda () (null (agent-repl--input-waiting agent-repl-itest-composer--ws)))
+               nil "the waiting line to clear on the host push"))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 ;; audit-2 #34
 (ert-deftest agent-repl-itest-composer-merge-parked-draws-its-badge ()
   "The `merge_parked' gate draws its exact badge in the composer mode line.
@@ -1542,7 +1453,7 @@ Ledger (R-COMPOSER): \"the drain resends under [the failed key]
 \(deferrals mint fresh)\".  A deferral never attempted anything, so it is
 a new turn rather than a retry — reusing an earlier key would let the
 daemon's duplicate refusal swallow a prompt the user deliberately queued
-for its own turn.  Only the outage half of that ruling was pinned."
+for its own turn."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -1612,12 +1523,12 @@ helpers."
          (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time))))))))))
 
 ;; audit-3 #43
-(ert-deftest agent-repl-itest-composer-transferring-away-holds-and-replays-under-the-same-key ()
-  "A `transferring_away' refusal HOLDS the prompt and replays it on PROMOTION,
-under the SAME idempotency key, with the queue left empty afterward.
-input.el `--input-on-handover-refusal' (\"outage queue under THIS
-attempt's KEY ... released on the promotion\"); prompt-queue.el
-`--prompt-queue-on-link-promote'.  The audit-2 #32 tests stubbed
+(ert-deftest agent-repl-itest-composer-transferring-away-holds-durably-under-the-same-key ()
+  "A `transferring_away' refusal HOLDS the prompt durably under the SAME key.
+input.el `--input-on-handover-refusal' writes it to the held-prompt
+ingress under THIS attempt's key while host.el walks the handover; the
+daemon that owns the workspace afterwards ingests it (owner ruling
+2026-09-28 retired the in-memory promotion replay).  The audit-2 #32 tests stubbed
 `agent-repl-host-handle-refusal', which is exactly the hole a production
 regression could hide in; nothing here is stubbed."
   ;; Arrange: a real link to the primary; host.el's own register+subscribe.
@@ -1666,14 +1577,16 @@ regression could hide in; nothing here is stubbed."
                 (setq failed-key
                       (agent-repl--send :user-sent nil agent-repl-itest-composer--ws))
                 (should failed-key)
-                ;; Assert: ONE outage entry, the text still in the buffer.
+                ;; Assert: ONE durable entry under the failed attempt's key,
+                ;; the text still in the buffer.
                 (agent-repl-itest--wait-until
-                 (lambda () (agent-repl-prompt-queue-pending
-                             agent-repl-itest-composer--ws :outage))
-                 nil "the prompt to reach the outage queue")
-                (should (equal (length (agent-repl-prompt-queue-pending
-                                       agent-repl-itest-composer--ws :outage))
-                               1))
+                 (lambda () (agent-repl-itest-composer--held-entries
+                             agent-repl-itest-composer--ws))
+                 nil "the prompt to reach the held-prompt ingress")
+                (let ((entries (agent-repl-itest-composer--held-entries
+                                agent-repl-itest-composer--ws)))
+                  (should (equal (length entries) 1))
+                  (should (equal (alist-get 'idempotency_key (car entries)) failed-key)))
                 (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
                 ;; Assert: the real handover walk adopted WS onto the
                 ;; successor -- `agent-repl-host-handle-refusal' ran for
@@ -1683,121 +1596,40 @@ regression could hide in; nothing here is stubbed."
                  (lambda () (eq (agent-repl-host-conn agent-repl-itest-composer--ws)
                                 (agent-repl-link-successor)))
                  nil "the workspace to be adopted onto the successor")
-                ;; Act: the old daemon's stream closes -- silent promotion.
-                (agent-repl-itest--end primary "daemon" nil nil t)
-                (agent-repl-itest--wait-until
-                 (lambda () (null (agent-repl-link-successor)))
-                 nil "the successor to be promoted to primary")
-                ;; Assert: exactly one SubmitPrompt reached the successor,
-                ;; under the SAME idempotency key as the failed attempt, and
-                ;; the outage queue is now empty.
-                (agent-repl-itest--await-call successor "SubmitPrompt")
-                (let ((calls (agent-repl-itest--calls successor "SubmitPrompt")))
-                  (should (equal (length calls) 1))
-                  (should (equal (agent-repl-itest--body-field
-                                  (alist-get 'body (car calls)) 'idempotencyKey)
-                                 failed-key)))
-                (should (null (agent-repl-prompt-queue-pending
-                               agent-repl-itest-composer--ws :outage))))))
+                ;; Assert: Emacs re-sent nothing itself -- the daemon that
+                ;; owns the workspace ingests the durable entry.
+                (should (null (agent-repl-itest--calls successor "SubmitPrompt"))))))
         (when buf (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
         (ignore-errors (agent-repl-link-teardown))
         (ignore-errors (agent-repl-link--cancel-reconnect))))))
 
-;; audit-3 #43
-(ert-deftest agent-repl-itest-composer-default-promote-hooks-include-the-prompt-queue-drain ()
-  "The default `agent-repl-link-promote-functions' includes the queue's own hook.
-prompt-queue.el registers `agent-repl--prompt-queue-on-link-promote' at
-load time; a suite that only ever exercised a scratch-bound hook list would
-never notice a load-time `add-hook' that silently stopped firing."
-  (should (memq #'agent-repl--prompt-queue-on-link-promote
-                agent-repl-link-promote-functions)))
-
-;; audit-3 #44
-(ert-deftest agent-repl-itest-composer-outage-drain-skips-a-dead-connection ()
-  "A drain against a DEAD connection re-queues, sending nothing.
-R-STABILITY ruling: \"the outage drain skips a dead conn and re-queues\".
-The connection is REALLY closed by the test, not stubbed.
-
-`agent-repl-host-conn' never answers a connection known dead: it starts
-the workspace\='s reattach onto the live daemon and answers that one, and
-with no link standing here it answers none -- so the drain has NO
-connection to send on and says so (`no-conn'), rather than holding a
-dead one (2026-09-27: a workspace kept its dead daemon\='s address after
-a promotion)."
+;; owner ruling 2026-09-28
+(ert-deftest agent-repl-itest-composer-two-failed-sends-are-held-oldest-first ()
+  "Two failed sends are held in the order written, each under its own key.
+The daemon ingests entries in name order, so the order on disk is the
+order the user's words are delivered in."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((conn (agent-repl-host-conn agent-repl-itest-composer--ws)))
-        (agent-repl--prompt-queue-enqueue
-         agent-repl-itest-composer--ws :outage
-         (agent-repl--input-said "run the tests" nil)
-         :user-sent "run the tests" "held-key-dead-conn")
-        (agent-repl-connect-close conn)
-        ;; Act: the link is up, but WS's own connection is dead.
-        (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-          (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
-        ;; Assert: nothing sent, the entry stays queued, the WARN is recorded.
-        (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
-        (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
-        (should (agent-repl-itest-composer--logged-p
-                 daemon "elisp.prompt-queue.no-conn" "warn"))))))
-
-;; audit-3 #44
-(ert-deftest agent-repl-itest-composer-outage-drain-warns-with-no-connection-at-all ()
-  "A drain with NO connection at all (host conn and primary both nil) WARNs `no-conn'.
-The other half of the liveness gate: an unregistered or unlinked workspace
-has no connection to judge as dead, and its held entry must stay queued
-rather than being silently dropped."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (let ((ws "itest-composer-no-conn-ws"))
-      (agent-repl--ws-put ws :project-dir (agent-repl-itest--fixture-dir ws))
-      (agent-repl--prompt-queue-enqueue
-       ws :outage (agent-repl--input-said "run the tests" nil)
-       :user-sent "run the tests" "held-key-no-conn")
+      (agent-repl-itest--stop-daemon daemon t)
       ;; Act.
-      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t))
-                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
-        (agent-repl-prompt-queue-drain ws :outage))
-      ;; Assert.
-      (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
-      (should (agent-repl-prompt-queue-pending ws :outage))
-      (should (agent-repl-itest--logged-p daemon "elisp.prompt-queue.no-conn" "warn")))))
-
-;; audit-3 #45
-(ert-deftest agent-repl-itest-composer-outage-drain-replays-two-held-prompts-in-order ()
-  "Two held prompts drain OLDEST FIRST, each under its own original key.
-prompt-queue.el: \"oldest first\"; elisp.md: \"replay in order\" -- a drain
-that reordered or merged keys would deliver the user's words out of the
-order they wrote them."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'open ref
-      (ignore ref)
-      (agent-repl--prompt-queue-enqueue
-       agent-repl-itest-composer--ws :outage
-       (agent-repl--input-said "first held prompt" nil)
-       :user-sent "first held prompt" "held-key-first")
-      (agent-repl--prompt-queue-enqueue
-       agent-repl-itest-composer--ws :outage
-       (agent-repl--input-said "second held prompt" nil)
-       :user-sent "second held prompt" "held-key-second")
-      ;; Act.
-      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-        (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
-      (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
-      ;; Assert.
-      (let ((bodies (agent-repl-itest--call-bodies daemon "SubmitPrompt")))
-        (should (equal (mapcar (lambda (b) (car (agent-repl-itest-composer--text-blocks b)))
-                               bodies)
-                       '("first held prompt" "second held prompt")))
-        (should (equal (mapcar (lambda (b) (agent-repl-itest--body-field b 'idempotencyKey))
-                               bodies)
-                       '("held-key-first" "held-key-second")))))))
-
+      (let ((first (agent-repl--send :user-sent "first held prompt"
+                                     agent-repl-itest-composer--ws))
+            (second (agent-repl--send :user-sent "second held prompt"
+                                      agent-repl-itest-composer--ws)))
+        (agent-repl-itest--wait-until
+         (lambda () (= 2 (length (agent-repl-itest-composer--held-entries
+                                  agent-repl-itest-composer--ws))))
+         nil "both prompts to reach the held-prompt ingress")
+        ;; Assert.
+        (let ((entries (agent-repl-itest-composer--held-entries
+                        agent-repl-itest-composer--ws)))
+          (should (equal (mapcar #'agent-repl-itest-composer--held-text entries)
+                         '("first held prompt" "second held prompt")))
+          (should (equal (mapcar (lambda (e) (alist-get 'idempotency_key e)) entries)
+                         (list first second))))))))
 ;; audit-3 #46
 (ert-deftest agent-repl-itest-composer-image-only-submission-carries-no-text-block ()
   "An image attached to an EMPTY buffer submits as an image-only UserSaid.

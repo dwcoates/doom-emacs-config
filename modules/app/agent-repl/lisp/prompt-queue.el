@@ -2,40 +2,38 @@
 
 ;;; Commentary:
 
-;; TWO ROLES, ONE QUEUE.  A prompt lands here for exactly one of two
-;; reasons, and the difference is WHICH EDGE releases it:
+;; ONE ROLE: THE USER'S DEFERRAL.  `agent-repl-queue-deferred-prompt'
+;; (`SPC j RET') captures what the user wrote and delivers it as its own
+;; discrete prompt once the agent finishes what it is doing.  It is
+;; released on THE FINISH EDGE -- the roster row's turn-running -> settled
+;; transition, through `agent-repl-roster-finish-functions'.  That edge is
+;; the daemon's pushed verdict on whether the turn is over; Emacs derives
+;; nothing.
 ;;
-;;   DEFERRAL (`agent-repl-queue-deferred-prompt', `SPC j RET').  The user
-;;   wrote something they want delivered as its own discrete prompt once
-;;   the agent finishes what it is doing.  Released on THE FINISH EDGE --
-;;   the roster row's turn-running -> settled transition, through
-;;   `agent-repl-roster-finish-functions'.  That edge is the daemon's
-;;   pushed verdict on whether the turn is over; Emacs derives nothing.
+;; THIS QUEUE HOLDS NOTHING THE DAEMON FAILED TO TAKE.  A prompt whose
+;; submission got no answer, or a handover refusal, is written to the
+;; durable held-prompt ingress (`held-ingress.el') and becomes the
+;; daemon's own held prompt; there is no in-memory outage queue and no
+;; link-up, promotion or reattach edge releasing one (owner ruling,
+;; 2026-09-28: held prompts survive outages and restarts).  A deferral is
+;; a DIFFERENT case: it was never submitted at all, and what the user asked
+;; for is "after this turn, as its own turn", which the daemon's queue
+;; would classify and might interject.  When its release fails at the
+;; transport, the send lands in the ingress like any other.
 ;;
-;;   OUTAGE (`agent-repl-prompt-queue-offer').  The composer submitted and
-;;   the daemon never answered, so nothing is known about whether the
-;;   prompt landed.  Released on LINK-UP, through
-;;   `agent-repl-link-up-functions'.
+;; NOTHING IS DROPPED SILENTLY.  Every deferred prompt leaves this queue as
+;; a real SubmitPrompt, whose own failure path holds it durably.
 ;;
-;; NOTHING IS DROPPED SILENTLY.  Every held prompt leaves this queue in
-;; exactly one of two ways: as a real SubmitPrompt that went onto the
-;; wire, or as its own surfaced failure carrying the prompt's text back to
-;; the user.  A queue that quietly forgot a prompt would be the one bug
-;; this module exists to make impossible.
+;; THE LIVENESS GATE IS THREE FACTS, all of which must hold before a
+;; release sends anything: the link is up (`agent-repl-link-up-p'), the
+;; workspace's connection is alive, and its COMPOSER GATE is not one of the
+;; refusing arms.
 ;;
-;; THE LIVENESS GATE IS TWO FACTS, both of which must hold before a drain
-;; sends anything: the link is up (`agent-repl-link-up-p') and the
-;; workspace's COMPOSER GATE is not one of the refusing arms.  A drain
-;; into a merging or draining composer would be refused by the daemon and
-;; lose the prompt's place in the user's order for nothing.
+;; RELEASED PROMPTS CARRY `:deferred-prompt', whatever origin they were
+;; composed under: this queue is that origin's ONE production send site.
 ;;
-;; DRAINED PROMPTS CARRY `:deferred-prompt', whatever origin they were
-;; composed under: this queue is that origin's ONE production send site,
-;; which is exactly what makes a stored turn say "this was held and
-;; delivered later" rather than pretending it went out when it was typed.
-;;
-;; ORDER IS THE USER'S TYPING ORDER, per workspace.  The drain is strictly
-;; sequential over the queue, so entry N+1 never overtakes entry N.
+;; ORDER IS THE USER'S TYPING ORDER, per workspace: one entry per finished
+;; turn, oldest first.
 
 ;;; Code:
 
@@ -67,28 +65,21 @@
 ;; auto-vivifies the variable, so registering on it at load time is safe
 ;; whichever module loads first.
 (defvar agent-repl-roster-finish-functions)
-(defvar agent-repl-link-up-functions)
-(defvar agent-repl-link-promote-functions)
-(defvar agent-repl-host-reattached-functions)
 
 ;;;; ---- State -----------------------------------------------------------
 
 (defvar agent-repl--prompt-queue (make-hash-table :test 'equal)
-  "Workspace name -> ordered list of held entries, oldest first.
-Each entry is the plist `(:id ID :kind KIND :said SAID :origin ORIGIN
-:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred'
-or `:outage' and names WHICH EDGE releases the entry; SAID is the fully composed
-`UserSaid' the composer already built, so a drain re-composes nothing and
-cannot decorate a prompt twice.")
-
-(defvar agent-repl--prompt-queue-draining (make-hash-table :test 'equal)
-  "Workspaces with a drain in flight, so two edges cannot interleave.")
+  "Workspace name -> ordered list of deferred entries, oldest first.
+Each entry is the plist `(:id ID :kind :deferred :said SAID :origin ORIGIN
+:raw RAW :queued-at SECONDS)'.  SAID is the fully composed `UserSaid' the
+composer already built, so a release re-composes nothing and cannot
+decorate a prompt twice.")
 
 (defvar agent-repl--prompt-queue-seq 0
   "Monotonic counter behind each entry's `:id'.")
 
 (defconst agent-repl--prompt-queue-drain-origin :deferred-prompt
-  "The `PromptOrigin' every drained prompt carries.
+  "The `PromptOrigin' every released prompt carries.
 This queue is that value's ONE production send site: a turn stored under
 it says the prompt was held and delivered later, which is a different
 editor situation from the one it was typed in.")
@@ -113,37 +104,36 @@ editor situation from the one it was typed in.")
   "Remove ENTRY from WS's queue."
   (agent-repl--prompt-queue-set ws (delq entry (gethash ws agent-repl--prompt-queue))))
 
-(defun agent-repl--prompt-queue-enqueue (ws kind said origin raw &optional key)
+(defun agent-repl--prompt-queue-enqueue (ws kind said origin raw)
   "Append a KIND entry for WS carrying SAID, ORIGIN and RAW; return it.
-KEY is the idempotency key of the attempt this entry re-drives, when
-there was one: an OUTAGE entry is a RETRY of a submission that may
-already have landed, so it must go back out under the SAME key and let
-the daemon\='s duplicate refusal do its job.  A DEFERRAL never attempted
-anything, so it carries no key and mints a fresh one at drain."
+KIND is `:deferred', the one kind this queue holds; anything else is a
+caller bug and signals.  A deferral never attempted anything, so it
+carries no idempotency key and its release mints a fresh one."
+  (unless (eq kind :deferred)
+    (error "agent-repl prompt-queue: %S is not a kind this queue holds" kind))
   (let ((entry (list :id (format "held:%d" (cl-incf agent-repl--prompt-queue-seq))
                      :kind kind
                      :said said
                      :origin origin
                      :raw raw
-                     :idempotency-key key
                      :queued-at (float-time))))
     (agent-repl--prompt-queue-set
      ws (append (gethash ws agent-repl--prompt-queue) (list entry)))
-    (agent-repl--info ws "elisp.prompt-queue.held ws=%s id=%s kind=%S origin=%S key=%s depth=%d"
-                      ws (plist-get entry :id) kind origin key
+    (agent-repl--info ws "elisp.prompt-queue.held ws=%s id=%s kind=%S origin=%S depth=%d"
+                      ws (plist-get entry :id) kind origin
                       (length (gethash ws agent-repl--prompt-queue)))
     entry))
 
 ;;;; ---- The liveness gate ------------------------------------------------
 
 (defconst agent-repl--prompt-queue-blocked-gates '(:merging :draining :restarting)
-  "Composer gate arms a drain must NOT send into.
+  "Composer gate arms a release must NOT send into.
 The daemon would refuse the submission, and a refused held prompt has lost
 its place in the user's order for nothing.  Every other arm sends: the
 daemon starts or revives the session implicitly.")
 
 (defun agent-repl--prompt-queue-conn (ws)
-  "Return the connection a drain for WS would submit on, or nil.
+  "Return the connection a release for WS would submit on, or nil.
 The SAME resolution the composer's submit uses, deliberately: the gate has
 to judge the connection the send would actually take, not a different
 one."
@@ -170,7 +160,7 @@ a closed connection would lose it for a send that cannot happen."
   "Return non-nil when a held prompt for WS may be sent right now.
 THREE facts must hold: the daemon link is up, WS's own send connection is
 alive, and WS's composer gate is not one of the refusing arms.  When any
-of them fails the held entries stay queued -- a drain never drops what it
+of them fails the held entries stay queued -- a release never drops what it
 did not send."
   (let* ((link-up (and (agent-repl-link-up-p) t))
          (live (and link-up (agent-repl--prompt-queue-live-conn-p ws)))
@@ -181,17 +171,7 @@ did not send."
                      ws link-up (and live t) gate result)
     result))
 
-;;;; ---- Offering ---------------------------------------------------------
-
-(defun agent-repl-prompt-queue-offer (ws said origin raw &optional key)
-  "Hold SAID for WS after a transport failure; return the held entry.
-Called by the composer when the daemon never answered a submission.  The
-composer keeps its text as well: nothing here is evidence the prompt did
-not land, so the user is left able to see and resend exactly what they
-wrote.  KEY is the failed attempt\='s idempotency key, carried so the
-re-drive goes out as a RETRY of that attempt rather than as a second
-turn."
-  (agent-repl--prompt-queue-enqueue ws :outage said origin raw key))
+;;;; ---- Deferring --------------------------------------------------------
 
 (defun agent-repl-queue-deferred-prompt ()
   "Hold the composer's contents until the agent finishes its current turn.
@@ -204,7 +184,7 @@ text pushed onto the input history, so it is recallable), and the prompt
 is delivered on THE FINISH EDGE -- the roster row's turn-running ->
 settled transition the daemon pushes.
 
-Each finished turn drains one entry, so a queue of several delivers one
+Each finished turn releases one entry, so a queue of several delivers one
 prompt per turn in the order they were written."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
@@ -233,56 +213,21 @@ prompt per turn in the order they were written."
                  (length (agent-repl-prompt-queue-pending ws :deferred)) ws)
         entry))))
 
-;;;; ---- Draining ---------------------------------------------------------
+;;;; ---- Sending ----------------------------------------------------------
 
 (defun agent-repl--prompt-queue-send (ws entry)
   "Submit ENTRY for WS under the queue's own origin.
 The `UserSaid' was composed when the prompt was written, so this
 re-composes nothing: a second `agent-repl--prepare-input' pass would
 decorate an already-decorated prompt."
-  (agent-repl--info ws "elisp.prompt-queue.sending ws=%s id=%s kind=%S composed-origin=%S key=%s"
+  (agent-repl--info ws "elisp.prompt-queue.sending ws=%s id=%s kind=%S composed-origin=%S"
                     ws (plist-get entry :id) (plist-get entry :kind)
-                    (plist-get entry :origin) (plist-get entry :idempotency-key))
+                    (plist-get entry :origin))
   (agent-repl--input-submit ws (plist-get entry :said)
                             agent-repl--prompt-queue-drain-origin
-                            (plist-get entry :raw)
-                            (plist-get entry :idempotency-key)))
+                            (plist-get entry :raw)))
 
-(defun agent-repl-prompt-queue-drain (ws &optional kind)
-  "Send WS's held prompts, oldest first; only those of KIND when given.
-Safe to call when nothing is held, when the workspace is not deliverable,
-and while a drain is already running -- wire it to the release edges
-and to nothing else.  Returns the number of entries sent."
-  (let ((held (agent-repl-prompt-queue-pending ws kind)))
-    (cond
-     ((null held)
-      (agent-repl--log ws "elisp.prompt-queue.drain-empty ws=%s kind=%S" ws kind)
-      0)
-     ((gethash ws agent-repl--prompt-queue-draining)
-      (agent-repl--log ws "elisp.prompt-queue.drain-reentrant ws=%s held=%d" ws (length held))
-      0)
-     ((not (agent-repl-prompt-queue-deliverable-p ws))
-      (agent-repl--info ws "elisp.prompt-queue.drain-deferred ws=%s held=%d -- not deliverable"
-                        ws (length held))
-      0)
-     (t
-      (puthash ws t agent-repl--prompt-queue-draining)
-      (unwind-protect
-          (let ((sent 0))
-            (dolist (entry held)
-              ;; Out of the queue BEFORE the send: the submit is
-              ;; fire-and-forget and its own failure path speaks for it
-              ;; from here, so an entry left in place could be dispatched
-              ;; a second time by the next edge.
-              (agent-repl--prompt-queue-drop ws entry)
-              (agent-repl--prompt-queue-send ws entry)
-              (cl-incf sent))
-            (agent-repl--info ws "elisp.prompt-queue.drained ws=%s kind=%S sent=%d"
-                              ws kind sent)
-            sent)
-        (remhash ws agent-repl--prompt-queue-draining))))))
-
-;;;; ---- The two release edges --------------------------------------------
+;;;; ---- The release edge ------------------------------------------------
 
 (defun agent-repl--prompt-queue-on-finish (ws)
   "Release ONE deferred prompt for WS on the roster's finish edge.
@@ -303,37 +248,7 @@ deferral was asked for."
       (agent-repl--prompt-queue-drop ws entry)
       (agent-repl--prompt-queue-send ws entry)))))
 
-(defun agent-repl--prompt-queue-on-link-up (&optional _conn)
-  "Release every OUTAGE-held prompt, in order, on the link-up edge."
-  (let ((workspaces (hash-table-keys agent-repl--prompt-queue)))
-    (agent-repl--info '(:agent-repl-central "link recovery scans every workspace") "elisp.prompt-queue.link-up workspaces=%d" (length workspaces))
-    (dolist (ws workspaces)
-      (agent-repl-prompt-queue-drain ws :outage))))
-
 (add-hook 'agent-repl-roster-finish-functions #'agent-repl--prompt-queue-on-finish)
-(defun agent-repl--prompt-queue-on-link-promote (&optional _old _new)
-  "Release every OUTAGE-held prompt on the PROMOTION edge.
-The same release as link-up, on the other edge that ends an outage.  A
-handover never brings the link down, so link-up never fires for it, yet a
-prompt refused with `transferring_away' or `not_yet_adopted' is held
-exactly until the successor owns the workspace -- and the promotion is
-that moment."
-  (agent-repl--prompt-queue-on-link-up))
-
-(defun agent-repl--prompt-queue-on-reattached (ws)
-  "Release WS's OUTAGE-held prompts once WS is re-attached to a daemon.
-The per-workspace edge that ends an outage.  A workspace whose daemon went
-without transferring it is re-attached on its own walk, AFTER the link
-edges above have already run -- the promotion runs every promote hook
-before host.el\='s re-registration answers -- so a prompt held while that
-workspace had no daemon is released here, on the daemon that now serves
-it, rather than waiting for an edge that may never come."
-  (agent-repl--info ws "elisp.prompt-queue.reattached ws=%s" ws)
-  (agent-repl-prompt-queue-drain ws :outage))
-
-(add-hook 'agent-repl-link-up-functions #'agent-repl--prompt-queue-on-link-up)
-(add-hook 'agent-repl-link-promote-functions #'agent-repl--prompt-queue-on-link-promote)
-(add-hook 'agent-repl-host-reattached-functions #'agent-repl--prompt-queue-on-reattached)
 
 (provide 'prompt-queue)
 

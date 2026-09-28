@@ -46,6 +46,7 @@
   (load (expand-file-name "test-frontend.el" dir) nil t)
   (load (expand-file-name "test-frontends.el" dir) nil t)
   (load (expand-file-name "test-held-edit.el" dir) nil t)
+  (load (expand-file-name "test-held-ingress.el" dir) nil t)
   (load (expand-file-name "test-history.el" dir) nil t)
   (load (expand-file-name "test-host.el" dir) nil t)
   (load (expand-file-name "test-input.el" dir) nil t)

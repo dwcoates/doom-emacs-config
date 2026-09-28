@@ -49,6 +49,25 @@ var (
 	ErrDuplicateSubmission = errors.New("prompthandler: that idempotency key already claimed a turn")
 )
 
+// redriveKey marks a context whose submission RE-DRIVES an earlier attempt.
+type redriveKey struct{}
+
+// WithRedrive marks ctx's submission as a re-drive of an attempt its caller
+// already made under the same idempotency key -- the held-prompt ingress's
+// resubmission of a prompt a client could not hand to a live daemon. For such
+// a submission ErrDuplicateSubmission is the EXPECTED answer when the earlier
+// attempt did land, so it is recorded at INFO rather than as the WARN an
+// unexplained duplicate is.
+func WithRedrive(ctx context.Context) context.Context {
+	return context.WithValue(ctx, redriveKey{}, true)
+}
+
+// isRedrive reports whether ctx carries WithRedrive's mark.
+func isRedrive(ctx context.Context) bool {
+	marked, _ := ctx.Value(redriveKey{}).(bool)
+	return marked
+}
+
 // Recognition is what the daemon made of a submission.
 type Recognition int
 

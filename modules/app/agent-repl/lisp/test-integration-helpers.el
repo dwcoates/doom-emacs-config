@@ -539,7 +539,6 @@ every scenario that pushes after subscribing must pass through here."
 ;; lexical shadows this file alone would see.
 (defvar agent-repl-host--by-name)
 (defvar agent-repl--prompt-queue)
-(defvar agent-repl--prompt-queue-draining)
 
 (defvar agent-repl-itest--orphaned-log-targets nil
   "Durable workspace log targets production has stopped owning this scenario.
@@ -948,7 +947,6 @@ signals."
                 (agent-repl--workspaces (make-hash-table :test 'equal))
                 (agent-repl-host--by-name (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue (make-hash-table :test 'equal))
-                (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
                 ;; Real blink-cadence scenarios arm keyed timers.  Give the
                 ;; scenario its own registry and marker table so their later
                 ;; steps cannot fire after the workspace registry unwinds.
