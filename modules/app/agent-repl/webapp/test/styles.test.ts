@@ -3104,28 +3104,54 @@ describe("a link in a prompt bubble (owner ruling, 2026-09-27)", () => {
 // rule paints every merge mark the accent, so the two arms the vocabulary
 // colors must be repainted after it, or the rail would draw a blue failure
 // and a green conflict in the accent.
-describe("the colored merge glyphs", () => {
+// THE TONE WINS (owner ruling, 2026-09-28): every rail mark — a disc's fill
+// and a merge glyph's ink alike — is its arm's shared tone. The six tones are
+// restated at the rail's own specificity, and no LATER rule may set a mark's
+// color, so no hand-picked hue can override the vocabulary.
+describe("the rail's tone rules", () => {
   it.each([
-    ["#ws-sidebar .st-merge-conflict", "var(--ok)"],
-    ["#ws-sidebar .st-merge-failed", "var(--init)"],
-  ])("paints %s with %s", (selector, color) => {
+    ["blue", "var(--init)"],
+    ["purple", "var(--blocked)"],
+    ["red", "var(--err)"],
+    ["turquoise", "var(--turquoise)"],
+    ["yellow", "var(--async)"],
+    ["green", "var(--ok)"],
+  ])("paints #ws-sidebar .st.tone-%s with %s", (tone, color) => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === selector,
+      (rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.tone-${tone}`,
     );
-    const last = rules.at(-1);
-    expect(last?.declarations).toContain(`color: ${color}`);
+    expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
+  });
+
+  it("lets no rail status rule set a color after the tone rules", () => {
+    const rules = rulesOf(stylesheet);
+    let lastTone = -1;
+    rules.forEach((rule, index) => {
+      if (rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-"))) lastTone = index;
+    });
+    const later = rules
+      .slice(lastTone + 1)
+      .filter((rule) =>
+        rule.selectors.some((sel) => /^#ws-sidebar \.st(-|\[|\.)/.test(sel)) &&
+        /(?:^|;)\s*color\s*:/.test(rule.declarations) &&
+        !rule.selectors.every((sel) => sel.includes('data-glyph="inactive"')),
+      );
+    expect(later.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 });
 
-// A LANDED MERGE IS GREEN (owner ruling, 2026-09-28): a merge in progress is
-// purple, and one that merged successfully draws the --ok disc of every other
-// green status.
-describe("the merged disc", () => {
-  it("paints #ws-sidebar .st-merged with var(--ok)", () => {
-    const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === "#ws-sidebar .st-merged",
+describe("the turquoise token", () => {
+  it("defines --turquoise in both themes", () => {
+    const defs = rulesOf(stylesheet).filter((rule) =>
+      /(?:^|;)\s*--turquoise\s*:/.test(rule.declarations),
     );
-    const last = rules.at(-1);
-    expect(last?.declarations).toContain("background: var(--ok)");
+    expect(defs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("gives .tone-turquoise its token", () => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.length === 1 && rule.selectors[0] === ".tone-turquoise",
+    );
+    expect(rules.at(-1)?.declarations).toContain("color: var(--turquoise)");
   });
 });

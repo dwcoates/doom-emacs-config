@@ -351,24 +351,26 @@ exist before its workspace directory is known."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl--color-init-blue        "#3366cc"
-  "BLUE: no live backend session, and SOMETHING IS WRONG.
-A workspace\='s color is CONNECTION TRUTH: blue is every way green\='s
-promise cannot be kept AND there is evidence of a breakage — no session
-yet, the shim dead or unspawned, bring-up in progress, a bring-up that
-failed or a session controller that died on a terminal protocol error, a store
-outage, or a backfill that failed.
+  "BLUE: the workspace is UNUSABLE right now (owner ruling, 2026-09-28).
+Starting or connecting, a severed or dead route, a start that failed, a
+close under way, or a vendor or account block — a usage limit, auth,
+billing — that stops all work until it is resolved.  Its composer is
+closed.
 
 It is deliberately ONE color for all of them.  The distinctions matter
 to whoever debugs it, not to the user reading a tab: every one of them
-means the same thing to them, which is that this workspace cannot be
-relied on right now.  The sidebar carries the distinction where it is
-worth having.
+means the same thing to them, which is that this workspace cannot be used
+right now.  The sidebar carries the distinction where it is worth having.
 
-THERE IS NO TEAL BESIDE IT ANY MORE.  Teal existed solely to hold
-hibernation apart from a broken substrate; hibernation LEFT THE CONTRACT
-\(a parked workspace presents as live with `shim_attached' false\), so the
-sixth color went with it, and blue no longer carries a benign second
-job.")
+Something that went wrong while the workspace stays USABLE is not blue:
+see `agent-repl--color-usable-fault-turquoise\='.")
+
+(defconst agent-repl--color-usable-fault-turquoise "#0891b2"
+  "TURQUOISE: something went wrong, but the workspace is USABLE.
+A failed turn, a failed merge, a degraded view of a serving session
+\(owner ruling, 2026-09-28).  It wants the user\='s attention, and its
+composer stays open.  Shares its value with the webapp\='s `--turquoise\='
+so a turquoise tab and a turquoise dot are literally the same color.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
   "RED: a turn is in flight.
@@ -401,10 +403,8 @@ would claim a turn was still running.  What purple shares with red is
 only the actionability claim — the user cannot act on the workspace
 until the merge resolves.
 
-Purple is the vendor-blocked color on every OTHER surface, and this
-renderer is the declared exception (`agent-repl--tab-bar-color-overrides\=').
-A tab bar has no glyph to tell two purples apart, so `:vendor-blocked\='
-takes blue here and purple says one thing.
+It is purple on every surface: the tab bar, the sidebar and the footer
+\(owner ruling, 2026-09-28).
 
 A magenta-leaning purple, deliberately clear of any violet: a merge is
 the system working, and confusing it with a session that has stopped is
@@ -491,8 +491,18 @@ ONE number rather than to three that could drift apart.")
 COLOR is any name or hex string `color-name-to-rgb' accepts.  A color
 this frame cannot resolve is an ERROR rather than a guess: a luminance
 invented here would let an illegible pair pass the very check that
-exists to catch it."
-  (let ((rgb (color-name-to-rgb color)))
+exists to catch it.
+
+A `#rrggbb\=' HEX STRING IS READ BY ITS DIGITS, never through the frame.
+`color-name-to-rgb\=' answers what the CURRENT display would draw, and a
+display with few colors (a terminal, or a batch run) rounds a hex to its
+nearest palette entry — `#0891b2\=' reads as pure cyan there — so the
+palette\='s own declared values would be measured as something else.  Only
+a color NAME needs the frame to resolve it."
+  (let ((rgb (if (and (stringp color) (string-match "\\`#\\([0-9a-fA-F]\\{2\\}\\)\\([0-9a-fA-F]\\{2\\}\\)\\([0-9a-fA-F]\\{2\\}\\)\\'" color))
+                 (mapcar (lambda (group) (/ (string-to-number (match-string group color) 16) 255.0))
+                         '(1 2 3))
+               (color-name-to-rgb color))))
     (unless rgb
       (error "agent-repl: cannot resolve the color %S, so its legibility cannot be checked" color))
     (cl-loop for channel in rgb
@@ -622,12 +632,12 @@ sits flush on the bar with no ground of its own.  See
     (:init            . "blue")
     (:severed         . "blue")
     (:dead            . "blue")
-    (:degraded        . "blue")
     (:start-failed    . "blue")
 
     (:vendor-blocked  . "blue")
 
-    (:turn-failed     . "blue")
+    (:degraded        . "turquoise")
+    (:turn-failed     . "turquoise")
 
     (:submitting      . "red")
     (:thinking        . "red")
@@ -641,13 +651,13 @@ sits flush on the bar with no ground of its own.  See
     (:interrupted     . "green")
     (:permission      . "green")
 
-    (:merge-enqueuing . "none")
-    (:merging         . "none")
-    (:merge-queued    . "none")
+    (:merge-enqueuing . "purple")
+    (:merging         . "purple")
+    (:merge-queued    . "purple")
     (:merge-conflict  . "green")
-    (:merge-failed    . "blue")
+    (:merge-failed    . "turquoise")
     (:merged          . "green"))
-  "Which of the five colors each ROSTER STATUS ARM takes, BY NAME.
+  "Which of the six colors each ROSTER STATUS ARM takes, BY NAME.
 
 Keyed by the `RosterRow.status' arm keywords `wire-roster.el' decodes
 \(`agent-repl-wire-roster-row-status-keywords\='), which is the ONE
@@ -666,53 +676,40 @@ It names the color rather than its value: each renderer keeps its own
 hex, since a tab-bar background and a CSS dot legitimately want
 different shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer.  The merge arms take none of the five here —
-the sidebar reports them with a glyph rather than spending a lifecycle
-color on the merge pipeline — and `none\=' and `inactive\=' take none
-because a workspace with no session has no lifecycle to report at all.
+\"none\" is a real answer: `none\=' and `inactive\=' take none because a
+workspace with no session has no lifecycle to report at all.
 
-THREE MERGE ARMS ARE COLORED AS WELL AS GLYPHED (owner ruling,
-2026-09-28), as the fixture\='s `colored_merge_arms\=' declares.
-`:merge-failed\=' is BLUE, the color that says something is wrong with
-the workspace.  `:merge-conflict\=' (a parked merge included) is GREEN:
-an expected state, ready for a human response, and never blue.
-`:merged\=' is GREEN: a merge that landed is a settled success, where a
-merge in progress is purple.
-THE TAB BAR DECLARES ITS OWN OVERRIDES (see
-`agent-repl-status-tab-bar-color-overrides\='); this table is what every
-surface starts from, never what the tab bar finishes with.
+WHAT EACH COLOR MEANS (owner ruling, 2026-09-28; restated in AGENTS.md,
+\"What each status color means\"): red, the agent is working; yellow,
+detached work runs while the main thread is idle; green, ready for the
+user; purple, a merge in progress; TURQUOISE, something went wrong but
+the workspace is usable (`:turn-failed\=', `:merge-failed\=',
+`:degraded\='); BLUE, the workspace is unusable right now.
+
+EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
+2026-09-28), as the fixture\='s `colored_merge_arms\=' declares: purple in
+progress, green on a conflict (a parked merge included) or a landing,
+turquoise on a failure.
+A surface that needs to diverge declares it in
+`agent-repl-status-tab-bar-color-overrides\='; none does today.
 
 THERE IS NO TEAL, and no RENDER_STATE_* enum: both left with
 hibernation.")
 
 (defconst agent-repl-status-tab-bar-color-overrides
-  '((:merge-enqueuing . "purple")
-    (:merge-queued    . "purple")
-    (:merging         . "purple"))
+  '()
   "Where the TAB BAR paints an arm differently from the shared assignment.
 
 Emacs\='s corner of the fixture\='s `surface_overrides.emacs_tab_bar\='
-section, asserted against it row for row.  The override is DECLARED in
+section, asserted against it row for row.  An override is DECLARED in
 the shared file rather than kept as a private local table: a surface that
 quietly disagrees with the contract is the exact drift the contract
 exists to catch.
 
-The tab bar has no room for the sidebar\='s status word — a state reaches
-it as the [N] bracket\='s color plus at most one glyph — so `none\' there
-would render a workspace whose merge is running identically to one nobody
-has touched.  PURPLE says what is true of the three IN-FLIGHT merge arms:
-work is in flight, it is the SYSTEM\='s rather than the agent\='s, and the
-user cannot act on the workspace until it resolves.  `merge_conflict\'
-wants the user and the other two are terminal, so none of them is
-overridden: the first two take their shared green and blue here too.
-
-`:vendor-blocked\=' is NO LONGER an override.  It was one while the shared
-assignment painted it purple and this glyph-less surface could not tell
-two purples apart, so it borrowed blue here.  It is now blue in
-`agent-repl-status-color-table\=' itself — every way the route to a working
-session is compromised is blue — so the tab bar inherits blue with
-nothing to declare.  An override that repaints an arm the color it already
-has is not a divergence, and this table holds only real divergences.")
+EMPTY TODAY.  The tab bar once painted the three in-flight merge arms
+purple over a shared `none\='; the shared assignment now paints them
+purple itself (owner ruling, 2026-09-28), so the tab bar agrees with
+every other surface and has nothing to declare.")
 
 (defconst agent-repl-status-tab-bar-color-table
   (mapcar (lambda (row)
@@ -765,25 +762,27 @@ switch is the whole clearing act — no dedicated ack verb exists.")
   `(("blue"   . ,agent-repl--color-init-blue)
     ("purple" . ,agent-repl--color-merging-purple)
     ("red"    . ,agent-repl--color-thinking-red)
+    ("turquoise" . ,agent-repl--color-usable-fault-turquoise)
     ("yellow" . ,agent-repl--color-idle-async-yellow)
     ("green"  . ,agent-repl--color-done-green))
-  "Map each of the five color NAMES to the constant this renderer draws it with.
+  "Map each of the six color NAMES to the constant this renderer draws it with.
 
 The indirection is what lets the color tables speak the shared
 vocabulary while the palette keeps painting with Emacs\='s own values.")
 
 (defconst agent-repl--color-precedence
-  '("blue" "purple" "red" "yellow" "green")
-  "The five-color precedence, strongest claim first.
+  '("blue" "purple" "red" "turquoise" "yellow" "green")
+  "The six-color precedence, strongest claim first.
 
-Each color is a strictly stronger claim about what the user CANNOT do
-than the one beneath it: blue leads because a compromised route to a
-session denies everything else; purple is the vendor or the account
-refusing; red is the agent holding the turn; yellow is detached work the
-user can talk over; green is the session yours to use.
+Each color is a strictly stronger claim about what the user CANNOT do,
+or must look at, than the one beneath it: blue leads because an unusable
+workspace denies everything else; purple is a merge holding it; red is
+the agent holding the turn; turquoise is a fault the user should look at
+while still able to work; yellow is detached work the user can talk
+over; green is the session yours to use.
 
 The fixture\='s `precedence\=' array is the authority and this restates it
-for the cross-language assertion.  THERE IS NO TEAL in it any more.")
+for the cross-language assertion.")
 
 (defun agent-repl--tab-palette-row (face color fg)
   "Build one `agent-repl--tab-palette' row from the parts that VARY.
@@ -884,13 +883,13 @@ in `agent-repl--color-default-bracket'."
                       'agent-repl-tab-done
                       agent-repl--color-done-green
                       agent-repl--color-dark))
-    ;; TURN-FAILED is BLUE (owner ruling, 2026-09-28): a turn end like the
-    ;; two greens above, holding the tab as an unread result the same way, but
-    ;; the turn did not produce what it was asked for, so it takes the blue
-    ;; that says something is wrong.
+    ;; TURN-FAILED is TURQUOISE (owner ruling, 2026-09-28): a turn end like
+    ;; the two greens above, holding the tab as an unread result the same
+    ;; way, but the turn did not produce what it was asked for — something
+    ;; went wrong, while the workspace stays usable.
     (:turn-failed . ,(agent-repl--tab-palette-row
-                      'agent-repl-tab-init
-                      agent-repl--color-init-blue
+                      'agent-repl-tab-usable-fault
+                      agent-repl--color-usable-fault-turquoise
                       agent-repl--color-light))
     (:permission . ,(agent-repl--tab-palette-row
                      'agent-repl-tab-permission
@@ -914,13 +913,12 @@ in `agent-repl--color-default-bracket'."
                          'agent-repl-tab-init
                          agent-repl--color-init-blue
                          agent-repl--color-light))
-    ;; MERGE-FAILED is BLUE and keeps its ✗ (owner ruling, 2026-09-28): "blue
-    ;; status in general is used to signal something is wrong with the current
-    ;; workspace".  It had no row at all, so it fell through to the default
-    ;; and drew a bare uncolored ✗ that read as no status.
+    ;; MERGE-FAILED is TURQUOISE and keeps its ✗ (owner ruling, 2026-09-28):
+    ;; something went wrong, but the merge no longer holds the workspace, so
+    ;; it is usable.
     (:merge-failed . ,(agent-repl--tab-palette-row
-                       'agent-repl-tab-init
-                       agent-repl--color-init-blue
+                       'agent-repl-tab-usable-fault
+                       agent-repl--color-usable-fault-turquoise
                        agent-repl--color-light))
     ;; MERGE-CONFLICT is GREEN and keeps its ≠ (owner ruling, 2026-09-28): a
     ;; conflict, a parked merge included, is an EXPECTED state ready for a
@@ -947,9 +945,12 @@ in `agent-repl--color-default-bracket'."
                'agent-repl-tab-init
                agent-repl--color-init-blue
                agent-repl--color-light))
+    ;; DEGRADED is TURQUOISE (owner ruling, 2026-09-28): the session serves,
+    ;; but the daemon's view of it is compromised — usable, with something
+    ;; wrong.
     (:degraded . ,(agent-repl--tab-palette-row
-                   'agent-repl-tab-init
-                   agent-repl--color-init-blue
+                   'agent-repl-tab-usable-fault
+                   agent-repl--color-usable-fault-turquoise
                    agent-repl--color-light))
     ;; The three IN-FLIGHT merge states take PURPLE, and it is theirs alone on
     ;; this surface.  They took no color at all until recently, which rendered
@@ -1247,6 +1248,13 @@ spec's (unspecified) :bg/:fg."
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs whose agent is ready (green): came up and was
 never prompted, or went quiet after a clean conclusion.")
+
+(defface agent-repl-tab-usable-fault
+  `((t :background ,agent-repl--color-usable-fault-turquoise
+       :foreground ,agent-repl--color-light
+       :weight ,agent-repl--tab-weight))
+  "Face for workspace tabs where something went wrong while the workspace
+stays usable (turquoise): a failed turn, a failed merge, a degraded view.")
 
 (defface agent-repl-tab-idle-async
   `((t :background ,agent-repl--color-idle-async-yellow

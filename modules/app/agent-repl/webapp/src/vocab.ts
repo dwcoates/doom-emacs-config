@@ -29,8 +29,8 @@ import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "./rpc/malformed.js";
 import { log } from "./log.js";
 
-/** The five colors, plus the explicit absence of one. */
-export type Color = "none" | "blue" | "purple" | "red" | "yellow" | "green";
+/** The six colors, plus the explicit absence of one. */
+export type Color = "none" | "blue" | "purple" | "red" | "turquoise" | "yellow" | "green";
 
 /** The three sides a failure can land on, from `failure_sides`. */
 export type FailureSide = "machinery" | "vendor" | "client_local";
@@ -86,6 +86,24 @@ export function rosterStatusColor(arm: string): Color {
 /** The color a `FooterStatus.status` arm paints the footer strip. */
 export function footerStatusColor(arm: string): Color {
   return lookup(FOOTER_STATUS, arm, "render-colors.json#footer_status");
+}
+
+/** The footer colors under which a composer is closed. */
+const COMPOSER_CLOSED_COLORS: readonly string[] = renderColors.composer_closed_colors;
+
+/**
+ * Whether a composer is CLOSED while its footer reads ARM.
+ *
+ * THE COMPOSER INVARIANT (owner ruling, 2026-09-28): a composer is closed
+ * exactly when the footer's status color is one of
+ * `render-colors.json#composer_closed_colors` — blue, an unusable workspace,
+ * and purple, a merge holding it. The gate is DERIVED from the color, never
+ * from a list of arm names, so an arm cannot be drawn usable and gated shut,
+ * or drawn unusable and left open. An arm the file has no color for is a
+ * MalformedView, exactly as it is for the color itself.
+ */
+export function composerClosedFor(arm: string): boolean {
+  return COMPOSER_CLOSED_COLORS.includes(footerStatusColor(arm));
 }
 
 /** The color a `FooterAllowance.status` arm paints its allowance cell. */

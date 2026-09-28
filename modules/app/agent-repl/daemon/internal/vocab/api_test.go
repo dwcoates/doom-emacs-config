@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -128,10 +129,16 @@ func TestLoadRenderColorsFailsOnAnUnknownColor(t *testing.T) {
 	}
 }
 
-func TestLoadRenderColorsFailsWhenAMergeArmSpendsAColor(t *testing.T) {
-	// Arrange.
+func TestLoadRenderColorsFailsWhenAnUndeclaredMergeArmSpendsAColor(t *testing.T) {
+	// Arrange: merging keeps its color but loses its declaration.
 	dir := writeColors(t, func(m map[string]any) {
-		m["roster_status"].(map[string]any)["merging"] = "red"
+		var kept []any
+		for _, arm := range m["colored_merge_arms"].([]any) {
+			if arm != "merging" {
+				kept = append(kept, arm)
+			}
+		}
+		m["colored_merge_arms"] = kept
 	})
 
 	// Act.
@@ -144,15 +151,15 @@ func TestLoadRenderColorsFailsWhenAMergeArmSpendsAColor(t *testing.T) {
 }
 
 func TestLoadRenderColorsAcceptsADeclaredColoredMergeArm(t *testing.T) {
-	// Arrange: merge_failed spends blue, and colored_merge_arms declares it.
+	// Arrange: merge_failed spends turquoise, and colored_merge_arms declares it.
 	c := loadColors(t)
 
 	// Act.
 	got := c.RosterStatus["merge_failed"]
 
 	// Assert.
-	if got != "blue" {
-		t.Fatalf("roster_status[merge_failed] = %q, want blue (owner ruling, 2026-09-28)", got)
+	if got != "turquoise" {
+		t.Fatalf("roster_status[merge_failed] = %q, want turquoise (owner ruling, 2026-09-28)", got)
 	}
 }
 
@@ -271,7 +278,7 @@ func TestLoadRenderColorsFailsOnATopbarToneOutsideTheClosedSet(t *testing.T) {
 func TestLoadRenderColorsFailsOnAnUndeclaredOverrideState(t *testing.T) {
 	// Arrange.
 	dir := writeColors(t, func(m map[string]any) {
-		m["surface_overrides"].(map[string]any)["emacs_tab_bar"].(map[string]any)["invented"] = "purple"
+		m["surface_overrides"] = map[string]any{"emacs_tab_bar": map[string]any{"invented": "purple"}}
 	})
 
 	// Act.
@@ -472,19 +479,24 @@ func TestFooterAllowanceColorFailsOnAnUnknownArm(t *testing.T) {
 }
 
 func TestRosterStatusColorHonorsADeclaredSurfaceOverride(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
+	// Arrange: a contract whose tab bar declares one divergence.
+	dir := writeColors(t, func(m map[string]any) {
+		m["surface_overrides"] = map[string]any{"emacs_tab_bar": map[string]any{"ready": "yellow"}}
+	})
+	c, err := LoadRenderColors(dir)
+	if err != nil {
+		t.Fatalf("LoadRenderColors: %v", err)
+	}
 
-	// Act: the tab bar repaints the glyph-less in-flight merge arm, whose
-	// shared assignment is "none", to purple.
-	got, err := c.RosterStatusColor("emacs_tab_bar", "merging")
+	// Act.
+	got, err := c.RosterStatusColor("emacs_tab_bar", "ready")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("RosterStatusColor: %v", err)
 	}
-	if got != "purple" {
-		t.Fatalf("RosterStatusColor = %q, want purple", got)
+	if got != "yellow" {
+		t.Fatalf("RosterStatusColor = %q, want the declared yellow", got)
 	}
 }
 
@@ -693,6 +705,88 @@ func TestContainsAcceptsPlainAndInventoryClasses(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("Contains(%q) = %v, want %v", tc.class, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheColorAssignmentsFollowTheOwnersColorMeanings(t *testing.T) {
+	// The owner's ruling (2026-09-28): blue is an UNUSABLE workspace,
+	// turquoise a usable one with something wrong, purple a merge in
+	// progress. One row per arm the ruling moved.
+	tests := []struct {
+		name  string
+		table string
+		arm   string
+		want  string
+	}{
+		{name: "a failed turn is turquoise on the roster", table: "roster", arm: "turn_failed", want: "turquoise"},
+		{name: "a failed merge is turquoise on the roster", table: "roster", arm: "merge_failed", want: "turquoise"},
+		{name: "a degraded view is turquoise on the roster", table: "roster", arm: "degraded", want: "turquoise"},
+		{name: "a vendor or account block is blue on the roster", table: "roster", arm: "vendor_blocked", want: "blue"},
+		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
+		{name: "an enqueuing merge is purple on the roster", table: "roster", arm: "merge_enqueuing", want: "purple"},
+		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
+		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
+		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},
+		{name: "a failed merge is turquoise on the footer", table: "footer", arm: "merge_failed", want: "turquoise"},
+		{name: "a degraded view is turquoise on the footer", table: "footer", arm: "degraded", want: "turquoise"},
+		{name: "a vendor or account block is blue on the footer", table: "footer", arm: "blocked", want: "blue"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := loadColors(t)
+			table := c.RosterStatus
+			if tc.table == "footer" {
+				table = c.FooterStatus
+			}
+
+			// Act.
+			got := table[tc.arm]
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("%s[%s] = %q, want %q", tc.table, tc.arm, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheComposerClosesOnBlueAndPurpleOnly(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := append([]string(nil), c.ComposerClosedColors...)
+	sort.Strings(got)
+
+	// Assert.
+	if len(got) != 2 || got[0] != "blue" || got[1] != "purple" {
+		t.Fatalf("composer_closed_colors = %v, want [blue purple] (owner ruling, 2026-09-28)", got)
+	}
+}
+
+func TestLoadRenderColorsRefusesABadComposerClosedColors(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "an empty list", value: []any{}},
+		{name: "a color outside the closed set", value: []any{"blue", "teal"}},
+		{name: "none, which is no color", value: []any{"none"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := writeColors(t, func(m map[string]any) { m["composer_closed_colors"] = tc.value })
+
+			// Act.
+			_, err := LoadRenderColors(dir)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("LoadRenderColors accepted composer_closed_colors = %v", tc.value)
 			}
 		})
 	}
