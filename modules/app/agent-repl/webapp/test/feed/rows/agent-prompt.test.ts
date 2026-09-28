@@ -16,6 +16,7 @@ import {
 } from "../../../src/breathing.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
+  PROMPT_CAP_LINES,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANT_ATTRIBUTE,
@@ -174,8 +175,8 @@ describe("drawFeedAgentPrompt: its spec", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("agent");
   });
 
-  it("collapses at the shared feed cap", () => {
-    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("feed");
+  it("collapses at the five-line prompt cap, like a person's own prompt", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(PROMPT_CAP_LINES));
   });
 
   it("puts the address line in the header strip", () => {

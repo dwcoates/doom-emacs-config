@@ -14,7 +14,7 @@
  * with no body.
  */
 import { log } from "../../log.js";
-import { drawBubble } from "../../bubble/draw.js";
+import { PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
@@ -62,7 +62,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
             requireMessage(result.value.body, `${PATH}.success.body`),
             `${PATH}.success.body`,
           ),
-          capLines: "feed",
+          capLines: PROMPT_CAP_LINES,
         },
         previous,
       ).bubble;
