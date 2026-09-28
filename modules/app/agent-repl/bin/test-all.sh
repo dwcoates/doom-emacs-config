@@ -73,6 +73,7 @@ ALL_SUITES=(
     go-deps-harness
     doctor-harness
     precommit-harness
+    merge-queue-hook-harness
     ert
     daemon
     sidecar
@@ -379,6 +380,7 @@ require_executable "$THIS_DIR/test-e2e.sh"
 require_executable "$THIS_DIR/test-e2e-emacs.sh"
 require_executable "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 require_executable "$REPO_ROOT/.githooks/test-pre-commit.sh"
+require_executable "$REPO_ROOT/.githooks/test-reference-transaction.sh"
 require_executable "$THIS_DIR/report-nonlisp-coverage.sh"
 require_executable "$THIS_DIR/report-logging-density.sh"
 require_executable "$REPO_ROOT/.claude/safe-test-run.sh"
@@ -406,6 +408,7 @@ run_timed logs-harness "$THIS_DIR/test-logs.sh"
 run_timed go-deps-harness "$THIS_DIR/test-check-go-deps.sh"
 run_timed doctor-harness "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 run_timed precommit-harness "$REPO_ROOT/.githooks/test-pre-commit.sh"
+run_timed merge-queue-hook-harness "$REPO_ROOT/.githooks/test-reference-transaction.sh"
 run_timed ert "$REPO_ROOT/.claude/safe-test-run.sh"
 
 for component in daemon sidecar store lock logging webapp shim proto; do
