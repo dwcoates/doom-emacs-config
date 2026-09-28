@@ -23,7 +23,7 @@ func readProcessState(pid int) (processState, error) {
 	// SysctlKinfoProc reports as EIO: the process is gone, and a process that
 	// is gone cannot run.
 	if errors.Is(err, unix.EIO) {
-		return processState{frozen: true, name: "gone"}, nil
+		return processState{frozen: true, exited: true, name: "gone"}, nil
 	}
 	if err != nil {
 		return processState{}, err
@@ -32,7 +32,7 @@ func readProcessState(pid int) (processState, error) {
 	case pStatStop:
 		return processState{frozen: true, name: "stopped"}, nil
 	case pStatZombie:
-		return processState{frozen: true, name: "a zombie"}, nil
+		return processState{frozen: true, exited: true, name: "a zombie"}, nil
 	case pStatIdle:
 		return processState{name: "being created"}, nil
 	case pStatRun:
