@@ -777,9 +777,12 @@ type fakeRollout struct {
 	mu          sync.Mutex
 	relaunches  []rolloutCall
 	relaunchErr error
-	checkErr    error
-	reloads     []ids.WorkspaceID
-	reloadErr   error
+	// refuseErr is what BounceShim answers synchronously, as the registry
+	// refuses a request it will not take; nil takes every request.
+	refuseErr error
+	checkErr  error
+	reloads   []ids.WorkspaceID
+	reloadErr error
 	// done fires once per finished relaunch. The restart verb ACCEPTS and
 	// runs the engine behind it, so a test synchronizes on this rather than
 	// on the verb's return.
@@ -797,8 +800,11 @@ type rolloutCall struct {
 func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
-	err := r.relaunchErr
+	err, refused := r.relaunchErr, r.refuseErr
 	r.mu.Unlock()
+	if refused != nil {
+		return bounce.Decision{}, refused
+	}
 	go func() {
 		if done != nil {
 			done(err)
