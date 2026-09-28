@@ -16,7 +16,13 @@ import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/fron
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { PREFS_KEY } from "../../src/sidebar/sidebar";
-import { assertVocabCoversArms, RENDER_COLORS, mergeGlyph, rosterStatusColor } from "./vocab";
+import {
+  assertVocabCoversArms,
+  isColoredMergeArm,
+  RENDER_COLORS,
+  mergeGlyph,
+  rosterStatusColor,
+} from "./vocab";
 import {
   ROSTER_MERGE_ARMS,
   ROSTER_STATUS_ARMS,
@@ -58,12 +64,20 @@ describe("arm coverage", () => {
     ]);
   });
 
-  it("gives every merge arm a glyph rather than a color", () => {
-    // Assert: the merge pipeline deliberately spends no lifecycle color.
+  it("gives every merge arm a glyph, and a color only where the vocabulary declares one", () => {
+    // Assert: the merge pipeline spends no lifecycle color except on the arms
+    // colored_merge_arms declares (owner ruling, 2026-09-28).
     for (const arm of ROSTER_MERGE_ARMS) {
-      expect(rosterStatusColor(arm)).toBe("none");
       expect(mergeGlyph(arm)).not.toBe("");
+      if (!isColoredMergeArm(arm)) expect(rosterStatusColor(arm)).toBe("none");
     }
+  });
+
+  it.each([
+    ["mergeConflict", "green"],
+    ["mergeFailed", "blue"],
+  ])("paints the colored merge arm %s %s", (arm, color) => {
+    expect(rosterStatusColor(arm)).toBe(color);
   });
 });
 
