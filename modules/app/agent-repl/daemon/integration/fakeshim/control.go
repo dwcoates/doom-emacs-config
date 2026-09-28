@@ -15,15 +15,18 @@ const (
 	OpPushSessionUpdate = "push_session_update"
 	OpPushAgentFrame    = "push_agent_frame"
 	OpPushUserPrompt    = "push_user_prompt"
-	OpPushBash          = "push_bash"
-	OpAnswer            = "answer"
-	OpExpect            = "expect"
-	OpExit              = "exit"
-	OpHang              = "hang"
-	OpUnhang            = "unhang"
-	OpDropStream        = "drop_stream"
-	OpInfo              = "info"
-	OpCount             = "count"
+	// OpPushRetired delivers WatchAgentResponse.retired: its payload is the
+	// conversation.v1 HistoryEntryAt as last served, at its own pointer.
+	OpPushRetired = "push_retired"
+	OpPushBash    = "push_bash"
+	OpAnswer      = "answer"
+	OpExpect      = "expect"
+	OpExit        = "exit"
+	OpHang        = "hang"
+	OpUnhang      = "unhang"
+	OpDropStream  = "drop_stream"
+	OpInfo        = "info"
+	OpCount       = "count"
 	// OpSetLiveWork states the live membership later re-announcements carry;
 	// its payload is a SessionStarted whose live_work is taken.
 	OpSetLiveWork = "set_live_work"
@@ -135,7 +138,7 @@ func ParseCommand(line []byte) (Command, error) {
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
-	case OpPushUserPrompt:
+	case OpPushUserPrompt, OpPushRetired:
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}

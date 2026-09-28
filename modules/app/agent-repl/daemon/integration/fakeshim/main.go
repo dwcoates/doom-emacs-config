@@ -421,6 +421,20 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.agents.publish(agentFrame{agent: agent, prompt: prompt})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
+	case OpPushRetired:
+		at := &conversationv1.HistoryEntryAt{}
+		if err := proto.Unmarshal(payload, at); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: decode retired entry: %v", err)}
+		}
+		if at.GetAt().GetValue() == "" {
+			// A RETIRED ENTRY IS SENT AT ITS OWN POINTER, which the real shim
+			// always has: a fake minting one would retire a row at a position
+			// nothing was ever served at.
+			return Reply{Error: "fakeshim: a retired entry must carry its own pointer"}
+		}
+		p.srv.agents.publish(agentFrame{agent: cmd.Agent, retired: at})
+		return Reply{OK: true, Count: p.srv.agents.count()}
+
 	case OpPushBash:
 		b := &conversationv1.AgentBash{}
 		if err := proto.Unmarshal(payload, b); err != nil {
