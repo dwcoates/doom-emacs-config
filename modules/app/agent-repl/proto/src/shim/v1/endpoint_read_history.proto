@@ -16,9 +16,8 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // Which agent's history, and where in it.
 message ReadHistoryRequest {
-  // WHOSE history. UNSET = the session's prompt thread, resolved by the shim.
-  // Any book the store holds may be named — a fork's daemon reads its
-  // parent's book this way; an unknown agent is a refusal.
+  // WHOSE history. UNSET = the session's prompt thread, resolved by the
+  // shim; an unknown agent is a refusal.
   optional conversation.v1.AgentId target = 1;
   // This page's budget.
   uint32 page_size = 2;
@@ -27,12 +26,9 @@ message ReadHistoryRequest {
     // The newest page. The newest entry is the serving side's fact, never a
     // value the caller supplies.
     ReadHistoryFirst first = 3;
-    // Entries placed strictly BEFORE the entry this pointer names — a pointer
-    // served by a page's `more` arm or by a watched entry, echoed verbatim.
+    // Strictly OLDER than the entry this pointer names — a pointer served by
+    // a page's `more` arm or by a watched entry, echoed verbatim.
     conversation.v1.HistoryPointer after = 4;
-    // The newest entries placed AT OR BEFORE this bound: the book as it stood
-    // at that instant. `more` then walks older with `after` as usual.
-    conversation.v1.ConversationThrough through = 5;
   }
 }
 

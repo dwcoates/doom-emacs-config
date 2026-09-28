@@ -10,8 +10,6 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { AgentId } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
-import type { ConversationThrough } from "../../conversation/v1/history_pb";
-import { file_conversation_v1_history } from "../../conversation/v1/history_pb";
 import type { ReadAgentPageFloor, ReadAgentPageMore, StoreItemPointer, StoreLineAt } from "./store_pb";
 import { file_store_v1_store } from "./store_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -20,11 +18,10 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_read_agent_page.proto.
  */
 export const file_store_v1_endpoint_read_agent_page: GenFile = /*@__PURE__*/
-  fileDesc("CidzdG9yZS92MS9lbmRwb2ludF9yZWFkX2FnZW50X3BhZ2UucHJvdG8SCHN0b3JlLnYxIsMBChRSZWFkQWdlbnRQYWdlUmVxdWVzdBImCgRib29rGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSEQoJcGFnZV9zaXplGAIgASgNEisKBWFmdGVyGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAEjcKB3Rocm91Z2gYBCABKAsyJC5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uVGhyb3VnaEgAQgoKCHBvc2l0aW9uIocBChVSZWFkQWdlbnRQYWdlUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VTdWNjZXNzSAASMQoHZmFpbHVyZRgCIAEoCzIeLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGYWlsdXJlSABCCAoGcmVzdWx0IqQBChRSZWFkQWdlbnRQYWdlU3VjY2VzcxIkCgVsaW5lcxgBIAMoCzIVLnN0b3JlLnYxLlN0b3JlTGluZUF0EisKBG1vcmUYAiABKAsyGy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlTW9yZUgAEi0KBWZsb29yGAMgASgLMhwuc3RvcmUudjEuUmVhZEFnZW50UGFnZUZsb29ySABCCgoIYm91bmRhcnkirgIKFFJlYWRBZ2VudFBhZ2VGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJACg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyJS5zdG9yZS52MS5SZWFkQWdlbnRQYWdlSW52YWxpZFJlcXVlc3RIABI8Cg1zdGFsZV9wb2ludGVyGAMgASgLMiMuc3RvcmUudjEuUmVhZEFnZW50UGFnZVN0YWxlUG9pbnRlckgAEkAKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIlLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VTdG9yYWdlRmFpbHVyZUgAEjwKDXVua25vd25fYWdlbnQYBSABKAsyIy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlVW5rbm93bkFnZW50SABCBgoEa2luZCIbChlSZWFkQWdlbnRQYWdlVW5rbm93bkFnZW50IiwKG1JlYWRBZ2VudFBhZ2VJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIdChtSZWFkQWdlbnRQYWdlU3RvcmFnZUZhaWx1cmUiGwoZUmVhZEFnZW50UGFnZVN0YWxlUG9pbnRlckIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_history, file_store_v1_store]);
+  fileDesc("CidzdG9yZS92MS9lbmRwb2ludF9yZWFkX2FnZW50X3BhZ2UucHJvdG8SCHN0b3JlLnYxInwKFFJlYWRBZ2VudFBhZ2VSZXF1ZXN0EiYKBGJvb2sYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBIRCglwYWdlX3NpemUYAiABKA0SKQoFYWZ0ZXIYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyIocBChVSZWFkQWdlbnRQYWdlUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VTdWNjZXNzSAASMQoHZmFpbHVyZRgCIAEoCzIeLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGYWlsdXJlSABCCAoGcmVzdWx0IqQBChRSZWFkQWdlbnRQYWdlU3VjY2VzcxIkCgVsaW5lcxgBIAMoCzIVLnN0b3JlLnYxLlN0b3JlTGluZUF0EisKBG1vcmUYAiABKAsyGy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlTW9yZUgAEi0KBWZsb29yGAMgASgLMhwuc3RvcmUudjEuUmVhZEFnZW50UGFnZUZsb29ySABCCgoIYm91bmRhcnki8AEKFFJlYWRBZ2VudFBhZ2VGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJACg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyJS5zdG9yZS52MS5SZWFkQWdlbnRQYWdlSW52YWxpZFJlcXVlc3RIABI8Cg1zdGFsZV9wb2ludGVyGAMgASgLMiMuc3RvcmUudjEuUmVhZEFnZW50UGFnZVN0YWxlUG9pbnRlckgAEkAKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIlLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VTdG9yYWdlRmFpbHVyZUgAQgYKBGtpbmQiLAobUmVhZEFnZW50UGFnZUludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIh0KG1JlYWRBZ2VudFBhZ2VTdG9yYWdlRmFpbHVyZSIbChlSZWFkQWdlbnRQYWdlU3RhbGVQb2ludGVyQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
- * The store's page read: N page lines of one book, in descending conversation
- * place.
+ * The store's page read: N page lines of one book, newest first.
  *
  * @generated from message store.v1.ReadAgentPageRequest
  */
@@ -45,32 +42,14 @@ export type ReadAgentPageRequest = Message<"store.v1.ReadAgentPageRequest"> & {
   pageSize: number;
 
   /**
-   * Where the page begins. THE ARM IS THE POSITION. There is no newest-page
-   * arm: the newest page is OpenAgentSession's answer.
+   * The page begins strictly OLDER than the item this pointer names — the
+   * pointer served by a previous page's `more` arm or by a streamed line,
+   * echoed verbatim. There is no first-page arm: the first page is
+   * OpenAgentSession's answer, and this verb only ever walks older.
    *
-   * @generated from oneof store.v1.ReadAgentPageRequest.position
+   * @generated from field: store.v1.StoreItemPointer after = 3;
    */
-  position: {
-    /**
-     * Lines placed strictly BEFORE the line this pointer names — the pointer
-     * served by a previous page's `more` arm or by a streamed line, echoed
-     * verbatim. Compared against that line's place as the store holds it now.
-     *
-     * @generated from field: store.v1.StoreItemPointer after = 3;
-     */
-    value: StoreItemPointer;
-    case: "after";
-  } | {
-    /**
-     * The newest lines placed AT OR BEFORE this bound: the book as it stood at
-     * that instant. A fork reads its parent's conversation up to the fork
-     * point this way.
-     *
-     * @generated from field: conversation.v1.ConversationThrough through = 4;
-     */
-    value: ConversationThrough;
-    case: "through";
-  } | { case: undefined; value?: undefined };
+  after?: StoreItemPointer | undefined;
 };
 
 /**
@@ -118,7 +97,7 @@ export const ReadAgentPageResponseSchema: GenMessage<ReadAgentPageResponse> = /*
  */
 export type ReadAgentPageSuccess = Message<"store.v1.ReadAgentPageSuccess"> & {
   /**
-   * The lines, in descending conversation place, each with its pointer — a continuation page
+   * The lines, newest first, each with its pointer — a continuation page
    * carries real positions exactly as the opening page does, so a reader
    * never mints a placeholder mark. At most page_size of them.
    *
@@ -171,8 +150,8 @@ export type ReadAgentPageFailure = Message<"store.v1.ReadAgentPageFailure"> & {
    */
   kind: {
     /**
-     * Empty book, zero page_size, an unset position, an `after` that is empty
-     * or not store-minted, or a `through` whose at_ms is not positive.
+     * Empty book, zero page_size, or an `after` that is unset, empty or not
+     * store-minted.
      *
      * @generated from field: store.v1.ReadAgentPageInvalidRequest invalid_request = 2;
      */
@@ -192,16 +171,6 @@ export type ReadAgentPageFailure = Message<"store.v1.ReadAgentPageFailure"> & {
      */
     value: ReadAgentPageStorageFailure;
     case: "storageFailure";
-  } | {
-    /**
-     * A `through` read of a book this store holds no agent row for: refused
-     * rather than served empty, so a mistyped or never-written book is
-     * distinguishable from one that holds nothing at that instant.
-     *
-     * @generated from field: store.v1.ReadAgentPageUnknownAgent unknown_agent = 5;
-     */
-    value: ReadAgentPageUnknownAgent;
-    case: "unknownAgent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -211,21 +180,6 @@ export type ReadAgentPageFailure = Message<"store.v1.ReadAgentPageFailure"> & {
  */
 export const ReadAgentPageFailureSchema: GenMessage<ReadAgentPageFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_read_agent_page, 3);
-
-/**
- * The addressed book names no agent this store has heard of.
- *
- * @generated from message store.v1.ReadAgentPageUnknownAgent
- */
-export type ReadAgentPageUnknownAgent = Message<"store.v1.ReadAgentPageUnknownAgent"> & {
-};
-
-/**
- * Describes the message store.v1.ReadAgentPageUnknownAgent.
- * Use `create(ReadAgentPageUnknownAgentSchema)` to create a new message.
- */
-export const ReadAgentPageUnknownAgentSchema: GenMessage<ReadAgentPageUnknownAgent> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_read_agent_page, 4);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -247,7 +201,7 @@ export type ReadAgentPageInvalidRequest = Message<"store.v1.ReadAgentPageInvalid
  * Use `create(ReadAgentPageInvalidRequestSchema)` to create a new message.
  */
 export const ReadAgentPageInvalidRequestSchema: GenMessage<ReadAgentPageInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_read_agent_page, 5);
+  messageDesc(file_store_v1_endpoint_read_agent_page, 4);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -262,7 +216,7 @@ export type ReadAgentPageStorageFailure = Message<"store.v1.ReadAgentPageStorage
  * Use `create(ReadAgentPageStorageFailureSchema)` to create a new message.
  */
 export const ReadAgentPageStorageFailureSchema: GenMessage<ReadAgentPageStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_read_agent_page, 6);
+  messageDesc(file_store_v1_endpoint_read_agent_page, 5);
 
 /**
  * The pointer names no line of the addressed book.
@@ -277,5 +231,5 @@ export type ReadAgentPageStalePointer = Message<"store.v1.ReadAgentPageStalePoin
  * Use `create(ReadAgentPageStalePointerSchema)` to create a new message.
  */
 export const ReadAgentPageStalePointerSchema: GenMessage<ReadAgentPageStalePointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_read_agent_page, 7);
+  messageDesc(file_store_v1_endpoint_read_agent_page, 6);
 

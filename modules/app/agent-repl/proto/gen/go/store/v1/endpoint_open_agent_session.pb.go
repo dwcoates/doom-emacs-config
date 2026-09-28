@@ -34,13 +34,9 @@ type OpenAgentSessionRequest struct {
 	// The opening page's budget.
 	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The newest item the caller already holds. UNSET = repaint: a full first
-	// page in descending conversation place. SET = catch-up: the page carries
-	// only items FIRST WRITTEN AFTER this one — catch-up is about what was
-	// written since, never about place, so a late-written item placed earlier in
-	// the conversation is delivered rather than skipped — ordered by descending
-	// place. An item delivered twice is absorbed by its identity. The store
-	// tracks nothing about what it previously served — the caller states its own
-	// high-water mark.
+	// page. SET = catch-up: the page carries only items NEWER than this, never
+	// it or anything older. The store tracks nothing about what it previously
+	// served — the caller states its own high-water mark.
 	KnownThrough *StoreItemPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
 	// Whether the caller will FOLLOW this open with a watch. UNSET/false = a
 	// watch is coming: the store mints a token and pins the tail (the ordinary
