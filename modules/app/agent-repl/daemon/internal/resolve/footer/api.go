@@ -19,6 +19,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
@@ -189,6 +190,9 @@ type TurnStarted struct {
 // Resolver is the footer's whole surface.
 type Resolver interface {
 	sessionwatcher.FooterSink
+	// Sink is the ONE entry point a deploy's progress reaches the footer
+	// through: the update line, stood on every workspace's strip (update.go).
+	deployprogress.Sink
 
 	// SetParticipants states the OTHER TWO HOPS of connectivity truth: whether
 	// this workspace's WatchHostWorkspace and WatchWebWorkspace streams are

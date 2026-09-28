@@ -196,6 +196,7 @@ Two further limits, stated rather than hidden:
 | `!subagent-detached-utterance` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedUtteranceStaysOffTopLevel asserts bubble stays Live, exact utterance text confined to sub-feed (positive+negative on exact string). | covered |
 | `!subagent-failed` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentFailed asserts the DETACHED wrapper placement, the head still naming the commission, and FeedSubagentSettled.outcome == failed with all three neighbouring arms (succeeded, cancelled, lost) checked ABSENT — the discrimination a resolver that collapsed the four would fail. | covered |
 | `!subagent-interleaved` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentInterleavedResponsesStayOnTheirOwnFeeds asserts the main turn draws exactly ONE thinking unit and ONE final_answer response, each with its whole exact text, the subagent's two exact responses on its sub-feed and absent from the root feed, and the bubble settled succeeded. | covered |
+| `!subagent-resumed` | ungrounded | — | — | — | No counted e2e layer drives this scenario; the shim integration suite drives it across a shim restart (test/integration/detached.test.ts). | uncovered |
 | `!task-change` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts a checklist row with Status.GetRunning()!=nil. | covered |
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
@@ -230,8 +231,8 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 
 - Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
-- Uncovered (no counted layer drives the scenario at all): **0**
-- Total canonical scenarios: 154
+- Uncovered (no counted layer drives the scenario at all): **1**
+- Total canonical scenarios: 155
 
 By layer, scenarios with at least one hit:
 - Go e2e (non-emacs): 153 scenarios referenced across 26 files
@@ -251,7 +252,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
-_None._
+- `!subagent-resumed`
 
 <!-- END DERIVED: uncovered -->
 

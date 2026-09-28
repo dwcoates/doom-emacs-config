@@ -91,40 +91,20 @@ func deployError(err error) (*agentreplv1.DeployError, bool) {
 		}}, true
 	case errors.As(err, &service):
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_ServiceRestartFailed{
-			ServiceRestartFailed: &agentreplv1.DeployServiceRestartFailed{Component: componentArm(service.Component), Detail: service.Detail},
+			ServiceRestartFailed: &agentreplv1.DeployServiceRestartFailed{Component: service.Component.Arm(), Detail: service.Detail},
 		}}, true
 	case errors.As(err, &install):
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_InstallFailed{
-			InstallFailed: &agentreplv1.DeployInstallFailed{Component: componentArm(install.Component), Detail: install.Detail},
+			InstallFailed: &agentreplv1.DeployInstallFailed{Component: install.Component.Arm(), Detail: install.Detail},
 		}}, true
 	}
 	return nil, false
 }
 
-// componentArm names a component on the wire.
-func componentArm(c deploy.Component) agentreplv1.DeployComponent {
-	switch c {
-	case deploy.ComponentDaemon:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON
-	case deploy.ComponentShim:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM
-	case deploy.ComponentWebapp:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP
-	case deploy.ComponentStore:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE
-	case deploy.ComponentSidecar:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
-	case deploy.ComponentElisp:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
-	default:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
-	}
-}
-
 // deployOutcome renders one decision. A component or a decision this handler
 // cannot name is an invariant violation, never a defaulted arm.
 func deployOutcome(o deploy.Outcome) (*agentreplv1.DeployComponentOutcome, error) {
-	component := componentArm(o.Component)
+	component := o.Component.Arm()
 	if component == agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED {
 		return nil, fmt.Errorf("server: the deploy decided for a component the contract does not name: %q", o.Component)
 	}
@@ -136,6 +116,19 @@ func deployOutcome(o deploy.Outcome) (*agentreplv1.DeployComponentOutcome, error
 		out.Outcome = &agentreplv1.DeployComponentOutcome_Restarted{Restarted: &agentreplv1.DeployServiceRestarted{}}
 	case deploy.HandingOver:
 		out.Outcome = &agentreplv1.DeployComponentOutcome_HandingOver{HandingOver: &agentreplv1.DeployHandingOver{
+			Workspaces: uint32(o.Handover.Workspaces), Busy: uint32(o.Handover.Busy), Forced: o.Handover.Forced,
+		}}
+	case deploy.RestartingAcrossLayout:
+		// THE TWO LAYOUTS DIFFER BY CONTRACT: their difference is why this is a
+		// restart and not a handover. Equal or negative layouts are a decision
+		// the arm cannot state, never one rendered with a wrapped or made-up
+		// number.
+		if o.Layouts.Running < 0 || o.Layouts.Fresh < 0 || o.Layouts.Running == o.Layouts.Fresh {
+			return nil, fmt.Errorf("server: the deploy decided a layout restart the contract cannot state: running layout %d, fresh layout %d",
+				o.Layouts.Running, o.Layouts.Fresh)
+		}
+		out.Outcome = &agentreplv1.DeployComponentOutcome_Restarting{Restarting: &agentreplv1.DeployRestarting{
+			RunningStateLayout: uint32(o.Layouts.Running), FreshStateLayout: uint32(o.Layouts.Fresh),
 			Workspaces: uint32(o.Handover.Workspaces), Busy: uint32(o.Handover.Busy), Forced: o.Handover.Forced,
 		}}
 	case deploy.ShimsBouncing:

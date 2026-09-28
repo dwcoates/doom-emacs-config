@@ -217,6 +217,7 @@ export interface FakeStoreWrite {
 export interface FakeStoreRead {
   readonly rpc:
     | "GetLiveWork"
+    | "GetAgentByVendorTask"
     | "OpenAgentSession"
     | "ReadAgentPage"
     | "WatchBashRun"
@@ -255,6 +256,12 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
    */
   const detachedOwner = new Map<string, string>();
   const spawnedBy = new Map<string, string>();
+  /**
+   * The store's `vendor_task` table: each vendor task locator, with every agent
+   * a batch's `agent_locators` paired it with. `GetAgentByVendorTask` answers
+   * from these within one session's lineage, exactly as the real store does.
+   */
+  const vendorTasks = new Map<string, Set<string>>();
   /**
    * Every bash row per run, ONE PER UPSERT KEY, in first-insert order, each
    * holding its newest write — the real store's row model. A run's output is
@@ -817,6 +824,49 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         });
       },
 
+      async getAgentByVendorTask(request) {
+        noteRead("GetAgentByVendorTask", request);
+        const session = request.session?.value ?? "";
+        const invalid = (field: string): storev1.GetAgentByVendorTaskResponse =>
+          create(storev1.GetAgentByVendorTaskResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.GetAgentByVendorTaskFailureSchema, {
+                detail: `${field}: the lookup is incomplete`,
+                kind: { case: "invalidRequest", value: create(storev1.GetAgentByVendorTaskInvalidRequestSchema, { field }) },
+              }),
+            },
+          });
+        if (session === "") return invalid("session");
+        if (request.vendorTaskId === "") return invalid("vendor_task_id");
+        const lineage = lineageOf(session);
+        const agents = [...(vendorTasks.get(request.vendorTaskId) ?? [])].filter((agent) => lineage.has(agent));
+        if (agents.length > 1) {
+          return create(storev1.GetAgentByVendorTaskResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.GetAgentByVendorTaskFailureSchema, {
+                detail: `vendor task ${request.vendorTaskId} is paired with ${agents.length} agents of one lineage`,
+                kind: { case: "storageFailure", value: create(storev1.GetAgentByVendorTaskStorageFailureSchema, {}) },
+              }),
+            },
+          });
+        }
+        const [agent] = agents;
+        return agent === undefined
+          ? create(storev1.GetAgentByVendorTaskResponseSchema, {
+              result: { case: "notFound", value: create(storev1.GetAgentByVendorTaskNotFoundSchema, {}) },
+            })
+          : create(storev1.GetAgentByVendorTaskResponseSchema, {
+              result: {
+                case: "success",
+                value: create(storev1.GetAgentByVendorTaskSuccessSchema, {
+                  agent: create(conversationv1.AgentIdSchema, { value: agent }),
+                }),
+              },
+            });
+      },
+
       async writeBatch(request) {
         receivedWrites.push(request);
         // AN UNCLASSIFIED WRITE IS REFUSED, as the real store refuses it: the
@@ -863,6 +913,15 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
               }),
             },
           });
+        }
+        for (const locator of request.batch?.agentLocators ?? []) {
+          const agent = locator.agent?.value ?? "";
+          if (locator.vendorTaskId === "" || agent === "") {
+            throw new Error("fake store: a batch stated an agent locator missing its locator or its agent");
+          }
+          const paired = vendorTasks.get(locator.vendorTaskId) ?? new Set<string>();
+          paired.add(agent);
+          vendorTasks.set(locator.vendorTaskId, paired);
         }
         for (const entry of request.batch?.entries ?? []) {
           // ABSORBED, as the real store's ledger absorbs it: nothing lands.

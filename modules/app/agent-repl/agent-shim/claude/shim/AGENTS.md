@@ -311,8 +311,9 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
   or `Skill` instead: `!glob`, `!grep-content`, `!grep-files`, `!grep-count`,
   `!artifact-publish`, `!artifact-list`, `!wakeup-schedule`, `!wakeup-stop`,
   `!worktree-keep`, `!worktree-remove`, `!memory`, `!skills-injected`;
-- `!send-message-resumed` / `!send-message-refused` — no capture addresses a
-  subagent;
+- `!send-message-resumed` / `!send-message-refused` / `!subagent-resumed` — no
+  capture addresses a subagent; `!subagent-resumed`'s resume `task_started`
+  from the send is the shape a live session's log showed (2026-09-27);
 - `!subagent-failed` — no capture has a failed subagent;
 - `!subagent-network-failed` / `!network-resume` — the failure's records are
   the 2026-09-27 outage's own (production records, not a capture), and the
@@ -382,6 +383,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!subagent-detached` | an `Agent` with `run_in_background`: `task_started`, `background_tasks_changed`, an `async_launched` `AgentOutput` naming the output file, then a completed `task_notification` carrying usage | the agent's `.meta.json` and `agent-<id>.jsonl`, the spool `<spool-root>/<slug>/<session>/tasks/a<hex>.output` written as AGENT JSONL, and the main transcript's lines | AgentSubagent detached_work + AgentSubagentSuccess.usage=total_only from the notification |
 | `!subagent-interleaved` | a detached `Agent` whose own responses stream INTO the main agent's open blocks: one whole subagent response (its `message_start` included) between the two deltas of the main thinking block, another between the two deltas of the main text block, then the completed `task_notification` | the agent's `.meta.json` and `agent-<id>.jsonl`, its spool as agent JSONL, and the main transcript's lines | AgentThinking + AgentResponse.from_model on the main book, each ONE unit, beside the subagent's own AgentResponse units on its book |
 | `!subagent-detached-live` | a detached `Agent` that is left LIVE after the turn ends and then raises its OWN gated call: the `canUseTool` ask carries the subagent's `agentID`. Nothing here ever finishes the agent — only a `stopTask` does, which is what makes a stop targeted at a subagent's AgentId observable | the agent's `.meta.json` and `agent-<id>.jsonl`, its spool, and the main transcript's lines | AgentSubagent detached_work left live, an AgentPermission raised UNDER the subagent, and AgentSubagentFailure.cause=stopped_by_user when the stop lands |
+| `!subagent-resumed` | a `SendMessage` that RESUMES an idle background agent — its task id is the prompt's argument, else a minted one: `task_started` naming the agent's task id and the SEND's tool_use_id, the send's `resumedAgentId` result, then a completed `task_notification` | the main transcript's lines | AgentDetachedWork(kind=subagent) detached from the send, naming the agent its spawn created + AgentSendMessage.delivery=resumed_recipient |
 | `!subagent-detached-hold` | a detached `Agent` left LIVE, and then the turn that spawned it HOLDS: nothing further until an interrupt lands, which ends the turn the way an interrupted turn ends. Whether the agent survives that interrupt is the vendor's `perTaskStopAffordance` posture, never the scenario's | the agent's `.meta.json` and `agent-<id>.jsonl`, its spool, and the main transcript's lines | AgentSubagent detached_work live UNDER AN OPEN TURN, and AgentInterrupted.by_user for the turn while the agent stays live |
 | `!subagent-detached-utterance` | a detached `Agent` left LIVE after the turn ends, whose only post-turn activity is ONE ordinary sidechain assistant text line — a mid-flight utterance with `IsSidechain`/`AgentId`/`SourceToolUseId` set and NO completion. Nothing here ever finishes the agent | the agent's `.meta.json` and `agent-<id>.jsonl` (the utterance lands there too), its spool, and the main transcript's lines | AgentSubagent detached_work left live; the utterance itself proves the router keeps a live subagent's prose OUT of the top-level feed rather than adding a new arm |
 | `!subagent-failed` | a detached `Agent` that ends in failure: `task_updated{status:"failed"}` and a failed `task_notification` | the agent's `.meta.json` and transcript, its spool, and the main transcript's lines | AgentSubagentFailure |
@@ -949,6 +951,42 @@ forever, and the run's announcement stayed open in the record.
   terminal key, exactly as `StopBash`'s own terminal already was: a shim
   terminal landing after a sidecar `EXIT=` row replaces the spool's evidence on
   that row (the tail row keeps the output).
+
+## A resumed subagent is named by the store when this process never saw its spawn (2026-09-27)
+
+A subagent's vendor task id (`task_started.task_id`, the `<id>` of
+`agent-<id>.jsonl`) is its LOCATOR and comes back when `SendMessage` resumes
+it, but the resume's call is the send, never the spawn whose `tool_use_id` IS
+the agent. Two sources name the agent, in this order:
+
+- **The fold's own join** (`TaskKindRegistry.rememberAgent`), recorded when this
+  process sees the task start from its spawn. KEPT, not deleted: it is written
+  synchronously by this process at the spawn, so it covers the window before the
+  sidecar has discovered the transcript and its meta and booked the pairing,
+  and a store outage at the resume. The store alone would refuse a resume that
+  lands in that window.
+- **The store** (`store.v1.GetAgentByVendorTask`, `src/store/locator.ts`), the
+  sidecar's pairing, for what memory structurally cannot know: a process that
+  restarted since the spawn. The shim never reads a vendor file itself.
+
+The engine asks the store at three sites through ONE helper
+(`agentFromStore` in `engine/session.ts`), which hands every answer to the fold
+(`EngineFold.learnTaskAgent`) and writes the one record of the lookup: INFO
+found, ERROR not-found or failed.
+
+- **The announcement.** `EngineFold.taskAwaitingAgent` names a task whose call is
+  known and is not its spawn, with no join; the engine awaits the store inside
+  the serial message loop BEFORE folding, so the fold stays synchronous and no
+  later message is folded ahead. A miss stays the fold's ERROR refusal, with
+  `store_answer` in the record.
+- **The restore.** A live handle whose recorded unit is a send is re-announced
+  `created`, named by the store from the send's settled recipient (the vendor's
+  id for the agent) and described by the agent's own spawn unit
+  (`resumedRecipient` / `resumedAgentAnnouncement` in `store/reconcile.ts`).
+- **The permission gate.** `agentFor` takes the fold's `taskAgent` first, so a
+  resumed agent's ask is never credited to the send; anything nothing on the
+  stream names is looked up by its id. `agentFor` answers a promise only then,
+  and an ask whose lookup spans a stand-down is denied with that stand-down.
 
 ## The store writer: it never drops a row
 

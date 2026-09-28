@@ -21,10 +21,9 @@
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { requireMessage } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
-import { ViewedRegistry } from "./viewed.js";
 import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
 import { drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
@@ -143,7 +142,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const prefs = createSidebarPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const attention = new AttentionRegistry(deps.timers);
-  const viewed = new ViewedRegistry();
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -156,7 +154,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     ctx,
     prefs,
     attention,
-    viewed,
     tasks: [],
     onDispose: (fn) => {
       disposers.push(fn);
@@ -183,21 +180,24 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
+    plannedEnding: (response) => response.push.case === "ending",
     onPush: (response) => {
-      const roster = requireMessage(response.roster, "WatchWorkspaceRosterResponse.roster");
+      const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
+      if (push.case !== "roster") {
+        // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
+        // not a contract violation: skipped quietly by the stream pipeline.
+        // (`ending` never reaches here: the stream pipeline consumes it.)
+        return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
+      }
+      const roster = requireMessage(push.value, "WatchWorkspaceRosterResponse.roster");
       // The teardowns come down BEFORE the draw, so a ticking age about to be
       // replaced cannot paint a node already detached.
       clear();
       // The blink pass brackets the draw: markers are re-attached to the phases
       // already running, and any marker the daemon cleared is forgotten.
       attention.beginPass();
-      // The viewed pass brackets the draw for the same reason the blink pass
-      // does: one workspace is drawn once per grouping, and both copies must
-      // resolve to the same display mode.
-      viewed.beginPass();
       const drawn = drawWorkspaceRoster(roster, sc);
       attention.endPass();
-      viewed.endPass();
       body.replaceChildren(drawn);
       // A detail panel is fixed-positioned so it can leave the rail, which
       // means it can only be measured once it is ON the page: a row drawn
@@ -216,7 +216,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       window.removeEventListener("scroll", replace, true);
       clear();
       attention.dispose();
-      viewed.dispose();
       host.replaceChildren();
       host.hidden = true;
     },

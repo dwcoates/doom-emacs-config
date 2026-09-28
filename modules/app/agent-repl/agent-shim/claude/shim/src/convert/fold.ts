@@ -73,7 +73,15 @@ import type { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { convertAttachment, type AttachmentRecord } from "./attachments.js";
-import { convertDetached, createTaskKindRegistry, type TaskKindRegistry } from "./detached.js";
+import {
+  convertDetached,
+  createTaskKindRegistry,
+  taskAgentKnowledge,
+  taskAwaitingAgent,
+  type TaskAgentKnowledge,
+  type TaskKindRegistry,
+} from "./detached.js";
+import { describeVendorTaskAnswer, type VendorTaskAnswer } from "../store/locator.js";
 import { attachmentActivityId } from "./ids.js";
 import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import {
@@ -175,6 +183,20 @@ interface Fold {
    * it — so nothing it announced can settle: every call still held is let go.
    */
   endQuery(why: string): void;
+  /**
+   * The vendor task whose agent the STORE must name before `message` is
+   * folded, or `undefined` (convert/detached.ts `taskAwaitingAgent`). A read:
+   * it records nothing.
+   */
+  taskAwaitingAgent(message: SdkMessage, context: FoldContext): string | undefined;
+  /**
+   * The store's answer for a task {@link Fold.taskAwaitingAgent} named: a found
+   * agent becomes the task's join, exactly as a spawn seen here would have made
+   * it; any other answer is kept for the refusal record that follows.
+   */
+  learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /** Which agent a vendor task is running, as this fold knows it. */
+  taskAgent(taskId: string): TaskAgentKnowledge;
 }
 
 /** Everything the fold remembers. Each field is named in this file's header. */
@@ -236,6 +258,15 @@ export function createFold(): Fold {
     endQuery(why) {
       endQueryCalls(state.calls, why);
     },
+    taskAwaitingAgent: (message, context) => taskAwaitingAgent(message, context, state.taskKinds, state.calls),
+    learnTaskAgent(taskId, answer) {
+      if (answer.kind === "found") {
+        state.taskKinds.rememberAgent(taskId, answer.agent);
+        return;
+      }
+      state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
+    },
+    taskAgent: (taskId) => taskAgentKnowledge(state.taskKinds, taskId),
   };
 }
 

@@ -10,6 +10,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
+import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
@@ -58,6 +59,10 @@ message WatchHostWorkspaceResponse {
     // shared editor-popup subroutine (right side, half width). A fact, not a
     // command: nothing acks it.
     HostOpenInEditor open_in_editor = 5;
+    // The daemon is standing down in a planned exit and this is the stream's
+    // last frame; the client reattaches to the live daemon without treating
+    // the end as a fault. See the message.
+    DaemonStreamEnding ending = 6;
   }
 }
 
