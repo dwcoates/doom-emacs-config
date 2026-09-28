@@ -542,6 +542,73 @@ func TestTheMergePipelineDominatesTheLink(t *testing.T) {
 	}
 }
 
+func TestTheLinkDominatesATerminalMerge(t *testing.T) {
+	// Arrange: a failed merge is over, so a broken route outranks it (the one
+	// ladder, resolve/ladder).
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, footer.MergeFacts{State: "failed"})
+
+	// Act.
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "severed" {
+		t.Fatalf("status = %q, want severed", got)
+	}
+}
+
+func TestAMergeConflictDominatesTheLink(t *testing.T) {
+	// Arrange: a merge stopped on a conflict still holds its lease, so it
+	// ranks with the merge in flight.
+	r := live(t, arrange(t))
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Act.
+	r.SetMerge(theWS, footer.MergeFacts{State: "conflict"})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "merge_conflict" {
+		t.Fatalf("status = %q, want merge_conflict", got)
+	}
+}
+
+func TestAParkedSessionStillShowsItsMerge(t *testing.T) {
+	// Arrange: parking skips only the link rung, which is all its ruling
+	// spoke about; a failed merge on a parked workspace is still a failed
+	// merge.
+	r := arrange(t)
+	r.SetRegistry(sidebar.Registry{
+		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+		Repositories: []wsm.Repository{repo},
+		Sessions: []wsm.Session{{
+			Workspace: theWS,
+			Terminal:  &wsm.SessionTerminal{Kind: "hibernated"},
+		}},
+	})
+
+	// Act.
+	r.SetMerge(theWS, footer.MergeFacts{State: "failed"})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "merge_failed" {
+		t.Fatalf("status = %q, want merge_failed", got)
+	}
+}
+
+func TestATurnAcceptedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
+	// Arrange: no session record and no link yet, so the row reads `none`.
+	r := arrange(t)
+
+	// Act: the daemon accepts a prompt before the session is spawned.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert: the route is coming up, which the footer draws as
+	// `disconnected · starting` from the same two facts (ladder.AwaitingBringUp).
+	if got := statusName(onlyRow(t, r)); got != "init" {
+		t.Fatalf("status = %q, want init", got)
+	}
+}
+
 func TestTheLinkDominatesTheSessionLifecycle(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))

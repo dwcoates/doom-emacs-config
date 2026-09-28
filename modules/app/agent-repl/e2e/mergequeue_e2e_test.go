@@ -456,10 +456,10 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 	footer := w.WatchFooter(child)
 	defer footer.Close()
 	fv := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
-	if fv.GetStrip().GetStatus().GetMerging().GetParked().GetLine() == "" {
-		t.Fatalf("footer parked = %v, want a composed line", fv.GetStrip().GetStatus().GetMerging().GetParked())
+	if fv.GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine() == "" {
+		t.Fatalf("footer parked = %v, want a composed line", fv.GetStrip().GetStatus().GetMergeConflict().GetParked())
 	}
 	host := w.WatchHost(child)
 	hv := harness.AwaitView(t, w.Ctx(), host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
