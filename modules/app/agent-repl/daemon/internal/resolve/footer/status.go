@@ -15,8 +15,8 @@ import (
 // the resolver can never reach.
 var statusArms = []string{
 	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
-	"merge_conflict", "merge_failed", "merged", "waiting", "thinking",
-	"background", "idle",
+	"merge_conflict", "merge_failed", "merged", "degraded", "waiting",
+	"thinking", "background", "turn_failed", "idle",
 }
 
 // The FooterAllowance.status arms this resolver emits, asserted the same way
@@ -83,6 +83,8 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 		return r.merged(s, log)
 	case ladder.Blocked:
 		return r.blocked(s, log)
+	case ladder.Degraded:
+		return r.degraded(s, log)
 	case ladder.Waiting:
 		if s.coldAnswer != nil {
 			// The answer being spent outranks the whole waiting rung; the
@@ -123,8 +125,9 @@ func (r *resolver) idleFamily(s *wsState) *frontendv1.FooterStatus {
 	return r.idle(s)
 }
 
-// disconnected resolves the link's step, or nil while the link serves without
-// degradation.
+// disconnected resolves the link's step, or nil while the link serves. A link
+// that serves WITH DEGRADATION is not disconnected: it is usable, and the
+// degraded rung draws it (owner ruling, 2026-09-28).
 //
 // A PARKED SESSION NEVER REACHES HERE. The ladder skips the whole rung while
 // the idle sweep's park stands (resolve/ladder): the sweep put the route down
@@ -182,10 +185,6 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 		// a status nobody is receiving.
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
-	case s.degraded:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.degraded"})
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Degraded{
-			Degraded: &frontendv1.FooterSubStatusDisconnectedDegraded{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		// THE LINK SERVES. Only a standing fault can still claim the status,
@@ -562,13 +561,46 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 			Background: &frontendv1.FooterStatusBackground{Activity: r.backgroundActivity(s)}}}
 }
 
+// degraded resolves the degraded rung: the session serves, but the daemon's
+// view of it is compromised. It is nil when the view is whole.
+//
+// A STATE THE SHIM NEVER RE-REPORTED is named first: it is about the whole
+// session (the daemon cannot see whether a turn is in flight), where an
+// observation window is about holes in what is drawn.
+func (r *resolver) degraded(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if !s.linkSeen {
+		return nil
+	}
+	arm := &frontendv1.FooterStatusDegraded{}
+	switch {
+	case s.stateUnreported:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.stateUnreported"})
+		arm.Substatus = &frontendv1.FooterStatusDegraded_StateUnreported{
+			StateUnreported: &frontendv1.FooterSubStatusDegradedStateUnreported{}}
+	case s.degraded:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.degraded"})
+		arm.Substatus = &frontendv1.FooterStatusDegraded_Observation{
+			Observation: &frontendv1.FooterSubStatusDegradedObservation{}}
+	default:
+		return nil
+	}
+	arm.Activity = r.idleActivity(s)
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Degraded{Degraded: arm}}
+}
+
 // idle is the bottom of the tree: nothing in flight.
+//
+// A FAILED TURN END is its own arm, `turn_failed` — the same turn end the
+// roster draws `turn_failed` (ladder.ClassifyFailure) — because it is
+// turquoise where idle is green (owner ruling, 2026-09-28). It stands where
+// `idle` would, and carries idle's activity kinds.
 func (r *resolver) idle(s *wsState) *frontendv1.FooterStatus {
-	arm := &frontendv1.FooterStatusIdle{Activity: r.idleActivity(s)}
 	if s.turnFailed {
-		// The same turn end the roster draws `turn_failed` (ladder.ClassifyFailure).
-		arm.Substatus = &frontendv1.FooterStatusIdle_TurnFailed{TurnFailed: &frontendv1.FooterSubStatusIdleTurnFailed{}}
-	} else if s.turnEverRan {
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_TurnFailed{
+			TurnFailed: &frontendv1.FooterStatusTurnFailed{Activity: r.idleActivity(s)}}}
+	}
+	arm := &frontendv1.FooterStatusIdle{Activity: r.idleActivity(s)}
+	if s.turnEverRan {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Done{Done: &frontendv1.FooterSubStatusIdleDone{}}
 	} else {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Ready{Ready: &frontendv1.FooterSubStatusIdleReady{}}
@@ -594,6 +626,10 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "background"
 	case *frontendv1.FooterStatus_Blocked:
 		return "blocked"
+	case *frontendv1.FooterStatus_Degraded:
+		return "degraded"
+	case *frontendv1.FooterStatus_TurnFailed:
+		return "turn_failed"
 	case *frontendv1.FooterStatus_Disconnected:
 		return "disconnected"
 	case *frontendv1.FooterStatus_Closing:

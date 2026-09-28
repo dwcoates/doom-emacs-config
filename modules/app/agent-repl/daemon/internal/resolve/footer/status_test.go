@@ -421,8 +421,8 @@ func TestAQueryDeathFailsTheTurnItCut(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetTurnFailed() == nil {
-		t.Fatalf("status = %q, want idle · turn_failed", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
+		t.Fatalf("status = %q, want turn_failed", h.status(t))
 	}
 }
 
@@ -458,7 +458,7 @@ func TestAQueryDeathStandsItsLineUnderTheFailedTurn(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetQueryDied().GetText() == "" {
+	if h.view(t).GetStrip().GetStatus().GetTurnFailed().GetActivity().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing")
 	}
 }
@@ -481,9 +481,9 @@ func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
 	})
 
 	// Assert
-	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	if idle.GetActivity().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", idle.GetActivity())
+	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
+	if failed.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
 	}
 }
 
@@ -527,8 +527,8 @@ func TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst(t *testing.T) {
 			tc.act(h, &turn)
 
 			// Assert
-			if h.view(t).GetStrip().GetStatus().GetIdle().GetTurnFailed() == nil {
-				t.Fatalf("status = %q, want idle · turn_failed", h.status(t))
+			if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
+				t.Fatalf("status = %q, want turn_failed", h.status(t))
 			}
 		})
 	}
@@ -547,9 +547,9 @@ func TestAQueryDiedTerminalStandsTheDeadQueryLine(t *testing.T) {
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, queryDiedFailure())
 
 	// Assert
-	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	if idle.GetActivity().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", idle.GetActivity())
+	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
+	if failed.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
 	}
 }
 
@@ -622,7 +622,9 @@ func TestABlockingLimitBlocksOnUsage(t *testing.T) {
 	}
 }
 
-func TestAModelErrorBlocksOnVendorError(t *testing.T) {
+// A model error is TRANSIENT (owner ruling, 2026-09-28): the workspace stays
+// usable, so it fails the turn rather than blocking the session.
+func TestAModelErrorFailsTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -635,8 +637,8 @@ func TestAModelErrorBlocksOnVendorError(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetVendorError() == nil {
-		t.Fatalf("want blocked · vendor_error")
+	if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
+		t.Fatalf("status = %q, want turn_failed", h.status(t))
 	}
 }
 
@@ -649,10 +651,12 @@ func TestEveryAgentFailureArmTakesItsClassifiedStatus(t *testing.T) {
 		failure *conversationv1.AgentFailure
 		want    string
 	}{
-		{name: "api_request_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: "blocked"},
+		{name: "api_request_failed of an unstated kind", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: "turn_failed"},
+		{name: "api_request_failed: authentication", failure: authFailure(), want: "blocked"},
+		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, want: "turn_failed"},
 		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "blocked"},
 		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "blocked"},
-		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "blocked"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "turn_failed"},
 		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: "turn_failed"},
 		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: "turn_failed"},
 		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, want: "turn_failed"},
@@ -685,7 +689,7 @@ func TestEveryAgentFailureArmTakesItsClassifiedStatus(t *testing.T) {
 			status := h.view(t).GetStrip().GetStatus()
 			got := h.status(t)
 			switch {
-			case status.GetIdle().GetTurnFailed() != nil:
+			case status.GetTurnFailed() != nil:
 				got = "turn_failed"
 			case status.GetIdle().GetDone() != nil:
 				got = "done"
@@ -746,9 +750,10 @@ func TestASessionStartLiftsAVendorBlock(t *testing.T) {
 	// Act
 	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
 
-	// Assert
-	if got := h.status(t); got != "idle" {
-		t.Fatalf("status = %q, want idle", got)
+	// Assert: the block lifts, and the failed turn it ended still stands, as
+	// the roster's turn_failed does.
+	if got := h.status(t); got != "turn_failed" {
+		t.Fatalf("status = %q, want turn_failed", got)
 	}
 }
 
@@ -822,6 +827,8 @@ func TestADeadLinkThatOnceConnectedIsDead(t *testing.T) {
 	}
 }
 
+// A serving link with an open degraded window is USABLE (owner ruling,
+// 2026-09-28): the degraded arm, never disconnected.
 func TestAnOpenDegradedWindowDrawsAServingLinkAsDegraded(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -840,8 +847,8 @@ func TestAnOpenDegradedWindowDrawsAServingLinkAsDegraded(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetDegraded() == nil {
-		t.Fatalf("want disconnected · degraded while a window is open")
+	if h.view(t).GetStrip().GetStatus().GetDegraded().GetObservation() == nil {
+		t.Fatalf("status = %q, want degraded · observation while a window is open", h.status(t))
 	}
 }
 
@@ -1392,5 +1399,68 @@ func authFailure() *conversationv1.AgentFailure {
 					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
 			},
 		},
+	}
+}
+
+func TestATakenBackShimsUnreportedStateDrawsDegraded(t *testing.T) {
+	tests := []struct {
+		name    string
+		act     func(h *harness)
+		want    string
+		wantArm bool
+	}{
+		{name: "the unreported state stands", act: func(h *harness) {
+			h.r.SetStateUnreported(testWS, true)
+		}, want: "degraded", wantArm: true},
+		{name: "a session start lifts it", act: func(h *harness) {
+			h.r.SetStateUnreported(testWS, true)
+			h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
+		}, want: "idle"},
+		{name: "an explicit lift lifts it", act: func(h *harness) {
+			h.r.SetStateUnreported(testWS, true)
+			h.r.SetStateUnreported(testWS, false)
+		}, want: "idle"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tc.act(h)
+
+			// Assert
+			if got := h.status(t); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+			if got := h.view(t).GetStrip().GetStatus().GetDegraded().GetStateUnreported() != nil; got != tc.wantArm {
+				t.Fatalf("degraded · state_unreported = %v, want %v", got, tc.wantArm)
+			}
+		})
+	}
+}
+
+func TestAnUnreportedStateOutranksAnObservationWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Diagnostics{
+			Diagnostics: &conversationv1.SessionDiagnostics{
+				DegradedWindows: []*conversationv1.SessionDegradedWindow{{
+					Component: "converter",
+					Extent:    &conversationv1.SessionDegradedWindow_Open{Open: &conversationv1.SessionDegradedOpen{}},
+				}},
+			},
+		},
+	})
+
+	// Act
+	h.r.SetStateUnreported(testWS, true)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetDegraded().GetStateUnreported() == nil {
+		t.Fatalf("status = %q, want degraded · state_unreported", h.status(t))
 	}
 }

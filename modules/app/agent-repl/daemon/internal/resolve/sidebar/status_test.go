@@ -376,23 +376,27 @@ func TestEveryAgentFailureArmTakesItsClassifiedArmAndColor(t *testing.T) {
 			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}}, arm: "vendor_blocked", color: "blue"},
 		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, arm: "vendor_blocked", color: "blue"},
 		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, arm: "vendor_blocked", color: "blue"},
-		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "vendor_blocked", color: "blue"},
-		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "turn_failed", color: "blue"},
-		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "turn_failed", color: "blue"},
-		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "turn_failed", color: "blue"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "api_request_failed: billing", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Kind: &conversationv1.ApiRequestFailed_BillingError{BillingError: &conversationv1.ApiBillingError{}}}}}, arm: "vendor_blocked", color: "blue"},
+		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, arm: "done", color: "green"},
-		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, arm: "turn_failed", color: "blue"},
+		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, arm: "done", color: "green"},
-		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, arm: "turn_failed", color: "blue"},
-		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, arm: "turn_failed", color: "blue"},
-		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, arm: "turn_failed", color: "blue"},
-		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, arm: "turn_failed", color: "blue"},
-		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, arm: "turn_failed", color: "blue"},
-		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, arm: "turn_failed", color: "blue"},
-		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, arm: "turn_failed", color: "blue"},
-		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, arm: "turn_failed", color: "blue"},
-		{name: "query_died", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, arm: "turn_failed", color: "blue"},
-		{name: "an arm this build does not know", failure: &conversationv1.AgentFailure{}, arm: "turn_failed", color: "blue"},
+		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "query_died", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "an arm this build does not know", failure: &conversationv1.AgentFailure{}, arm: "turn_failed", color: "turquoise"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -439,8 +443,8 @@ func TestASubagentFailureDoesNotBlockTheRow(t *testing.T) {
 func TestViewingAVendorBlockedRowReadsTheFailedTurnsResult(t *testing.T) {
 	// Arrange: a vendor failure blocks the row over the failed turn's end.
 	r := live(t, arrange(t))
-	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
-		ModelError: &conversationv1.AgentModelError{}}})
+	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
+		BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
 	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
 		t.Fatalf("status = %q, want vendor_blocked — the arrangement missed the arm", got)
 	}
@@ -459,8 +463,8 @@ func TestViewingAVendorBlockedRowReadsTheFailedTurnsResult(t *testing.T) {
 func TestAnUnviewedVendorBlockedRowLeavesTheResultUnread(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
-	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
-		ModelError: &conversationv1.AgentModelError{}}})
+	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
+		BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
 
 	// Act: the block lifts with no view.
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})

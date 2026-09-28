@@ -13,10 +13,22 @@ func TestClassifyFailurePlacesEveryAgentFailureArm(t *testing.T) {
 		want    FailureClass
 	}{
 		{name: "no failure", failure: nil, want: NoFailure},
-		{name: "api_request_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: VendorBlocked},
+		{name: "api_request_failed of an unstated kind", failure: apiFailed(&conversationv1.ApiRequestFailed{}), want: TurnFailed},
+		{name: "api_request_failed: rate limited", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}}}), want: VendorBlocked},
+		{name: "api_request_failed: authentication failed", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}), want: VendorBlocked},
+		{name: "api_request_failed: permission denied", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_PermissionDenied{PermissionDenied: &conversationv1.ApiPermissionDenied{}}}), want: VendorBlocked},
+		{name: "api_request_failed: billing", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_BillingError{BillingError: &conversationv1.ApiBillingError{}}}), want: VendorBlocked},
+		{name: "api_request_failed: organization not allowed", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_OauthOrgNotAllowed{OauthOrgNotAllowed: &conversationv1.ApiOauthOrgNotAllowed{}}}), want: VendorBlocked},
+		{name: "api_request_failed: overloaded", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}), want: TurnFailed},
+		{name: "api_request_failed: invalid request", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_InvalidRequest{InvalidRequest: &conversationv1.ApiInvalidRequest{}}}), want: TurnFailed},
+		{name: "api_request_failed: request too large", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_RequestTooLarge{RequestTooLarge: &conversationv1.ApiRequestTooLarge{}}}), want: TurnFailed},
+		{name: "api_request_failed: not found", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_NotFound{NotFound: &conversationv1.ApiNotFound{}}}), want: TurnFailed},
+		{name: "api_request_failed: internal", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}}}), want: TurnFailed},
+		{name: "api_request_failed: max output tokens", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_MaxOutputTokens{MaxOutputTokens: &conversationv1.ApiMaxOutputTokens{}}}), want: TurnFailed},
+		{name: "api_request_failed: unmodeled", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{}}}), want: TurnFailed},
 		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: VendorBlocked},
 		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: VendorBlocked},
-		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: VendorBlocked},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: TurnFailed},
 		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: TurnFailed},
 		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: TurnFailed},
 		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, want: TurnFailed},
@@ -94,4 +106,9 @@ func TestRateLimitBlocks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// apiFailed wraps a failed api request as the turn-ending failure it reports.
+func apiFailed(failed *conversationv1.ApiRequestFailed) *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: failed}}
 }

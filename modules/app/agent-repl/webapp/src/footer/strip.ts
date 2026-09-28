@@ -78,6 +78,8 @@ import type {
   FooterStatusLoadingActivity,
   FooterStatusMergeConflict,
   FooterStatusMergeFailed,
+  FooterStatusTurnFailed,
+  FooterStatusDegraded,
   FooterStatusMerged,
   FooterStatusMerging,
   FooterStatusMergingActivity,
@@ -241,7 +243,8 @@ type SubStatusOneof =
   | FooterStatusDisconnected["substatus"]
   | FooterStatusClosing["substatus"]
   | FooterStatusLoading["substatus"]
-  | FooterStatusMergeConflict["substatus"];
+  | FooterStatusMergeConflict["substatus"]
+  | FooterStatusDegraded["substatus"];
 
 /** Every per-status activity message, as one type to walk. */
 export type FooterActivity =
@@ -392,6 +395,7 @@ function statusParts(
     case "blocked":
     case "disconnected":
     case "closing":
+    case "degraded":
       return {
         substatus: status.value.substatus,
         activity: status.value.activity,
@@ -428,6 +432,17 @@ function statusParts(
       return {
         substatus: undefined,
         activity: settled.activity,
+        activityRequired: false,
+        substatusless: true,
+      };
+    }
+    case "turnFailed": {
+      // A failed turn declares no substatus oneof: the feed's turn-end row
+      // carries the account, so the cell merges the same way.
+      const failed: FooterStatusTurnFailed = status.value;
+      return {
+        substatus: undefined,
+        activity: failed.activity,
         activityRequired: false,
         substatusless: true,
       };
