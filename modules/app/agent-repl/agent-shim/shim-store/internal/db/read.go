@@ -89,7 +89,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	if err != nil {
 		return OpenedPage{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}
-	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+	defer d.endTx(tx, base)
 
 	// THE REGISTER IS ASKED FIRST, before the pointer. A known_through against
 	// a book that does not exist is stale only as a consequence of the book not
@@ -156,7 +156,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "begin read transaction"))
 	}
-	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+	defer d.endTx(tx, base)
 
 	if err := d.pointerInBook(ctx, tx, agentID, position, "after", after.GetValue()); err != nil {
 		fields := base
