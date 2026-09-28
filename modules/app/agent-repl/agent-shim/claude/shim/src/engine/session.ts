@@ -128,6 +128,7 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
+import { NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
   TurnEngine,
@@ -249,6 +250,24 @@ interface EngineDeps {
    * ordering it protects is unchanged by its size.
    */
   readonly watcherConclusionBudgetMs?: number;
+  /**
+   * Whether the vendor's API host can be reached, asked by the network-resume
+   * loop (engine/network-resume.ts). REQUIRED, with no default: a real session
+   * probes the configured API host (`main.ts`), `--fake` and every suite probe
+   * nothing real, and a default here would be a network call a suite could
+   * reach by forgetting to name one.
+   */
+  readonly probeApiReachable: ReachabilityProbe;
+  /** Injected so a suite drives the network-resume loop without a clock. */
+  readonly networkResumeScheduler?: KeepaliveScheduler;
+  /**
+   * The network-resume probe interval and give-up window, when something
+   * overrode the module constants. `main.ts` fills these ONLY for a `--fake`
+   * process; a real session always probes every five seconds for thirty
+   * minutes (engine/network-resume.ts).
+   */
+  readonly networkResumeIntervalMs?: number;
+  readonly networkResumeWindowMs?: number;
   /**
    * End the process, once the session has been stood down.
    *
@@ -533,6 +552,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const keepaliveScope = new KeepaliveScope();
   const newUuid = deps.newUuid ?? randomUUID;
+  /**
+   * THE ONE NETWORK-RESUME STATE of this process, and its one probe loop
+   * (engine/network-resume.ts). Fed every SDK message; delivers through
+   * {@link deliverNetworkResume}; stopped with the session.
+   */
+  const networkResume = new NetworkResume({
+    probe: deps.probeApiReachable,
+    deliver: (prompt) => deliverNetworkResume(prompt),
+    nowMs: deps.nowMs,
+    scheduler: deps.networkResumeScheduler ?? REAL_SCHEDULER,
+    ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
+    ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
+  });
 
   let identity: SessionIdentity | undefined;
   /**
@@ -1717,6 +1749,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message);
+    networkResume.observe(message);
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext(attribution));
     if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
@@ -2420,6 +2453,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setOpen(undefined);
     keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
+    networkResume.stop(`the vendor query died: ${detail}`);
     // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
     // it lost, so this fault is meant to stand for the session's life -- and it
     // holds its own component so a probe that still answers cannot clear it.
@@ -3945,6 +3979,52 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * Deliver the network-resume prompt as the main agent's next turn.
+   *
+   * ONLY ON AN IDLE MAIN AGENT: an open turn (a keep-alive's included) or a
+   * `StartTurn` being processed answers `busy`, and the loop asks again on its
+   * next beat. The prompt goes in as the vendor's OWN kind of turn — no shim
+   * turn is opened and no prompt row is written — exactly as a background
+   * task's notification starts one, because a turn id is the daemon's to mint
+   * and this turn has no daemon behind it. What the turn DOES (the
+   * `SendMessage` per agent, the resumed agents' own work) is folded and
+   * served as any vendor-run turn's work is.
+   *
+   * THE KEEP-ALIVE ROLLBACK IS OWED FIRST, as it is before any real prompt:
+   * the resume must not build on keep-alive context.
+   */
+  async function deliverNetworkResume(text: string): Promise<ResumeDelivery> {
+    if (standingDown) return { kind: "unavailable", detail: "the session is standing down" };
+    if (identity === undefined || query === undefined || prompts === undefined) {
+      return { kind: "unavailable", detail: "no vendor query is accepting prompts" };
+    }
+    const busy = mainAgentBusy();
+    if (busy !== undefined) return { kind: "busy", detail: busy };
+    await yieldObligation(textSaid(text), false);
+    // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
+    // turn; the resume waits for the next beat rather than riding into it.
+    const busyAfter = mainAgentBusy();
+    if (busyAfter !== undefined) return { kind: "busy", detail: busyAfter };
+    const queue = prompts;
+    if (queue === undefined) {
+      return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
+    }
+    queue.push(userMessage(text, undefined));
+    LOGGER.info(
+      { characters: text.length },
+      "submitted the network-resume prompt; the main agent continues the cut-off agents in a turn of its own",
+    );
+    return { kind: "delivered" };
+  }
+
+  /** Why the main agent cannot take a prompt now, or absence when it is idle. */
+  function mainAgentBusy(): string | undefined {
+    if (open !== undefined) return open.keepalive ? "a keep-alive turn is open" : `turn ${open.id.value} is open`;
+    if (turns.startInFlight()) return "a StartTurn is being processed";
+    return undefined;
+  }
+
   // -- the SessionContext the turn verbs run against ------------------------
 
   const context: SessionContext = {
@@ -4438,6 +4518,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     cadence?.stop();
+    networkResume.stop(reason);
     if (accountUsageHandle !== undefined) {
       (deps.scheduler ?? REAL_SCHEDULER).clearInterval(accountUsageHandle);
       accountUsageHandle = undefined;

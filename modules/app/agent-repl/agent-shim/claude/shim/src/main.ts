@@ -74,6 +74,13 @@ import {
 } from "./store/persistence.js";
 import { createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
+import {
+  createFakeReachabilityProbe,
+  createReachabilityProbe,
+  recordReachabilityTarget,
+  resolveReachabilityTarget,
+} from "./engine/api-reachability.js";
+import type { ReachabilityProbe } from "./engine/network-resume.js";
 import { ensureWorkspaceTrusted } from "./trust.js";
 import { randomUUID } from "node:crypto";
 import { shimRoutes } from "./service/routes.js";
@@ -372,6 +379,71 @@ export function resolveRetryPolicy(
   // `parsed` is never empty here (an empty override was answered above), and
   // `reduce` with no seed THROWS on an empty list rather than inventing a value.
   return { ...DEFAULT_RETRY_POLICY, backoffMs: parsed, heldRetryMs: parsed.reduce((_last, ms) => ms) };
+}
+
+/**
+ * The network-resume probe INTERVAL and give-up WINDOW overrides, honored ONLY
+ * under `--fake` (engine/network-resume.ts).
+ *
+ * The production beat is five seconds and the window thirty minutes; a suite
+ * that waited those out would ride them, while what it asserts — a wait, a
+ * resume, a give-up — is an ordering, not a duration. Refused for a real
+ * session: a production shim told to probe every millisecond, or to give up
+ * at once, would break the owner's ruling.
+ */
+export const FAKE_NETWORK_RESUME_INTERVAL_ENV = "AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS";
+export const FAKE_NETWORK_RESUME_WINDOW_ENV = "AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS";
+
+/**
+ * The mocked vendor's API REACHABILITY GATE: a path whose existence IS the
+ * API being reachable. Unset under `--fake` means always reachable. Honored
+ * only under `--fake`, where no probe ever touches a network.
+ */
+export const FAKE_API_REACHABLE_GATE_ENV = "AGENT_REPL_FAKE_API_REACHABLE_GATE";
+
+/** Resolve the network-resume probe interval; `undefined` means the module constant. */
+export function resolveNetworkResumeIntervalMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_NETWORK_RESUME_INTERVAL_ENV,
+    "network_resume_interval_override",
+    "network-resume probe interval",
+  );
+}
+
+/** Resolve the network-resume give-up window; `undefined` means the module constant. */
+export function resolveNetworkResumeWindowMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_NETWORK_RESUME_WINDOW_ENV,
+    "network_resume_window_override",
+    "network-resume window",
+  );
+}
+
+/**
+ * The probe the network-resume loop asks.
+ *
+ * `--fake` NEVER TOUCHES A NETWORK: its probe reads the gate. A real session
+ * probes the API host the vendor is configured for; a configuration the probe
+ * cannot resolve is recorded ONCE here at ERROR and every probe then answers
+ * "unreachable" with the reason, so the wait gives up loudly rather than
+ * probing a host the vendor does not use.
+ */
+export function resolveReachabilityProbe(env: NodeJS.ProcessEnv, fake: boolean): ReachabilityProbe {
+  const gate = env[FAKE_API_REACHABLE_GATE_ENV];
+  if (fake) return createFakeReachabilityProbe(gate === undefined || gate === "" ? undefined : gate);
+  if (gate !== undefined && gate !== "") {
+    MAIN_LIFECYCLE_LOGGER.debug(
+      { env: FAKE_API_REACHABLE_GATE_ENV, value: gate, outcome: "api_reachable_gate_refused" },
+      "the API reachability gate is honored only under --fake; ignoring it for this real session",
+    );
+  }
+  const target = resolveReachabilityTarget(env);
+  recordReachabilityTarget(target);
+  return createReachabilityProbe(target);
 }
 
 /** Everything the process reads from its environment, resolved and checked. */
@@ -835,6 +907,9 @@ export async function main(): Promise<void> {
   const exitQuietBudgetMs = resolveExitQuietBudgetMs(process.env, args.fake);
   const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
   const retry = resolveRetryPolicy(process.env, args.fake);
+  const networkResumeIntervalMs = resolveNetworkResumeIntervalMs(process.env, args.fake);
+  const networkResumeWindowMs = resolveNetworkResumeWindowMs(process.env, args.fake);
+  const probeApiReachable = resolveReachabilityProbe(process.env, args.fake);
 
   // THE SESSION ENGINE, with the real record plane behind it.
   //
@@ -869,6 +944,9 @@ export async function main(): Promise<void> {
     nowMs: () => Date.now(),
     ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
     ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),
+    probeApiReachable,
+    ...(networkResumeIntervalMs === undefined ? {} : { networkResumeIntervalMs }),
+    ...(networkResumeWindowMs === undefined ? {} : { networkResumeWindowMs }),
   });
 
   const server = await serve(args.listen, shimRoutes(engine));

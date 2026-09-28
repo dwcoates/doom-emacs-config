@@ -38,13 +38,22 @@ import { mainAgentId } from "../../src/convert/ids.js";
 // static binding is the file's one copy and cannot drift from the engine's.
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import type { SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
+import {
+  NETWORK_RESUME_PROBE_INTERVAL_MS,
+  isNetworkResumePrompt,
+  resumePromptTargets,
+} from "../../src/engine/network-resume.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
   readonly engine: SessionEngine;
   readonly persistence: RecordingPersistence;
   readonly fold: RecordingFold;
   readonly scheduler: ManualScheduler;
+  /** The network-resume loop's own scheduler, fired by hand. */
+  readonly networkScheduler: ManualScheduler;
+  /** The reachability probe the network-resume loop asks. */
+  readonly probe: ScriptedProbe;
   readonly queries: { spec: QuerySpec; query: ScriptedQuery }[];
   readonly stateDir: string;
   readonly configDir: string;
@@ -227,6 +236,8 @@ function harness(
   const persistence = new RecordingPersistence();
   const fold = new RecordingFold();
   const scheduler = new ManualScheduler();
+  const networkScheduler = new ManualScheduler();
+  const probe = new ScriptedProbe();
   const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
   const locks: string[] = [];
   const released: string[] = [];
@@ -290,6 +301,8 @@ function harness(
     },
     env: { stateDir, configDir, cwd },
     nowMs: () => options.nowMs ?? 1_000_100,
+    probeApiReachable: probe.probe,
+    networkResumeScheduler: networkScheduler,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
     ...(options.initTimeoutMs === undefined ? {} : { initTimeoutMs: options.initTimeoutMs }),
     ...(options.liveSignalTimeoutMs === undefined
@@ -334,6 +347,8 @@ function harness(
     persistence,
     fold,
     scheduler,
+    networkScheduler,
+    probe,
     queries,
     stateDir,
     configDir,
@@ -698,6 +713,7 @@ describe("StartSession, fresh", () => {
   it("refuses with vendor_start_failed when the query cannot be created", async () => {
     const h = harness();
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: () => Promise.reject(new Error("the mocked vendor is not implemented")),
@@ -715,6 +731,7 @@ describe("StartSession, fresh", () => {
   it("releases the session lock when the vendor start fails", async () => {
     const h = harness();
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: () => Promise.reject(new Error("no")),
@@ -748,6 +765,7 @@ describe("StartSession, fresh", () => {
     // every real condition.
     const h = harness();
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: () => Promise.reject(new Error("no")),
@@ -772,6 +790,7 @@ describe("StartSession, fresh", () => {
     // vendor never opened.
     const h = harness();
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: () => Promise.reject(new Error("no")),
@@ -807,6 +826,7 @@ describe("StartSession, fresh", () => {
       "utf8",
     );
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: () => Promise.reject(new Error("no")),
@@ -829,6 +849,7 @@ describe("StartSession, fresh", () => {
     const h = harness();
     let starts = 0;
     const engine = createEngine({
+      probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
       createQuery: (spec) => {
@@ -9936,5 +9957,170 @@ describe("the held stop command (KillTurn.commanded_by)", () => {
 
     // Assert
     expect(h.fold.contexts.at(-1)?.stopCommand).toBeUndefined();
+  });
+});
+
+/**
+ * THE NETWORK RESUME, WIRED INTO THE SESSION (engine/network-resume.ts).
+ *
+ * The module's own suite owns classification, the loop and the window; this
+ * block owns what only the session can answer: that its messages reach the
+ * loop, that the resume is delivered to the vendor as the main agent's own
+ * turn only when the main agent is idle, and that stand-down cancels the loop.
+ */
+describe("a background agent a network outage cut off", () => {
+  const OUTAGE = "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)";
+
+  /** The vendor's account of agent a1 dying on an unreachable API. */
+  async function cutOff(h: Harness): Promise<void> {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a1",
+      tool_use_id: "toolu_spawn",
+      description: "a sweep",
+      task_type: "local_agent",
+      uuid: "00000000-0000-4000-8000-0000000000a1",
+      session_id: "s",
+    } as unknown as SdkMessage);
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      message: { model: "<synthetic>", content: [{ type: "text", text: OUTAGE }] },
+      parent_tool_use_id: "toolu_spawn",
+      error: "server_error",
+      uuid: "00000000-0000-4000-8000-0000000000a2",
+      session_id: "s",
+    } as unknown as SdkMessage);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a1",
+      tool_use_id: "toolu_spawn",
+      status: "failed",
+      output_file: "/tmp/a1.output",
+      summary: `Agent "a sweep" failed: Agent terminated early due to an API error: ${OUTAGE} (error type server_error)`,
+      uuid: "00000000-0000-4000-8000-0000000000a3",
+      session_id: "s",
+    } as unknown as SdkMessage);
+  }
+
+  /** One beat of the loop, and every send it caused let through. */
+  async function beat(h: Harness): Promise<void> {
+    h.networkScheduler.fire(0);
+    await drainTurns();
+  }
+
+  it("waits on the session's one probe loop, beating every five seconds", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await cutOff(h);
+
+    // Assert
+    expect(h.networkScheduler.intervals).toEqual([NETWORK_RESUME_PROBE_INTERVAL_MS]);
+  });
+
+  it("is continued by the main agent once the API is reachable", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(delivered.filter(isNetworkResumePrompt).map(resumePromptTargets)).toEqual([["a1"]]);
+  });
+
+  it("is not delivered while the API is unreachable", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await cutOff(h);
+    h.probe.reachable = false;
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(delivered.filter(isNetworkResumePrompt)).toEqual([]);
+  });
+
+  it("waits while a real turn is open", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await cutOff(h);
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(delivered.filter(isNetworkResumePrompt)).toEqual([]);
+  });
+
+  it("is delivered on the first beat after the open turn ends", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await cutOff(h);
+    await beat(h);
+    await h.engine.onSdkMessage(resultMessage("turn-1-result"));
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(delivered.filter(isNetworkResumePrompt)).toHaveLength(1);
+  });
+
+  it("opens no shim turn: a StartTurn right after the resume is accepted", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    await beat(h);
+
+    // Act
+    const response = await startDuring(h, "turn-2");
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("stand-down cancels the probe loop", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(h.networkScheduler.cleared).toBe(1);
+  });
+
+  it("the vendor query dying cancels the probe loop", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    (await untilQuery(h, 0)).query.end();
+    await settledUntil(() => h.networkScheduler.cleared > 0);
+
+    // Assert
+    expect(h.networkScheduler.cleared).toBe(1);
   });
 });
