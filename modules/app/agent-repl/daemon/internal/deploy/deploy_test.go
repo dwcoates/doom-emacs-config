@@ -910,18 +910,3 @@ func TestNewRefusesAMissingProgressSink(t *testing.T) {
 		t.Fatalf("New accepted a Deployer with no progress sink")
 	}
 }
-
-func TestNewRefusesAMissingProgressSink(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	deps := h.d.deps
-	deps.Progress = nil
-
-	// Act
-	_, err := New(deps)
-
-	// Assert
-	if err == nil {
-		t.Fatalf("New accepted a Deployer with no progress sink")
-	}
-}
