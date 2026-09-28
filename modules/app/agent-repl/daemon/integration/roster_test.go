@@ -108,9 +108,18 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitRoster(t, f.d, roster, "done after the turn concludes", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetDone() != nil }))
 
-	// Act / Assert: idle_async with detached work live and no turn.
+	// Act / Assert: the unread result holds the row on done while detached
+	// work runs.
+	// The row does not move, so no roster push comes: the roster's own
+	// record of the decision is what proves the work was weighed and the
+	// unread result kept the row on done.
 	pushDetachedShell(f.shim, "work-1", "sleep 1")
-	awaitRoster(t, f.d, roster, "idle_async with detached work and no turn", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil }))
+	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.unread_outranks_async")
+
+	// Act / Assert: idle_async, FULL, once the user has viewed the result.
+	markViewed(t, f.d, f.ws)
+	awaitRoster(t, f.d, roster, "idle_async with detached work and the result read",
+		statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil && row.GetViewed() == nil }))
 }
 
 func TestRosterOrdersRowsByPriority(t *testing.T) {

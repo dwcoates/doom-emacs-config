@@ -24,7 +24,6 @@ import type { AppContext } from "../rpc/context.js";
 import { requireMessage } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
-import { ViewedRegistry } from "./viewed.js";
 import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
 import { drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
@@ -143,7 +142,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const prefs = createSidebarPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const attention = new AttentionRegistry(deps.timers);
-  const viewed = new ViewedRegistry();
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -156,7 +154,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     ctx,
     prefs,
     attention,
-    viewed,
     tasks: [],
     onDispose: (fn) => {
       disposers.push(fn);
@@ -191,13 +188,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       // The blink pass brackets the draw: markers are re-attached to the phases
       // already running, and any marker the daemon cleared is forgotten.
       attention.beginPass();
-      // The viewed pass brackets the draw for the same reason the blink pass
-      // does: one workspace is drawn once per grouping, and both copies must
-      // resolve to the same display mode.
-      viewed.beginPass();
       const drawn = drawWorkspaceRoster(roster, sc);
       attention.endPass();
-      viewed.endPass();
       body.replaceChildren(drawn);
       // A detail panel is fixed-positioned so it can leave the rail, which
       // means it can only be measured once it is ON the page: a row drawn
@@ -216,7 +208,6 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       window.removeEventListener("scroll", replace, true);
       clear();
       attention.dispose();
-      viewed.dispose();
       host.replaceChildren();
       host.hidden = true;
     },

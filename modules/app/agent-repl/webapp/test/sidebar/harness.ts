@@ -30,7 +30,6 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
-import { ViewedRegistry } from "../../src/sidebar/viewed.js";
 import type { SidebarContext, SidebarPrefs } from "../../src/sidebar/context.js";
 
 /** The webview's own workspace. */
@@ -135,7 +134,6 @@ export function sidebarContext(
     ctx,
     prefs,
     attention: new AttentionRegistry(timers),
-    viewed: new ViewedRegistry(),
     tasks: [],
     disposers,
     onDispose: (fn) => {
