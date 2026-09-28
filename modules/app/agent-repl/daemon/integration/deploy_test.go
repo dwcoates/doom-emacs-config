@@ -4,10 +4,15 @@ package integration
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 
+	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -322,5 +327,126 @@ func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
 	// Assert: the fault comes down and the deploy ends its own story.
 	awaitFooter(t, f, footer, "the fault retracted", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil && footerFault(v) == nil
+	})
+}
+
+// ---- a failed deploy: on the topbar, and rolled back -----------------------
+
+// topbarHasLine reports whether the topbar's warning strip carries line.
+func topbarHasLine(v *frontendv1.TopbarView, line string) bool {
+	for _, w := range v.GetWarnings().GetWarnings() {
+		if w.GetLine().GetText() == line {
+			return true
+		}
+	}
+	return false
+}
+
+// buildFailedTopbarLine is the topbar line the harness's failing build stands as.
+var buildFailedTopbarLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
+
+func TestADeployWhoseBuildFailsStandsOnTheTopbar(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+
+	// Act
+	resp, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil || resp.Msg.GetError().GetBuildFailed() == nil {
+		t.Fatalf("Deploy = (%v, %v), want the build_failed refusal", resp, err)
+	}
+
+	// Assert: the failure stands in the topbar's error section, naming its
+	// step and its words.
+	awaitTopbar(t, f, topbar, "the deploy_failed warning line", func(v *frontendv1.TopbarView) bool {
+		return topbarHasLine(v, buildFailedTopbarLine)
+	})
+}
+
+func TestALaterDeployThatBuildsTakesTheFaultOffTheTopbar(t *testing.T) {
+	t.Parallel()
+	// Arrange: a failed deploy's fault stands on the topbar.
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+	awaitTopbar(t, f, topbar, "the deploy_failed warning line", func(v *frontendv1.TopbarView) bool {
+		return topbarHasLine(v, buildFailedTopbarLine)
+	})
+	f.d.StageDeployBuild(harness.DeployCurrent)
+
+	// Act
+	deployOutcomes(t, f.d, false)
+
+	// Assert
+	awaitTopbar(t, f, topbar, "the warning line retracted", func(v *frontendv1.TopbarView) bool {
+		return !topbarHasLine(v, buildFailedTopbarLine)
+	})
+}
+
+// failSidecarRestart makes the next deploy judge the sidecar stale and its
+// launchd kickstart fail, before AND after the rollback: the cache bin under
+// the test's HOME is empty, so the deploy installs into it and then fails.
+func failSidecarRestart(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	d.StageDeployBuild(harness.DeployCurrent)
+	if err := buildreport.Write(d.LockDir, buildreport.ServiceSidecar, buildreport.Report{PID: d.PID(), Build: "an older sidecar"}); err != nil {
+		t.Fatalf("state the sidecar's stale build report: %v", err)
+	}
+	d.Launchctl.SetExitCode(1)
+	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.services", "daemon.deploy.decide",
+		"daemon.deploy.rollback", "daemon.deploy.run")
+}
+
+func TestADeployWhoseServiceRestartFailsRollsTheCacheBinBack(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+	failSidecarRestart(t, d)
+
+	// Act
+	resp, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil || resp.Msg.GetError().GetServiceRestartFailed() == nil {
+		t.Fatalf("Deploy = (%v, %v), want the service_restart_failed refusal", resp, err)
+	}
+
+	// Assert: what the install put where nothing stood is gone again.
+	removed := d.AwaitLogRecord(d.RunLogPath(), "the rollback's removal of the installed sidecar", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.rollback" && r.Context["artifact"] == buildreport.ServiceSidecar &&
+			strings.HasSuffix(fmt.Sprint(r.Context["live"]), "/"+buildreport.ServiceSidecar) &&
+			strings.Contains(r.Message, "removed what the install put where nothing stood before")
+	})
+	if _, err := os.Stat(fmt.Sprint(removed.Context["live"])); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the installed sidecar after the rollback: stat = %v, want it absent as it was", err)
+	}
+}
+
+func TestADeployWhoseRollbackFailsStandsAsItsOwnFaultOnTheTopbar(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	failSidecarRestart(t, f.d)
+
+	// Act
+	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+
+	// Assert: the step's fault and the rollback's own both stand.
+	awaitTopbar(t, f, topbar, "the step's and the rollback's warning lines", func(v *frontendv1.TopbarView) bool {
+		var step, rollback bool
+		for _, w := range v.GetWarnings().GetWarnings() {
+			text := w.GetLine().GetText()
+			step = step || strings.HasPrefix(text, "deploy failed: restart services sidecar, rollback failed: ")
+			rollback = rollback || strings.HasPrefix(text, "deploy failed: rollback sidecar: ")
+		}
+		return step && rollback
 	})
 }
