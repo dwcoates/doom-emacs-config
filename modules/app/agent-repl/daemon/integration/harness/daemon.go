@@ -315,12 +315,21 @@ type Daemon struct {
 	client            agentreplv1connect.AgentReplClient
 	http              *http.Client
 
-	mu       sync.Mutex
-	exited   bool
-	exitErr  error
-	waitOnce sync.Once
-	expected map[string]bool
-	shims    map[string]*ShimControl
+	mu     sync.Mutex
+	exited bool
+	// sigMu makes every signal to the daemon's pid or group, and the reap
+	// that frees them, ONE OWNER'S. The reap takes it once the process has
+	// exited and marks reapBegun before cmd.Wait; every signal takes it and
+	// checks reapBegun first. A reap still running on a goroutine an earlier
+	// bounded wait left behind (Stop giving up on SIGTERM and falling through
+	// to Kill) therefore can never free the pid under a signal, nor between
+	// Kill's leader SIGKILL and its group SIGKILL.
+	sigMu     sync.Mutex
+	reapBegun bool
+	exitErr   error
+	waitOnce  sync.Once
+	expected  map[string]bool
+	shims     map[string]*ShimControl
 }
 
 // installFakeGit copies the scripted `git` into the directory that leads the
@@ -976,7 +985,10 @@ func (d *Daemon) gracefulStopForCoverage() {
 	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
 		return
 	}
-	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	d.sigMu.Lock()
+	sent := !d.reapBegun && d.cmd.Process.Signal(syscall.SIGTERM) == nil
+	d.sigMu.Unlock()
+	if !sent {
 		return
 	}
 	d.awaitReapWithin(DefaultTimeout)
@@ -1051,42 +1063,7 @@ func (d *Daemon) Kill() {
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
-	// A REAPED PROCESS IS NEVER SIGNALED. cmd.Wait has returned, so the kernel
-	// has freed the pid and the group id that shares it: -pid names no group
-	// of ours any more, and signaling it can only reach whatever process the
-	// pid was recycled into. This is the ordinary state of every test that
-	// waits for its daemon to leave on its own (a refused second daemon, a
-	// joining daemon) before the cleanup kill runs. Until the reap below, the
-	// leader is ours and unreaped — a zombie at worst — so every signal names
-	// our process and our group exactly.
-	if d.reaped() {
-		return
-	}
-	pgid := d.cmd.Process.Pid
-	if !d.signalGroup(pgid, syscall.SIGSTOP) {
-		return
-	}
-	if d.afterGroupStopped != nil {
-		d.afterGroupStopped()
-	}
-	if !d.signalLeader(syscall.SIGKILL) {
-		return
-	}
-	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
-	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
-	// it, so the leader WILL exit; only its scheduling is left, and a leader
-	// that never exits after an accepted SIGKILL is a kernel fault the test
-	// binary's own -timeout reports with every stack. The event does not reap
-	// it, so the group id stays ours for the group kill below. A wait that
-	// fails is REPORTED and the kill still goes ahead: a group left running is
-	// worse than one whose leader might have seen a member go.
-	if err := WaitProcessExit(context.Background(), pgid); err != nil {
-		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
-	}
-	if d.afterLeaderExit != nil {
-		d.afterLeaderExit()
-	}
-	if !d.signalGroup(pgid, syscall.SIGKILL) {
+	if !d.killGroup() {
 		return
 	}
 	// THE REAP IS AWAITED ON THE REAP ITSELF, NOT RACED AGAINST A CLOCK. The
@@ -1102,13 +1079,64 @@ func (d *Daemon) Kill() {
 	}
 }
 
+// killGroup runs Kill's signals as sigMu's owner and reports whether the
+// group was killed and is left to reap.
+//
+// A REAPED PROCESS IS NEVER SIGNALED. Once the reap has begun, the kernel may
+// have freed the pid and the group id that shares it: -pid names no group of
+// ours any more, and signaling it can only reach whatever process the pid was
+// recycled into. This is the ordinary state of every test that waits for its
+// daemon to leave on its own (a refused second daemon, a joining daemon)
+// before the cleanup kill runs. While killGroup holds sigMu no reap can
+// begin, so the leader is ours and unreaped — a zombie at worst — and every
+// signal names our process and our group exactly.
+func (d *Daemon) killGroup() bool {
+	d.t.Helper()
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
+		return false
+	}
+	pgid := d.cmd.Process.Pid
+	if !d.signalGroup(pgid, syscall.SIGSTOP) {
+		return false
+	}
+	if d.afterGroupStopped != nil {
+		d.afterGroupStopped()
+	}
+	if !d.signalLeader(syscall.SIGKILL) {
+		return false
+	}
+	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
+	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
+	// it, so the leader WILL exit; only its scheduling is left, and a leader
+	// that never exits after an accepted SIGKILL is a kernel fault the test
+	// binary's own -timeout reports with every stack. The event does not reap
+	// it, so the group id stays ours for the group kill below. A wait that
+	// fails is REPORTED and the kill still goes ahead: a group left running is
+	// worse than one whose leader might have seen a member go.
+	if err := WaitProcessExit(context.Background(), pgid); err != nil {
+		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
+	}
+	if d.afterLeaderExit != nil {
+		d.afterLeaderExit()
+	}
+	return d.signalGroup(pgid, syscall.SIGKILL)
+}
+
 // Freeze stops the daemon's process group and waits for the kernel to confirm
 // the stop, leaving it to a later Kill. A frozen daemon reads nothing, so a
 // shim's frame pushed while it is frozen reaches no daemon at all: it is how a
 // test ends a turn while no daemon is watching, before the daemon dies.
 func (d *Daemon) Freeze() {
 	d.t.Helper()
-	if d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+	if d.cmd == nil || d.cmd.Process == nil {
+		d.t.Fatal("harness: Freeze needs a running daemon")
+		return
+	}
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
 		d.t.Fatal("harness: Freeze needs a running daemon")
 		return
 	}
@@ -1125,31 +1153,41 @@ func (d *Daemon) Freeze() {
 // signalGroup sends sig to the daemon's process group and reports whether the
 // kill should go on.
 //
-// ESRCH is the benign race: the group left on its own between the caller's
-// decision and this signal, and the reap that follows confirms it. EPERM is
-// the same race after a recycle — the pid now belongs to someone else — and is
-// accepted ONLY once the reap confirms our own process is in fact gone, which
-// ends the kill. Every other error is a real fault, reported, and ends it too.
+// The caller holds sigMu and found the reap not begun, so the group id is
+// still ours. ESRCH is the benign race: the group left on its own between the
+// caller's decision and this signal, and the reap that follows confirms it.
+//
+// EPERM IS DARWIN'S ANSWER FOR A GROUP LEFT WITH ONLY ZOMBIES: it finds our
+// own exited, unreaped leader, which it will not signal, and nothing else.
+// That is the ordinary state of the group kill once the leader's exit has
+// orphaned the group and the kernel's SIGHUP has ended its members. It is
+// accepted ONLY once the kernel's process table confirms every process in the
+// group has exited; an EPERM with a live member left, and every other error,
+// is a real fault, reported, and ends the kill.
 func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 	d.t.Helper()
 	err := syscall.Kill(-pgid, sig)
-	switch {
-	case err == nil, errors.Is(err, syscall.ESRCH):
+	if err == nil || errors.Is(err, syscall.ESRCH) {
 		return true
-	case errors.Is(err, syscall.EPERM):
-		if !d.awaitReapWithin(reapGrace) {
-			d.t.Errorf("harness: %v process group %d: %v, and it was still unreaped %s later", sig, pgid, err, reapGrace)
-		}
-		return false
-	default:
-		d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
-		return false
 	}
+	if errors.Is(err, syscall.EPERM) {
+		exited, readErr := groupExited(pgid)
+		if readErr != nil {
+			d.t.Errorf("harness: %v process group %d: %v, and its members could not be read: %v", sig, pgid, err, readErr)
+			return false
+		}
+		if exited {
+			return true
+		}
+	}
+	d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
+	return false
 }
 
 // signalLeader sends sig to the daemon's own process, and only to it, and
-// reports whether the kill should go on. Kill found the leader unreaped, so
-// its pid is still ours, exactly as the group id is for signalGroup: ESRCH is
+// reports whether the kill should go on. The caller holds sigMu and found the
+// reap not begun, so its pid is still ours, exactly as the group id is for
+// signalGroup: ESRCH is
 // a leader that already exited, which is what the caller awaits next. Every
 // other error is a real fault, reported, and ends the kill.
 func (d *Daemon) signalLeader(sig syscall.Signal) bool {
@@ -1190,6 +1228,11 @@ func (d *Daemon) awaitReapWithin(budget time.Duration) bool {
 
 func (d *Daemon) signal(sig syscall.Signal) {
 	d.t.Helper()
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
+		return
+	}
 	if err := d.cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		d.t.Fatalf("harness: signal %v: %v", sig, err)
 	}
@@ -1207,8 +1250,20 @@ func (d *Daemon) Wait() int {
 	return 0
 }
 
+// wait reaps the process, as sigMu's owner: it awaits the exit on the kernel's
+// exit event, which does not reap, then takes sigMu and marks the reap begun
+// before cmd.Wait frees the pid, so no signal is ever in flight across the
+// reap. A failed exit wait is kept in exitErr, where every reader of the exit
+// sees it, and the reap still goes ahead: cmd.Wait blocks on the exit itself.
 func (d *Daemon) wait() {
+	exitErr := WaitProcessExit(context.Background(), d.cmd.Process.Pid)
+	d.sigMu.Lock()
+	d.reapBegun = true
+	d.sigMu.Unlock()
 	err := d.cmd.Wait()
+	if exitErr != nil {
+		err = errors.Join(fmt.Errorf("harness: await the daemon's exit before the reap: %w", exitErr), err)
+	}
 	d.mu.Lock()
 	d.exited, d.exitErr = true, err
 	d.mu.Unlock()
@@ -1225,8 +1280,11 @@ func (d *Daemon) Exited() bool {
 	if already {
 		return true
 	}
-	// Signal 0 probes liveness without disturbing the process.
-	if d.cmd.Process.Signal(syscall.Signal(0)) != nil {
+	// Signal 0 probes liveness without disturbing the process, and like
+	// every signal it is sent only while no reap can free the pid.
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun || d.cmd.Process.Signal(syscall.Signal(0)) != nil {
 		return true
 	}
 	// A ZOMBIE HAS EXITED. Signal 0 succeeds against a process that has run to
