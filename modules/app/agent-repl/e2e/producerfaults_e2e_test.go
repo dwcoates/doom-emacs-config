@@ -240,7 +240,7 @@ func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 
 	// Assert
 	view := pfAwaitView(t, w, footer.Stream, "the footer's failed turn after the query died", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetTurnFailed() != nil
+		return v.GetStrip().GetStatus().GetTurnFailed() != nil
 	})
 	idle := view.GetStrip().GetStatus().GetIdle()
 	if idle.GetTurnFailed() == nil {

@@ -1177,70 +1177,49 @@ per workspace on the marker's present->absent edge (a restated marker is not a
 clear, and neither is a first sighting without it). The reaction only re-arms
 the dwell clock, since the tab already draws full from the row.
 
-## Purple means the vendor, blue means the local environment, teal means nothing is wrong
+## What each status color means
 
-Every surface that carries color here — the Emacs tab-bar, the sidebar dots,
-the feed bubbles, the failure cards — splits the same way, and a new element
-picks its hue from that split before it picks a shade:
+Owner ruling, 2026-09-28. A workspace's status color answers ONE question on
+every surface — the Emacs tab bar, the webapp sidebar dot and the footer
+strip: what state is this workspace in, and can I use it? `proto/vocab/render-colors.json`
+is where the assignment is executable (Go, TypeScript and elisp each assert
+against it), and this table is what it means.
 
-- **Purple: the llm/agent vendor.** The vendor's api, the account, and the
-  model's own work. `vendor_blocked` and `ERROR_CLASS_API` (auth, a usage
-  limit, a persistent 4xx/5xx), the assistant text bubble, the tool-card titles
-  and the subagent chip (work the agent itself issued), the wash behind a
-  compaction summary, and the arc drawn while a failed api request is being
-  auto-retried.
-- **Blue: the local environment, BROKEN.** Everything on the
-  Emacs→daemon→shim→store route and the machine it runs on, when there is
-  EVIDENCE something failed. `starting`, `severed` (a bring-up that could not
-  be completed, or a session controller that died on a terminal protocol
-  error), `dead`, `degraded` and `ERROR_CLASS_INTERNAL` (shim down, store
-  outage, a refused command), the backfill-failed gate, and the user's own
-  prompt bubble.
-- **Teal: nothing is wired, and nothing is wrong.** `hibernated` alone — a
-  session we SIGTERMed on purpose to reclaim its ~500MB, or a workspace nothing
-  has ever been wired to.
+| Color | Meaning | Usable? | Statuses |
+|---|---|---|---|
+| Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `thinking`, `loading` |
+| Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
+| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge stopped awaiting you (`merge_conflict`, a parked merge included); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
+| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_enqueuing`, `merge_queued`, `merging` |
+| Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded` (a shim component dropping or delaying observations, or a shim taken back after a failed handover that never re-reported its state) |
+| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected`, `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved) |
+| Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
 
-  It is the correction to a conflation that cost blue its meaning. A single
-  `dormant` state used to say both "asleep by choice" and "the substrate is
-  broken", so the most routine event in the system — the idle sweeper reaping a
-  workspace nobody touched for an hour — painted a tab exactly like a dead shim
-  did. A user who watches every workspace go blue after an ordinary daemon
-  bounce learns to ignore blue, and then misses the one that is really severed.
+The rules that keep this true:
 
-  Teal's PRECEDENCE is still the blue band's, not green's (rank 15, directly
-  below `starting` at 14 and above purple's 20): a teal workspace cannot be
-  interacted with until a bring-up is paid for, which is exactly the claim green
-  exists to deny. Only the reason is benign. Consequently a teal tab over a live
-  turn is unreachable by construction — `hibernate()` refuses a workspace that
-  is not settled — and anywhere it is detectable it is logged as an invariant
-  violation, never as expected.
-
-`proto/vocab/render-colors.json` is where the split is executable: a failure
-card takes its class's color from the same table the workspace dot takes, so a
-purple workspace can never be explained by a blue card or the reverse. Reach
-for a NEW hue only once you are sure the thing is neither side's — the tree
-carried three answers about one api failure before this rule existed, and teal
-was added only because one existing color was answering two incompatible
-questions.
-
-Within a hue the shade still carries meaning:
-
-- The magenta-leaning `--blocked` (`#a21caf`,
-  `agent-repl--color-vendor-blocked-purple`) is reserved for stopped at the
-  vendor, needing a human. The violets (`--retry`, `--info-agents`,
-  `--tool-title`) are the vendor working, and a retry mistaken for a dead
-  session is the misread the two leans exist to prevent.
-- Blue is deliberately one color for every local fault. Which part of the route
-  broke matters to whoever debugs it, not to the user reading a tab, so the
-  failure cards carry that distinction instead. What blue does NOT cover is the
-  absence of a fault, which is the teal split above.
-
-The merge lifecycle is outside the split by design: merge states wear glyphs
-rather than colors so they never spend one of the six, and the Recently Merged
-disc borrows the `--info-agents` violet as a section tint, not as a claim about
-the vendor. Rows inside Recently Merged render glyphless whatever status they
-carry: the section is settled history, and a question mark or a recycle mark
-there reads as an alarm about work that is already done.
+- **Blue is only "unusable".** Something that went wrong while the workspace
+  stays usable is turquoise, never blue. An expected state that awaits you (a
+  merge conflict, a permission ask) is green, never blue.
+- **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
+  every turn-ending agent failure into a vendor or account block (blue), the
+  turn's own failure (turquoise) or an expected stop (green), and both the
+  footer and the roster call it.
+- **The status ladder ranks every unusable rung above every usable one**
+  (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
+  turquoise one.
+- **The webapp composer is closed exactly when the footer is blue or purple**
+  (`render-colors.json#composer_closed_colors`, read by
+  `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
+  never from a list of arm names. Emacs's composer is gated by the daemon's
+  host composer arm instead (a merge lease, a drain, a restart), and while the
+  workspace is unusable it still takes prompts and holds them durably (the held
+  ingress), per the ruling that held prompts survive outages.
+- **Whether a status draws FULL (unread) or PARTIAL (viewed) is independent of
+  its color.** Nothing about color changes the viewed mode.
+- **Each renderer keeps its own shade, never its own assignment.** A surface
+  that must diverge declares it in `render-colors.json#surface_overrides`; none
+  does today. The sidebar's disc fill and merge-glyph ink are the arm's tone
+  (`#ws-sidebar .st.tone-*`), and no later rule may recolor a mark.
 
 ## The "expanded footer" is what the progress footer's detail section is called
 

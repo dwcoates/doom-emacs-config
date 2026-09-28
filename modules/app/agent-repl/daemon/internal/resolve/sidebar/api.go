@@ -79,6 +79,10 @@ type Resolver interface {
 	// detached work runs. There is no lowering setter: the next turn is what
 	// makes a new result unread.
 	SetViewed(ws ids.WorkspaceID)
+	// SetStateUnreported installs, or lifts, the fact that a shim taken back
+	// after a failed handover has not re-reported its session state: the
+	// degraded rung, drawn `degraded`.
+	SetStateUnreported(ws ids.WorkspaceID, unreported bool)
 	// SetReviving raises (true) or lowers (false) the workspace's REVIVING
 	// marker: its parked session is being brought back up. The workspace
 	// verbs raise it when they decide to revive and lower it when that revival

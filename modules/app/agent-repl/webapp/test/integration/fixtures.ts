@@ -1377,6 +1377,10 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   mergeConflict: ["parked"],
   mergeFailed: [],
   merged: [],
+  // A failed turn and a degraded view are usable faults (owner ruling,
+  // 2026-09-28): each its own turquoise arm.
+  turnFailed: [],
+  degraded: ["observation", "stateUnreported"],
 };
 
 export const FOOTER_STATUS_ARMS = Object.keys(FOOTER_STATUS_SUBSTATUSES);
@@ -1479,6 +1483,8 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   mergeConflict: ["mergingCommit", "notification", "rateLimited", "contextBudget"],
   mergeFailed: ["notification", "rateLimited", "contextBudget"],
   merged: ["notification", "rateLimited", "contextBudget"],
+  turnFailed: ["notification", "rateLimited", "contextBudget", "queryDied"],
+  degraded: ["notification", "rateLimited", "contextBudget"],
 };
 
 /** The status arms whose `activity` is NOT optional on the wire. */

@@ -57,12 +57,20 @@ describe("the status mark", () => {
     expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "" });
   });
 
-  it("draws a failed turn end as a blue dot", () => {
-    expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-blue", glyph: "dot", char: "" });
+  it("draws a failed turn end as a turquoise dot", () => {
+    expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "" });
   });
 
-  it("draws a failed merge as a blue cross", () => {
-    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-blue", glyph: "failed", char: "✕" });
+  it("draws a failed merge as a turquoise cross", () => {
+    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "failed", char: "✕" });
+  });
+
+  it("draws a degraded view as a turquoise dot", () => {
+    expect(rosterArmMark("degraded")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "" });
+  });
+
+  it("draws a merge in progress as a purple recycle mark", () => {
+    expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "recycle", char: "⟳" });
   });
 
   it("draws a landed merge as a green check", () => {
