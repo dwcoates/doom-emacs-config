@@ -815,3 +815,42 @@ func rawUnknown(t *testing.T, item *storev1.StoreUnservedItem) []byte {
 	t.Helper()
 	return item.ProtoReflect().GetUnknown()
 }
+
+// ---- the conversation place ----
+
+func TestClassifyRefusesAPlaceWithANonPositiveInstant(t *testing.T) {
+	tests := []struct {
+		name string
+		atMs int64
+	}{
+		{name: "zero", atMs: 0},
+		{name: "negative", atMs: -5},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			entry := placed(pageEntry("w", "u", "agent-1", promptItem("agent-1")), test.atMs, 0)
+
+			// Act
+			_, err := classify(entry, 0)
+
+			// Assert
+			if RefusalSite(err) != SitePlaceNotPositive || RefusalField(err) != "entries[0].place.at_ms" {
+				t.Fatalf("site, field = %q, %q (error: %v); want %q, %q", RefusalSite(err), RefusalField(err), err, SitePlaceNotPositive, "entries[0].place.at_ms")
+			}
+		})
+	}
+}
+
+func TestClassifyAcceptsAPositivePlace(t *testing.T) {
+	// Arrange
+	entry := placed(pageEntry("w", "u", "agent-1", promptItem("agent-1")), 1, 0)
+
+	// Act
+	_, err := classify(entry, 0)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("classify = %v, want nil", err)
+	}
+}

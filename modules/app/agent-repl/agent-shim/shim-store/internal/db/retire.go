@@ -139,6 +139,11 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 		return nil
 	}
 
+	place, err := placeOfRow(ctx, tx, row.position)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+
 	*nextSeq++
 	seq := *nextSeq
 	if _, err := tx.ExecContext(ctx, retireRowSQL, kindRetired, seq, now, row.position); err != nil {
@@ -147,7 +152,7 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 	result.Retired++
 	result.Lines = append(result.Lines, LineWritten{
 		AgentID:  row.book.String,
-		Line:     &storev1.StoreLineAt{At: encodePointer(row.position), Line: line, Turn: stored.GetTurn()},
+		Line:     lineAt(row.position, line, stored.GetTurn(), place),
 		WriteSeq: seq,
 		Retired:  true,
 	})
