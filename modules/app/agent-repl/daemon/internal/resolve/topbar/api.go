@@ -93,6 +93,30 @@ type DetachedUnmodeled struct {
 	StartedAt time.Time
 }
 
+// DaemonWarning is one daemon-scoped condition as the warning strip draws it:
+// the row's line, and the overlay the row opens when it has one.
+type DaemonWarning struct {
+	// Line is the row's sentence. Never empty.
+	Line string
+	// DeployFailed is a failed deploy's overlay; nil is a row with no overlay.
+	DeployFailed *DeployFailedOverlay
+}
+
+// DeployFailedOverlay is what a failed deploy's row reveals, every line
+// composed by the health package out of the fault's own evidence.
+type DeployFailedOverlay struct {
+	// Step is the step that failed, in words.
+	Step string
+	// Component is what the step failed on: the build step, or the component.
+	Component string
+	// Rollback is what became of the install, in words.
+	Rollback string
+	// Detail is the failure's own account, whole.
+	Detail string
+	// Log is where the build's whole output is archived; empty for none.
+	Log string
+}
+
 // Resolver is the topbar's whole surface.
 type Resolver interface {
 	sessionwatcher.TopbarSink
@@ -158,11 +182,12 @@ type Resolver interface {
 	RaiseWarning(ws ids.WorkspaceID, key, line string)
 	// RaiseDaemonWarning is RaiseWarning for a condition of the WHOLE DAEMON
 	// — a daemon-scoped fault — which stands on EVERY workspace's warning
-	// strip, present and future, as one line with no overlay. key identifies
-	// the condition, so raising it again restates the line. Unlike a
-	// workspace's raised warning it is RETRACTED when the condition ends
-	// (RetractDaemonWarning): the fault it draws is closed, not merely past.
-	RaiseDaemonWarning(key, line string)
+	// strip, present and future, as its line and, when the warning carries
+	// one, the overlay its row opens. key identifies the condition, so
+	// raising it again restates it. Unlike a workspace's raised warning it is
+	// RETRACTED when the condition ends (RetractDaemonWarning): the fault it
+	// draws is closed, not merely past.
+	RaiseDaemonWarning(key string, warning DaemonWarning)
 	// RetractDaemonWarning takes a daemon-scoped warning off every strip. A
 	// key that is not raised retracts nothing.
 	RetractDaemonWarning(key string)

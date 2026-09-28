@@ -124,14 +124,17 @@ type fakeMerge struct {
 	merge.Orchestrator
 
 	enqueued []ids.WorkspaceID
-	err      error
+	// by records who each enqueue said asked for the merge.
+	by  []merge.Requester
+	err error
 }
 
-func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
+func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID, by merge.Requester) error {
 	if m.err != nil {
 		return m.err
 	}
 	m.enqueued = append(m.enqueued, ws)
+	m.by = append(m.by, by)
 	return nil
 }
 

@@ -190,6 +190,12 @@ func sfRateLimited(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRat
 		return status.GetClosing().GetActivity().GetRateLimited()
 	case status.GetLoading() != nil:
 		return status.GetLoading().GetActivity().GetRateLimited()
+	case status.GetMergeConflict() != nil:
+		return status.GetMergeConflict().GetActivity().GetRateLimited()
+	case status.GetMergeFailed() != nil:
+		return status.GetMergeFailed().GetActivity().GetRateLimited()
+	case status.GetMerged() != nil:
+		return status.GetMerged().GetActivity().GetRateLimited()
 	default:
 		return nil
 	}

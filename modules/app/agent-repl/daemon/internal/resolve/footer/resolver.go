@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -349,6 +350,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 		return
 	}
 	s.turnEverRan = true
+	s.turnFailed = false
 	s.sawActivity = false
 	s.blocked = nil
 	s.queryDied = nil
@@ -575,6 +577,17 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 		})
 }
 
+// OnSessionStarted lifts a standing vendor or account block: a session that
+// has (re)started is one the vendor served, which is the roster's rule for its
+// vendor_blocked on the same event, so the strip and the dot lift together.
+func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
+	r.mutate(ws, "daemon.footer.on_session_started", "the footer took a session start",
+		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
+			s.sessionStarted = true
+			s.blocked = nil
+		})
+}
+
 // OnSessionUpdate carries the session-scoped facts the footer reflects.
 func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) {
 	if update == nil {
@@ -599,7 +612,14 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			r.logSessionArm(ws, s, "query_died")
 			now := r.opts.clock.Now()
 			s.queryDied = &standing{text: deadQueryLine, at: now}
-			s.blocked = &blockedState{kind: blockedQueryDied, at: now}
+			// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling,
+			// 2026-09-28): the next prompt restarts it, and nothing about the
+			// vendor or the account refuses the session. A turn the death cut
+			// is a failed one; with no turn in flight, the last turn's end
+			// stands as it was, under the dead-query line.
+			if s.turn != nil {
+				s.turnFailed = true
+			}
 			s.turn = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
 			s.compacting = false
@@ -618,6 +638,16 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
 			r.observeRateLimitStatus(s, u.RateLimitStatus)
+			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and any
+			// other verdict lifts the block — the same rule, on the same event,
+			// as the roster's vendor_blocked (ladder.RateLimitBlocks).
+			if ladder.RateLimitBlocks(u.RateLimitStatus) {
+				if s.blocked == nil {
+					s.blocked = &blockedState{kind: blockedUsageLimit, at: r.opts.clock.Now()}
+				}
+			} else {
+				s.blocked = nil
+			}
 		}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) {

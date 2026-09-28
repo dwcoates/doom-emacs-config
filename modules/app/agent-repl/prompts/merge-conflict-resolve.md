@@ -1,10 +1,10 @@
-<!-- used by: daemon internal/workspace/merge/conflictresolver.go (ConflictResolution.Prompt); placeholders: {{conflict_commit}}, {{source_branch}}, {{target_dir}} -->
-A `git merge --no-ff` of branch {{source_branch}} at commit {{conflict_commit}} onto the merge target is CONFLICTED in the worktree at {{target_dir}}.
+<!-- used by: daemon internal/merge/phases.go (run.conflicts); placeholders: {{conflict_commit}}, {{source_branch}}, {{source_dir}}, {{target_branch}}, {{target_dir}}, {{conflicted_files}} -->
+The merge queue tried to land your branch {{source_branch}} (at commit {{conflict_commit}}) on {{target_branch}}, and the `git merge --no-ff` CONFLICTED in: {{conflicted_files}}.
 
-That worktree IS the merge target, not a temporary scratch tree and not your own workspace. Changes you make here are real changes to the target. The merge is paused mid-merge, with every conflict left staged and unresolved, waiting on you.
+The queue made that merge in a scratch tree of its own and has already thrown it away. {{target_branch}} in {{target_dir}} was never touched, and you must not touch it either: do not commit, merge, reset or check anything out there.
 
-Resolve every conflict in that worktree and stage each resolution with `git add`.
+Resolve the conflict on YOUR OWN branch, in your own worktree at {{source_dir}}: merge {{target_branch}} into {{source_branch}} there (`git merge {{target_branch}}`), resolve every conflict, and commit the merge. When your turn ends, the queue makes its merge again on {{target_branch}}'s current tip.
 
-Then STOP. Do NOT commit, do NOT amend, and do NOT run `git merge --continue`, `git merge --abort`, `git reset`, or any rebase or cherry-pick command. The daemon completes the merge commit itself as soon as your turn ends, and it can only do that against a merge that is still paused mid-merge.
+Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` and not `modules/app/agent-repl/bin/test-all.sh`. The queue refuses a resolution that does, and parks the merge. A fix to the merge or its gate lands through a branch of its own.
 
-If the conflicts cannot be resolved, say so plainly and leave the tree as you found it. The daemon aborts the merge and restores the target — a human takes it from there.
+If the conflicts cannot be resolved, say so plainly and leave your branch as it was. The queue sees the same conflict again and parks the merge for a human.

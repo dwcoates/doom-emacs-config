@@ -49,6 +49,10 @@ type RenderColors struct {
 	RosterStatus map[string]string
 	// MergeGlyphs maps each merge arm of RosterRow.status to a glyph NAME.
 	MergeGlyphs map[string]string
+	// ColoredMergeArms are the merge arms DECLARED to spend a lifecycle color
+	// beside their glyph (owner ruling, 2026-09-28). Every other merge arm
+	// takes ColorNone.
+	ColoredMergeArms []string
 	// FeedMergeHeadGlyph is the glyph name a merge bubble's head carries.
 	FeedMergeHeadGlyph string
 	// FooterStatus maps each FooterStatus.status arm name to its color.
@@ -74,6 +78,7 @@ type renderColorsJSON struct {
 	Precedence         []string                     `json:"precedence"`
 	RosterStatus       map[string]string            `json:"roster_status"`
 	MergeGlyphs        map[string]string            `json:"merge_glyphs"`
+	ColoredMergeArms   []string                     `json:"colored_merge_arms"`
 	FeedMergeHeadGlyph string                       `json:"feed_merge_head_glyph"`
 	FooterStatus       map[string]string            `json:"footer_status"`
 	FooterAllowance    map[string]string            `json:"footer_allowance"`
@@ -163,8 +168,17 @@ func (c RenderColors) validate() error {
 		if !ok {
 			return fmt.Errorf("merge_glyphs[%q] names no roster_status arm", arm)
 		}
-		if color != ColorNone {
-			return fmt.Errorf("merge arm %q takes color %q; the merge arms spend no color", arm, color)
+		colored := contains(c.ColoredMergeArms, arm)
+		if !colored && color != ColorNone {
+			return fmt.Errorf("merge arm %q takes color %q; a merge arm spends no color unless colored_merge_arms declares it", arm, color)
+		}
+		if colored && color == ColorNone {
+			return fmt.Errorf("merge arm %q is declared in colored_merge_arms but takes no color", arm)
+		}
+	}
+	for _, arm := range c.ColoredMergeArms {
+		if _, ok := c.MergeGlyphs[arm]; !ok {
+			return fmt.Errorf("colored_merge_arms names %q, which is not a merge arm", arm)
 		}
 	}
 	if c.FeedMergeHeadGlyph == "" {

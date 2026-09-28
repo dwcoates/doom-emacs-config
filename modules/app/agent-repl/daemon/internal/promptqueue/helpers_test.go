@@ -953,6 +953,9 @@ type harness struct {
 	parked      []*conversationv1.UserSaid
 	parkedTurns []ids.TurnID
 	parkedErr   error
+	// onParkedRoute, when set, runs as the route is asked, which is where a
+	// test reads what was already recorded.
+	onParkedRoute func()
 
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
@@ -1023,6 +1026,9 @@ func newHarness(t *testing.T) *harness {
 			return h.coldGate, h.coldGate != ""
 		},
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
+			if h.onParkedRoute != nil {
+				h.onParkedRoute()
+			}
 			h.parked = append(h.parked, said)
 			h.parkedTurns = append(h.parkedTurns, turn)
 			return h.parkedErr

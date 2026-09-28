@@ -35,6 +35,17 @@ type Git interface {
 	CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error
 	// RemoveWorktree removes a worktree, leaving its branch.
 	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
+	// AddDetachedWorktree checks commit out at worktreeDir on a DETACHED HEAD,
+	// creating no branch. It is the merge queue's own scratch tree: the merge
+	// is made and tested there, and nothing names it but its directory.
+	AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, commit string) error
+	// FastForward moves dir's checked-out branch, and its tree, forward to
+	// commit. It refuses anything that is not a fast-forward.
+	FastForward(ctx context.Context, dir, commit string) error
+	// IsAncestor reports whether ancestor is reachable from descendant. It is
+	// a PROBE: "no" is an ordinary answer, and only a git that could not tell
+	// is an error.
+	IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error)
 	// Nuke force-removes both the worktree and the branch. This is data
 	// destruction and has no undo.
 	Nuke(ctx context.Context, repoDir, worktreeDir, branch string) error

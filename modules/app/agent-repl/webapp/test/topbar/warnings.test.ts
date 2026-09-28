@@ -12,7 +12,9 @@ import {
   drawTopbarWarningStrip,
   drawWarningDetail,
   drawWarningList,
+  reportAppearedDeployFailures,
 } from "../../src/topbar/warnings.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
 import { daemonUnreachable, staleBundle, workspaceGone } from "../../src/failure/sink.js";
 import { oneofArms } from "../arms.js";
@@ -25,6 +27,18 @@ const strip = (...warnings: ReturnType<typeof warning>[]) =>
   create(TopbarWarningStripSchema, { warnings });
 
 const ACCOUNTING = { case: "accounting", value: { lines: [{ text: "2 responses missing usage" }] } };
+
+/** A failed deploy's overlay, with LOG when the build archived one. */
+const deployFailed = (log: string | undefined) => ({
+  case: "deployFailed",
+  value: {
+    step: { text: "install" },
+    component: { text: "store" },
+    rollback: { text: "it was rolled back to the previous build" },
+    detail: { text: "rename store: permission denied\nsecond line" },
+    ...(log === undefined ? {} : { log: { text: log } }),
+  },
+});
 
 /** Mount the chip and open its list. */
 function openList(view: ReturnType<typeof strip>) {
@@ -181,6 +195,40 @@ describe("the detail overlay", () => {
     expect(openPanel(host)?.textContent).toContain("it stalled");
   });
 
+  it.each([
+    ["step", "install"],
+    ["component", "store"],
+    ["rollback", "it was rolled back to the previous build"],
+    ["detail", "rename store: permission denied\nsecond line"],
+  ])("draws a failed deploy's %s verbatim", (name, text) => {
+    const host = openDetail(strip(warning("deploy failed: install store", deployFailed(undefined))));
+    expect(openPanel(host)?.querySelector(`[data-datum="${name}"]`)?.textContent).toBe(text);
+  });
+
+  it("keeps a failed deploy's whole account apart as its own block", () => {
+    const host = openDetail(strip(warning("deploy failed: install store", deployFailed(undefined))));
+    expect(
+      openPanel(host)?.querySelector('[data-datum="detail"]')?.classList.contains("topbar-warning-whole"),
+    ).toBe(true);
+  });
+
+  it("names where a failed build archived its output", () => {
+    const host = openDetail(strip(warning("deploy failed: build webapp", deployFailed("/s/build.log"))));
+    expect(openPanel(host)?.querySelector('[data-datum="log"]')?.textContent).toBe("/s/build.log");
+  });
+
+  it("draws no log for a failed deploy that archived none", () => {
+    const host = openDetail(strip(warning("deploy failed: install store", deployFailed(undefined))));
+    expect(openPanel(host)?.querySelector('[data-datum="log"]')).toBeNull();
+  });
+
+  it("refuses a failed deploy naming no step", () => {
+    const { tc } = topbarContext();
+    const bad = warning("a", deployFailed(undefined));
+    (bad.detail.value as { step?: unknown }).step = undefined;
+    expect(() => drawWarningDetail(bad, tc, "TopbarWarning")).toThrow(MalformedView);
+  });
+
   it("ticks an OPEN degraded window from when it began", () => {
     const host = openDetail(
       strip(
@@ -312,7 +360,14 @@ describe("the detail overlay", () => {
 
   // ENUMERATED FROM THE SCHEMA: a detail arm added to the proto fails here.
   it("has a drawing for every detail arm the schema declares", () => {
-    const drawn = ["accounting", "unmodeledTool", "detachedUnmodeled", "sessionFault", "degradedWindow"];
+    const drawn = [
+      "accounting",
+      "unmodeledTool",
+      "detachedUnmodeled",
+      "sessionFault",
+      "degradedWindow",
+      "deployFailed",
+    ];
     expect(oneofArms(TopbarWarningSchema, "detail")).toEqual(drawn);
   });
 });
@@ -455,5 +510,67 @@ describe("the chip's client-local failures", () => {
     const panel = openChip(host, drawLocalWarningStrip(tc));
     panel?.querySelector("[data-local]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(host.querySelector("img")).toBeNull();
+  });
+});
+
+/**
+ * A FAILED DEPLOY IS LOGGED LOUDLY WHERE IT FIRST APPEARS: one ERROR record
+ * per failed deploy a push carries that the previous push did not.
+ */
+describe("reportAppearedDeployFailures", () => {
+  const failing = (text: string) => warning(text, deployFailed(undefined));
+
+  /** The forwarded deploy-failure records, after the pushes under test. */
+  async function records(capture: ReturnType<typeof captureLogRecords>) {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent.filter((record) => record.operation === "topbar.deploy-failed");
+  }
+
+  it("logs a failed deploy the first push carries at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    reportAppearedDeployFailures(undefined, strip(failing("deploy failed: install store")));
+    // Assert
+    const record = await forwardedRecord(capture, "topbar.deploy-failed");
+    expect([record.level.case, record.context]).toEqual([
+      "error",
+      expect.objectContaining({ line: "deploy failed: install store", step: "install", component: "store" }),
+    ]);
+  });
+
+  it("does not log a failed deploy the previous push already carried", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const standing = strip(failing("deploy failed: install store"));
+    // Act
+    reportAppearedDeployFailures(standing, strip(failing("deploy failed: install store")));
+    // Assert
+    expect(await records(capture)).toHaveLength(0);
+  });
+
+  it("logs a failed deploy that is new beside a standing one", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const standing = strip(failing("deploy failed: install store"));
+    // Act
+    reportAppearedDeployFailures(
+      standing,
+      strip(failing("deploy failed: rollback store"), failing("deploy failed: install store")),
+    );
+    // Assert
+    expect((await records(capture)).map((record) => record.context?.line)).toEqual([
+      "deploy failed: rollback store",
+    ]);
+  });
+
+  it("logs nothing for a push carrying no failed deploy", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    reportAppearedDeployFailures(undefined, strip(warning("a", ACCOUNTING)));
+    // Assert
+    expect(await records(capture)).toHaveLength(0);
   });
 });

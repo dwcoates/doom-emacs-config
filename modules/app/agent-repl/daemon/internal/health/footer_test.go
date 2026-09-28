@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -200,11 +201,13 @@ func TestObserveFaultsTellsTheSinkWhereAnOpenedFaultLands(t *testing.T) {
 	sink := &recordingSink{}
 	observed := ObserveFaults(db, sink, newStubSurfaces())
 
-	// Act
-	if _, err := observed.OpenFault(context.Background(), wsm.Fault{
+	fault := wsm.Fault{
 		Workspace: &ws, Kind: KindResumeFailed, OpenedAt: fixedNow,
 		Evidence: map[string]string{"cause": "the shim refused"},
-	}); err != nil {
+	}
+
+	// Act
+	if _, err := observed.OpenFault(context.Background(), fault); err != nil {
 		t.Fatalf("OpenFault: %v", err)
 	}
 
@@ -216,9 +219,9 @@ func TestObserveFaultsTellsTheSinkWhereAnOpenedFaultLands(t *testing.T) {
 	want := FaultLine{
 		ID: "fault-1", Kind: KindResumeFailed,
 		Cell:   FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed},
-		Detail: "the shim refused", At: fixedNow,
+		Detail: "the shim refused", At: fixedNow, Record: fault,
 	}
-	if got.ws != ws || got.line != want {
+	if got.ws != ws || !reflect.DeepEqual(got.line, want) {
 		t.Fatalf("sink saw (%q, %+v), want (%q, %+v)", got.ws, got.line, ws, want)
 	}
 }

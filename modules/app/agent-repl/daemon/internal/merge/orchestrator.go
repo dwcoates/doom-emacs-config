@@ -70,9 +70,27 @@ type orchestrator struct {
 	// facts is every workspace's last published merge facts, which is what
 	// Facts answers from without re-deriving anything.
 	facts map[ids.WorkspaceID]MergeFacts
-	// running is the merge in flight per repository, so a second admission for
-	// one repository is impossible in this process as well as across processes.
+	// running is the run HOLDING each repository's slot: the one merge that
+	// may make a queue tree, run the gate and move the target. A second
+	// admission for one repository is impossible in this process as well as
+	// across processes (the slot's run also holds the repository's kernel
+	// lock). A PARKED run holds no slot: it yields it the moment it parks, so
+	// the merges behind it proceed (owner ruling, 2026-09-28).
 	running map[wsm.RepoKey]*run
+	// waiters are the parked runs whose guidance turn ended and who want
+	// their repository's slot back, in the order they asked. Only the pump
+	// grants a slot, so a waiter and a queue front never race for one.
+	waiters map[wsm.RepoKey][]*run
+	// kicked records a kick that arrived while the repository's pump was
+	// running. The pump reads it under the same lock before it goes idle, so
+	// a kick is never lost between the pump's last look and its exit.
+	kicked map[wsm.RepoKey]bool
+	// displaces records the workspaces whose merge the USER asked for, which
+	// alone may displace the turn in flight at admission (see Requester).
+	displaces map[ids.WorkspaceID]bool
+	// live counts the run goroutines. Nothing in production waits on it; a
+	// test does, so a run it left behind cannot outlive the test.
+	live sync.WaitGroup
 	// runsByWorkspace addresses the in-flight run of one workspace, which is
 	// what a parked route and an interrupt need.
 	runsByWorkspace map[ids.WorkspaceID]*run
@@ -119,6 +137,10 @@ type orchestrator struct {
 	// parked merge is a state, and waiting for a state by sleeping is how a
 	// suite becomes flaky.
 	onPark func(ids.WorkspaceID)
+	// onWait, when set, is signalled the moment a parked run whose guidance
+	// turn ended asks for its repository's slot back. Like onPark it exists so
+	// a test synchronizes on the state rather than on elapsed time.
+	onWait func(ids.WorkspaceID)
 }
 
 // New builds the orchestrator. Its admission pump runs on its own goroutine:
@@ -152,6 +174,9 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
 		facts:           map[ids.WorkspaceID]MergeFacts{},
 		running:         map[wsm.RepoKey]*run{},
+		waiters:         map[wsm.RepoKey][]*run{},
+		kicked:          map[wsm.RepoKey]bool{},
+		displaces:       map[ids.WorkspaceID]bool{},
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
 		offers:          map[ids.WorkspaceID]bool{},
@@ -191,7 +216,7 @@ func (d Deps) validate() error {
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
 	check(d.SelfRepoDir != "", "SelfRepoDir")
-	check(len(d.TestCommand) > 0, "TestCommand")
+	check(d.TestCommand != nil, "TestCommand")
 	if len(missing) > 0 {
 		return fmt.Errorf("merge: the orchestrator is missing %v", missing)
 	}
@@ -318,13 +343,16 @@ func (o *orchestrator) layoutFor(ctx context.Context, ws ids.WorkspaceID) (wsm.C
 	return job, nil
 }
 
-// TestCommandFor resolves the gate's command line. AGENT_REPL_TEST_ALL_SCRIPT
-// overrides the repository's own entrypoint for tests, and the script is run
-// through bash so a fixture script needs no execute bit.
-func TestCommandFor(checkout string) []string {
+// TestCommandFor resolves the gate's command line for the tree it tests: the
+// tree's OWN entrypoint, because `bin/test-all.sh` tests the checkout it lives
+// in, so running any other copy of it would test that copy's tree instead of
+// the merge. AGENT_REPL_TEST_ALL_SCRIPT overrides it for tests, and the script
+// is run through bash so a fixture script needs no execute bit. The script is
+// the LAST element, which is what the gate's preflight reads.
+func TestCommandFor(tree string) []string {
 	script := os.Getenv("AGENT_REPL_TEST_ALL_SCRIPT")
 	if script == "" {
-		script = filepath.Join(checkout, "modules", "app", "agent-repl", "bin", "test-all.sh")
+		script = filepath.Join(tree, "modules", "app", "agent-repl", "bin", "test-all.sh")
 	}
 	return []string{"bash", script}
 }

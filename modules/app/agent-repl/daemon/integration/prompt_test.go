@@ -903,7 +903,7 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 // has come to REST holding it, which is what a submission is refused against.
 //
 // WHY NOT THE MERGING ARM. `FooterStatus.merging` is the arm for every merge
-// substatus, ENQUEUING included -- and enqueuing is published by the
+// IN FLIGHT, ENQUEUING included -- and enqueuing is published by the
 // MergeWorkspace request itself, before the queue pump has admitted anything
 // and before any lease exists. Waiting on the arm therefore returned at
 // enqueuing, so every assertion past it raced a merge that was still running:
@@ -935,6 +935,7 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f, _, _ := promptMergeFixture(t)
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -971,6 +972,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 	// Arrange: the scripted conflict's brief is concluded, so the run leaves
 	// the conflicts phase and parks awaiting the user's guidance.
 	f, _, _ := promptMergeFixture(t)
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -979,7 +981,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	pushConcludedTurn(f.shim, mainAgent, "merge-conflict-brief")
 	awaitFooter(t, f, footer, "the merge parked on its conflict", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
 	})
 
 	// Act
@@ -1009,6 +1011,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	})
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -2141,6 +2144,7 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 
 	// Act: the merge admits, captures the still-open turn as displaced, and
 	// lands with no conflict and a passing gate.
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}

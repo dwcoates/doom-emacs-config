@@ -303,6 +303,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	roster := d.WatchRoster()
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -773,21 +774,24 @@ func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
 	}
 }
 
-// TestRosterRowIsVendorBlockedWhenTheQueryDies covers
-// RosterRowStatusVendorBlocked driven by SessionUpdate_QueryDied
-// (internal/resolve/sidebar/status_test.go's
-// TestRowIsVendorBlockedWhenTheQueryDied is the same fact at the unit level;
-// this is its integration-level, real-cause counterpart).
-func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
+// TestRosterRowIsTurnFailedWhenTheQueryDiesUnderATurn covers a dead query as
+// what the owner ruled it (2026-09-28): a FAILED TURN, drawn `turn_failed`,
+// never `vendor_blocked` — nothing about the vendor or the account refuses the
+// session, and the next prompt restarts the query. The watcher closes the
+// turn the death cut as failed (internal/resolve/sidebar/status_test.go's
+// TestAQueryDeathDoesNotBlockTheRow is the unit-level half).
+func TestRosterRowIsTurnFailedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the died query the test feeds.
-	f.d.ExpectWarnings("daemon.sessionwatcher.query_died")
+	// A death under a turn also draws the turn's terminal row in the feed.
+	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "ready before the query dies", func(r *frontendv1.WorkspaceRoster) bool {
+	f.submit("go", "k-query-died", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	awaitRoster(t, f.d, roster, "the turn in flight before the query dies", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetReady() != nil
+		return row != nil && (row.GetSubmitting() != nil || row.GetThinking() != nil)
 	})
 
 	// Act
@@ -796,40 +800,42 @@ func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
 	})
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "vendor_blocked after the query died", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "turn_failed after the query died", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetVendorBlocked() != nil
+		return row != nil && row.GetTurnFailed() != nil
 	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetVendorBlocked() == nil {
-		t.Fatalf("the roster row's status = %T after the query died, want vendor_blocked", row.GetStatus())
+	if row := rosterRow(got, f.ws.GetId()); row.GetTurnFailed() == nil {
+		t.Fatalf("the roster row's status = %T after the query died, want turn_failed", row.GetStatus())
 	}
 }
 
-// TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails covers
+// TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails covers
 // RosterRowStatusMergeFailed: a genuine (non-conflict) error that gives up
-// the run (internal/merge/run.go's emacsMethod, then abort() ->
+// the run (internal/merge/phases.go's attempt, then abort() ->
 // internal/merge/terminal.go's StateFailed) -- as opposed to
 // merge_conflict/parked, which a scripted conflict or a test-gate escalation
 // produce instead (merge_test.go's own tests). The scripted git failure is
-// the harness's repo.ScriptFailure, landed this round for exactly this kind
-// of real, non-conflict git failure.
-func TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails(t *testing.T) {
+// the harness's repo.ScriptFailure. (It was the landed-range read that
+// failed here once; that read now follows a landing that has HAPPENED, so
+// its failure reads merged, not failed -- internal/merge's
+// TestALandingWhoseRangeWillNotReadStillConcludesAsMerged.)
+func TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails(t *testing.T) {
 	t.Parallel()
 	// Arrange: a clean self-repo merge (mergeCleanRepo, merge_test.go) whose
-	// LandedRange git call (`rev-list`, internal/gitclient/gitclient.go) is
-	// scripted to fail after the no-ff merge itself lands cleanly.
+	// no-ff merge, made in the queue's own tree, git refuses outright.
 	f, d, repo, _ := mergeCleanRepo(t)
-	repo.ScriptFailure(repo.Dir, 1, "boom: rev-list exploded", "rev-list")
+	repo.ScriptFailure("", 1, "fatal: refusing to merge unrelated histories", "merge")
 	roster := d.WatchRoster()
-	d.ExpectWarnings("daemon.gitclient.landed_range", "daemon.merge.abort")
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.abort")
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert
-	got := awaitRoster(t, d, roster, "merge_failed after the landed-range git command fails", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d, roster, "merge_failed after the merge git command fails", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetMergeFailed() != nil
 	})

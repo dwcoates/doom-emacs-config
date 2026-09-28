@@ -3,6 +3,7 @@ package sidebar
 import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -52,6 +53,10 @@ type wsState struct {
 	turnEverRan bool
 	// lastClose is how the last turn ended, read only once the turn is over.
 	lastClose TurnClose
+	// lastFailure is how the last turn's own terminal classified its failure
+	// (ladder.ClassifyFailure). It refines a FAILED close: an expected stop —
+	// a Stop hook, a deferred tool — closes as failed but reads as `done`.
+	lastFailure ladder.FailureClass
 	// compacting reports a VENDOR-initiated auto-compaction in flight, which
 	// no accepted turn of ours announces.
 	compacting bool
@@ -157,6 +162,7 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.turnEverRan = true
 	s.sawActivity = false
 	s.vendorBlocked = false
+	s.lastFailure = ladder.NoFailure
 	s.compacting = turn.Act == footer.ActCompact
 	// A new turn is new foreground work: the detached items announced by the
 	// turn before it belong to that turn's account, not this one's. The
@@ -207,15 +213,32 @@ func isTurnEndArm(arm string) bool {
 	return arm == armDone || arm == armInterrupted || arm == armTurnFailed
 }
 
+// readsResult reports whether a viewed report on arm READS the last turn's
+// result: a turn-end arm, or `vendor_blocked`, which a failed turn raised and
+// which stands over that turn's end until the block lifts (owner ruling,
+// 2026-09-28). The PARTIAL marker is still drawn on a turn end alone
+// (viewedOn).
+func readsResult(arm string) bool {
+	return isTurnEndArm(arm) || arm == "vendor_blocked"
+}
+
 // turnEndArm names the turn-end arm the last close resolves to. A close this
 // build does not know was refused loudly when it was installed
 // (SetTurnEnded), so it is never unread; it keeps the row on `done`, the arm
 // it has always drawn.
+//
+// AN EXPECTED STOP IS A COMPLETION (owner ruling, 2026-09-28): a Stop hook
+// that forbade continuing and a deferred tool close the turn as failed, but
+// they await the human, so they read `done`, never the blue `turn_failed`.
 func (s *wsState) turnEndArm() string {
-	if arm, ok := closeArm(s.lastClose); ok {
-		return arm
+	arm, ok := closeArm(s.lastClose)
+	if !ok {
+		return armDone
 	}
-	return armDone
+	if arm == armTurnFailed && s.lastFailure == ladder.ExpectedStop {
+		return armDone
+	}
+	return arm
 }
 
 // noteArm records the arm being published for this workspace and reports

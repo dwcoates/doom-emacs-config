@@ -85,14 +85,7 @@ func (r rolledBack) state() string {
 
 // clause says what became of the install, in the fault record's own prose.
 func (r rolledBack) clause() string {
-	switch r.state() {
-	case health.RollbackRestored:
-		return "it was rolled back to the previous build"
-	case health.RollbackIncomplete:
-		return "its rollback did NOT restore the previous build"
-	default:
-		return "nothing was installed"
-	}
+	return health.RollbackClause(r.state())
 }
 
 // recordFailure opens the fault a failed deploy stands as, superseding the

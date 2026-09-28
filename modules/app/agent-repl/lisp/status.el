@@ -644,8 +644,8 @@ sits flush on the bar with no ground of its own.  See
     (:merge-enqueuing . "none")
     (:merging         . "none")
     (:merge-queued    . "none")
-    (:merge-conflict  . "none")
-    (:merge-failed    . "none")
+    (:merge-conflict  . "green")
+    (:merge-failed    . "blue")
     (:merged          . "none"))
   "Which of the five colors each ROSTER STATUS ARM takes, BY NAME.
 
@@ -670,6 +670,12 @@ different shades of one idea.  What may never differ is the ASSIGNMENT.
 the sidebar reports them with a glyph rather than spending a lifecycle
 color on the merge pipeline — and `none\=' and `inactive\=' take none
 because a workspace with no session has no lifecycle to report at all.
+
+TWO MERGE ARMS ARE COLORED AS WELL AS GLYPHED (owner ruling,
+2026-09-28), as the fixture\='s `colored_merge_arms\=' declares.
+`:merge-failed\=' is BLUE, the color that says something is wrong with
+the workspace.  `:merge-conflict\=' (a parked merge included) is GREEN:
+an expected state, ready for a human response, and never blue.
 THE TAB BAR DECLARES ITS OWN OVERRIDES (see
 `agent-repl-status-tab-bar-color-overrides\='); this table is what every
 surface starts from, never what the tab bar finishes with.
@@ -696,7 +702,7 @@ has touched.  PURPLE says what is true of the three IN-FLIGHT merge arms:
 work is in flight, it is the SYSTEM\='s rather than the agent\='s, and the
 user cannot act on the workspace until it resolves.  `merge_conflict\'
 wants the user and the other two are terminal, so none of them is
-overridden.
+overridden: the first two take their shared green and blue here too.
 
 `:vendor-blocked\=' is NO LONGER an override.  It was one while the shared
 assignment painted it purple and this glyph-less surface could not tell
@@ -737,7 +743,9 @@ assertion test checks that every named glyph has a character here.
 
 The merge arms take no color on the shared assignment precisely so the
 glyph can be the whole report; on the tab bar the three in-flight arms
-ALSO take purple, and the glyph then says which of the three it is.")
+ALSO take purple, and the glyph then says which of the three it is.
+`:merge-conflict\=' and `:merge-failed\=' take their shared green and
+blue, and draw their glyph over it.")
 
 (defconst agent-repl-status-inactive-glyph "?"
   "The glyph an `inactive\=' row draws.
@@ -904,6 +912,21 @@ in `agent-repl--color-default-bracket'."
                          'agent-repl-tab-init
                          agent-repl--color-init-blue
                          agent-repl--color-light))
+    ;; MERGE-FAILED is BLUE and keeps its ✗ (owner ruling, 2026-09-28): "blue
+    ;; status in general is used to signal something is wrong with the current
+    ;; workspace".  It had no row at all, so it fell through to the default
+    ;; and drew a bare uncolored ✗ that read as no status.
+    (:merge-failed . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-init
+                       agent-repl--color-init-blue
+                       agent-repl--color-light))
+    ;; MERGE-CONFLICT is GREEN and keeps its ≠ (owner ruling, 2026-09-28): a
+    ;; conflict, a parked merge included, is an EXPECTED state ready for a
+    ;; human response.  Blue is reserved for what is unexpected or wrong.
+    (:merge-conflict . ,(agent-repl--tab-palette-row
+                         'agent-repl-tab-ready
+                         agent-repl--color-done-green
+                         agent-repl--color-dark))
     ;; `:start-failed', `:dead' and `:degraded' are BLUE, not colors of
     ;; their own: a shim that never came up, one that has gone away, and a
     ;; store outage are the same compromised route.  Which way the route is
@@ -960,9 +983,10 @@ arms have rows at all because of the override that gives them purple;
 badge-bearing surface.
 
 The arms taking `none' have NO entry and fall through to
-`agent-repl--tab-default': `:merge-conflict', `:merge-failed' and
-`:merged' report themselves with a glyph, and `:none' and `:inactive'
-have no lifecycle to report at all.")
+`agent-repl--tab-default': `:merged' reports itself with a glyph, and
+`:none' and `:inactive' have no lifecycle to report at all.
+`:merge-conflict' (green) and `:merge-failed' (blue) have rows, and
+draw their glyph over them.")
 
 
 ;;; The roster is the state -----------------------------------------------
@@ -1001,9 +1025,11 @@ at ERROR rather than painted."
 
 (defun agent-repl-status-tab-glyph (ws arm)
   "Return the glyph WS draws for ARM, or nil when it draws none.
-Three glyphs exist, in precedence order: the merge pipeline's (the
+Three glyphs exist, in precedence order: the merge pipeline's (most
 merge arms carry no lifecycle color, so the glyph is their whole
-report), the inactive question mark, and the attention marker."
+report, and `:merge-conflict' and `:merge-failed' draw theirs over
+their green and blue), the inactive question mark, and the attention
+marker."
   (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
@@ -3028,8 +3054,9 @@ so this reaction never has to enumerate origins."
   "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
 Registered on `agent-repl-roster-status-change-functions'.
 
-The daemon takes a dwell on a turn-end row (done, interrupted or turn-failed)
-only: one reported while WS is thinking, waiting, severed or anything else is
+The daemon takes a dwell on a turn-end row (done, interrupted or
+turn-failed) and on a vendor-blocked one, whose failed turn it reads;
+one reported while WS is thinking, waiting, severed or anything else is
 dropped, so there is no marker for the viewed-cleared edge to announce later.
 Without this, a user who watched a turn run to done would have spent the
 one-shot dwell on the running turn, and the finished response would never go

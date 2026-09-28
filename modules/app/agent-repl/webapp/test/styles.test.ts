@@ -3099,3 +3099,20 @@ describe("a link in a prompt bubble (owner ruling, 2026-09-27)", () => {
     expect(rule).toMatch(/color:\s*var\(--prompt-link\)/);
   });
 });
+
+// THE TWO COLORED MERGE GLYPHS (owner rulings, 2026-09-28). The merge glyph
+// rule paints every merge mark the accent, so the two arms the vocabulary
+// colors must be repainted after it, or the rail would draw a blue failure
+// and a green conflict in the accent.
+describe("the colored merge glyphs", () => {
+  it.each([
+    ["#ws-sidebar .st-merge-conflict", "var(--ok)"],
+    ["#ws-sidebar .st-merge-failed", "var(--init)"],
+  ])("paints %s with %s", (selector, color) => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.length === 1 && rule.selectors[0] === selector,
+    );
+    const last = rules.at(-1);
+    expect(last?.declarations).toContain(`color: ${color}`);
+  });
+});

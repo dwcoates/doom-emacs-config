@@ -1791,19 +1791,20 @@ this test needs the genuinely sectionless roster."
   "A DeploySuccess naming one outcome of every arm.")
 
 (defconst agent-repl-test-verbs--deploy-errors
-  '(((:arm :build-failed :value (:step "webapp" :detail "tsc: 2 errors" :log "/tmp/b.log"))
-     "agent-repl: deploy refused: the webapp build failed, so nothing was deployed: tsc: 2 errors (log: /tmp/b.log)")
-    ((:arm :already-deploying :value nil)
+  '(((:arm :already-deploying :value nil)
      "agent-repl: deploy refused: a deploy is already running; ask again when it ends")
     ((:arm :already-rolling-out :value (:waiting-on ("ws-a" "ws-b")))
      "agent-repl: deploy refused: a handover is already in flight, waiting on ws-a, ws-b")
     ((:arm :joining :value nil)
-     "agent-repl: deploy refused: this daemon is a successor still joining a handover")
-    ((:arm :service-restart-failed :value (:component :store :detail "exit 78"))
-     "agent-repl: deploy refused: store did not come back onto the fresh build: exit 78")
-    ((:arm :install-failed :value (:component :daemon :detail "EACCES"))
-     "agent-repl: deploy refused: the daemon artifact could not be installed, so nothing was restarted: EACCES"))
-  "Every DeployError cause arm and the echo-area line it is reported by.")
+     "agent-repl: deploy refused: this daemon is a successor still joining a handover"))
+  "Every DeployError cause arm the verb echoes, and the line it is echoed by.")
+
+(defconst agent-repl-test-verbs--deploy-fault-errors
+  '((:arm :build-failed :value (:step "webapp" :detail "tsc: 2 errors" :log "/tmp/b.log"))
+    (:arm :service-restart-failed :value (:component :store :detail "exit 78"))
+    (:arm :install-failed :value (:component :daemon :detail "EACCES")))
+  "Every DeployError cause arm the daemon also stands as a `deploy_failed' fault.
+Its minibuffer line is the pushed fault's, never the verb's.")
 
 (ert-deftest agent-repl-verbs-deploy-unforced-sends-no-force ()
   "Without a prefix the deploy is unforced and asks nothing."
@@ -1930,22 +1931,72 @@ this test needs the genuinely sectionless roster."
       ;; Assert
       (should (equal (car agent-repl-test-verbs--messages) (cadr case))))))
 
-(ert-deftest agent-repl-verbs-deploy-every-refusal-is-an-error-record ()
-  "Every DeployError arm is recorded at ERROR with its arm and fields."
-  (dolist (case agent-repl-test-verbs--deploy-errors)
+(defun agent-repl-test-verbs--deploy-error-records (cause)
+  "Refuse a deploy with CAUSE and answer the ERROR records it made."
+  (let ((errors nil))
     (agent-repl-test-verbs--with
-        `((:deploy . (:response (:arm :error :value (:cause ,(car case))))))
+        `((:deploy . (:response (:arm :error :value (:cause ,cause)))))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        (agent-repl-deploy nil)))
+    errors))
+
+(defun agent-repl-test-verbs--deploy-refused-record (cause)
+  "The ERROR record a deploy refused with CAUSE is expected to make."
+  (format "elisp.verbs.deploy-refused arm=%S fields=%S"
+          (plist-get cause :arm) (plist-get cause :value)))
+
+(ert-deftest agent-repl-verbs-deploy-every-refusal-is-an-error-record ()
+  "Every DeployError arm the verb echoes is recorded at ERROR with its fields."
+  (dolist (case agent-repl-test-verbs--deploy-errors)
+    ;; Arrange / Act
+    (let ((errors (agent-repl-test-verbs--deploy-error-records (car case))))
+      ;; Assert
+      (should (equal errors (list (agent-repl-test-verbs--deploy-refused-record (car case))))))))
+
+(ert-deftest agent-repl-verbs-deploy-every-fault-refusal-is-an-error-record ()
+  "Every DeployError arm its fault echoes is still recorded at ERROR here."
+  (dolist (cause agent-repl-test-verbs--deploy-fault-errors)
+    ;; Arrange / Act
+    (let ((errors (agent-repl-test-verbs--deploy-error-records cause)))
+      ;; Assert
+      (should (equal errors (list (agent-repl-test-verbs--deploy-refused-record cause)))))))
+
+(ert-deftest agent-repl-verbs-deploy-every-fault-refusal-leaves-the-echo-to-its-fault ()
+  "A failure the daemon stands as a fault is not echoed by the verb.
+Its pushed fault's line is the one minibuffer line (daemon-link.el)."
+  (dolist (cause agent-repl-test-verbs--deploy-fault-errors)
+    (agent-repl-test-verbs--with
+        `((:deploy . (:response (:arm :error :value (:cause ,cause)))))
+      ;; Act
+      (agent-repl-deploy nil)
+      ;; Assert
+      (should-not (agent-repl-test-verbs--messaged-p "deploy refused")))))
+
+(ert-deftest agent-repl-verbs-deploy-fault-refusal-records-its-sentence ()
+  "A failure left to its fault still records the verb's own sentence for it."
+  (let ((records nil))
+    (agent-repl-test-verbs--with
+        '((:deploy . (:response (:arm :error
+                                 :value (:cause (:arm :install-failed
+                                                 :value (:component :daemon :detail "EACCES")))))))
       ;; Arrange
-      (let ((errors nil))
-        (cl-letf (((symbol-function 'agent-repl--error)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
-          ;; Act
-          (agent-repl-deploy nil))
-        ;; Assert
-        (should (equal errors
-                       (list (format "elisp.verbs.deploy-refused arm=%S fields=%S"
-                                     (plist-get (car case) :arm)
-                                     (plist-get (car case) :value)))))))))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (when (string-prefix-p "elisp.verbs.deploy-refusal-echoed-by-its-fault" fmt)
+                     (push (apply #'format fmt args) records)))))
+        ;; Act
+        (agent-repl-deploy nil)))
+    ;; Assert
+    (should (equal records
+                   '("elisp.verbs.deploy-refusal-echoed-by-its-fault arm=:install-failed sentence=\"the daemon artifact could not be installed, so nothing was restarted: EACCES\"")))))
+
+(ert-deftest agent-repl-verbs-deploy-fault-arms-are-every-step-failure ()
+  "The verb leaves the echo to the fault for exactly the three step failures."
+  (should (equal agent-repl-verbs--deploy-fault-arms
+                 (mapcar (lambda (cause) (plist-get cause :arm))
+                         '((:arm :build-failed) (:arm :install-failed)
+                           (:arm :service-restart-failed))))))
 
 (ert-deftest agent-repl-verbs-deploy-unanswered-is-a-transport-failure ()
   "A daemon that does not answer the deploy is reported as a failure."

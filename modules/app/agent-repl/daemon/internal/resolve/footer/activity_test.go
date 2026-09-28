@@ -336,7 +336,9 @@ func TestARejectedAllowanceStatusIsCopied(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
+	// allowance line stands under the block.
+	got := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetRateLimited().GetSession()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the vendor's rejected arm copied", got.GetStatus())
 	}
@@ -419,7 +421,9 @@ func TestTheVerdictJoinsWhenTheRateLimitEventArrives(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
+	// allowance line stands under the block.
+	got := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetRateLimited().GetSession()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the verdict to have joined the drawn allowance", got.GetStatus())
 	}

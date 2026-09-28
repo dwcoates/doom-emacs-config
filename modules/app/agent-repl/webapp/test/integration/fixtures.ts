@@ -1350,7 +1350,7 @@ export const emptyFeedPage = (): FeedPage => feedPageSuccess([]);
 
 /** Every status arm, with every legal substatus arm under it. */
 export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
-  idle: ["ready", "done"],
+  idle: ["ready", "done", "turnFailed"],
   thinking: ["submitting", "thinking", "clearing", "compacting"],
   waiting: ["wakeup", "permission", "question", "coldGate", "interrupting"],
   interrupted: ["byUser", "hostShutdown"],
@@ -1372,6 +1372,11 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   disconnected: ["starting", "degraded", "severed", "dead", "startFailed"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
+  // A merge that STOPPED is its own arm (owner ruling, 2026-09-28): a
+  // conflict awaiting the user (its one step is parked), a failure, a landing.
+  mergeConflict: ["parked"],
+  mergeFailed: [],
+  merged: [],
 };
 
 export const FOOTER_STATUS_ARMS = Object.keys(FOOTER_STATUS_SUBSTATUSES);
@@ -1443,7 +1448,7 @@ export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
 
 /** Which activity kinds each status arm legally carries. */
 export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
-  idle: ["notification", "contextBudget", "rateLimited"],
+  idle: ["notification", "contextBudget", "rateLimited", "queryDied"],
   thinking: [
     "hook",
     "retrying",
@@ -1471,6 +1476,9 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   disconnected: ["notification", "rateLimited", "contextBudget"],
   closing: ["closeBlocked", "notification", "rateLimited", "contextBudget"],
   loading: ["contextInjected", "notification", "rateLimited", "contextBudget"],
+  mergeConflict: ["mergingCommit", "notification", "rateLimited", "contextBudget"],
+  mergeFailed: ["notification", "rateLimited", "contextBudget"],
+  merged: ["notification", "rateLimited", "contextBudget"],
 };
 
 /** The status arms whose `activity` is NOT optional on the wire. */
@@ -1687,6 +1695,7 @@ export const TOPBAR_WARNING_ARMS = [
   "detachedUnmodeled",
   "sessionFault",
   "degradedWindow",
+  "deployFailed",
 ] as const;
 export type TopbarWarningArm = (typeof TOPBAR_WARNING_ARMS)[number];
 
@@ -1725,6 +1734,16 @@ const warningDetail = (arm: TopbarWarningArm): WarningDetail => {
           reason: { text: "disk pressure" },
           beganAtMs: 1_000n,
           extent: { case: "open", value: {} },
+        },
+      };
+    case "deployFailed":
+      return {
+        case: "deployFailed",
+        value: {
+          step: { text: "install" },
+          component: { text: "store" },
+          rollback: { text: "it was rolled back to the previous build" },
+          detail: { text: "rename store: permission denied" },
         },
       };
   }
@@ -1913,6 +1932,7 @@ export const ROSTER_STATUS_ARMS = [
   "permission",
   "done",
   "interrupted",
+  "turnFailed",
   "ready",
   "idleAsync",
   "vendorBlocked",
@@ -1932,7 +1952,11 @@ export const ROSTER_STATUS_ARMS = [
 ] as const;
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
-/** The merge arms the vocabulary paints with glyphs instead of a color. */
+/**
+ * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
+ * the ones render-colors.json declares in `colored_merge_arms` also spend a
+ * color (owner ruling, 2026-09-28: merge_conflict green, merge_failed blue).
+ */
 export const ROSTER_MERGE_ARMS = [
   "mergeEnqueuing",
   "merging",
@@ -2215,6 +2239,9 @@ export const WATCH_DAEMON_PUSHES = [
   // Addressed to stale EMACS streams alone, never to a webview; a page that
   // meets one skips it as the same forward-compat skew.
   "reloadElisp",
+  // The daemon's standing loud faults: an EMACS stream's alone (a webview
+  // draws the same faults on its topbar and footer), skipped as the same skew.
+  "faultsStanding",
   // The planned end of the stream: consumed by the stream pipeline itself
   // (`plannedEnding`), which then reopens without filing a failure.
   "ending",

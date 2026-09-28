@@ -556,8 +556,13 @@ func (s *server) watchDaemon(
 	events := s.daemonEventTopic.Subscribe(streamCtx)
 
 	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan *agentreplv1.WatchDaemonResponse, 4)}
+	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
+	// them on the topbar and footer views it already holds. A nil channel is
+	// never ready, so a webview's select never takes that case.
+	var faults <-chan *agentreplv1.DaemonFaultsStanding
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
+		faults = s.deps.LoudFaults.Subscribe(streamCtx)
 	}
 	// The reported build is read into the record BEFORE the watcher is
 	// shared: once registered, a deploy's reload may move it under s.mu.
@@ -601,6 +606,19 @@ func (s *server) watchDaemon(
 			push, fromState = event, false
 		case addressed := <-w.elisp:
 			push, fromState = addressed, false
+		case standing, ok := <-faults:
+			if !ok {
+				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if standing == nil {
+				s.log.Error("WatchDaemon", "a publisher raised an empty fault set; it was not sent", nil)
+				continue
+			}
+			push = &agentreplv1.WatchDaemonResponse{
+				Push: &agentreplv1.WatchDaemonResponse_FaultsStanding{FaultsStanding: standing},
+			}
+			fromState = false
 		}
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",

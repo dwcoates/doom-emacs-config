@@ -918,29 +918,25 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
 	repoRef := mergeRepositoryRef(t, d, repo)
-	first := mergeCreateChild(t, d, repoRef, "ahead", "do the first thing", nil)
-	repo.ScriptConflict(repo.Dir, mergeBranchOf(t, first.ws), "conflict.txt")
+	first := mergeCreateChild(t, d, repoRef, "ahead", "do the first thing",
+		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold the queue open")})
 	second := mergeCreateChild(t, d, repoRef, "behind", "do the second thing", nil)
 
-	// The first merge parks on its scripted conflict and holds the repo lock,
-	// so the second one waits in the queue.
+	// The first merge stops in a before-merge prompt nobody answers, holding
+	// its repository's slot, so the second one waits in the queue. (A PARKED
+	// merge would not hold it: it yields the slot, owner ruling 2026-09-28.)
+	harness.CommitWork(t, first.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: first.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(first) = error %v, want the merge enqueued", err)
 	}
 	first.shim.ExpectStartTurn()
-	d.AwaitWorkspaceLogOperationCount(first.ws.GetDir(), harness.OpTurnOpened, 2)
-	pushConcludedTurn(first.shim, mainAgent, "conflict-brief-done")
-	host := d.WatchHost(first.ws)
-	awaitView(t, first, host, "the first merge parked", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
-	})
+	harness.CommitWork(t, second.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: second.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(second) = error %v, want the merge enqueued", err)
 	}
 	roster := d.WatchRoster()
 	awaitRoster(t, d, roster, "the second workspace's queued merge", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, second.ws.GetId())
-		return row.GetMergeQueued() != nil || row.GetMergeEnqueuing() != nil
+		return rosterRow(r, second.ws.GetId()).GetMergeQueued() != nil
 	})
 
 	// Act
@@ -953,11 +949,7 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	if resp.Msg.GetError().GetBlocked() == nil {
 		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
-	// The Arrange's scripted conflict is stated by the merge tab, the git
-	// client and the resulting park. The Act's own refusal names a LANDED arm,
-	// so it warns about nothing and is deliberately not declared here.
-	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts",
-		"daemon.gitclient.merge_no_ff")
+	// The Act's own refusal names a LANDED arm, so it warns about nothing.
 }
 
 func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {

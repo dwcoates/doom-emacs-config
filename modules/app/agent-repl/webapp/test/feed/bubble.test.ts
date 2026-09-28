@@ -18,6 +18,8 @@ import {
   openSuccess,
   page,
   push,
+  pushScale,
+  pushSelection,
   responseRow,
   rowContext,
   stubRenderers,
@@ -1426,5 +1428,51 @@ describe("mountBubble: a collapse moves nothing the reader is looking at", () =>
     bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
     // Assert
     expect(metrics.scrollTop).toBe(1000);
+  });
+});
+
+// Regression, 2026-09-28: a merge bubble's tail filed `frameUndecodable` on
+// `WatchFeedResponse.row` for the scale push every sub-feed tail receives first.
+describe("mountBubble: the non-row frames a sub-feed tail carries", () => {
+  async function expandedTail(row: FeedRow) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    const h = harness({ channels });
+    const { bubble } = mount(row, h);
+    await bubble.expand();
+    await settle();
+    return { h, channel, bubble };
+  }
+
+  it("reads a merge bubble's feed-text-scale frame as a scale, not an unreadable row", async () => {
+    // Arrange
+    const { h, channel } = await expandedTail(mergeRow("b1"));
+    // Act
+    channel.push(pushScale(1.25));
+    await settle();
+    // Assert
+    expect(h.sink.reported).toEqual([]);
+  });
+
+  it("applies the feed-text-scale frame a sub-feed tail carries to the document", async () => {
+    // Arrange
+    document.documentElement.style.removeProperty("--feed-text-scale");
+    const { channel } = await expandedTail(subagentRow("b1"));
+    // Act
+    channel.push(pushScale(1.5));
+    await settle();
+    // Assert
+    expect(document.documentElement.style.getPropertyValue("--feed-text-scale")).toBe("1.5");
+  });
+
+  it("still files a selection frame on a sub-feed as unreadable, the selection being root-only", async () => {
+    // Arrange
+    const { h, channel } = await expandedTail(subagentRow("b1"));
+    // Act
+    channel.push(pushSelection({ active: false }));
+    await settle();
+    // Assert
+    expect(h.sink.reported).toEqual(["frameUndecodable"]);
   });
 });

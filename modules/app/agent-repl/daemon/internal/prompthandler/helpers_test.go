@@ -235,6 +235,17 @@ type harness struct {
 	minted ids.TurnID
 	// log captures every record the handler writes.
 	log *dlog.TestSurfaces
+
+	// movedOn records every workspace the handler said moved on.
+	movedMu sync.Mutex
+	movedOn []ids.WorkspaceID
+}
+
+// moved reads back the workspaces the handler said moved on.
+func (h *harness) moved() []ids.WorkspaceID {
+	h.movedMu.Lock()
+	defer h.movedMu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.movedOn...)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -260,7 +271,12 @@ func newHarness(t *testing.T) *harness {
 			return h.panel, h.panelErr
 		},
 		MintTurn: func() ids.TurnID { return h.minted },
-		Log:      h.log,
+		MovedOn: func(_ context.Context, ws ids.WorkspaceID) {
+			h.movedMu.Lock()
+			h.movedOn = append(h.movedOn, ws)
+			h.movedMu.Unlock()
+		},
+		Log: h.log,
 	})
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
