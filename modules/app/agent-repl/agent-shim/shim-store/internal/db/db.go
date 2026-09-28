@@ -1104,7 +1104,7 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 		return fail(storagef(err, "begin the in-place table build"))
 	}
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, fields)
 	for _, table := range inPlaceTables {
 		if !contains(missing, table.name) {
 			continue
