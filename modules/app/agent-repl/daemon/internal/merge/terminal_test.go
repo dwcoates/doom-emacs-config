@@ -1425,3 +1425,76 @@ func TestRouteParkedAnswersNoRunOnceTheRunEnded(t *testing.T) {
 		t.Fatalf("RouteParked after the run ended = %v, want the no-run answer", err)
 	}
 }
+
+// --- a concluded merge's state retires once the workspace moves on --------
+
+// TestAConcludedMergesStateRetiresWhenTheWorkspaceMovesOn covers the lingering
+// state: a failed or landed merge's standing state is retired by the next
+// submission of the workspace's own.
+func TestAConcludedMergesStateRetiresWhenTheWorkspaceMovesOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		conclude func(h *harness)
+	}{
+		{name: "a failed merge", conclude: func(h *harness) {
+			h.git.mergeErr = errors.New("refusing to merge unrelated histories")
+		}},
+		{name: "a landed merge", conclude: func(h *harness) {
+			h.landsCleanly("abc123def4567")
+			h.gatePasses("daemon")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a merge that concluded.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			tc.conclude(h)
+			enqueue(t, h)
+			_ = h.admit(context.Background())
+
+			// Act.
+			h.o.RetireConcluded(context.Background(), theWorkspace)
+
+			// Assert.
+			if _, known := h.o.Facts(theWorkspace); known || h.footer.last().State != "none" {
+				t.Fatalf("the concluded state still stands (footer %q)", h.footer.last().State)
+			}
+		})
+	}
+}
+
+// TestAMergeInFlightIsNeverRetiredByTheWorkspaceMovingOn covers the other side:
+// only a CONCLUDED merge retires; a parked one's prompt is its guidance.
+func TestAMergeInFlightIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
+	// Arrange: a parked merge.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parkOnABrokenGate(t, h, ctx, 1)
+
+	// Act.
+	h.o.RetireConcluded(ctx, theWorkspace)
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateParked {
+		t.Fatalf("the parked merge's state is %q, want it still parked", facts.State)
+	}
+}
+
+// TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn covers a merge waiting
+// in the queue: it is not concluded either.
+func TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	h.o.RetireConcluded(context.Background(), theWorkspace)
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateQueued {
+		t.Fatalf("the queued merge's state is %q, want it still queued", facts.State)
+	}
+}

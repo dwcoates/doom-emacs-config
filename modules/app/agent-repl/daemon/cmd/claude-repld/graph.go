@@ -785,6 +785,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:       p.DB,
 		Panels:   server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
 		MintTurn: wsm.NewTurnID,
+		MovedOn:  mergeOrchestrator.RetireConcluded,
 		Log:      p.Surfaces,
 	})
 	if err != nil {

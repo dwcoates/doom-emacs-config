@@ -628,6 +628,23 @@ func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID) s
 	return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir)
 }
 
+// RetireConcluded retires a concluded merge's standing state once the workspace
+// has moved on. The one release path cannot do it: it runs at the merge's
+// end, and the concluded state is what a reader should see until the
+// workspace does something else. What retires it is that something.
+func (o *orchestrator) RetireConcluded(ctx context.Context, ws ids.WorkspaceID) {
+	o.mu.Lock()
+	facts, known := o.facts[ws]
+	_, running := o.runsByWorkspace[ws]
+	o.mu.Unlock()
+	if !known || running || (facts.State != StateFailed && facts.State != StateMerged) {
+		return
+	}
+	o.log(ctx, ws).Info("daemon.merge.retire", "retired a concluded merge's standing state; the workspace moved on", dlog.Context{
+		"workspace": string(ws), "state": facts.State})
+	o.forget(ws)
+}
+
 // OnInterrupt raises the dequeue offer for a workspace whose merge is queued.
 // An interrupt no longer silently yanks a merge off the queue: the daemon asks.
 func (o *orchestrator) OnInterrupt(ctx context.Context, ws ids.WorkspaceID) {
