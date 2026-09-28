@@ -833,12 +833,16 @@ deferred to the replacement):
 A restart that cannot finish (a failed stand-down, a replacement that will not
 start) takes EVERY workspace back, frees the slot and keeps serving, at ERROR.
 
-OPEN CONTRACT QUESTION: `endpoint_deploy.proto` has no daemon arm for this
-restart (only the blue-green `handing_over`), so the `Deploy` rpc answers a
-layout-change deploy as an internal failure naming the unnamed decision while
-the restart proceeds; a landing's deploy (no rpc) is unaffected. The
-announcement reuses `self_merge_rollout` with the address unset, whose comment
-describes a handover. Both await the owner's ruling.
+The `Deploy` rpc answers this decision with the daemon's
+`DeployComponentOutcome.restarting` arm (`DeployRestarting`: the running and
+fresh state layouts, the workspaces standing down, how many were busy, and
+whether it is forced); equal or negative layouts are refused as a decision the
+arm cannot state. `claude-repld deploy` prints it as
+`daemon build=… restarting layout=N→M workspaces=W busy=B forced=F`.
+
+OPEN CONTRACT QUESTION: the announcement reuses `self_merge_rollout` with the
+address unset, whose comment describes a handover. It awaits the owner's
+ruling.
 
 ## Logging
 
