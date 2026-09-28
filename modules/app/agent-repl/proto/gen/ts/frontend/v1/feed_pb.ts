@@ -1783,11 +1783,11 @@ export const FeedArtifactFailedSchema: GenMessage<FeedArtifactFailed> = /*@__PUR
  */
 export type FeedResponse = Message<"frontend.v1.FeedResponse"> & {
   /**
-   * The response's cost corner ("2.1k"), daemon-formatted, meaningful in
-   * EVERY state: interim while arriving (the vendor states usage when the
-   * response opens and restates it as it grows), final once settled, the
-   * last observed figure on a broken bubble. UNSET when no usage has been
-   * observed yet — absence draws no stamp, never a zero.
+   * The response's cost corner ("2.1k"): FRESH INPUT, daemon-formatted (see
+   * FeedResponseUsageStamp for what it counts). Meaningful in EVERY state:
+   * growing while the bubble arrives, frozen once it settles, the frozen
+   * figure on a broken bubble. UNSET while the bubble's agent has stated no
+   * usage yet — absence draws no stamp, never a zero.
    *
    * @generated from field: optional frontend.v1.FeedResponseUsageStamp usage = 1;
    */
@@ -2005,7 +2005,28 @@ export const FeedResponseProseSchema: GenMessage<FeedResponseProse> = /*@__PURE_
   messageDesc(file_frontend_v1_feed, 58);
 
 /**
- * The cost-corner element.
+ * The cost-corner element: how much FRESH INPUT the bubble's agent spent to
+ * produce this bubble.
+ *
+ * FRESH INPUT is every input token that was NOT a cache hit — the vendor's
+ * `input_tokens` plus `cache_creation_input_tokens`, the
+ * `conversation.v1.TokenCacheMisses` of an API response — for the ONE agent
+ * whose feed the bubble is in, never its subagents. It is the same quantity
+ * the footer's tokens cell (FooterTokensCell) tallies for the main agent.
+ *
+ * A BUBBLE'S FIGURE IS A DELTA, FROZEN WHEN IT LANDS. While the bubble
+ * arrives, the figure is the fresh input its agent has added since the
+ * agent's PREVIOUS bubble landed, and it grows as usage arrives; the moment
+ * the bubble settles the figure is frozen and never changes again. The
+ * bubbles of one tally therefore partition it: no fresh token is counted in
+ * two bubbles. The tally is the main agent's turn (it starts again at every
+ * turn) or a subagent's whole lifetime.
+ *
+ * THE FINAL ANSWER CARRIES THE TURN'S TOTAL. When the turn concludes, the
+ * bubble marked `final_answer` is re-stamped ONCE with the main agent's whole
+ * fresh input for the turn — the footer cell's final figure — so it is at
+ * least the sum of the turn's earlier bubbles. That is the only change a
+ * landed bubble's figure ever sees.
  *
  * @generated from message frontend.v1.FeedResponseUsageStamp
  */
@@ -4097,8 +4118,13 @@ export type FeedSubagent = Message<"frontend.v1.FeedSubagent"> & {
   description?: FeedSubagentDescription | undefined;
 
   /**
-   * The running token sum ("12.4k tok"), daemon-formatted, re-pushed as it
-   * grows and final once settled. UNSET before any usage is observed.
+   * The subagent's FRESH INPUT over its whole lifetime ("12.4k tok"):
+   * every input token of its own API responses that was not a cache hit
+   * (`conversation.v1.TokenCacheMisses`, written plus unwritten), exactly the
+   * quantity the footer's tokens cell tallies for the main agent. Re-pushed as
+   * it grows, final once the subagent stops producing usage. It is the sum of
+   * the response-bubble stamps in the subagent's own feed. UNSET before the
+   * subagent has stated any usage.
    *
    * @generated from field: optional frontend.v1.FeedSubagentTokens tokens = 3;
    */
