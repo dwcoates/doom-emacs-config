@@ -239,6 +239,156 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 	}
 }
 
+// respawningStray starts a stand-in for a live daemon the harness never
+// started (a layout change's replacement): a process naming stateDir that
+// spawns a child naming it too, and spawns another the moment that child
+// dies, the way a daemon revives a shim that died on its own. It answers the
+// respawner and its first child's pid.
+func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
+	t.Helper()
+	script := `while :; do /bin/sh -c 'while :; do /bin/sleep 1; done' "$0/child" & echo $!; wait $!; done`
+	cmd := exec.Command("/bin/sh", "-c", script, stateDir)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the respawner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	line, err := bufio.NewReader(out).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read the child's pid: %v", err)
+	}
+	child, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("the child's pid %q: %v", line, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	return cmd, child
+}
+
+// TestReapStraysFreezesEveryStrayBeforeKillingAny pins the ordering that
+// keeps a live stray from replacing what the sweep kills: at the instant a
+// stray dies, every other stray is already stopped, so a respawner that would
+// bring the dead one back cannot run.
+func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	respawner, child := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	var respawnerState processState
+	var stateErr, exitErr error
+	d.afterStraysFrozen = func() {
+		// The child dies first, as it did under a snapshot-then-kill sweep.
+		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+			exitErr = err
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+		defer cancel()
+		exitErr = WaitProcessExit(ctx, child)
+		respawnerState, stateErr = readProcessState(respawner.Process.Pid)
+	}
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if exitErr != nil || stateErr != nil {
+		t.Fatalf("killing the child first: exit %v, reading the respawner %v", exitErr, stateErr)
+	}
+	if respawnerState.name != "stopped" {
+		t.Fatalf("the respawner was %s when its child died, want stopped", respawnerState.name)
+	}
+}
+
+// TestReapStraysLeavesNoReplacementOfAStrayKilledFirst is the leak as the
+// layout-restart test lived it: a stray killed ahead of the live process that
+// supervises it is not brought back, and nothing naming the state directory
+// is left running.
+func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	_, child := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	d.afterStraysFrozen = func() { _ = syscall.Kill(child, syscall.SIGKILL) }
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if err := d.leakedStrays(); err != nil {
+		t.Fatalf("leakedStrays after the reap = %v, want none", err)
+	}
+}
+
+func TestLeakedStrays(t *testing.T) {
+	cases := []struct {
+		name string
+		// arrange leaves the state directory's process set in the state
+		// under test.
+		arrange    func(t *testing.T, stateDir string)
+		wantLeaked bool
+	}{
+		{
+			name:       "no process names the state directory",
+			arrange:    func(*testing.T, string) {},
+			wantLeaked: false,
+		},
+		{
+			name: "a running process naming the state directory is a leak",
+			arrange: func(t *testing.T, stateDir string) {
+				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			},
+			wantLeaked: true,
+		},
+		{
+			name: "an exited, unreaped process naming the state directory is not a leak",
+			arrange: func(t *testing.T, stateDir string) {
+				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				t.Cleanup(func() { _ = cmd.Wait() })
+				if err := cmd.Process.Kill(); err != nil {
+					t.Fatalf("SIGKILL: %v", err)
+				}
+				if err := awaitFrozen(cmd.Process.Pid, DefaultTimeout); err != nil {
+					t.Fatalf("await the exit: %v", err)
+				}
+			},
+			wantLeaked: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			stateDir := t.TempDir()
+			tc.arrange(t, stateDir)
+			d := &Daemon{t: t, StateDir: stateDir}
+
+			// Act
+			err := d.leakedStrays()
+
+			// Assert
+			if leaked := errors.Is(err, ErrLeakedProcess); leaked != tc.wantLeaked {
+				t.Fatalf("leakedStrays() = %v, want a leak reported = %v", err, tc.wantLeaked)
+			}
+			if !tc.wantLeaked && err != nil {
+				t.Fatalf("leakedStrays() = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestNamesPath(t *testing.T) {
 	cases := []struct {
 		name string
