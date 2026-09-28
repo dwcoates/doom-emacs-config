@@ -130,8 +130,8 @@ type Controller interface {
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
 	//
-	// adopted is the SESSIONS whose surviving shim this boot adopted — never an
-	// inert survivor. A shim takes the workspace lock at StartSession and not
+	// survivors.Adopted is the SESSIONS whose surviving shim this boot adopted
+	// — never an inert survivor. A shim takes the workspace lock at StartSession and not
 	// at process start (agent-shim/claude/shim/src/engine/session.ts, "it lands
 	// HERE rather than at process start because an inert shim owns no
 	// conversation"), so a live shim whose lock reads FREE carries NO SESSION:
@@ -140,12 +140,16 @@ type Controller interface {
 	// lock-held survivors, and passing an inert one would raise a fault over a
 	// workspace that never had a session to lose.
 	//
+	// AN ADOPTED SESSION NEVER RECORDS bounce_unknown: its adoption accounts
+	// for it (PRESERVED), with a manifest or without one.
+	//
 	// With NO MANIFEST — a crash or a force-kill, where the outgoing daemon
-	// never stood down — each adopted SESSION is one whose bounce nobody
+	// never stood down — each session in survivors.Unadopted (the lock says it
+	// may survive, and this boot did not adopt it) is one whose bounce nobody
 	// accounted for, and BOUNCE ACCOUNTABILITY says which sessions were left
 	// unaccounted is surfaced per workspace rather than passed over, so each
 	// gets an OPEN bounce_unknown fault.
-	Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error)
+	Reconcile(ctx context.Context, survivors Survivors) ([]Disposition, error)
 }
 
 // HandoverAcceptance is a handover that was ACCEPTED and is under way. It is

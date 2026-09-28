@@ -1261,8 +1261,6 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	f.shim.ExpectStartSession()
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)
 	if watchesBefore == 0 {
@@ -1273,8 +1271,6 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 	f.d.Kill()
 
 	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert: no second spawn — the same fake process, still reachable at
 	// the same control socket, is adopted rather than replaced.
@@ -1494,53 +1490,52 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 
 // ---- critique 13: bounce accountability ----
 
-// TestCrashBootWithNoManifestRecordsBounceUnknown covers BOUNCE ACCOUNTABILITY
-// for the case the manifest cannot describe: the outgoing daemon crashed or was
-// force-killed, so it wrote NO manifest at all. Every session that survived
-// into this boot is one whose bounce nobody accounted for, and each is
-// RECORDED per workspace as a bounce_unknown fault rather than passed over.
+// TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace
+// covers BOUNCE ACCOUNTABILITY for the case the manifest cannot describe: the
+// outgoing daemon crashed or was force-killed, so it wrote NO manifest at all.
 //
-// THE FAULT'S LIFETIME ENDS AT THE WORKSPACE'S HEALTHY ATTACH (owner-approved
-// plan docs/investigations/2026-09-27-footer-fault-lifetimes-plan.md): the
-// boot's own adoption of the surviving shim IS that attach, fired after the
-// reconcile that records the fault, so the record is closed by it and no line
-// stands on a workspace that is serving. Before the plan, this test asserted
-// the fault stood OPEN on the host stream, and that is the line that stood on
-// a strip for over 30 minutes on 2026-09-27.
-func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
+// A SESSION THE SUCCESSOR ADOPTED IS ACCOUNTED FOR BY ITS ADOPTION: it
+// survived, a process answered the dial, and it is served. So the successor
+// records it PRESERVED and resolved, and records NO bounce_unknown for it at
+// all -- no WARN, no fault, nothing for the healthy attach to close. Before,
+// the boot recorded bounce_unknown at WARN ("needs a human") for the workspace
+// it had just adopted, and the adoption's healthy attach closed it at once. A
+// session the lock says survived and the boot could NOT adopt still records
+// bounce_unknown and keeps it standing; that is pinned where it can be staged
+// (internal/rollout TestNoManifestLeavesAnOpenBounceUnknownOnlyForASessionNobodyAdopted,
+// internal/boot TestTheReconcileIsHandedEverySessionTheBootCouldNotAdopt).
+func TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
 	// the successor adopts it.
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	f.shim.ExpectStartSession()
 
 	// Act: kill the daemon and leave the shim (and its workspace lock) alone,
 	// writing no manifest — which is exactly what a crash leaves behind.
 	f.d.Kill()
 	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 
-	// Assert: the successor recorded the undetermined bounce, and its own
-	// adoption's healthy attach closed it.
-	successor.AwaitLogRecord(successor.RunLogPath(), "the undetermined bounce recorded", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.rollout.reconcile" && r.Level == "warn" &&
-			r.Message == "a session's bounce disposition needs a human"
+	// Assert: the adoption is what accounts for the session, at INFO.
+	successor.AwaitLogRecord(successor.RunLogPath(), "the adopted survivors accounted for", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.reconcile" && r.Level == "info" &&
+			r.Message == "sessions survived a bounce that wrote no intent manifest; this boot adopted every one, which accounts for it"
 	})
-	successor.AwaitLogRecord(successor.RunLogPath(), "the bounce_unknown closed by the adoption's healthy attach", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.health.close_on_edge" && r.Level == "info" &&
-			r.Context["kind"] == "bounce_unknown" && r.Context["edge"] == "healthy_attach"
-	})
+	// Assert: no bounce_unknown was recorded, so none was closed either. The
+	// reconcile is one synchronous boot step, and the record above is its
+	// summary, so everything it wrote is on disk by now. The cleanup sweep
+	// fails on any WARN, which is the no-WARN half.
+	for _, r := range successor.RunLog() {
+		if r.Context["kind"] == "bounce_unknown" || r.Message == "a session's bounce disposition needs a human" {
+			t.Fatalf("record %+v: an adopted workspace must record no bounce_unknown at all", r)
+		}
+	}
 }
 
 func TestCrashBootWithADeadManifestPidTakesTheOrdinaryDeadShimPath(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose shim will be gone before restart.
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	f.shim.ExpectStartSession()
 	oldPID := f.shim.Info().PID
 	vendorID := f.shim.Info().VendorSessionID

@@ -131,9 +131,6 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 	// Act
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
 	f.d = nd
-	// The surviving shim is adopted with no intent manifest to account for
-	// it, which the rollout reconciler states as a fault by design.
-	nd.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert: the first is delivered to the adopted session, the second is
 	// held behind it, and the ingress is empty.

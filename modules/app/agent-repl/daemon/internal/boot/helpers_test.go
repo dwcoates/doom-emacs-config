@@ -174,18 +174,20 @@ type fakeRollout struct {
 	reconcileErr error
 	joins        int
 	joinErr      error
-	// adopted is the adopted set the boot handed Reconcile, which is what the
-	// no-manifest accounting keys on.
-	adopted []rollout.AdoptedSession
+	// adopted and unadopted are the survivor sets the boot handed Reconcile,
+	// which is what the no-manifest accounting keys on.
+	adopted   []rollout.AdoptedSession
+	unadopted []rollout.UnadoptedSession
 	// onReconcile runs inside Reconcile, where the real controller records
 	// the bounce dispositions as faults.
 	onReconcile func()
 }
 
-func (r *fakeRollout) Reconcile(_ context.Context, adopted []rollout.AdoptedSession) ([]rollout.Disposition, error) {
+func (r *fakeRollout) Reconcile(_ context.Context, survivors rollout.Survivors) ([]rollout.Disposition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.adopted = append([]rollout.AdoptedSession(nil), adopted...)
+	r.adopted = append([]rollout.AdoptedSession(nil), survivors.Adopted...)
+	r.unadopted = append([]rollout.UnadoptedSession(nil), survivors.Unadopted...)
 	if r.onReconcile != nil {
 		r.onReconcile()
 	}
