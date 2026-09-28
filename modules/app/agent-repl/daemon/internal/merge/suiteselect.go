@@ -35,6 +35,7 @@ var AllSuites = []string{
 	"readiness-harness",
 	"doctor-harness",
 	"precommit-harness",
+	"merge-queue-hook-harness",
 	"ert",
 	"daemon",
 	"sidecar",
