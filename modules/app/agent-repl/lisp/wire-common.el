@@ -595,12 +595,22 @@ RAW is the untyped Struct, kept verbatim: nothing is drawn from it."
     (:merge-before-action . "PROMPT_ORIGIN_MERGE_BEFORE_ACTION")
     (:merge-after-action . "PROMPT_ORIGIN_MERGE_AFTER_ACTION")
     (:merge-displaced-turn-resume . "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME")
-    (:resume-after-restart . "PROMPT_ORIGIN_RESUME_AFTER_RESTART"))
+    (:resume-after-restart . "PROMPT_ORIGIN_RESUME_AFTER_RESTART")
+    (:vendor-started . "PROMPT_ORIGIN_VENDOR_STARTED"))
   "The whole `conversation.v1.PromptOrigin' vocabulary, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: every send site must choose a real
 value, so the zero value has no elisp spelling to reach for by accident.
 A test pins this table against the checked-in Go bindings, so an enum
-value landed in the proto without a keyword here fails loudly.")
+value landed in the proto without a keyword here fails loudly.
+Values listed in `agent-repl-wire-shim-only-prompt-origins' are ABSENT too:
+no client ever sends them.")
+
+(defconst agent-repl-wire-shim-only-prompt-origins
+  '("PROMPT_ORIGIN_VENDOR_STARTED")
+  "PromptOrigin values only the shim produces, never a client send.
+VENDOR_STARTED names a turn the vendor began on its own, which the shim
+adopts; an editor submit carrying it would claim the vendor started a
+turn the user in fact sent, so it has no elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.
