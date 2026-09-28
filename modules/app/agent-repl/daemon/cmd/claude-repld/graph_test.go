@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/wsm"
 
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
@@ -357,11 +358,15 @@ func (f *recordingFooter) CloseFault(_ ids.WorkspaceID, id string) {
 type recordingTopbar struct {
 	topbar.Resolver
 	raised    map[string]string
+	warnings  map[string]topbar.DaemonWarning
 	retracted []string
 }
 
 func (t *recordingTopbar) RaiseDaemonWarning(key string, w topbar.DaemonWarning) {
 	t.raised[key] = w.Line
+	if t.warnings != nil {
+		t.warnings[key] = w
+	}
 }
 
 func (t *recordingTopbar) RetractDaemonWarning(key string) { t.retracted = append(t.retracted, key) }
@@ -431,6 +436,39 @@ func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
 			}
 			if !reflect.DeepEqual(tb.retracted, tc.wantRetracted) {
 				t.Fatalf("topbar retracted = %v, want %v", tb.retracted, tc.wantRetracted)
+			}
+		})
+	}
+}
+
+func TestTheFaultSinkGivesAFailedDeploysTopbarRowItsOverlay(t *testing.T) {
+	tests := []struct {
+		name string
+		line health.FaultLine
+		want *topbar.DeployFailedOverlay
+	}{
+		{"a failed deploy's row opens what failed",
+			health.FaultLine{ID: "f-1", Kind: health.KindDeployFailed, Topbar: "deploy failed: build webapp: tsc",
+				Record: wsm.Fault{Kind: health.KindDeployFailed, Evidence: health.DeployFailure{
+					Step: health.DeployStepBuild, BuildStep: "webapp", Detail: "tsc", Log: "/s/build.log"}.Evidence()}},
+			&topbar.DeployFailedOverlay{Step: "build", Component: "webapp", Rollback: "nothing was installed", Detail: "tsc", Log: "/s/build.log"}},
+		{"a failed deploy whose record names no step is its line alone",
+			health.FaultLine{ID: "f-2", Kind: health.KindDeployFailed, Topbar: "deploy failed: prose",
+				Record: wsm.Fault{Kind: health.KindDeployFailed, Detail: "prose"}},
+			nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			tb := &recordingTopbar{raised: map[string]string{}, warnings: map[string]topbar.DaemonWarning{}}
+			sink := newFaultSurfaces(&recordingFooter{}, tb)
+
+			// Act
+			sink.FaultOpened("", tc.line)
+
+			// Assert
+			if got := tb.warnings[string(tc.line.ID)].DeployFailed; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("overlay = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
