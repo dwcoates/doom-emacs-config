@@ -3054,8 +3054,9 @@ so this reaction never has to enumerate origins."
   "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
 Registered on `agent-repl-roster-status-change-functions'.
 
-The daemon takes a dwell on a turn-end row (done, interrupted or turn-failed)
-only: one reported while WS is thinking, waiting, severed or anything else is
+The daemon takes a dwell on a turn-end row (done, interrupted or
+turn-failed) and on a vendor-blocked one, whose failed turn it reads;
+one reported while WS is thinking, waiting, severed or anything else is
 dropped, so there is no marker for the viewed-cleared edge to announce later.
 Without this, a user who watched a turn run to done would have spent the
 one-shot dwell on the running turn, and the finished response would never go
