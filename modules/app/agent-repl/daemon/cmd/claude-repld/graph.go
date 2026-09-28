@@ -587,6 +587,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		WriteDaemonAddr:  func(context.Context) error { return p.Claim.Publish() },
 		ShimBuild:        shimBundle.Build,
 		ColdGate:         fleet.RaiseColdGate,
+		Progress:         footerResolver,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
