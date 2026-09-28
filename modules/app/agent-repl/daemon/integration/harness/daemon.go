@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -301,8 +302,12 @@ type Daemon struct {
 	// the SIGKILL: the one instant at which the harness's own tests can read
 	// the kernel's state of a group that is frozen and not yet killed.
 	afterFreeze func()
-	client      agentreplv1connect.AgentReplClient
-	http        *http.Client
+	// afterStraysFrozen, when set, runs inside ReapStrays once every stray is
+	// confirmed stopped and before any is killed: the instant at which the
+	// harness's own tests can kill one stray first, as a racing sweep would.
+	afterStraysFrozen func()
+	client            agentreplv1connect.AgentReplClient
+	http              *http.Client
 
 	mu       sync.Mutex
 	exited   bool
@@ -1288,28 +1293,6 @@ func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
 	}
 }
 
-// ReapStrays kills every process whose command line names this run's state
-// directory, whatever process group it is in — except a pid the test declared
-// its own through SpareFromStrayReaping.
-//
-// IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
-// its own process group and Kill ends that group, but every shim the daemon
-// spawns is put in a group of ITS own (the spawn's process-group discipline),
-// so a daemon that dies without standing its shims down leaves them running —
-// and a leaked daemon keeps prelaunching more. The state directory is unique to
-// this run and appears in both the daemon's argv and every shim's `--listen`
-// path, so it is an exact key for "processes this test started".
-func (d *Daemon) ReapStrays() {
-	for _, pid := range d.strayPIDs() {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-	}
-}
-
-// StrayPIDs answers the live processes naming this run's state directory,
-// excluding the harness's own process. A test asserts on it; ReapStrays acts
-// on it.
-func (d *Daemon) StrayPIDs() []int { return d.strayPIDs() }
-
 // sparedFromReaping holds the pids of processes a TEST owns and stands down
 // itself. Nothing else may reap them.
 //
@@ -1358,29 +1341,203 @@ func SparedFromStrayReaping(pid int) bool {
 	return sparedFromReaping[pid]
 }
 
-func (d *Daemon) strayPIDs() []int {
-	if d.StateDir == "" {
+// ErrLeakedProcess names a process this test started that is still running
+// after its teardown's reap. It is the teardown's own failure: whatever the
+// test asserted, a leaked shim holds its workspace lock and memory for as long
+// as the machine is up.
+var ErrLeakedProcess = errors.New("harness: a process this test started outlived its teardown")
+
+// ReapStrays kills every process whose command line names this run's state
+// directory, whatever process group it is in — except a pid the test declared
+// its own through SpareFromStrayReaping — waits for each to exit, and then
+// fails the test with ErrLeakedProcess if any such process is still running.
+//
+// IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
+// its own process group and Kill ends that group, but every shim the daemon
+// spawns is put in a group of ITS own (the spawn's process-group discipline),
+// so a daemon that dies without standing its shims down leaves them running —
+// and a leaked daemon keeps prelaunching more. The state directory is unique to
+// this run and appears in both the daemon's argv and every shim's `--listen`
+// path, so it is an exact key for "processes this test started".
+//
+// EVERY STRAY IS FROZEN BEFORE ANY IS KILLED, and the freeze runs to a fixed
+// point. A stray can be a LIVE DAEMON the harness never started: a layout
+// change's replacement (and a handover's successor) is spawned by the
+// incumbent into a session of its own, so no Kill ever reaches it. A
+// snapshot-then-kill sweep raced it: the replacement brought a pending
+// workspace's session up — or revived a shim the sweep had just killed — in
+// the instant between the `ps` snapshot and its own SIGKILL, and the new shim,
+// in no snapshot, outlived the test (2026-09-27: an orphaned fakeshim of
+// TestALayoutChangeRestartsTheDaemonAndItsReplacementServes, reparented to
+// launchd). A stopped process runs no instruction and so forks nothing, and a
+// fork already under way shows up in the next listing under its parent's
+// argv, so the sweep re-lists until a listing names no process it has not
+// already stopped: at that point nothing naming the state directory can run.
+func (d *Daemon) ReapStrays() {
+	d.t.Helper()
+	killed, err := d.freezeStrays()
+	if err != nil {
+		d.t.Errorf("harness: freeze the strays before the kill: %v", err)
+	}
+	for _, pid := range killed {
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
+		}
+	}
+	// A SIGKILL cannot be caught, so each exit is decided; the bound covers
+	// only a starved host scheduling it, and a stray still running after it is
+	// reported below as the leak it then is.
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+	for _, pid := range killed {
+		if err := WaitProcessExit(ctx, pid); err != nil {
+			d.t.Errorf("harness: the SIGKILLed stray %d did not exit: %v", pid, err)
+		}
+	}
+	if err := d.leakedStrays(); err != nil {
+		d.t.Error(err)
+	}
+}
+
+// freezeStrays SIGSTOPs every stray, re-listing until a listing names none it
+// has not stopped, and answers the ones the final listing still names: those
+// are the processes to kill. A pid stopped earlier that the final listing no
+// longer names has exited — or, having exited, was recycled into a stranger's
+// process before the stop reached it — so it is continued, never killed.
+func (d *Daemon) freezeStrays() ([]int, error) {
+	stopped := map[int]bool{}
+	for {
+		strays, err := d.listStrays()
+		if err != nil {
+			return d.settleFrozen(stopped, nil), err
+		}
+		var fresh []int
+		for _, s := range strays {
+			if !stopped[s.pid] {
+				fresh = append(fresh, s.pid)
+			}
+		}
+		if len(fresh) == 0 {
+			listed := map[int]bool{}
+			for _, s := range strays {
+				listed[s.pid] = true
+			}
+			if d.afterStraysFrozen != nil {
+				d.afterStraysFrozen()
+			}
+			return d.settleFrozen(stopped, listed), nil
+		}
+		for _, pid := range fresh {
+			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+				if errors.Is(err, syscall.ESRCH) {
+					continue
+				}
+				return d.settleFrozen(stopped, nil), fmt.Errorf("SIGSTOP stray %d: %w", pid, err)
+			}
+			stopped[pid] = true
+			if err := awaitFrozen(pid, freezeBound); err != nil {
+				return d.settleFrozen(stopped, nil), err
+			}
+		}
+	}
+}
+
+// settleFrozen answers the stopped pids to kill: those listed (every stopped
+// one when listed is nil, as after a failed freeze, when killing a stranger
+// is the lesser harm than leaving a stray running). The rest are continued.
+func (d *Daemon) settleFrozen(stopped, listed map[int]bool) []int {
+	var kill []int
+	for pid := range stopped {
+		if listed == nil || listed[pid] {
+			kill = append(kill, pid)
+			continue
+		}
+		if err := syscall.Kill(pid, syscall.SIGCONT); err != nil && !errors.Is(err, syscall.ESRCH) {
+			d.t.Errorf("harness: SIGCONT pid %d that left the stray set: %v", pid, err)
+		}
+	}
+	return kill
+}
+
+// leakedStrays answers ErrLeakedProcess naming every process that still names
+// this run's state directory and has not exited, or nil when there is none.
+// A zombie has exited: only its reaping, by a parent that is not this test,
+// is left.
+func (d *Daemon) leakedStrays() error {
+	strays, err := d.listStrays()
+	if err != nil {
+		return fmt.Errorf("harness: list the processes left after the reap: %w", err)
+	}
+	var leaked []string
+	for _, s := range strays {
+		state, err := readProcessState(s.pid)
+		if err != nil {
+			return fmt.Errorf("harness: read the state of process %d left after the reap: %w", s.pid, err)
+		}
+		if !state.exited {
+			leaked = append(leaked, fmt.Sprintf("pid %d (%s): %s", s.pid, state.name, s.args))
+		}
+	}
+	if len(leaked) == 0 {
 		return nil
+	}
+	return fmt.Errorf("%w: %d process(es) under %s: %s", ErrLeakedProcess, len(leaked), d.StateDir, strings.Join(leaked, "; "))
+}
+
+// StrayPIDs answers the live processes naming this run's state directory,
+// excluding the harness's own process. A test asserts on it; ReapStrays acts
+// on it. A listing that cannot be read fails the test and answers none.
+func (d *Daemon) StrayPIDs() []int { return d.strayPIDs() }
+
+func (d *Daemon) strayPIDs() []int {
+	d.t.Helper()
+	strays, err := d.listStrays()
+	if err != nil {
+		d.t.Errorf("harness: list the strays: %v", err)
+		return nil
+	}
+	pids := make([]int, 0, len(strays))
+	for _, s := range strays {
+		pids = append(pids, s.pid)
+	}
+	return pids
+}
+
+// stray is one process naming this run's state directory.
+type stray struct {
+	pid  int
+	args string
+}
+
+// listStrays reads the process table for every process naming this run's
+// state directory, excluding the harness's own process and every pid a test
+// declared its own.
+func (d *Daemon) listStrays() ([]stray, error) {
+	if d.StateDir == "" {
+		return nil, nil
 	}
 	out, err := exec.Command("ps", "-Ao", "pid=,args=").Output()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("ps: %w", err)
 	}
 	self := os.Getpid()
-	var pids []int
+	var strays []stray
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !namesPath(line, d.StateDir) {
 			continue
 		}
-		fields := strings.Fields(line)
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == self || SparedFromStrayReaping(pid) {
+		pidField, args, _ := strings.Cut(line, " ")
+		pid, err := strconv.Atoi(pidField)
+		if err != nil {
+			return nil, fmt.Errorf("ps line %q has no pid: %w", line, err)
+		}
+		if pid == self || SparedFromStrayReaping(pid) {
 			continue
 		}
-		pids = append(pids, pid)
+		strays = append(strays, stray{pid: pid, args: strings.TrimSpace(args)})
 	}
-	return pids
+	return strays, nil
 }
 
 // namesPath reports whether line names dir itself or a path beneath it: an
