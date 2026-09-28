@@ -1484,8 +1484,9 @@ type RosterRow_TurnFailed struct {
 	// by dying under it. It is a TURN END like `done` and `interrupted`, with
 	// the same read rule: while its result is UNREAD it outranks
 	// `idle_async`; once read it is drawn with `viewed` (see
-	// RosterRowViewed). BLUE, where the other two turn ends are green: the
-	// turn did not produce the result it was asked for.
+	// RosterRowViewed). TURQUOISE (owner ruling, 2026-09-28), where the
+	// other two turn ends are green: the turn did not produce the result it
+	// was asked for, but the workspace is usable.
 	TurnFailed *RosterRowStatusTurnFailed `protobuf:"bytes,36,opt,name=turn_failed,json=turnFailed,proto3,oneof"`
 }
 
@@ -1526,7 +1527,11 @@ type RosterRow_StartFailed struct {
 }
 
 type RosterRow_Degraded struct {
-	// Running, but with a compromised route.
+	// Running and USABLE, but the daemon's view of it is compromised: a shim
+	// component dropping or delaying what it observes, or a shim taken back
+	// after a failed handover that never re-reported its session state.
+	// TURQUOISE (owner ruling, 2026-09-28). The same coarse claim as the
+	// footer's `degraded` arm.
 	Degraded *RosterRowStatusDegraded `protobuf:"bytes,17,opt,name=degraded,proto3,oneof"`
 }
 

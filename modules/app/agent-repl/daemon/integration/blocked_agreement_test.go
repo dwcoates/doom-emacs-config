@@ -62,7 +62,11 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 		{"structured_output_retry_exhausted", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{
 			StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, "turn"},
 		{"model_error", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
-			ModelError: &conversationv1.AgentModelError{}}}, "vendor"},
+			ModelError: &conversationv1.AgentModelError{}}}, "turn"},
+		{"api_overloaded", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Kind: &conversationv1.ApiRequestFailed_Overloaded{
+					Overloaded: &conversationv1.ApiOverloaded{}}}}}, "turn"},
 		{"stop_hook_prevented", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{
 			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, "expected"},
 		{"prompt_too_long", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{
@@ -94,8 +98,8 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil
 				})
 			case "turn":
-				awaitFooter(t, f, footer, "the footer draws idle · turn_failed", func(v *frontendv1.FooterView) bool {
-					return v.GetStrip().GetStatus().GetIdle().GetTurnFailed() != nil
+				awaitFooter(t, f, footer, "the footer draws turn_failed", func(v *frontendv1.FooterView) bool {
+					return v.GetStrip().GetStatus().GetTurnFailed() != nil
 				})
 				awaitRoster(t, f.d, roster, "the roster paints turn_failed", func(r *frontendv1.WorkspaceRoster) bool {
 					return rosterRow(r, f.ws.GetId()).GetTurnFailed() != nil

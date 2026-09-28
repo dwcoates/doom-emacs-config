@@ -879,7 +879,43 @@ func TestATakeBackWhoseReAttachedShimNeverReAnnouncesIsNotTransferredAgain(t *te
 			t.Fatalf("requests = %+v, want no transfer judged against a shim whose turn this daemon cannot see", h.registry.Requests())
 		}
 	}
-	if !hasRecord(h, opTransfer, "error", "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight") {
+	if !hasRecord(h, opTransfer, "error", "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight, and the workspace is drawn degraded until it does") {
 		t.Fatalf("records = %+v, want the missing facts at ERROR", records(h.log, opTransfer))
+	}
+}
+
+func TestATakeBackWhoseReAttachedShimNeverReAnnouncesIsDrawnDegraded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.fleet.factsErr[ws] = context.DeadlineExceeded
+	handOverUntilWindow(t, h)
+
+	// Act
+	refusedBySuccessor(t, h, ws)
+	awaitRecord(t, h, opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again")
+
+	// Assert: every status surface is told, and the workspace stays usable.
+	got := h.Unreported()
+	if len(got) != 1 || got[0].ws != ws || !got[0].unreported {
+		t.Fatalf("StateUnreported calls = %+v, want one stating %s unreported", got, ws)
+	}
+}
+
+func TestATakeBackWhoseReAttachedShimReAnnouncesIsNotDrawnDegraded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	handOverUntilWindow(t, h)
+
+	// Act
+	refusedBySuccessor(t, h, ws)
+	h.registry.awaitRequest(t, isFreenessTransfer)
+
+	// Assert
+	if got := h.Unreported(); len(got) != 0 {
+		t.Fatalf("StateUnreported calls = %+v, want none for a shim that re-announced", got)
 	}
 }

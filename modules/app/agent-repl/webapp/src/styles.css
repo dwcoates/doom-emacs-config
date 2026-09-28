@@ -106,6 +106,11 @@
      is why this is a hue of its own and not a shade of --init: the two states
      WERE one, and a teal that reads as bluish re-merges them at a glance. */
   --hibernated: #0d9488;
+  /* TURQUOISE: something went wrong and wants the user's attention, but the
+     workspace is USABLE — a failed turn, a failed merge, a degraded view
+     (owner ruling, 2026-09-28). A cyan well clear of --init's blue and --ok's
+     green, so the three read apart at a glance. */
+  --turquoise: #0891b2;
   /* The revival gate's own fill and frame (#revival-gate): a SOLID yellow
      card inside a solid orange frame. Solid rather than a color-mix wash of
      the feed, because the gate is the only interaction available while it
@@ -410,6 +415,8 @@
     --token-yellow: #eab308;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
     --hibernated: #2dd4bf;
+    /* Brighter turquoise for the dark theme, as the other state colors lift. */
+    --turquoise: #22d3ee;
     /* The gate stays a SOLID yellow card in the dark theme too, but a deep
        yellow rather than the light theme's bright one, so --fg still reads on
        it. The frame lifts to the brighter orange the dark theme already gives
@@ -782,9 +789,11 @@ body::after {
 
 /* Merge lifecycle: the recycle glyph — spinning while the run is the queue's
    active one (a clean apply in flight, or a conflict being resolved under the
-   same lease), still while merely queued or once the run has failed, GREEN on
-   a conflict (an expected state ready for the user) and BLUE on a failure
-   (something is wrong with the workspace) — owner rulings, 2026-09-28.  `merged` is NOT here: a settled merge has left the pipeline and
+   same lease), still while merely queued or once the run has failed. Its ink
+   is the arm's shared tone (the rules under THE TONE WINS below): purple in
+   progress, GREEN on a conflict (an expected state ready for the user) and
+   TURQUOISE on a failure (something went wrong, but the workspace is usable)
+   — owner rulings, 2026-09-28.  `merged` is NOT here: a settled merge has left the pipeline and
    renders in the Recently Merged section, where the recycle mark would
    misread as still-queued, so it takes the green disc below instead (owner
    ruling, 2026-09-28: a merge in progress is purple, a landed one green). */
@@ -806,7 +815,6 @@ body::after {
   justify-content: center;
   border-radius: 0;
   background: none;
-  color: var(--accent);
   /* Sized ABOVE the 9px disc statuses above (#ws-sidebar .st): the recycle
      glyph is a thin stroke, so at a disc-matching box it reads optically
      SMALLER than a solid fill alongside the green/red/orange/yellow dots. The
@@ -814,12 +822,6 @@ body::after {
   font-size: 1.3rem;
   line-height: 1;
 }
-/* The shared vocabulary's colors for the two colored merge arms: green is the
-   --ok of every other ready dot and blue the --init of every other blue one,
-   so these glyphs read as the same claims (render-colors.json
-   colored_merge_arms). */
-#ws-sidebar .st-merge-conflict { color: var(--ok); }
-#ws-sidebar .st-merge-failed { color: var(--init); }
 /* SPINNING: the workspace is the merge queue's ACTIVE one. `merging` is the
    daemon driving the cherry-pick; `merge-conflict` is the same run still in
    hand, holding the same lease, with the resolution now the work in flight —
@@ -828,7 +830,6 @@ body::after {
    over. */
 #ws-sidebar .st-merging,
 #ws-sidebar .st-merge-conflict { animation: ws-spin 1.4s linear infinite; }
-#ws-sidebar .st-merged { background: var(--ok); }
 
 /* Recently Merged: settled history rather than live work, so it is set off
    from the by-repo list above by a light rule and carries a purple header
@@ -4112,6 +4113,7 @@ body.draining #composer-input::placeholder {
 .tone-blue { color: var(--init); }
 .tone-purple { color: var(--blocked); }
 .tone-red { color: var(--err); }
+.tone-turquoise { color: var(--turquoise); }
 .tone-yellow { color: var(--async); }
 .tone-green { color: var(--ok); }
 
@@ -4994,7 +4996,7 @@ bubble-body.bubble-body { display: block; }
 /* THE STATUS MARK. The dot's SIZE and shape are the rail's (above); its COLOR
    comes from `.tone-<color>` through src/vocab.ts, so a workspace cannot read
    one color here and another in the footer or the Emacs tab bar. `currentColor`
-   is what makes one fill rule serve all five tones. */
+   is what makes one fill rule serve every tone. */
 #ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
 /* The glyph statuses are not discs: a box that centers a single character, so
    the recycle mark turns on its own axis rather than orbiting. */
@@ -5009,14 +5011,19 @@ bubble-body.bubble-body { display: block; }
   font-size: 1.1rem;
   line-height: 1;
 }
-/* A merge spends no color of its own (`none` in the vocabulary), so the glyph
-   takes the rail's accent — except the two that wait on a human, which are the
-   one merge state worth an alarm. */
-#ws-sidebar .st[data-glyph="queue"],
-#ws-sidebar .st[data-glyph="recycle"],
-#ws-sidebar .st[data-glyph="check"] { color: var(--accent); }
-#ws-sidebar .st[data-glyph="conflict"],
-#ws-sidebar .st[data-glyph="failed"] { color: var(--err); }
+/* THE TONE WINS OVER EVERY PER-STATE RULE. Every merge arm spends a color of
+   its own (render-colors.json colored_merge_arms), so a glyph's ink is its
+   tone exactly as a disc's fill is. The six tones are restated here at the
+   rail's own specificity, after every `.st-*` rule, so neither a disc nor a
+   glyph can take a hand-picked hue (owner ruling, 2026-09-28: a merge conflict
+   is green and a failed merge turquoise — a red glyph for either was exactly
+   this drift). */
+#ws-sidebar .st.tone-blue { color: var(--init); }
+#ws-sidebar .st.tone-purple { color: var(--blocked); }
+#ws-sidebar .st.tone-red { color: var(--err); }
+#ws-sidebar .st.tone-turquoise { color: var(--turquoise); }
+#ws-sidebar .st.tone-yellow { color: var(--async); }
+#ws-sidebar .st.tone-green { color: var(--ok); }
 #ws-sidebar .st[data-glyph="inactive"] { color: var(--muted); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE breath and ONE spin for the whole rail, so the animation always makes

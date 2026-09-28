@@ -981,6 +981,8 @@ type harness struct {
 	drained      []ids.WorkspaceID
 	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
+	// unreported records every StateUnreported statement, in order.
+	unreported   []stateUnreportedCall
 	addrWrites   int
 	exits        chan struct{}
 	lockStates   map[string]sessionlock.State
@@ -1089,6 +1091,11 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.published = append(h.published, ws)
 			h.mu.Unlock()
 			return nil
+		},
+		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
+			h.mu.Lock()
+			h.unreported = append(h.unreported, stateUnreportedCall{ws: ws, unreported: unreported})
+			h.mu.Unlock()
 		},
 		WriteDaemonAddr: func(context.Context) error {
 			h.mu.Lock()
@@ -1283,4 +1290,17 @@ func (f *fakeProgress) statements() []*deployprogress.Progress {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]*deployprogress.Progress(nil), f.stated...)
+}
+
+// stateUnreportedCall is one StateUnreported statement.
+type stateUnreportedCall struct {
+	ws         ids.WorkspaceID
+	unreported bool
+}
+
+// Unreported reads back the StateUnreported statements, in order.
+func (h *harness) Unreported() []stateUnreportedCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]stateUnreportedCall(nil), h.unreported...)
 }

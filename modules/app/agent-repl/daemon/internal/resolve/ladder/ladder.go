@@ -36,17 +36,29 @@
 //     parked session is idle, not broken.
 //  4. closing        a close was refused. The roster observes no close
 //     refusal, so only the footer ever stands here.
-//  5. merge_failed   the merge failed. TERMINAL: the merge no longer holds the
-//     session, so a broken route (which is live evidence about what the user
-//     cannot do right now) outranks it, while it outranks everything the
-//     session itself is doing.
-//  6. merged         the merge landed. Terminal, ranked as merge_failed is.
-//  7. blocked        the vendor or the account refuses the session.
-//  8. waiting        the session waits on the user: a permission ask, and on
+//  5. blocked        the vendor or the account refuses the session until
+//     something outside it is resolved (ClassifyFailure).
+//  6. merge_failed   the merge failed. TERMINAL: the merge no longer holds the
+//     session, so every claim that the workspace is UNUSABLE (the three
+//     above) outranks it, while it outranks everything the session itself
+//     is doing.
+//  7. merged         the merge landed. Terminal, ranked as merge_failed is.
+//  8. degraded       the session serves, but the daemon's view of it is
+//     compromised: a shim component dropping or delaying observations, or a
+//     taken-back shim that never re-reported its session state. USABLE, so
+//     every unusable claim outranks it; SKIPPED while PARKED, as the link is.
+//  9. waiting        the session waits on the user: a permission ask, and on
 //     the footer also an interrupt landing, a question or a cold gate.
-//  9. thinking       a turn is in flight, a context cut included.
-//  10. idle          the foreground is free: a turn end (read or not),
-//     detached work running, a wakeup pending, or nothing at all.
+//  10. thinking      a turn is in flight, a context cut included.
+//  11. idle          the foreground is free: a turn end (read or not, a
+//     failed one included), detached work running, a wakeup pending, or
+//     nothing at all.
+//
+// THE COLORS FOLLOW THE RUNGS (owner ruling, 2026-09-28): every rung that
+// makes the workspace UNUSABLE — disconnected, closing, blocked — is blue and
+// ranks above every rung on which it is usable; merging is purple; a usable
+// rung with something wrong — merge_failed, degraded, and idle's failed turn
+// — is turquoise.
 //
 // Momentary footer statuses sit INSIDE the rung their fact belongs to rather
 // than above it: `loading` is a turn taking on context (thinking) and the
@@ -63,7 +75,11 @@
 //   - the footer's momentary `interrupted` and `loading` ranked above
 //     `blocked` and the merge; they now sit in the idle and thinking rungs;
 //   - the roster skipped the merge rungs for a parked session; parking now
-//     skips only the link rung, which is all its ruling ever spoke about.
+//     skips only the link rungs, which is all its ruling ever spoke about;
+//   - (owner ruling, 2026-09-28) `blocked` moved above the terminal merge
+//     rungs, and a degraded view left the disconnected rung for its own
+//     `degraded` rung below them: an unusable workspace outranks every
+//     usable one.
 //
 // FACTS ONLY ONE RESOLVER OBSERVES are the limit of the guarantee. The ladder
 // makes the two surfaces agree on every fact both are fed; a fact only one of
@@ -99,6 +115,8 @@ const (
 	Merged Claim = "merged"
 	// Blocked is the vendor or the account refusing the session.
 	Blocked Claim = "blocked"
+	// Degraded is a serving session whose view is compromised.
+	Degraded Claim = "degraded"
 	// Waiting is the session waiting on the user.
 	Waiting Claim = "waiting"
 	// Thinking is a turn in flight.
@@ -116,8 +134,8 @@ const Inactive Claim = "inactive"
 // Order is the ladder, strongest claim first. It is the ONE statement of the
 // precedence; the package comment explains every position.
 var Order = []Claim{
-	Merging, MergeConflict, Disconnected, Closing, MergeFailed, Merged,
-	Blocked, Waiting, Thinking, Idle,
+	Merging, MergeConflict, Disconnected, Closing, Blocked, MergeFailed,
+	Merged, Degraded, Waiting, Thinking, Idle,
 }
 
 // AwaitingBringUp reports a workspace whose route has never been seen at all
@@ -167,7 +185,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 			if claim != standing {
 				continue
 			}
-		case Disconnected:
+		case Disconnected, Degraded:
 			if parked {
 				continue
 			}
