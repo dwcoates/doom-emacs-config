@@ -12,6 +12,8 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/flock"
+	"claude-repld/internal/intakegate"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
@@ -25,6 +27,8 @@ const (
 	opDefer      = "daemon.heldingress.defer"
 	opQuarantine = "daemon.heldingress.quarantine"
 	opRemove     = "daemon.heldingress.remove"
+	opGate       = "daemon.heldingress.gate"
+	opLock       = "daemon.heldingress.lock"
 )
 
 // retry is one refused entry's standing: how often it was refused, the
@@ -62,6 +66,8 @@ type ingress struct {
 	// in memory on purpose: a restart retries every entry at once, which is
 	// exactly what a restart is for.
 	retries map[string]retry
+	// gate answers whether this daemon takes the intake at all.
+	gate *intakegate.Gate
 }
 
 func removeFile(path string) error { return os.Remove(path) }
@@ -93,12 +99,48 @@ func (i *ingress) Run(ctx context.Context) error {
 
 // Sweep ingests every entry once, in name order.
 //
+// ONLY THE DAEMON THAT SERVES SWEEPS (intakegate): a joining successor and an
+// incumbent whose handover has begun take nothing.
+//
+// A SWEEP IS EXCLUSIVE ACROSS DAEMONS, under a kernel lock held for its whole
+// run. The gate alone cannot make it so: a sweep the incumbent began before
+// its handover can still be submitting when the successor's gate opens, and
+// an entry submitted by both -- the incumbent's claim of its key not yet
+// accepted when the successor re-drives it -- would be delivered twice. The
+// lock dies with its holder, so a daemon that crashed mid-sweep leaves nothing
+// behind but its entries, which the next sweep takes under their keys.
+//
 // ORDER IS KEPT PER WORKSPACE: once one workspace's entry is left for a later
 // sweep, every later entry for that workspace is left too, so a prompt is
 // never delivered ahead of one its writer wrote before it.
 func (i *ingress) Sweep(ctx context.Context) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if !i.gate.Admits() {
+		return nil
+	}
+	// THE LOCK NEVER CREATES THE DIRECTORY: the ingress is a directory in the
+	// shared state root, which a client creates when it writes an entry, and
+	// recreating it would put back a state root that was deleted under this
+	// daemon (its own root watch would then read the recreation as another
+	// directory). No directory is no entry, so there is nothing to sweep.
+	lock, held, err := flock.TryExclusiveIn(i.deps.LockPath)
+	if errors.Is(err, os.ErrNotExist) {
+		i.deps.Log.Global().Debug(opLock, "the ingress directory does not exist; nothing has been written to sweep", dlog.Context{"dir": i.deps.Dir})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("take the sweep lock %q: %w", i.deps.LockPath, err)
+	}
+	if !held {
+		i.deps.Log.Global().Debug(opLock, "another daemon is sweeping the ingress; this sweep takes nothing", dlog.Context{"lock": i.deps.LockPath})
+		return nil
+	}
+	defer func() {
+		if err := lock.Release(); err != nil {
+			i.deps.Log.Global().Error(opLock, "could not release the sweep lock", dlog.Context{"lock": i.deps.LockPath, "cause": err.Error()})
+		}
+	}()
 	matches, err := filepath.Glob(filepath.Join(i.deps.Dir, Glob))
 	if err != nil {
 		return fmt.Errorf("glob %q: %w", Glob, err)
