@@ -36,8 +36,10 @@ type WatchAgentRequest struct {
 	// The opening page's budget.
 	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The newest entry the caller already holds. UNSET = repaint: a full first
-	// page. SET = catch-up: the opening page carries only entries NEWER than
-	// this. The shim tracks nothing about what it previously served — the
+	// page in descending conversation place. SET = catch-up: the opening page
+	// carries only entries FIRST WRITTEN AFTER this one — catch-up is about what
+	// was written since, never about place, so a late-written entry placed
+	// earlier in the conversation is delivered rather than skipped. The shim tracks nothing about what it previously served — the
 	// caller states its own high-water mark. A fresh agent simply yields an
 	// empty page.
 	KnownThrough  *v1.HistoryPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
