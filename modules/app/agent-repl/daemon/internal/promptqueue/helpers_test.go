@@ -67,6 +67,8 @@ type fakeDB struct {
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
 	closeTurnErrs map[ids.TurnID]error
+	// putTurnErr fails every turn-row write.
+	putTurnErr error
 	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
 	orphansErr error
 	claimErr   error
@@ -269,6 +271,9 @@ func (d *fakeDB) AllHeldPrompts(context.Context) ([]wsm.HeldPrompt, error) {
 func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.putTurnErr != nil {
+		return d.putTurnErr
+	}
 	copied := t
 	d.turns[t.ID] = &copied
 	return nil
