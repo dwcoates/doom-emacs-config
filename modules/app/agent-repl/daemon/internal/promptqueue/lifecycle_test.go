@@ -165,6 +165,57 @@ func TestOnLeaseChangedDeliversAReleasedHoldWhenNothingIsRunning(t *testing.T) {
 	}
 }
 
+func TestOnLeaseChangedRunsAQueuedActBeforeTheReleasedPrompt(t *testing.T) {
+	// Arrange: a /compact queued behind a prompt the lease holds.
+	h := newHarness(t)
+	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
+	h.lease(wsm.HolderDrain, wsm.PolicyHold)
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "t-compact"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	h.clearLease()
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+	// Assert: the cut runs, and the prompt waits for the cut's end.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t-compact" {
+		t.Fatalf("started = %v, want the queued /compact first and alone", started)
+	}
+}
+
+func TestOnLeaseChangedWithNoHoldsStillRunsAQueuedAct(t *testing.T) {
+	// Arrange: an act installed with nothing held behind the lease.
+	h := newHarness(t)
+	h.lease(wsm.HolderRestart, wsm.PolicyHold)
+	h.q.mu.Lock()
+	h.q.stateLocked(theWorkspace).acts = []Act{{Kind: ActSetModel, Value: "opus"}}
+	h.q.mu.Unlock()
+	h.clearLease()
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+	// Assert
+	if models := h.sender.modelsSet(); len(models) != 1 || models[0] != "opus" {
+		t.Fatalf("models = %v, want the queued act run at the lease's release", models)
+	}
+}
+
+func TestOnLeaseChangedKeepsAQueuedActWhileTheLeaseStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.lease(wsm.HolderRestart, wsm.PolicyHold)
+	h.q.mu.Lock()
+	h.q.stateLocked(theWorkspace).acts = []Act{{Kind: ActSetModel, Value: "opus"}}
+	h.q.mu.Unlock()
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+	// Assert
+	if models := h.sender.modelsSet(); len(models) != 0 {
+		t.Fatalf("models = %v, want the act kept behind the standing lease", models)
+	}
+}
+
 func TestOnLeaseChangedHoldsBackWhileATurnStillRuns(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -59,10 +59,100 @@ type Request struct {
 	// next bring-up, if any, spawns the installed build anyway, and a relaunch
 	// would revive a workspace nobody asked to be running.
 	ReplacesShim bool
+	// WaitFor is the gate the request waits on before it runs. The zero value
+	// is GateFreeness. Only a MOVE (KeepDraining) may ask for
+	// GateDispatchQuiet.
+	WaitFor Gate
 	// Done, when set, is told how the bounce ended. It is called once, after
 	// the workspace has left draining (or, with KeepDraining, after Run), or
 	// with ErrUnregistered when the registry dropped the bounce unrun.
 	Done func(error)
+}
+
+// Gate is what a bounce waits on before the registry runs it.
+//
+// A HANDOVER NEVER WAITS ON WORK; A SHIM REPLACEMENT DOES (owner ruling,
+// 2026-09-27). Replacing a shim ends everything that runs inside its vendor
+// child, so it waits for the workspace to fall free. Moving a workspace to
+// another daemon ends nothing: the shim keeps running, detached, and the
+// daemon it moves to adopts it mid-turn. So a move waits only until no
+// DELIVERY is in flight, which the registry's own per-workspace delivery lock
+// already guarantees at the instant it decides.
+type Gate int
+
+// The gates.
+const (
+	// GateFreeness waits for no turn in flight and no live detached work: the
+	// shim-replacement gate, and the zero value.
+	GateFreeness Gate = iota
+	// GateDispatchQuiet waits only for the delivery lock: no StartTurn is
+	// mid-flight when the bounce is decided, and none can start after it.
+	// Turns and detached work run on through it.
+	GateDispatchQuiet
+)
+
+// String names a gate for the records.
+func (g Gate) String() string {
+	switch g {
+	case GateFreeness:
+		return "freeness"
+	case GateDispatchQuiet:
+		return "dispatch_quiet"
+	default:
+		return "unknown"
+	}
+}
+
+// ErrHandedAcross is what Done is told for a shim REPLACEMENT a dispatch-quiet
+// move carried to the daemon it took the workspace to: the move ran without
+// waiting for the replacement's freeness, and the replacement runs on that
+// daemon after its adoption, at ITS freeness (or at once, when forced). It is
+// an outcome, not a failure.
+var ErrHandedAcross = errors.New("bounce: handed across; the daemon the workspace moved to runs the replacement after its adoption")
+
+// ErrMovedAway refuses a request against a workspace whose move has already
+// SEALED what it carries to the next daemon: nothing asked of this daemon now
+// can reach that daemon, so the caller asks the daemon the workspace moved to.
+// The transport answers it as `transferring_away`.
+var ErrMovedAway = errors.New("bounce: the workspace is moving to another daemon; ask the daemon it moved to")
+
+// Handoff is what a workspace's prompt queue held ONLY IN MEMORY when a
+// dispatch-quiet move sealed it: the part of the queue's state that is not a
+// durable row and would otherwise die with this daemon while the work it
+// orders is still running on the adopted shim. The move carries it to the
+// daemon it takes the workspace to, which installs it before it dials the
+// shim.
+type Handoff struct {
+	// Acts are the session acts queued behind the running work, in
+	// submission order.
+	Acts []HandoffAct `json:"acts,omitempty"`
+	// Cut is the context cut (/clear, /compact) that IS the running turn, nil
+	// when none is.
+	Cut *HandoffCut `json:"cut,omitempty"`
+	// Head is the held prompt an interjection moved to the SEMANTIC HEAD: its
+	// interrupt was sent, and it is delivered first at the running turn's end.
+	Head string `json:"head,omitempty"`
+	// Interrupting reports the footer's waiting-interrupting status.
+	Interrupting bool `json:"interrupting,omitempty"`
+}
+
+// HandoffAct is one queued session act.
+type HandoffAct struct {
+	Kind   string `json:"kind"`
+	Value  string `json:"value,omitempty"`
+	Turn   string `json:"turn,omitempty"`
+	Origin int32  `json:"origin,omitempty"`
+}
+
+// HandoffCut is the running context cut: its turn and its command.
+type HandoffCut struct {
+	Turn    string `json:"turn"`
+	Command int32  `json:"command"`
+}
+
+// Empty reports whether the handoff carries nothing.
+func (h Handoff) Empty() bool {
+	return len(h.Acts) == 0 && h.Cut == nil && h.Head == "" && !h.Interrupting
 }
 
 // ErrUnregistered is what Done is told for a registered bounce the registry

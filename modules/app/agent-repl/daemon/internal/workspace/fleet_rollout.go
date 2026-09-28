@@ -839,6 +839,100 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 	return true, nil
 }
 
+// AwaitFacts blocks until the workspace's installed watcher has taken up the
+// session facts, or ctx ends. It is what a MID-WORK adoption waits on before
+// it lets a held prompt go: until the adopted shim's re-announcement lands,
+// the watcher answers no turn in flight for a turn the shim is running, and a
+// prompt delivered in that window would start a second turn beside it. A
+// workspace with no watcher has no recorded conversation to announce, and
+// answers at once.
+func (f *Fleet) AwaitFacts(ctx context.Context, ws ids.WorkspaceID) error {
+	f.mu.RLock()
+	session, ok := f.sessions[ws]
+	f.mu.RUnlock()
+	if !ok || session.watcher == nil {
+		return nil
+	}
+	if err := session.watcher.AwaitSessionFacts(ctx); err != nil {
+		return fmt.Errorf("workspace: await the adopted session's facts on %q: %w", ws, err)
+	}
+	return nil
+}
+
+// ColdGateStanding answers the cold facts of the gate standing on a
+// workspace, false when none stands. A handover carries them: the gate is
+// daemon memory, and the successor raises it again over the parked shim it
+// adopts (AdoptParked).
+func (f *Fleet) ColdGateStanding(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if _, ok := f.coldGates[ws]; !ok {
+		return nil, false
+	}
+	cold := f.lastCold[ws]
+	return cold, cold != nil
+}
+
+// AdoptParked adopts a running shim whose session is PARKED AT ITS COLD GATE:
+// a handover's successor taking over a workspace whose gate the incumbent
+// served. The shim started no session -- it refused the resume `cold` before
+// it took any lock -- so there is nothing to watch: the client is held exactly
+// as the park holds it, with no watcher, and the gate is raised again from the
+// carried facts, so the user's answer re-opens through this daemon.
+func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error) {
+	if cold == nil {
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: no cold facts", ws)
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: resolve the workspace log sink: %w", ws, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
+	session, _, err := f.deps.DB.Session(ctx, ws)
+	if err != nil {
+		log.Error(opFleetRollout, "could not read the parked session's record", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: read the session record: %w", ws, err)
+	}
+	socketPath, socket, socketErr := shimsocket.NewestLive(f.socketProbe, f.deps.SocketPath(ws))
+	log.Debug(opFleetRollout, "resolved the parked shim's socket generation", dlog.Context{
+		"socket": socketPath, "socket_state": socket.String(), "cause": errText(socketErr),
+	})
+	client, err := f.adoptBounded(ctx, log, ws, record.Dir, socketPath, "handover_parked")
+	if err != nil {
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
+	}
+	// THE CLAIM COMES BEFORE THE MAP WRITE, as Install's does: a refused claim
+	// leaves no half-adoption, and the link this call dialed is let go --
+	// DETACHED, never killed: the parked shim is the user's conversation
+	// waiting on their answer.
+	if err := f.claimServing(ctx, log, ws); err != nil {
+		client.Detach()
+		log.Info(opFleetRollout, "let go of the dialed parked shim after a refused claim; the process keeps running", dlog.Context{
+			"shim_pid": client.PID(), "socket": socketPath,
+		})
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
+	}
+	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: session.HostSessionID}); err != nil {
+		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
+	}
+	// THE LINK IS RESTATED, as the park restates it: no watcher opens on a
+	// parked session, and without it the surfaces draw whatever link they
+	// last knew over the gate the user has to answer.
+	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
+	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
+	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
+	f.raiseColdGate(ws, session.VendorSessionID, cold)
+	f.publishHost(ws)
+	log.Info(opFleetRollout, "adopted the running shim parked at its cold gate; the gate stands on this daemon", dlog.Context{
+		"shim_pid": client.PID(), "vendor_session_id": session.VendorSessionID,
+	})
+	return client, nil
+}
+
 // StandDown is the rollout's stand-down: end the session, then stop the
 // process, forced. It is KillSession under the name the rollout's contract
 // gives it, so a handover that must stop a workspace it cannot transfer takes
