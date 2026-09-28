@@ -29,7 +29,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
-import { PersistenceError, type AgentPageSession } from "./persistence.js";
+import { PersistenceError, type AgentPageSession, type AgentTailFrame } from "./persistence.js";
 import { isRetryableRead, readWithRetry, type ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-reader", operation: "shim.store.reader" });
@@ -103,6 +103,14 @@ function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntr
  * no fingerprint, so nothing is ever withheld against it.
  */
 const CONTENT_UNKNOWN = "";
+
+/**
+ * What a RETIRED pointer's content is recorded as: the consumer was told to
+ * remove the line, so it holds nothing there. Like {@link CONTENT_UNKNOWN} it
+ * matches no fingerprint (a sha256 in base64 is never this string), so a row
+ * later taken back at the same position is always served again.
+ */
+const RETIRED_CONTENT = "retired";
 
 /**
  * The identity of one line's CONTENT. A pointer names a position and an upsert
@@ -577,7 +585,7 @@ export function createReader(options: ReaderOptions): Reader {
     // `close()` aborts the call rather than merely leaving the loop.
     let abort = new AbortController();
 
-    const tail: AsyncIterable<conversationv1.HistoryEntryAt> = {
+    const tail: AsyncIterable<AgentTailFrame> = {
       async *[Symbol.asyncIterator]() {
         /**
          * Consecutive UNASKED ends of the store's stream that delivered
@@ -596,16 +604,50 @@ export function createReader(options: ReaderOptions): Reader {
               abort.signal,
             )) {
               if (stopped) return;
-              if (push.line === undefined) {
-                throw new PersistenceError(
-                  "store_unavailable",
-                  "the store pushed a watch frame with no line",
-                );
+              let frame: AgentTailFrame;
+              switch (push.frame.case) {
+                case "line": {
+                  const entry = toHistoryEntryAt(push.frame.value);
+                  if (entry.at !== undefined) {
+                    served.set(entry.at.value, lineFingerprint(push.frame.value));
+                  }
+                  frame = { case: "entry", value: entry };
+                  break;
+                }
+                case "retired": {
+                  const entry = toHistoryEntryAt(push.frame.value);
+                  // A RETIREMENT IS SERVED, for the conclusion's purposes. The
+                  // consumer has been handed the last word on this pointer --
+                  // remove what you drew -- and the store will never serve the
+                  // line again, so a conclusion naming it (the teardown's head
+                  // was the retired row) must settle here rather than stand
+                  // forever for a line that cannot come. It is recorded under
+                  // RETIRED_CONTENT, not the line's fingerprint, so a later
+                  // write that takes the row back at the same position is
+                  // never withheld by the re-open's already-served check,
+                  // whatever its content: the consumer removed it.
+                  if (entry.at !== undefined) served.set(entry.at.value, RETIRED_CONTENT);
+                  LOGGER.logVerbose(
+                    { agent: agent.value, pointer: entry.at?.value },
+                    "the store retired a line of an agent's book; relaying the retirement to the consumer",
+                  );
+                  frame = { case: "retired", value: entry };
+                  break;
+                }
+                default:
+                  // AN UNSET ARM IS ILLEGAL AT THE CONSUMER, loudly: a frame
+                  // that is neither a line nor a retirement says nothing this
+                  // tail can relay, and skipping it would hide a broken store.
+                  throw new PersistenceError(
+                    "store_unavailable",
+                    "the store pushed a watch frame with no arm set",
+                  );
               }
-              const entry = toHistoryEntryAt(push.line);
-              servedThrough = entry.at;
-              if (entry.at !== undefined) served.set(entry.at.value, lineFingerprint(push.line));
-              yield entry;
+              // The retired pointer is as valid a high-water mark as a served
+              // one: the store keeps the position in the book, so a re-open
+              // from it is bounded exactly as from any other line.
+              servedThrough = frame.value.at;
+              yield frame;
               barrenEnds = 0;
               if (settled()) {
                 stopped = true;
@@ -721,7 +763,7 @@ export function createReader(options: ReaderOptions): Reader {
           for (const { entry, fingerprint } of fresh) {
             servedThrough = entry.at;
             if (entry.at !== undefined) served.set(entry.at.value, fingerprint);
-            yield entry;
+            yield { case: "entry", value: entry };
             barrenEnds = 0;
             if (settled()) {
               stopped = true;
@@ -886,7 +928,7 @@ export function createReader(options: ReaderOptions): Reader {
           // write order.
           for (const entry of [...session.page.entries].reverse()) {
             if (entry.at !== undefined) served.add(entry.at.value);
-            yield entry;
+            yield { case: "entry", value: entry };
             // THE CONCLUSION IS HONORED BY WHOEVER SERVED THE ROW. These
             // entries never pass through the inner session's tail, so only
             // this loop can know the named pointer has been handed over.
@@ -920,7 +962,11 @@ export function createReader(options: ReaderOptions): Reader {
               return;
             }
             pending = rows.next();
-            if (next.value.at !== undefined) served.add(next.value.at.value);
+            // A retirement counts as served here exactly as in the inner
+            // session (see its `retired` arm): the consumer has the last word
+            // on that pointer, and the store will never serve it again.
+            const at = next.value.value.at;
+            if (at !== undefined) served.add(at.value);
             yield next.value;
             if (settled()) {
               session.close();

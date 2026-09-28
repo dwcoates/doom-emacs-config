@@ -24,6 +24,7 @@ import type {
 } from "../../src/sdk/types.js";
 import type {
   AgentPageSession,
+  AgentTailFrame,
   FlushOutcome,
   PersistEntry,
   Persistence,
@@ -33,6 +34,7 @@ import type { VendorTaskAnswer } from "../../src/store/locator.js";
 import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
+import type { ReachabilityProbe } from "../../src/engine/network-resume.js";
 
 /** A query whose message stream a suite pushes into, one message at a time. */
 export class ScriptedQuery implements QueryLike {
@@ -315,7 +317,7 @@ export class RecordingPersistence implements Persistence {
   page: conversationv1.HistoryPage = create(conversationv1.HistoryPageSchema, {
     boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
   });
-  tail: conversationv1.HistoryEntryAt[] = [];
+  tail: AgentTailFrame[] = [];
   bashFrames: conversationv1.AgentBash[] = [];
   live: storev1.GetLiveWorkSuccess = create(storev1.GetLiveWorkSuccessSchema, {});
   openError: PersistenceError | undefined;
@@ -413,7 +415,7 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve({
       page: this.page,
       tail: {
-        async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.HistoryEntryAt> {
+        async *[Symbol.asyncIterator](): AsyncIterator<AgentTailFrame> {
           for (const entry of entries) yield entry;
           if (standing) await new Promise<void>(() => undefined);
         },
@@ -601,6 +603,19 @@ export class RecordingFold implements EngineFold {
   taskAgent(taskId: string): TaskAgentKnowledge {
     return this.knowledge.get(taskId) ?? { kind: "unknown" };
   }
+}
+
+/**
+ * A reachability probe answering whatever the suite last set. It touches no
+ * network, and counts how often it was asked.
+ */
+export class ScriptedProbe {
+  reachable = true;
+  calls = 0;
+  readonly probe: ReachabilityProbe = () => {
+    this.calls++;
+    return Promise.resolve({ reachable: this.reachable, detail: "scripted" });
+  };
 }
 
 /** A scheduler that never schedules; the suite fires the beat itself. */

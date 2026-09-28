@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_agent.proto.
  */
 export const file_shim_v1_endpoint_watch_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxIq8BChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAiAEBEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI7Cg1rbm93bl90aHJvdWdoGAMgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySAGIAQFCCQoHX3RhcmdldEIQCg5fa25vd25fdGhyb3VnaCJ9ChJXYXRjaEFnZW50UmVzcG9uc2USLAoEcGFnZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZUgAEjAKBWVudHJ5GAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0SABCBwoFZnJhbWVCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
+  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxIq8BChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAiAEBEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI7Cg1rbm93bl90aHJvdWdoGAMgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySAGIAQFCCQoHX3RhcmdldEIQCg5fa25vd25fdGhyb3VnaCKxAQoSV2F0Y2hBZ2VudFJlc3BvbnNlEiwKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2VIABIwCgVlbnRyeRgCIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnlBdEgAEjIKB3JldGlyZWQYAyABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5QXRIAEIHCgVmcmFtZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
 
 /**
  * Follow one agent.
@@ -90,6 +90,18 @@ export type WatchAgentResponse = Message<"shim.v1.WatchAgentResponse"> & {
      */
     value: HistoryEntryAt;
     case: "entry";
+  } | {
+    /**
+     * An entry the store RETIRED: a re-derivation of the record behind it
+     * found the record no longer converts to it, so it is no longer part of
+     * this agent's history and no page serves it again. It carries the entry
+     * as last served, at its own pointer, so the caller removes whatever it
+     * drew for it. The pointer stays a valid known_through.
+     *
+     * @generated from field: conversation.v1.HistoryEntryAt retired = 3;
+     */
+    value: HistoryEntryAt;
+    case: "retired";
   } | { case: undefined; value?: undefined };
 };
 

@@ -185,6 +185,10 @@ func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgen
 		w.routeEntryLocked(a, at)
 		return
 	}
+	if at := resp.GetRetired(); at != nil {
+		w.routeRetiredLocked(a, at)
+		return
+	}
 	w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "a WatchAgentResponse carried no frame", dlog.Context{
 		"agent_id": a.id.GetValue(),
 	})
@@ -399,6 +403,73 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 	w.log.Warn("daemon.sessionwatcher.entry_unrouted", "a history entry carried no arm", dlog.Context{
 		"agent_id": a.id.GetValue(),
 	})
+}
+
+// routeRetiredLocked routes an entry the store RETIRED: a re-derivation of the
+// vendor record behind it found the record no longer converts to it, so the
+// feed removes whatever it drew for it. The frame carries the entry as last
+// served, which is what names the rows to remove.
+//
+// ONLY THREE KINDS ARE RETIRABLE: a user prompt, a peer message, and an agent
+// frame carrying an api_error update -- the page lines an older conversion
+// could wrongly mint from a user-type record. Anything else on this arm is a
+// producer breaking the contract; it is recorded at ERROR and nothing is drawn
+// or undone.
+//
+// THE POINTER IS NOT ADOPTED AS THE WATCH'S MARK. A retired row keeps its OLD
+// position (the store retires whatever row a re-read finds, anywhere in the
+// book), so taking it would walk the high-water mark backwards and the next
+// re-open would re-serve what the views already drew.
+//
+// TURN BOOKKEEPING IS LEFT ALONE. A retired prompt was recorded as a turn this
+// watcher knows (knownTurns), and that set is what lets a later terminal
+// naming the turn end nothing quietly rather than be reported as naming a turn
+// the daemon never opened (terminalTurnLocked). Forgetting it would turn such a
+// terminal into an ERROR against a healthy session. A prompt row never set the
+// turn in flight, so there is nothing there to undo.
+func (w *watcher) routeRetiredLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
+	entry := at.GetEntry()
+	if prompt := entry.GetUserPrompt(); prompt != nil {
+		w.log.Info("daemon.sessionwatcher.prompt_retired", "a retired prompt was routed to the feed for removal", dlog.Context{
+			"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(), "pointer": at.GetAt().GetValue(),
+		})
+		w.sinks.Feed.OnPromptRetired(w.ws, prompt, w.addr)
+		return
+	}
+	if peer := entry.GetPeerMessage(); peer != nil {
+		w.log.Info("daemon.sessionwatcher.peer_message_retired", "a retired peer message was routed to the feed for removal", dlog.Context{
+			"agent_id": peer.GetAgent().GetValue(), "peer_id": peer.GetId(), "pointer": at.GetAt().GetValue(),
+		})
+		w.sinks.Feed.OnPeerMessageRetired(w.ws, peer, w.addr)
+		return
+	}
+	if failed := entry.GetAgentFrame().GetUpdate().GetApiError(); failed != nil {
+		agent := entry.GetAgentFrame().GetAgentId()
+		w.log.Info("daemon.sessionwatcher.api_error_retired", "a retired api error was routed to the feed for withdrawal", dlog.Context{
+			"agent_id": agent.GetValue(), "turn_id": at.GetTurn().GetValue(), "pointer": at.GetAt().GetValue(),
+		})
+		w.sinks.Feed.OnApiErrorRetired(w.ws, agent, failed, at.GetTurn(), w.addr)
+		return
+	}
+	w.log.Error("daemon.sessionwatcher.retired_unretirable", "a retired entry was of a kind the store never retires; nothing was removed", dlog.Context{
+		"agent_id": a.id.GetValue(), "pointer": at.GetAt().GetValue(), "kind": entryKind(entry),
+	})
+}
+
+// entryKind names a history entry's arm for a log record.
+func entryKind(entry *conversationv1.HistoryEntry) string {
+	switch {
+	case entry.GetUserPrompt() != nil:
+		return "user_prompt"
+	case entry.GetPeerMessage() != nil:
+		return "peer_message"
+	case entry.GetAgentFrame().GetUpdate() != nil:
+		return "agent_update"
+	case entry.GetAgentFrame() != nil:
+		return "agent_frame"
+	default:
+		return "unset"
+	}
 }
 
 // routePromptLocked routes a prompt delivered to the watched agent. On the

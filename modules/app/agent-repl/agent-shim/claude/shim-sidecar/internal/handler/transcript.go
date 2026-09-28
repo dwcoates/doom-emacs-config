@@ -97,6 +97,10 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 		converted := conv.Line(frame.Obj, at, lookahead(frames, i+1))
 		logResidue(log, ctx, frame.Offset, converted)
 		out = append(out, converted...)
+		// WHAT THIS RECORD NO LONGER CONVERTS TO, for a re-read of bytes an
+		// older conversion produced. Computed for every record, sent only by a
+		// reader that is re-deriving (cycle.go writeBatch).
+		ctx.Retired = append(ctx.Retired, convert.RetiredKeys(frame.Obj, converted)...)
 	}
 	return out
 }

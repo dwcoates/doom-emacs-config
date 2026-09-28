@@ -474,7 +474,7 @@ func TestLiveWorkReportsAStorageFailureWhenTheDetachedScanFails(t *testing.T) {
 func seedCursor(t *testing.T, d *DB, fileID, path string, offset int64) {
 	t.Helper()
 	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: path, Offset: offset},
+		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: path, Offset: offset, Conversion: currentConversion()},
 	}, nil); err != nil {
 		t.Fatalf("seed cursor: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestCursorsPreservesTheCarry(t *testing.T) {
 	// once and whole.
 	d, _ := newStore(t)
 	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 5, Carry: []byte(`{"partial":`)},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 5, Carry: []byte(`{"partial":`), Conversion: currentConversion()},
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -710,5 +710,67 @@ func TestTheSessionLineageSeeksEachLineageIndex(t *testing.T) {
 				t.Fatalf("the lineage walk does not seek %s:\n%s", index.name, plan)
 			}
 		})
+	}
+}
+
+// ---- the cursor's conversion bookkeeping ----
+
+func TestCursorsServeTheConversionACurrentAdvanceStated(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	healBatch(t, d, 10, 2, nil)
+
+	// Act
+	cursors, err := d.Cursors(ctx(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Cursors: %v", err)
+	}
+	conv := cursors[0].GetConversion()
+	if conv.GetVersion() != 2 || conv.GetCurrent() == nil {
+		t.Fatalf("conversion = %v, want version 2, current", conv)
+	}
+}
+
+func TestCursorsServeAHealInProgressWithItsThrough(t *testing.T) {
+	// Arrange: a restart mid-heal resumes from exactly this.
+	d, _ := newStore(t)
+	cursor := cursorAt(10, 2)
+	cursor.Conversion.State = &storev1.CursorConversion_Healing{Healing: &storev1.CursorConversionHealing{Through: 9000}}
+	if _, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, &storev1.EntryBatch{CursorAdvance: cursor}, nil); err != nil {
+		t.Fatalf("WriteBatch: %v", err)
+	}
+
+	// Act
+	cursors, err := d.Cursors(ctx(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Cursors: %v", err)
+	}
+	if got := cursors[0].GetConversion().GetHealing().GetThrough(); got != 9000 {
+		t.Fatalf("healing.through = %d, want 9000", got)
+	}
+}
+
+func TestCursorsServeAPreVersioningCursorWithNoConversion(t *testing.T) {
+	// Arrange: a cursor the live store already held before the bookkeeping
+	// existed has no cursor_conversion row.
+	d, _ := newStore(t)
+	healBatch(t, d, 10, 2, nil)
+	if _, err := d.sql.Exec(`DELETE FROM cursor_conversion`); err != nil {
+		t.Fatalf("removing the bookkeeping row: %v", err)
+	}
+
+	// Act
+	cursors, err := d.Cursors(ctx(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Cursors: %v", err)
+	}
+	if cursors[0].GetConversion() != nil {
+		t.Fatalf("conversion = %v, want unset", cursors[0].GetConversion())
 	}
 }

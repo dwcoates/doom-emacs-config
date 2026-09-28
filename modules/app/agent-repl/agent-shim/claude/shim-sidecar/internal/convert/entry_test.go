@@ -12,7 +12,7 @@ import (
 
 func TestWriteIdIsTheRuledDigestOfItsSourceCoordinates(t *testing.T) {
 	// Arrange. THE RECIPE IS THE RULING (R-S1): sha256 of
-	// "producer|file_id|offset|discriminator", hex. Asserting the recipe rather
+	// "producer|v<conversion version>|file_id|offset|discriminator", hex. Asserting the recipe rather
 	// than a recorded digest is what keeps the shim able to reproduce it.
 	at := Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 128}
 
@@ -20,9 +20,9 @@ func TestWriteIdIsTheRuledDigestOfItsSourceCoordinates(t *testing.T) {
 	got := WriteID(at, "block:0")
 
 	// Assert: recomputing the documented input must reproduce it exactly.
-	want := sha256Hex(Producer + "|16777232:9910|128|block:0")
+	want := sha256Hex(Producer + "|" + versionTag + "|16777232:9910|128|block:0")
 	if got != want {
-		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|16777232:9910|128|block:0")
+		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|"+versionTag+"|16777232:9910|128|block:0")
 	}
 }
 
@@ -320,9 +320,9 @@ func TestARecordWithNoFilePositionIsIdentifiedByItsRun(t *testing.T) {
 	got := WriteID(at, "bash_terminal")
 
 	// Assert: the recipe deliberately carries NO offset.
-	want := sha256Hex(Producer + "|run:toolu_run_0001|bash_terminal")
+	want := sha256Hex(Producer + "|" + versionTag + "|run:toolu_run_0001|bash_terminal")
 	if got != want {
-		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|run:toolu_run_0001|bash_terminal")
+		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|"+versionTag+"|run:toolu_run_0001|bash_terminal")
 	}
 }
 

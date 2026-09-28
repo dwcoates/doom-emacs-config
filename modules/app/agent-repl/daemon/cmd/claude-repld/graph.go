@@ -913,7 +913,8 @@ type paths struct {
 	// beneath it.
 	ShimMain, WebappDist, PromptsDir, VocabDir string
 	// SelfRepo is the daemon's OWN checkout identity, which the merge
-	// orchestrator's two methods key on.
+	// orchestrator's two methods key on: the REPOSITORY root containing
+	// Checkout, never Checkout itself (resolveSelfRepo).
 	SelfRepo string
 	// BuiltSHA is daemon/bin/.built-sha, the source-revision stamp the build
 	// writes beside the daemon binary: the version the health and status
@@ -938,16 +939,38 @@ func resolvePaths(opts options) (paths, error) {
 	if err != nil {
 		return paths{}, fmt.Errorf("claude-repld: %w", err)
 	}
+	selfRepo, err := resolveSelfRepo(opts, root)
+	if err != nil {
+		return paths{}, err
+	}
 	out := paths{
 		Checkout:   root,
 		ShimMain:   firstNonEmpty(opts.shim, checkout.ShimMain(root)),
 		WebappDist: firstNonEmpty(opts.webapp, checkout.WebappDist(root)),
 		PromptsDir: firstNonEmpty(opts.promptsDir, os.Getenv(envPromptsDir), checkout.PromptsDir(root)),
 		VocabDir:   checkout.VocabDir(root),
-		SelfRepo:   firstNonEmpty(opts.selfRepo, os.Getenv(envSelfRepo), root),
+		SelfRepo:   selfRepo,
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
 	}
 	return out, nil
+}
+
+// resolveSelfRepo answers the daemon's own checkout identity: the flag, then
+// the environment, then the REPOSITORY root containing the module root. The
+// merge orchestrator compares it against a workspace's target worktree root
+// and runs the gate at <it>/modules/app/agent-repl/bin/test-all.sh, so it must
+// be the repository root, never the module root beneath it. The repository
+// root is derived only when nothing overrides it, so an unmarked
+// $AGENT_REPL_CHECKOUT paired with an override still boots.
+func resolveSelfRepo(opts options, root string) (string, error) {
+	if override := firstNonEmpty(opts.selfRepo, os.Getenv(envSelfRepo)); override != "" {
+		return override, nil
+	}
+	repo, err := checkout.RepoRoot(root)
+	if err != nil {
+		return "", fmt.Errorf("claude-repld: resolving the self repository: %w", err)
+	}
+	return repo, nil
 }
 
 // mustExecutable answers this process's binary, falling back to argv[0] when

@@ -163,6 +163,15 @@ overwrites their real `shim-store.build.json`.
   because a SendMessage resume names the send, not the spawn, and a shim that
   restarted since the spawn has nothing else to name the running agent by.
 
+- `cursor_conversion` — one row per cursor (`file_id` PK, `version`,
+  `healing_through` NULL unless a re-derivation is in progress): the
+  `CursorConversion` a file-plane cursor advance states, written in the
+  advance's own transaction and served back left-joined by
+  `GetSidecarCursors`. A cursor with no row here was stored before conversion
+  versions existed and is served with its conversion UNSET, which the sidecar
+  reads as version 0. It is an IN-PLACE table (`inPlaceTables`), built on a
+  matching database the way the lineage indexes are, never by a version bump.
+
 `agent`/`workflow`/`detached_work` are UNPACKED to columns because the store
 filters and joins on them; `entry`'s frame stays a BLOB because activity
 vocabulary is content, and unpacking it would drag every `conversation.v1`
@@ -339,6 +348,14 @@ rebuilt or rewritten, and a database carrying every index is left untouched.
   at package scope. The live-work listings drive from the lineage with `CROSS
   JOIN`, because the other order built an automatic index over the materialized
   lineage.
+- **A TABLE THAT ADDS A SHAPE NOTHING ON DISK HAS IS BUILT THE SAME WAY**
+  (`inPlaceTables`, `CREATE TABLE IF NOT EXISTS`, `ensureInPlaceTables`): the
+  rows already stored keep every meaning they had, and the table's reader states
+  what its absence means. `cursor_conversion` is one: nuking the database to add
+  it would also throw away every stream-plane row the shim wrote live, which no
+  producer can rebuild. The shape check compares the table set with the
+  in-place tables taken out (`shapeTables`), because a database this binary
+  created may still lack them.
 - **ADDING ONE.** Append to `lineageIndexes` (or a sibling list applied the same
   way) with a comment naming the statement it serves; do not edit `schemaDDL`
   for it and do not bump the version.
@@ -682,6 +699,33 @@ and not something this change touches.
   A file-plane terminal still supersedes a stream-plane one, file supersedes
   file, stream supersedes stream, and every non-terminal or non-bash row is
   unchanged.
+- **EVERY FILE-PLANE ROW RECORDS THE CONVERSION THAT PRODUCED IT**
+  (`StoreEntry.conversion_version`). A file-plane entry without one (or with 0)
+  and a stream-plane entry with one are refused, and a file-plane cursor advance
+  must state its `CursorConversion`. A row stored before the field existed
+  reads as version 0.
+- **A FILE-PLANE WRITE OF UNCHANGED CONTENT IS A RESTAMP**
+  (`sameContentBarVersion`, `restamp`). When the only difference from the row
+  is the conversion version (and the write id, which digests it), the row takes
+  the new write id, version and frame and a ledger row, but its `write_seq` is
+  NOT bumped and nothing is published: a re-derivation that changes nothing is
+  invisible to every reader.
+- **A RE-DERIVATION RETIRES WHAT A RECORD NO LONGER CONVERTS TO**
+  (`EntryBatch.retirements`, `retire.go`). Retirements ride the batch's FINAL
+  transaction, after every entry and beside the cursor advance they require.
+  A row is retired only when it is a page line the FILE plane last wrote under a
+  conversion version strictly below the retirement's; an absent key, an
+  already-retired row, a non-page-line row, a stream-plane row and a row this
+  version produced are left, each traced at VERBOSE, and none is a refusal. A
+  line whose content drove a lifecycle table (an activity, a terminal, a
+  detached announcement) is never retired and the store says so at ERROR: only
+  a prompt, a peer message and a non-activity agent update are. A retired row
+  is a `kindRetired` TOMBSTONE, not a delete: its `write_seq` is bumped, it
+  keeps its book, position and last frame, every page stops serving it, every
+  standing watch is sent it once on the `retired` arm (a watch opened later
+  replays it by `write_seq`), its pointer stays valid, the ledger is untouched,
+  and a later write of a real record under the same key takes it back in place.
+  Each retirement is recorded once at INFO.
 - **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
   is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
   tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one

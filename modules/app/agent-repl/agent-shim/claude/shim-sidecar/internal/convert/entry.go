@@ -152,8 +152,11 @@ func (at Attribution) ctxError(operation string) logging.Context {
 
 // writeID mints the STABLE write identity for one record.
 //
-// DETERMINISTIC ON PURPOSE, and the exact ruled recipe (R-S1): hex sha256 of
-// "shim-claude-sidecar|" + FILE_ID + "|" + offset + "|" + discriminator. The
+// DETERMINISTIC ON PURPOSE, and the exact ruled recipe (R-S1) with the
+// conversion version in it: hex sha256 of "shim-claude-sidecar|v<N>|" +
+// FILE_ID + "|" + offset + "|" + discriminator. THE VERSION IS PART OF THE
+// IDENTITY (versionTag): the same bytes re-read under a new conversion are a
+// new write the ledger does not absorb, so their re-derived content lands. The
 // discriminator separates the several entries one record can mint (a block
 // index, "terminal", "diag"). Randomness is forbidden — replay idempotence at
 // the store rests entirely on the same bytes minting the same id.
@@ -172,14 +175,14 @@ func (at Attribution) ctxError(operation string) logging.Context {
 // onto one identity space keyed only by offset.
 func writeID(at Attribution, discriminator string) string {
 	if at.FileID != "" {
-		sum := sha256.Sum256([]byte(Producer + "|" + at.FileID + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
+		sum := sha256.Sum256([]byte(Producer + "|" + versionTag + "|" + at.FileID + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
 		return hex.EncodeToString(sum[:])
 	}
 	if at.WriteScope != "" {
 		// A record with no file position — an inferred terminal — is identified
 		// by its run instead. The offset is deliberately absent rather than
 		// zero: there is no position, and digesting one would claim there was.
-		sum := sha256.Sum256([]byte(Producer + "|" + at.WriteScope + "|" + discriminator))
+		sum := sha256.Sum256([]byte(Producer + "|" + versionTag + "|" + at.WriteScope + "|" + discriminator))
 		return hex.EncodeToString(sum[:])
 	}
 	panic("convert: write_id requires either the file's dev:inode identity or a run-scoped WriteScope; the reader supplied neither")
