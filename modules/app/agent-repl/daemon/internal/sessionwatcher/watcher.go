@@ -1695,6 +1695,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 		defer close(w.factsIn)
 	}
 	w.sinks.Topbar.OnSessionStarted(w.ws, started)
+	w.sinks.Footer.OnSessionStarted(w.ws, started)
 	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
 	// A RESUMED OR ADOPTED SESSION may already carry prompts with no vendor
 	// title, so the synthesizer is triggered at the session's naming — not only

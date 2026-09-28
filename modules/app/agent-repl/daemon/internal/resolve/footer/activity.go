@@ -166,6 +166,16 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 			Kind: &frontendv1.FooterStatusIdleActivity_Notification{Notification: line},
 		}
 	}
+	// THE DEAD-QUERY LINE stands under the failed turn's idle, where it once
+	// stood under a block: a dead query is a failed turn (owner ruling,
+	// 2026-09-28), and the line is still the one sentence the strip has about it.
+	if s.queryDied != nil {
+		return &frontendv1.FooterStatusIdleActivity{
+			At: stamp(s.queryDied.at),
+			Kind: &frontendv1.FooterStatusIdleActivity_QueryDied{
+				QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
+		}
+	}
 	if line := r.rateLine(s); line != nil {
 		return &frontendv1.FooterStatusIdleActivity{
 			At:   stamp(s.rate.at),

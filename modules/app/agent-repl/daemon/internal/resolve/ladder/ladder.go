@@ -120,14 +120,15 @@ var Order = []Claim{
 	Blocked, Waiting, Thinking, Idle,
 }
 
-// AwaitingBringUp reports a turn the daemon ACCEPTED on a workspace whose route
-// has never been seen at all: the prompt is held for a session that is still
-// to be brought up. It stands on the DISCONNECTED rung — the route is coming
-// up, and that is the truest claim about it — so both surfaces walk a cold
-// submit monotonically (idle, then the route coming up, then the turn) instead
-// of drawing the turn, then the bring-up, then the turn again.
-func AwaitingBringUp(linkSeen, turnInFlight bool) bool {
-	return !linkSeen && turnInFlight
+// AwaitingBringUp reports a workspace whose route has never been seen at all
+// while something already says a session is on its way: a turn the daemon
+// ACCEPTED (the prompt is held for a session still to be brought up), or a
+// session that has announced itself. It stands on the DISCONNECTED rung — the
+// route is coming up, and that is the truest claim about it — so both surfaces
+// walk a cold submit monotonically (idle, then the route coming up, then the
+// turn) instead of drawing the turn, then the bring-up, then the turn again.
+func AwaitingBringUp(linkSeen, turnInFlight, sessionAnnounced bool) bool {
+	return !linkSeen && (turnInFlight || sessionAnnounced)
 }
 
 // MergeClaim names the rung a merge state stands on, and the empty claim for
