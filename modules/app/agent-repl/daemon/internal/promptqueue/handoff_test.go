@@ -36,6 +36,26 @@ func TestSealMoveRefusesAWorkspaceWithNoQuietMoveRunning(t *testing.T) {
 	}
 }
 
+func TestSealMoveSealsAMoveTakenAtFreenessToo(t *testing.T) {
+	// Arrange: a free workspace's freeness-gated move (the fallback
+	// transfer) is running.
+	h := newHarness(t)
+	transfer := newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.moving("handover_transfer")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	transfer.awaitStart(t)
+
+	// Act
+	_, carried, err := h.q.SealMove(context.Background(), theWorkspace)
+
+	// Assert
+	if err != nil || len(carried) != 0 {
+		t.Fatalf("SealMove = (%+v, %v), want the move sealed with nothing carried", carried, err)
+	}
+	transfer.finish(h, nil)
+}
+
 func TestSealMoveCarriesTheQueuedActsInOrder(t *testing.T) {
 	// Arrange: a /compact and a model change queued behind the running turn.
 	h := newHarness(t)

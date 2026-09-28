@@ -20,7 +20,7 @@ const opHandoff = "daemon.promptqueue.handoff"
 
 // ErrNoMoveToSeal refuses a seal asked of a workspace no dispatch-quiet move
 // is running for: only the move's own action may seal what it carries.
-var ErrNoMoveToSeal = errors.New("promptqueue: no dispatch-quiet move is running for the workspace, so there is nothing to seal")
+var ErrNoMoveToSeal = errors.New("promptqueue: no move is running for the workspace, so there is nothing to seal")
 
 // A MID-WORK HANDOVER CARRIES WHAT THE QUEUE HELD ONLY IN MEMORY (owner ruling,
 // 2026-09-27: a daemon handover moves a workspace WITHOUT waiting for its work
@@ -57,10 +57,10 @@ func (q *queue) SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handof
 
 	q.mu.Lock()
 	pending := state.bounce
-	running := pending != nil && pending.draining && pending.quietMove() && pending.move.started && !pending.sealed && !pending.kept
+	running := pending != nil && pending.draining && pending.move != nil && pending.move.started && !pending.sealed && !pending.kept
 	q.mu.Unlock()
 	if !running {
-		log.Error(opHandoff, "a seal was asked of a workspace no dispatch-quiet move is running for", nil)
+		log.Error(opHandoff, "a seal was asked of a workspace no move is running for", nil)
 		return bounce.Handoff{}, nil, fmt.Errorf("seal %q: %w", ws, ErrNoMoveToSeal)
 	}
 
@@ -146,6 +146,9 @@ func (q *queue) UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff boun
 	}
 	q.mu.Unlock()
 	q.installLocked(ws, state, handoff, true)
+	if err := q.verifyInstalledLocked(ctx, ws, handoff, log); err != nil {
+		return err
+	}
 	log.Info(opHandoff, "the move did not land; what the seal took is this daemon's again", dlog.Context{
 		"acts": len(handoff.Acts), "running_cut": handoff.Cut != nil, "semantic_head": handoff.Head,
 	})
@@ -154,12 +157,12 @@ func (q *queue) UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff boun
 
 // AdoptHandoff implements Queue.
 //
-// IT RUNS BEFORE THE ADOPTED SHIM IS DIALED, so no turn end this daemon
-// observes on it can overtake the acts or pass the cut by. A carried fact the
-// store no longer bears out is dropped rather than installed: a cut whose turn
-// is no longer open ended while no daemon watched it (its close is the
-// adoption's own reconciliation), and a head whose prompt no longer stands was
-// delivered or dropped.
+// It runs under the delivery lock and BEFORE the handover hold is released, so
+// nothing it installs can be overtaken: no held prompt is deliverable yet,
+// and the release is what runs the carried acts ahead of them. A carried fact
+// the store no longer bears out is retired rather than left standing: a cut
+// whose turn is no longer open ended while no daemon watched it, and a head
+// whose prompt no longer stands was delivered or dropped.
 func (q *queue) AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -172,36 +175,52 @@ func (q *queue) AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bo
 	state := q.state(ws)
 	state.drain.Lock()
 	defer state.drain.Unlock()
+	q.installLocked(ws, state, handoff, false)
+	if err := q.verifyInstalledLocked(ctx, ws, handoff, log); err != nil {
+		return err
+	}
+	log.Info(opHandoff, "installed what the previous daemon's queue held in memory for the workspace", dlog.Context{
+		"acts": len(handoff.Acts), "running_cut": handoff.Cut != nil, "semantic_head": handoff.Head,
+		"interrupting": handoff.Interrupting,
+	})
+	return nil
+}
 
+// verifyInstalledLocked retires an installed cut whose turn is no longer open
+// and an installed head whose prompt no longer stands.
+//
+// INSTALL, THEN VERIFY -- never the other way round. A turn's close retires
+// the cut it finds (retireCutIf, from the turn-close door), and an unobserved
+// close of the cut's turn runs off the delivery lock. Checked first and
+// installed after, a close landing between the two finds no cut to retire and
+// the cut is installed stale, holding every later prompt behind an act that is
+// no longer running. Installed first, either the close finds it or this read
+// sees the close. The caller holds the delivery lock.
+func (q *queue) verifyInstalledLocked(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff, log dlog.Logger) error {
 	if handoff.Cut != nil {
 		open, err := q.deps.DB.OpenTurns(ctx, ws)
 		if err != nil {
-			log.Error(opHandoff, "could not read the open turns to install the carried context cut", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("adopt the handoff of %q: read the open turns: %w", ws, err)
+			log.Error(opHandoff, "could not read the open turns to verify the carried context cut; it is left installed", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("verify the handoff of %q: read the open turns: %w", ws, err)
 		}
-		if !openTurn(open, ids.TurnID(handoff.Cut.Turn)) {
+		if turn := ids.TurnID(handoff.Cut.Turn); !openTurn(open, turn) {
+			q.retireCutIf(ws, turn, func() (dlog.Logger, bool) { return log, true })
 			log.Info(opHandoff, "the carried context cut's turn is no longer open; it ended while no daemon watched it", dlog.Context{
 				"session_act_turn": handoff.Cut.Turn,
 			})
-			handoff.Cut = nil
 		}
 	}
 	if handoff.Head != "" {
 		standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 		if err != nil {
-			log.Error(opHandoff, "could not read the standing holds to install the carried semantic head", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("adopt the handoff of %q: read the standing holds: %w", ws, err)
+			log.Error(opHandoff, "could not read the standing holds to verify the carried semantic head; it is left installed", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("verify the handoff of %q: read the standing holds: %w", ws, err)
 		}
-		if !standingTurn(standing, ids.TurnID(handoff.Head)) {
-			log.Info(opHandoff, "the carried semantic head no longer stands; it is not installed", dlog.Context{"turn": handoff.Head})
-			handoff.Head = ""
+		if turn := ids.TurnID(handoff.Head); !standingTurn(standing, turn) {
+			q.clearHeadIf(ws, turn)
+			log.Info(opHandoff, "the carried semantic head no longer stands; it is retired", dlog.Context{"turn": handoff.Head})
 		}
 	}
-	q.installLocked(ws, state, handoff, false)
-	log.Info(opHandoff, "installed what the previous daemon's queue held in memory for the workspace", dlog.Context{
-		"acts": len(handoff.Acts), "running_cut": handoff.Cut != nil, "semantic_head": handoff.Head,
-		"interrupting": handoff.Interrupting,
-	})
 	return nil
 }
 
