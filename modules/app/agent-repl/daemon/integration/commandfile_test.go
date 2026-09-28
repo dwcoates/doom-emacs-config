@@ -101,6 +101,7 @@ func TestAMergeEntryEnqueuesTheNamedWorkspace(t *testing.T) {
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "cmdfile-merge", "do the thing", nil)
+	harness.CommitWork(t, f.ws.GetDir())
 	roster := d.WatchRoster()
 
 	// Act
