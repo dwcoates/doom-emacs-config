@@ -30,12 +30,22 @@ import (
 //  8. compacting      …either kind.
 //  9. submitting      the turn is accepted and the shim has not acked it.
 //  10. thinking        the turn is producing activity.
-//  11. idle_async      detached work runs while the foreground is free. It
-//     outranks the two turn terminals below because work
-//     happening NOW outranks how the last turn ended.
-//  12. interrupted     the last turn was stopped by the user.
-//  13. done            the last turn finished and its response is unread.
-//  14. ready           live, proven usable and idle.
+//  11. turn end, unread  done or interrupted, whichever the last turn's close
+//     resolves to, while its result is UNREAD: the turn
+//     completed or was interrupted and the user has not viewed
+//     the row since. It outranks idle_async below: a result is
+//     waiting, and detached work still running must not hide
+//     that. It holds until the editor reports the row viewed
+//     (SetViewed) or a new prompt starts a turn.
+//  12. idle_async      detached work runs while the foreground is free. It
+//     outranks the turn terminals below because work
+//     happening NOW outranks how the last turn ended — once
+//     that turn's result has been read.
+//  13. interrupted     the last turn was stopped by the user.
+//  14. done            the last turn finished.
+//     Both 13 and 14 are drawn PARTIAL (viewed) once their
+//     result is read, FULL while it is not.
+//  15. ready           live, proven usable and idle.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Logger) string {
 	if !s.live(session) && rec.Closed {
 		return "inactive"
@@ -198,15 +208,21 @@ func sessionArm(s *wsState, log dlog.Logger) string {
 	case s.turn != nil:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil"})
 		return "thinking"
+	case s.resultUnreadNow():
+		arm := s.turnEndArm()
+		if s.asyncLive() {
+			log.Debug("daemon.sidebar.unread_outranks_async",
+				"the last turn's result is unread, so the row stays on its turn-end arm over live detached work",
+				dlog.Context{"status": arm})
+		}
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
+		return arm
 	case s.asyncLive():
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.asyncLive()"})
 		return "idle_async"
-	case s.turnEverRan && s.lastClose == wsm.CloseKilled:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan && s.lastClose == wsm.CloseKilled"})
-		return "interrupted"
 	case s.turnEverRan:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan"})
-		return "done"
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
+		return s.turnEndArm()
 	default:
 		log.Debug("daemon.sidebar.status", "the session is live and idle", nil)
 		return "ready"

@@ -132,6 +132,13 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 // mutateWorkspace is mutate for a fact about ONE workspace, resolved onto that
 // workspace's own log sink.
 func (r *resolver) mutateWorkspace(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState)) {
+	r.mutateWorkspaceLogged(ws, operation, message, ctx, func(s *wsState, _ dlog.Logger) { apply(s) })
+}
+
+// mutateWorkspaceLogged is mutateWorkspace for a change that records a
+// transition of its own: apply is handed the workspace's log sink, and runs
+// under the same lock as the render it precedes.
+func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger)) {
 	r.mu.Lock()
 	log := r.logFor(ws)
 	r.mu.Unlock()
@@ -139,7 +146,7 @@ func (r *resolver) mutateWorkspace(ws ids.WorkspaceID, operation, message string
 		ctx = dlog.Context{}
 	}
 	ctx["workspace_id"] = string(ws)
-	r.mutate(operation, message, ctx, log, func() { apply(r.state.workspace(ws)) })
+	r.mutate(operation, message, ctx, log, func() { apply(r.state.workspace(ws), log) })
 }
 
 // render builds the WHOLE roster: both groupings, the hoisted merged section
@@ -246,21 +253,41 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 		})
 }
 
-// SetViewed raises the workspace's VIEWED marker, which draws its row PARTIAL
-// — but only while the row is DONE.
+// SetViewed records that the user has READ the last turn's result, which
+// draws the row PARTIAL — but only when the report lands on a TURN-END row
+// (done or interrupted).
 //
 // The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
 // fact, and the editor reports it whatever the status. Whether it takes is
-// the roster's decision, made in the render this mutation runs (`wsState.
-// noteArm`): a report on a row that is not done is dropped there, under the
-// same lock, before anything is published. There is no companion lowering
-// setter, deliberately — the marker is cleared by the row's next STATUS
-// CHANGE (`wsState.noteArm`), so the sidebar and the Emacs tab-bar reset on
-// the same rule.
+// the roster's decision, made against the arm the row last PUBLISHED — the
+// one the user was looking at — under the same lock as the render this
+// mutation runs. A report on a turn-end row reads the result: an unread one
+// held over live detached work then yields to `idle_async`, drawn FULL, and
+// the row comes back PARTIAL on its turn-end arm when that work ends. A
+// report on any other row is refused and recorded, and changes nothing.
+// There is no companion lowering setter, deliberately: a new turn is what
+// makes the next result unread (startTurn, SetTurnEnded).
 func (r *resolver) SetViewed(ws ids.WorkspaceID) {
-	r.mutateWorkspace(ws, "daemon.sidebar.set_viewed",
-		"the roster took the editor's viewed report; the row is PARTIAL only while it is done",
-		nil, func(s *wsState) { s.viewed = true })
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
+		"the roster took the editor's viewed report; it reads the result only on a done row",
+		nil, func(s *wsState, log dlog.Logger) {
+			if !s.lastArmSeen || !isTurnEndArm(s.lastArm) {
+				log.Debug("daemon.sidebar.row_viewed_refused",
+					"the row is not on a turn-end arm, so the viewed report was dropped and the row stays FULL",
+					dlog.Context{"status": s.lastArm, "result": s.result.String()})
+				return
+			}
+			if s.result == resultRead {
+				return
+			}
+			log.Info("daemon.sidebar.result_read",
+				"the user viewed the turn-end row, so the last turn's result is read", dlog.Context{
+					"status":     s.lastArm,
+					"was":        s.result.String(),
+					"async_live": s.asyncLive(),
+				})
+			s.result = resultRead
+		})
 }
 
 // SetReviving raises or lowers the workspace's REVIVING marker, which draws a
@@ -282,8 +309,14 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 	if turn != nil {
 		ctx["act"] = int(turn.Act)
 	}
-	r.mutateWorkspace(ws, "daemon.sidebar.set_turn", "the roster took the accepted turn", ctx,
-		func(s *wsState) { s.startTurn(turn) })
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn", "the roster took the accepted turn", ctx,
+		func(s *wsState, log dlog.Logger) {
+			if turn != nil && s.result == resultUnread {
+				log.Info("daemon.sidebar.result_unread_cleared",
+					"a new prompt started a turn, so the last turn's unread result no longer holds the row", nil)
+			}
+			s.startTurn(turn)
+		})
 }
 
 // AckTurn records the shim's acceptance of the turn, ending `submitting`.
@@ -298,12 +331,26 @@ func (r *resolver) AckTurn(ws ids.WorkspaceID) {
 
 // SetTurnEnded installs how the last turn ended.
 func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
-	r.mutateWorkspace(ws, "daemon.sidebar.set_turn_ended", "the roster took the turn's close",
-		dlog.Context{"close": int(how)}, func(s *wsState) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", "the roster took the turn's close",
+		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			s.turn = nil
 			s.turnEverRan = true
 			s.lastClose = how
 			s.compacting = false
+			// A COMPLETED or INTERRUPTED turn leaves a result the user has
+			// not read. Any other close leaves no tracked result, but it is
+			// still a NEW ending, so a read state from before it does not
+			// carry over.
+			if how != wsm.CloseCompleted && how != wsm.CloseKilled {
+				s.result = resultNone
+				return
+			}
+			s.result = resultUnread
+			log.Info("daemon.sidebar.result_unread",
+				"the turn ended, so its result is unread until the user views the row", dlog.Context{
+					"status":     s.turnEndArm(),
+					"async_live": s.asyncLive(),
+				})
 		})
 }
 
