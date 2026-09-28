@@ -646,7 +646,7 @@ sits flush on the bar with no ground of its own.  See
     (:merge-queued    . "none")
     (:merge-conflict  . "green")
     (:merge-failed    . "blue")
-    (:merged          . "none"))
+    (:merged          . "green"))
   "Which of the five colors each ROSTER STATUS ARM takes, BY NAME.
 
 Keyed by the `RosterRow.status' arm keywords `wire-roster.el' decodes
@@ -671,11 +671,13 @@ the sidebar reports them with a glyph rather than spending a lifecycle
 color on the merge pipeline — and `none\=' and `inactive\=' take none
 because a workspace with no session has no lifecycle to report at all.
 
-TWO MERGE ARMS ARE COLORED AS WELL AS GLYPHED (owner ruling,
+THREE MERGE ARMS ARE COLORED AS WELL AS GLYPHED (owner ruling,
 2026-09-28), as the fixture\='s `colored_merge_arms\=' declares.
 `:merge-failed\=' is BLUE, the color that says something is wrong with
 the workspace.  `:merge-conflict\=' (a parked merge included) is GREEN:
 an expected state, ready for a human response, and never blue.
+`:merged\=' is GREEN: a merge that landed is a settled success, where a
+merge in progress is purple.
 THE TAB BAR DECLARES ITS OWN OVERRIDES (see
 `agent-repl-status-tab-bar-color-overrides\='); this table is what every
 surface starts from, never what the tab bar finishes with.
@@ -744,8 +746,8 @@ assertion test checks that every named glyph has a character here.
 The merge arms take no color on the shared assignment precisely so the
 glyph can be the whole report; on the tab bar the three in-flight arms
 ALSO take purple, and the glyph then says which of the three it is.
-`:merge-conflict\=' and `:merge-failed\=' take their shared green and
-blue, and draw their glyph over it.")
+`:merge-conflict\=', `:merge-failed\=' and `:merged\=' take their shared
+green, blue and green, and draw their glyph over it.")
 
 (defconst agent-repl-status-inactive-glyph "?"
   "The glyph an `inactive\=' row draws.
@@ -927,6 +929,12 @@ in `agent-repl--color-default-bracket'."
                          'agent-repl-tab-ready
                          agent-repl--color-done-green
                          agent-repl--color-dark))
+    ;; MERGED is GREEN and keeps its ✓ (owner ruling, 2026-09-28): a merge in
+    ;; progress is purple, and one that landed successfully is green.
+    (:merged . ,(agent-repl--tab-palette-row
+                 'agent-repl-tab-ready
+                 agent-repl--color-done-green
+                 agent-repl--color-dark))
     ;; `:start-failed', `:dead' and `:degraded' are BLUE, not colors of
     ;; their own: a shim that never came up, one that has gone away, and a
     ;; store outage are the same compromised route.  Which way the route is
@@ -983,10 +991,9 @@ arms have rows at all because of the override that gives them purple;
 badge-bearing surface.
 
 The arms taking `none' have NO entry and fall through to
-`agent-repl--tab-default': `:merged' reports itself with a glyph, and
-`:none' and `:inactive' have no lifecycle to report at all.
-`:merge-conflict' (green) and `:merge-failed' (blue) have rows, and
-draw their glyph over them.")
+`agent-repl--tab-default': `:none' and `:inactive' have no lifecycle
+to report at all.  `:merge-conflict' (green), `:merge-failed' (blue)
+and `:merged' (green) have rows, and draw their glyph over them.")
 
 
 ;;; The roster is the state -----------------------------------------------
@@ -1027,9 +1034,9 @@ at ERROR rather than painted."
   "Return the glyph WS draws for ARM, or nil when it draws none.
 Three glyphs exist, in precedence order: the merge pipeline's (most
 merge arms carry no lifecycle color, so the glyph is their whole
-report, and `:merge-conflict' and `:merge-failed' draw theirs over
-their green and blue), the inactive question mark, and the attention
-marker."
+report, and `:merge-conflict', `:merge-failed' and `:merged' draw
+theirs over their green, blue and green), the inactive question mark,
+and the attention marker."
   (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
