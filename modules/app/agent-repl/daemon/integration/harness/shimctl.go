@@ -428,6 +428,14 @@ func (s *ShimControl) PushUserPrompt(agent string, p *conversationv1.AgentPrompt
 	s.send(controlCommand{Op: "push_user_prompt", Agent: agent, Payload: encode(s.t, p)})
 }
 
+// PushRetired delivers one RETIRED entry (WatchAgentResponse.retired) on the
+// matching WatchAgent stream: the entry as last served, at its own pointer,
+// which the store no longer serves. An empty agent reaches every stream.
+func (s *ShimControl) PushRetired(agent string, at *conversationv1.HistoryEntryAt) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "push_retired", Agent: agent, Payload: encode(s.t, at)})
+}
+
 // PushBash delivers one bash frame on the detached shell's WatchBash stream.
 func (s *ShimControl) PushBash(work string, b *conversationv1.AgentBash) {
 	s.t.Helper()
