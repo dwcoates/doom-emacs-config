@@ -208,7 +208,7 @@ func (c *controller) abandonRestart(ctx context.Context, plan *handoverPlan, cau
 	var failures []error
 	for ws, m := range moved {
 		wsFields := merge(fields, dlog.Context{"workspace": string(ws), "lease": string(m.lease)})
-		if _, err := c.reclaim(ctx, ws, m.lease, m.detached, true, wsFields); err != nil {
+		if _, err := c.reclaim(ctx, ws, m.lease, m.detached, true, nil, wsFields); err != nil {
 			failures = append(failures, err)
 		}
 	}
