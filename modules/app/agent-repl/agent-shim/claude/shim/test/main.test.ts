@@ -20,6 +20,12 @@ import {
   FAKE_KEEPALIVE_INTERVAL_ENV,
   FAKE_STORE_BACKOFF_ENV,
   FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
+  FAKE_API_REACHABLE_GATE_ENV,
+  FAKE_NETWORK_RESUME_INTERVAL_ENV,
+  FAKE_NETWORK_RESUME_WINDOW_ENV,
+  resolveNetworkResumeIntervalMs,
+  resolveNetworkResumeWindowMs,
+  resolveReachabilityProbe,
   resolveExitQuietBudgetMs,
   resolveRetryPolicy,
   resolveWatcherConclusionBudgetMs,
@@ -753,6 +759,57 @@ describe("the watcher-conclusion budget override", () => {
     expect(
       resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "soon" }, true),
     ).toBeUndefined();
+  });
+});
+
+describe("the network-resume overrides", () => {
+  it("the probe interval is honored under --fake", () => {
+    expect(resolveNetworkResumeIntervalMs({ [FAKE_NETWORK_RESUME_INTERVAL_ENV]: "20" }, true)).toBe(20);
+  });
+
+  it("the probe interval is REFUSED for a real session", () => {
+    expect(resolveNetworkResumeIntervalMs({ [FAKE_NETWORK_RESUME_INTERVAL_ENV]: "20" }, false)).toBeUndefined();
+  });
+
+  it("the window is honored under --fake", () => {
+    expect(resolveNetworkResumeWindowMs({ [FAKE_NETWORK_RESUME_WINDOW_ENV]: "300" }, true)).toBe(300);
+  });
+
+  it("the window is REFUSED for a real session", () => {
+    expect(resolveNetworkResumeWindowMs({ [FAKE_NETWORK_RESUME_WINDOW_ENV]: "300" }, false)).toBeUndefined();
+  });
+});
+
+describe("the reachability probe a process gets", () => {
+  it("under --fake with no gate answers reachable without a network", async () => {
+    // Act
+    const answer = await resolveReachabilityProbe({}, true)();
+
+    // Assert
+    expect(answer.reachable).toBe(true);
+  });
+
+  it("under --fake with an absent gate answers unreachable", async () => {
+    // Arrange
+    const gate = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-main-gate-")), "up");
+
+    // Act
+    const answer = await resolveReachabilityProbe({ [FAKE_API_REACHABLE_GATE_ENV]: gate }, true)();
+
+    // Assert
+    expect(answer.reachable).toBe(false);
+  });
+
+  it("for a real session with an unresolvable base URL answers unreachable, touching nothing", async () => {
+    // Act
+    const answer = await resolveReachabilityProbe(
+      { ANTHROPIC_BASE_URL: "not a url", [FAKE_API_REACHABLE_GATE_ENV]: "/ignored" },
+      false,
+    )();
+
+    // Assert
+    expect(answer.reachable).toBe(false);
+    expect(answer.detail).toContain("not a URL");
   });
 });
 
