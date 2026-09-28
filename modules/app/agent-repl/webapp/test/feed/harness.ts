@@ -557,6 +557,15 @@ export function push(row: FeedRow): WatchFeedResponse {
 }
 
 /**
+ * A tail push carrying the daemon-global FEED TEXT SCALE (and no row): pushed
+ * on EVERY open feed's watch, sub-feeds included, and replayed the instant a
+ * tail is accepted.
+ */
+export function pushScale(scale: number): WatchFeedResponse {
+  return create(WatchFeedResponseSchema, { feedTextScale: { scale } });
+}
+
+/**
  * A tail push carrying the reply-to-a-past-response SELECTION state (and no
  * row): the daemon's per-workspace selection, pushed on the root feed's watch.
  */
