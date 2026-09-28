@@ -92,7 +92,7 @@ func TestTailerResumesFromTheStoresCursor(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
-	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn))}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()}}
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -132,9 +132,10 @@ func TestARenamedFileResumesFromTheStoresCursor(t *testing.T) {
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
 	h.store.cursors = []*storev1.CursorState{{
-		FileId: identityOf(t, path),
-		Path:   filepath.Join(filepath.Dir(path), "sess-0.jsonl"),
-		Offset: int64(2 * len(turn)),
+		FileId:     identityOf(t, path),
+		Path:       filepath.Join(filepath.Dir(path), "sess-0.jsonl"),
+		Offset:     int64(2 * len(turn)),
+		Conversion: currentConversion(),
 	}}
 
 	// Act.
@@ -193,7 +194,7 @@ func TestTheBootRewindHappensOncePerFile(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
-	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn))}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()}}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -1292,7 +1293,7 @@ func TestAFileDiscoveredAfterTheCycleBeganAsksTheStoreForItsCursor(t *testing.T)
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
 	store.cursors = []*storev1.CursorState{{
-		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)),
+		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion(),
 	}}
 
 	// Act: the file appears mid-cycle.
@@ -1338,7 +1339,7 @@ func TestTheBootRewindIsOncePerIdentityNotPerPath(t *testing.T) {
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
 	store.cursors = []*storev1.CursorState{{
-		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)),
+		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion(),
 	}}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
@@ -2577,7 +2578,7 @@ func TestTheBootRewindIsForFilesThatCanCarryATurnInFlight(t *testing.T) {
 				t.Fatalf("stamping %s: %v", path, err)
 			}
 			h.store.cursors = []*storev1.CursorState{{
-				FileId: identityOf(t, path), Path: path, Offset: tc.offset,
+				FileId: identityOf(t, path), Path: path, Offset: tc.offset, Conversion: currentConversion(),
 			}}
 
 			// Act.
@@ -2608,8 +2609,8 @@ func TestTheBootRewindStatesWhatTheWalkReRead(t *testing.T) {
 		t.Fatalf("stamping %s: %v", cold, err)
 	}
 	h.store.cursors = []*storev1.CursorState{
-		{FileId: identityOf(t, cold), Path: cold, Offset: turn},
-		{FileId: identityOf(t, warm), Path: warm, Offset: turn},
+		{FileId: identityOf(t, cold), Path: cold, Offset: turn, Conversion: currentConversion()},
+		{FileId: identityOf(t, warm), Path: warm, Offset: turn, Conversion: currentConversion()},
 	}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
@@ -2938,4 +2939,98 @@ func TestARescanPastTheClearIntervalDropsTheRememberedMisses(t *testing.T) {
 	if got := h.sc.identity.Globs() - before; got < 3+3 {
 		t.Errorf("a rescan past the clear interval ran %d glob(s), want the refresh's 3 plus one per watcher", got)
 	}
+}
+
+// ---- conversion versions: the stamp, the advance, and the heal the pass leaves alone ----
+
+func TestThePollPassLeavesAHealingTranscriptToTheHeal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	healingTranscript(t, h, "sess-heal", promptLine, assistantLine)
+
+	// Act.
+	h.tick()
+
+	// Assert.
+	if len(h.store.writes) != 0 {
+		t.Fatalf("the poll pass wrote %d batch(es), want none: a re-derivation is read by healStep", len(h.store.writes))
+	}
+}
+
+func TestEveryWrittenEntryRecordsTheConversionVersion(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-live", healTypedLine, assistantLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.tick()
+
+	// Assert.
+	for _, batch := range h.store.writes {
+		for _, entry := range batch.GetEntries() {
+			if entry.GetConversionVersion() != convert.ConversionVersion {
+				t.Fatalf("entry %q records conversion %d, want %d", entry.GetUpsertKey(), entry.GetConversionVersion(), convert.ConversionVersion)
+			}
+		}
+	}
+}
+
+func TestEveryCursorAdvanceStatesItsConversion(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-live", healTypedLine, assistantLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.tick()
+
+	// Assert.
+	conv := h.store.writes[0].GetCursorAdvance().GetConversion()
+	if conv.GetVersion() != convert.ConversionVersion || conv.GetCurrent() == nil {
+		t.Fatalf("the advance states %v, want current at version %d", conv, convert.ConversionVersion)
+	}
+}
+
+func TestACursorFromANewerConversionIsResumedWithoutAHeal(t *testing.T) {
+	// Arrange: a newer binary read the file, and this one was rolled back to.
+	h := newHarness(t, &fakeStore{})
+	turn := int64(len(promptLine + "\n" + assistantLine + "\n"))
+	path := h.transcript(t, "sess-newer", promptLine, assistantLine, promptLine, assistantLine)
+	h.store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path), Path: path, Offset: 2 * turn,
+		Conversion: &storev1.CursorConversion{Version: convert.ConversionVersion + 1},
+	}}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if w := h.sc.watchers[path]; w.heal != nil || w.tailer.Offset() == 0 {
+		t.Fatalf("heal=%+v offset=%d, want the stored position resumed and nothing re-derived", w.heal, w.tailer.Offset())
+	}
+}
+
+func TestACursorFromANewerConversionIsStated(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, "sess-newer", promptLine, assistantLine)
+	h.store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path), Path: path, Offset: fileSizeOf(t, path),
+		Conversion: &storev1.CursorConversion{Version: convert.ConversionVersion + 1},
+	}}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	h.requireOnce(t, "conversion-heal", "info")
 }
