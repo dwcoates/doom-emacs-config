@@ -149,7 +149,7 @@ export function rosterStream(
   return {
     watchWorkspaceRoster: async function* () {
       for (const roster of rosters) {
-        yield create(WatchWorkspaceRosterResponseSchema, { roster });
+        yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster } });
       }
       // A standing stream never ends on its own.
       await new Promise<never>(() => undefined);

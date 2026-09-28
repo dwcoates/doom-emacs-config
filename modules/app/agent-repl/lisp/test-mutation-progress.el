@@ -211,7 +211,7 @@ and it failed -- that is what makes the vocabulary one vocabulary."
       (should (alist-get phase (alist-get kind agent-repl-workspace-progress-phases))))))
 
 (ert-deftest agent-repl-test-mp-open-states-every-daemon-stage ()
-  "Every stage the daemon's WorkspaceOpenStage enum can push has a sentence.
+  "Every stage the daemon's WorkspaceOpenStage oneof can push has a sentence.
 A stage with none would reach the user as the caller bug report instead of
 as progress."
   ;; Arrange / Act / Assert.
@@ -220,7 +220,7 @@ as progress."
     (should (alist-get stage (alist-get :open agent-repl-workspace-progress-phases)))))
 
 (ert-deftest agent-repl-test-mp-create-states-every-daemon-stage ()
-  "Every stage the daemon's WorkspaceCreateStage enum can push has a sentence."
+  "Every stage the daemon's WorkspaceCreateStage oneof can push has a sentence."
   ;; Arrange / Act / Assert.
   (dolist (stage '(:deriving-name :creating-worktree :starting-session))
     (should (alist-get stage (alist-get :create agent-repl-workspace-progress-phases)))))

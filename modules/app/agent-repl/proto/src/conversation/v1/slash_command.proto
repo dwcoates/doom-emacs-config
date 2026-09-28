@@ -126,6 +126,9 @@ enum SessionCommand {
   SESSION_COMMAND_VIM = 28 [(session_command_spec) = {literal: "/vim"}];
   SESSION_COMMAND_REWIND = 29 [(session_command_spec) = {literal: "/rewind"}];
   SESSION_COMMAND_BUG = 30 [(session_command_spec) = {literal: "/bug"}];
+  SESSION_COMMAND_EFFORT = 31 [(session_command_spec) = {literal: "/effort", takes_args: true}];
+  SESSION_COMMAND_PLUGIN = 32 [(session_command_spec) = {literal: "/plugin", takes_args: true}];
+  SESSION_COMMAND_LOW_PRIORITY = 33 [(session_command_spec) = {literal: "/low-priority"}];
 }
 
 // ---- Context cuts: what /clear, /compact and auto-compaction leave behind ----

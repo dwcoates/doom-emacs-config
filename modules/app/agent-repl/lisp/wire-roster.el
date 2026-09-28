@@ -35,6 +35,7 @@
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decoded "wire-common")
+(declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--object "wire-common")
@@ -726,17 +727,25 @@ preference, a selection between two resolved views, never a derivation."
   "Decode `WatchWorkspaceRosterResponse''s `roster' field VALUE."
   (agent-repl-wire-decode-workspace-roster value))
 
+(defun agent-repl-wire-decode-watch-workspace-roster-response-ending (value)
+  "Decode `WatchWorkspaceRosterResponse''s `ending' push arm VALUE."
+  (agent-repl-wire-decode-daemon-stream-ending value))
+
 (defun agent-repl-wire-decode-watch-workspace-roster-response (value)
-  "Decode VALUE as `WatchWorkspaceRosterResponse', a plist `(:roster R)'.
-Always whole, never a delta — a partially-applied roster is
-unrepresentable by construction."
+  "Decode VALUE as `WatchWorkspaceRosterResponse', `(:arm ARM :value V)'.
+THE ARM IS WHAT THE FRAME CARRIES: `:roster' is the roster, always whole
+and never a delta -- a partially-applied roster is unrepresentable by
+construction -- and `:ending' (value nil) is the planned end of the
+stream, its last frame before a clean end.  An unset oneof is a breach,
+never an empty sidebar."
   (let ((object (agent-repl-wire--object "WatchWorkspaceRosterResponse" value)))
-    (agent-repl-wire--check-keys "WatchWorkspaceRosterResponse" object '(roster))
+    (agent-repl-wire--check-keys "WatchWorkspaceRosterResponse" object '(roster ending))
     (agent-repl-wire--decoded
      "WatchWorkspaceRosterResponse"
-     (list :roster (agent-repl-wire--decode-message
-                    "WatchWorkspaceRosterResponse" 'roster object
-                    #'agent-repl-wire-decode-watch-workspace-roster-response-roster)))))
+     (agent-repl-wire--decode-oneof
+      "WatchWorkspaceRosterResponse" 'push object
+      '((roster :roster agent-repl-wire-decode-watch-workspace-roster-response-roster)
+        (ending :ending agent-repl-wire-decode-watch-workspace-roster-response-ending))))))
 
 (provide 'wire-roster)
 

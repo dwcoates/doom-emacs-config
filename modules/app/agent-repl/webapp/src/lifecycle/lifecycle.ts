@@ -202,6 +202,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
     schema: WatchDaemonResponseSchema,
     open: (_client, signal) =>
       ctx.streams.watch("daemon", { client: { case: "webview", value: {} } }, signal),
+    plannedEnding: (response) => response.push.case === "ending",
     onPush: (response) => {
       const push = requireCase(response.push, "WatchDaemonResponse.push");
       switch (push.case) {

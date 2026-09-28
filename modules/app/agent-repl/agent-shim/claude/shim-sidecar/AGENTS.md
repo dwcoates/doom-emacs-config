@@ -1070,7 +1070,10 @@ foreground harnesses may use `logging.NewAtLevel`.
   GLOBAL durable sink via the same `forward_undelivered` no-loss path. This is
   the roster-delivered-but-absent case ONLY: a roster stream that errors or
   never delivers a snapshot is a transport transient handled by the pid/boot
-  sentinels above, not an unresolvable workspace.
+  sentinels above, not an unresolvable workspace. A stream whose first frame
+  is the daemon's planned ending (`WatchWorkspaceRosterResponse.ending`,
+  `DaemonStreamEnding`) delivered no roster either: the daemon is standing
+  down, so it is `logging.ErrForwardTargetNotThere`, the restart transient.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened

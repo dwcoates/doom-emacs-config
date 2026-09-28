@@ -21,7 +21,7 @@
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { requireMessage } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
@@ -180,8 +180,16 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
+    plannedEnding: (response) => response.push.case === "ending",
     onPush: (response) => {
-      const roster = requireMessage(response.roster, "WatchWorkspaceRosterResponse.roster");
+      const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
+      if (push.case !== "roster") {
+        // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
+        // not a contract violation: skipped quietly by the stream pipeline.
+        // (`ending` never reaches here: the stream pipeline consumes it.)
+        return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
+      }
+      const roster = requireMessage(push.value, "WatchWorkspaceRosterResponse.roster");
       // The teardowns come down BEFORE the draw, so a ticking age about to be
       // replaced cannot paint a node already detached.
       clear();

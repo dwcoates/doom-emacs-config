@@ -458,3 +458,140 @@ func TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent(t *tes
 		t.Fatal("a late subscriber lost the drain banner; the progress event replaced the standing state")
 	}
 }
+
+// lastFrameBeforeEnd reads a stream to its end and answers the last frame it
+// carried and how it ended: a nil error is the clean end of stream.
+func lastFrameBeforeEnd[R any](stream *connect.ServerStreamForClient[R]) (*R, error) {
+	var last *R
+	for stream.Receive() {
+		last = stream.Msg()
+	}
+	return last, stream.Err()
+}
+
+// TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame pins that the
+// daemon's planned stand-down (Close, which `serve` runs on every planned exit)
+// sends `DaemonStreamEnding` as the LAST frame of each of the three streams
+// that carry the arm, and then ends the stream cleanly.
+func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
+	cases := []struct {
+		name string
+		// open opens the stream, proves it live, and answers a reader that
+		// reports whether the last frame was the ending, and the end's error.
+		open func(t *testing.T, ctx context.Context, h *harness) func() (bool, error)
+	}{
+		{
+			name: "WatchHostWorkspace",
+			open: func(t *testing.T, ctx context.Context, h *harness) func() (bool, error) {
+				stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+				if err != nil {
+					t.Fatalf("open the host stream: %v", err)
+				}
+				h.Server.Relay().ReloadWebapp(testWorkspaceID)
+				receiveHostEvent(t, stream)
+				return func() (bool, error) {
+					last, err := lastFrameBeforeEnd(stream)
+					return last.GetEnding() != nil, err
+				}
+			},
+		},
+		{
+			name: "WatchDaemon",
+			open: func(t *testing.T, _ context.Context, h *harness) func() (bool, error) {
+				stream := proveDaemonSubscription(t, h)
+				return func() (bool, error) {
+					last, err := lastFrameBeforeEnd(stream)
+					return last.GetEnding() != nil, err
+				}
+			},
+		},
+		{
+			name: "WatchWorkspaceRoster",
+			open: func(t *testing.T, ctx context.Context, h *harness) func() (bool, error) {
+				stream, err := h.Client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+				if err != nil {
+					t.Fatalf("open the roster stream: %v", err)
+				}
+				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
+				if !stream.Receive() || stream.Msg().GetRoster() == nil {
+					t.Fatalf("prove the roster subscription: %v", stream.Err())
+				}
+				return func() (bool, error) {
+					last, err := lastFrameBeforeEnd(stream)
+					return last.GetEnding() != nil, err
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			read := tc.open(t, ctx, h)
+
+			// Act.
+			if err := h.Server.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			// Assert.
+			endedWithEnding, err := read()
+			if err != nil {
+				t.Fatalf("the %s stream ended with %v, want a clean end", tc.name, err)
+			}
+			if !endedWithEnding {
+				t.Fatalf("the %s stream's last frame was not DaemonStreamEnding", tc.name)
+			}
+		})
+	}
+}
+
+// endingSink records what endStandingStream sent.
+type endingSink struct {
+	sent []*agentreplv1.WatchDaemonResponse
+}
+
+func (s *endingSink) Send(r *agentreplv1.WatchDaemonResponse) error {
+	s.sent = append(s.sent, r)
+	return nil
+}
+
+// TestEndStandingStreamSendsOnlyWhenTheLifetimeEnded pins the planned/unplanned
+// split at its source: the ending is sent when the daemon's lifetime (Close)
+// ended the stream, and never when the stream ended with the lifetime still
+// running -- its client cancelled it, and nobody is listening.
+func TestEndStandingStreamSendsOnlyWhenTheLifetimeEnded(t *testing.T) {
+	cases := []struct {
+		name        string
+		lifeEnded   bool
+		wantEndings int
+	}{
+		{name: "the daemon's lifetime ended", lifeEnded: true, wantEndings: 1},
+		{name: "the client ended the stream", lifeEnded: false, wantEndings: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			life, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.lifeEnded {
+				cancel()
+			}
+			s := &server{life: life}
+			sink := &endingSink{}
+
+			// Act.
+			endStandingStream(s, "WatchDaemon", &recordingLogger{}, streamSink[agentreplv1.WatchDaemonResponse](sink),
+				&agentreplv1.WatchDaemonResponse{
+					Push: &agentreplv1.WatchDaemonResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+				})
+
+			// Assert.
+			if len(sink.sent) != tc.wantEndings {
+				t.Fatalf("endings sent = %d, want %d", len(sink.sent), tc.wantEndings)
+			}
+		})
+	}
+}

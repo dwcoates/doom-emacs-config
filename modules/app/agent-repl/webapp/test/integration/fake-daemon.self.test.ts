@@ -239,7 +239,7 @@ describe("unset-field injection", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    const row = push.roster?.repository?.sections[0]?.rows?.rows[0];
+    const row = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.rows?.rows[0];
     expect(row?.status.case).toBeUndefined();
   });
 
@@ -328,7 +328,7 @@ describe("view streams", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    expect(push.roster?.repository?.sections[0]?.rows?.rows[0]?.name?.text).toBe("ported");
+    expect((push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.rows?.rows[0]?.name?.text).toBe("ported");
   });
 
   it("pushes the scripted tray", async () => {

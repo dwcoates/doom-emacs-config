@@ -13,23 +13,32 @@ import (
 	"connectrpc.com/connect"
 )
 
-// awaitStreamEnd reads a stream to its end and answers how it ended: nil for
-// the end frame, the transport's error for a cut.
-func awaitStreamEnd[T any](t *testing.T, d *harness.Daemon, s *harness.Stream[T], what string) error {
+// awaitStreamEnd reads a stream to its end and answers its last push and how
+// it ended: nil for the end frame, the transport's error for a cut.
+func awaitStreamEnd[T any](t *testing.T, d *harness.Daemon, s *harness.Stream[T], what string) (T, error) {
 	t.Helper()
 	ctx, cancel := d.WaitCtx()
 	defer cancel()
+	var last T
 	for {
 		select {
-		case _, ok := <-s.C:
+		case v, ok := <-s.C:
 			if !ok {
-				return s.Err()
+				return last, s.Err()
 			}
+			last = v
 		case <-ctx.Done():
 			t.Fatalf("the %s stream was still open after the daemon exited: %v", what, ctx.Err())
-			return nil
+			return last, nil
 		}
 	}
+}
+
+// streamEnd is how one stream ended: whether its last push was the planned
+// `DaemonStreamEnding`, and the end's error.
+type streamEnd struct {
+	ending bool
+	err    error
 }
 
 // TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits pins the
@@ -40,7 +49,9 @@ func awaitStreamEnd[T any](t *testing.T, d *harness.Daemon, s *harness.Stream[T]
 // process exit. Every client still watching read "producer closed without an
 // end frame": Emacs, which speaks HTTP/1.1, on a workspace no transfer notice
 // had reached and on its roster. Each stream now ends with its end frame
-// before the process goes, on both transports.
+// before the process goes, on both transports -- and the three streams whose
+// contract carries `DaemonStreamEnding` (host, roster, daemon) send it as
+// their last push first, so a client reads the end as planned.
 func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) {
 	t.Parallel()
 	transports := []struct {
@@ -52,38 +63,56 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 	}
 	streams := []struct {
 		name string
-		open func(f *fixture, client agentreplv1connect.AgentReplClient) func() error
+		open func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd
+		// wantEnding is whether the stream's contract carries the planned
+		// ending arm, which a planned exit must send as its last frame.
+		wantEnding bool
 	}{
 		{
 			name: "WatchHostWorkspace",
-			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() error {
+			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchHostOn(client, f.ws)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the host stream")
-				return func() error { return awaitStreamEnd(f.t, f.d, s, "host") }
+				return func() streamEnd {
+					last, err := awaitStreamEnd(f.t, f.d, s, "host")
+					return streamEnd{ending: last.GetEnding() != nil, err: err}
+				}
 			},
+			wantEnding: true,
 		},
 		{
 			name: "WatchWorkspaceRoster",
-			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() error {
-				s := f.d.WatchRosterOn(client)
+			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
+				s := f.d.WatchRosterFramesOn(client)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the roster stream")
-				return func() error { return awaitStreamEnd(f.t, f.d, s, "roster") }
+				return func() streamEnd {
+					last, err := awaitStreamEnd(f.t, f.d, s, "roster")
+					return streamEnd{ending: last.GetEnding() != nil, err: err}
+				}
 			},
+			wantEnding: true,
 		},
 		{
 			name: "WatchDaemon",
-			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() error {
+			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchDaemonStreamOn(client)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the daemon stream")
-				return func() error { return awaitStreamEnd(f.t, f.d, s, "daemon") }
+				return func() streamEnd {
+					last, err := awaitStreamEnd(f.t, f.d, s, "daemon")
+					return streamEnd{ending: last.GetEnding() != nil, err: err}
+				}
 			},
+			wantEnding: true,
 		},
 		{
 			name: "WatchWebWorkspace",
-			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() error {
+			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchWebOn(client, f.ws)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the web stream")
-				return func() error { return awaitStreamEnd(f.t, f.d, s, "web") }
+				return func() streamEnd {
+					_, err := awaitStreamEnd(f.t, f.d, s, "web")
+					return streamEnd{err: err}
+				}
 			},
 		},
 	}
@@ -108,8 +137,13 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 				}
 
 				// Assert
-				if err := ended(); err != nil {
-					t.Fatalf("the %s stream ended with %v, want its end frame", stream.name, err)
+				end := ended()
+				if end.err != nil {
+					t.Fatalf("the %s stream ended with %v, want its end frame", stream.name, end.err)
+				}
+				if end.ending != stream.wantEnding {
+					t.Fatalf("the %s stream's last push was the planned ending = %v, want %v",
+						stream.name, end.ending, stream.wantEnding)
 				}
 			})
 		}

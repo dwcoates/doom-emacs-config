@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The daemon is ending this standing stream because the daemon itself is
+// standing down in a PLANNED exit — a handover to a successor, a restart onto a
+// fresh build, a drain, or an ordinary shutdown. It is the LAST frame the
+// stream carries before its clean end of stream.
+//
+// A client that reads it treats the end as expected rather than as a lost
+// stream: it logs the end at INFO, not ERROR, and reattaches to whichever
+// daemon now serves (the successor named by a transfer notice, or the daemon
+// address it resolves afresh). A stream that ends WITHOUT this frame ended
+// unplanned — a crash, a killed process, a broken connection — and is a fault.
+//
+// It carries nothing: which daemon to reattach to is not this frame's to say,
+// because a successor may not be serving yet when the frame is sent, and the
+// client's own daemon resolution is the one authority for the live address.
+message DaemonStreamEnding {}

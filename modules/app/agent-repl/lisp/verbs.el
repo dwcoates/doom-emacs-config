@@ -1198,6 +1198,14 @@ whole stack's build, so it is far longer than an ordinary verb's deadline."
                (if (= (plist-get value :workspaces) 1) "" "s")
                (plist-get value :busy)
                (if (plist-get value :forced) ", forced" "")))
+      (:restarting
+       (format "restarting for state layout %d→%d, %d workspace%s (%d busy%s)"
+               (plist-get value :running-state-layout)
+               (plist-get value :fresh-state-layout)
+               (plist-get value :workspaces)
+               (if (= (plist-get value :workspaces) 1) "" "s")
+               (plist-get value :busy)
+               (if (plist-get value :forced) ", forced" "")))
       (:shims
        (let ((bounces (plist-get value :bounces)))
          (format "%d bounced now, %d registered"

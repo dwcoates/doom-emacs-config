@@ -118,6 +118,19 @@ func deployOutcome(o deploy.Outcome) (*agentreplv1.DeployComponentOutcome, error
 		out.Outcome = &agentreplv1.DeployComponentOutcome_HandingOver{HandingOver: &agentreplv1.DeployHandingOver{
 			Workspaces: uint32(o.Handover.Workspaces), Busy: uint32(o.Handover.Busy), Forced: o.Handover.Forced,
 		}}
+	case deploy.RestartingAcrossLayout:
+		// THE TWO LAYOUTS DIFFER BY CONTRACT: their difference is why this is a
+		// restart and not a handover. Equal or negative layouts are a decision
+		// the arm cannot state, never one rendered with a wrapped or made-up
+		// number.
+		if o.Layouts.Running < 0 || o.Layouts.Fresh < 0 || o.Layouts.Running == o.Layouts.Fresh {
+			return nil, fmt.Errorf("server: the deploy decided a layout restart the contract cannot state: running layout %d, fresh layout %d",
+				o.Layouts.Running, o.Layouts.Fresh)
+		}
+		out.Outcome = &agentreplv1.DeployComponentOutcome_Restarting{Restarting: &agentreplv1.DeployRestarting{
+			RunningStateLayout: uint32(o.Layouts.Running), FreshStateLayout: uint32(o.Layouts.Fresh),
+			Workspaces: uint32(o.Handover.Workspaces), Busy: uint32(o.Handover.Busy), Forced: o.Handover.Forced,
+		}}
 	case deploy.ShimsBouncing:
 		bounces := &agentreplv1.DeployShimBounces{}
 		for _, b := range o.Shims {
