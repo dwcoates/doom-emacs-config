@@ -208,6 +208,21 @@ func (h HoldKind) String() string {
 	}
 }
 
+// valid reports whether the delivery is one of the declared deliveries.
+func (d Delivery) valid() bool { return d >= DeliveryOrdinary && d <= DeliveryDeferred }
+
+// String names a delivery, for logs.
+func (d Delivery) String() string {
+	switch d {
+	case DeliveryOrdinary:
+		return "ordinary"
+	case DeliveryDeferred:
+		return "deferred"
+	default:
+		return fmt.Sprintf("delivery(%d)", int(d))
+	}
+}
+
 // valid reports whether the classification arm is one of the declared arms.
 func (a ClassificationArm) valid() bool { return a >= ArmClassifying && a <= ArmClassificationError }
 
