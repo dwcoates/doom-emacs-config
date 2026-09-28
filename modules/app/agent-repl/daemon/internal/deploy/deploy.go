@@ -319,10 +319,11 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// reaches only its caller, and a landing's deploy has none. A handover
 	// whose successor would not start is the rollout's own fault.
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
+	var rollback rolledBack
 	defer func() {
 		if err != nil {
 			d.progress(nil)
-			d.recordFailure(ctx, err)
+			d.recordFailure(ctx, err, rollback)
 		}
 	}()
 
@@ -348,7 +349,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		if err == nil || !prev.touched() {
 			return
 		}
-		d.rollback(ctx, prev, nonce, err)
+		rollback = rolledBack{ran: true, err: d.rollback(ctx, prev, nonce, err)}
 	}()
 	d.log.Info(opDeploy, "deploying: building every component into staging", fields)
 
@@ -390,6 +391,9 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	if err != nil {
 		return result, err
 	}
+	// A DEPLOY THAT GOT ALL THE WAY THROUGH installed and decided every
+	// component, so no earlier rollback's partial state stands.
+	d.stepSucceeded(ctx, health.DeployStepRollback)
 	d.log.Info(opDeploy, "deployed: every component decided", merge(fields, dlog.Context{"decisions": summarize(result)}))
 	if !movesDaemon(result) {
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
