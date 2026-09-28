@@ -114,3 +114,45 @@ func TestStandingIsOwnedOnceAJoiningDaemonHasAdopted(t *testing.T) {
 		t.Fatalf("Standing = %v after adoption, want owned", standing)
 	}
 }
+
+func TestServesIntakeOnlyWhileNeitherJoiningNorHandingOver(t *testing.T) {
+	ws := ids.WorkspaceID("ws-handed-over")
+	tests := []struct {
+		name        string
+		joiningMode bool
+		owned       bool
+		handingOver bool
+		want        bool
+	}{
+		{name: "an incumbent with no handover in flight serves", want: true},
+		{name: "an incumbent whose handover has begun does not", handingOver: true},
+		{name: "a successor still joining does not", joiningMode: true},
+		{name: "a successor that owns everything it was handed serves", joiningMode: true, owned: true, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.joiningMode, h.c.manifestSeen = tc.joiningMode, tc.joiningMode
+			if tc.joiningMode {
+				h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+				h.c.owned = map[ids.WorkspaceID]bool{ws: tc.owned}
+			}
+			h.c.mu.Unlock()
+			if tc.handingOver {
+				if _, err := h.c.claimHandover(); err != nil {
+					t.Fatalf("claimHandover: %v", err)
+				}
+			}
+
+			// Act
+			got := h.c.ServesIntake()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("ServesIntake = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
