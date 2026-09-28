@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -106,7 +107,8 @@ func (s *lifecycleSink) OnLinkFault(ws ids.WorkspaceID, fault sessionwatcher.Lin
 	// not a second condition. It is retracted only AFTER the stronger record
 	// stands, so no read ever finds the session with neither.
 	if kind == health.KindShimDied {
-		s.retractLinkFaults(ctx, ws, health.KindLinkSevered)
+		health.CloseOnEdge(ctx, health.ReporterFaults(reporter), s.log, health.EdgeShimDeathRecorded,
+			health.EdgeScope{Workspace: &ws}, time.Now())
 	}
 }
 
@@ -163,29 +165,6 @@ func (s *lifecycleSink) recordSessionFault(ws ids.WorkspaceID, record wsm.Fault)
 		s.log.Error("daemon.cmd.lifecycle", "the session fault could not be recorded", dlog.Context{
 			"workspace": string(ws), "kind": record.Kind, "cause": err.Error(),
 		})
-	}
-}
-
-// retractLinkFaults closes every standing fault of one kind on a workspace.
-func (s *lifecycleSink) retractLinkFaults(ctx context.Context, ws ids.WorkspaceID, kind string) {
-	reporter, ok := s.health.reporter()
-	if !ok {
-		return
-	}
-	scoped := wsm.WorkspaceID(ws)
-	open, err := reporter.OpenFaults(ctx, wsm.FaultScope{Workspace: &scoped, Kind: kind})
-	if err != nil {
-		s.log.Error("daemon.cmd.lifecycle", "the superseded link faults could not be read", dlog.Context{
-			"workspace": string(ws), "kind": kind, "cause": err.Error(),
-		})
-		return
-	}
-	for _, f := range open {
-		if err := reporter.CloseFault(ctx, f.ID); err != nil {
-			s.log.Error("daemon.cmd.lifecycle", "a superseded link fault could not be closed", dlog.Context{
-				"workspace": string(ws), "fault": string(f.ID), "cause": err.Error(),
-			})
-		}
 	}
 }
 
@@ -297,25 +276,13 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 	}
 	ctx := context.Background()
 	scoped := wsm.WorkspaceID(ws)
-	open, err := reporter.OpenFaults(ctx, wsm.FaultScope{Workspace: &scoped})
+	// THE PUSH IS THE WHOLE VERDICT: it is the recovery edge of every
+	// shim-reported fault standing. A standing set that cannot be read is not
+	// replaced, or the verdict would be stacked on top of itself.
+	closed, err := health.CloseOnEdge(ctx, health.ReporterFaults(reporter), s.log, health.EdgeShimDiagnostics,
+		health.EdgeScope{Workspace: &ws}, time.Now())
 	if err != nil {
-		s.log.Error("daemon.cmd.lifecycle", "the standing session faults could not be read", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
-		})
 		return
-	}
-	closed := 0
-	for _, f := range open {
-		if f.Kind != health.KindShimReported {
-			continue
-		}
-		if err := reporter.CloseFault(ctx, f.ID); err != nil {
-			s.log.Error("daemon.cmd.lifecycle", "a retracted session fault could not be closed", dlog.Context{
-				"workspace": string(ws), "fault": string(f.ID), "cause": err.Error(),
-			})
-			continue
-		}
-		closed++
 	}
 
 	opened := 0
