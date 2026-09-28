@@ -137,7 +137,15 @@ func (w *watcher) registerTurnWaiter(turn ids.TurnID) (ch chan turnEnd, standing
 // late waiter, every standing waiter on that turn is answered, and the
 // freeness signal is raised.
 func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
-	w.turn = nil
+	if w.turn != nil && *w.turn == turn {
+		w.turn = nil
+		if w.adopted != nil && *w.adopted == turn {
+			w.adopted = nil
+		}
+		w.standNextWaitingLocked(turn)
+	} else if !w.dropWaitingLocked(turn, "a turn waiting behind the adopted turn ended") {
+		w.turn = nil
+	}
 	// THE LIFECYCLE SINK IS TOLD OFF THE LOCK. It is the prompt queue, and a
 	// turn's end is what makes the queue DELIVER the next prompt -- which
 	// opens a turn back on this watcher and needs this very mutex. Told
@@ -152,6 +160,49 @@ func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
 	}
 	delete(w.turnWaiters, turn)
 	w.signalFreenessLocked()
+}
+
+// standNextWaitingLocked stands the newest turn waiting behind `ended` in
+// flight, now that the turn ahead of it ended. An accepted turn takes the open
+// edges the views were not given while it waited; one still opening takes
+// them from its own OnTurnOpened. It runs BEFORE the ended turn's end reaches
+// the lifecycle sink, so the queue finds this turn running and pops nothing
+// into it.
+func (w *watcher) standNextWaitingLocked(ended ids.TurnID) {
+	if len(w.waiting) == 0 {
+		return
+	}
+	next := w.waiting[len(w.waiting)-1]
+	w.waiting = w.waiting[:len(w.waiting)-1]
+	turn := next.turn
+	w.turn = &turn
+	w.turnAccepted = next.accepted || next.adopted
+	if next.adopted {
+		w.adopted = &turn
+	}
+	w.log.Info("daemon.sessionwatcher.turn_resumed", "the turn ahead ended; the turn waiting behind it stands in flight", dlog.Context{
+		"turn_id": string(turn), "ended_turn": string(ended), "accepted": next.accepted, "still_waiting": len(w.waiting),
+	})
+	if next.accepted || next.adopted {
+		w.sinks.Footer.OnTurnOpened(w.ws, turn)
+		w.sinks.Feed.OnTurnOpened(w.ws, turn)
+	}
+}
+
+// dropWaitingLocked takes `turn` out of the waiting stack, reporting whether
+// it was there.
+func (w *watcher) dropWaitingLocked(turn ids.TurnID, why string) bool {
+	for i := range w.waiting {
+		if w.waiting[i].turn != turn {
+			continue
+		}
+		w.waiting = append(w.waiting[:i], w.waiting[i+1:]...)
+		w.log.Debug("daemon.sessionwatcher.turn_waiting_dropped", why, dlog.Context{
+			"turn_id": string(turn), "turn_in_flight": turnValue(w.turn), "still_waiting": len(w.waiting),
+		})
+		return true
+	}
+	return false
 }
 
 // rememberClosedTurnLocked records a turn's close, evicting the oldest once
