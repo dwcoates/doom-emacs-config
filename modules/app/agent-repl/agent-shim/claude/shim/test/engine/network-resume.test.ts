@@ -7,17 +7,14 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  NETWORK_RESUME_MARKER,
   NETWORK_RESUME_PROBE_INTERVAL_MS,
   NETWORK_RESUME_WINDOW_MS,
   NetworkResume,
   classifyAgentFailure,
-  isNetworkResumePrompt,
-  networkResumePrompt,
-  resumePromptTargets,
   type FailureEvidence,
   type ResumeDelivery,
 } from "../../src/engine/network-resume.js";
+import { resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
 import { REAL_SCHEDULER } from "../../src/engine/keepalive.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler, ScriptedProbe } from "./fakes.js";
@@ -214,49 +211,6 @@ describe("classifyAgentFailure", () => {
 
     // Assert
     expect(verdict.network).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The resume prompt
-// ---------------------------------------------------------------------------
-
-describe("the resume prompt", () => {
-  it("names every agent it continues, in order, and reads them back", () => {
-    // Arrange
-    const targets = [
-      { taskId: "a1111", description: "first" },
-      { taskId: "a2222", description: "second `quoted`" },
-    ];
-
-    // Act
-    const prompt = networkResumePrompt(targets);
-
-    // Assert
-    expect(resumePromptTargets(prompt)).toEqual(["a1111", "a2222"]);
-  });
-
-  it("opens with the marker", () => {
-    // Act
-    const prompt = networkResumePrompt([{ taskId: "a1", description: "d" }]);
-
-    // Assert
-    expect(isNetworkResumePrompt(prompt)).toBe(true);
-    expect(prompt.startsWith(NETWORK_RESUME_MARKER)).toBe(true);
-  });
-
-  it("an ordinary prompt is not a resume prompt", () => {
-    // Act / Assert
-    expect(isNetworkResumePrompt("please continue")).toBe(false);
-  });
-
-  it("asks for SendMessage to the agent's own id", () => {
-    // Act
-    const prompt = networkResumePrompt([{ taskId: "a8586cc4fd87da466", description: "d" }]);
-
-    // Assert
-    expect(prompt).toContain("SendMessage");
-    expect(prompt).toContain("`a8586cc4fd87da466`");
   });
 });
 
