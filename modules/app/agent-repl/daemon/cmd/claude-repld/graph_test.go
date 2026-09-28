@@ -2,6 +2,10 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
+
+	"claude-repld/internal/merge"
 
 	"claude-repld/internal/boot"
 	"claude-repld/internal/sessionlock"
@@ -243,5 +247,64 @@ func TestResolveStartBoundReadsADuration(t *testing.T) {
 	}
 	if got != 250*time.Millisecond {
 		t.Fatalf("resolveStartBound(\"250ms\") = %v, want 250ms", got)
+	}
+}
+
+func TestResolveSelfRepo(t *testing.T) {
+	tests := []struct {
+		name    string
+		flag    string
+		env     string
+		root    string
+		want    string
+		wantErr string
+	}{
+		{name: "the flag wins over the environment", flag: "/flag", env: "/env", root: "/repo/modules/app/agent-repl", want: "/flag"},
+		{name: "the environment wins over the checkout", env: "/env", root: "/repo/modules/app/agent-repl", want: "/env"},
+		{name: "the default is the repository root, not the module root", root: "/repo/modules/app/agent-repl", want: "/repo"},
+		{name: "an override lets an unmarked checkout boot", env: "/env", root: "/pinned", want: "/env"},
+		{name: "an unmarked checkout with no override is refused", root: "/pinned", wantErr: "resolving the self repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv(envSelfRepo, tt.env)
+
+			// Act.
+			got, err := resolveSelfRepo(options{selfRepo: tt.flag}, tt.root)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("resolveSelfRepo() = (%q, %v), want an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("resolveSelfRepo() = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// The merge gate's script is the checkout's own bin/test-all.sh: the default
+// self repository joined by merge.TestCommandFor must land beneath the module
+// root exactly once, never at modules/app/agent-repl/modules/app/agent-repl.
+func TestTheDefaultSelfRepoRunsTheCheckoutsOwnTestAll(t *testing.T) {
+	// Arrange.
+	t.Setenv(envSelfRepo, "")
+	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "")
+	root := filepath.Join("/repo", "modules", "app", "agent-repl")
+	selfRepo, err := resolveSelfRepo(options{}, root)
+	if err != nil {
+		t.Fatalf("resolveSelfRepo() error = %v", err)
+	}
+
+	// Act.
+	argv := merge.TestCommandFor(selfRepo)
+
+	// Assert.
+	if want := filepath.Join(root, "bin", "test-all.sh"); argv[len(argv)-1] != want {
+		t.Fatalf("TestCommandFor(%q) = %v, want the script at %q", selfRepo, argv, want)
 	}
 }
