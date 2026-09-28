@@ -27,6 +27,10 @@ type LineWritten struct {
 	AgentID  string
 	Line     *storev1.StoreLineAt
 	WriteSeq uint64
+	// Retired says this is not a line but the RETIREMENT of one (retire.go):
+	// Line is the line as it was last served, at its own pointer, and a
+	// watcher is sent it on the `retired` arm so it removes what it drew.
+	Retired bool
 }
 
 // SkippedEntry is one batch entry the store left UNCHANGED because its
@@ -67,6 +71,15 @@ type WriteResult struct {
 	// catalog. A COUNT and not a list: the store's answer is the same whichever
 	// row each landed on, and the producer already knows which hashes it sent.
 	Shapes int
+	// Restamped is the entries whose content was already stored exactly as
+	// written, apart from the conversion version: the row took the new
+	// version and write id and NOTHING ELSE (no write_seq bump, no watcher
+	// told), so a re-derivation that still converts a record the same way
+	// costs its readers nothing.
+	Restamped int
+	// Retired is how many rows this batch's retirements retired. Each is also
+	// in Lines with Retired set, when it had a book to publish to.
+	Retired int
 }
 
 // bulkBounds bound ONE bulk transaction. A bulk batch whose entries exceed any
@@ -169,6 +182,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 			return result, d.refuse(base, err)
 		}
 	}
+	if err := validateRetirements(batch.GetRetirements(), cursor); err != nil {
+		return result, d.refuse(base, err)
+	}
 	// THE SHAPE CATALOG IS VALIDATED WITH EVERYTHING ELSE, before any
 	// transaction opens, so a malformed observation refuses the batch whole
 	// rather than half-committing the records beside it.
@@ -180,7 +196,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 
 	remaining := routes
 	for transaction := 1; ; transaction++ {
-		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes)
+		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes, batch.GetRetirements())
 		if err != nil {
 			if transaction > 1 {
 				// THE LEADING TRANSACTIONS STAY COMMITTED, and the record says so,
@@ -208,6 +224,8 @@ func (r *WriteResult) merge(part WriteResult) {
 	r.Lines = append(r.Lines, part.Lines...)
 	r.BashRows = append(r.BashRows, part.BashRows...)
 	r.Shapes += part.Shapes
+	r.Restamped += part.Restamped
+	r.Retired += part.Retired
 }
 
 // writeTransaction commits ONE transaction of a batch: every remaining entry
@@ -216,7 +234,7 @@ func (r *WriteResult) merge(part WriteResult) {
 // advance only when it consumed the last of them. Its outcome is returned only
 // once it has COMMITTED; a rolled-back transaction contributes nothing.
 func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class WriteClass, transaction int, routes []routed,
-	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation) (WriteResult, int, error) {
+	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation, retirements []*storev1.StoreRetirement) (WriteResult, int, error) {
 	var result WriteResult
 	consumed := 0
 
@@ -285,6 +303,15 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	final := consumed == len(routes)
 
 	if final {
+		// THE RETIREMENTS RIDE THE CURSOR ADVANCE'S TRANSACTION, AFTER EVERY
+		// ENTRY. A record's retirement and the rows it now converts to are one
+		// re-derivation, and the cursor advance past that record is what says it
+		// happened: split them and a re-read cut short could retire a row whose
+		// replacement never committed, or commit the position past a record
+		// whose stale row still stands and will never be re-read.
+		if err := d.applyRetirements(ctx, tx, base, retirements, &nextSeq, now, &result); err != nil {
+			return WriteResult{}, 0, err
+		}
 		// THE CATALOG COMMITS WITH THE CURSOR ADVANCE THAT CONSUMED THE LINES IT
 		// DESCRIBES. Split them and an advance that survived a lost catalog
 		// write takes the shape with it: the bytes are past the cursor, nothing
@@ -309,8 +336,8 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
-	}, "transaction %d committed written=%d absorbed=%d skipped=%d lines=%d shapes=%d cursor_advance=%t final=%t",
-		transaction, result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), result.Shapes, final && cursor != nil, final)
+	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d cursor_advance=%t final=%t",
+		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, final && cursor != nil, final)
 	return result, consumed, nil
 }
 
@@ -342,7 +369,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
-	skip, retiredFrom, err := d.applyIdentityPolicy(ctx, tx, fields, &r)
+	skip, retiredFrom, prior, err := d.applyIdentityPolicy(ctx, tx, fields, &r)
 	if err != nil {
 		return d.refuse(fields, err)
 	}
@@ -363,6 +390,16 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
 			skip.FromBook, skip.ToBook, r.index)
 		return nil
+	}
+
+	if prior != nil && retiredFrom == "" {
+		unchanged, err := sameContentBarVersion(r, prior)
+		if err != nil {
+			return d.refuse(fields, err)
+		}
+		if unchanged {
+			return d.restamp(ctx, tx, fields, r, cursor, prior, now, result)
+		}
 	}
 
 	if r.workflowNotImplemented {
@@ -387,11 +424,15 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	}
 	if retiredFrom != "" {
 		// ONCE PER KEY by construction: the row now holds a real kind, so no
-		// later write to it takes this branch again.
+		// later write to it takes this branch again (until it is retired anew).
 		info := fields
 		info.Level = "info"
-		d.log.Log(info, "a retired keep-alive row was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
-			retiredFrom, r.kind, r.index)
+		what := "a retired keep-alive row"
+		if retiredFrom == kindRetired {
+			what = "a page line the file plane's re-derivation retired"
+		}
+		d.log.Log(info, "%s was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
+			what, retiredFrom, r.kind, r.index)
 	}
 	result.Written++
 	switch r.kind {
@@ -563,35 +604,114 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *st
 // record parked its producer's whole file. No keep-alive row is ever served or
 // written again, so the retired row names nothing a pointer could hold, and
 // the real record takes the key. The caller is told through `retiredFrom`.
-func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging.Fields, r *routed) (skip *SkippedEntry, retiredFrom string, err error) {
-	var book sql.NullString
-	var kind string
-	var stored []byte
+//
+// A ROW THE FILE PLANE'S RE-DERIVATION RETIRED (kindRetired) IS THE SECOND. It
+// was a page line and still holds its book and position; a real page line under
+// the same key in the SAME book takes it back where it stood, so a pointer
+// already served for it names the line again. Into another book it is the
+// ordinary book-move skip, and as any other kind the ordinary refusal.
+//
+// The stored row is handed back (`prior`) whenever it was superseded in place,
+// so the caller can see whether the write changes anything at all.
+func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging.Fields, r *routed) (skip *SkippedEntry, retiredFrom string, prior *storedRow, err error) {
+	row := &storedRow{}
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT book_agent_id, kind, frame FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind, &stored); {
+		`SELECT position, write_seq, plane, book_agent_id, kind, frame FROM entry WHERE upsert_key = ?`, r.upsertKey).
+		Scan(&row.position, &row.writeSeq, &row.plane, &row.book, &row.kind, &row.frame); {
 	case errors.Is(err, sql.ErrNoRows):
 		// A first insert has no identity to change.
-		return nil, "", nil
+		return nil, "", nil, nil
 	case err != nil:
-		return nil, "", storagef(err, "reading the identity of row %q", r.upsertKey)
+		return nil, "", nil, storagef(err, "reading the identity of row %q", r.upsertKey)
 	}
-	if kind == kindKeepaliveRetired && r.kind != kindKeepaliveRetired {
-		return nil, kind, nil
+	if row.kind == kindKeepaliveRetired && r.kind != kindKeepaliveRetired {
+		return nil, row.kind, nil, nil
 	}
-	if kind != r.kind {
-		return nil, "", invalidSitef(SiteUpsertChangesIdentity,
+	if row.kind == kindRetired && r.kind == kindPageLine {
+		if row.book.Valid != r.book.Valid || row.book.String != r.book.String {
+			return &SkippedEntry{UpsertKey: r.upsertKey, FromBook: nullableBook(row.book), ToBook: nullableBook(r.book)}, "", nil, nil
+		}
+		return nil, row.kind, nil, d.carryStoredTurn(fields, r, row.frame)
+	}
+	if row.kind != r.kind {
+		return nil, "", nil, invalidSitef(SiteUpsertChangesIdentity,
 			entryField(r.index, "agent_update"),
 			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
-			r.index, r.upsertKey, kind, r.kind)
+			r.index, r.upsertKey, row.kind, r.kind)
 	}
-	if book.Valid != r.book.Valid || book.String != r.book.String {
+	if row.book.Valid != r.book.Valid || row.book.String != r.book.String {
 		return &SkippedEntry{
 			UpsertKey: r.upsertKey,
-			FromBook:  nullableBook(book),
+			FromBook:  nullableBook(row.book),
 			ToBook:    nullableBook(r.book),
-		}, "", nil
+		}, "", nil, nil
 	}
-	return nil, "", d.carryStoredTurn(fields, r, stored)
+	if err := d.carryStoredTurn(fields, r, row.frame); err != nil {
+		return nil, "", nil, err
+	}
+	return nil, "", row, nil
+}
+
+// storedRow is the row an upsert found under its key: what the identity policy
+// judged and what the unchanged-content test compares against.
+type storedRow struct {
+	position int64
+	writeSeq uint64
+	plane    int64
+	book     sql.NullString
+	kind     string
+	frame    []byte
+}
+
+// sameContentBarVersion reports whether a FILE-PLANE write would store exactly
+// what the row already holds, apart from the conversion version that produced
+// it.
+//
+// IT IS WHAT MAKES A RE-DERIVATION FREE FOR ITS READERS. When the sidecar's
+// conversion advances it re-reads whole transcripts, and nearly every record
+// converts exactly as before; superseding each such row would bump its
+// write_seq and re-deliver it to every standing watch, which for a reader is a
+// whole conversation replayed for nothing. Only the file plane's own re-writes
+// are judged this way: a stream-plane write is the shim telling live readers
+// something, and whether they have heard it before is not the store's call.
+//
+// THE TURN HAS ALREADY BEEN CARRIED (carryStoredTurn), so a write that differs
+// only by omitting the stamp the row already holds is the same content.
+func sameContentBarVersion(r routed, prior *storedRow) (bool, error) {
+	if r.plane != planeFile || prior.plane != planeFile {
+		return false, nil
+	}
+	stored := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(prior.frame, stored); err != nil {
+		return false, storagef(err, "the stored frame of row %q cannot be decoded to compare its content", r.upsertKey)
+	}
+	incoming := proto.Clone(r.entry).(*storev1.StoreEntry)
+	stored.ConversionVersion, incoming.ConversionVersion = nil, nil
+	// The write id is a coordinate, not content: the version is digested into
+	// it, so an unchanged record re-read under a new version mints a new one.
+	stored.WriteId, incoming.WriteId = "", ""
+	return proto.Equal(stored, incoming), nil
+}
+
+// restamp records a file-plane write whose content the row already holds: the
+// row takes the write's id, frame (which carries the new conversion version)
+// and ledger row, and NOTHING that a reader can observe changes — its write_seq
+// stays, so no watch replays it, no line is published, and no lifecycle table
+// is touched, since those were derived from the same content already.
+func (d *DB) restamp(ctx context.Context, tx *sql.Tx, fields logging.Fields, r routed, cursor *storev1.CursorState, prior *storedRow, now int64, result *WriteResult) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE entry SET write_id = ?, frame = ? WHERE position = ?`, r.writeID, r.frame, prior.position); err != nil {
+		return d.refuse(fields, storagef(err, "restamping row %q with its new conversion version", r.upsertKey))
+	}
+	if err := d.recordApplied(ctx, tx, r, cursor, prior.writeSeq, now); err != nil {
+		return d.refuse(fields, err)
+	}
+	result.Restamped++
+	verbose := fields
+	verbose.Position = encodePointer(prior.position).GetValue()
+	verbose.WriteSeq = prior.writeSeq
+	d.log.LogVerbose(verbose, "entry restamped: the row already holds this content; it takes conversion_version=%d and nothing a reader observes changes entries_index=%d",
+		r.entry.GetConversionVersion(), r.index)
+	return nil
 }
 
 // carryStoredTurn keeps a row's FIRST turn stamp across every later write of
@@ -689,7 +809,40 @@ func validateCursorState(c *storev1.CursorState) error {
 	if c.GetOffset() < 0 {
 		return invalidFieldf("cursor_advance.offset", "cursor_advance.offset is negative (file_id=%q offset=%d)", c.GetFileId(), c.GetOffset())
 	}
-	return nil
+	return validateCursorConversion(c)
+}
+
+// validateCursorConversion is the base function for store.v1.CursorConversion
+// on a cursor advance: REQUIRED, with a real version and a stated state.
+//
+// A POSITION WITH NO CONVERSION BEHIND IT IS ONE NO RE-DERIVATION CAN REASON
+// ABOUT. The sidecar decides whether a file's rows predate its conversion from
+// this and nothing else, so an advance that omitted it would read, on the next
+// boot, as a file every byte of which a superseded conversion produced.
+func validateCursorConversion(c *storev1.CursorState) error {
+	conv := c.GetConversion()
+	switch {
+	case conv == nil:
+		return invalidSitef(SiteCursorConversionUnset, "cursor_advance.conversion",
+			"cursor_advance.conversion is unset (file_id=%q) — every advance states the conversion the file was read under", c.GetFileId())
+	case conv.GetVersion() == 0:
+		return invalidSitef(SiteCursorConversionUnset, "cursor_advance.conversion.version",
+			"cursor_advance.conversion.version is 0 (file_id=%q), which names no conversion", c.GetFileId())
+	}
+	switch state := conv.GetState().(type) {
+	case *storev1.CursorConversion_Current:
+		return nil
+	case *storev1.CursorConversion_Healing:
+		if state.Healing.GetThrough() <= c.GetOffset() {
+			return invalidSitef(SiteCursorConversionUnset, "cursor_advance.conversion.healing.through",
+				"cursor_advance.conversion.healing.through=%d is not past the offset %d (file_id=%q) — a re-read that has reached where the older conversion stopped is `current`",
+				state.Healing.GetThrough(), c.GetOffset(), c.GetFileId())
+		}
+		return nil
+	default:
+		return invalidSitef(SiteCursorConversionUnset, "cursor_advance.conversion.state",
+			"cursor_advance.conversion sets no state arm (file_id=%q)", c.GetFileId())
+	}
 }
 
 // upsertCursor advances one file's reader position IN THE SAME TRANSACTION as
@@ -705,9 +858,26 @@ func (d *DB) upsertCursor(ctx context.Context, tx *sql.Tx, c *storev1.CursorStat
 	if _, err := tx.ExecContext(ctx, upsertSQL, c.GetFileId(), c.GetPath(), c.GetOffset(), c.GetCarry(), now); err != nil {
 		return storagef(err, "advancing cursor file_id=%q", c.GetFileId())
 	}
+	// THE CONVERSION BOOKKEEPING IS PART OF THE ADVANCE, in the same
+	// transaction: a position committed without it would be read back as one a
+	// superseded conversion produced.
+	var through sql.NullInt64
+	if healing := c.GetConversion().GetHealing(); healing != nil {
+		through = sql.NullInt64{Int64: healing.GetThrough(), Valid: true}
+	}
+	if _, err := tx.ExecContext(ctx, upsertConversionSQL, c.GetFileId(), c.GetConversion().GetVersion(), through); err != nil {
+		return storagef(err, "recording the conversion of cursor file_id=%q", c.GetFileId())
+	}
 	offset := c.GetOffset()
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "cursor", FileID: c.GetFileId(), Path: c.GetPath(), Offset: &offset,
-	}, "cursor advanced")
+	}, "cursor advanced conversion_version=%d healing=%t", c.GetConversion().GetVersion(), through.Valid)
 	return nil
 }
+
+// upsertConversionSQL binds (file id, conversion version, healing_through or
+// NULL). At package scope so the suite EXPLAINs the production text.
+const upsertConversionSQL = `INSERT INTO cursor_conversion (file_id, version, healing_through)
+  VALUES (?, ?, ?)
+  ON CONFLICT(file_id) DO UPDATE SET
+    version = excluded.version, healing_through = excluded.healing_through`

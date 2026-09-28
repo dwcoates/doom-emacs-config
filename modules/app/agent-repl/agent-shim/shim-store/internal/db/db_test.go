@@ -311,6 +311,25 @@ func batch(entries ...*storev1.StoreEntry) *storev1.EntryBatch {
 	return &storev1.EntryBatch{Entries: entries}
 }
 
+// testConversionVersion is the conversion version a file-plane fixture is
+// stamped with, as the sidecar stamps every entry it writes.
+const testConversionVersion = 1
+
+// fileVersion is StoreEntry.conversion_version for a file-plane fixture.
+func fileVersion() *uint32 {
+	v := uint32(testConversionVersion)
+	return &v
+}
+
+// currentConversion is the conversion a cursor advance states when its file
+// is read under the current version with nothing to re-derive.
+func currentConversion() *storev1.CursorConversion {
+	return &storev1.CursorConversion{
+		Version: testConversionVersion,
+		State:   &storev1.CursorConversion_Current{Current: &storev1.CursorConversionCurrent{}},
+	}
+}
+
 // writeOK writes a batch that must succeed.
 func writeOK(t *testing.T, d *DB, entries ...*storev1.StoreEntry) WriteResult {
 	t.Helper()
@@ -1229,11 +1248,12 @@ func thirtyRowFileBatch(tag string, fileID string, offset int64) *storev1.EntryB
 		key := fmt.Sprintf("%s-%d", tag, i)
 		entry := pageEntry(key, key, "agent-1", frameItem(activityFrame("agent-1", "act-"+key, prose())))
 		entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+		entry.ConversionVersion = fileVersion()
 		entries = append(entries, entry)
 	}
 	return &storev1.EntryBatch{
 		Entries:       entries,
-		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/corpus/live.jsonl", Offset: offset},
+		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/corpus/live.jsonl", Offset: offset, Conversion: currentConversion()},
 	}
 }
 
@@ -1430,4 +1450,64 @@ func TestCloseReportsAWALIndexDescriptorThatWillNotClose(t *testing.T) {
 		t.Fatalf("Close = %v, want a storage failure", err)
 	}
 	s.assertLogged(t, "error", "closing the WAL-index descriptor failed")
+}
+
+// ---- the in-place tables ----
+
+// preConversionDatabase writes a database carrying SchemaVersion's tables and
+// one entry row but NOT cursor_conversion — the shape the owner's events.db had
+// before the conversion heal — and returns its path, closed.
+func preConversionDatabase(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	if _, err := d.sql.Exec(`DROP TABLE cursor_conversion`); err != nil {
+		t.Fatalf("dropping cursor_conversion: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return path
+}
+
+func TestOpenBuildsAMissingInPlaceTableOnAPreExistingDatabase(t *testing.T) {
+	// Arrange
+	path := preConversionDatabase(t)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	tables, err := d.scanStrings(ctx(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cursor_conversion'`)
+	if err != nil || len(tables) != 1 {
+		t.Fatalf("cursor_conversion present = %v (err %v), want it built in place", tables, err)
+	}
+}
+
+func TestOpenKeepsTheRowsOfADatabaseItBuildsAnInPlaceTableOn(t *testing.T) {
+	// Arrange: the build is IN PLACE — nothing already stored is discarded.
+	path := preConversionDatabase(t)
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'u1'`); got != 1 {
+		t.Fatalf("rows = %d, want the stored row kept", got)
+	}
 }

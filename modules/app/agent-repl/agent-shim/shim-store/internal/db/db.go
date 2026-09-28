@@ -776,10 +776,43 @@ var lineageIndexes = []struct{ name, ddl string }{
 	{"detached_work_owner_agent", `CREATE INDEX IF NOT EXISTS detached_work_owner_agent ON detached_work(owner_agent)`},
 }
 
-// indexMigrationError is a failure to build a missing lineage index in place.
-// It is a storage failure (it wraps ErrStorage through its cause), and it is
-// its own type so Open can tell it apart from a file it should discard: the
-// database it failed on is one this binary created, and is never nuked for it.
+// inPlaceTables are the tables added after SchemaVersion 7 shipped, built IN
+// PLACE on a matching database exactly as lineageIndexes are, because a version
+// bump nukes the owner's database.
+//
+// A TABLE IS NUKE-WORTHY ONLY WHEN IT CHANGES A SHAPE THAT IS ALREADY THERE.
+// These add a shape nothing on disk has, next to the rows that are, so the rows
+// already stored keep every meaning they had: a database that predates one
+// simply has no bookkeeping in it yet, and each table's reader states what that
+// absence means. The statements are idempotent (`CREATE TABLE IF NOT EXISTS`);
+// a fresh database gets them in createSchema's own transaction, and nothing
+// here is ever altered, dropped or rewritten.
+//
+// WHY THIS ONE COULD NOT BE A VERSION BUMP. cursor_conversion exists so a
+// conversion change heals the stored rows it made wrong (owner ruling
+// 2026-09-27: the stale rows go and nothing else changes). Nuking the database
+// would also throw away every stream-plane row the shim wrote live — asks,
+// stream-only frames — which no producer can rebuild.
+var inPlaceTables = []struct{ name, ddl string }{
+	// THE FILE PLANE'S CONVERSION BOOKKEEPING, one row per cursor (store.v1
+	// CursorConversion): the conversion version every byte below the cursor's
+	// offset was converted under, and — while a re-derivation is in progress —
+	// the offset the older conversion had read to (NULL when none is). It rides
+	// the cursor advance's own transaction (upsertCursor). A cursor with NO row
+	// here was written before conversion versions existed and is served with
+	// the conversion unset, which the reader reads as version 0.
+	{"cursor_conversion", `CREATE TABLE IF NOT EXISTS cursor_conversion (
+  file_id         TEXT    PRIMARY KEY,
+  version         INTEGER NOT NULL,
+  healing_through INTEGER
+)`},
+}
+
+// indexMigrationError is a failure to build a missing lineage index or
+// in-place table. It is a storage failure (it wraps ErrStorage through its
+// cause), and it is its own type so Open can tell it apart from a file it
+// should discard: the database it failed on is one this binary created, and is
+// never nuked for it.
 type indexMigrationError struct{ err error }
 
 func (e *indexMigrationError) Error() string { return e.err.Error() }
@@ -789,7 +822,27 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "residue_shapes", "schema_meta", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "residue_shapes", "schema_meta", "workflow", "write_ledger"}
+
+// shapeTables is a table set with the in-place tables taken out: the part of a
+// database's shape that must match EXACTLY, because the in-place tables are the
+// ones a database this binary created may still lack.
+func shapeTables(tables []string) []string {
+	out := make([]string, 0, len(tables))
+	for _, table := range tables {
+		inPlace := false
+		for _, t := range inPlaceTables {
+			if t.name == table {
+				inPlace = true
+				break
+			}
+		}
+		if !inPlace {
+			out = append(out, table)
+		}
+	}
+	return out
+}
 
 // supersededVersion reports whether an on-disk stamp names a schema THIS
 // binary superseded: any version below its own, and not the 0 of a database
@@ -837,9 +890,12 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 			"reading the on-disk schema failed: %v", err)
 		return err
 	}
-	if current == SchemaVersion && slicesEqual(tables, schemaTables) {
+	if current == SchemaVersion && slicesEqual(shapeTables(tables), shapeTables(schemaTables)) {
 		d.log.LogVerbose(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
 			"schema already current version=%d", current)
+		if err := d.ensureInPlaceTables(ctx, path, tables); err != nil {
+			return err
+		}
 		return d.ensureIndexes(ctx, path)
 	}
 	// AN EMPTY FILE IS A FIRST CREATE, NOT A NUKE. Every fresh store — every
@@ -927,8 +983,14 @@ func (d *DB) createSchema(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
 		return storagef(err, "creating the schema")
 	}
-	// A fresh database gets the lineage indexes in the SAME transaction as the
-	// tables, so no database this binary creates is ever without them.
+	// A fresh database gets the in-place tables and the lineage indexes in the
+	// SAME transaction as the rest, so no database this binary creates is ever
+	// without them.
+	for _, table := range inPlaceTables {
+		if _, err := tx.ExecContext(ctx, table.ddl); err != nil {
+			return storagef(err, "creating table %s", table.name)
+		}
+	}
 	for _, index := range lineageIndexes {
 		if _, err := tx.ExecContext(ctx, index.ddl); err != nil {
 			return storagef(err, "creating index %s", index.name)
@@ -993,6 +1055,53 @@ func (d *DB) ensureIndexes(ctx context.Context, path string) error {
 		return fail(storagef(err, "committing the lineage index build"))
 	}
 	d.log.Log(fields, "built the missing lineage indexes in place indexes=%v duration_ms=%d",
+		missing, d.mono().Sub(started).Milliseconds())
+	return nil
+}
+
+// ensureInPlaceTables builds, IN PLACE, every inPlaceTables entry a matching
+// database is missing. Like ensureIndexes it only ever ADDS: a database carrying
+// every such table is left untouched (one verbose record, no write
+// transaction), and a failure is recorded once at ERROR and returned as an
+// indexMigrationError, which Open refuses to answer with a nuke.
+func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []string) error {
+	fields := logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "sqlite_master"}
+	var missing []string
+	for _, table := range inPlaceTables {
+		if !contains(present, table.name) {
+			missing = append(missing, table.name)
+		}
+	}
+	if len(missing) == 0 {
+		d.log.LogVerbose(fields, "every in-place table is present count=%d", len(inPlaceTables))
+		return nil
+	}
+	fail := func(err error) error {
+		failed := fields
+		failed.Level = "error"
+		failed.ErrorCause = err.Error()
+		d.log.Log(failed, "building the missing in-place tables failed; the database is left as it was and the open fails: %v", err)
+		return &indexMigrationError{err: err}
+	}
+	started := d.mono()
+	tx, release, err := d.beginWrite(ctx, WriteBulk)
+	if err != nil {
+		return fail(storagef(err, "begin the in-place table build"))
+	}
+	defer release()
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	for _, table := range inPlaceTables {
+		if !contains(missing, table.name) {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, table.ddl); err != nil {
+			return fail(storagef(err, "creating table %s", table.name))
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fail(storagef(err, "committing the in-place table build"))
+	}
+	d.log.Log(fields, "built the missing in-place tables tables=%v duration_ms=%d",
 		missing, d.mono().Sub(started).Milliseconds())
 	return nil
 }
