@@ -417,6 +417,16 @@ type fakeGit struct {
 	clean          bool
 	cleanErr       error
 
+	// queueTrees and queueBases record every scratch tree the queue made and
+	// the commit each was made at, in order.
+	queueTrees []string
+	queueBases []string
+	// fastForwards records every landing, as "<dir>@<commit>".
+	fastForwards   []string
+	fastForwardErr error
+	// contained answers IsAncestor: the source branch is already in the target.
+	contained bool
+
 	// calls records what was asked of git, in order.
 	calls []string
 	// removedWorktrees records the teardown's removals.
@@ -474,6 +484,30 @@ func (g *fakeGit) RemoveWorktree(_ context.Context, _, worktreeDir string) error
 	g.removedWorktrees = append(g.removedWorktrees, worktreeDir)
 	g.mu.Unlock()
 	return nil
+}
+
+func (g *fakeGit) AddDetachedWorktree(_ context.Context, _, worktreeDir, commit string) error {
+	g.record("add_detached_worktree")
+	g.mu.Lock()
+	g.queueTrees = append(g.queueTrees, worktreeDir)
+	g.queueBases = append(g.queueBases, commit)
+	g.mu.Unlock()
+	return nil
+}
+
+func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
+	g.record("fast_forward")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.fastForwards = append(g.fastForwards, dir+"@"+commit)
+	return g.fastForwardErr
+}
+
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, _ string) (bool, error) {
+	g.record("is_ancestor")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.contained, nil
 }
 
 func (g *fakeGit) Nuke(context.Context, string, string, string) error {
