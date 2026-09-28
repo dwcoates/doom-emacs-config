@@ -37,6 +37,7 @@ func (f *fakeFaults) OpenFault(_ context.Context, fault wsm.Fault) (ids.FaultID,
 	}
 	f.seq++
 	id := ids.FaultID(string(rune('a'+f.seq-1)) + "-fault")
+	fault.ID = id
 	f.opened = append(f.opened, fault)
 	f.ids = append(f.ids, id)
 	return id, nil
@@ -47,6 +48,18 @@ func (f *fakeFaults) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) 
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, id)
 	return nil
+}
+
+// OpenFaults answers the standing faults in scope, as the state client does.
+func (f *fakeFaults) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	var out []wsm.Fault
+	for _, fault := range f.standing() {
+		if scope.Workspace != nil && (fault.Workspace == nil || *fault.Workspace != *scope.Workspace) {
+			continue
+		}
+		out = append(out, fault)
+	}
+	return out, nil
 }
 
 // standing answers the faults opened and not since closed, in open order.
@@ -454,6 +467,58 @@ func TestAStandingFinalAnswerFaultIsRetractedWhenTheNextTurnStarts(t *testing.T)
 	// Assert.
 	if fault := h.standingAnswerFault(); fault != nil {
 		t.Fatalf("the fault survived the next turn starting: %v", fault.Evidence)
+	}
+}
+
+// AN OPENED TURN IS THE TURN-STARTED RECOVERY EDGE of every fault whose
+// lifetime ends there (health/lifetime.go), not only the final-answer fault
+// this resolver tracks.
+func TestAnOpenedTurnClosesTheFaultsWhoseLifetimeEndsAtTheNextTurn(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"an abandoned conversation", health.KindConversationAbandoned, true},
+		{"a failed classifier run", health.KindClassifierFailed, true},
+		{"a dead shim waits for a healthy attach", health.KindShimDied, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws := testWorkspace
+			if _, err := h.faults.OpenFault(context.Background(), wsm.Fault{Workspace: &ws, Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Act.
+			h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-1"))
+
+			// Assert.
+			if closed := len(h.faults.standing()) == 0; closed != tt.closes {
+				t.Fatalf("%s closed = %v, want %v", tt.kind, closed, tt.closes)
+			}
+		})
+	}
+}
+
+// A TURN REPLAYED FROM HISTORY PROVES NOTHING ABOUT THE CONVERSATION NOW, so
+// it retires only the final-answer fault this resolver tracks.
+func TestAReplayedTurnLeavesAnAbandonedConversationStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := testWorkspace
+	if _, err := h.faults.OpenFault(context.Background(), wsm.Fault{Workspace: &ws, Kind: health.KindConversationAbandoned}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Act.
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Assert.
+	if got := h.faults.standing(); len(got) != 1 || got[0].Kind != health.KindConversationAbandoned {
+		t.Fatalf("standing = %+v, want the abandoned conversation still standing", got)
 	}
 }
 
