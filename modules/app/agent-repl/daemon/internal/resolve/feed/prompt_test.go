@@ -682,3 +682,44 @@ func TestAnAgentPromptSettlesAtItsTurnsTerminal(t *testing.T) {
 		})
 	}
 }
+
+// A VENDOR-STARTED TURN'S PROMPT ROW IS AN EDGE, NOT WORDS. The shim writes it
+// only to open a turn the vendor began on its own, so it draws no bubble.
+func TestAVendorStartedTurnDrawsNoPromptBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-v", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if got := h.userPromptRows(); len(got) != 0 {
+		t.Fatalf("user-prompt rows = %d, want none for a vendor-started turn", len(got))
+	}
+}
+
+// THE SUPPRESSED ROW STILL OPENS ITS TURN, so the turn's rows are stamped with
+// it and its terminal draws the ending and marks the final answer.
+func TestAVendorStartedPromptOpensItsTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-v", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if turn := h.resolver.state(testWorkspace).turnInFlight; turn == nil || *turn != "turn-v" {
+		t.Fatalf("turn in flight = %v, want the vendor-started turn", turn)
+	}
+}
+
+// NO READER NAMES THE USER AS THE AUTHOR of a turn the vendor began.
+func TestTheAuthorLabelOfAVendorStartedTurnIsTheVendor(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if got != "Vendor" {
+		t.Fatalf("author = %q, want Vendor", got)
+	}
+}
