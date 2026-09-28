@@ -114,9 +114,11 @@ have a tab.  A first sighting is NOT a change (PREVIOUS is never nil).")
 (defvar agent-repl-roster-viewed-cleared-functions nil
   "Abnormal hook run with WS per row whose VIEWED MARKER WAS CLEARED.
 
-The daemon is the single source of the viewed (partial) mode: it raises
-`RosterRowViewed' on a row when Emacs reports a dwell and clears it on any
-status change.  This hook fires on the present->absent edge of that marker,
+The daemon is the single source of the viewed (partial) mode: it derives
+`RosterRowViewed' from the workspace's read-result fact, which a reported
+dwell on a turn-end row (done or interrupted) sets and the next turn resets,
+and it carries the marker only while the row stands on a turn-end arm.  This
+hook fires on the present->absent edge of that marker,
 computed against the previous accepted push.  A restated marker is not a
 clear, and a first sighting without the marker is not a clear.
 
