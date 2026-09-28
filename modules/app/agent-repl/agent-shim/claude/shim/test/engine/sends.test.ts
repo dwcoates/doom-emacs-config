@@ -91,7 +91,7 @@ describe("stampedSends", () => {
   });
 
   it.each([
-    ["a subagent's frame, which the vendor never stamps", { ...subagentReply(), ...stamp(FIRST.uuid) } as SdkMessage],
+    ["a subagent's frame, which the vendor never stamps", { ...subagentReply(), ...stamp(FIRST.uuid) }],
     ["an unstamped reply", reply()],
     ["a hook, which is no reply", hook()],
     ["an empty single field", reply({ user_message_uuid: "" })],
@@ -271,6 +271,32 @@ describe("the send ledger", () => {
 
     // Assert
     expect(verdict.turn).toEqual({ kind: "unknown", uuids: [STRANGER] });
+  });
+
+  it("binds to the last of its own sends in the list when the single field is not its own", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST);
+
+    // Act
+    const verdict = ledger.attribute(reply({ user_message_uuid: STRANGER, user_message_uuids: [FIRST.uuid, STRANGER] }));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("send:turn-1");
+  });
+
+  it("still records the unknown member of a list it bound by another member at ERROR", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST);
+    const before = logSinkMark();
+
+    // Act
+    ledger.attribute(reply({ user_message_uuid: STRANGER, user_message_uuids: [FIRST.uuid, STRANGER] }));
+
+    // Assert
+    expect(logRecordsSince(before).map((record) => [record.level, record.context.unknown_uuids])).toContainEqual([
+      "error",
+      STRANGER,
+    ]);
   });
 
   it("records an unknown echo at ERROR, naming the uuid", () => {

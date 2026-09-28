@@ -22,11 +22,15 @@
  *   - A frame that NAMES a send of ours (open, or retired within
  *     {@link RETIRED_SENDS_REMEMBERED}) makes the running vendor turn that
  *     send's. `user_message_uuid` is the send the frame answers; the list is
- *     the complete set the turn consumed, so any OTHER open send of ours it
- *     names was consumed by this turn too, and is reported ABSORBED.
- *   - A frame naming a uuid we never sent is an INVARIANT VIOLATION: it is
- *     recorded at ERROR and attributed to nothing. The ledger never guesses
- *     which send it "must" have meant.
+ *     the complete set the turn consumed, and the SDK's own binding rule is
+ *     that a sender finds its uuid ANYWHERE in it — so when the single field
+ *     is not ours, the last of ours in the list is the send answered. Any
+ *     OTHER open send of ours the list names was consumed by this turn too,
+ *     and is reported ABSORBED.
+ *   - A uuid we never sent is an INVARIANT VIOLATION: it is recorded at ERROR
+ *     every time a frame names it, and a frame naming nothing but such uuids
+ *     is attributed to nothing. The ledger never guesses which send an
+ *     unknown uuid "must" have meant.
  *   - An UNSTAMPED first reply (or a result with no reply ahead of it) opens a
  *     VENDOR-STARTED turn: the SDK stamps the first reply of every turn a
  *     stamped send started, so a turn whose first reply names nothing answers
@@ -246,6 +250,7 @@ export class SendLedger {
     let openedVendorTurn = false;
     if (stamps !== undefined) {
       const next = this.stated(stamps.answers, stamps.all);
+      const answered = next.kind === "send" ? next.send.uuid : undefined;
       if (next.kind === "send" && this.running.kind === "vendor") {
         // THE FOLD. A turn the vendor started on its own took one of our sends
         // in, and its echo moved onto that send: from here the turn answers it.
@@ -272,7 +277,7 @@ export class SendLedger {
       // vendor merged, a send folded in between tool rounds): its own turn
       // will never come, so it is concluded with this one.
       for (const uuid of stamps.all) {
-        if (uuid === stamps.answers) continue;
+        if (uuid === answered) continue;
         const consumed = this.open.get(uuid);
         if (consumed === undefined) continue;
         if (absorbed.some((turn) => turn.kind === "send" && turn.send.uuid === uuid)) continue;
@@ -309,7 +314,10 @@ export class SendLedger {
     return { turn, openedVendorTurn, absorbed, ended: true };
   }
 
-  /** The vendor turn an echo states, recording an unknown uuid at ERROR. */
+  /**
+   * The vendor turn an echo states, recording an unknown uuid at ERROR: the
+   * single field when it is ours, else the last of ours in the list.
+   */
   private stated(answers: string, all: readonly string[]): VendorTurn {
     const unknown = all.filter((uuid) => !this.open.has(uuid) && !this.retired.has(uuid));
     if (unknown.length > 0) {
@@ -326,11 +334,13 @@ export class SendLedger {
         "a vendor frame echoed a client uuid the shim never sent; it is attributed to no send",
       );
     }
-    const open = this.open.get(answers);
+    const ours = all.filter((uuid) => this.open.has(uuid) || this.retired.has(uuid));
+    const chosen = ours.includes(answers) ? answers : ours.at(-1);
+    if (chosen === undefined) return { kind: "unknown", uuids: unknown };
+    const open = this.open.get(chosen);
     if (open !== undefined) return { kind: "send", send: open, retired: false };
-    const retired = this.retired.get(answers);
-    if (retired !== undefined) return { kind: "send", send: retired, retired: true };
-    return { kind: "unknown", uuids: unknown };
+    const retired = this.retired.get(chosen) as Send;
+    return { kind: "send", send: retired, retired: true };
   }
 
   private retire(send: Send): void {
