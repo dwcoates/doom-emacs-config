@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestKillNeverSignalsAReapedProcess pins the property that keeps the cleanup
@@ -44,7 +45,8 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			// Arrange: a real child in a group of its own, under a bare
 			// Daemon carrying only the fields the kill path touches. The
 			// reaped flag is set directly, because the assertion is about
-			// what Kill DOES with it, not about how it comes to be set.
+			// what Kill DOES with it, not about how it comes to be set. The
+			// mark Kill reads is reapBegun, set before cmd.Wait frees the pid.
 			cmd := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
@@ -52,9 +54,9 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			}
 			d := &Daemon{t: t, cmd: cmd}
 			if tc.reaped {
-				d.mu.Lock()
-				d.exited = true
-				d.mu.Unlock()
+				d.sigMu.Lock()
+				d.reapBegun = true
+				d.sigMu.Unlock()
 				t.Cleanup(func() {
 					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 					_ = cmd.Wait()
@@ -197,6 +199,31 @@ func TestKillEndsTheLeaderBeforeSignalingAnyMember(t *testing.T) {
 	}
 	if !leaderState.exited {
 		t.Fatalf("the leader was %s when the group kill was sent, want exited", leaderState.name)
+	}
+}
+
+// TestKillOwnsTheReapARacingWaitLeftInFlight is Stop giving up on SIGTERM and
+// falling through to Kill: the bounded wait it gave up on leaves a reap in
+// flight, and that reap must not free the leader's pid, and with it the group
+// id, between the leader's SIGKILL and the group's.
+func TestKillOwnsTheReapARacingWaitLeftInFlight(t *testing.T) {
+	// Arrange: a reap in flight, as Stop's expired wait leaves one.
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	d.awaitReapWithin(0)
+	reapedDuringKill := false
+	d.afterLeaderExit = func() {
+		reapedDuringKill = d.awaitReapWithin(50 * time.Millisecond)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if reapedDuringKill {
+		t.Fatal("the in-flight reap freed the leader between its SIGKILL and the group's, want it held until the group kill")
+	}
+	if !d.reaped() {
+		t.Fatal("the leader is unreaped after Kill")
 	}
 }
 
