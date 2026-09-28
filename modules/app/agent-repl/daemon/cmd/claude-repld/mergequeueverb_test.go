@@ -211,6 +211,23 @@ func TestTheMergeQueueVerbEnqueuesAWorkspaceThroughTheIngress(t *testing.T) {
 	}
 }
 
+func TestTheMergeQueueVerbNamesTheWorktreeItMerges(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(
+		roster(rosterRow(f.worktree, "done", 0)),
+		roster(rosterRow(f.worktree, statusQueued, 0)),
+	)}}
+
+	// Act.
+	f.run(t, "-dir", f.worktree)
+
+	// Assert.
+	if want := worktreeLinePrefix + canonicalDir(f.worktree) + "\n"; !strings.Contains(f.out.String(), want) {
+		t.Fatalf("stdout %q does not carry %q", f.out.String(), want)
+	}
+}
+
 func TestTheMergeQueueVerbLandsABranchThroughAWorkspaceCutFromIt(t *testing.T) {
 	// Arrange: a repository main worktree (a `.git` directory beside it).
 	f := newMergeFixture(t)
