@@ -34,6 +34,7 @@ import type { VendorTaskAnswer } from "../../src/store/locator.js";
 import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
+import type { ReachabilityProbe } from "../../src/engine/network-resume.js";
 
 /** A query whose message stream a suite pushes into, one message at a time. */
 export class ScriptedQuery implements QueryLike {
@@ -602,6 +603,19 @@ export class RecordingFold implements EngineFold {
   taskAgent(taskId: string): TaskAgentKnowledge {
     return this.knowledge.get(taskId) ?? { kind: "unknown" };
   }
+}
+
+/**
+ * A reachability probe answering whatever the suite last set. It touches no
+ * network, and counts how often it was asked.
+ */
+export class ScriptedProbe {
+  reachable = true;
+  calls = 0;
+  readonly probe: ReachabilityProbe = () => {
+    this.calls++;
+    return Promise.resolve({ reachable: this.reachable, detail: "scripted" });
+  };
 }
 
 /** A scheduler that never schedules; the suite fires the beat itself. */
