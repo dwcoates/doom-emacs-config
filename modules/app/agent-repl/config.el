@@ -328,11 +328,16 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
-;; The held-prompt queue: what a prompt sent across a daemon bounce becomes
-;; instead of a dropped submission.  It needs only core.el and workspace.el at
-;; load time; its defaults call back into the transport from lambdas that run
-;; long after every module is loaded.
+;; The deferred-prompt queue: a prompt the user asked to deliver as its own
+;; turn once the running one finishes.  It needs only core.el and workspace.el
+;; at load time; its release calls back into the transport from the roster's
+;; finish edge, long after every module is loaded.
 (agent-repl--load-module "prompt-queue")
+;; WHY: held-ingress.el writes a prompt the daemon did not take into the
+;; daemon-owned durable ingress and draws the composer's waiting line from
+;; it.  It hooks host.el's update (above); input.el and panels.el call it at
+;; run time only.
+(agent-repl--load-module "held-ingress")
 ;; WHY: services.el owns launchd lifecycle for shim-store/sidecar and the
 ;; coordinated runtime bounce.  It needs the daemon/client plus the pushed
 ;; state stores loaded so its preflight can reject every active turn before

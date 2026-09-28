@@ -33,7 +33,10 @@
   "Handover refusals handed to host.el, as (WS ARM-PLIST).")
 
 (defvar agent-repl-test-input--queued nil
-  "Prompts offered to the hold queue, as (WS SAID ORIGIN RAW KEY).")
+  "Prompts written to the held-prompt ingress, as (WS SAID ORIGIN KEY).")
+
+(defvar agent-repl-test-input--hold-error nil
+  "When non-nil, the stubbed ingress write signals this error.")
 
 (defvar agent-repl-test-input--messages nil
   "Strings passed to `message' during a test.")
@@ -64,6 +67,7 @@ fake would not exercise them."
   (declare (indent 0))
   `(let ((agent-repl-test-input--submitted nil)
          (agent-repl-test-input--queued nil)
+         (agent-repl-test-input--hold-error nil)
          (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
@@ -105,10 +109,14 @@ fake would not exercise them."
                       ((symbol-function 'agent-repl-host-handle-refusal)
                        (lambda (ws arm)
                          (push (list ws arm) agent-repl-test-input--refusals)))
-                      ((symbol-function 'agent-repl-prompt-queue-offer)
-                       (lambda (ws said origin raw &optional key)
-                         (push (list ws said origin raw key)
-                               agent-repl-test-input--queued)))
+                      ((symbol-function 'agent-repl-held-ingress-write)
+                       (lambda (ws said origin key)
+                         (when agent-repl-test-input--hold-error
+                           (signal (car agent-repl-test-input--hold-error)
+                                   (cdr agent-repl-test-input--hold-error)))
+                         (push (list ws said origin key)
+                               agent-repl-test-input--queued)
+                         (format "/state/held-prompts/held_x_%s.json" key)))
                       ((symbol-function 'run-at-time) (lambda (&rest _) nil))
                       ((symbol-function 'agent-repl--register-timer)
                        (lambda (_key timer) timer))
@@ -288,8 +296,8 @@ fake would not exercise them."
     ;; Assert -- still empty, no error was raised reaching this point.
     (should (equal (agent-repl-test-input--composer-text) ""))))
 
-(ert-deftest agent-repl-input-a-composer-send-transport-failure-queues-said-and-raw ()
-  "The erased draft is not lost: the outage queue carries said+raw for re-drive."
+(ert-deftest agent-repl-input-a-composer-send-transport-failure-holds-the-said ()
+  "The erased draft is not lost: the held-prompt ingress carries the said."
   (agent-repl-test-input--with
     ;; Arrange -- the wire fails.
     (agent-repl-test-input--type "my draft")
@@ -297,11 +305,10 @@ fake would not exercise them."
           (list :failure (list :kind :transport :message "no daemon")))
     ;; Act
     (agent-repl--send :user-sent)
-    ;; Assert -- one queued entry carrying the full said and the raw text.
+    ;; Assert -- one held entry carrying the full said.
     (should (equal (length agent-repl-test-input--queued) 1))
-    (pcase-let ((`(,_ws ,said ,_origin ,raw ,_key)
+    (pcase-let ((`(,_ws ,said ,_origin ,_key)
                  (car agent-repl-test-input--queued)))
-      (should (equal raw "my draft"))
       (should (equal (plist-get (plist-get (car (plist-get (plist-get said :content) :blocks))
                                            :value)
                                 :text)
@@ -936,7 +943,7 @@ own key and the words stay visible."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (nth 4 (car agent-repl-test-input--queued))
+    (should (equal (nth 3 (car agent-repl-test-input--queued))
                    (plist-get (agent-repl-test-input--request) :idempotency-key)))))
 
 (ert-deftest agent-repl-input-not-yet-adopted-routes-to-the-host ()
@@ -1044,7 +1051,7 @@ their words, which come straight back."
 
 (ert-deftest agent-repl-input-transport-failure-clears-the-composer ()
   "A from-buffer submit was cleared optimistically at dispatch; nothing is lost
-because the outage queue holds said+raw AND the RAW text sits in the history
+because the held-prompt ingress holds the said AND the RAW text sits in the history
 ring (owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
@@ -1052,22 +1059,48 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (agent-repl--send :user-sent)
     (should (equal (agent-repl-test-input--composer-text) ""))))
 
-(ert-deftest agent-repl-input-transport-failure-offers-to-the-queue ()
-  "A transport failure hands the prompt to the hold queue for link-up."
+(ert-deftest agent-repl-input-transport-failure-writes-the-held-prompt-ingress ()
+  "A transport failure writes the prompt to the durable held-prompt ingress."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
     (should (equal (length agent-repl-test-input--queued) 1))
-    (should (equal (nth 3 (car agent-repl-test-input--queued)) "hello"))))
+    (should (equal (nth 2 (car agent-repl-test-input--queued)) :user-sent))))
 
-(ert-deftest agent-repl-input-transport-failure-offers-this-attempts-key ()
-  "The offer carries THIS attempt\='s key: the re-drive is a retry of it."
+(ert-deftest agent-repl-input-transport-failure-holds-under-this-attempts-key ()
+  "The entry carries THIS attempt\='s key: the re-drive is a retry of it."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
     (agent-repl-test-input--type "hello")
     (let ((key (agent-repl--send :user-sent)))
-      (should (equal (nth 4 (car agent-repl-test-input--queued)) key)))))
+      (should (equal (nth 3 (car agent-repl-test-input--queued)) key)))))
+
+(ert-deftest agent-repl-input-a-hold-that-cannot-be-written-is-an-error-naming-the-words ()
+  "An ingress write that fails is an ERROR and a message carrying the text."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone"))
+          agent-repl-test-input--hold-error '(file-error "Disk full"))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (seq-some (lambda (text) (string-match-p "could not be saved.*hello" text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-a-hold-that-cannot-be-written-does-not-claim-it-is-held ()
+  "A failed ingress write never tells the user the prompt is held."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone"))
+          agent-repl-test-input--hold-error '(file-error "Disk full"))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (seq-some (lambda (text) (string-match-p "the prompt is held" text))
+                          agent-repl-test-input--messages))))
 
 (ert-deftest agent-repl-input-submit-reuses-a-supplied-key ()
   "A supplied key rides the wire instead of a freshly minted one."
@@ -1085,7 +1118,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (should (stringp (plist-get (car agent-repl-test-input--submitted)
                                 :idempotency-key)))))
 
-(ert-deftest agent-repl-input-no-connection-offers-to-the-queue ()
+(ert-deftest agent-repl-input-no-connection-writes-the-held-prompt-ingress ()
   "No connection at all is the same fact as a transport failure."
   (agent-repl-test-input--with
     (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
