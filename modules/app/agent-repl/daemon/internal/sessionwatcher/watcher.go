@@ -150,6 +150,12 @@ type watcher struct {
 	// just established. A link that comes back with every stream still
 	// standing has nothing to re-open.
 	degraded bool
+	// fleetConnections is the client's Connections() when the current fleet
+	// was opened. A severing that finds the count already past it knows the
+	// link broke AND came back before this watcher heard its own stream end,
+	// so the LinkConnected that would have re-opened the fleet has already
+	// been consumed, with degraded still false (severedLocked).
+	fleetConnections uint64
 
 	link LinkState
 	// linkNow mirrors link for the lock-free readers; every write to link
@@ -436,6 +442,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	}
 	w.publishLinkLocked()
 
+	w.fleetConnections = w.client.Connections()
 	w.openSessionLocked()
 	w.openMainAfterFactsLocked()
 	if session.Started != nil {
@@ -1145,6 +1152,23 @@ func (w *watcher) severedLocked(operation, detail string, err error, extra ...dl
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
 	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
+	// THE LINK MAY ALREADY BE BACK. A transport break ends the client's own
+	// liveness stream and this fleet's streams at once, and the two are
+	// handled on different goroutines: when the client's redial wins, runLink
+	// consumes its LinkConnected while degraded is still false and re-opens
+	// nothing, and no second LinkConnected ever comes. The fleet then stayed
+	// dark for good -- on 2026-09-28 a hung shell's conclusion was never
+	// reconciled, and the bounce registered behind it never ran, because the
+	// re-announcement that carries it rides a session watch nobody re-opened.
+	// The client's connection count says which order it was, whatever order
+	// the two goroutines ran in.
+	if now := w.client.Connections(); now > w.fleetConnections {
+		w.log.Info("daemon.sessionwatcher.link", "the link came back before this watcher heard its stream end; re-opening now", dlog.Context{
+			"fleet_connections": w.fleetConnections, "client_connections": now,
+		})
+		w.setLinkLocked(shimclient.LinkConnected)
+		w.reopenLocked("the link came back before the stream's end was heard")
+	}
 }
 
 // reopenLocked tears the fleet down and opens it again, each watch catching up
@@ -1173,6 +1197,7 @@ func (w *watcher) reopenLocked(reason string) {
 		"reason": reason, "agents": len(w.agents), "shells": len(w.shells),
 	})
 
+	w.fleetConnections = w.client.Connections()
 	w.openSessionLocked()
 	w.openMainAfterFactsLocked()
 	for _, a := range w.agents {
