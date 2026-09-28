@@ -307,9 +307,10 @@ type Daemon struct {
 	// the harness's own tests can read a group whose leader is dead and whose
 	// members this harness has not yet signaled to die.
 	afterLeaderExit func()
-	// afterStraysFrozen, when set, runs inside ReapStrays once every stray is
-	// confirmed stopped and before any is killed: the instant at which the
-	// harness's own tests can kill one stray first, as a racing sweep would.
+	// afterStraysFrozen, when set, runs inside each ReapStrays round that lists
+	// a stray, once every listed stray is confirmed stopped and before any is
+	// killed: the instant at which the harness's own tests can kill one stray
+	// first, as a racing sweep would, or undo a stop, as exec does.
 	afterStraysFrozen func()
 	client            agentreplv1connect.AgentReplClient
 	http              *http.Client
@@ -1394,8 +1395,9 @@ var ErrLeakedProcess = errors.New("harness: a process this test started outlived
 
 // ReapStrays kills every process whose command line names this run's state
 // directory, whatever process group it is in — except a pid the test declared
-// its own through SpareFromStrayReaping — waits for each to exit, and then
-// fails the test with ErrLeakedProcess if any such process is still running.
+// its own through SpareFromStrayReaping — waits for each to exit, and repeats
+// until a listing names no live process; it then fails the test with
+// ErrLeakedProcess if any such process is still running.
 //
 // IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
 // its own process group and Kill ends that group, but every shim the daemon
@@ -1405,43 +1407,86 @@ var ErrLeakedProcess = errors.New("harness: a process this test started outlived
 // this run and appears in both the daemon's argv and every shim's `--listen`
 // path, so it is an exact key for "processes this test started".
 //
-// EVERY STRAY IS FROZEN BEFORE ANY IS KILLED, and the freeze runs to a fixed
-// point. A stray can be a LIVE DAEMON the harness never started: a layout
-// change's replacement (and a handover's successor) is spawned by the
-// incumbent into a session of its own, so no Kill ever reaches it. A
-// snapshot-then-kill sweep raced it: the replacement brought a pending
-// workspace's session up — or revived a shim the sweep had just killed — in
-// the instant between the `ps` snapshot and its own SIGKILL, and the new shim,
-// in no snapshot, outlived the test (2026-09-27: an orphaned fakeshim of
+// THE GUARANTEE RESTS ON EXITS, NOT ON STOPS. A stray can be a LIVE DAEMON the
+// harness never started: a layout change's replacement (and a handover's
+// successor) is spawned by the incumbent into a session of its own, so no Kill
+// ever reaches it. A snapshot-then-kill sweep raced it: the replacement
+// brought a pending workspace's session up — or revived a shim the sweep had
+// just killed — between the `ps` snapshot and its own SIGKILL, and the new
+// shim, in no snapshot, outlived the test (2026-09-27: an orphaned fakeshim of
 // TestALayoutChangeRestartsTheDaemonAndItsReplacementServes, reparented to
-// launchd). A stopped process runs no instruction and so forks nothing, and a
-// fork already under way shows up in the next listing under its parent's
-// argv, so the sweep re-lists until a listing names no process it has not
-// already stopped: at that point nothing naming the state directory can run.
+// launchd). Stopping every stray first narrows that, but a stop is revocable:
+// on Darwin a SIGSTOP that reaches a process inside execve is discarded when
+// the exec completes (see Kill), so a stray just spawned can run on through
+// the freeze and spawn again. So the sweep runs in ROUNDS, each one a freeze
+// of every listed stray (containment: a stray the stop holds forks nothing
+// and observes no other's death), a SIGKILL of each, and the kernel's exit
+// event for each, and it ends only on a listing that names no live process.
+// An exit cannot be undone, so every process a round lists is gone before
+// the next listing, and whatever that listing names was spawned by a process
+// that ran after its round's stop: a stray that escaped it.
+//
+// TERMINATION: every round kills everything it lists, so a round after the
+// first exists only because a stray escaped the previous round's stop and
+// spawned before its SIGKILL landed, which needs it to have been inside
+// execve at that stop; a spawner the stops always hold ends in two rounds.
+// The rounds share one DefaultTimeout budget, so a source of strays that is
+// never listed (a spawner whose argv does not name the state directory) ends
+// the sweep at that budget, and the leak check names what it left running.
 func (d *Daemon) ReapStrays() {
 	d.t.Helper()
-	killed, err := d.freezeStrays()
-	if err != nil {
-		d.t.Errorf("harness: freeze the strays before the kill: %v", err)
-	}
-	for _, pid := range killed {
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
-		}
-	}
-	// A SIGKILL cannot be caught, so each exit is decided; the bound covers
-	// only a starved host scheduling it, and a stray still running after it is
-	// reported below as the leak it then is.
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
-	for _, pid := range killed {
-		if err := WaitProcessExit(ctx, pid); err != nil {
-			d.t.Errorf("harness: the SIGKILLed stray %d did not exit: %v", pid, err)
+	for again := true; again && ctx.Err() == nil; {
+		killed, err := d.freezeStrays()
+		// A freeze that failed (a listing that could not be read, a stop the
+		// kernel refused) still has what it stopped killed, and ends the
+		// rounds: repeating it would only repeat the report, and the leak
+		// check below still names whatever is left.
+		if err != nil {
+			d.t.Errorf("harness: freeze the strays before the kill: %v", err)
+			again = false
+		}
+		live := d.liveOf(killed)
+		if len(live) == 0 {
+			break
+		}
+		for _, pid := range live {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
+			}
+		}
+		// A SIGKILL cannot be caught, so each exit is decided; the bound covers
+		// only a starved host scheduling it, and a stray still running after
+		// it is reported below as the leak it then is.
+		for _, pid := range live {
+			if err := WaitProcessExit(ctx, pid); err != nil {
+				d.t.Errorf("harness: the SIGKILLed stray %d did not exit: %v", pid, err)
+			}
 		}
 	}
 	if err := d.leakedStrays(); err != nil {
 		d.t.Error(err)
 	}
+}
+
+// liveOf answers the pids that have not exited. One whose state cannot be
+// read is kept, so the kill and the leak check still see it, and reported.
+func (d *Daemon) liveOf(pids []int) []int {
+	d.t.Helper()
+	var live []int
+	for _, pid := range pids {
+		state, err := readProcessState(pid)
+		if err != nil {
+			d.t.Errorf("harness: read the state of stray %d: %v", pid, err)
+			live = append(live, pid)
+			continue
+		}
+		if !state.exited {
+			live = append(live, pid)
+		}
+	}
+	return live
 }
 
 // freezeStrays SIGSTOPs every stray, re-listing until a listing names none it
@@ -1467,7 +1512,7 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 			for _, s := range strays {
 				listed[s.pid] = true
 			}
-			if d.afterStraysFrozen != nil {
+			if d.afterStraysFrozen != nil && len(strays) > 0 {
 				d.afterStraysFrozen()
 			}
 			return d.settleFrozen(stopped, listed), nil
