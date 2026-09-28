@@ -837,3 +837,67 @@ func TestHeldPromptByTurnReportsAnUnknownTurn(t *testing.T) {
 		t.Fatalf("HeldPromptByTurn = (%v, %v), want not found and no error", ok, err)
 	}
 }
+
+func TestPutHeldPromptRoundTripsTheDelivery(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery Delivery
+	}{
+		{name: "an ordinary prompt", delivery: DeliveryOrdinary},
+		{name: "a deferred prompt", delivery: DeliveryDeferred},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+				Workspace: ws.ID, Turn: NewTurnID(), Said: said("x"), Origin: "webapp", QueuedAt: instant, Delivery: tc.delivery,
+			}); err != nil {
+				t.Fatalf("PutHeldPrompt: %v", err)
+			}
+			got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil || len(got) != 1 || got[0].Delivery != tc.delivery {
+				t.Fatalf("HeldPrompts = (%+v, %v), want one hold delivered %s", got, err, tc.delivery)
+			}
+		})
+	}
+}
+
+func TestPutHeldPromptRefusesAnUndeclaredDelivery(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+		Workspace: ws.ID, Turn: NewTurnID(), Said: said("x"), Origin: "webapp", QueuedAt: instant, Delivery: Delivery(99),
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("PutHeldPrompt with an undeclared delivery succeeded")
+	}
+}
+
+func TestAHeldPromptWithAnUnknownDeliveryIsNeverReadAsOrdinary(t *testing.T) {
+	// Arrange — a deferred prompt misread as ordinary would be classified and
+	// could interject, so the whole read fails instead.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	broken := standingHold(t, s, ws.ID)
+	corrupt(t, s, `UPDATE held_prompts SET delivery = 99 WHERE turn_id = ?`, broken)
+
+	// Act
+	_, err := s.AllHeldPrompts(context.Background())
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Field != "delivery" {
+		t.Fatalf("AllHeldPrompts = %v, want a *DecodeError naming held_prompts.delivery", err)
+	}
+}

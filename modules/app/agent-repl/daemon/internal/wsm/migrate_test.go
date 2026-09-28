@@ -671,3 +671,51 @@ func TestTheMigrationStampsOnlyAClaimTheQueueTook(t *testing.T) {
 		})
 	}
 }
+
+// TestTheMigrationAddsTheHeldPromptDeliveryColumn pins the layout-12 step: a
+// file written before a held prompt's delivery was durable carries the column
+// afterwards.
+func TestTheMigrationAddsTheHeldPromptDeliveryColumn(t *testing.T) {
+	// Arrange — a file written before delivery existed.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('held_prompts') WHERE name = 'delivery'`)
+	if got != 1 {
+		t.Fatalf("held_prompts.delivery exists %d times after the migration, want 1", got)
+	}
+}
+
+// TestTheMigratedHeldPromptsAreOrdinary pins the layout-12 default: no build
+// before it could hold a prompt any other way, so every migrated row reads as
+// the ordinary delivery.
+func TestTheMigratedHeldPromptsAreOrdinary(t *testing.T) {
+	// Arrange — a hold written before delivery existed.
+	path := layout3Fixture(t)
+	withRawDB(t, path, func(db *sql.DB) {
+		if _, err := db.Exec(`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, accepted, queued_at) VALUES ('turn-1', 'ws-layout3', x'', 'emacs', 0, 1)`); err != nil {
+			t.Fatalf("seed the hold: %v", err)
+		}
+	})
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store), `SELECT delivery FROM held_prompts WHERE turn_id = 'turn-1'`)
+	if got != int(DeliveryOrdinary) {
+		t.Fatalf("migrated delivery = %d, want the ordinary %d", got, DeliveryOrdinary)
+	}
+}

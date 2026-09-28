@@ -17,7 +17,7 @@ import (
 // column added to the row can never be decoded by only some of them.
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	accepted, tombstone_kind, tombstone_at, queued_at`
+	accepted, tombstone_kind, tombstone_at, queued_at, delivery`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -39,12 +39,19 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		tombKind sql.NullString
 		tombAt   sql.NullInt64
 		queued   int64
+		delivery int64
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
-		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued); err != nil {
+		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued, &delivery); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
+	// A delivery this build does not know is never read as the ordinary one: a
+	// deferred prompt misread would be classified and could interject.
+	h.Delivery = Delivery(delivery)
+	if !h.Delivery.valid() {
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "delivery", Err: fmt.Errorf("unknown delivery %d", delivery)}
+	}
 
 	// The submission is the one fact a hold exists to preserve; an unparseable
 	// blob is never read as an empty prompt.
@@ -116,7 +123,7 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 // resurrects, so a late writer cannot bring a delivered or dropped prompt back.
 func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 	const op = "daemon.wsm.put_held_prompt"
-	fields := dlog.Context{"workspace": string(h.Workspace), "turn": string(h.Turn), "origin": h.Origin}
+	fields := dlog.Context{"workspace": string(h.Workspace), "turn": string(h.Turn), "origin": h.Origin, "delivery": h.Delivery.String()}
 	if h.Said == nil {
 		err := errors.New("wsm: a held prompt carries what the user said")
 		s.log.Error(op, "refused a held prompt with no submission", withError(fields, err))
@@ -164,8 +171,8 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
-			   accepted, tombstone_kind, tombstone_at, queued_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   accepted, tombstone_kind, tombstone_at, queued_at, delivery)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -176,9 +183,9 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   classification_at = excluded.classification_at,
 			   accepted = excluded.accepted,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
-			   queued_at = excluded.queued_at`,
+			   queued_at = excluded.queued_at, delivery = excluded.delivery`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
-			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt))
+			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery))
 		return err
 	})
 }
@@ -195,6 +202,9 @@ func validateHold(h HeldPrompt) error {
 		}
 	} else if h.ScheduleID != "" {
 		return errors.New("wsm: a schedule id without a hold kind")
+	}
+	if !h.Delivery.valid() {
+		return fmt.Errorf("wsm: undeclared delivery %d", int(h.Delivery))
 	}
 	if h.Classification != nil && !h.Classification.Arm.valid() {
 		return fmt.Errorf("wsm: undeclared classification arm %d", int(h.Classification.Arm))
