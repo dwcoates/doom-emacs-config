@@ -165,6 +165,11 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * to finish is FULL until the user dwells on the finished turn. A row carrying
  * this marker with any other arm is a contract breach.
  *
+ * ONE EXCEPTION READS WITHOUT DRAWING (owner ruling, 2026-09-28): a dwell on a
+ * `vendor_blocked` row READS the result of the turn whose failure raised the
+ * block, so the row is PARTIAL once the block lifts and it falls back to that
+ * turn's end. The marker itself is still never drawn on `vendor_blocked`.
+ *
  * THE MARKER IS DERIVED FROM A READ FACT, and the daemon resolves it in the
  * same render as the row's `status`, so every push states the two in
  * agreement and a client draws the marker as it arrives, with no rule of its
@@ -704,7 +709,11 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "idleAsync";
   } | {
     /**
-     * Blocked on the vendor or the account, not on agent-repl.
+     * Blocked on the vendor or the account, not on agent-repl — and ONLY
+     * that (owner ruling, 2026-09-28): an api request the vendor refused or
+     * failed, an account blocking limit, a rapid-refill breaker, a model
+     * error, or a rejected rate limit. Every other agent failure is the
+     * failed turn's own `turn_failed` end.
      *
      * @generated from field: frontend.v1.RosterRowStatusVendorBlocked vendor_blocked = 12;
      */
@@ -752,8 +761,10 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "dead";
   } | {
     /**
-     * The merge pipeline. These render a recycle glyph rather than a lifecycle
-     * dot, except merged, which is settled and files under recently_merged.
+     * The merge pipeline. These render a glyph rather than a lifecycle dot,
+     * except merged, which is settled and files under recently_merged.
+     * merge_conflict and merge_failed ALSO take a color (owner ruling,
+     * 2026-09-28): green for a conflict, blue for a failure.
      * The first instant of a merge, before anything durable exists for it.
      *
      * @generated from field: frontend.v1.RosterRowStatusMergeEnqueuing merge_enqueuing = 19;
@@ -778,7 +789,9 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "mergeQueued";
   } | {
     /**
-     * The merge stopped on a conflict awaiting resolution.
+     * The merge stopped awaiting the user: on a conflict its resolution
+     * agent could not settle, or PARKED for the user's guidance. GREEN: an
+     * expected state, ready for a human response.
      *
      * @generated from field: frontend.v1.RosterRowStatusMergeConflict merge_conflict = 22;
      */
@@ -786,7 +799,7 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "mergeConflict";
   } | {
     /**
-     * The merge failed outright.
+     * The merge failed outright. BLUE: something is wrong with the workspace.
      *
      * @generated from field: frontend.v1.RosterRowStatusMergeFailed merge_failed = 23;
      */

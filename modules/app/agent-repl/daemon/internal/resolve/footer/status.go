@@ -14,7 +14,8 @@ import (
 // the resolver can never reach.
 var statusArms = []string{
 	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
-	"waiting", "thinking", "background", "idle",
+	"merge_conflict", "merge_failed", "merged", "waiting", "thinking",
+	"background", "idle",
 }
 
 // The FooterAllowance.status arms this resolver emits, asserted the same way
@@ -528,6 +529,12 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:
 		return "loading"
+	case *frontendv1.FooterStatus_MergeConflict:
+		return "merge_conflict"
+	case *frontendv1.FooterStatus_MergeFailed:
+		return "merge_failed"
+	case *frontendv1.FooterStatus_Merged:
+		return "merged"
 	default:
 		return "unset"
 	}
