@@ -148,6 +148,17 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 			log.Error(opSubmit, "a parked lease stands but no parked route is wired", fields)
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: no parked route is wired", sub.WS)
 		}
+		// THE GUIDANCE IS A TURN, AND ITS RECORD GOES DOWN FIRST, exactly as a
+		// delivery's does: its terminal closes the row through the one door.
+		// Without it a guidance turn that ENDED closed nothing -- `could not
+		// stamp the turn's close ... not found` at ERROR -- because until the
+		// park answered every prompt, no guidance turn ever ended.
+		if err := q.deps.DB.PutTurn(ctx, wsm.Turn{
+			ID: sub.Turn, Workspace: sub.WS, Text: saidText(sub.Said), Origin: sub.Origin.String(), StartedAt: q.deps.Now(),
+		}); err != nil {
+			log.Error(opSubmit, "could not record the guidance turn before routing it", merged(fields, dlog.Context{"cause": err.Error()}))
+			return Disposition{}, true, fmt.Errorf("record the guidance turn %q on %q: %w", sub.Turn, sub.WS, err)
+		}
 		if err := q.deps.ParkedRoute(ctx, sub.WS, sub.Turn, sub.Said); err != nil {
 			log.Error(opSubmit, "the parked route refused the submission",
 				merged(fields, dlog.Context{"cause": err.Error()}))
