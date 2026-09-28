@@ -127,8 +127,8 @@ overwrites their real `shim-store.build.json`.
   delivers a synchronous spawn only as its conclusion, and the success is then
   the one frame stating the spawner. The success writes LINEAGE ONLY — never the
   start's metadata columns.
-- `entry` — the spine: `position` (FIRST-insert order — the page order and the
-  pointer; an upsert keeps it), `upsert_key` UNIQUE, `write_id` UNIQUE,
+- `entry` — the spine: `position` (FIRST-insert order — the pointer and the
+  catch-up order, NOT the page order; an upsert keeps it), `upsert_key` UNIQUE, `write_id` UNIQUE,
   `write_seq` (store-internal global write ordinal, bumped on every insert AND
   every upsert), `plane`, `kind`, `book_agent_id` (NULL for every never-served
   row — the keep-alive/residue index), `run_id` (a bash row's run; NULL
@@ -136,7 +136,28 @@ overwrites their real `shim-store.build.json`.
   `book_agent_id`), `top_level`, and `frame`, the serialized `StoreEntry` the
   store never opens beyond routing — and beyond its `turn`, which is the row's
   FIRST stamp: a later write that omits or contradicts it is rewritten to carry
-  it (`carryStoredTurn`), so no plane can move a row between turns.
+  it (`carryStoredStamps`), so no plane can move a row between turns. The same
+  function keeps the row's FIRST STATED `place`: a write stating another, or
+  none, carries the stored one, and a row stored with none takes the first
+  later stated place (the one way a row moves within its book). A disagreeing
+  place is traced at VERBOSE, because the two planes' copies of one unit
+  routinely state different places (the shim's observation instant, the
+  sidecar's vendor timestamp). A place whose `at_ms` is not positive is refused
+  (`place_not_positive`, on `entries[i].place.at_ms`).
+- `entry_place` — THE PAGE ORDER, and the one home of the served place: one
+  row per row with a book (`position` PK, `book_agent_id`, `at_ms`, `ordinal`,
+  `recorded`), indexed `(book_agent_id, at_ms, ordinal, position)`. `recorded`
+  = 1 is the row's first stated place, served as `StoreLineAt.recorded_place`;
+  0 is its first-insert receipt instant (`entry.first_inserted_at_ms`, ordinal
+  0), served as `received_place`. `placeRow` (`internal/db/place.go`) is its
+  one writer, in the write's own transaction, and `lineAt` is the one
+  constructor of a served line, so no path serves a line unplaced. A booked
+  row found with no place row is a storage failure, never a line skipped. It
+  is an IN-PLACE table whose BACKFILL, run once in the transaction that creates
+  it, places every row stored before it at `first_inserted_at_ms` on the
+  received arm — exact, since no producer stated a place then and no upsert
+  rewrites that column; the file plane's next re-derivation states the
+  recorded places.
 - `write_ledger` — one row per write APPLIED AND STILL RE-READABLE (`write_id`
   PK, `upsert_key`, `write_seq`, `applied_at_ms`, `source_file_id`,
   `source_offset`), written in the same transaction as the row it applied and
@@ -763,11 +784,27 @@ and not something this change touches.
   is refused (`page_book_mismatch`). They are two statements about one line and
   the store cannot pick a winner; accepting either files an agent's words under
   another agent's name.
-- **Order is by FIRST insert, never last write**, so a `StoreItemPointer` is
-  stable across upserts and a unit settling mid-walk cannot teleport across a
-  continuation. Pointers are opaque encodings of `position`, echoed verbatim; a
-  pointer that names no row IN THAT BOOK is a stale-pointer refusal. No `seq`
-  exists on any wire.
+- **A BOOK IS SERVED IN DESCENDING CONVERSATION PLACE** — `(at_ms, ordinal)`
+  from `entry_place`, then `position` as a stable tiebreak that carries no
+  meaning — never in arrival order, which diverges from it whenever records
+  reach the store out of their own order. A stated place never moves, so a
+  unit settling mid-walk cannot teleport across a continuation; only a row with
+  no stated place moves, once, when it gains one.
+- **A POINTER NAMES AN ITEM, NEVER A PLACE.** Pointers are opaque encodings of
+  `position` (first-insert order), echoed verbatim and stable across upserts
+  and across the item gaining a recorded place; a pointer that names no row IN
+  THAT BOOK is a stale-pointer refusal. No `seq` exists on any wire.
+- **THE PAGE POSITIONS.** `ReadAgentPage.after` serves the lines placed
+  strictly BEFORE the named line's CURRENT place (read in the page's own
+  transaction). `ReadAgentPage.through` serves the newest lines placed AT OR
+  BEFORE `through.at_ms`, whatever the ordinal — the book as it stood then — and
+  refuses a book with no `agent` row as `unknown_agent` (recorded at `info`, like
+  the open's). An unset position (`position_unset`, field `position`) and a
+  non-positive bound (`through_not_positive`, field `through.at_ms`) are
+  invalid requests. `OpenAgentSession` repaints the newest places; its
+  `known_through` catch-up serves the lines FIRST WRITTEN AFTER the mark
+  (`position > mark`, write order, not place), ordered by descending place, so
+  a late-written line placed earlier is delivered rather than skipped.
 - `OpenAgentSession` answers the page plus a store-minted `AgentSessionToken`
   (128 random bits from `crypto/rand`, hex) — **UNLESS THE REQUEST SAID
   `page_only`**, which is the caller stating that no watch follows: nothing is
@@ -800,8 +837,9 @@ and not something this change touches.
   nobody ever kept. It is its own refusal class (`db.ErrUnknownAgent`) with its
   own site and arm, both spelled `unknown_agent`: the request is well formed and
   respelling it cannot help, so it is neither `invalid_request` nor a race to
-  retry. `ReadAgentPage` is unchanged — it always carries a pointer, which is
-  already stale for a book that does not exist.
+  retry. `ReadAgentPage` with `after` carries a pointer, which is already stale
+  for a book that does not exist; with `through` it carries none, so it asks
+  the register exactly as the open does.
 - The watch pin is the global `write_seq` at the moment the page was read,
   taken INSIDE that read transaction. `WatchAgentSession` then **subscribes to
   the fan-out BEFORE running the replay query** and dedupes by `write_seq`, so
@@ -886,7 +924,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `keepalive_retired`, `bash_tail_over_cap`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
 `session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
-`listen_occupied`.
+`listen_occupied`, `place_not_positive`, `through_not_positive`, `position_unset`.
 
 - **THE SITE IS NOT THE ARM.** A site says which of the store's many checks said
   no — the vocabulary an operator counts by — while the failure's `kind` arm says
@@ -903,7 +941,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   the request around it — and every path is walkable from the message the
   producer sent, so a caller never has to guess the top of it. The forms are:
   request-level (`producer`, `batch`, `agent`, `book`, `session`, `page_size`,
-  `known_through`, `after`, `watch`, `run`, `file_id`, `work`); batch-level
+  `known_through`, `after`, `position`, `through.at_ms`, `watch`, `run`, `file_id`, `work`); batch-level
   (`cursor_advance.file_id`); and entry-level, always rooted at
   `entries[i]` — `entries[i].write_id`, `entries[i].upsert_key`,
   `entries[i].plane`, `entries[i].entry`, `entries[i].agent_update…`,
@@ -917,7 +955,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   invalid_request|storage_failure (a stale pointer is unreachable — the verb
   names no position); `OpenAgentSession`
   invalid_request|stale_pointer|storage_failure|unknown_agent; `ReadAgentPage`
-  all three; `GetLiveWork`
+  the same four (`unknown_agent` only for a `through` read); `GetLiveWork`
   invalid_request|storage_failure (the request must name its session); `GetSidecarCursors`
   invalid_request|storage_failure; `GetWorkflow` not_implemented, the one honest
   arm while nothing routes into the workflow table.

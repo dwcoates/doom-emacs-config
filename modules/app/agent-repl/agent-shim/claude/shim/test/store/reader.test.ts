@@ -2654,3 +2654,156 @@ describe("a line the store retired", () => {
     );
   });
 });
+
+describe("the conversation place", () => {
+  /** A persistence over a fresh fake store whose clock the test moves. */
+  async function clocked(name: string) {
+    const started = await startFakeStore(socketPathForTest(name));
+    store = started;
+    const clock = { now: 1_000 };
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: PRODUCER,
+      nowMs: () => clock.now,
+      sleep: async () => undefined,
+    });
+    return { started, plane, clock };
+  }
+
+  /** One line of an older page, as a stub store serves it. */
+  async function servedOlderLine(line: storev1.StoreLineAt): Promise<conversationv1.HistoryEntryAt | undefined> {
+    const reader = readerOver({
+      readAgentPage: async () =>
+        create(storev1.ReadAgentPageResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.ReadAgentPageSuccessSchema, {
+              lines: [line],
+              boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
+            }),
+          },
+        }),
+    });
+    const page = await reader.readAgentPage(BOOK, 10, create(conversationv1.HistoryPointerSchema, { value: "9" }));
+    return page.entries[0];
+  }
+
+  it("serves an entry at the place its writer stamped, on the recorded arm", async () => {
+    // Arrange.
+    const { plane } = await clocked("place-recorded");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/1")]);
+    await plane.flush();
+
+    // Act.
+    const session = await plane.openAgentPage(BOOK, 10);
+    session.close();
+
+    // Assert.
+    const place = session.page.entries[0]?.place;
+    expect([place?.case, place?.value?.atMs, place?.value?.ordinal]).toEqual(["recordedPlace", 1_000n, 0]);
+  });
+
+  it("serves a line the store placed by receipt on the received arm", async () => {
+    // Arrange.
+    const line = storedLine("9", "unit-1");
+    line.place = {
+      case: "receivedPlace",
+      value: create(conversationv1.ConversationPlaceSchema, { atMs: 4_000n, ordinal: 0 }),
+    };
+
+    // Act.
+    const entry = await servedOlderLine(line);
+
+    // Assert.
+    expect([entry?.place.case, entry?.place.value?.atMs]).toEqual(["receivedPlace", 4_000n]);
+  });
+
+  it("serves a line the store placed nowhere unplaced", async () => {
+    // Arrange.
+    const line = storedLine("9", "unit-1");
+
+    // Act.
+    const entry = await servedOlderLine(line);
+
+    // Assert.
+    expect(entry?.place.case).toBeUndefined();
+  });
+
+  it("serves a book in descending place, not in the order it was written", async () => {
+    // Arrange: the later-placed row is written first.
+    const { started, clock } = await clocked("place-order");
+    const client = createStoreClient(started.socketPath);
+    const late = createPersistence({ client, producer: PRODUCER, nowMs: () => 5_000, sleep: async () => undefined });
+    late.write([readEntry(BOOK, "unit-late", "/tmp/late")]);
+    await late.flush();
+    clock.now = 2_000;
+    const early = createPersistence({ client, producer: PRODUCER, nowMs: () => clock.now, sleep: async () => undefined });
+    early.write([readEntry(BOOK, "unit-early", "/tmp/early")]);
+    await early.flush();
+
+    // Act.
+    const session = await early.openAgentPage(BOOK, 10);
+    session.close();
+
+    // Assert.
+    expect(session.page.entries.map(unitOf)).toEqual(["unit-late", "unit-early"]);
+  });
+
+  it("forwards a through read as the store's own through arm", async () => {
+    // Arrange.
+    const requests: storev1.ReadAgentPageRequest[] = [];
+    const reader = readerOver({
+      readAgentPage: async (request) => {
+        requests.push(request);
+        return create(storev1.ReadAgentPageResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.ReadAgentPageSuccessSchema, {
+              boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
+            }),
+          },
+        });
+      },
+    });
+
+    // Act.
+    await reader.readPageThrough(BOOK, 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
+
+    // Assert.
+    const position = requests[0]?.position;
+    expect([position?.case, position?.case === "through" ? position.value.atMs : undefined]).toEqual([
+      "through",
+      2_500n,
+    ]);
+  });
+
+  it("reads a book as it stood at an instant", async () => {
+    // Arrange.
+    const { plane, clock } = await clocked("place-through");
+    for (const [at, unitValue] of [
+      [1_000, "unit-1"],
+      [2_000, "unit-2"],
+      [3_000, "unit-3"],
+    ] as const) {
+      clock.now = at;
+      plane.write([readEntry(BOOK, unitValue, `/tmp/${unitValue}`)]);
+      await plane.flush();
+    }
+
+    // Act.
+    const page = await plane.readPageThrough(BOOK, 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n }));
+
+    // Assert.
+    expect(page.entries.map(unitOf)).toEqual(["unit-2", "unit-1"]);
+  });
+
+  it("refuses a through read of a book the store never heard of as unknown", async () => {
+    // Arrange.
+    const { plane } = await clocked("place-through-unknown");
+
+    // Act, Assert.
+    await expect(
+      plane.readPageThrough(agent("nobody"), 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n })),
+    ).rejects.toMatchObject({ kind: "unknown_agent" });
+  });
+});

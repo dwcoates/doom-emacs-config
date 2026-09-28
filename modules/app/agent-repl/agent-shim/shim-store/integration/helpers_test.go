@@ -1648,7 +1648,7 @@ func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreCli
 	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 		Book:     agentID(book),
 		PageSize: pageSize,
-		After:    after,
+		Position: &storev1.ReadAgentPageRequest_After{After: after},
 	}))
 	if err != nil {
 		t.Fatalf("ReadAgentPage(%q) transport error: %v", book, err)
@@ -1936,6 +1936,21 @@ type receivedLine struct {
 	// retired says the frame arrived on the `retired` arm: the store withdrew
 	// the line rather than writing it.
 	retired bool
+	// place is the line's conversation place as served (placeText).
+	place string
+}
+
+// placeText renders a served line's place as "<arm>:<at_ms>.<ordinal>", or
+// "unset" when the store served none, so a test can compare it whole.
+func placeText(at *storev1.StoreLineAt) string {
+	switch place := at.GetPlace().(type) {
+	case *storev1.StoreLineAt_RecordedPlace:
+		return fmt.Sprintf("recorded:%d.%d", place.RecordedPlace.GetAtMs(), place.RecordedPlace.GetOrdinal())
+	case *storev1.StoreLineAt_ReceivedPlace:
+		return fmt.Sprintf("received:%d.%d", place.ReceivedPlace.GetAtMs(), place.ReceivedPlace.GetOrdinal())
+	default:
+		return "unset"
+	}
 }
 
 // receiveLines reads exactly n frames from a stream, failing on a short or
@@ -1972,6 +1987,7 @@ func receiveLinesWithin(t *testing.T, stream *watch, n int, within time.Duration
 				pointer: at.GetAt().GetValue(),
 				text:    lineText(at.GetLine()),
 				retired: retired != nil,
+				place:   placeText(at),
 			})
 		}
 		done <- result{lines: lines}

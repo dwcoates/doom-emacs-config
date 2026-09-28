@@ -890,8 +890,11 @@ func TestEveryReadStatementBuildsNoAutomaticIndex(t *testing.T) {
 		statement string
 		args      []any
 	}{
-		{name: "the open-page lines", statement: pageLinesSQL(pageBoundAboveFloor), args: []any{"agent-1", kindPageLine, 0, 11}},
-		{name: "the read-page lines", statement: pageLinesSQL(pageBoundBelow), args: []any{"agent-1", kindPageLine, 100, 11}},
+		{name: "the newest page", statement: pageNewestSQL, args: []any{"agent-1", kindPageLine, 11}},
+		{name: "the page before a line", statement: pageBeforeSQL, args: []any{"agent-1", kindPageLine, testNow, 0, 100, 11}},
+		{name: "the page through an instant", statement: pageThroughSQL, args: []any{"agent-1", kindPageLine, testNow, 11}},
+		{name: "the catch-up page", statement: pageWrittenAfterSQL, args: []any{"agent-1", kindPageLine, 100, 11}},
+		{name: "the place of one row", statement: placeOfRowSQL, args: []any{100}},
 		{name: "the stale-pointer probe", statement: pointerInBookSQL, args: []any{1, "agent-1", kindPageLine, kindRetired}},
 		{name: "the cursor listing with its conversion", statement: cursorsSQL + ` WHERE c.file_id = ? ORDER BY c.file_id ASC`, args: []any{"12:34"}},
 		{name: "the lines-since replay", statement: linesSinceSQL, args: []any{"agent-1", kindPageLine, kindRetired, 0}},
@@ -971,5 +974,278 @@ func TestACancelledOpenPageHoldsNoConnectionOnceItReturns(t *testing.T) {
 	// Assert
 	if inUse := d.read.Stats().InUse; inUse != 0 {
 		t.Fatalf("read pool InUse = %d after every OpenPage returned; a rollback is still running off the caller's goroutine", inUse)
+	}
+}
+
+// ---- the conversation place ----
+
+// pointerOf is the pointer a write published for its one line.
+func pointerOf(t *testing.T, result WriteResult) string {
+	t.Helper()
+	if len(result.Lines) != 1 {
+		t.Fatalf("published lines = %d, want 1", len(result.Lines))
+	}
+	return result.Lines[0].Line.GetAt().GetValue()
+}
+
+func TestOpenPageOrdersABookByPlaceNotByArrival(t *testing.T) {
+	// Arrange: the later-placed line arrives first.
+	d, _ := newStore(t)
+	late := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 200, 0)))
+	early := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := servedPointers(opened.Page.GetLines()); !slicesEqual(got, []string{late, early}) {
+		t.Fatalf("served = %v, want descending place %v", got, []string{late, early})
+	}
+}
+
+func TestOpenPageRanksLinesOfOneInstantByOrdinal(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	second := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 1)))
+	first := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := servedPointers(opened.Page.GetLines()); !slicesEqual(got, []string{second, first}) {
+		t.Fatalf("served = %v, want ordinal 1 above ordinal 0", got)
+	}
+}
+
+func TestOpenPageBreaksAnExactPlaceTieByFirstInsert(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	older := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0)))
+	newer := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := servedPointers(opened.Page.GetLines()); !slicesEqual(got, []string{newer, older}) {
+		t.Fatalf("served = %v, want the stable tiebreak %v", got, []string{newer, older})
+	}
+}
+
+func TestOpenPageServesEveryLineWithItsPlace(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 3))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := opened.Page.GetLines()[0].GetRecordedPlace(); got.GetAtMs() != 100 || got.GetOrdinal() != 3 {
+		t.Fatalf("place = %v, want recorded 100.3", got)
+	}
+}
+
+func TestOpenPageCatchUpDeliversALineWrittenLaterButPlacedEarlier(t *testing.T) {
+	// Arrange: the caller holds the line at 200; a transcript read late then
+	// writes a line placed at 100.
+	d, _ := newStore(t)
+	mark := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 200, 0)))
+	late := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: mark})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := servedPointers(opened.Page.GetLines()); !slicesEqual(got, []string{late}) {
+		t.Fatalf("served = %v, want only the late-written line %v", got, []string{late})
+	}
+}
+
+func TestOpenPageCatchUpOrdersWhatItDeliversByPlace(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	mark := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 50, 0)))
+	lower := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+	higher := pointerOf(t, writeOK(t, d, placedLine("w3", "u3", "agent-1", 300, 0)))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: mark})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := servedPointers(opened.Page.GetLines()); !slicesEqual(got, []string{higher, lower}) {
+		t.Fatalf("served = %v, want descending place %v", got, []string{higher, lower})
+	}
+}
+
+func TestReadPageWalksToTheLinesPlacedBeforeTheNamedLine(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	low := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0)))
+	named := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 200, 0)))
+	writeOK(t, d, placedLine("w3", "u3", "agent-1", 300, 0))
+
+	// Act
+	page, err := d.ReadPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: named})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReadPage: %v", err)
+	}
+	if got := servedPointers(page.GetLines()); !slicesEqual(got, []string{low}) {
+		t.Fatalf("served = %v, want only the line placed before %v", got, []string{low})
+	}
+}
+
+func TestReadPageBoundsByTheNamedLinesCurrentPlace(t *testing.T) {
+	// Arrange: the named line was served unplaced (at its receipt instant) and
+	// has since gained a recorded place below another line.
+	d, _ := newStore(t)
+	named := pointerOf(t, writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", prose())))))
+	below := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
+	writeOK(t, d, placed(pageEntry("w3", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 200, 0))
+
+	// Act
+	page, err := d.ReadPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: named})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReadPage: %v", err)
+	}
+	if got := servedPointers(page.GetLines()); !slicesEqual(got, []string{below}) {
+		t.Fatalf("served = %v, want the lines below its current place 200 %v", got, []string{below})
+	}
+}
+
+func TestReadPageThroughServesTheLinesPlacedAtOrBeforeTheBound(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	low := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0)))
+	atBound := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 200, 9)))
+	writeOK(t, d, placedLine("w3", "u3", "agent-1", 201, 0))
+
+	// Act
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 10, 200)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReadPageThrough: %v", err)
+	}
+	if got := servedPointers(page.GetLines()); !slicesEqual(got, []string{atBound, low}) {
+		t.Fatalf("served = %v, want %v", got, []string{atBound, low})
+	}
+}
+
+func TestReadPageThroughReportsMoreWhenTheBudgetCutsTheBookShort(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0))
+	newest := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 150, 0)))
+
+	// Act
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 1, 200)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReadPageThrough: %v", err)
+	}
+	if got := page.GetMore().GetLastItem().GetValue(); got != newest {
+		t.Fatalf("more = %q, want the last served line %q", got, newest)
+	}
+}
+
+func TestReadPageThroughAnEmptyKnownBookIsTheFloor(t *testing.T) {
+	// Arrange: the agent is known, and nothing it said is placed that early.
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 0))
+
+	// Act
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 10, 100)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReadPageThrough: %v", err)
+	}
+	if len(page.GetLines()) != 0 || page.GetFloor() == nil {
+		t.Fatalf("page = %v, want an empty page at the floor", page)
+	}
+}
+
+func TestReadPageThroughRefusesABookTheStoreNeverHeardOf(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.ReadPageThrough(ctx(), "nobody", 10, 100)
+
+	// Assert
+	if !errors.Is(err, ErrUnknownAgent) {
+		t.Fatalf("ReadPageThrough = %v, want ErrUnknownAgent", err)
+	}
+}
+
+func TestReadPageThroughRefusesANonPositiveBound(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.ReadPageThrough(ctx(), "agent-1", 10, 0)
+
+	// Assert
+	if RefusalSite(err) != SiteThroughNotPositive {
+		t.Fatalf("site = %q (error: %v), want %q", RefusalSite(err), err, SiteThroughNotPositive)
+	}
+}
+
+func TestLinesSinceServesEachLineWithItsPlace(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 3))
+
+	// Act
+	lines, err := d.LinesSince(ctx(), "agent-1", 0)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if got := lines[0].Line.GetRecordedPlace(); got.GetAtMs() != 100 || got.GetOrdinal() != 3 {
+		t.Fatalf("place = %v, want recorded 100.3", got)
+	}
+}
+
+func TestAPageLineMissingFromThePlaceIndexIsAStorageFailure(t *testing.T) {
+	// Arrange: a damaged index, which placeRow never leaves behind.
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0))
+	if _, err := d.sql.Exec(`DELETE FROM entry_place`); err != nil {
+		t.Fatalf("damaging the index: %v", err)
+	}
+
+	// Act
+	_, err := d.LinesSince(ctx(), "agent-1", 0)
+
+	// Assert
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("LinesSince = %v, want a storage failure", err)
 	}
 }
