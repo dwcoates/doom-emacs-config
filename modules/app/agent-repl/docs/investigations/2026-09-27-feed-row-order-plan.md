@@ -1,6 +1,6 @@
 # Plan: a late feed row lands where it belongs
 
-Status: plan only, not started. Owner ruling (2026-09-27): a late row must be
+Status: implemented 2026-09-28 (branch feat/feed-row-order). Owner ruling (2026-09-27): a late row must be
 placed where it would have been if it had not been late.
 
 ## The incident
