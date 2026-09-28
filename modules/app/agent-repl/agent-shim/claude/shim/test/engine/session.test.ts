@@ -22,7 +22,7 @@ import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engi
 import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { saidText, textSaid } from "../../src/engine/turn.js";
-import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
+import { KEEPALIVE_INTERVAL_MS, KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type {
@@ -1549,7 +1549,7 @@ describe("the turn loop", () => {
         pageSize: 5,
       }),
     );
-    h.queries[0]?.query.emit(resultMessage());
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(h.fold.contexts.at(-1)?.turnId?.value).toBe("turn-1");
@@ -1566,7 +1566,7 @@ describe("the turn loop", () => {
         pageSize: 5,
       }),
     );
-    h.queries[0]?.query.emit(resultMessage());
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
     await new Promise((resolve) => setImmediate(resolve));
 
     // A second StartTurn now succeeds, which is only true if the first closed.
@@ -1593,7 +1593,7 @@ describe("the turn loop", () => {
         pageSize: 5,
       }),
     );
-    h.queries[0]?.query.emit(resultMessage());
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
     await new Promise((resolve) => setImmediate(resolve));
 
     const after = h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
@@ -1615,7 +1615,7 @@ describe("the turn loop", () => {
         pageSize: 5,
       }),
     );
-    h.queries[0]?.query.emit(resultMessage());
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
     await new Promise((resolve) => setImmediate(resolve));
 
     const after = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
@@ -1635,7 +1635,7 @@ describe("the turn loop", () => {
         pageSize: 5,
       }),
     );
-    h.queries[0]?.query.emit(resultMessage());
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
     await new Promise((resolve) => setImmediate(resolve));
 
     const after = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
@@ -1746,7 +1746,7 @@ describe("a turn the vendor started on its own", () => {
     await realPrompt(h, "turn-1");
 
     // Act
-    await h.engine.onSdkMessage(assistantMessage("reply"));
+    await h.engine.onSdkMessage(answering(h, assistantMessage("reply")));
 
     // Assert
     expect([adoptions(h).length, h.fold.contexts.at(-1)?.turnId?.value]).toEqual([0, "turn-1"]);
@@ -1780,7 +1780,7 @@ describe("a turn the vendor started on its own", () => {
     expect(adoptions(h)).toHaveLength(1);
   });
 
-  it("refuses a StartTurn while the adopted turn runs, so nothing is delivered into it", async () => {
+  it("accepts a StartTurn while the adopted turn runs (ruled 2026-09-28)", async () => {
     // Arrange
     const h = harness();
     await started(h);
@@ -1790,7 +1790,22 @@ describe("a turn the vendor started on its own", () => {
     const response = await startDuring(h, "turn-1");
 
     // Assert
-    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+    expect(response.result.case).toBe("success");
+  });
+
+  it("delivers a StartTurn's prompt while the adopted turn runs, under a client uuid of its own", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await h.engine.onSdkMessage(assistantMessage("reply"));
+
+    // Act
+    await startDuring(h, "turn-1");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(sends.map((send) => send.uuid)).toEqual([h.minted.at(-1)]);
   });
 
   it("frees the slot on the adopted turn's result", async () => {
@@ -1905,6 +1920,201 @@ describe("a turn the vendor started on its own", () => {
 
     // Assert
     expect(adoptions(h)).toHaveLength(2);
+  });
+});
+
+/**
+ * A REPLY IS MATCHED TO THE SEND THAT CAUSED IT BY ID (owner ruling 2026-09-28).
+ *
+ * Every send carries a client uuid the vendor echoes on the reply, and the
+ * shim attributes each vendor turn by that echo alone. The failure mode
+ * excluded is the race the adoption left open: a vendor-started turn landing
+ * the instant before a StartTurn's own answer was charged to the StartTurn.
+ */
+describe("replies matched to their send by id", () => {
+  /** The turn id the fold was handed for each message, in order, from `mark`. */
+  const turnsFrom = (h: Harness, mark: number): (string | undefined)[] =>
+    h.fold.contexts.slice(mark).map((context) => context.turnId?.value);
+
+  /** Every adoption row the engine wrote, in order. */
+  const adoptions = (h: Harness): string[] =>
+    h.persistence.buffered.flatMap((entry) =>
+      entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED
+        ? [entry.item.prompt.id?.value ?? ""]
+        : [],
+    );
+
+  /** A frame stamped as answering `uuid`. */
+  const stampedWith = (message: SdkMessage, uuid: string): SdkMessage =>
+    ({ ...message, user_message_uuid: uuid, user_message_uuids: [uuid] }) as SdkMessage;
+
+  it("attributes each turn's output to its own turn when a StartTurn races a vendor-started turn", async () => {
+    // Arrange: the StartTurn's send is in the vendor's queue, and the vendor
+    // runs a turn of its own first.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const send = h.minted.at(-1) ?? "";
+    const mark = h.fold.contexts.length;
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("turn-1-reply"), send));
+    await h.engine.onSdkMessage(stampedWith(resultMessage("turn-1-result"), send));
+
+    // Assert
+    const vendorTurn = adoptions(h)[0];
+    expect(turnsFrom(h, mark)).toEqual([vendorTurn, vendorTurn, "turn-1", "turn-1"]);
+  });
+
+  it("keeps the StartTurn's turn open across the vendor-started turn's result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Assert
+    const second = await startDuring(h, "turn-2");
+    expect(second.result.case === "failure" ? second.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+  });
+
+  it("closes the StartTurn's turn on its own stamped result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const send = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(resultMessage("turn-1-result"), send));
+
+    // Assert
+    expect((await startDuring(h, "turn-2")).result.case).toBe("success");
+  });
+
+  it("matches two quick sends each by its own echo", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const first = h.minted.at(-1) ?? "";
+    const mark = h.fold.contexts.length;
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("turn-1-reply"), first));
+    await h.engine.onSdkMessage(stampedWith(resultMessage("turn-1-result"), first));
+    await realPrompt(h, "turn-2");
+    const second = h.minted.at(-1) ?? "";
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("turn-2-reply"), second));
+    await h.engine.onSdkMessage(stampedWith(resultMessage("turn-2-result"), second));
+
+    // Assert
+    expect([first !== second, turnsFrom(h, mark)]).toEqual([true, ["turn-1", "turn-1", "turn-2", "turn-2"]]);
+  });
+
+  it("concludes a vendor-started turn that folds the StartTurn's send in, before the send's own rows", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const send = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("folded-reply"), send));
+
+    // Assert
+    expect([h.fold.absorbed.map((entry) => entry.turn), h.fold.contexts.at(-1)?.turnId?.value]).toEqual([
+      [adoptions(h)[0]],
+      "turn-1",
+    ]);
+  });
+
+  it("frees the adopted turn a fold absorbed, so the next vendor-started turn is adopted afresh", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const send = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("folded-reply"), send));
+    await h.engine.onSdkMessage(stampedWith(resultMessage("turn-1-result"), send));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("next-vendor-reply"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(2);
+  });
+
+  it("attributes a reply echoing an unknown uuid to no turn, never guessing the open one", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("stray-reply"), "00000000-0000-4000-8000-00000000dead"));
+
+    // Assert
+    expect([h.fold.contexts.at(-1)?.turnId, adoptions(h)]).toEqual([undefined, []]);
+  });
+
+  it("records a reply echoing an unknown uuid at ERROR", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(assistantMessage("stray-reply"), "00000000-0000-4000-8000-00000000dead"));
+
+    // Assert
+    expect(logRecordsSince(mark).map((record) => [record.level, record.message])).toContainEqual([
+      "error",
+      "a vendor frame echoed a client uuid the shim never sent; it is attributed to no send",
+    ]);
+  });
+
+  it("charges a killed turn's stamped stop result to the killed turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const send = h.minted.at(-1) ?? "";
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }) }),
+    );
+
+    // Act
+    await h.engine.onSdkMessage(stampedWith(resultMessage("stopped-result"), send));
+
+    // Assert
+    expect([h.fold.contexts.at(-1)?.turnId?.value, adoptions(h)]).toEqual(["turn-1", []]);
+  });
+
+  it("serves the adopted turn as the turn in flight while a StartTurn waits behind it in the vendor", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    const inFlight = failure?.cause.case === "live" ? failure.cause.value.turnInFlight?.value : undefined;
+    expect(inFlight).toBe(adoptions(h)[0]);
   });
 });
 
@@ -2040,7 +2250,7 @@ describe("the keep-alive turn serves nothing", () => {
     expect(sends.at(-1)?.uuid).toBe(h.minted.at(-1));
   });
 
-  it("sends a real prompt with no client uuid", async () => {
+  it("sends a real prompt under a client uuid of its own (ruled 2026-09-28)", async () => {
     // Arrange
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
@@ -2051,7 +2261,7 @@ describe("the keep-alive turn serves nothing", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     // Assert
-    expect(sends.at(-1)?.uuid).toBeUndefined();
+    expect(sends.at(-1)?.uuid).toBe(h.minted.at(-1));
   });
 
   it("keeps the keep-alive's reply off every page", async () => {
@@ -2276,7 +2486,7 @@ describe("the keep-alive turn serves nothing", () => {
     await realPrompt(h, "turn-1");
 
     // Act
-    await h.engine.onSdkMessage(assistantMessage("real-reply"));
+    await h.engine.onSdkMessage(answering(h, assistantMessage("real-reply")));
 
     // Assert
     expect([h.fold.contexts.at(-1)?.turnId?.value, ...rowsFor(h, "real-reply").map((row) => row.keepalive)]).toEqual([
@@ -2297,7 +2507,7 @@ describe("the keep-alive turn serves nothing", () => {
     const before = probes();
 
     // Act
-    await h.engine.onSdkMessage(resultMessage("real-result"));
+    await h.engine.onSdkMessage(answering(h, resultMessage("real-result")));
 
     // Assert
     expect(probes()).toBeGreaterThan(before);
@@ -5745,8 +5955,8 @@ async function realTurn(
   resultUuid = `${turnId}-result-uuid`,
 ): Promise<void> {
   await realPrompt(h, turnId);
-  for (const record of records) await h.engine.onSdkMessage(record);
-  await h.engine.onSdkMessage(resultMessage(resultUuid));
+  for (const record of records) await h.engine.onSdkMessage(answering(h, record));
+  await h.engine.onSdkMessage(answering(h, resultMessage(resultUuid)));
 }
 
 /** A whole keep-alive turn, beaten by the suite's own scheduler. */
@@ -5759,12 +5969,14 @@ async function keepaliveTurn(h: Harness, records: SdkMessage[]): Promise<void> {
 
 /**
  * A reply frame as the vendor stamps it: naming the send it answers — the
- * LATEST keep-alive send the engine minted a client uuid for (sdk.d.ts,
- * `user_message_uuid` / `user_message_uuids`).
+ * LATEST send the engine minted a client uuid for, real or keep-alive
+ * (sdk.d.ts, `user_message_uuid` / `user_message_uuids`). Every send is
+ * stamped (ruled 2026-09-28), so every reply a test means as a send's answer
+ * goes through here.
  */
 function answering(h: Harness, message: SdkMessage): SdkMessage {
   const send = h.minted.at(-1);
-  if (send === undefined) throw new Error("no keep-alive send was minted a client uuid");
+  if (send === undefined) throw new Error("no send was minted a client uuid");
   return { ...message, user_message_uuid: send, user_message_uuids: [send] } as SdkMessage;
 }
 
@@ -5805,7 +6017,13 @@ async function settledSoon(promise: Promise<unknown>): Promise<boolean> {
 
 /** Each send the vendor received, as `keepalive` (it carries a client uuid) or `real`. */
 function sendKinds(sends: readonly SdkUserMessage[]): string[] {
-  return sends.map((send) => (send.uuid === undefined ? "real" : "keepalive"));
+  // EVERY send carries a client uuid now (ruled 2026-09-28), so a keep-alive is
+  // told by its marker, as the store and sidecar tell it.
+  return sends.map((send) =>
+    typeof send.message.content === "string" && send.message.content.startsWith(KEEPALIVE_PROMPT_MARKER)
+      ? "keepalive"
+      : "real",
+  );
 }
 
 /** Let every queued send reach the drained prompt stream. */
@@ -9975,7 +10193,7 @@ describe("refreshing the context reading after a main-agent API response", () =>
     const before = probes(h);
 
     // Act.
-    await h.engine.onSdkMessage(message());
+    await h.engine.onSdkMessage(answering(h, message()));
     await drained();
 
     // Assert.
@@ -9992,7 +10210,7 @@ describe("refreshing the context reading after a main-agent API response", () =>
     const before = probes(h);
 
     // Act.
-    await h.engine.onSdkMessage(apiResponse());
+    await h.engine.onSdkMessage(answering(h, apiResponse()));
     await drained();
 
     // Assert.
@@ -10340,7 +10558,7 @@ describe("a background agent a network outage cut off", () => {
     await realPrompt(h, "turn-1");
     await cutOff(h);
     await beat(h);
-    await h.engine.onSdkMessage(resultMessage("turn-1-result"));
+    await h.engine.onSdkMessage(answering(h, resultMessage("turn-1-result")));
 
     // Act
     await beat(h);
@@ -10357,7 +10575,7 @@ describe("a background agent a network outage cut off", () => {
         : [],
     );
 
-  it("adopts the resume's turn before its first reply: a StartTurn right after it is refused", async () => {
+  it("holds a StartTurn right after it behind the resume's turn rather than refusing it", async () => {
     // Arrange
     const h = harness({ drainPrompts: [] });
     await started(h);
@@ -10365,10 +10583,62 @@ describe("a background agent a network outage cut off", () => {
     await beat(h);
 
     // Act
-    const response = await startDuring(h, "turn-2");
+    const starting = startDuring(h, "turn-2");
 
     // Assert
-    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+    expect(await settledSoon(starting)).toBe(false);
+  });
+
+  it("opens the held StartTurn once the resume's own result ends its turn", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    await beat(h);
+    const resumeSend = h.minted.at(-1);
+    const starting = startDuring(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage({
+      ...resultMessage("resume-result"),
+      user_message_uuid: resumeSend,
+      user_message_uuids: [resumeSend],
+    } as SdkMessage);
+
+    // Assert
+    expect((await starting).result.case).toBe("success");
+  });
+
+  it("sends the resume prompt under a client uuid of its own", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    await beat(h);
+
+    // Assert
+    expect(sends.map((send) => send.uuid)).toEqual([h.minted.at(-1)]);
+  });
+
+  it("matches the resume's reply by its echo, not by arriving next", async () => {
+    // Arrange: the vendor runs a turn of its own ahead of the resume's answer.
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    await beat(h);
+    const resumeTurn = adoptions(h)[0]?.id?.value;
+    await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("resume-reply")));
+
+    // Assert
+    const vendorTurn = adoptions(h)[1]?.id?.value;
+    expect([h.fold.contexts.at(-1)?.turnId?.value === resumeTurn, vendorTurn !== resumeTurn]).toEqual([true, true]);
   });
 
   it("writes one VENDOR_STARTED prompt row for the resume's turn", async () => {
@@ -10392,7 +10662,7 @@ describe("a background agent a network outage cut off", () => {
     await beat(h);
 
     // Act
-    await h.engine.onSdkMessage(assistantMessage("resume-reply"));
+    await h.engine.onSdkMessage(answering(h, assistantMessage("resume-reply")));
 
     // Assert
     expect(adoptions(h)).toHaveLength(1);
@@ -10404,7 +10674,7 @@ describe("a background agent a network outage cut off", () => {
     await started(h);
     await cutOff(h);
     await beat(h);
-    await h.engine.onSdkMessage(resultMessage("resume-result"));
+    await h.engine.onSdkMessage(answering(h, resultMessage("resume-result")));
 
     // Act
     const response = await startDuring(h, "turn-2");
