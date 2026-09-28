@@ -569,3 +569,57 @@ func TestAContextCutBehindAnotherRunningTurnStillQueues(t *testing.T) {
 		t.Fatalf("started = %v, want the queued cut started once at the turn's end", started)
 	}
 }
+
+func TestSubmitSessionActRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *testing.T) {
+	const (
+		noSession = "the workspace has no session to act on"
+		movedAway = "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to"
+	)
+	tests := []struct {
+		name      string
+		redrive   bool
+		sealed    bool
+		message   string
+		wantLevel string
+	}{
+		{name: "a live no-session refusal warns", message: noSession, wantLevel: "warn"},
+		{name: "a re-driven no-session refusal is debug", redrive: true, message: noSession, wantLevel: "debug"},
+		{name: "a live moved-away refusal is info", sealed: true, message: movedAway, wantLevel: "info"},
+		{name: "a re-driven moved-away refusal is debug", sealed: true, redrive: true, message: movedAway, wantLevel: "debug"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			var transfer *gate
+			if tc.sealed {
+				busy(t, h)
+				transfer = newGate()
+				startQuietMove(t, h, transfer)
+				if _, _, err := h.q.SealMove(context.Background(), theWorkspace); err != nil {
+					t.Fatalf("SealMove: %v", err)
+				}
+			} else {
+				h.noSession = true
+			}
+			ctx := context.Background()
+			if tc.redrive {
+				ctx = WithRedrive(ctx)
+			}
+
+			// Act
+			err := h.q.SubmitSessionAct(ctx, theWorkspace, Act{Kind: ActCompact, Turn: "t-compact"})
+
+			// Assert
+			if err == nil {
+				t.Fatal("SubmitSessionAct = nil error, want the refusal")
+			}
+			if !logged(h.log.Records(), tc.wantLevel, opAct, tc.message) {
+				t.Fatalf("records = %+v, want %q at %s", h.log.Records(), tc.message, tc.wantLevel)
+			}
+			if transfer != nil {
+				transfer.finish(h, nil)
+			}
+		})
+	}
+}
