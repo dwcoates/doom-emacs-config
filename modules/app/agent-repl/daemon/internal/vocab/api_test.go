@@ -143,6 +143,62 @@ func TestLoadRenderColorsFailsWhenAMergeArmSpendsAColor(t *testing.T) {
 	}
 }
 
+func TestLoadRenderColorsAcceptsADeclaredColoredMergeArm(t *testing.T) {
+	// Arrange: merge_failed spends blue, and colored_merge_arms declares it.
+	c := loadColors(t)
+
+	// Act.
+	got := c.RosterStatus["merge_failed"]
+
+	// Assert.
+	if got != "blue" {
+		t.Fatalf("roster_status[merge_failed] = %q, want blue (owner ruling, 2026-09-28)", got)
+	}
+}
+
+func TestLoadRenderColorsPaintsAMergeConflictGreen(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.RosterStatus["merge_conflict"]
+
+	// Assert.
+	if got != "green" {
+		t.Fatalf("roster_status[merge_conflict] = %q, want green (owner ruling, 2026-09-28)", got)
+	}
+}
+
+func TestLoadRenderColorsFailsWhenADeclaredColoredMergeArmTakesNoColor(t *testing.T) {
+	// Arrange.
+	dir := writeColors(t, func(m map[string]any) {
+		m["roster_status"].(map[string]any)["merge_failed"] = "none"
+	})
+
+	// Act.
+	_, err := LoadRenderColors(dir)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("LoadRenderColors accepted a colored_merge_arms entry that takes no color")
+	}
+}
+
+func TestLoadRenderColorsFailsWhenAColoredMergeArmIsNotAMergeArm(t *testing.T) {
+	// Arrange.
+	dir := writeColors(t, func(m map[string]any) {
+		m["colored_merge_arms"] = append(m["colored_merge_arms"].([]any), "ready")
+	})
+
+	// Act.
+	_, err := LoadRenderColors(dir)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("LoadRenderColors accepted a colored_merge_arms entry that names no merge arm")
+	}
+}
+
 func TestLoadRenderColorsFailsOnAMergeArmWithNoGlyph(t *testing.T) {
 	// Arrange.
 	dir := writeColors(t, func(m map[string]any) {
@@ -300,8 +356,8 @@ func TestEveryMergeArmIsARosterArmWithAGlyph(t *testing.T) {
 			if !present[arm] {
 				t.Fatalf("%q is not a RosterRow.status arm", arm)
 			}
-			if c.RosterStatus[arm] != ColorNone {
-				t.Fatalf("roster_status[%q] = %q, want none", arm, c.RosterStatus[arm])
+			if !contains(c.ColoredMergeArms, arm) && c.RosterStatus[arm] != ColorNone {
+				t.Fatalf("roster_status[%q] = %q, want none for a merge arm colored_merge_arms does not declare", arm, c.RosterStatus[arm])
 			}
 			if c.MergeGlyphs[arm] == "" {
 				t.Fatalf("merge_glyphs has no glyph for %q", arm)
