@@ -831,22 +831,6 @@ func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, le
 // for that transfer to run, naming the workspace on the holdout cadence while
 // it waits, and answers whether the workspace ends this daemon's.
 func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, fields dlog.Context) bool {
-	// THE TAKEN-BACK WATCHER KNOWS NO TURN UNTIL THE SHIM RE-ANNOUNCES, the
-	// same rule the successor's mid-work adoption waits on (adopt.go). The
-	// take-back re-attached the shim a moment ago, and a freeness read before
-	// its re-announcement answers "free" for a turn the shim is running, so
-	// the transfer ran at once, mid-work, and was refused again: the
-	// integration suite 2026-09-28 read turn_in_flight=false 1ms after the
-	// re-attach, and no holdout was ever named. A shim that never
-	// re-announces cannot have its freeness read, so it is not transferred.
-	facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
-	err := c.deps.Shims.AwaitFacts(facts, ws.ID)
-	cancel()
-	if err != nil {
-		c.log.Error(opTransfer, "the taken-back shim never re-announced its session facts, so its freeness cannot be read; the workspace stays served here",
-			withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
-		return true
-	}
 	outcome := make(chan error, 1)
 	// NEVER FORCED, a forced handover's included: a forced transfer runs at
 	// once, mid-work again, and the successor would refuse it again.
