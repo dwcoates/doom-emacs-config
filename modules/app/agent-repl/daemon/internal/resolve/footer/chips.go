@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/figures"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/ladder"
 )
 
 // OnActivity advances the status tree, the token accounting and the live-work
@@ -425,17 +426,24 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			// go together (compaction.go, "the line's lifetime").
 			s.compacting = false
 			r.endCompactionAtTerminal(ws, s, *turn)
-			if FailureBlocks(failure) {
+			// A QUERY-DIED TERMINAL IS THE DEATH ITSELF, so it stands the
+			// dead-query line as the session's push does: the two arrive by
+			// independent channels in no fixed order, and the strip must not
+			// depend on which came first. A line the push already stood keeps
+			// its own instant.
+			if _, died := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); died && s.queryDied == nil {
+				s.queryDied = &standing{text: deadQueryLine, at: r.opts.clock.Now()}
+			}
+			switch ladder.ClassifyFailure(failure) {
+			case ladder.VendorBlocked:
 				s.blocked = r.blockFor(failure)
-				// A QUERY-DIED TERMINAL IS THE DEATH ITSELF, so it stands the
-				// dead-query line as the session's push does: the two arrive by
-				// independent channels in no fixed order, and the strip must not
-				// depend on which came first. A line the push already stood keeps
-				// its own instant.
-				if _, died := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); died && s.queryDied == nil {
-					s.queryDied = &standing{text: deadQueryLine, at: r.opts.clock.Now()}
-				}
+				s.turnFailed = true
 				return
+			case ladder.TurnFailed:
+				s.turnFailed = true
+				return
+			case ladder.ExpectedStop, ladder.NoFailure:
+				// An expected stop reads exactly as a completion: idle·done.
 			}
 			if interrupted, ok := success.GetOutcome().(*conversationv1.AgentSuccess_Interrupted); ok {
 				s.interrupted = &interruptedState{
@@ -478,26 +486,9 @@ func interruptedCause(interrupted *conversationv1.AgentInterrupted) interruptedK
 	return interruptedByUser
 }
 
-// FailureBlocks reports whether a turn-ending agent failure leaves the session
-// standing-blocked. It is THE ONE classifier the footer's `blocked` arm and the
-// roster's `vendor_blocked` dot both consult — the footer here in
-// OnAgentTerminal, the roster in resolve/sidebar's vendorBlocked — so the strip
-// and the dot can never disagree about the same failure. That agreement is the
-// owner's 2026-09-14 ruling: blocked is blue, and the roster agrees with the
-// footer.
-//
-// EVERY classified failure blocks. A turn that ended in failure cannot proceed
-// until the user acts — a re-prompt, a re-auth, a wait for a limit to reset —
-// which is exactly what `blocked` says and what the roster paints blue. The
-// specific block KIND (auth, a usage limit, billing, or an unclassified vendor
-// error) is `blockFor`'s to name, because only the footer has a substatus to
-// spend it on; the roster needs only this yes-or-no. A nil failure — a turn
-// that SUCCEEDED — never blocks.
-func FailureBlocks(failure *conversationv1.AgentFailure) bool {
-	return failure != nil
-}
-
-// blockFor respells a turn's failure into the standing block it leaves behind.
+// blockFor respells a VENDOR OR ACCOUNT failure (ladder.ClassifyFailure) into
+// the standing block it leaves behind. Which block is this surface's detail;
+// that it blocks at all is the classifier's, shared with the roster.
 func (r *resolver) blockFor(failure *conversationv1.AgentFailure) *blockedState {
 	now := r.opts.clock.Now()
 	switch item := failure.GetFailure().(type) {
@@ -505,14 +496,10 @@ func (r *resolver) blockFor(failure *conversationv1.AgentFailure) *blockedState 
 		return &blockedState{kind: apiBlockKind(item.ApiRequestFailed), at: now,
 			line: item.ApiRequestFailed.GetMessage()}
 	case *conversationv1.AgentFailure_BlockingLimit,
-		*conversationv1.AgentFailure_RapidRefillBreaker,
-		*conversationv1.AgentFailure_BudgetExhausted:
+		*conversationv1.AgentFailure_RapidRefillBreaker:
 		return &blockedState{kind: blockedUsageLimit, at: now}
-	case *conversationv1.AgentFailure_QueryDied:
-		// The same block the session's query_died push stands, whichever of
-		// the two statements of the death lands first.
-		return &blockedState{kind: blockedQueryDied, at: now}
 	default:
+		// A model error, the one vendor failure with no finer step of its own.
 		return &blockedState{kind: blockedVendorError, at: now}
 	}
 }

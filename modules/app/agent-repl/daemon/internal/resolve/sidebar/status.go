@@ -80,7 +80,7 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 	case ladder.Merged:
 		return "merged"
 	case ladder.Disconnected:
-		if ladder.AwaitingBringUp(s.linkSeen, s.turn != nil) {
+		if ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.started) {
 			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
 			return "init"
 		}

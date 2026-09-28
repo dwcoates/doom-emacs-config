@@ -171,6 +171,40 @@ var turnCases = []turnCase{
 					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}},
 		}, wsm.CloseFailed)
 	}},
+	{name: "vendor refused, then the session restarted", apply: func(s *surfaces) {
+		s.startTurn()
+		s.endTurn(nil, &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
+		}, wsm.CloseFailed)
+		started := &conversationv1.SessionStarted{VendorSessionId: "vendor-2"}
+		s.footer.OnSessionStarted(theWS, started)
+		s.roster.OnSessionStarted(theWS, started)
+	}},
+	{name: "the turn's own failure", apply: func(s *surfaces) {
+		s.startTurn()
+		s.endTurn(nil, &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}},
+		}, wsm.CloseFailed)
+	}},
+	{name: "an expected stop", apply: func(s *surfaces) {
+		s.startTurn()
+		s.endTurn(nil, &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}},
+		}, wsm.CloseFailed)
+	}},
+	{name: "the query died mid-turn", apply: func(s *surfaces) {
+		s.startTurn()
+		died := &conversationv1.SessionUpdate{
+			Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+		}
+		s.footer.OnSessionUpdate(theWS, died)
+		s.roster.OnSessionUpdate(theWS, died)
+		s.roster.SetTurnEnded(theWS, wsm.CloseFailed)
+	}},
+	{name: "the allowance rejected", apply: func(s *surfaces) {
+		s.footer.OnSessionUpdate(theWS, rejectedRateLimit())
+		s.roster.OnSessionUpdate(theWS, rejectedRateLimit())
+	}},
 }
 
 // mergeStates is every state the merge orchestrator states, "none" included.
