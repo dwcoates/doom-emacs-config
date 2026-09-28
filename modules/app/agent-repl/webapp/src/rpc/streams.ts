@@ -99,6 +99,15 @@ export interface WatchStreamOptions<Res extends Message> {
   open: (client: AgentReplClient, signal: AbortSignal) => AsyncIterable<Res>;
   /** Draw the push. A MalformedView thrown here skips the frame. */
   onPush: (res: Res) => void;
+  /**
+   * Recognize the stream's PLANNED ENDING frame (`DaemonStreamEnding`, the
+   * `ending` arm the host, daemon and roster streams carry): the daemon is
+   * standing down on purpose and this is the run's last frame. The frame is
+   * consumed here and never reaches `onPush`, and a run that then ends
+   * cleanly is reopened WITHOUT filing the unreachable failure. Omitted for a
+   * stream whose contract carries no such arm.
+   */
+  plannedEnding?: (res: Res) => boolean;
   /** Observe how a run finished. Never required. */
   onEnd?: (end: StreamEnd) => void;
   /**
@@ -145,6 +154,8 @@ export function watchStream<Res extends Message>(
   let backoffMs = initialMs;
   /** Whether a daemon_unreachable card of ours is standing. */
   let unreachableFiled = false;
+  /** Whether this run carried the planned-ending frame. Reset per run. */
+  let endingSeen = false;
   /** Resolves the current backoff wait early when the stream is cancelled. */
   let wakeFromBackoff: (() => void) | null = null;
 
@@ -179,6 +190,14 @@ export function watchStream<Res extends Message>(
       // own arrival.
       ctx.notePush?.();
       if (unreachableFiled) ctx.noteLinkRestored?.();
+      if (opts.plannedEnding?.(response)) {
+        endingSeen = true;
+        log.info(`the ${opts.name} stream's daemon is standing down in a planned exit`, {
+          operation: "rpc.stream-planned-ending",
+          context: { rpc: opts.name },
+        });
+        return;
+      }
       opts.onPush(response);
     } catch (err) {
       if (!isMalformedView(err)) throw err;
@@ -267,6 +286,7 @@ export function watchStream<Res extends Message>(
   const run = async (): Promise<void> => {
     while (!cancelled) {
       controller = new AbortController();
+      endingSeen = false;
       let end: StreamEnd;
       try {
         for await (const response of opts.open(ctx.client, controller.signal)) {
@@ -279,6 +299,18 @@ export function watchStream<Res extends Message>(
       }
       opts.onEnd?.(end);
       if (cancelled) return;
+      // THE DAEMON SAID SO FIRST: a clean end after the planned-ending frame
+      // is a stand-down, not a fault. Nothing is filed; the stream reopens at
+      // once and finds whichever daemon serves now. An ERROR after the frame
+      // is still the failure below: only a clean conclusion was announced.
+      if (endingSeen && end.kind === "producer_ended") {
+        log.info(`the ${opts.name} stream ended as the daemon planned; reopening`, {
+          operation: "rpc.stream-ended-planned",
+          context: { rpc: opts.name },
+        });
+        backoffMs = initialMs;
+        continue;
+      }
       // producer_ended and transport_failure are the SAME condition here: a
       // standing stream that ended without our cancel. The arms differ only so
       // an onEnd observer can tell a clean conclusion from a thrown one.
