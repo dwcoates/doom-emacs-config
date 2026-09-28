@@ -255,10 +255,14 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 	}
 }
 
-func TestFooterTokensCellAndTopbarChipReadOneContextUsage(t *testing.T) {
+// TestFooterTokensCellIsNotDerivedFromTheTopbarContextChip pins the two as
+// different facts (AGENTS.md, "Fresh input is the one token quantity every
+// spend figure counts"): the chip is the context window's size, the cell the
+// main agent's fresh input for the turn. A mid-turn context_usage push moves
+// the chip and adds nothing to the cell.
+func TestFooterTokensCellIsNotDerivedFromTheTopbarContextChip(t *testing.T) {
 	t.Parallel()
-	// Arrange: the context held before the turn is 100k, stated to both
-	// surfaces by one push; then a turn opens.
+	// Arrange: the context held before the turn is 100k; then a turn opens.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
@@ -272,23 +276,24 @@ func TestFooterTokensCellAndTopbarChipReadOneContextUsage(t *testing.T) {
 		return v.GetStrip().GetTokens().GetInput().GetText() == "0 in"
 	})
 
-	// Act: ONE mid-turn context_usage push, as the shim states after a main
-	// API response.
+	// Act: ONE mid-turn context_usage push growing the context by 18.2k, then
+	// the main agent's API response with 5k fresh input.
 	f.shim.PushSessionUpdate(ftContextUsage(118_200))
-
-	// Assert: the chip states the context held and the cell its growth since
-	// the turn opened, both from that one push.
 	chip := awaitTopbar(t, f, topbar, "the context chip after the mid-turn push", func(v *frontendv1.TopbarView) bool {
 		return v.GetContext().GetText() != "100k"
 	})
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-ctx", ftUsage(1_000, 4_000, 90_000))))
+
+	// Assert: the chip states the context held; the cell states the fresh
+	// input alone, with none of the context's growth in it.
 	if chip.GetContext().GetText() != "118.2k" {
 		t.Fatalf("context chip = %q, want 118.2k", chip.GetContext().GetText())
 	}
-	cell := awaitFooter(t, f, footer, "the tokens cell after the mid-turn push", func(v *frontendv1.FooterView) bool {
+	cell := awaitFooter(t, f, footer, "the tokens cell after the usage-carrying response", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
 	})
-	if cell.GetStrip().GetTokens().GetInput().GetText() != "18.2k in" {
-		t.Fatalf("tokens cell = %q, want 18.2k in: the chip's 118.2k less the 100k the turn opened on",
+	if cell.GetStrip().GetTokens().GetInput().GetText() != "5k in" {
+		t.Fatalf("tokens cell = %q, want 5k in: the response's fresh input, none of the context's 18.2k growth",
 			cell.GetStrip().GetTokens().GetInput().GetText())
 	}
 }
