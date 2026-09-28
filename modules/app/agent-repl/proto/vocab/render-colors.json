@@ -129,7 +129,15 @@
     "cannot serve it — and every such state renders the agent unusable,",
     "which is exactly what blue means. It reads the same as the roster's",
     "'vendor_blocked', and the two are held together by ONE classifier so",
-    "the strip and the dot can never disagree about the same failure."
+    "the strip and the dot can never disagree about the same failure.",
+    "",
+    "A MERGE THAT HAS STOPPED IS NOT 'merging' (owner ruling, 2026-09-28).",
+    "'merging' is purple and means a merge is IN FLIGHT. A merge stopped",
+    "awaiting the user is 'merge_conflict', GREEN: an expected state, ready",
+    "for a human response. A failed merge is 'merge_failed', BLUE: something",
+    "is wrong with the workspace. A landed merge is 'merged', which keeps the",
+    "purple the footer drew it with while it was a 'merging' step. Each of",
+    "the three is the same coarse claim as the roster arm of the same name."
   ],
   "footer_status": {
     "idle": "green",
@@ -141,7 +149,10 @@
     "blocked": "blue",
     "disconnected": "blue",
     "closing": "blue",
-    "loading": "red"
+    "loading": "red",
+    "merge_conflict": "green",
+    "merge_failed": "blue",
+    "merged": "purple"
   },
   "_footer_allowance_comment": [
     "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",
