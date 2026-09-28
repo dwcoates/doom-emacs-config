@@ -100,10 +100,11 @@ func TestHandOverAnswersBeforeABusyWorkspaceFallsFree(t *testing.T) {
 	}
 }
 
-func TestHandOverNeverTransfersAWorkspaceThatIsStillBusy(t *testing.T) {
+func TestHandOverTransfersABusyWorkspaceAtOnceWithoutEndingItsWork(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	shim := h.fleet.live[ws]
 	h.freeness.SetFree(ws, false)
 
 	// Act
@@ -113,18 +114,16 @@ func TestHandOverNeverTransfersAWorkspaceThatIsStillBusy(t *testing.T) {
 	h.registry.wait()
 
 	// Assert
-	if !h.registry.Pending(ws) {
-		t.Fatalf("the busy workspace's transfer is not registered")
+	if calls := h.pusher.Calls(); len(calls) != 1 || calls[0].WS != ws {
+		t.Fatalf("pushes = %v, want the busy workspace transferred at once", calls)
 	}
-	if calls := h.pusher.Calls(); len(calls) != 0 {
-		t.Fatalf("pushes = %v, want none while the workspace is busy", calls)
-	}
-	if kills := h.fleet.live[ws].KillRequests(); len(kills) != 0 {
-		t.Fatalf("the busy workspace's session was killed %d time(s); a handover ends nothing", len(kills))
+	if !shim.Detached() || len(shim.KillRequests()) != 0 || len(shim.ForceKills()) != 0 {
+		t.Fatalf("detached %v, kills %d/%d; want the shim detached with its work running",
+			shim.Detached(), len(shim.KillRequests()), len(shim.ForceKills()))
 	}
 }
 
-func TestHandOverCompletesOnceTheWorkspaceFallsFree(t *testing.T) {
+func TestHandOverOfABusyWorkspaceCompletesWhileItsWorkRuns(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -133,17 +132,18 @@ func TestHandOverCompletesOnceTheWorkspaceFallsFree(t *testing.T) {
 		t.Fatalf("HandOver: %v", err)
 	}
 
-	// Act
-	h.registry.free(ws)
+	// Act: the successor adopts it mid-work; the work never ends.
 	h.clock.awaitArmed(t, adoptionWindow)
 	h.successorAdopts(t)
-	h.clock.Fire(adoptionWindow)
 	awaitExit(t, h)
 
 	// Assert
 	calls := h.pusher.Calls()
 	if len(calls) != 1 || calls[0].WS != ws {
 		t.Fatalf("pushes = %v, want the one transfer of %q", calls, ws)
+	}
+	if h.freeness.Free(ws) {
+		t.Fatalf("the workspace fell free; this test is of a handover that does not wait for it")
 	}
 }
 
