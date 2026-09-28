@@ -114,6 +114,26 @@ release edge; `test-prompt-queue.el` fails on any production source naming
 one. `prompt-queue.el` holds only the user's explicit deferral (`SPC j RET`),
 which was never submitted and is released on the roster's finish edge.
 
+## A failed deploy reaches the minibuffer however it was started
+
+The daemon tells every Emacs its standing loud faults on the one
+daemon-level stream Emacs holds, `WatchDaemon`, as `faults_standing`
+(`agentrepl.v1.DaemonFaultsStanding`): the whole set, replayed to a
+resubscribing stream. "Loud" is exactly what the topbar's warning strip
+carries: a failed deploy, and a failed deploy's rollback.
+
+- `agent-repl-link--faults-standing` (`daemon-link.el`) surfaces each
+  fault id ONCE: an ERROR record `elisp.link.daemon-fault` carrying the id,
+  the line and the typed fault, and one `agent-repl: <line>` echo for the
+  push's new faults together.
+- `agent-repl-link--surfaced-faults` remembers the ids across resubscribes,
+  reconnects, `agent-repl-link-teardown` and reloads; a replay is silent.
+- A deploy this Emacs asked for (`agent-repl-deploy`) that fails at its
+  build, install or service restart is ALSO such a fault, so the pushed line
+  is the one echo: the verb records its refusal at ERROR and does not echo
+  it (`agent-repl-verbs--deploy-fault-arms`). Every other refusal is still
+  echoed by the verb.
+
 ## Workspace create/open/register progress
 
 Every gesture that makes or restores a workspace -- `SPC TAB n`, `N`, `c`,
