@@ -5,7 +5,7 @@
 // frame, and reads Emacs's own state back AS DATA — `agent-repl--workspaces',
 // `agent-repl-host--by-name', `agent-repl-roster--tab-order',
 // `agent-repl--ws-tabline-names',
-// `agent-repl--prompt-queue' — never the drawn sidebar, never a rendered tab
+// `agent-repl-held-ingress-waiting' — never the drawn sidebar, never a rendered tab
 // string. The workspace verbs are the module's OWN leader bindings, which
 // EMACS-LAYER-SPEC.md's "Which scenarios should assert a binding" section
 // calls "the strongest case in the list", so each verb is reached the way a
@@ -646,13 +646,21 @@ func TestEmacsCloseWorkspaceIsAViewAct(t *testing.T) {
 //
 // What Emacs OWES here is precisely to NOT ACT. Per elisp.md the refusal
 // manifests in the WEBAPP FOOTER, not in an Emacs dialog, so the assertion is
-// negative on both sides: the tab is still there, and the held prompt is
-// still in `agent-repl--prompt-queue'. Undelivered user intent may never be
-// silently discarded, which is the whole point of the second half.
+// negative: the tab is still there.
+//
+// The held prompt is the DAEMON's (owner ruling 2026-09-28: Emacs holds no
+// prompt in memory). `SPC j RET` submits the deferral AT ONCE with
+// `:delivery :deferred` and the daemon holds it in its tray. So the half of
+// this scenario that says undelivered intent is never silently discarded is
+// read at the edges Emacs can see: the deferral reached the RPC boundary
+// deferred, the daemon answered it `:success` (took it) before the close was
+// asked for, and nothing waits in the on-disk ingress — the one place Emacs
+// itself would hold a prompt the daemon did not take. The daemon's tray is
+// not read: this fixture exposes no daemon client.
 //
 // The turn is parked with the fake SDK's `!hold' scenario so the close is
-// genuinely refused rather than merely slow: a deferred prompt is queued
-// against a turn that is actually in flight.
+// genuinely refused rather than merely slow: the deferral is held against a
+// turn that is actually in flight.
 func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 	t.Parallel()
 	box := requireSandbox(t)
@@ -660,28 +668,38 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 	e := f.Emacs
 	t.Cleanup(f.releaseHeldWork)
 
+	// ARRANGE: a parked turn, then the deferral through its own ordinary
+	// command. The observers are armed after the parked turn's send, so they
+	// see only the deferral.
 	f.parkAHeldTurn()
+	armSubmissionObserver(t, e)
+	armSubmissionAnswerObserver(t, e)
 
-	// Queue the deferred prompt through its own ordinary command, and check
-	// it landed before asking for the close: a queue that was never populated
-	// would make the surviving-entry assertion vacuous.
+	const deferred = "the deferred prompt"
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(f.Name) + `)
                (erase-buffer)
-               (insert "the deferred prompt")
+               (insert ` + elispString(deferred) + `)
                t)`)
 	e.Eval(`(agent-repl-queue-deferred-prompt)`)
-	e.AwaitEvalFor(emacsVerbBound, "the deferred prompt to be held",
-		`(length (gethash `+elispString(f.Name)+` agent-repl--prompt-queue))`,
-		func(raw json.RawMessage) bool {
-			var n int
-			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n >= 1
-		})
 
+	// Check it landed with the daemon BEFORE asking for the close: a
+	// deferral the daemon never took would make the close's refusal say
+	// nothing about held work.
+	sent := awaitSubmissions(t, e, 1, "the deferral to reach the RPC boundary")[0]
+	if sent.Text != deferred || sent.Delivery != ":deferred" {
+		t.Fatalf("the deferral was submitted as text %q delivery %q, want %q delivered :deferred",
+			sent.Text, sent.Delivery, deferred)
+	}
+	if arm := awaitSubmissionAnswer(t, e, deferred, "the daemon to answer the deferral"); arm != ":success" {
+		t.Fatalf("the daemon answered the deferral %s, want :success: the daemon holds it", arm)
+	}
+
+	// ACT
 	e.Leader("j d")
 
-	// The tab SURVIVES. Waiting for the close's own round trip to land first
-	// is what makes this a real assertion rather than a race with it: the
-	// refusal is echoed to the echo area, so the message is the edge.
+	// ASSERT: the tab SURVIVES. Waiting for the close's own round trip to
+	// land first is what makes this a real assertion rather than a race with
+	// it: the refusal is echoed to the echo area, so the message is the edge.
 	e.AwaitEvalFor(emacsVerbBound, "the blocked close to be answered",
 		`(with-current-buffer "*Messages*"
                    (and (string-match-p "close blocked" (buffer-string)) t))`,
@@ -690,8 +708,10 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 	if tabs := f.tabNames(); !containsString(tabs, f.Name) {
 		t.Fatalf("agent-repl--ws-tabline-names = %v, want %q still present: a blocked close draws no dialog and leaves the tab in place", tabs, f.Name)
 	}
-	if n := e.EvalInt(`(length (gethash ` + elispString(f.Name) + ` agent-repl--prompt-queue))`); n < 1 {
-		t.Fatalf("agent-repl--prompt-queue holds %d entries for %q, want the held prompt still there: undelivered intent is never silently discarded", n, f.Name)
+	// ASSERT: nothing waits on disk. The daemon took the deferral, so the
+	// ingress — Emacs's only holding place — is empty.
+	if n := e.EvalInt(`(agent-repl-held-ingress-waiting ` + elispString(f.Name) + `)`); n != 0 {
+		t.Fatalf("%d of %q's prompts wait in the held-prompt ingress, want none: the daemon took the deferral", n, f.Name)
 	}
 }
 
