@@ -2205,6 +2205,9 @@ export const WATCH_DAEMON_PUSHES = [
   // Addressed to stale EMACS streams alone, never to a webview; a page that
   // meets one skips it as the same forward-compat skew.
   "reloadElisp",
+  // The planned end of the stream: consumed by the stream pipeline itself
+  // (`plannedEnding`), which then reopens without filing a failure.
+  "ending",
 ] as const;
 
 export function shutdownAnnounced(init?: {

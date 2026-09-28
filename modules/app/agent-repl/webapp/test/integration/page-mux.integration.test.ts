@@ -196,6 +196,44 @@ describe("the page's stream dropping", () => {
   });
 });
 
+describe("a view's planned ending", () => {
+  it.each(["watchDaemon", "watchWorkspaceRoster"] as const)(
+    "files no daemonUnreachable when %s ends after the daemon's planned ending",
+    async (rpc) => {
+      // Arrange.
+      harness = await startHarness();
+      await harness.fake.awaitStream(rpc);
+      await harness.settle();
+
+      // Act: the planned-ending frame, then the clean end it announces.
+      harness.fake.pushPlannedEnding(rpc);
+      await harness.settle();
+      harness.fake.endStream(rpc);
+      await harness.settle();
+
+      // Assert: the daemon said the end was planned, so it is not a fault.
+      expect(harness.failureArms()).not.toContain("daemonUnreachable");
+    },
+  );
+
+  it.each(["watchDaemon", "watchWorkspaceRoster"] as const)(
+    "still files daemonUnreachable when %s ends WITHOUT the planned ending",
+    async (rpc) => {
+      // Arrange.
+      harness = await startHarness();
+      await harness.fake.awaitStream(rpc);
+      await harness.settle();
+
+      // Act.
+      harness.fake.endStream(rpc);
+      await harness.settle();
+
+      // Assert.
+      expect(harness.failureArms()).toContain("daemonUnreachable");
+    },
+  );
+});
+
 describe("one view's subscription refused", () => {
   it("leaves every other view drawing", async () => {
     // Arrange: the footer's own open is refused, and nothing else is.
