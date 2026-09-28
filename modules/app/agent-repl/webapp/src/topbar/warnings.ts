@@ -33,6 +33,7 @@
 import type {
   TopbarAccountingWarningDetail,
   TopbarDegradedWindowWarningDetail,
+  TopbarDeployFailedWarningDetail,
   TopbarDetachedUnmodeledWarningDetail,
   TopbarSessionFaultWarningDetail,
   TopbarUnmodeledToolWarningDetail,
@@ -310,6 +311,8 @@ export function drawWarningDetail(
       return drawSessionFaultDetail(detail.value, `${path}.session_fault`);
     case "degradedWindow":
       return drawDegradedWindowDetail(detail.value, tc, `${path}.degraded_window`);
+    case "deployFailed":
+      return drawDeployFailedDetail(detail.value, `${path}.deploy_failed`);
     default: {
       const other: { case: string } = detail;
       return unreachableArm(`${path}.detail`, other.case);
@@ -423,6 +426,91 @@ export function drawDegradedWindowDetail(
   }
   body.append(span);
   return body;
+}
+
+/**
+ * The failed-deploy overlay: the step that failed and what it failed on, what
+ * became of the install, the failure's WHOLE account (the row's line carries
+ * only its last line), and where a build archived its output. Every line is
+ * the daemon's, drawn verbatim; an absent log draws nothing.
+ */
+export function drawDeployFailedDetail(
+  u: TopbarDeployFailedWarningDetail,
+  path: string,
+): HTMLElement {
+  const body = document.createElement("div");
+  body.className = "topbar-warning-body";
+  body.append(datum(detailName(requireMessage(u.step, `${path}.step`).text), "step"));
+  body.append(datum(detailLine(requireMessage(u.component, `${path}.component`).text), "component"));
+  body.append(datum(detailLine(requireMessage(u.rollback, `${path}.rollback`).text), "rollback"));
+  const whole = detailLine(requireMessage(u.detail, `${path}.detail`).text);
+  whole.classList.add("topbar-warning-whole");
+  body.append(datum(whole, "detail"));
+  if (u.log !== undefined) body.append(datum(detailLine(u.log.text), "log"));
+  return body;
+}
+
+/** Mark ELEMENT as the overlay's NAME datum, the hook a probe reads. */
+function datum(element: HTMLElement, name: string): HTMLElement {
+  element.setAttribute("data-datum", name);
+  return element;
+}
+
+/** One failed deploy a topbar push carries: its row's line and its overlay. */
+interface CarriedDeployFailure {
+  line: string;
+  detail: TopbarDeployFailedWarningDetail;
+}
+
+/**
+ * The failed deploys a topbar push carries, keyed by their line and whole
+ * account: what "the same failure" means across two pushes of one page.
+ */
+function deployFailures(
+  u: TopbarWarningStrip | undefined,
+  path: string,
+): Map<string, CarriedDeployFailure> {
+  const out = new Map<string, CarriedDeployFailure>();
+  for (const [index, warning] of (u?.warnings ?? []).entries()) {
+    if (warning.detail.case !== "deployFailed") continue;
+    const at = `${path}.warnings[${index}]`;
+    const line = requireMessage(warning.line, `${at}.line`).text;
+    const detail = warning.detail.value;
+    const whole = requireMessage(detail.detail, `${at}.deploy_failed.detail`).text;
+    out.set(JSON.stringify([line, whole]), { line, detail });
+  }
+  return out;
+}
+
+/**
+ * A FAILED DEPLOY IS LOGGED LOUDLY WHERE IT FIRST APPEARS (owner request,
+ * 2026-09-28): one ERROR record per failed deploy the NEXT push carries that
+ * the PREVIOUS one did not, so a page that opens over a standing failure logs
+ * it once and a failure that stands across many pushes is logged once. The
+ * chip's own `warning-chip.report` covers client-local failures only; this is
+ * the pushed warning's record.
+ */
+export function reportAppearedDeployFailures(
+  previous: TopbarWarningStrip | undefined,
+  next: TopbarWarningStrip,
+): void {
+  const seen = deployFailures(previous, "TopbarWarningStrip");
+  for (const [key, { line, detail }] of deployFailures(next, "TopbarWarningStrip")) {
+    if (seen.has(key)) continue;
+    const at = "TopbarWarning.deploy_failed";
+    log.error("a failed deploy appeared on the topbar", {
+      operation: "topbar.deploy-failed",
+      context: {
+        line,
+        step: requireMessage(detail.step, `${at}.step`).text,
+        component: requireMessage(detail.component, `${at}.component`).text,
+        rollback: requireMessage(detail.rollback, `${at}.rollback`).text,
+        detail: requireMessage(detail.detail, `${at}.detail`).text,
+        // An absent log is a failure that archived none: no field at all.
+        ...(detail.log === undefined ? {} : { log: detail.log.text }),
+      },
+    });
+  }
 }
 
 /** A wall-clock reading for a settled span's bounds. */
