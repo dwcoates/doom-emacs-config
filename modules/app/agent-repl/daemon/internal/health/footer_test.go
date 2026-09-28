@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -329,5 +331,57 @@ func TestObserveFaultsSaysNothingWhenTheWriteFailed(t *testing.T) {
 	}
 	if len(sink.opened) != 0 {
 		t.Fatalf("sink saw %+v, want nothing: no fault was recorded", sink.opened)
+	}
+}
+
+func TestFaultTopbarLineCarriesAFailedDeployAlone(t *testing.T) {
+	ws := ids.WorkspaceID("ws-1")
+	build := DeployFailure{Step: DeployStepBuild, BuildStep: "webapp", Detail: "tsc: nope"}.Evidence()
+	tests := []struct {
+		name  string
+		fault wsm.Fault
+		want  string
+	}{
+		{"a daemon-scoped failed deploy is its footer line under the kind's name",
+			wsm.Fault{Kind: KindDeployFailed, Evidence: build}, "deploy failed: build webapp: tsc: nope"},
+		{"a failed rollback likewise",
+			wsm.Fault{Kind: KindDeployFailed, Evidence: DeployFailure{Step: DeployStepRollback,
+				Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Detail: "EROFS"}.Evidence()},
+			"deploy failed: rollback daemon: EROFS"},
+		{"a workspace-scoped failed deploy is not the daemon's",
+			wsm.Fault{Kind: KindDeployFailed, Workspace: &ws, Evidence: build}, ""},
+		{"another daemon-scoped kind is the footer's alone",
+			wsm.Fault{Kind: KindPromptsDirMissing}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := FaultTopbarLine(tc.fault, tc.fault.Workspace == nil)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("FaultTopbarLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestObserveFaultsHandsTheSinkAFailedDeploysTopbarLine(t *testing.T) {
+	// Arrange
+	db := &stubDB{openedID: "fault-9"}
+	sink := &recordingSink{}
+	observed := ObserveFaults(db, sink, newStubSurfaces())
+
+	// Act
+	if _, err := observed.OpenFault(context.Background(), wsm.Fault{
+		Kind: KindDeployFailed, OpenedAt: fixedNow,
+		Evidence: DeployFailure{Step: DeployStepBuild, BuildStep: "build", Detail: "refused"}.Evidence(),
+	}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Assert
+	if len(sink.opened) != 1 || sink.opened[0].line.Topbar != "deploy failed: build: refused" {
+		t.Fatalf("sink saw %+v, want the failed deploy's topbar line", sink.opened)
 	}
 }

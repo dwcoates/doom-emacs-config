@@ -105,6 +105,13 @@ func TestDaemonFaultCarriesTheFailedDeployStep(t *testing.T) {
 				RestartServices: &agentreplv1.DeployServiceRestartFailed{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "exit 5"},
 			}},
 		},
+		{
+			name:    "a failed rollback",
+			failure: DeployFailure{Step: DeployStepRollback, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Detail: "EROFS"},
+			want: &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_Rollback{
+				Rollback: &agentreplv1.DeployRollbackFailed{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON, Detail: "EROFS"},
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

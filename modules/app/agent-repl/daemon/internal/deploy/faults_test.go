@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agentrepl/logging/buildreport"
@@ -64,10 +65,16 @@ func TestEachFailingStepOpensTheFaultNamingIt(t *testing.T) {
 		{"a failed store restart names the store", func(t *testing.T, h *harness) {
 			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
 			h.services.storeErr = errors.New("launchctl refused")
+			// The restart fails once, so the rollback's own restart restores the
+			// previous build and the step's fault stands alone.
+			h.services.recovers = true
 		}, health.DeployFailure{Step: health.DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "launchctl refused"}},
 		{"a failed sidecar restart names the sidecar", func(t *testing.T, h *harness) {
 			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
 			h.services.sidecarErr = errors.New("bootstrap refused")
+			// The restart fails once, so the rollback's own restart restores the
+			// previous build and the step's fault stands alone.
+			h.services.recovers = true
 		}, health.DeployFailure{Step: health.DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "bootstrap refused"}},
 	}
 	for _, tc := range tests {
@@ -294,5 +301,161 @@ func TestNewRefusesAMissingFaultRecorder(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("New accepted a Deployer with no fault recorder")
+	}
+}
+
+func TestAFailedStepsFaultSaysWhatBecameOfTheInstall(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    string
+		clause  string
+	}{
+		{"a failed build installed nothing", func(t *testing.T, h *harness) {
+			h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc"}
+		}, health.RollbackNone, "nothing was installed"},
+		{"a failed install was rolled back", func(t *testing.T, h *harness) {
+			failInstall(t, h)
+		}, health.RollbackRestored, "it was rolled back to the previous build"},
+		{"a failed restart was rolled back", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
+			h.services.sidecarErr = errors.New("kickstart refused")
+			h.services.recovers = true
+		}, health.RollbackRestored, "it was rolled back to the previous build"},
+		{"a failed restart whose rollback failed", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
+			h.services.sidecarErr = errors.New("kickstart refused")
+		}, health.RollbackIncomplete, "its rollback did NOT restore the previous build"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("Deploy succeeded, want the failure")
+			}
+			fault, ok := standingOfStep(t, h, "", health.DeployStepRollback)
+			if !ok {
+				t.Fatalf("standing faults = %+v, want the step's fault", h.faults.standing(t))
+			}
+			if got := health.DeployFailureOf(fault).Rollback; got != tc.want {
+				t.Fatalf("rollback = %q, want %q", got, tc.want)
+			}
+			if !strings.Contains(fault.Detail, tc.clause) {
+				t.Fatalf("fault detail = %q, want it to say %q", fault.Detail, tc.clause)
+			}
+		})
+	}
+}
+
+// standingOfStep answers the one standing `deploy_failed` fault of step, or
+// of any step but notStep when step is empty.
+func standingOfStep(t *testing.T, h *harness, step, notStep string) (wsm.Fault, bool) {
+	t.Helper()
+	for _, f := range h.faults.standing(t) {
+		got := health.DeployFailureOf(f).Step
+		if f.Kind == health.KindDeployFailed && (got == step || (step == "" && got != notStep)) {
+			return f, true
+		}
+	}
+	return wsm.Fault{}, false
+}
+
+func TestARollbackThatFailsOpensItsOwnFault(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T, h *harness)
+		component agentreplv1.DeployComponent
+	}{
+		{"an artifact that cannot be restored", func(t *testing.T, h *harness) {
+			staleDaemon(t, h)
+			h.rollout.handErr = errors.New("a handover is in flight")
+			h.rollout.onHandOver = func() { failInstall(t, h) }
+		}, agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON},
+		{"a service that will not restart onto the restored build", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+			h.services.storeErr = errors.New("launchctl refused")
+		}, agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("Deploy succeeded, want the failure")
+			}
+			fault, ok := standingOfStep(t, h, health.DeployStepRollback, "")
+			if !ok || fault.Workspace != nil {
+				t.Fatalf("standing faults = %+v, want a daemon-scoped rollback fault", h.faults.standing(t))
+			}
+			if got := health.DeployFailureOf(fault).Component; got != tc.component {
+				t.Fatalf("rollback fault component = %v, want %v", got, tc.component)
+			}
+		})
+	}
+}
+
+func TestARefusedHandoverWhoseRollbackFailedStandsAsTheRollbackAlone(t *testing.T) {
+	// Arrange: a refused handover is the rollout's to say; its rollback is ours.
+	h := newHarness(t)
+	staleDaemon(t, h)
+	h.rollout.handErr = errors.New("a handover is in flight")
+	h.rollout.onHandOver = func() { failInstall(t, h) }
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the refused handover")
+	}
+	if got := standingSteps(t, h); len(got) != 1 || got[0] != health.DeployStepRollback {
+		t.Fatalf("standing steps = %v, want the rollback's alone", got)
+	}
+}
+
+func TestADeployThatGetsAllTheWayThroughClosesTheRollbackFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id := deployFault(t, h, health.DeployStepRollback)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if !h.faults.closed[id] {
+		t.Fatalf("the rollback fault still stands after a deploy got all the way through")
+	}
+}
+
+func TestADeployThatFailsAgainKeepsTheRollbackFault(t *testing.T) {
+	// Arrange: an earlier rollback failed, and this deploy's build fails.
+	h := newHarness(t)
+	id := deployFault(t, h, health.DeployStepRollback)
+	h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc"}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the build failure")
+	}
+	if h.faults.closed[id] {
+		t.Fatalf("the rollback fault was closed by a deploy that installed nothing")
 	}
 }
