@@ -108,6 +108,7 @@ import {
 } from "./stream-events.js";
 import {
   classifyVendorApiFailure,
+  absorbedTurnTerminal,
   convertResult,
   isUserStop,
   type VendorApiError,
@@ -197,6 +198,12 @@ interface Fold {
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
   /** Which agent a vendor task is running, as this fold knows it. */
   taskAgent(taskId: string): TaskAgentKnowledge;
+  /**
+   * The terminal of a turn the vendor absorbed into another
+   * (convert/terminals.ts `absorbedTurnTerminal`), naming the last top-level
+   * prose this fold saw as its answer.
+   */
+  concludeAbsorbedTurn(context: FoldContext, coordinate: string): FoldOutput;
 }
 
 /** Everything the fold remembers. Each field is named in this file's header. */
@@ -267,6 +274,7 @@ export function createFold(): Fold {
       state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
     },
     taskAgent: (taskId) => taskAgentKnowledge(state.taskKinds, taskId),
+    concludeAbsorbedTurn: (context, coordinate) => absorbedTurnTerminal(context, coordinate, state.lastAnswer),
   };
 }
 

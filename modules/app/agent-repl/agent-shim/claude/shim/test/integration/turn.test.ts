@@ -1591,6 +1591,111 @@ describe("keep-alives", () => {
   });
 });
 
+/**
+ * A REPLY IS MATCHED TO THE SEND THAT CAUSED IT BY ID (owner ruling 2026-09-28).
+ *
+ * The mocked vendor delivers the frames in the racing order: `!queue-vendor-turn`
+ * queues a turn the vendor runs ON ITS OWN, unstamped, ahead of the next send's
+ * own turn. So the next StartTurn's send lands in the vendor's queue, the
+ * vendor answers its own turn first, and only then the send's. Matching by
+ * arrival charged the vendor's turn to the StartTurn and adopted the
+ * StartTurn's real answer as a turn nobody started.
+ */
+describe("replies matched to their send by id", () => {
+  /** A served agent frame carrying `needle` that reached the store. */
+  const servedCarrying = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    needle: string,
+  ): Promise<storev1.StoreEntry> =>
+    shim.store?.entryLanded((entry) => {
+      if (entry.entry.case !== "agentUpdate") return false;
+      const info = entry.entry.value.agentInfo;
+      if (info.case !== "serveableFrame") return false;
+      const item = info.value.agentItem;
+      if (item?.item.case !== "agentFrame") return false;
+      return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
+    }) ?? Promise.reject(new Error("this shim has no store"));
+
+  /** The agent frame a stored entry carries, if it carries one. */
+  const storedFrame = (entry: storev1.StoreEntry): conversationv1.AgentFrame | undefined => {
+    if (entry.entry.case !== "agentUpdate") return undefined;
+    const info = entry.entry.value.agentInfo;
+    if (info.case !== "serveableFrame") return undefined;
+    const item = info.value.agentItem;
+    return item?.item.case === "agentFrame" ? item.item.value : undefined;
+  };
+
+  /** Every VENDOR_STARTED prompt row the store was handed. */
+  const vendorStartedRows = (shim: Awaited<ReturnType<typeof spawnShim>>): storev1.StoreEntry[] =>
+    (shim.store?.writes() ?? [])
+      .flatMap((request) => request.batch?.entries ?? [])
+      .filter((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes("PROMPT_ORIGIN_VENDOR_STARTED"));
+
+  /** Start t1, which queues a vendor turn, and wait for t1 to close. */
+  const queueAVendorTurn = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> => {
+    const closed = shim.log.record((record) => record.message === "closed a turn" && record.context.turn_id === "t1");
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" })));
+    await closed;
+  };
+
+  test("the vendor's own turn racing a StartTurn is served under its adopted id", async () => {
+    // Arrange
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await queueAVendorTurn(shim);
+
+    // Act
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
+    const vendorAnswer = await servedCarrying(shim, "A background task finished.");
+    await servedCarrying(shim, "echo: the racing prompt");
+
+    // Assert
+    const adopted = vendorStartedRows(shim);
+    expect([adopted.length, vendorAnswer.turn?.value === adopted[0]?.turn?.value]).toEqual([1, true]);
+  });
+
+  test("the StartTurn racing the vendor's own turn is answered under its own turn id", async () => {
+    // Arrange
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await queueAVendorTurn(shim);
+
+    // Act
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
+    const answer = await servedCarrying(shim, "echo: the racing prompt");
+
+    // Assert
+    expect(answer.turn?.value).toBe("t2");
+  });
+
+  test("the StartTurn racing the vendor's own turn ends on its own result, naming its own answer", async () => {
+    // Arrange
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await queueAVendorTurn(shim);
+    const terminalOfT2 = shim.store?.entryLanded((entry) => {
+      const frame = storedFrame(entry);
+      return entry.turn?.value === "t2" && frame?.result.case === "success";
+    });
+
+    // Act
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
+    const answer = storedFrame(await servedCarrying(shim, "echo: the racing prompt"));
+    const terminal = storedFrame((await terminalOfT2) ?? create(storev1.StoreEntrySchema, {}));
+
+    // Assert
+    const answerUnit =
+      answer?.result.case === "update" && answer.result.value.update.case === "activity"
+        ? answer.result.value.update.value.activityId?.value
+        : undefined;
+    const named =
+      terminal?.result.case === "success" && terminal.result.value.outcome.case === "completed"
+        ? terminal.result.value.outcome.value.answer?.value
+        : undefined;
+    expect([answerUnit !== undefined, named]).toEqual([true, answerUnit]);
+  });
+});
+
 describe("scope, arms and ordering the verbs owe", () => {
   test("KillTurn kills THIS TURN ONLY: an earlier turn's live run survives", async () => {
     // THE KILL IS SCOPED TO A TURN, and the refusal set is transitive only over

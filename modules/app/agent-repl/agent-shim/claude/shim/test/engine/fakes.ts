@@ -584,6 +584,14 @@ export class RecordingFold implements EngineFold {
     this.queryEnds.push(why);
   }
 
+  /** Every absorbed turn the engine concluded, by the turn its context named and its coordinate. */
+  readonly absorbed: { turn: string; coordinate: string }[] = [];
+
+  concludeAbsorbedTurn(context: FoldContext, coordinate: string): EngineFoldOutput {
+    this.absorbed.push({ turn: context.turnId?.value ?? "", coordinate });
+    return { entries: [], turnEnded: { frame: create(conversationv1.AgentFrameSchema, { agentId: context.mainAgentId }) } };
+  }
+
   /** The task a message awaits the store for; none unless a suite says so. */
   awaitingFor: (message: SdkMessage) => string | undefined = () => undefined;
   /** Every store answer the engine handed back, in order. */
