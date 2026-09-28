@@ -3,6 +3,7 @@ package heldingress
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
@@ -191,6 +193,7 @@ func TestARefusalIsRecordedOnceAtInfoAndItsRetriesAtDebug(t *testing.T) {
 		{name: "a merge in flight", refusal: promptqueue.ErrMerging, wantLevel: "info"},
 		{name: "a cold gate", refusal: &promptqueue.ColdGateRefusal{Detail: "answer the gate"}, wantLevel: "info"},
 		{name: "no session", refusal: promptqueue.ErrNoSession, wantLevel: "info"},
+		{name: "a move sealed toward another daemon", refusal: fmt.Errorf("session act: %w", bounce.ErrMovedAway), wantLevel: "info"},
 		{name: "an unexpected fault", refusal: errors.New("the database is locked"), wantLevel: "error"},
 	}
 	for _, tc := range tests {
@@ -212,6 +215,38 @@ func TestARefusalIsRecordedOnceAtInfoAndItsRetriesAtDebug(t *testing.T) {
 			}
 			if got := len(w.records("debug", opDefer)); got < 1 {
 				t.Fatalf("debug %s records = %d, want the retry recorded at debug", opDefer, got)
+			}
+		})
+	}
+}
+
+func TestEachRefusalKindAnEntryMeetsIsRecordedOnceAtInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		refusals []error
+		wantInfo int
+	}{
+		{name: "one standing condition is stated once", refusals: []error{promptqueue.ErrMerging, promptqueue.ErrMerging, promptqueue.ErrMerging}, wantInfo: 1},
+		{name: "a condition that changes is stated again", refusals: []error{promptqueue.ErrMerging, &promptqueue.ColdGateRefusal{Detail: "answer the gate"}}, wantInfo: 2},
+		{name: "a condition that returns is not stated twice", refusals: []error{promptqueue.ErrMerging, promptqueue.ErrNoSession, promptqueue.ErrMerging}, wantInfo: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+			in := w.ingress()
+
+			// Act: one sweep per refusal, each once its retry is due.
+			for _, refusal := range tc.refusals {
+				w.handler.refuse["k-1"] = refusal
+				w.sweep(in)
+				w.now = w.now.Add(time.Hour)
+			}
+
+			// Assert
+			if got := len(w.records("info", opDefer)); got != tc.wantInfo {
+				t.Fatalf("info %s records = %d, want %d", opDefer, got, tc.wantInfo)
 			}
 		})
 	}
