@@ -196,8 +196,12 @@ func (h *handler) mintTurn(ctx context.Context, ws ids.WorkspaceID, idempotencyK
 	switch got.Standing {
 	case wsm.ClaimAccepted:
 		release()
-		log.Warn(opSubmit, "the idempotency key already claimed a turn",
-			dlog.Context{"existing_turn": string(got.Turn), "evidence": got.Evidence})
+		fields := dlog.Context{"existing_turn": string(got.Turn), "evidence": got.Evidence}
+		if isRedrive(ctx) {
+			log.Info(opSubmit, "the re-driven submission's idempotency key was already accepted; the earlier submission stands", fields)
+			return claim{}, ErrDuplicateSubmission
+		}
+		log.Warn(opSubmit, "the idempotency key already claimed a turn", fields)
 		return claim{}, ErrDuplicateSubmission
 	case wsm.ClaimRedriven:
 		// THE RETRY KEEPS THE FIRST SUBMISSION'S TURN ID. A process that died

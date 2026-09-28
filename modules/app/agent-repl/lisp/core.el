@@ -1143,7 +1143,6 @@ and logging its own resolution would recurse through the same boundary."
     ("elisp.notes.open: rejected" . "the record reports that no current workspace exists")
     ("elisp.notes.popup-predicate" . "popup classification is process-wide")
     ("elisp.popup." . "the generic popup utility is path-scoped")
-    ("elisp.prompt-queue.link-up" . "link recovery scans every workspace")
     ("elisp.status.tab-color: unknown" . "the shared status palette is not workspace-specific")
     ("elisp.verbs." . "workspace-management verbs can precede workspace creation")
     ("elisp.worktree." . "generic worktree utilities are path-scoped")

@@ -39,9 +39,10 @@
 ;;                             Emacs logs it and clears the input
 ;;   error `merging'           refused: the text is KEPT so the user can
 ;;                             resubmit once the merge resolves
-;;   transport failure         the daemon never answered: the text is KEPT
-;;                             and the prompt is offered to
-;;                             `prompt-queue.el', which drains on link-up
+;;   transport failure         the daemon never answered: the prompt is
+;;                             written to the durable held-prompt ingress
+;;                             (`held-ingress.el'), which the daemon
+;;                             ingests into its held queue once it serves
 ;;
 ;; PROMPT ORIGINS ARE A CLOSED VOCABULARY and every value has exactly ONE
 ;; production send site, so a stored turn traces back to the exact editor
@@ -99,8 +100,7 @@
 (declare-function agent-repl-rpc-adjust-feed-text-scale "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
 (declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
-(declare-function agent-repl-prompt-queue-offer "agent-repl-prompt-queue"
-                  (ws said origin raw &optional key))
+(declare-function agent-repl-held-ingress-write "held-ingress" (ws said origin key))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
 
@@ -187,6 +187,14 @@ agent owns this composer, and to the refusal flash when a submission comes
 back refused.  Buffer-local to the input buffer, because the notice is
 about THIS composer and no other.")
 
+(defvar-local agent-repl-input-waiting nil
+  "The composer's held-prompt waiting line, or nil.
+\"N prompts waiting for the daemon\" while prompts this workspace's
+composer could not hand to a live daemon sit in the durable ingress
+(`held-ingress.el'), which is the only writer.  Drawn beside the notice
+and never replaced by it: a refusal flash must not hide that prompts are
+still owed.")
+
 (defvar-local agent-repl-input-attachments nil
   "Images attached to this composer, oldest first.
 Each element is the plist `(:path ABSOLUTE-PATH :media-type MIME)'.
@@ -221,10 +229,24 @@ to cancel, while core's timer boundary reports whether a keyed timer existed."
   "The composer's mode-line segment: the standing notice, or nothing.")
 
 (defun agent-repl--input-notice-segment ()
-  "Return the input buffer's mode-line notice text, or the empty string."
-  (if agent-repl-input-notice
-      (concat " " agent-repl-input-notice)
-    ""))
+  "Return the input buffer's mode-line notice text, or the empty string.
+The standing notice first, then the held-prompt waiting line."
+  (concat (if agent-repl-input-notice (concat " " agent-repl-input-notice) "")
+          (if agent-repl-input-waiting (concat " [" agent-repl-input-waiting "]") "")))
+
+(defun agent-repl--input-waiting (ws)
+  "Return WS's composer's waiting line, or nil (also with no composer)."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (and buf (buffer-local-value 'agent-repl-input-waiting buf))))
+
+(defun agent-repl--input-set-waiting (ws text)
+  "Set WS's composer waiting line to TEXT (nil clears it)."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (agent-repl--log ws "elisp.input.waiting ws=%s text=%S buffer=%s" ws text (and buf t))
+    (when buf
+      (with-current-buffer buf
+        (setq agent-repl-input-waiting text)
+        (force-mode-line-update)))))
 
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
@@ -877,9 +899,9 @@ longer leaves the composer full.
 
 Nothing is lost by clearing early.  RAW is pushed onto the input history
 ring here, so the user can recall it with history-prev even on a refusal
-that is not queued.  And a transport failure hands the full said+raw to
-the outage queue (see `agent-repl--input-on-failure'), which is
-independent of the composer.  Between the ring and the queue, the erased
+that is not queued.  And a transport failure writes the full said to the
+durable held-prompt ingress (see `agent-repl--input-on-failure'), which is
+independent of the composer.  Between the ring and the ingress, the erased
 draft is always recoverable.
 
 ATTACHMENTS are cleared too: the submission carried them, so leaving them
@@ -1021,18 +1043,18 @@ during the one rollout that is supposed to be invisible.")
   "Route ARM, a handover refusal of WS's submission, and HOLD the prompt.
 Two acts, both required.  host.el walks the handover -- the redial, the
 adopt, the webview -- because the refusal is the same fact its own pushes
-carry.  The prompt itself goes to the OUTAGE queue under THIS attempt\='s
-KEY: it was refused, not consumed, so re-driving it is a RETRY of this
-submission and must go back out under the same key for the daemon to
-recognize a duplicate.  The queue releases it on the promotion, which is
-the moment the successor is the primary and the workspace is adopted.
+carry.  The prompt itself is written to the durable held-prompt ingress
+under THIS attempt\='s KEY: it was refused, not consumed, so re-driving
+it is a RETRY of this submission and must go back out under the same key
+for the daemon to recognize a duplicate.  The daemon that owns the
+workspace once the handover ends ingests it.
 
 The composer KEEPS its text: nothing here says the prompt landed, and the
 user is left able to see exactly what they wrote."
   (agent-repl--info ws "elisp.input.handover-refusal ws=%s origin=%S arm=%S key=%s"
                     ws origin (plist-get arm :arm) key)
   (agent-repl-host-handle-refusal ws arm)
-  (agent-repl-prompt-queue-offer ws said origin raw key))
+  (agent-repl--input-hold ws said origin raw key))
 
 (defconst agent-repl--input-bubble-refusal-labels
   '((:not-deliverable . "no route to that agent")
@@ -1178,20 +1200,39 @@ refusal can re-drive the very prompt that was refused."
 (defun agent-repl--input-on-failure (ws said origin raw detail key)
   "Handle a TRANSPORT failure for WS's submission.
 The daemon never answered, so nothing is known about whether the prompt
-landed.  The full SAID and RAW are offered to the hold queue, which sends
-them for real once the link is back -- the queue entry is independent of
-the composer, so a from-buffer submission that was optimistically cleared
-at dispatch loses nothing: its words ride the queue AND sit in the history
-ring.  This path adds no erase and no restore of the composer.
+landed.  The full SAID is written to the durable held-prompt ingress
+(`agent-repl--input-hold'), which the daemon ingests once it serves --
+the entry is independent of the composer, so a from-buffer submission
+that was optimistically cleared at dispatch loses nothing: its words ride
+the ingress AND sit in the history ring.  This path adds no erase and no
+restore of the composer.
 
-KEY is THIS attempt\='s idempotency key and rides into the queue: the
-re-drive is a RETRY of this submission, not a second turn, so it goes
-back out under the same key and the daemon can refuse a duplicate."
+KEY is THIS attempt\='s idempotency key and rides into the entry: the
+re-drive is a RETRY of this submission, not a second turn, so the daemon
+answers an attempt that did land as a duplicate and delivers it once."
   (agent-repl--error ws "elisp.input.transport-failure ws=%s origin=%S key=%s detail=%S"
                      ws origin key detail)
-  (agent-repl-prompt-queue-offer ws said origin raw key)
-  (agent-repl--input-flash ws "send failed -- held until the daemon is back")
-  (message "agent-repl: the daemon did not answer; the prompt is held"))
+  (when (agent-repl--input-hold ws said origin raw key)
+    (agent-repl--input-flash ws "send failed -- held until the daemon is back")
+    (message "agent-repl: the daemon did not answer; the prompt is held")))
+
+(defun agent-repl--input-hold (ws said origin raw key)
+  "Hold SAID for WS in the durable ingress under ORIGIN and KEY.
+THE ONE PATH a prompt the daemon did not take goes down: it is written to
+disk (`agent-repl-held-ingress-write'), where it survives a restart of
+Emacs, the daemon and the shim, and the daemon ingests it into its own
+held queue once it serves.  Emacs keeps no copy in memory.  Returns the
+entry's path, or nil when it could not be written -- then the failure is
+an ERROR record and a message naming RAW, which the history ring also
+still holds, so the words are never lost silently."
+  (condition-case err
+      (agent-repl-held-ingress-write ws said origin key)
+    (error
+     (agent-repl--error ws "elisp.input.hold-failed ws=%s origin=%S key=%s cause=%S"
+                        ws origin key err)
+     (message "agent-repl: the prompt could not be saved for the daemon (%s); it is in the input history: %s"
+              (error-message-string err) raw)
+     nil)))
 
 (cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer snapshot)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
@@ -1199,8 +1240,7 @@ Resolves the workspace ref and the connection, mints the idempotency key,
 and dispatches the answer arms.  Returns the idempotency key.
 
 KEY re-uses an earlier attempt\='s idempotency key instead of minting a
-fresh one -- the outage queue\='s re-drive passes the failed attempt\='s
-key, because a re-drive is a RETRY and not a second turn.
+fresh one, because a re-drive is a RETRY and not a second turn.
 
 FROM-BUFFER says RAW was read out of the composer, and rides all the way
 to the acceptance because only a composer-sourced submission may erase
@@ -1304,7 +1344,7 @@ record.  When PROMPT is nil the text comes from the input buffer, and
 that from-buffer submission is cleared OPTIMISTICALLY -- the composer is
 erased and the prompt recorded the instant the user hits return, before
 the wire call and regardless of whether the daemon ever acks (owner
-ruling; the history ring and the outage queue are what keep the erased
+ruling; the history ring and the held-prompt ingress are what keep the erased
 draft recoverable, so nothing is lost).  When PROMPT is supplied the text
 was composed by the caller (a canned command, a metaprompt, a queue
 re-drive), and the user's own draft is left untouched -- those sites

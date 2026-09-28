@@ -233,6 +233,8 @@ type harness struct {
 
 	// minted is the turn the handler mints, so a subject can assert on it.
 	minted ids.TurnID
+	// log captures every record the handler writes.
+	log *dlog.TestSurfaces
 }
 
 func newHarness(t *testing.T) *harness {
@@ -242,6 +244,7 @@ func newHarness(t *testing.T) *harness {
 		queue:  &fakeQueue{},
 		feed:   &fakeFeed{},
 		minted: "minted-turn",
+		log:    dlog.NewTestSurfaces(),
 		panel: &agentreplv1.SubmitPromptCommandPanel{
 			Panel: &agentreplv1.SubmitPromptCommandPanel_Status{Status: &frontendv1.StatusPanelView{}},
 		},
@@ -257,7 +260,7 @@ func newHarness(t *testing.T) *harness {
 			return h.panel, h.panelErr
 		},
 		MintTurn: func() ids.TurnID { return h.minted },
-		Log:      dlog.NewTestSurfaces(),
+		Log:      h.log,
 	})
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
