@@ -245,7 +245,7 @@ func TestLastTabDefaultsToTheQueue(t *testing.T) {
 // enqueueWorkspace queues one named workspace's merge.
 func enqueueWorkspace(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), ws); err != nil {
+	if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing %s: %v", ws, err)
 	}
 }

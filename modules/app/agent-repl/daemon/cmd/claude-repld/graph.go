@@ -695,7 +695,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Briefs:       merge.BriefsFrom(paths.PromptsDir),
 		SelfRepoDir:  paths.SelfRepo,
 		StateDir:     p.Layout.Dir(),
-		TestCommand:  merge.TestCommandFor(paths.SelfRepo),
+		TestCommand:  merge.TestCommandFor,
 		TestRunner:   scripts,
 		Painter:      painter,
 		StartSession: fleet.Start,

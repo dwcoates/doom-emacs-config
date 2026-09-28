@@ -58,26 +58,32 @@ const (
 type Orchestrator interface {
 	// Enqueue queues a workspace's merge. It REFUSES pre-state: no layout
 	// facts recorded at creation, a deleted session, or a workspace already
-	// queued or merging.
-	Enqueue(ctx context.Context, ws ids.WorkspaceID) error
+	// queued or merging. `by` says who asked, which decides whether the
+	// admission may displace the workspace's turn in flight (see Requester).
+	Enqueue(ctx context.Context, ws ids.WorkspaceID, by Requester) error
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
 	Pause(ctx context.Context, scope *RepositoryScope) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
-	// Evict removes a queued workspace from the queue.
+	// Evict removes a workspace's merge from the queue. A merge that is
+	// already RUNNING -- merging, testing, repairing or parked -- is
+	// ABANDONED: it is ended through the one release path, which gives back
+	// its lease, its queue entry, its ledger interval and its repository's
+	// slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
 	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
-	// or take it out.
+	// or take it out. Taking out a running merge abandons it, as Evict does.
 	AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, keep bool) error
 	// OnInterrupt raises the dequeue offer when the user interrupts a
 	// workspace that is queued.
 	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
-	// OnWorkspaceClosed abandons a workspace's WAITING merge when the
-	// workspace itself is torn down (killed or nuked), recording the close as
-	// the abandon cause. It is a no-op for a workspace with no waiting merge,
-	// and never touches a merge already in flight.
+	// OnWorkspaceClosed abandons a workspace's merge when the workspace
+	// itself is torn down (killed or nuked), recording the close as the
+	// abandon cause: a waiting merge leaves its queue, and a running or
+	// parked one is ended through the one release path. It is a no-op for a
+	// workspace with no merge.
 	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
 	// RouteParked delivers a submission that arrived while this workspace's
 	// merge lease stands PARKED. It is the queue's one ingress into the
@@ -104,6 +110,38 @@ type Orchestrator interface {
 	// re-enqueues every merge that was queued but not started, in the order it
 	// was waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
+}
+
+// Requester names who asked for a merge.
+//
+// IT DECIDES WHETHER THE ADMISSION MAY DISPLACE THE WORKSPACE'S TURN. A merge
+// the USER asks for (MergeWorkspace, from Emacs or the webapp) takes the
+// session away from the turn in flight: that turn is captured, ended unforced
+// and resubmitted at the lease's release. A merge an AGENT asks for (the
+// command-file ingress, which is what a one-shot's own turn writes to) never
+// does: the turn in flight is, as far as the daemon can tell, the requester
+// itself, and ending it would kill the very turn that asked (2026-09-28,
+// prompt-bubble-height: "the turn was interrupted"). Such a merge waits for
+// the workspace to fall free instead, and nothing is marked for
+// resubmission.
+type Requester int
+
+const (
+	// RequestedByAgent is a merge an agent's turn asked for through the
+	// command-file ingress. It is the zero value on purpose: a merge whose
+	// requester is not known (one the boot recovery put back) never
+	// displaces anything either.
+	RequestedByAgent Requester = iota
+	// RequestedByUser is a merge the user asked for over an rpc.
+	RequestedByUser
+)
+
+// String names a requester for the log record.
+func (r Requester) String() string {
+	if r == RequestedByUser {
+		return "user"
+	}
+	return "agent"
 }
 
 // RepositoryScope names WHICH repository's merge queue a pause or a resume
@@ -159,10 +197,14 @@ type Deps struct {
 	// StateDir is the state root, whose merge-logs/ subdirectory archives every
 	// test-gate run's output.
 	StateDir string
-	// TestCommand is the Emacs-repo method's test gate, run with the selected
-	// suites, no flake re-run, output archived. The first element is the script
-	// (AGENT_REPL_TEST_ALL_SCRIPT overrides it); `--suites <a,b>` is appended.
-	TestCommand []string
+	// TestCommand answers the Emacs-repo method's test gate FOR ONE TREE, run
+	// with the selected suites, no flake re-run, output archived. The gate
+	// runs in the queue's own tree, and a repository's test entrypoint tests
+	// the tree it lives in, so the command is resolved per tree (TestCommandFor;
+	// AGENT_REPL_TEST_ALL_SCRIPT overrides the script). Its LAST element is the
+	// script, which the gate checks is there before it runs; `--suites <a,b>`
+	// is appended.
+	TestCommand func(tree string) []string
 	// TestRunner runs the test gate. Injected so the gate is exercised against
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.
