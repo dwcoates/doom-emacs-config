@@ -113,7 +113,9 @@ type client struct {
 	udsPath string
 	rpc     shimv1connect.ShimClient
 	back    backoff
-	grace   time.Duration
+	// connections counts the links established (Connections, connected).
+	connections atomic.Uint64
+	grace       time.Duration
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -311,6 +313,17 @@ func (c *client) StandDown() bool {
 // Connectivity yields every link state change: dialing, connected, redialing,
 // dead.
 func (c *client) Connectivity() <-chan LinkState { return c.link.states() }
+
+// Connections counts the links established so far (see Client.Connections).
+func (c *client) Connections() uint64 { return c.connections.Load() }
+
+// connected is the one way a link is announced as established: the count
+// advances first, then LinkConnected is published, so no consumer can see the
+// announcement's effects with the count still behind it.
+func (c *client) connected() {
+	c.connections.Add(1)
+	c.link.publish(LinkConnected)
+}
 
 // Occupy takes the in-memory occupancy guard, returning the release function.
 // A second holder is REFUSED, named against the current one.
@@ -986,7 +999,7 @@ func (c *client) redial(ctx context.Context) (Stream[*shimv1.WatchSessionRespons
 			c.log.Info("daemon.shimclient.redial", "shim link re-established", dlog.Context{
 				"uds": c.udsPath, "attempt": attempt,
 			})
-			c.link.publish(LinkConnected)
+			c.connected()
 			return stream, nil
 		}
 		if stop := c.afterFailedDial(ctx, err, attempt); stop != nil {
