@@ -988,6 +988,53 @@ found, ERROR not-found or failed.
   stream names is looked up by its id. `agentFor` answers a promise only then,
   and an ask whose lookup spans a stand-down is denied with that stand-down.
 
+## A background subagent a network outage killed is resumed (2026-09-27)
+
+Owner ruling after the 2026-09-27 DNS outage. `src/engine/network-resume.ts`
+owns the rule, `src/engine/api-reachability.ts` the probe, and
+`deliverNetworkResume` in `src/engine/session.ts` the delivery.
+
+- **Only a network failure is resumed.** `classifyAgentFailure` reads the
+  vendor's structured error class first, then a connection code, then an HTTP
+  status (an answer means reachable), and the vendor's prose last. Auth,
+  billing, quota, overload, rate limits, invalid requests and model errors are
+  never resumed.
+- **One probe loop per process**, shared by every waiting agent, on a FIXED
+  five-second beat with no backoff. It exists only while something waits, and
+  stand-down or the vendor query dying cancels it.
+- **The probe spends no tokens.** It is a `HEAD` of the host the vendor is
+  configured for: `ANTHROPIC_BASE_URL` or the default, through
+  `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` exempts the host.
+- **The wait is bounded.** Thirty minutes from the failure, then the wait
+  gives up at ERROR and the agent keeps its failure terminal.
+- **One resume per failure event.** A resumed run that fails again restarts
+  the window only if the model answered for it since the resume, so a
+  resume-then-fail loop cannot outlive the first window.
+- **The resume is the vendor's own `SendMessage`.** The shim asks the MAIN
+  agent, with a marked prompt (`src/engine/network-resume-prompt.ts`), to
+  continue each named agent. The vendor resumes the same agent from its
+  transcript, and the fold names it through the one resumed-agent identity
+  path above (the fold's join, else the store).
+- **The resume's turn is ADOPTED before the push** (`adoptTurn`, the path a
+  vendor-started turn takes): a shim-minted id and a `VENDOR_STARTED` prompt
+  row. A `StartTurn` arriving before the vendor's first reply is refused
+  `turnAlreadyOpen` and waits behind it. It is delivered only on an idle main
+  agent; an open turn or a `StartTurn` in flight makes the beat wait.
+- **Every transition is one record** under `shim.engine.network_resume`, with
+  `outcome` = `waiting`, `resumed`, `not_resumed`, `abandoned` or `gave_up`
+  (ERROR).
+- **Not yet visible in the footer or live work.** Showing "waiting to resume"
+  needs a proto arm the owner has not ruled on; until then the wait is visible
+  in the log only, and the feed row keeps its failure.
+
+`--fake`-only levers (a real session never honors them):
+
+| Env | Meaning |
+| --- | --- |
+| `AGENT_REPL_FAKE_API_REACHABLE_GATE` | a path whose existence is the API being reachable; unset means always reachable |
+| `AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS` | the probe beat |
+| `AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS` | the give-up window |
+
 ## The store writer: it never drops a row
 
 `src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
