@@ -189,7 +189,7 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	}
 	started := d.mono()
 
-	rows, err := d.read.QueryContext(ctx, linesSinceSQL, agentID, kindPageLine, afterSeq)
+	rows, err := d.read.QueryContext(ctx, linesSinceSQL, agentID, kindPageLine, kindRetired, afterSeq)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "replaying lines of book %q", agentID))
 	}
@@ -199,18 +199,22 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	for rows.Next() {
 		var position int64
 		var seq uint64
+		var kind string
 		var frame []byte
-		if err := rows.Scan(&position, &seq, &frame); err != nil {
+		if err := rows.Scan(&position, &seq, &kind, &frame); err != nil {
 			return nil, d.refuse(base, storagef(err, "scanning a replayed line of book %q", agentID))
 		}
 		line, err := decodeLineAt(frame, position)
 		if err != nil {
 			return nil, d.refuse(base, err)
 		}
+		// A RETIRED ROW REPLAYS AS ITS RETIREMENT. Its frame is the line as it
+		// was last served, so the watcher is handed exactly what to withdraw.
 		out = append(out, LineWritten{
 			AgentID:  agentID,
 			Line:     line,
 			WriteSeq: seq,
+			Retired:  kind == kindRetired,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -259,7 +263,7 @@ func validateBook(agentID string, pageSize uint32) error {
 // its page would serve one agent's lines under another's name.
 func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, position int64, field, value string) error {
 	var one int
-	err := tx.QueryRowContext(ctx, pointerInBookSQL, position, agentID, kindPageLine).Scan(&one)
+	err := tx.QueryRowContext(ctx, pointerInBookSQL, position, agentID, kindPageLine, kindRetired).Scan(&one)
 	switch {
 	case err == nil:
 		return nil
@@ -273,14 +277,19 @@ func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, posi
 // THE READ STATEMENTS ARE AT PACKAGE SCOPE so the suite EXPLAINs the
 // production text itself (read_test.go) rather than a copy that can drift.
 const (
-	// linesSinceSQL binds (book, the page-line kind, the write_seq after which
-	// to replay).
-	linesSinceSQL = `SELECT position, write_seq, frame FROM entry
-	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
+	// linesSinceSQL binds (book, the page-line kind, the retired kind, the
+	// write_seq after which to replay). A retired row is replayed too — as its
+	// retirement — because a watcher whose page was read before the row was
+	// retired must still be told to withdraw it.
+	linesSinceSQL = `SELECT position, write_seq, kind, frame FROM entry
+	  WHERE book_agent_id = ? AND kind IN (?, ?) AND write_seq > ?
 	  ORDER BY write_seq ASC`
 
-	// pointerInBookSQL binds (position, book, the page-line kind).
-	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind = ?`
+	// pointerInBookSQL binds (position, book, the page-line kind, the retired
+	// kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS BOOK: a reader
+	// whose high-water mark was that line walks on from it rather than being
+	// sent to repaint a book that only lost a line.
+	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind IN (?, ?)`
 
 	// pageBoundAboveFloor is OpenPage's bound: every line above the floor.
 	pageBoundAboveFloor = `position > ?`

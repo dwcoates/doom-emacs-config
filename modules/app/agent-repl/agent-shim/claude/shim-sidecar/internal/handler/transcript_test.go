@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -460,5 +461,39 @@ func TestPrimeReturnsAPrefixReadFailure(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, errPrime) {
 		t.Fatalf("Prime error = %v, want the read failure", err)
+	}
+}
+
+// notification is a task notification the old conversion minted a prompt for;
+// the current one never does.
+const notification = `{"type":"user","uuid":"n-1","isSidechain":false,"entrypoint":"cli","origin":{"kind":"task-notification"},` +
+	`"timestamp":"2026-07-21T20:14:05.044Z","message":{"role":"user","content":"<task-notification>\n<task-id>bsh1</task-id>\n<status>completed</status>\n</task-notification>"}}`
+
+func TestARecordsRetiredKeysRideTheContext(t *testing.T) {
+	// Arrange.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+
+	// Act.
+	h.Handle(framesFrom(t, notification), ctx)
+
+	// Assert.
+	if !slices.Contains(ctx.Retired, convert.PromptKey("n-1")) {
+		t.Fatalf("Retired = %v, want the notification's prompt key named", ctx.Retired)
+	}
+}
+
+func TestAHeldBoundaryNamesNoRetiredKey(t *testing.T) {
+	// Arrange: the boundary is held, so it is not converted in this batch.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.Redelivers = true
+
+	// Act.
+	h.Handle(framesFrom(t, boundary), ctx)
+
+	// Assert: a record not converted yet can name nothing it no longer converts to.
+	if len(ctx.Retired) != 0 {
+		t.Fatalf("Retired = %v, want nothing for a held record", ctx.Retired)
 	}
 }

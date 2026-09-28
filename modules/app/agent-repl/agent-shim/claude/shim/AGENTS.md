@@ -658,6 +658,29 @@ way a refusal does.
      conclusion by observing it on the `AgentPageSession` it registers with the
      session, which is what the teardown concludes through.
 
+## A retired line is relayed, never dropped
+
+The store can RETIRE a page line (store.v1 `StoreRetirement`: the sidecar's
+conversion changed and the record behind the row no longer converts to it).
+A standing `WatchAgentSession` sends it ONCE on the `retired` arm, as the line
+last served, at its own pointer; no page serves it again.
+
+- `store/reader.ts` switches on `WatchAgentSessionResponse.frame.case`:
+  `line` is served as before, `retired` is converted by the same
+  `toHistoryEntryAt` and yielded as an `AgentTailFrame` on the `retired` arm,
+  and an UNSET arm is still a loud `store_unavailable`, never skipped.
+- `AgentPageSession.tail` yields `AgentTailFrame` (a discriminated union whose
+  arms are named after `WatchAgentResponse.frame`'s), and `engine/turn.ts`
+  relays `retired` as `WatchAgentResponse.retired` so the daemon removes what
+  it drew.
+- A retirement COUNTS AS SERVED for the conclusion: its pointer joins `served`
+  and becomes `servedThrough`, so a teardown concluding through a retired head
+  ends instead of standing for a line that can never come. It is recorded
+  under a content marker no fingerprint equals, so a row later taken back at
+  the same position is always served again on a re-open.
+- Each relayed retirement is one `logVerbose` record with `agent` and
+  `pointer`; nothing on this path logs at warn.
+
 ## The keep-alive rewind: what may anchor it, and what happens when it fails
 
 The shim submits its own keep-alive prompt every four minutes to keep the
