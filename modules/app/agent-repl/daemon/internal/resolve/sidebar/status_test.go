@@ -260,13 +260,14 @@ func TestRowStaysOnPermissionUntilEveryGateIsDecided(t *testing.T) {
 }
 
 func TestRowIsIdleAsyncWithDetachedWorkAndNoTurn(t *testing.T) {
-	// Arrange.
+	// Arrange: the turn completed with detached work still running.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
-
-	// Act.
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Act: the user reads the result, so it no longer holds the row on done.
+	r.SetViewed(theWS)
 
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "idle_async" {
@@ -608,6 +609,7 @@ func TestIdleAsyncStandsWhileTheLiveWorkSetIsNotEmpty(t *testing.T) {
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	r.SetViewed(theWS) // the result is read, so it does not hold the row on done
 
 	// Act: the watcher states a live item the roster never saw announced.
 	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{
@@ -625,8 +627,11 @@ func TestDetachedWorkDominatesTheTurnsTerminal(t *testing.T) {
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 
-	// Act: work happening NOW outranks how the last turn ended.
 	r.SetTurnEnded(theWS, wsm.CloseKilled)
+
+	// Act: once the interruption is read, work happening NOW outranks how the
+	// last turn ended.
+	r.SetViewed(theWS)
 
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "idle_async" {
@@ -668,6 +673,7 @@ func TestANewTurnDominatesTheAuthoritativeLiveWorkSet(t *testing.T) {
 	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{
 		Shells: []*conversationv1.DetachedWorkId{{Value: "work-1"}}})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	r.SetViewed(theWS) // the result is read, so the row rests at idle_async
 	if got := statusName(onlyRow(t, r)); got != "idle_async" {
 		t.Fatalf("arrange status = %q, want idle_async before the new turn", got)
 	}
@@ -744,6 +750,7 @@ func TestRowTakesDetachedWorkRestoredWithNoAnnouncingAgent(t *testing.T) {
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	r.SetViewed(theWS) // the result is read, so it does not hold the row on done
 
 	// Act.
 	r.OnDetachedWork(theWS, nil, detachedWork("work-restored"))
@@ -968,5 +975,209 @@ func (w *statusWalk) awaitArm(t *testing.T, arm string) []string {
 			t.Fatalf("the roster never published %q within %s; the walk was %v", arm, walkBound, seen)
 			return nil
 		}
+	}
+}
+
+// ---- The UNREAD RESULT: a turn end holds the row until the user reads it ---
+//
+// A turn that completes or is interrupted leaves a result the user has not
+// read. While it is unread the row shows the turn-end arm (done or
+// interrupted) even over live detached work; once the editor reports the row
+// viewed it yields to idle_async, drawn FULL; and when that work ends the row
+// comes back on its turn-end arm in the READ state, PARTIAL — never a fresh,
+// full turn-end claiming a result nobody has read.
+
+// liveShell is a watcher-stated live-work set carrying one detached shell.
+func liveShell() sidebar.LiveWorkSet {
+	return sidebar.LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{{Value: "work-1"}}}
+}
+
+// endedWithAsync runs one turn to how while detached work the watcher states
+// is still live, which is where every unread-result case starts.
+func endedWithAsync(t *testing.T, how sidebar.TurnClose) sidebarResolver {
+	t.Helper()
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnLiveWorkChanged(theWS, liveShell())
+	r.SetTurnEnded(theWS, how)
+	return r
+}
+
+func TestAnUnreadTurnEndHoldsTheRowOverDetachedWork(t *testing.T) {
+	cases := []struct {
+		name       string
+		how        sidebar.TurnClose
+		act        func(r sidebarResolver)
+		wantStatus string
+		wantViewed bool
+	}{
+		{
+			name:       "completed with async live is done, full",
+			how:        wsm.CloseCompleted,
+			act:        func(sidebarResolver) {},
+			wantStatus: "done",
+		},
+		{
+			name:       "completed, viewed while async live is idle_async, full",
+			how:        wsm.CloseCompleted,
+			act:        func(r sidebarResolver) { r.SetViewed(theWS) },
+			wantStatus: "idle_async",
+		},
+		{
+			name: "completed, async ends after read is done, partial",
+			how:  wsm.CloseCompleted,
+			act: func(r sidebarResolver) {
+				r.SetViewed(theWS)
+				r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+			},
+			wantStatus: "done",
+			wantViewed: true,
+		},
+		{
+			name:       "completed, async ends while unread is done, full",
+			how:        wsm.CloseCompleted,
+			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
+			wantStatus: "done",
+		},
+		{
+			name: "completed, a new prompt clears the unread result",
+			how:  wsm.CloseCompleted,
+			act: func(r sidebarResolver) {
+				// The prompt is accepted and then retired unrun, so the row
+				// falls back past the turn to what the facts now say.
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurn(theWS, nil)
+			},
+			wantStatus: "idle_async",
+		},
+		{
+			name:       "interrupted with async live is interrupted, full",
+			how:        wsm.CloseKilled,
+			act:        func(sidebarResolver) {},
+			wantStatus: "interrupted",
+		},
+		{
+			name:       "interrupted, viewed while async live is idle_async, full",
+			how:        wsm.CloseKilled,
+			act:        func(r sidebarResolver) { r.SetViewed(theWS) },
+			wantStatus: "idle_async",
+		},
+		{
+			name: "interrupted, async ends after read is interrupted, partial",
+			how:  wsm.CloseKilled,
+			act: func(r sidebarResolver) {
+				r.SetViewed(theWS)
+				r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+			},
+			wantStatus: "interrupted",
+			wantViewed: true,
+		},
+		{
+			name:       "interrupted, async ends while unread is interrupted, full",
+			how:        wsm.CloseKilled,
+			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
+			wantStatus: "interrupted",
+		},
+		{
+			name: "interrupted, a new prompt clears the unread result",
+			how:  wsm.CloseKilled,
+			act: func(r sidebarResolver) {
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurn(theWS, nil)
+			},
+			wantStatus: "idle_async",
+		},
+		{
+			name:       "a failed close leaves no unread result, so async shows",
+			how:        wsm.CloseFailed,
+			act:        func(sidebarResolver) {},
+			wantStatus: "idle_async",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := endedWithAsync(t, tc.how)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := row.GetViewed() != nil; got != tc.wantViewed {
+				t.Fatalf("viewed = %v, want %v", got, tc.wantViewed)
+			}
+		})
+	}
+}
+
+func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
+	cases := []struct {
+		name       string
+		how        sidebar.TurnClose
+		viewed     bool
+		wantStatus string
+	}{
+		{name: "completed, unread", how: wsm.CloseCompleted, wantStatus: "done"},
+		{name: "completed, viewed", how: wsm.CloseCompleted, viewed: true, wantStatus: "done"},
+		{name: "interrupted, unread", how: wsm.CloseKilled, wantStatus: "interrupted"},
+		{name: "interrupted, viewed", how: wsm.CloseKilled, viewed: true, wantStatus: "interrupted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.SetTurnEnded(theWS, tc.how)
+
+			// Act.
+			if tc.viewed {
+				r.SetViewed(theWS)
+			}
+
+			// Assert: the arm is the turn end's; the report only draws it PARTIAL.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := row.GetViewed() != nil; got != tc.viewed {
+				t.Fatalf("viewed = %v, want %v", got, tc.viewed)
+			}
+		})
+	}
+}
+
+func TestTheUnreadResultTransitionsAreRecorded(t *testing.T) {
+	cases := []struct {
+		name      string
+		act       func(r sidebarResolver)
+		operation string
+	}{
+		{name: "a turn end sets unread", act: func(sidebarResolver) {}, operation: "daemon.sidebar.result_unread"},
+		{name: "an unread result outranks async", act: func(sidebarResolver) {}, operation: "daemon.sidebar.unread_outranks_async"},
+		{name: "a viewed report reads it", act: func(r sidebarResolver) { r.SetViewed(theWS) }, operation: "daemon.sidebar.result_read"},
+		{name: "a new prompt clears it", act: func(r sidebarResolver) {
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+		}, operation: "daemon.sidebar.result_unread_cleared"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := endedWithAsync(t, wsm.CloseCompleted)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			for _, rec := range r.surfaces.Records() {
+				if rec.Operation == tc.operation {
+					return
+				}
+			}
+			t.Fatalf("no %s record", tc.operation)
+		})
 	}
 }
