@@ -62,7 +62,12 @@
     "The merge arms take 'none' — the roster draws them with the glyphs in",
     "'merge_glyphs' rather than spending a lifecycle color on the merge",
     "pipeline. 'none' and 'inactive' take 'none' because a workspace with no",
-    "session has no lifecycle to report at all."
+    "session has no lifecycle to report at all.",
+    "",
+    "'turn_failed' is BLUE (owner ruling, 2026-09-28). It is a turn end like",
+    "'done' and 'interrupted', and it holds the row as an unread result the",
+    "same way, but the turn did not produce what it was asked for, so it is",
+    "drawn in the color that says something is wrong rather than green."
   ],
   "roster_status": {
     "none": "none",
@@ -73,6 +78,7 @@
     "degraded": "blue",
     "start_failed": "blue",
     "vendor_blocked": "blue",
+    "turn_failed": "blue",
     "submitting": "red",
     "thinking": "red",
     "clearing": "red",
