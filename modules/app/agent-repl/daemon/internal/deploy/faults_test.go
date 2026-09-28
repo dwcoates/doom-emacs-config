@@ -108,6 +108,11 @@ func TestEachFailingStepOpensTheFaultNamingIt(t *testing.T) {
 	}
 }
 
+// opHealthCloseOnEdge is the operation the health package records every
+// recovery-edge close under: a deploy fault leaves by the same one door every
+// fault does (health/faultclose.go), so its close is recorded there.
+const opHealthCloseOnEdge = "daemon.health.close_on_edge"
+
 func TestALaterDeployThatGetsThroughTheStepClosesItsFault(t *testing.T) {
 	tests := []struct {
 		name string
@@ -132,7 +137,7 @@ func TestALaterDeployThatGetsThroughTheStepClosesItsFault(t *testing.T) {
 			if !h.faults.closed[id] {
 				t.Fatalf("the %s fault still stands after a deploy got through it", tc.step)
 			}
-			if !logged(h.log, "info", opFault, "closed a standing deploy fault") {
+			if !logged(h.log, "info", opHealthCloseOnEdge, "a recovery edge closed a standing fault") {
 				t.Fatalf("records = %+v, want the close at INFO", h.log.Records())
 			}
 		})
@@ -229,7 +234,7 @@ func TestAStandingFaultThatCannotBeReadSaysSoAtError(t *testing.T) {
 	}
 
 	// Assert
-	if !logged(h.log, "error", opFault, "could not read the standing deploy faults to close them") {
+	if !logged(h.log, "error", opHealthCloseOnEdge, "could not read the standing faults a recovery edge closes; they stand") {
 		t.Fatalf("records = %+v, want the unreadable faults at ERROR", h.log.Records())
 	}
 }
@@ -249,7 +254,7 @@ func TestAStandingFaultThatCannotBeClosedSaysSoAtError(t *testing.T) {
 	if h.faults.closed[id] {
 		t.Fatalf("a close that failed closed the fault")
 	}
-	if !logged(h.log, "error", opFault, "could not close a standing deploy fault") {
+	if !logged(h.log, "error", opHealthCloseOnEdge, "could not close a standing fault on its recovery edge; it stands") {
 		t.Fatalf("records = %+v, want the failed close at ERROR", h.log.Records())
 	}
 }
@@ -270,6 +275,35 @@ func TestABootingDaemonClosesEveryDeployFaultAnEarlierOneLeft(t *testing.T) {
 	}
 	if h.faults.closed[other] {
 		t.Fatalf("a fault of another kind was closed")
+	}
+}
+
+// THE BOOT IS A RECOVERY EDGE of every daemon-scoped kind whose lifetime ends
+// there (health/lifetime.go), not of the deploy's faults alone.
+func TestABootingDaemonClosesEveryFaultWhoseLifetimeEndsAtABoot(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"an earlier process's poisoned sink", health.KindLogSinkPoisoned, true},
+		{"an earlier process's read-only handle", health.KindWsmReadOnly, true},
+		{"a missing prompts directory waits for a served brief", health.KindPromptsDirMissing, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			id := h.faults.seed(t, wsm.Fault{Kind: tt.kind})
+
+			// Act
+			h.d.CloseEarlierFailures(context.Background())
+
+			// Assert
+			if h.faults.closed[id] != tt.closes {
+				t.Fatalf("%s closed = %v, want %v", tt.kind, h.faults.closed[id], tt.closes)
+			}
+		})
 	}
 }
 

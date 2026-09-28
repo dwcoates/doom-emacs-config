@@ -843,12 +843,13 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		return err
 	}
 	adopted := path == pathAdopted
-	// THE HEALTHY ATTACH CLOSES THE LOST-LINK FAULTS. Bring-up gates on the
-	// shim's first healthy diagnostics, so reaching here IS the repair of
-	// whatever shim_died or link_severed the previous attachment recorded. A
-	// mid-stream redial is NOT this moment: the link coming back on a stream
-	// the daemon never re-attached leaves the evidence standing.
-	f.closeLinkFaults(ctx, log, ws)
+	// THE HEALTHY ATTACH IS A RECOVERY EDGE. Bring-up gates on the shim's
+	// first healthy diagnostics, so reaching here IS the repair of every
+	// standing fault whose lifetime ends at a healthy attach: a lost link, a
+	// start that failed, an undetermined bounce. A mid-stream redial is NOT
+	// this moment: the link coming back on a stream the daemon never
+	// re-attached leaves the evidence standing.
+	f.closeOnEdge(ctx, log, ws, health.EdgeHealthyAttach)
 
 	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
 	// the adopt path precisely because a shim is still alive on this
@@ -1475,46 +1476,13 @@ func (f *Fleet) noteSessionRefused(ctx context.Context, log dlog.Logger, ws ids.
 	f.publishHost(ws)
 }
 
-// linkFaultKinds are the fault kinds a lost daemon-to-shim link records, and
-// the ones a healthy attach retracts.
-var linkFaultKinds = []string{health.KindShimDied, health.KindLinkSevered}
-
-// closeLinkFaults retracts the lost-link faults of one workspace.
-func (f *Fleet) closeLinkFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
-	f.closeFaults(ctx, log, ws, linkFaultKinds, "a healthy attach retracted a lost-link fault")
-}
-
-// closeSessionRefusedFaults retracts the refused-start fault of one workspace,
-// because a session that IS serving is the repair of the refusal that preceded
-// it. One shared closer with closeLinkFaults, so the two cannot drift.
-func (f *Fleet) closeSessionRefusedFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
-	f.closeFaults(ctx, log, ws, []string{health.KindResumeFailed},
-		"a started session retracted a refused-start fault")
-}
-
-// closeFaults retracts every standing fault of these kinds on one workspace.
-func (f *Fleet) closeFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kinds []string, note string) {
+// closeOnEdge closes every standing fault of one workspace whose declared
+// lifetime (health/lifetime.go) ends at edge. The kinds are the table's, never
+// a list here: a healthy attach and a started session once closed hand-listed
+// kinds, and the kinds nobody listed stood until the next daemon restart.
+func (f *Fleet) closeOnEdge(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, edge health.Edge) {
 	workspace := ws
-	for _, kind := range kinds {
-		open, err := f.deps.DB.OpenFaults(ctx, wsm.FaultScope{Workspace: &workspace, Kind: kind})
-		if err != nil {
-			log.Error(opBringUp, "could not read the standing link faults", dlog.Context{
-				"kind": kind, "cause": err.Error(),
-			})
-			continue
-		}
-		for _, fault := range open {
-			if err := f.deps.DB.CloseFault(ctx, fault.ID, f.now()); err != nil {
-				log.Error(opBringUp, "could not close a standing link fault", dlog.Context{
-					"kind": kind, "fault": string(fault.ID), "cause": err.Error(),
-				})
-				continue
-			}
-			log.Info(opBringUp, note, dlog.Context{
-				"kind": kind, "fault": string(fault.ID),
-			})
-		}
-	}
+	health.CloseOnEdge(ctx, f.deps.DB, log, edge, health.EdgeScope{Workspace: &workspace}, f.now())
 }
 
 // portAcrossAccounts carries a session's vendor transcript from the root it
@@ -1646,7 +1614,10 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	case err != nil && !errors.Is(err, shimclient.ErrStandDownOrdered):
 		f.noteSessionRefused(ctx, log, ws, err)
 	case err == nil && started != nil:
-		f.closeSessionRefusedFaults(ctx, log, ws)
+		// A SESSION THAT IS SERVING is the repair of every fault whose
+		// lifetime ends at a started session: the refusal that preceded it,
+		// a failed cold-gate re-open, an undetermined bounce.
+		f.closeOnEdge(ctx, log, ws, health.EdgeSessionStarted)
 	}
 	return started, err
 }

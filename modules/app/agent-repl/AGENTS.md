@@ -1318,6 +1318,28 @@ workspace that is owed the service the daemon cannot give.
 state is the live truth about the link, and a fault is the standing record
 beside it.
 
+### Every fault kind declares when it ends
+
+The owner-approved plan of 2026-09-28
+(`docs/investigations/2026-09-27-footer-fault-lifetimes-plan.md`). A fault
+line stands until something closes its record, and before the plan several
+kinds had no closer at all: `bounce_unknown` stood on a strip for over 30
+minutes on a workspace that was serving.
+
+**THE LIFETIME IS DECLARED IN ONE TABLE**, `daemon/internal/health/lifetime.go`,
+beside the footer partition. Each kind is either STANDING until one of its
+named recovery edges (a healthy attach, a started session, the next turn, a
+serving successor, a deploy step that got through, a boot, ...) or MOMENTARY
+(closed as it is recorded, or never recorded at all).
+
+**A RECOVERY EDGE CLOSES THROUGH ONE DOOR**, `health.CloseOnEdge` (or
+`health.CloseFaultOn` for the one fault a resolver tracks). It closes every
+standing fault in scope whose kind declares that edge, and records each close
+at INFO under `daemon.health.close_on_edge` with the kind, the fault, the edge
+and how long it stood. Do NOT list kinds at a call site: add the kind's row to
+the table. `lifetime_test.go` fails a kind with no lifetime and an edge with no
+production caller.
+
 ## Hibernation is the memory knob, and it is gated on real elapsed quiet
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of

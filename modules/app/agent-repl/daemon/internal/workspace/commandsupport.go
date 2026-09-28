@@ -127,23 +127,6 @@ func (v *verbs) raisePromptsFault(ctx context.Context, log dlog.Logger, detail s
 // successful read+splice of a brief: that read IS the health probe, so the
 // repair is observed by the same path the breakage was.
 func (v *verbs) clearPromptsFault(ctx context.Context, log dlog.Logger) {
-	standing, err := v.deps.Health.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindPromptsDirMissing})
-	if err != nil {
-		log.Error(opCommandSupport, "could not check for a standing prompts-directory fault",
-			dlog.Context{"cause": err.Error()})
-		return
-	}
-	for _, f := range standing {
-		if f.Workspace != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "f.Workspace != nil"})
-			continue
-		}
-		if err := v.deps.Health.CloseFault(ctx, f.ID); err != nil {
-			log.Error(opCommandSupport, "could not close the prompts-directory fault",
-				dlog.Context{"fault": string(f.ID), "cause": err.Error()})
-			continue
-		}
-		log.Info(opCommandSupport, "the prompts directory furnishes briefs again; fault closed",
-			dlog.Context{"fault": string(f.ID), "path": v.deps.PromptsDir})
-	}
+	health.CloseOnEdge(ctx, health.ReporterFaults(v.deps.Health), log, health.EdgePromptsDirServed,
+		health.EdgeScope{DaemonOnly: true}, v.now())
 }

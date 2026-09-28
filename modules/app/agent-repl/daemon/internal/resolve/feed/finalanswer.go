@@ -72,6 +72,9 @@ type FaultRecorder interface {
 	OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, error)
 	// CloseFault retracts one by id.
 	CloseFault(ctx context.Context, id ids.FaultID, at time.Time) error
+	// OpenFaults lists the standing faults in scope, which is what the
+	// turn-started recovery edge reads to close every fault that ends there.
+	OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.Fault, error)
 }
 
 // answerFaultState is the ONE final-answer fault standing for a workspace.
@@ -84,6 +87,9 @@ type answerFaultState struct {
 	why string
 	// unit is the activity id it was raised about.
 	unit string
+	// openedAt is when it was raised, which is what a close measures how
+	// long it stood against.
+	openedAt time.Time
 }
 
 // stallState is one armed stall window. The sequence is what makes a timer
@@ -130,7 +136,7 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 		return
 	}
 	// A DIFFERENT final-answer fault stands: it is superseded, not accumulated.
-	r.closeAnswerFault(s, "a later final-answer fault superseded it")
+	r.closeAnswerFault(s, health.EdgeSuperseded, "a later final-answer fault superseded it")
 	if r.deps.Faults == nil {
 		log.Debug("daemon.feed.final_answer_fault_unrecorded",
 			"no fault recorder is wired into the feed resolver; the fault reaches no footer",
@@ -139,12 +145,13 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 	}
 	ws := s.id
 	line := r.answerFaultLine(why)
+	openedAt := r.deps.Now()
 	id, err := r.deps.Faults.OpenFault(context.Background(), wsm.Fault{
 		Workspace: &ws,
 		Kind:      health.KindFinalAnswerUnresolved,
 		Detail:    message,
 		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": line},
-		OpenedAt:  r.deps.Now(),
+		OpenedAt:  openedAt,
 	})
 	if err != nil {
 		log.Error("daemon.feed.final_answer_fault_unopenable",
@@ -152,29 +159,31 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 			dlog.Context{"turn": turn, "unit": unit, "why": why, "cause": err.Error()})
 		return
 	}
-	s.answerFault = &answerFaultState{id: id, why: why, unit: unit}
+	s.answerFault = &answerFaultState{id: id, why: why, unit: unit, openedAt: openedAt}
 }
 
-// closeAnswerFault retracts the standing final-answer fault, if one stands.
-func (r *resolver) closeAnswerFault(s *wsState, because string) {
+// closeAnswerFault retracts the standing final-answer fault, if one stands,
+// on the recovery edge that ended it. The close goes through the health
+// package's one door (health.CloseFaultOn), which refuses an edge the kind
+// does not declare and records the close at INFO; a close that fails is ERROR
+// there, and the footer may keep drawing the fault.
+func (r *resolver) closeAnswerFault(s *wsState, edge health.Edge, because string) {
 	fault := s.answerFault
 	if fault == nil {
 		return
 	}
 	s.answerFault = nil
-	log := r.logger(s.id)
 	if r.deps.Faults == nil {
 		return
 	}
-	if err := r.deps.Faults.CloseFault(context.Background(), fault.id, r.deps.Now()); err != nil {
-		log.Error("daemon.feed.final_answer_fault_unclosable",
-			"the standing final-answer fault could not be closed; the footer may keep drawing it",
-			dlog.Context{"fault": string(fault.id), "why": fault.why, "cause": err.Error()})
-		return
-	}
-	log.Debug("daemon.feed.final_answer_fault_closed",
-		"the standing final-answer fault was retracted", dlog.Context{
-			"fault": string(fault.id), "why": fault.why, "because": because})
+	ws := s.id
+	health.CloseFaultOn(context.Background(), r.deps.Faults,
+		r.logger(s.id).With(dlog.Context{"why": fault.why, "because": because}), edge, wsm.Fault{
+			ID:        fault.id,
+			Workspace: &ws,
+			Kind:      health.KindFinalAnswerUnresolved,
+			OpenedAt:  fault.openedAt,
+		}, r.deps.Now())
 }
 
 // clearStalledAnswerFault retracts a standing fault ONLY when it is the stall
@@ -186,7 +195,7 @@ func (r *resolver) clearStalledAnswerFault(s *wsState, unit, because string) {
 	if s.answerFault == nil || s.answerFault.why != whyStalled || s.answerFault.unit != unit {
 		return
 	}
-	r.closeAnswerFault(s, because)
+	r.closeAnswerFault(s, health.EdgeAnswerArrived, because)
 }
 
 // clearTurnStalledAnswerFault is the terminal's clearing: the turn ended, so
@@ -199,14 +208,32 @@ func (r *resolver) clearTurnStalledAnswerFault(s *wsState, turn, because string)
 	if !ok || fold.turn != turn {
 		return
 	}
-	r.closeAnswerFault(s, because)
+	r.closeAnswerFault(s, health.EdgeAnswerArrived, because)
 }
 
 // turnStarted is what every turn-start site calls: the standing final-answer
 // fault is a statement about the turn that just ended, and the next turn
 // beginning is what retires it.
 func (r *resolver) turnStarted(s *wsState, turn ids.TurnID) {
-	r.closeAnswerFault(s, "the next turn started: "+string(turn))
+	r.closeAnswerFault(s, health.EdgeTurnStarted, "the next turn started: "+string(turn))
+}
+
+// liveTurnStarted is the turn-started recovery edge for a turn the daemon
+// OPENED, never one replayed from history: every standing fault of the
+// workspace whose lifetime ends at the next turn (health/lifetime.go) is
+// closed, the conversation-level ones (an abandoned conversation, a failed
+// classifier run) with the final-answer one. A replayed turn retires only
+// the final-answer fault this resolver tracks, because replaying a
+// conversation's history proves nothing about it now.
+func (r *resolver) liveTurnStarted(s *wsState, turn ids.TurnID) {
+	r.turnStarted(s, turn)
+	if r.deps.Faults == nil {
+		return
+	}
+	ws := s.id
+	health.CloseOnEdge(context.Background(), r.deps.Faults,
+		r.logger(s.id).With(dlog.Context{"turn": string(turn)}), health.EdgeTurnStarted,
+		health.EdgeScope{Workspace: &ws}, r.deps.Now())
 }
 
 // armAnswerStall starts (or restarts) one response fold's stall window. Every

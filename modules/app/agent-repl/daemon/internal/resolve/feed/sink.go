@@ -469,8 +469,9 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 	s.turnStamp = &running
 	s.knowTurn(running)
 	// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and the next
-	// turn beginning is what retires it.
-	r.turnStarted(s, running)
+	// turn beginning is what retires it -- with every other fault whose
+	// lifetime ends at the next turn.
+	r.liveTurnStarted(s, running)
 	r.logger(ws).Debug("daemon.feed.turn_opened",
 		"the feed took the turn the daemon opened", dlog.Context{"turn": string(turn)})
 }

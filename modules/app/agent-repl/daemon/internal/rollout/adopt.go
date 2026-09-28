@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 )
@@ -683,6 +684,15 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		dlog.Context{"all_joining_owned": complete})
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
+
+	// A DIALED ADOPTION IS A HEALTHY ATTACH, the recovery edge of every
+	// standing fault whose lifetime ends there (health/lifetime.go) -- the
+	// bounce dispositions flushed at the promotion above among them.
+	if dial {
+		workspace := ws
+		health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeHealthyAttach,
+			health.EdgeScope{Workspace: &workspace}, c.deps.Clock.Now())
+	}
 
 	// THE REPLACEMENTS THE MOVE CARRIED RUN HERE, after the adoption (owner
 	// ruling, 2026-09-27: a restart racing a running move runs on the daemon
