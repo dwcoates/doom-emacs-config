@@ -346,6 +346,25 @@ func TestAFaultOutranksTheUpdateLine(t *testing.T) {
 	}
 }
 
+func TestAStandingDeployFaultStandsAboveTheNextDeploysUpdateLine(t *testing.T) {
+	// Arrange: an earlier deploy's failure stands on every strip.
+	h := newHarness(t)
+	connected(h)
+	h.r.OpenFault("", faultOf(t, "fault-1", health.KindDeployFailed, true))
+
+	// Act: the next deploy starts building.
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Building})
+
+	// Assert: the fault keeps the activity line, and the status stays idle.
+	idle := h.view(t).GetStrip().GetStatus().GetIdle()
+	if idle == nil {
+		t.Fatalf("status = %+v, want idle: a failed deploy does not escalate", h.view(t).GetStrip().GetStatus())
+	}
+	if got := idle.GetActivity().GetFault().GetKind(); got != health.KindDeployFailed {
+		t.Fatalf("activity = %+v, want the deploy_failed fault over the update line", idle.GetActivity().GetKind())
+	}
+}
+
 func TestTheUpdateLineOutranksANotification(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -6,11 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/deploy"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/rollout"
+	"claude-repld/internal/wsm"
 )
 
 func envOf(values map[string]string) func(string) string {
@@ -95,6 +100,81 @@ func TestADeployerIsNotBuiltWithoutARollout(t *testing.T) {
 	// Assert: the deploy's own constructor refuses the missing collaborator.
 	if err == nil || !strings.Contains(err.Error(), "rollout controller is required") {
 		t.Fatalf("buildDeployer = %v, want the deploy's refusal", err)
+	}
+}
+
+// idleRollout is a rollout controller with nothing in flight.
+type idleRollout struct{}
+
+func (idleRollout) HandOver(context.Context, bool) (rollout.HandoverAcceptance, error) {
+	return rollout.HandoverAcceptance{}, nil
+}
+
+func (idleRollout) Restart(context.Context, bool) (rollout.HandoverAcceptance, error) {
+	return rollout.HandoverAcceptance{}, nil
+}
+
+func (idleRollout) CheckStaleness(context.Context, ids.WorkspaceID, bool) (rollout.StaleCheck, error) {
+	return rollout.StaleCheck{}, nil
+}
+
+func (idleRollout) Joining() bool { return false }
+
+func (idleRollout) RollingOut() ([]ids.WorkspaceID, bool) { return nil, false }
+
+// noProgress drops the update line.
+type noProgress struct{}
+
+func (noProgress) SetDeployProgress(*deployprogress.Progress) {}
+
+// deployFaults is a fault table holding one standing deploy fault.
+type deployFaults struct {
+	standing wsm.Fault
+	closed   []ids.FaultID
+}
+
+func (f *deployFaults) OpenFault(context.Context, wsm.Fault) (ids.FaultID, error) { return "", nil }
+
+func (f *deployFaults) OpenFaults(context.Context, wsm.FaultScope) ([]wsm.Fault, error) {
+	return []wsm.Fault{f.standing}, nil
+}
+
+func (f *deployFaults) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) error {
+	f.closed = append(f.closed, id)
+	return nil
+}
+
+func TestTheBootingDeployerClosesTheDeployFaultsAnEarlierDaemonLeft(t *testing.T) {
+	tests := []struct {
+		name       string
+		joining    bool
+		wantClosed int
+	}{
+		{name: "a daemon that owns its state closes them", joining: false, wantClosed: 1},
+		{name: "a joining successor leaves them to its incumbent", joining: true, wantClosed: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			exe := filepath.Join(t.TempDir(), "claude-repld")
+			if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			faults := &deployFaults{standing: wsm.Fault{ID: "earlier", Kind: health.KindDeployFailed,
+				Evidence: health.DeployFailure{Step: health.DeployStepBuild}.Evidence()}}
+			p := deployerParamsFor(t, exe)
+			p.Rollout, p.Progress, p.Faults, p.Joining = idleRollout{}, noProgress{}, faults, tc.joining
+
+			// Act
+			if _, err := buildDeployer(context.Background(), p); err != nil {
+				t.Fatalf("buildDeployer: %v", err)
+			}
+
+			// Assert
+			if len(faults.closed) != tc.wantClosed {
+				t.Fatalf("closed = %v, want %d closed", faults.closed, tc.wantClosed)
+			}
+		})
 	}
 }
 

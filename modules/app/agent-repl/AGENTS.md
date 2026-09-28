@@ -508,6 +508,11 @@ a busy workspace's `waiting` (its own turn and background counts), and a
 momentary `updated` the daemon that stays says, or the successor says after a
 handover (it reads `Manifest.deploy`). A deploy's handover draws no webapp
 banner; a successor that will not start is the `successor_spawn_failed` fault.
+A build, install or service restart that FAILS takes the line down and stands
+as the daemon-scoped `deploy_failed` fault (non-escalating: the running build
+keeps serving), its line naming the step and the last line of its output. It
+stands until a deploy gets through that step, and a daemon that boots owning
+its state closes the ones an earlier daemon left.
 
 `force` does not wait: every stale shim is bounced at once and a stale daemon
 hands every workspace over at once, ENDING RUNNING TURNS. Emacs asks before a
@@ -1222,7 +1227,7 @@ raise: that is exactly how three kinds came to have a path and sixteen did not.
 | `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
 | `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
 | `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
-| unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned` — NON-ESCALATING |
+| unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned`, `deploy_failed` (daemon scope) — NON-ESCALATING |
 
 The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
 `shim_start_failed`, which keeps `FooterStatusActivityStartFailed` because it
