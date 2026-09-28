@@ -1127,6 +1127,14 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       return reader.readAgentPage(agent, pageSize, after);
     },
 
+    readPageThrough(
+      agent: conversationv1.AgentId,
+      pageSize: number,
+      through: conversationv1.ConversationThrough,
+    ): Promise<conversationv1.HistoryPage> {
+      return reader.readPageThrough(agent, pageSize, through);
+    },
+
     liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
       return reconciler.liveWork(session);
     },
