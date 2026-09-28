@@ -141,6 +141,39 @@ type AdoptedSession struct {
 	ShimPID int
 }
 
+// UnadoptedSession is a workspace whose kernel lock says a session MAY still be
+// running -- it read HELD, or the probe could not tell -- that the boot did NOT
+// adopt: the survivor never answered within the adoption bound, or the lock
+// could not be read. It is the one kind of session a boot genuinely cannot
+// account for.
+type UnadoptedSession struct {
+	// Workspace is the session's workspace.
+	Workspace ids.WorkspaceID
+	// Lock is what the kernel lock said: HELD or UNKNOWN, never FREE (a free
+	// lock is no session).
+	Lock sessionlock.State
+}
+
+// Survivors is what a boot found of the sessions the last daemon left: the
+// ones it adopted and the ones it could not.
+type Survivors struct {
+	// Adopted are the SESSIONS whose surviving shim this boot adopted -- never
+	// an inert survivor.
+	Adopted []AdoptedSession
+	// Unadopted are the sessions the lock says may survive that this boot did
+	// not adopt.
+	Unadopted []UnadoptedSession
+}
+
+// adoptedSet indexes the adopted sessions by workspace.
+func (s Survivors) adoptedSet() map[ids.WorkspaceID]AdoptedSession {
+	out := make(map[ids.WorkspaceID]AdoptedSession, len(s.Adopted))
+	for _, a := range s.Adopted {
+		out[a.Workspace] = a
+	}
+	return out
+}
+
 // FaultBounceDisposition is the fault kind an ORDINARY reconciled session is
 // recorded under — one the bounce preserved or rolled, opened and closed in the
 // same breath so the per-session accounting survives without polluting the open
@@ -237,6 +270,7 @@ func ReadManifest(path string) (Manifest, bool, error) {
 //	stand_down + free    → ROLLED      (ended, as intended)
 //	stand_down + held    → UNKNOWN     (meant to end; something still holds it)
 //	any        + unknown → UNKNOWN     (the probe could not tell)
+//	adopted              → PRESERVED   (this boot adopted it: it survived and is served)
 //
 // PRESERVED, ROLLED and DIED are recorded as ALREADY-RESOLVED faults, so the
 // record exists per session without polluting the open-fault set: a DIED
@@ -250,8 +284,8 @@ func ReadManifest(path string) (Manifest, bool, error) {
 // to remove it: a manifest written 2026-09-23 12:30 was reconciled again on
 // every boot for a day, re-opening a bounce_died fault and a WARN each time for
 // a shim that had died once, long before.
-func (c *controller) Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error) {
-	out, _, landed, err := c.reconcile(ctx, adopted)
+func (c *controller) Reconcile(ctx context.Context, survivors Survivors) ([]Disposition, error) {
+	out, _, landed, err := c.reconcile(ctx, survivors)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +300,7 @@ func (c *controller) Reconcile(ctx context.Context, adopted []AdoptedSession) ([
 // whether a manifest was found and whether every disposition it named LANDED
 // durably — false when any record failed, or was deferred behind a read-only
 // handle, which is exactly when the manifest must be kept.
-func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, bool, bool, error) {
+func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disposition, bool, bool, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
@@ -274,8 +308,9 @@ func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([
 		return nil, false, false, err
 	}
 	if !found {
-		return c.reconcileWithoutManifest(ctx, adopted), false, false, nil
+		return c.reconcileWithoutManifest(ctx, survivors), false, false, nil
 	}
+	adopted := survivors.adoptedSet()
 	out := make([]Disposition, 0, len(m.Sessions))
 	landed := true
 	for _, session := range m.Sessions {
@@ -304,6 +339,15 @@ func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([
 			Intent:    intent,
 			Lock:      state,
 			Kind:      disposition(intent, state),
+		}
+		// A SESSION THIS BOOT ADOPTED IS ACCOUNTED FOR by its adoption: a
+		// process answered the dial and is served now, which is a stronger
+		// fact than any lock reading, so its bounce PRESERVED it whatever the
+		// outgoing daemon meant. Recorded UNKNOWN, it stood a WARN and an open
+		// bounce_unknown the adoption's own healthy attach closed in the same
+		// boot.
+		if _, ok := adopted[session.Workspace]; ok && intent != IntentNoSession {
+			d.Lock, d.Kind = sessionlock.StateHeld, DispositionPreserved
 		}
 		out = append(out, d)
 		if gone, why := c.workspaceGone(ctx, session.Workspace); gone {
@@ -415,35 +459,54 @@ func (c *controller) clearStaleManifest(fields dlog.Context) error {
 // whose survival could be judged. The boot passes only the lock-held
 // survivors, which is what makes the ordinary case ordinary.
 //
-// With sessions this boot ADOPTED it is a crash or a force-kill: the outgoing
-// daemon never stood down, so nothing states what its bounce meant for them,
-// and BOUNCE ACCOUNTABILITY surfaces that per workspace rather than passing
-// over it. Each adopted session gets an OPEN bounce_unknown fault.
+// A SESSION THIS BOOT ADOPTED IS ACCOUNTED FOR by its adoption: it survived,
+// a process answered the dial, and it is served. It is recorded PRESERVED —
+// resolved as it is recorded — so the per-session accounting stands without a
+// fault, a WARN, or a line on the strip. It used to be recorded
+// bounce_unknown at WARN, which the adoption's own healthy attach then closed
+// in the same boot.
 //
-// THE LOCK STATE IS NOT INVENTED HERE. It reads HELD because the caller's
-// contract is that every entry is a lock-held survivor; nothing in this
-// function guesses a state it did not read.
-func (c *controller) reconcileWithoutManifest(ctx context.Context, adopted []AdoptedSession) []Disposition {
-	if len(adopted) == 0 {
-		c.log.Debug(opReconcile, "no intent manifest is present and no session survived; this is an ordinary boot",
-			dlog.Context{"path": c.deps.IntentManifest})
-		return nil
+// A SESSION THE LOCK SAYS MAY SURVIVE AND THIS BOOT DID NOT ADOPT is the one
+// the boot genuinely cannot account for: nothing states what the crash meant
+// for it, and nothing serves it. BOUNCE ACCOUNTABILITY surfaces it per
+// workspace: an OPEN bounce_unknown, standing until the workspace next
+// attaches or starts healthy.
+func (c *controller) reconcileWithoutManifest(ctx context.Context, survivors Survivors) []Disposition {
+	fields := dlog.Context{
+		"path": c.deps.IntentManifest, "adopted": len(survivors.Adopted), "unadopted": len(survivors.Unadopted),
 	}
-	c.log.Warn(opReconcile, "sessions survived a bounce that wrote no intent manifest; each one is unaccounted for",
-		dlog.Context{"path": c.deps.IntentManifest, "adopted": len(adopted)})
-	out := make([]Disposition, 0, len(adopted))
-	for _, session := range adopted {
+	switch {
+	case len(survivors.Adopted) == 0 && len(survivors.Unadopted) == 0:
+		c.log.Debug(opReconcile, "no intent manifest is present and no session survived; this is an ordinary boot", fields)
+		return nil
+	case len(survivors.Unadopted) == 0:
+		c.log.Info(opReconcile, "sessions survived a bounce that wrote no intent manifest; this boot adopted every one, which accounts for it", fields)
+	default:
+		c.log.Warn(opReconcile, "sessions survived a bounce that wrote no intent manifest and this boot could not adopt them; each one is unaccounted for", fields)
+	}
+	out := make([]Disposition, 0, len(survivors.Adopted)+len(survivors.Unadopted))
+	for _, session := range survivors.Adopted {
 		d := Disposition{
 			Workspace: session.Workspace,
 			Intent:    IntentUnattested,
 			Lock:      sessionlock.StateHeld,
-			Kind:      DispositionUnknown,
+			Kind:      DispositionPreserved,
 		}
 		out = append(out, d)
 		c.recordDisposition(ctx, ManifestSession{
 			Workspace: session.Workspace,
 			ShimPID:   session.ShimPID,
 		}, d)
+	}
+	for _, session := range survivors.Unadopted {
+		d := Disposition{
+			Workspace: session.Workspace,
+			Intent:    IntentUnattested,
+			Lock:      session.Lock,
+			Kind:      DispositionUnknown,
+		}
+		out = append(out, d)
+		c.recordDisposition(ctx, ManifestSession{Workspace: session.Workspace}, d)
 	}
 	return out
 }

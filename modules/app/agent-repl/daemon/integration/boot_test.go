@@ -780,8 +780,10 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 		},
 	})
 	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges, reported by the supervisor and by the boot.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt")
+	// adoption this test arranges, reported by the supervisor and by the boot,
+	// and the bounce accounting's bounce_unknown for the session nobody could
+	// adopt.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
 
 	// Assert: the daemon answers. StartDaemon already waited for the serving
 	// record, and this is the socket actually accepting a connection.
@@ -813,14 +815,57 @@ func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
 		},
 	})
 	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges, reported by the supervisor and by the boot.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt")
+	// adoption this test arranges, reported by the supervisor and by the boot,
+	// and the bounce accounting's bounce_unknown for the session nobody could
+	// adopt.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
 
 	// Assert.
 	nd.AwaitLogRecord(nd.RunLogPath(), "the overrun adoption's error record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.boot.adopt" && r.Level == "error" &&
 			strings.Contains(r.Message, "adoption bound")
 	})
+}
+
+// TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding is the
+// other half of TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace:
+// a session the lock says survived the crash and that the boot could NOT adopt
+// is the one the boot genuinely cannot account for. It records bounce_unknown
+// ("needs a human"), and nothing closes it: the workspace never attached.
+func TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding(t *testing.T) {
+	t.Parallel()
+	// Arrange: the survivor holds its lock and its socket path is gone.
+	f := newOpened(t, harness.Opts{})
+	socket := f.d.SocketPath(f.ws)
+	f.d.Kill()
+	if err := os.Remove(socket); err != nil {
+		t.Fatalf("unlink the surviving shim's socket path %s: %v", socket, err)
+	}
+
+	// Act
+	nd := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraEnv: []string{
+			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
+			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
+		},
+	})
+	// The sweep covers every test; the declared records are the overrun
+	// adoption this test arranges and the bounce_unknown it is about.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
+
+	// Assert: recorded for this workspace.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the unadopted session's bounce_unknown", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.reconcile" && r.Level == "warn" &&
+			r.Message == "a session's bounce disposition needs a human" && r.Context["workspace"] == f.ws.GetId()
+	})
+	// Assert: and standing. The boot's healthy-attach edge ran before the
+	// daemon served, which StartDaemon waited for.
+	for _, r := range nd.RunLog() {
+		if r.Operation == "daemon.health.close_on_edge" && r.Context["kind"] == "bounce_unknown" {
+			t.Fatalf("record %+v: an unadopted survivor's bounce_unknown must stand", r)
+		}
+	}
 }
 
 // TestAnUnhealthySurvivorIsAdoptedWithinTheBound pins the realtest-1 finding.
@@ -850,10 +895,8 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 			"AGENT_REPL_BOOT_ADOPT_BOUND=60s",
 		},
 	})
-	// The rollout warnings are the SIGKILLed predecessor's missing intent
-	// manifest, which every crash-restart arrangement produces.
 	nd.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session",
-		"daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
+		"daemon.boot.adopt", "daemon.shimclient.adopt")
 
 	// Assert: the survivor was adopted, and the fault it is standing on
 	// reached the workspace health path rather than being a boot blocker.
@@ -971,9 +1014,9 @@ func TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable(t *testing.T)
 		KeepStaleAddr: true,
 		ExtraEnv:      []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
 	})
-	// The crash-restart's own evidence: the stale advertisement, the
-	// predecessor's missing intent manifest, and the adoption it drives.
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.rollout.reconcile", "daemon.boot.adopt",
+	// The crash-restart's own evidence: the stale advertisement and the
+	// adoption it drives.
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.adopt",
 		"daemon.shimclient.adopt")
 	nd.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "a record from the restarted daemon",
 		func(r harness.LogRecord) bool { return r.PID == nd.PID() })

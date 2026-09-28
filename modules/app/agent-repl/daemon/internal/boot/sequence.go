@@ -384,6 +384,7 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			}
 			log.Warn("daemon.boot.adopt", "the workspace lock probe could not tell; never read as free", context)
 			report.Undetermined = append(report.Undetermined, ws.ID)
+			report.UnadoptedSessions = append(report.UnadoptedSessions, rollout.UnadoptedSession{Workspace: ws.ID, Lock: state})
 		}
 	}
 
@@ -412,6 +413,11 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 				"error":        sv.err.Error(),
 			})
 			report.Undetermined = append(report.Undetermined, sv.ws.ID)
+			// AN INERT SURVIVOR CARRIES NO SESSION (its lock read free), so
+			// only a lock-held one is a session nobody adopted.
+			if !sv.inert {
+				report.UnadoptedSessions = append(report.UnadoptedSessions, rollout.UnadoptedSession{Workspace: sv.ws.ID, Lock: sessionlock.StateHeld})
+			}
 			continue
 		}
 		if sv.err != nil {
@@ -491,7 +497,10 @@ func (s *sequence) dialSurvivors(ctx context.Context, survivors []*survivor) {
 // dispositions as faults; PRESERVED, ROLLED, DIED and UNKNOWN are never
 // collapsed, because WHICH sessions silently died is the whole point.
 func (s *sequence) reconcileManifest(ctx context.Context, log dlog.Logger, report *Report) error {
-	dispositions, err := s.deps.Rollout.Reconcile(ctx, report.AdoptedSessions)
+	dispositions, err := s.deps.Rollout.Reconcile(ctx, rollout.Survivors{
+		Adopted:   report.AdoptedSessions,
+		Unadopted: report.UnadoptedSessions,
+	})
 	if err != nil {
 		log.Error("daemon.boot.reconcile", "the intent manifest could not be reconciled", dlog.Context{
 			"error": err.Error(),
@@ -511,14 +520,15 @@ func (s *sequence) reconcileManifest(ctx context.Context, log dlog.Logger, repor
 }
 
 // adoptedAttachedHealthy fires the healthy-attach recovery edge for every
-// workspace this boot adopted. An adoption IS a healthy attach, but it runs
-// BEFORE the manifest is reconciled, and the reconcile is what opens an
-// undetermined bounce's fault; so the edge is fired here, after it, or an
-// adopted and serving workspace would carry a `bounce_unknown` line until
-// its next bring-up (it stood for over 30 minutes on 2026-09-27). A fault
-// the edge cannot close is ERROR in health.CloseOnEdge and stands; the boot
-// goes on, because a standing fault is a line on a strip, not a workspace
-// that cannot be served.
+// workspace this boot adopted. An adoption IS a healthy attach. The reconcile
+// never records a bounce_unknown for an adopted workspace (its adoption
+// accounts for it), so what this closes is one an EARLIER boot left standing
+// -- the survivor it could not adopt, adopted now -- which would otherwise
+// carry a `bounce_unknown` line until its next bring-up (one stood for over
+// 30 minutes on 2026-09-27). It runs after the reconcile so that nothing the
+// reconcile writes can outlive it. A fault the edge cannot close is ERROR in
+// health.CloseOnEdge and stands; the boot goes on, because a standing fault
+// is a line on a strip, not a workspace that cannot be served.
 func (s *sequence) adoptedAttachedHealthy(ctx context.Context, log dlog.Logger, report *Report) {
 	for _, ws := range report.Adopted {
 		workspace := ws

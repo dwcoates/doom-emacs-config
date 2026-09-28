@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -44,9 +45,11 @@ func TestAdoptsASurvivingShimRatherThanRespawningIt(t *testing.T) {
 }
 
 // AN ADOPTION IS A HEALTHY ATTACH, and the boot fires its recovery edge AFTER
-// the manifest is reconciled, because the reconcile is what records an
-// undetermined bounce. Before, a `bounce_unknown` recorded for a workspace
-// this very boot had adopted stood for over 30 minutes (2026-09-27).
+// the manifest is reconciled. The reconcile never records a bounce_unknown
+// for a workspace this boot adopted, so the one this closes is one standing
+// from before -- an earlier boot's survivor it could not adopt -- which stood
+// for over 30 minutes on 2026-09-27. A workspace this boot did NOT adopt keeps
+// its bounce_unknown standing.
 func TestTheBootClosesAnAdoptedWorkspacesUndeterminedBounce(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -728,6 +731,53 @@ func TestAnUnreachableSurvivorDoesNotWedgeTheBoot(t *testing.T) {
 	}
 	if len(report.Undetermined) != 1 || report.Undetermined[0] != ws.ID {
 		t.Fatalf("report.Undetermined = %v, want [%v]: the lock reads held, so the workspace is owned and undetermined", report.Undetermined, ws.ID)
+	}
+}
+
+// TestTheReconcileIsHandedEverySessionTheBootCouldNotAdopt pins what the
+// bounce accounting keys on: a workspace whose lock says a session may
+// survive (held but unanswered within the bound, or unreadable) and that this
+// boot did not adopt is handed over as UNADOPTED, the one kind of session the
+// accounting cannot account for. An adopted one never is.
+func TestTheReconcileIsHandedEverySessionTheBootCouldNotAdopt(t *testing.T) {
+	tests := []struct {
+		name    string
+		lock    sessionlock.State
+		hang    bool
+		wantAdp int
+		wantUnd []rollout.UnadoptedSession
+	}{
+		{name: "an adopted survivor is adopted, never unadopted", lock: sessionlock.StateHeld, wantAdp: 1},
+		{name: "a held survivor past the adoption bound is unadopted", lock: sessionlock.StateHeld, hang: true, wantUnd: []rollout.UnadoptedSession{{Lock: sessionlock.StateHeld}}},
+		{name: "an unreadable lock is unadopted", lock: sessionlock.StateUnknown, wantUnd: []rollout.UnadoptedSession{{Lock: sessionlock.StateUnknown}}},
+		{name: "a free lock is no session at all", lock: sessionlock.StateFree},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = 20 * time.Millisecond })
+			h.supervisor.hang = tt.hang
+			ws := h.register(t, t.TempDir(), tt.lock)
+			if tt.lock == sessionlock.StateUnknown {
+				h.probeErrs[ws.Dir] = errBoom
+			}
+			for i := range tt.wantUnd {
+				tt.wantUnd[i].Workspace = ws.ID
+			}
+
+			// Act.
+			if _, err := h.seq.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			// Assert.
+			if got := len(h.rollout.adopted); got != tt.wantAdp {
+				t.Fatalf("adopted sessions handed to Reconcile = %d, want %d", got, tt.wantAdp)
+			}
+			if !reflect.DeepEqual(h.rollout.unadopted, tt.wantUnd) {
+				t.Fatalf("unadopted sessions handed to Reconcile = %+v, want %+v", h.rollout.unadopted, tt.wantUnd)
+			}
+		})
 	}
 }
 

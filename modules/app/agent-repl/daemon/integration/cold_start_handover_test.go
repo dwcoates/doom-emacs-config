@@ -56,9 +56,6 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 			stopFirst: func(t *testing.T, f *fixture) {
 				f.d.Stop()
 			},
-			// A session that survived a stop which wrote no intent manifest
-			// is unaccounted for, and the reconciler says so by design.
-			coldWarnings: []string{"daemon.rollout.reconcile"},
 		},
 	}
 	for _, tt := range tests {
