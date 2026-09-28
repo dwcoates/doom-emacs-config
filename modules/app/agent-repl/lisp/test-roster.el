@@ -1734,6 +1734,11 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
         ;; Assert
         (should logs)))))
 
+(ert-deftest agent-repl-test-roster-running-to-turn-failed-is-a-finish-edge ()
+  "A turn that FAILED has ended: thinking -> turn-failed is the finish edge."
+  ;; Act / Assert
+  (should (agent-repl-roster--finish-edge-p :thinking :turn-failed)))
+
 ;;; test-roster.el ends here
 
 ;;;; ---- Tests: move-tab-to-back ----
