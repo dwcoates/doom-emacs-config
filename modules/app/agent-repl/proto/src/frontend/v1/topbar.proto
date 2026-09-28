@@ -297,6 +297,11 @@ message TopbarWarning {
     // delaying what it observed — evidence that what is on screen may have
     // holes from that span.
     TopbarDegradedWindowWarningDetail degraded_window = 6;
+    // A failed deploy: the daemon-scoped `deploy_failed` fault, standing on
+    // every workspace's strip (owner request, 2026-09-28). The row's line is
+    // the footer's own detail under "deploy failed: "; the overlay is what
+    // failed, whole.
+    TopbarDeployFailedWarningDetail deploy_failed = 7;
   }
 }
 // The list-line element.
@@ -379,6 +384,29 @@ message TopbarDegradedWindowWarningDetail {
     // Closed: when, and what was dropped inside it.
     TopbarDegradedWindowClosed closed = 5;
   }
+}
+// The failed-deploy overlay: what failed, whole. Every line is composed by
+// the daemon out of the fault's own evidence (the very refusal the Deploy
+// rpc answered its caller with), so the overlay, the row's line and the
+// footer's activity line cannot say different things about one failure.
+message TopbarDeployFailedWarningDetail {
+  // The step that failed, in words: "build", "install", "restart services",
+  // or "rollback" for a failed deploy's rollback that did not restore the
+  // previous build (a fault of its own, beside the step's).
+  TopbarWarningDetailLine step = 1;
+  // What the step failed on: the build step for a build, the component for
+  // every other step. Verbatim.
+  TopbarWarningComponent component = 2;
+  // What became of the install, in words: nothing was installed, it was
+  // rolled back to the previous build, or the rollback did not restore it.
+  TopbarWarningDetailLine rollback = 3;
+  // The failure's own account, WHOLE and verbatim — the build's output tail,
+  // the install's or the restart's error. The row's line carries only its
+  // last line.
+  TopbarWarningDetailLine detail = 4;
+  // Where the build's whole output is archived. UNSET for every step but a
+  // build, and for a build that archived none: draw nothing.
+  optional TopbarWarningDetailLine log = 5;
 }
 // Still open. Empty: the arm is the fact.
 message TopbarDegradedWindowOpen {}
