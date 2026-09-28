@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"claude-repld/internal/boot"
+	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/workspace"
 	"testing"
@@ -243,5 +244,27 @@ func TestResolveStartBoundReadsADuration(t *testing.T) {
 	}
 	if got != 250*time.Millisecond {
 		t.Fatalf("resolveStartBound(\"250ms\") = %v, want 250ms", got)
+	}
+}
+
+func TestResolveFactsBound(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "blank is the rollout's default", value: "", want: rollout.DefaultFactsBound},
+		{name: "a set value is taken", value: "200ms", want: 200 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act
+			got, err := resolveFactsBound(tc.value)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveFactsBound(%q) = (%v, %v), want %v", tc.value, got, err, tc.want)
+			}
+		})
 	}
 }
