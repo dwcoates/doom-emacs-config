@@ -2095,6 +2095,119 @@ func TestAnAdoptedTurnEndsOnItsMainWatchTerminal(t *testing.T) {
 	}
 }
 
+// TestRouteRetiredEntryReachesItsFeedRemoval covers the `retired` arm: each
+// retirable kind is handed to the feed method that removes what its live
+// counterpart drew, and to nothing else.
+func TestRouteRetiredEntryReachesItsFeedRemoval(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *conversationv1.HistoryEntryAt
+		want  string
+	}{
+		{
+			name:  "a retired prompt",
+			entry: promptEntry("ptr-1", "turn-7", "main-1"),
+			want:  "feed.OnPromptRetired",
+		},
+		{
+			name:  "a retired peer message",
+			entry: peerEntryAt("ptr-2", "peer-1", "main-1"),
+			want:  "feed.OnPeerMessageRetired",
+		},
+		{
+			name:  "a retired api error",
+			entry: frameEntryAt("ptr-3", frameUpdate("main-1", apiErrorUpdate("529 overloaded"))),
+			want:  "feed.OnApiErrorRetired",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := h.route(h.main, retiredFrame(tt.entry))
+
+			// Assert.
+			assertNames(t, got, []string{tt.want})
+		})
+	}
+}
+
+// TestRouteRetiredEntryIsNeverUnrouted covers the arm's routing itself: it is
+// a frame the watcher knows, so it never falls into the unrouted warning.
+func TestRouteRetiredEntryIsNeverUnrouted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	h.route(h.main, retiredFrame(promptEntry("ptr-1", "turn-7", "main-1")))
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.sessionwatcher.agent_frame_unrouted") {
+		t.Fatal("a retired frame was reported unrouted")
+	}
+}
+
+// TestRouteRetiredUnretirableKindDrawsNothing covers a producer breaking the
+// contract: a retired entry of a kind the store never retires reaches no view.
+func TestRouteRetiredUnretirableKindDrawsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, retiredFrame(frameEntryAt("ptr-1", frameUpdate("main-1", activityUpdate(readActivity("act-1"))))))
+
+	// Assert.
+	assertNames(t, got, nil)
+}
+
+// TestRouteRetiredUnretirableKindIsRecordedAtError covers the same violation's
+// record: it names the kind the producer sent.
+func TestRouteRetiredUnretirableKindIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	h.route(h.main, retiredFrame(frameEntryAt("ptr-1", frameUpdate("main-1", activityUpdate(readActivity("act-1"))))))
+
+	// Assert.
+	ctx := h.recordContext(t, "error", "daemon.sessionwatcher.retired_unretirable")
+	if ctx["kind"] != "agent_update" || ctx["pointer"] != "ptr-1" {
+		t.Fatalf("the violation's record = %v, want an agent_update at ptr-1", ctx)
+	}
+}
+
+// TestRouteRetiredPointerIsNotAdoptedAsTheMark covers the high-water mark: a
+// retired row keeps its old position, so taking it would walk the watch's
+// mark backwards and the next re-open would re-serve drawn rows.
+func TestRouteRetiredPointerIsNotAdoptedAsTheMark(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	h.route(h.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-newest"))
+
+	// Act: routed directly, because the sentinel a streamed frame is bounded
+	// by is itself an entry that moves the mark.
+	h.routeNow(func(w *watcher) {
+		w.routeAgentResponseLocked(w.main, retiredFrame(promptEntry("ptr-old", "turn-1", "main-1")))
+	})
+
+	// Assert.
+	if got := h.w.Pointers().Main.GetValue(); got == "ptr-old" {
+		t.Fatalf("main mark = %q, want the retired row's old pointer never adopted", got)
+	}
+}
+
 // THE VENDOR-STARTED TURN. The vendor runs turns nobody submitted (a
 // subagent's hand-back, a task notification); the shim adopts each and opens
 // it with a PROMPT_ORIGIN_VENDOR_STARTED prompt row, the one statement anywhere

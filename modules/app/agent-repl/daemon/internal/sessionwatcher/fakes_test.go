@@ -693,6 +693,18 @@ func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMes
 	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
 }
 
+func (s *feedSink) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPromptRetired", agent: prompt.GetAgent().GetValue(), detail: prompt.GetId().GetValue()})
+}
+
+func (s *feedSink) OnPeerMessageRetired(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPeerMessageRetired", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
+}
+
+func (s *feedSink) OnApiErrorRetired(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnApiErrorRetired", agent: agent.GetValue(), detail: failed.GetMessage()})
+}
+
 func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }
@@ -1202,6 +1214,24 @@ func entryPeer(id, agent, sender string) *shimv1.WatchAgentResponse {
 			},
 		},
 	}}
+}
+
+// retiredFrame carries an entry the store retired, as the shim last served it.
+func retiredFrame(at *conversationv1.HistoryEntryAt) *shimv1.WatchAgentResponse {
+	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Retired{Retired: at}}
+}
+
+// peerEntryAt is one entry carrying a peer message.
+func peerEntryAt(pointer, id, agent string) *conversationv1.HistoryEntryAt {
+	return &conversationv1.HistoryEntryAt{
+		At: &conversationv1.HistoryPointer{Value: pointer},
+		Entry: &conversationv1.HistoryEntry{
+			Entry: &conversationv1.HistoryEntry_PeerMessage{PeerMessage: &conversationv1.PeerMessage{
+				Agent: agentID(agent),
+				Id:    id,
+			}},
+		},
+	}
 }
 
 // pageFrame is a watch's opening catch-up page.

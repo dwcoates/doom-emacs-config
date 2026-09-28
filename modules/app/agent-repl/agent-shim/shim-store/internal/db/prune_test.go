@@ -81,6 +81,7 @@ func TestPruneWriteLedgerNeverPrunesARowItCannotMeasure(t *testing.T) {
 			arrange: func(t *testing.T, d *DB) {
 				entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
 				entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+				entry.ConversionVersion = fileVersion()
 				if _, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entry), nil); err != nil {
 					t.Fatalf("WriteBatch: %v", err)
 				}
@@ -122,14 +123,19 @@ func TestPruneWriteLedgerNeverPrunesARowItCannotMeasure(t *testing.T) {
 // to every live watcher at a new ordinal.
 func TestARereadInsideTheWindowIsStillAbsorbedAfterASweep(t *testing.T) {
 	const window = 1000
+	// PAST THE WINDOW THE REPLAY IS APPLIED AGAIN, and since it is a file-plane
+	// write of exactly the content the row holds, applying it is a RESTAMP
+	// (write.go sameContentBarVersion): the ledger learns the write id again
+	// and no reader observes anything.
 	tests := []struct {
-		name         string
-		cursorNow    int64
-		wantAbsorbed int
-		wantWritten  int
+		name          string
+		cursorNow     int64
+		wantAbsorbed  int
+		wantWritten   int
+		wantRestamped int
 	}{
-		{name: "inside the window: absorbed", cursorNow: 5_500, wantAbsorbed: 1, wantWritten: 0},
-		{name: "past the window: the row was pruned, so the replay applies again", cursorNow: 5_000_000, wantAbsorbed: 0, wantWritten: 1},
+		{name: "inside the window: absorbed", cursorNow: 5_500, wantAbsorbed: 1},
+		{name: "past the window: the row was pruned, so the replay applies again as a restamp", cursorNow: 5_000_000, wantRestamped: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -146,13 +152,13 @@ func TestARereadInsideTheWindowIsStillAbsorbedAfterASweep(t *testing.T) {
 			result := writeFileBatch(t, d, "12:34", 5_000, "w1", "u1")
 
 			// Assert
-			if result.Absorbed != test.wantAbsorbed || result.Written != test.wantWritten {
-				t.Fatalf("replay = %d absorbed / %d written, want %d / %d",
-					result.Absorbed, result.Written, test.wantAbsorbed, test.wantWritten)
+			if result.Absorbed != test.wantAbsorbed || result.Written != test.wantWritten || result.Restamped != test.wantRestamped {
+				t.Fatalf("replay = %d absorbed / %d written / %d restamped, want %d / %d / %d",
+					result.Absorbed, result.Written, result.Restamped, test.wantAbsorbed, test.wantWritten, test.wantRestamped)
 			}
 			seqAfter := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`)
-			if test.wantAbsorbed == 1 && seqAfter != seqBefore {
-				t.Fatalf("write_seq moved %d -> %d on an absorbed replay; the row would be re-delivered to every watcher", seqBefore, seqAfter)
+			if seqAfter != seqBefore {
+				t.Fatalf("write_seq moved %d -> %d on a replay of unchanged content; the row would be re-delivered to every watcher", seqBefore, seqAfter)
 			}
 		})
 	}
@@ -331,9 +337,10 @@ func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, u
 	t.Helper()
 	entry := pageEntry(writeID, upsertKey, "agent-1", frameItem(activityFrame("agent-1", "act-"+upsertKey, prose())))
 	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+	entry.ConversionVersion = fileVersion()
 	result, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{entry},
-		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
+		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset, Conversion: currentConversion()},
 	}, nil)
 	if err != nil {
 		t.Fatalf("WriteBatch: %v", err)
@@ -346,7 +353,7 @@ func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, u
 func advanceCursor(t *testing.T, d *DB, fileID string, offset int64) {
 	t.Helper()
 	if _, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
+		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset, Conversion: currentConversion()},
 	}, nil); err != nil {
 		t.Fatalf("advancing the cursor: %v", err)
 	}

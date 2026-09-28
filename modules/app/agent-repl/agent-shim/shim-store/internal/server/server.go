@@ -546,12 +546,21 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 }
 
 func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.WatchAgentSessionResponse], line LineWritten) error {
-	if err := stream.Send(&storev1.WatchAgentSessionResponse{Line: line.Line}); err != nil {
+	// THE ARM IS WHAT HAPPENED TO THE LINE: a retired row goes out on
+	// `retired`, carrying the line as it was last served, so the watcher
+	// withdraws what it drew rather than drawing it again.
+	response := &storev1.WatchAgentSessionResponse{Frame: &storev1.WatchAgentSessionResponse_Line{Line: line.Line}}
+	what := "line"
+	if line.Retired {
+		response = &storev1.WatchAgentSessionResponse{Frame: &storev1.WatchAgentSessionResponse_Retired{Retired: line.Line}}
+		what = "retirement"
+	}
+	if err := stream.Send(response); err != nil {
 		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
-			"sending a line to the watcher failed: %v", err)
+			"sending a %s to the watcher failed: %v", what, err)
 		return err
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "line delivered")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "%s delivered", what)
 	return nil
 }
 

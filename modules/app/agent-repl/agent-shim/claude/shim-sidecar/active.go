@@ -317,6 +317,12 @@ func (s *sidecar) drained(path string, w *watched, now time.Time) bool {
 	if s.tracker.Open(path) {
 		return false
 	}
+	if w.heal != nil {
+		// A RE-DERIVATION IN PROGRESS IS OWED. Dropping it would leave the rows
+		// the older conversion made wrong standing until the workspace is next
+		// active; the stored cursor would resume it then, but nothing says when.
+		return false
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

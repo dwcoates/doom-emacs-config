@@ -123,6 +123,22 @@ func compiledRootFrom(sourceFile string, known bool) (string, bool) {
 	}
 }
 
+// RepoRoot answers the repository root that contains the module root root:
+// root with its trailing "modules/app/agent-repl" segments removed. A root that
+// does not end in the marker (an unvalidated $AGENT_REPL_CHECKOUT) names no
+// repository, so RepoRoot refuses it loudly rather than guessing one.
+func RepoRoot(root string) (string, error) {
+	clean := filepath.Clean(root)
+	if !hasMarkerSuffix(clean) {
+		return "", fmt.Errorf("checkout: %q is not a %q module root, so it names no repository root", root, marker)
+	}
+	repo := clean
+	for range strings.Split(marker, "/") {
+		repo = filepath.Dir(repo)
+	}
+	return repo, nil
+}
+
 // VocabDir is the shared render vocabulary beneath root: the render-colors and
 // paint-class tables the resolvers refuse to serve an unpainted state without.
 func VocabDir(root string) string {
