@@ -124,3 +124,42 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaceOf(t *testing.T) {
+	// Arrange.
+	recorded := &conversationv1.ConversationPlace{AtMs: 10, Ordinal: 1}
+	received := &conversationv1.ConversationPlace{AtMs: 20}
+	tests := []struct {
+		name string
+		at   *conversationv1.HistoryEntryAt
+		want *conversationv1.ConversationPlace
+	}{
+		{
+			name: "a recorded place is the entry's place",
+			at:   &conversationv1.HistoryEntryAt{Place: &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: recorded}},
+			want: recorded,
+		},
+		{
+			name: "a received stand-in is the entry's place",
+			at:   &conversationv1.HistoryEntryAt{Place: &conversationv1.HistoryEntryAt_ReceivedPlace{ReceivedPlace: received}},
+			want: received,
+		},
+		{
+			name: "no stated place is none",
+			at:   &conversationv1.HistoryEntryAt{},
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := PlaceOf(tc.at)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("PlaceOf = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

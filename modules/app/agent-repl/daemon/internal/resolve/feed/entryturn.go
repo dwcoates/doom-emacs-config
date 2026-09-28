@@ -31,6 +31,17 @@ func (s *wsState) drawingEntry(turn *conversationv1.TurnId) func() {
 	return func() { s.entryTurn = prior }
 }
 
+// placingEntry puts one entry's CONVERSATION PLACE in force for the duration
+// of drawing it and answers the restore, so every row the entry first draws is
+// keyed from where the entry sits in its conversation (order.go). A nil place
+// is an entry whose serving side stated none: it is still an entry being
+// drawn, and its rows follow the row before them.
+func (s *wsState) placingEntry(place *conversationv1.ConversationPlace) func() {
+	priorPlace, priorIn := s.entryPlace, s.inEntry
+	s.entryPlace, s.inEntry = place, true
+	return func() { s.entryPlace, s.inEntry = priorPlace, priorIn }
+}
+
 // rowTurn is the turn a row being drawn belongs to: the entry's own stamp, else
 // the turn rows are positionally attributed to (turnStamp).
 func (s *wsState) rowTurn() *ids.TurnID {

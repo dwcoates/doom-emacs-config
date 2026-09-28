@@ -671,12 +671,13 @@ func TestALateHistoryRowAboveAClearDividerIsKeptOffThePush(t *testing.T) {
 		t.Fatalf("Tail: %v", err)
 	}
 	rows := tail.Rows(ctx)
-	h.cut(clearedCut())
+	h.cutPlaced("entry-1", clearedCut(), 200)
 
-	// Act: a history page replays a prompt (history plane) AFTER the divider,
-	// so it sorts above the divider; then a live prompt lands below it.
-	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-old", "from above the cut")))
-	h.deliverPrompt("turn-new", "below the cut")
+	// Act: a history page replays a prompt placed before the divider AFTER
+	// the divider arrived, so it sorts above the divider; then a live prompt
+	// lands below it.
+	h.replay(placedPage(&conversationv1.HistoryFloor{}, pagedEntry{atMs: 100, entry: promptEntry("turn-old", "from above the cut")}))
+	h.deliverPromptAt("turn-new", "below the cut", 300)
 
 	// Assert: the tail's first two pushes are the divider and the live prompt,
 	// in that order — the withheld history row never reached the wire. Were it
@@ -743,10 +744,10 @@ func TestADetachedShellsSpoolIsNotPushedToARootTailThatNeverOpenedTheBubble(t *t
 func TestAWithheldRowStaysStoredForPaging(t *testing.T) {
 	// Arrange: a /clear divider, then a history row replayed above it.
 	h := newHarness(t)
-	h.cut(clearedCut())
+	h.cutPlaced("entry-1", clearedCut(), 200)
 
 	// Act.
-	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-old", "from above the cut")))
+	h.replay(placedPage(&conversationv1.HistoryFloor{}, pagedEntry{atMs: 100, entry: promptEntry("turn-old", "from above the cut")}))
 
 	// Assert: withholding from the push is recorded, and the row is still in
 	// the feed's order (stored, so a walk back to it still orders it).
@@ -771,19 +772,20 @@ func TestAWithheldRowStaysStoredForPaging(t *testing.T) {
 // every history row reads as older than the live cut, so a reconnect that
 // replayed the compaction's POST-cut conversation and THEN took the cut live had
 // its whole feed withheld — blank but for the divider, though the conversation
-// was on screen a moment before. The publication seq tells the post-cut rows
-// (drawn before the cut arrived) from a late-forwarded pre-cut row (drawn after).
+// was on screen a moment before. The rows' conversation places tell the
+// post-cut rows from a late-forwarded pre-cut row, whichever arrived first.
 
 func TestALiveCutAfterAReplayKeepsThePostCutConversation(t *testing.T) {
 	// Arrange: a reconnect replays post-compaction turns in the history plane.
 	h := newHarness(t)
-	h.replay(historyPage(&conversationv1.HistoryFloor{},
-		promptEntry("turn-7", "after two"),
-		promptEntry("turn-6", "after one"),
+	h.replay(placedPage(&conversationv1.HistoryFloor{},
+		pagedEntry{atMs: 400, entry: promptEntry("turn-7", "after two")},
+		pagedEntry{atMs: 300, entry: promptEntry("turn-6", "after one")},
 	))
 
-	// Act: the compaction cut arrives LIVE, after the replay.
-	h.cutAt("entry-cut", compactedCut("what survived"))
+	// Act: the compaction cut, placed before them, arrives LIVE after the
+	// replay.
+	h.cutPlaced("entry-cut", compactedCut("what survived"), 200)
 	page, _ := h.openPage(rootFeed(), "reader-1")
 
 	// Assert: the replayed conversation survives the bound move — the feed is not
@@ -807,10 +809,10 @@ func TestALiveCutAfterAReplayKeepsThePostCutConversation(t *testing.T) {
 func TestALiveCutAfterAReplayIsNotRecordedAsWithholding(t *testing.T) {
 	// Arrange: post-cut turns replayed in the history plane, then the live cut.
 	h := newHarness(t)
-	h.replay(historyPage(&conversationv1.HistoryFloor{},
-		promptEntry("turn-6", "after one"),
+	h.replay(placedPage(&conversationv1.HistoryFloor{},
+		pagedEntry{atMs: 300, entry: promptEntry("turn-6", "after one")},
 	))
-	h.cutAt("entry-cut", compactedCut("what survived"))
+	h.cutPlaced("entry-cut", compactedCut("what survived"), 200)
 
 	// Act.
 	h.openPage(rootFeed(), "reader-1")
@@ -823,7 +825,15 @@ func TestALiveCutAfterAReplayIsNotRecordedAsWithholding(t *testing.T) {
 }
 
 func TestBoundHides(t *testing.T) {
-	// Arrange.
+	// Arrange: keys in the resolver's own vocabulary (order.go) — class, then
+	// the entry's place.
+	own := func(atMs int64) string {
+		return entryBase('2', &conversationv1.ConversationPlace{AtMs: atMs}) + "00000000"
+	}
+	inherited := func(atMs int64) string {
+		return entryBase('1', &conversationv1.ConversationPlace{AtMs: atMs}) + "00000000"
+	}
+	ported := "0.00000001"
 	tests := []struct {
 		name  string
 		row   rowRank
@@ -831,40 +841,40 @@ func TestBoundHides(t *testing.T) {
 		want  bool
 	}{
 		{
-			name: "same plane, before the cut, is pre-cut and hidden",
-			row:  rowRank{plane: planeLive, seq: 3}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+			name: "a row placed before the cut is pre-cut and hidden",
+			row:  rowRank{plane: planeLive, key: own(3)}, bound: rowRank{plane: planeLive, key: own(5)}, want: true,
 		},
 		{
-			name: "same plane, after the cut, is post-cut and kept",
-			row:  rowRank{plane: planeLive, seq: 7}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+			name: "a row placed after the cut is post-cut and kept",
+			row:  rowRank{plane: planeLive, key: own(7)}, bound: rowRank{plane: planeLive, key: own(5)}, want: false,
 		},
 		{
-			name: "earlier plane drawn after the cut is a late pre-cut row, hidden",
-			row:  rowRank{plane: planeHistory, seq: 9}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+			name: "a history row placed before a live cut is a late pre-cut row, hidden",
+			row:  rowRank{plane: planeHistory, key: own(3)}, bound: rowRank{plane: planeLive, key: own(5)}, want: true,
 		},
 		{
-			name: "earlier plane drawn before the cut is replayed post-cut content, kept",
-			row:  rowRank{plane: planeHistory, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+			name: "a history row placed after a live cut is replayed post-cut content, kept",
+			row:  rowRank{plane: planeHistory, key: own(7)}, bound: rowRank{plane: planeLive, key: own(5)}, want: false,
 		},
 		{
-			name: "later plane is unambiguously after the cut, kept",
-			row:  rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeHistory, seq: 5}, want: false,
+			name: "a row following the cut is after it, kept",
+			row:  rowRank{plane: planeLive, key: own(5) + ".00000001"}, bound: rowRank{plane: planeLive, key: own(5)}, want: false,
 		},
 		{
-			name: "a fork's inherited row precedes the fork's own cut however early it was drawn, hidden",
-			row:  rowRank{plane: planeInherited, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+			name: "a fork's inherited row precedes the fork's own cut whatever its place, hidden",
+			row:  rowRank{plane: planeInherited, key: inherited(9)}, bound: rowRank{plane: planeLive, key: own(5)}, want: true,
 		},
 		{
-			name: "a fork's ported row precedes the fork's own replayed cut, hidden",
-			row:  rowRank{plane: planePorted, seq: 2}, bound: rowRank{plane: planeHistory, seq: 5}, want: true,
+			name: "a fork's ported row precedes the fork's own cut, hidden",
+			row:  rowRank{plane: planePorted, key: ported}, bound: rowRank{plane: planeHistory, key: own(5)}, want: true,
 		},
 		{
-			name: "a ported row drawn before an inherited cut keeps the seq rule, kept",
-			row:  rowRank{plane: planePorted, seq: 2}, bound: rowRank{plane: planeInherited, seq: 5}, want: false,
+			name: "a ported row is never hidden by an inherited cut",
+			row:  rowRank{plane: planePorted, key: ported}, bound: rowRank{plane: planeInherited, key: inherited(5)}, want: false,
 		},
 		{
 			name: "the fork's own row is never hidden by an inherited cut",
-			row:  rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeInherited, seq: 9}, want: false,
+			row:  rowRank{plane: planeLive, key: own(1)}, bound: rowRank{plane: planeInherited, key: inherited(9)}, want: false,
 		},
 	}
 

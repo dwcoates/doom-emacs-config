@@ -322,7 +322,7 @@ func TestRouteContextCut(t *testing.T) {
 	got := h.routeNow(func(w *watcher) {
 		w.routeUpdateLocked(agentID("main-1"), &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
-		}, &conversationv1.HistoryPointer{Value: "entry-1"}, nil)
+		}, &conversationv1.HistoryPointer{Value: "entry-1"}, nil, nil)
 	})
 
 	// Assert.
@@ -338,7 +338,7 @@ func TestRouteContextBudgetWarning(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil, nil) })
+	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil, nil, nil) })
 
 	// Assert.
 	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
@@ -2361,7 +2361,7 @@ func TestAVendorStartedPromptOnASubagentWatchStandsNothing(t *testing.T) {
 
 	// Act.
 	h.routeNow(func(w *watcher) {
-		w.routePromptLocked(&agentWatch{id: agentID("sub-1")}, vendorPrompt("turn-v", "sub-1"))
+		w.routePromptLocked(&agentWatch{id: agentID("sub-1")}, vendorPrompt("turn-v", "sub-1"), nil)
 	})
 
 	// Assert.
@@ -2589,5 +2589,84 @@ func TestTheQuerysDeathEndsTheAdoptedTurnAndTheTurnWaitingBehindIt(t *testing.T)
 	}
 	if !slices.Equal(ended, []string{"turn-v", "turn-q"}) {
 		t.Fatalf("turns ended = %v, want turn-v then turn-q", ended)
+	}
+}
+
+// placed stamps a live entry with the conversation place its serving side
+// recorded for it.
+func placed(resp *shimv1.WatchAgentResponse, atMs int64, ordinal uint32) *shimv1.WatchAgentResponse {
+	resp.GetEntry().Place = &conversationv1.HistoryEntryAt_RecordedPlace{
+		RecordedPlace: &conversationv1.ConversationPlace{AtMs: atMs, Ordinal: ordinal},
+	}
+	return resp
+}
+
+// TestALiveEntrysPlaceReachesTheFeed covers the one fact the feed mints a row's
+// order key from: whatever arm a live entry is, the feed call it becomes carries
+// the entry's conversation place.
+func TestALiveEntrysPlaceReachesTheFeed(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		entry *shimv1.WatchAgentResponse
+		call  string
+	}{
+		{name: "a prompt", entry: entryPrompt("turn-1", "main-1"), call: "feed.OnPrompt"},
+		{name: "a peer message", entry: entryPeer("peer-1", "main-1", "agent-x"), call: "feed.OnPeerMessage"},
+		{name: "an activity", entry: entryFrame(frameUpdate("main-1", activityUpdate(readActivity("act-1")))), call: "feed.OnActivity"},
+		{name: "a context cut", entry: entryFrame(frameUpdate("main-1", clearedCutUpdate())), call: "feed.OnContextCut"},
+		{name: "a terminal", entry: entryFrame(frameSuccess("main-1", completed())), call: "feed.OnAgentTerminal"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := h.route(h.main, placed(tc.entry, 1_700_000_000_123, 2))
+
+			// Assert.
+			call := requireEvent(t, got, tc.call)
+			if call.place.GetAtMs() != 1_700_000_000_123 || call.place.GetOrdinal() != 2 {
+				t.Fatalf("%s carried place %v, want at_ms 1700000000123 ordinal 2", tc.call, call.place)
+			}
+		})
+	}
+}
+
+// TestAnUnplacedLiveEntryReachesTheFeedWithNoPlace covers the serving side
+// that states no place: the feed is told so, never handed a made-up one.
+func TestAnUnplacedLiveEntryReachesTheFeedWithNoPlace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(readActivity("act-1")))))
+
+	// Assert.
+	if call := requireEvent(t, got, "feed.OnActivity"); call.place != nil {
+		t.Fatalf("an unplaced entry reached the feed with place %v", call.place)
+	}
+}
+
+// TestAWithheldTerminalKeepsItsPlace covers the held terminal: released once
+// the main agent is named, the row it draws is ordered by the entry it came
+// from, not by when the naming landed.
+func TestAWithheldTerminalKeepsItsPlace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.route(h.main, placed(entryFrame(frameSuccess("main-1", completed())), 1_700_000_000_500, 0))
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeQueryDiedLocked(queryDiedUpdate()) })
+
+	// Assert.
+	if call := requireEvent(t, got, "feed.OnAgentTerminal"); call.place.GetAtMs() != 1_700_000_000_500 {
+		t.Fatalf("the released terminal carried place %v, want at_ms 1700000000500", call.place)
 	}
 }

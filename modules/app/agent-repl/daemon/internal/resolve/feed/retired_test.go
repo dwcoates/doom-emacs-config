@@ -83,7 +83,7 @@ func TestARetiredAgentPromptRemovesBothEnds(t *testing.T) {
 		Id:    &conversationv1.TurnId{Value: "turn-2"},
 		Agent: created,
 		Said:  &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{textBlock("go")}}},
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Act.
 	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-2", created), noAddress())
@@ -149,7 +149,7 @@ func TestARetiredApiErrorWithdrawsItsEvidenceLine(t *testing.T) {
 	h.deliverPrompt("turn-1", "go")
 	stamp := &conversationv1.TurnId{Value: "turn-1"}
 	failed := &conversationv1.ApiRequestFailed{Message: "529 overloaded"}
-	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, stamp, noAddress())
+	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, stamp, nil, noAddress())
 
 	// Act.
 	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, stamp, noAddress())
@@ -165,7 +165,7 @@ func TestAnUnstampedRetiredApiErrorWithdrawsNothing(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "go")
 	failed := &conversationv1.ApiRequestFailed{Message: "529 overloaded"}
-	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, nil, noAddress())
+	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, nil, nil, noAddress())
 
 	// Act.
 	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, nil, noAddress())
