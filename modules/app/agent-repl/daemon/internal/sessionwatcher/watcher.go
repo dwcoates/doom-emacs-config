@@ -446,6 +446,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	w.log.Info("daemon.sessionwatcher.start", "opening the session's watch fleet", dlog.Context{
 		"vendor_session_id": session.Started.GetVendorSessionId(),
 		"turn_in_flight":    session.Started.GetTurnInFlight().GetValue(),
+		"turns_waiting":     len(session.Started.GetTurnsWaiting()),
 		"live_work":         len(session.Started.GetLiveWork()),
 		// A PURE ATTACH opens with no facts at all: an adopting daemon
 		// (crash boot, handover) learns them from the shim's own
@@ -1774,6 +1775,7 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 		"took the session facts from the shim's re-announcement", dlog.Context{
 			"vendor_session_id": started.GetVendorSessionId(),
 			"turn_in_flight":    started.GetTurnInFlight().GetValue(),
+			"turns_waiting":     len(started.GetTurnsWaiting()),
 			"live_work":         len(started.GetLiveWork()),
 		})
 	w.applySessionStartedLocked(started)
@@ -1815,9 +1817,48 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 		w.sinks.Title.OnSessionStarted(w.ws)
 	}
 	if t := started.GetTurnInFlight(); t != nil {
-		w.standTurnLocked(ids.TurnID(t.GetValue()), "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight")
+		ahead := ids.TurnID(t.GetValue())
+		if w.standTurnLocked(ahead, "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight") {
+			w.restoreWaitingLocked(ahead, started.GetTurnsWaiting())
+		}
+	} else if len(started.GetTurnsWaiting()) > 0 {
+		w.log.Error("daemon.sessionwatcher.turns_waiting_unanchored", "the session's facts name turns waiting behind no turn in flight; none is stood behind anything", dlog.Context{
+			"turns_waiting": len(started.GetTurnsWaiting()),
+		})
 	}
 	w.reconcileOpenAtAttachLocked(started)
+}
+
+// restoreWaitingLocked stands the turns the session's facts name as WAITING
+// behind `ahead`, the turn in flight, exactly as the watcher stood them when
+// it saw them arrive (waitBehindAdoptedLocked). A turn waits only behind a
+// turn the vendor started on its own, so `ahead` is the adopted turn. Each
+// waiting turn's send reached the shim, so it is accepted: it takes its open
+// edges when it stands in flight. The facts list the turns in the order they
+// will run and the stack pops its newest, so they go on in reverse.
+//
+// A re-attaching daemon told only of the running turn closed the waiting one
+// as ended unobserved while the shim went on to run it.
+func (w *watcher) restoreWaitingLocked(ahead ids.TurnID, waiting []*conversationv1.TurnId) {
+	if len(waiting) == 0 {
+		return
+	}
+	adopted := ahead
+	w.adopted = &adopted
+	for i := len(waiting) - 1; i >= 0; i-- {
+		turn := ids.TurnID(waiting[i].GetValue())
+		if turn == "" {
+			w.log.Error("daemon.sessionwatcher.turn_waiting_unidentified", "the session's facts name a waiting turn with no id; it is not stood behind the turn in flight", dlog.Context{
+				"turn_in_flight": string(ahead),
+			})
+			continue
+		}
+		if !w.waitBehindAdoptedLocked(turn, true) {
+			w.log.Debug("daemon.sessionwatcher.turn_waiting_not_restored", "a turn the session's facts name as waiting is the turn in flight or already ended; it is not stood behind it", dlog.Context{
+				"turn_id": string(turn), "turn_in_flight": string(ahead),
+			})
+		}
+	}
 }
 
 // reconcileOpenAtAttachLocked compares the turns the adoption found open with
@@ -1832,10 +1873,16 @@ func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionSta
 		return
 	}
 	inFlight := ids.TurnID(started.GetTurnInFlight().GetValue())
+	// A TURN WAITING BEHIND THE ONE IN FLIGHT IS HELD BY THE SHIM TOO: it runs
+	// when the turn ahead of it ends, and its own terminal closes it.
+	held := map[ids.TurnID]struct{}{inFlight: {}}
+	for _, t := range started.GetTurnsWaiting() {
+		held[ids.TurnID(t.GetValue())] = struct{}{}
+	}
 	for _, turn := range w.openAtAttach {
-		if turn == inFlight {
-			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still in flight on the shim; it stays open", dlog.Context{
-				"turn_id": string(turn),
+		if _, ok := held[turn]; ok {
+			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still held by the shim; it stays open", dlog.Context{
+				"turn_id": string(turn), "turn_in_flight": string(inFlight),
 			})
 			continue
 		}
