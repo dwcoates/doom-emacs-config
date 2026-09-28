@@ -81,7 +81,36 @@ export function toHistoryEntry(line: storev1.StorePageLine): conversationv1.Hist
   }
 }
 
-/** One stored line and its position. */
+/**
+ * A stored line's conversation place, on the arm naming who established it.
+ *
+ * THE ARM PASSES THROUGH UNCHANGED: the store's `recorded_place` is a place a
+ * producer stated, its `received_place` the store's receipt instant standing
+ * in, and `HistoryEntryAt` spells the same two arms. This is the ONE mapping
+ * every serving path uses (a page, a catch-up, a live or retired frame), so no
+ * path can serve an entry at a place another path would not.
+ *
+ * A LINE THE STORE SERVED UNPLACED is passed through unplaced — the proto's
+ * "the serving side states no places at all", which a consumer orders by its
+ * own receipt and records that it did. The store states a place on every line
+ * it serves, so this is a store that predates places, and it is traced.
+ */
+function toHistoryPlace(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt["place"] {
+  switch (line.place.case) {
+    case "recordedPlace":
+      return { case: "recordedPlace", value: line.place.value };
+    case "receivedPlace":
+      return { case: "receivedPlace", value: line.place.value };
+    default:
+      LOGGER.debug(
+        { pointer: line.at?.value },
+        "the store served a line with no conversation place; it is served unplaced",
+      );
+      return { case: undefined };
+  }
+}
+
+/** One stored line, its pointer, its turn and its place. */
 function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
   if (line.at === undefined || line.line === undefined) {
     throw new PersistenceError(
@@ -94,6 +123,7 @@ function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntr
     entry: toHistoryEntry(line.line),
     // The row's turn as the store keeps it (its first stamp), passed through.
     ...(line.turn === undefined ? {} : { turn: line.turn }),
+    place: toHistoryPlace(line),
   });
 }
 
@@ -274,6 +304,11 @@ function isNotFound(error: unknown): boolean {
 // The reader
 // ---------------------------------------------------------------------------
 
+/** Where a page read below the newest page begins: the store's two position arms. */
+type PageFrom =
+  | { readonly case: "after"; readonly value: conversationv1.HistoryPointer }
+  | { readonly case: "through"; readonly value: conversationv1.ConversationThrough };
+
 /** The read half, plus the two notes the write half feeds it about shell runs. */
 interface Reader {
   openAgentPage(
@@ -299,6 +334,11 @@ interface Reader {
     agent: conversationv1.AgentId,
     pageSize: number,
     after: conversationv1.HistoryPointer,
+  ): Promise<conversationv1.HistoryPage>;
+  readPageThrough(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    through: conversationv1.ConversationThrough,
   ): Promise<conversationv1.HistoryPage>;
   openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe one shell-run frame the writer took: the log line that says it was written. */
@@ -1119,15 +1159,21 @@ export function createReader(options: ReaderOptions): Reader {
   const readAgentPageOnce = async (
     agent: conversationv1.AgentId,
     pageSize: number,
-    after: conversationv1.HistoryPointer,
+    from: PageFrom,
   ): Promise<conversationv1.HistoryPage> => {
+    // THE ARM IS THE POSITION, forwarded as the store spells it: `after` walks
+    // below a served line, `through` reads the book as it stood at an instant.
+    const position: storev1.ReadAgentPageRequest["position"] =
+      from.case === "after"
+        ? { case: "after", value: toStorePointer(from.value) }
+        : { case: "through", value: from.value };
     let response: storev1.ReadAgentPageResponse;
     try {
       response = await client.readAgentPage(
         create(storev1.ReadAgentPageRequestSchema, {
           book: agent,
           pageSize,
-          position: { case: "after", value: toStorePointer(after) },
+          position,
         }),
       );
     } catch (error) {
@@ -1178,7 +1224,13 @@ export function createReader(options: ReaderOptions): Reader {
 
     readAgentPage(agent, pageSize, after) {
       return onReadRetrySchedule("readAgentPage", agent, () =>
-        readAgentPageOnce(agent, pageSize, after),
+        readAgentPageOnce(agent, pageSize, { case: "after", value: after }),
+      );
+    },
+
+    readPageThrough(agent, pageSize, through) {
+      return onReadRetrySchedule("readPageThrough", agent, () =>
+        readAgentPageOnce(agent, pageSize, { case: "through", value: through }),
       );
     },
     async openBashRun(work) {

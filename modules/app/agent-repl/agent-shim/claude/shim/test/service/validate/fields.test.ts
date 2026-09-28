@@ -105,6 +105,29 @@ describe("validateHistoryPointer", () => {
   });
 });
 
+describe("validateConversationThrough", () => {
+  it("accepts a positive instant", () => {
+    // Arrange.
+    const through = create(conversationv1.ConversationThroughSchema, { atMs: 1n });
+
+    // Act, Assert.
+    expect(codeOf(() => fields.validateConversationThrough(through, "p"))).toBeUndefined();
+  });
+
+  it("refuses an unset bound", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateConversationThrough(undefined, "p"))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a bound that names no instant", () => {
+    // Arrange.
+    const through = create(conversationv1.ConversationThroughSchema, { atMs: 0n });
+
+    // Act, Assert.
+    expect(codeOf(() => fields.validateConversationThrough(through, "p"))).toBe(Code.InvalidArgument);
+  });
+});
+
 describe("validateAgentModel", () => {
   it("refuses an unset model", () => {
     // Arrange, Act, Assert.
