@@ -686,3 +686,34 @@ func loggedAt(h *harness, operation, level string) bool {
 	}
 	return false
 }
+
+// The workspace MOVED ON when the queue accepted a submission of its own, and
+// only then: that is what retires a concluded merge's standing state.
+func TestSubmitTellsTheWorkspaceMovedOnOnlyWhenTheQueueAccepted(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		refuse  bool
+		wantLen int
+	}{
+		{name: "an accepted prompt", text: "carry on", wantLen: 1},
+		{name: "an accepted session act", text: "/clear", wantLen: 1},
+		{name: "a prompt the queue refused", text: "carry on", refuse: true, wantLen: 0},
+		{name: "a panel command, which the queue never sees", text: "/status", wantLen: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.refuse {
+				h.queue.submitErr = errors.New("the queue is closed")
+			}
+			// Act
+			_, _ = h.submit(tc.text)
+			// Assert
+			if got := h.moved(); len(got) != tc.wantLen {
+				t.Fatalf("moved on = %v, want %d", got, tc.wantLen)
+			}
+		})
+	}
+}

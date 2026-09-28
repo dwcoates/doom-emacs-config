@@ -233,6 +233,17 @@ type harness struct {
 
 	// minted is the turn the handler mints, so a subject can assert on it.
 	minted ids.TurnID
+
+	// movedOn records every workspace the handler said moved on.
+	movedMu sync.Mutex
+	movedOn []ids.WorkspaceID
+}
+
+// moved reads back the workspaces the handler said moved on.
+func (h *harness) moved() []ids.WorkspaceID {
+	h.movedMu.Lock()
+	defer h.movedMu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.movedOn...)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -257,7 +268,12 @@ func newHarness(t *testing.T) *harness {
 			return h.panel, h.panelErr
 		},
 		MintTurn: func() ids.TurnID { return h.minted },
-		Log:      dlog.NewTestSurfaces(),
+		MovedOn: func(_ context.Context, ws ids.WorkspaceID) {
+			h.movedMu.Lock()
+			h.movedOn = append(h.movedOn, ws)
+			h.movedMu.Unlock()
+		},
+		Log: dlog.NewTestSurfaces(),
 	})
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)

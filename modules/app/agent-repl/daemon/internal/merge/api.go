@@ -97,6 +97,12 @@ type Orchestrator interface {
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
+	// RetireConcluded retires a CONCLUDED merge's standing state (failed or
+	// merged) once the workspace has moved on -- the queue accepted a
+	// submission of its own. A merge that is queued, running or parked is
+	// untouched. Before it nothing ever retired one: a failed merge's state
+	// stood on the footer and the roster until the daemon restarted.
+	RetireConcluded(ctx context.Context, ws ids.WorkspaceID)
 	// Drain stops admitting merges and waits, WITHIN A BOUND
 	// (TerminalDrainBound), for every run that has already reached its
 	// TERMINAL to finish its durable stamps and its teardown. The daemon's
