@@ -200,6 +200,16 @@ onto a daemon that has not proven it is listening.")
 Shape: `(:at-ms N :reason (:arm KEYWORD :value VALUE))', decoded verbatim
 from the `drain_scheduled' push.")
 
+(defvar agent-repl-link--surfaced-faults (make-hash-table :test #'equal)
+  "The ids of the daemon's loud faults this Emacs has already surfaced.
+EACH FAULT ID IS SURFACED ONCE, however often it is re-told: the daemon
+replays its standing set to every resubscribing stream (a reconnect, a
+handover's successor, a restart of the link), and a failed deploy is one
+line in the minibuffer, not one per stream.  It is deliberately NOT reset
+by `agent-repl-link-teardown' or by a reload of this file: a fault id is
+minted once and never reused, so remembering it across the link's
+lifetimes costs nothing and forgetting it would echo it again.")
+
 (defvar agent-repl-link-drain-segment nil
   "The `global-mode-string' segment drawn for a standing drain or bounce.
 A string, or nil when there is nothing to say.  Recomputed by
@@ -593,6 +603,9 @@ live daemon afresh.  The caller has already recorded why."
       ;; A deploy found this Emacs on older elisp.  elisp-build.el checks the
       ;; root and schedules the load OUT of this process filter.
       (:reload-elisp (agent-repl-elisp-reload-handle value))
+      ;; The daemon's standing loud faults (a failed deploy, whoever started
+      ;; it): each one not yet surfaced is echoed and recorded at ERROR.
+      (:faults-standing (agent-repl-link--faults-standing value))
       ;; The daemon is standing down on purpose and this was the stream's
       ;; last frame; `agent-repl-link--handle-close' reads the mark.
       (:ending
@@ -602,6 +615,37 @@ live daemon afresh.  The caller has already recorded why."
                          (agent-repl-connect-connection-address conn)))
       (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm=%S push=%S"
                             arm push)))))
+
+(defun agent-repl-link--faults-standing (standing)
+  "Surface every fault in STANDING this Emacs has not surfaced before.
+STANDING is a decoded `DaemonFaultsStanding': the daemon's WHOLE set of
+standing loud faults, the ones every client surfaces (a failed deploy and
+a failed deploy's rollback, whoever started the deploy -- this Emacs, the
+CLI or a landing).  Each new fault is an ERROR record carrying its id, its
+line and its typed fault, and the new faults' lines are echoed together
+in ONE minibuffer line, the daemon's own words after `agent-repl: '.  A
+fault already surfaced is recorded at debug and never echoed again, which
+is what makes a resubscribe's replay silent."
+  (let ((central '(:agent-repl-central "the resident daemon link spans workspaces"))
+        (faults (plist-get standing :faults))
+        fresh)
+    (dolist (fault faults)
+      (let ((id (plist-get fault :fault-id)))
+        (if (gethash id agent-repl-link--surfaced-faults)
+            (agent-repl--log central "elisp.link.fault-already-surfaced fault-id=%s" id)
+          (puthash id t agent-repl-link--surfaced-faults)
+          (push fault fresh))))
+    (setq fresh (nreverse fresh))
+    (dolist (fault fresh)
+      (agent-repl--error central
+                         "elisp.link.daemon-fault fault-id=%s line=%S opened-at-ms=%S fault=%S"
+                         (plist-get fault :fault-id) (plist-get fault :line)
+                         (plist-get fault :opened-at-ms) (plist-get fault :fault)))
+    (when fresh
+      (message "agent-repl: %s"
+               (mapconcat (lambda (fault) (plist-get fault :line)) fresh "; ")))
+    (agent-repl--log central "elisp.link.faults-standing standing=%d surfaced=%d"
+                     (length faults) (length fresh))))
 
 (defun agent-repl-link--shutdown-announced (conn announcement)
   "React to a `shutdown_announced' ANNOUNCEMENT received on CONN.
