@@ -86,7 +86,7 @@ func TestParseRefusesAnEntryItCouldOnlyActOnByGuessing(t *testing.T) {
 		{name: "trailing data", body: entryJSON(nil) + `{}`, wantCause: "trailing data"},
 		{name: "a truncated document", body: entryJSON(nil)[:20], wantCause: "decode the entry"},
 		{name: "an unknown delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_NOPE"`}), wantCause: "not a delivery"},
-		{name: "the unspecified delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED"`}), wantCause: "not a delivery"},
+		{name: "the unspecified delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED"`}), wantCause: "never UNSPECIFIED"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
