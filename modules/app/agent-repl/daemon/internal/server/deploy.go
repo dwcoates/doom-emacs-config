@@ -91,40 +91,20 @@ func deployError(err error) (*agentreplv1.DeployError, bool) {
 		}}, true
 	case errors.As(err, &service):
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_ServiceRestartFailed{
-			ServiceRestartFailed: &agentreplv1.DeployServiceRestartFailed{Component: componentArm(service.Component), Detail: service.Detail},
+			ServiceRestartFailed: &agentreplv1.DeployServiceRestartFailed{Component: service.Component.Arm(), Detail: service.Detail},
 		}}, true
 	case errors.As(err, &install):
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_InstallFailed{
-			InstallFailed: &agentreplv1.DeployInstallFailed{Component: componentArm(install.Component), Detail: install.Detail},
+			InstallFailed: &agentreplv1.DeployInstallFailed{Component: install.Component.Arm(), Detail: install.Detail},
 		}}, true
 	}
 	return nil, false
 }
 
-// componentArm names a component on the wire.
-func componentArm(c deploy.Component) agentreplv1.DeployComponent {
-	switch c {
-	case deploy.ComponentDaemon:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON
-	case deploy.ComponentShim:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM
-	case deploy.ComponentWebapp:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP
-	case deploy.ComponentStore:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE
-	case deploy.ComponentSidecar:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
-	case deploy.ComponentElisp:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
-	default:
-		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
-	}
-}
-
 // deployOutcome renders one decision. A component or a decision this handler
 // cannot name is an invariant violation, never a defaulted arm.
 func deployOutcome(o deploy.Outcome) (*agentreplv1.DeployComponentOutcome, error) {
-	component := componentArm(o.Component)
+	component := o.Component.Arm()
 	if component == agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED {
 		return nil, fmt.Errorf("server: the deploy decided for a component the contract does not name: %q", o.Component)
 	}
