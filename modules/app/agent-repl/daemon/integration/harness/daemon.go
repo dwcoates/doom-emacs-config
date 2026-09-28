@@ -1451,6 +1451,13 @@ func SparedFromStrayReaping(pid int) bool {
 // as the machine is up.
 var ErrLeakedProcess = errors.New("harness: a process this test started outlived its teardown")
 
+// maxReapRounds bounds ReapStrays' rounds. Every round after the first needs
+// a stray to have escaped the previous round's stop inside execve (453 of
+// 3000 for a process stopped just after its fork; see Kill), so a sweep
+// still going after eight rounds is being fed by a spawner no listing names,
+// and more rounds would not end it.
+const maxReapRounds = 8
+
 // ReapStrays kills every process whose command line names this run's state
 // directory, whatever process group it is in — except a pid the test declared
 // its own through SpareFromStrayReaping — waits for each to exit, and repeats
@@ -1488,14 +1495,13 @@ var ErrLeakedProcess = errors.New("harness: a process this test started outlived
 // first exists only because a stray escaped the previous round's stop and
 // spawned before its SIGKILL landed, which needs it to have been inside
 // execve at that stop; a spawner the stops always hold ends in two rounds.
-// The rounds share one DefaultTimeout budget, so a source of strays that is
-// never listed (a spawner whose argv does not name the state directory) ends
-// the sweep at that budget, and the leak check names what it left running.
+// The rounds are COUNTED, not timed: maxReapRounds ends a sweep that a source
+// of strays never listed (a spawner whose argv does not name the state
+// directory) would otherwise feed forever, and the leak check then names what
+// it left running.
 func (d *Daemon) ReapStrays() {
 	d.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-	defer cancel()
-	for again := true; again && ctx.Err() == nil; {
+	for round, again := 0, true; again && round < maxReapRounds; round++ {
 		killed, err := d.freezeStrays()
 		// A freeze that failed (a listing that could not be read, a stop the
 		// kernel refused) still has what it stopped killed, and ends the
@@ -1509,18 +1515,29 @@ func (d *Daemon) ReapStrays() {
 		if len(live) == 0 {
 			break
 		}
+		var killedNow []int
 		for _, pid := range live {
 			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 				d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
+				continue
+			}
+			killedNow = append(killedNow, pid)
+		}
+		// EACH EXIT IS AWAITED ON THE EXIT ITSELF, NOT RACED AGAINST A CLOCK,
+		// as in Kill: SIGKILL cannot be caught, blocked or ignored, and kill(2)
+		// accepted it, so the exit is decided and only its scheduling is left.
+		// Under 16 CPU loads a clock bound here failed 2 of 10000 sweeps on
+		// strays that had done exactly what they were told. A stray that never
+		// exits after an accepted SIGKILL is a kernel fault the test binary's
+		// own -timeout reports with every stack.
+		began := time.Now()
+		for _, pid := range killedNow {
+			if err := WaitProcessExit(context.Background(), pid); err != nil {
+				d.t.Errorf("harness: await the SIGKILLed stray %d's exit: %v", pid, err)
 			}
 		}
-		// A SIGKILL cannot be caught, so each exit is decided; the bound covers
-		// only a starved host scheduling it, and a stray still running after
-		// it is reported below as the leak it then is.
-		for _, pid := range live {
-			if err := WaitProcessExit(ctx, pid); err != nil {
-				d.t.Errorf("harness: the SIGKILLed stray %d did not exit: %v", pid, err)
-			}
+		if took := time.Since(began); took > reapGrace {
+			d.t.Logf("harness: the SIGKILLed strays took %s to exit; the host was starving them", took)
 		}
 	}
 	if err := d.leakedStrays(); err != nil {
