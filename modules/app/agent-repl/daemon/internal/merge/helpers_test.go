@@ -692,6 +692,21 @@ func (q *fakeQueue) RequestBounce(context.Context, ids.WorkspaceID, bounce.Reque
 // is the rollout's.
 func (q *fakeQueue) EndKeptDrain(ids.WorkspaceID) {}
 
+// The handover's queue half is never reached by the merge orchestrator;
+// answering it loudly keeps a new caller from passing silently.
+func (q *fakeQueue) SealMove(context.Context, ids.WorkspaceID) (bounce.Handoff, []bounce.Request, error) {
+	return bounce.Handoff{}, nil, errors.New("fakeQueue: the merge orchestrator never seals a move")
+}
+func (q *fakeQueue) UnsealMove(context.Context, ids.WorkspaceID, bounce.Handoff) error {
+	return errors.New("fakeQueue: the merge orchestrator never unseals a move")
+}
+func (q *fakeQueue) AdoptHandoff(context.Context, ids.WorkspaceID, bounce.Handoff) error {
+	return errors.New("fakeQueue: the merge orchestrator never adopts a handoff")
+}
+func (q *fakeQueue) RejudgeHeld(context.Context, ids.WorkspaceID) error {
+	return errors.New("fakeQueue: the merge orchestrator never re-judges holds")
+}
+
 func (q *fakeQueue) OnFree(ids.WorkspaceID) {}
 func (q *fakeQueue) OnDeparted(ids.WorkspaceID, promptqueue.Watcher, sessionwatcher.Departure) {
 }
