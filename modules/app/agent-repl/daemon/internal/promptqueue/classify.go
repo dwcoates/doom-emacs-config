@@ -253,13 +253,15 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 // settle records a verdict and, on an interject, runs the interjection — but
 // only while the content it judged still stands. An edit's commit replacing
 // the content bumps the turn's epoch under the same verdict lock, so a verdict
-// about the replaced words is discarded rather than stamped on the new ones.
+// about the replaced words is discarded rather than stamped on the new ones. A
+// move's seal bumps it too (handoff.go): a verdict answering after the
+// workspace was sealed for another daemon is that daemon's to reach.
 func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, interject bool, log dlog.Logger) {
 	state := q.state(sub.WS)
 	state.verdicts.Lock()
 	defer state.verdicts.Unlock()
 	if now := state.epochs[sub.Turn]; now != epoch {
-		log.Info(opClassify, "the verdict is about content an edit has since replaced; it is discarded", dlog.Context{
+		log.Info(opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded", dlog.Context{
 			"turn": string(sub.Turn), "arm": armName(c.Arm), "judged_epoch": epoch, "content_epoch": now,
 		})
 		return

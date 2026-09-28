@@ -822,219 +822,173 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	drainAwaitAddrFileChange(t, d, addr)
 }
 
-func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsInOrder(t *testing.T) {
+// TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuccessor
+// is the owner's 2026-09-27 ruling end to end: a handover moves a workspace
+// WITHOUT waiting for its work to end and without interrupting it. The turn
+// and a background shell run on through the move; the successor adopts the
+// running shim, learns the turn in flight from its re-announcement, and
+// delivers the prompts held behind it exactly once, in order, as it ends.
+func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuccessor(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange: a running turn, a background shell beside it, two prompts held.
 	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
-
-	first := f.submit("first", "k-busy-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	if first.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt(first) = %v, want a minted TurnId", first)
+	if first := f.submit("first", "k-midwork-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); first.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt(first) = %v, want the turn accepted", first)
 	}
 	f.shim.ExpectStartTurn()
-	second := f.submit("second", "k-busy-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	if second.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt(second) = %v, want a minted TurnId (held for the turn's end)", second)
+	pushDetachedShell(f.shim, "work-midwork-1", "sleep 100")
+	f.shim.SetLiveWork(detachedShell("work-midwork-1", "sleep 100"))
+	f.shim.ExpectWatchBash()
+	for _, p := range []struct{ said, key string }{{"second", "k-midwork-2"}, {"third", "k-midwork-3"}} {
+		if got := f.submit(p.said, p.key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+			t.Fatalf("SubmitPrompt(%s) = %v, want it held for the turn's end", p.said, got)
+		}
 	}
-	third := f.submit("third", "k-busy-3", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	if third.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt(third) = %v, want a minted TurnId (held for the turn's end)", third)
-	}
-
 	daemonStream := d.WatchDaemonStream()
 
-	// Act: fire the handover while the turn is still running.
+	// Act: hand over while the turn and the shell run.
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
-	addr := announced.GetAddress()
 
-	// Assert: the busy workspace is not yet transferred.
-	harness.ExpectNoPush(t, host, harness.ProbeWindow, "a busy workspace transferring before its turn ends")
-
-	// Act: let the turn conclude, freeing the workspace to transfer.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: NOW it transfers.
+	// Assert: the workspace is transferred with its turn still running.
 	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
 
-	// Act: adopt on the successor.
-	successor := drainDial(addr)
-	if _, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("AdoptHostWorkspace = error %v, want a success", err)
+	// Act: the participants adopt on the successor.
+	successor := drainDial(announced.GetAddress())
+	if resp, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AdoptHostWorkspace = (%v, %v), want a success mid-turn", resp, err)
 	}
-	if _, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("AdoptWebWorkspace = error %v, want a success", err)
+	if resp, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AdoptWebWorkspace = (%v, %v), want a success mid-turn", resp, err)
 	}
 
-	// Assert: the two held prompts drain FIFO onto the adopted (running) shim.
+	// Assert: the adopted turn is still running, so nothing held has gone.
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+
+	// Act: the turn ends on the successor's watch.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the held prompts drain FIFO, one turn at a time, exactly once.
 	req1 := f.shim.ExpectStartTurn()
-	// ONE TURN AT A TIME: the third prompt was held for the running turn's
-	// end, so it waits for the second's end on the successor exactly as it
-	// would have on the incumbent.
 	if got := f.shim.Count(harness.RPCStartTurn); got != 2 {
-		t.Fatalf("StartTurn count = %d while the second prompt's turn runs, want 2 (the third waits for it)", got)
+		t.Fatalf("StartTurn count = %d while the second prompt's turn runs, want 2", got)
 	}
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	req2 := f.shim.ExpectStartTurn()
 	if text(req1.GetSaid()) != "second" || text(req2.GetSaid()) != "third" {
 		t.Fatalf("held intake drained as (%q, %q), want (\"second\", \"third\") in order", text(req1.GetSaid()), text(req2.GetSaid()))
 	}
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 3, harness.ProbeWindow)
+
+	// Assert: nothing was interrupted, and the incumbent left.
+	for _, rpc := range []string{harness.RPCKillTurn, harness.RPCKillSession, harness.RPCStopBash} {
+		if got := f.shim.Count(rpc); got != 0 {
+			t.Fatalf("%s was called %d time(s); a handover interrupts nothing", rpc, got)
+		}
+	}
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
+	}
 }
 
-// TestARestartJoiningABusyWorkspacesTransferStillTransfersIt pins the
-// 2026-09-27 regression at the daemon's own surface: a handover's transfer was
-// registered behind a busy workspace, the restart verb joined that registered
-// bounce, and the newest action won -- the restart ran on the outgoing daemon
-// and the workspace was never sent its transfer notice, so its host stream died
-// with the daemon. Both now run when the turn ends: the restart, then the
-// transfer, whose notice reaches the host stream.
-//
-// THE RESTART IS GRACEFUL ON PURPOSE. A forced one interrupts the turn first,
-// and whether that turn's end reaches the registry before the restart's own
-// request does is a race: the transfer can start alone and the restart then
-// joins a RUNNING move. A graceful restart registers beside the transfer while
-// the turn still runs, which is exactly the coalescing under test.
-func TestARestartJoiningABusyWorkspacesTransferStillTransfersIt(t *testing.T) {
+// TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway pins the
+// incumbent's half of the owner's second 2026-09-27 ruling: a restart asked
+// once a move has sealed what it carries is not run here and not lost -- it is
+// answered transferring_away, naming the daemon the workspace moved to, which
+// is where it runs. (A restart that joins the move BEFORE the seal is carried
+// across and run by the successor after its adoption; that race is narrow, so
+// its unit tests in internal/rollout and internal/promptqueue pin it.)
+func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) {
 	t.Parallel()
-	// Arrange: a busy workspace whose transfer is registered behind its turn.
+	// Arrange: a busy workspace, moved mid-turn.
 	selfRepo, d := drainSelfRepoDaemon(t)
-	// The restart's trail: the stand-down the fake shim ends by exiting, and
-	// the shim link that dies with it.
-	d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
-	f.submit("long running work", "k-coalesced-busy", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.submit("long running work", "k-moved-restart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
-	daemonStream := d.WatchDaemonStream()
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
-	harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetShutdownAnnounced() != nil
-	})
-	registered := func(reason, what string) {
-		d.AwaitWorkspaceLogRecord(f.ws.GetDir(), what, func(r harness.LogRecord) bool {
-			return r.PID == d.PID() && r.Operation == "daemon.promptqueue.bounce" &&
-				r.Message == "the workspace has work in flight; registered the bounce for when it ends" &&
-				r.Context["reason"] == reason
-		})
-	}
-	registered("handover_transfer", "the transfer registered behind the turn")
-	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: false}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace{force:false} = (%v, %v), want a success", resp, err)
-	}
-	registered("restart_verb", "the restart registered beside the transfer")
-
-	// Act: the turn ends, freeing the workspace for the coalesced bounce.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the transfer notice still came, after the restart ran as the
-	// bounce's first stage.
 	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
-	d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the restart stage finishing ahead of the transfer", func(r harness.LogRecord) bool {
-		return r.PID == d.PID() && r.Operation == "daemon.promptqueue.bounce" &&
-			r.Message == "a stage of the bounce finished; the workspace stays draining for the stage after it"
-	})
+
+	// Act
+	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: true}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RestartWorkspace = error %v, want a typed answer", err)
+	}
+	if resp.Msg.GetError().GetTransferringAway() == nil {
+		t.Fatalf("RestartWorkspace on the incumbent = %v, want error.transferring_away", resp.Msg)
+	}
+	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
+		t.Fatalf("KillTurn was called %d time(s); the incumbent must not run a restart it has moved away", got)
+	}
+	// The standing refusal is recorded as the transport's unlanded arm, as
+	// every refusal of a workspace this daemon no longer serves is.
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 }
 
-func TestASuccessorDoesNotAdoptABusyWorkspaceBeforeTheIncumbentTransfersIt(t *testing.T) {
+func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name   string
-		prompt string
-		key    string
-	}{
-		{name: "an adoption call arriving during a turn waits for transfer", prompt: "still running", key: "k-adopt-before-free"},
+	// Arrange: the webapp-layer handover driver calls the successor as soon
+	// as its address is announced, while the workspace's turn runs.
+	selfRepo, d := drainSelfRepoDaemon(t)
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	watchesBefore := f.shim.Count(harness.RPCWatchSession)
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	if got := f.submit("still running", "k-adopt-early", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			// Arrange: one host participant calls the successor while the
-			// workspace's turn still holds the incumbent behind its freeness
-			// gate.
-			selfRepo, d := drainSelfRepoDaemon(t)
-			f := drainOpenWorkspace(t, d)
-			f.shim.ExpectStartSession()
-			f.shim.ExpectWatchSession()
-			watchesBefore := f.shim.Count(harness.RPCWatchSession)
-			host := d.WatchHost(f.ws)
-			harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
-			if got := f.submit(test.prompt, test.key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
-				t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
-			}
-			f.shim.ExpectStartTurn()
-			daemonStream := d.WatchDaemonStream()
-			drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
-			announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
-				return r.GetShutdownAnnounced() != nil
-			}).GetShutdownAnnounced()
-			successor := drainDial(announced.GetAddress())
+	f.shim.ExpectStartTurn()
+	daemonStream := d.WatchDaemonStream()
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	successor := drainDial(announced.GetAddress())
 
-			// Act: this is the early call the webapp-layer handover driver
-			// makes as soon as the successor address is announced.
-			adopted := make(chan *connect.Response[agentreplv1.AdoptHostWorkspaceResponse], 1)
-			adoptFailed := make(chan error, 1)
-			go func() {
-				resp, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
-				adopted <- resp
-				adoptFailed <- err
-			}()
+	// Act
+	resp, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
 
-			// Assert: elapsed time cannot start successor ownership while the
-			// incumbent is still serving. A new WatchSession would prove the
-			// successor dialed and adopted the live shim too early.
-			expectRPCCount(t, f.shim, harness.RPCWatchSession, watchesBefore, harness.ProbeWindow)
-
-			// Act: the turn terminal releases freeness; the incumbent
-			// quiesces, detaches and clears serving ownership before the
-			// successor may proceed.
-			f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-			harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-				return r.GetTransferred() != nil
-			})
-
-			// Assert: the pending adoption now succeeds and opens exactly the
-			// successor's session watch.
-			resp := <-adopted
-			if err := <-adoptFailed; err != nil {
-				t.Fatalf("AdoptHostWorkspace after incumbent transfer = error %v, want success", err)
-			}
-			if resp.Msg.GetSuccess() == nil {
-				t.Fatalf("AdoptHostWorkspace after incumbent transfer = %v, want success", resp.Msg)
-			}
-			ftAwaitTrue(t, d.Ctx(), func() bool {
-				return f.shim.Count(harness.RPCWatchSession) > watchesBefore
-			}, "the successor's WatchSession after serving ownership was released")
-		})
+	// Assert: the adoption lands mid-turn on the successor's own watch, and
+	// the turn was never ended to make way for it.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AdoptHostWorkspace = (%v, %v), want a success mid-turn", resp, err)
+	}
+	ftAwaitTrue(t, d.Ctx(), func() bool {
+		return f.shim.Count(harness.RPCWatchSession) > watchesBefore
+	}, "the successor's WatchSession on the adopted shim")
+	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
+		t.Fatalf("KillTurn was called %d time(s); an adoption never ends the turn it adopts", got)
 	}
 }
 
-// TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout is critique 11's
-// first half: a workspace that never falls free leaves both daemons up
-// forever, naming the holdout in a periodic WARN
-// (internal/rollout/handover.go awaitFreeForever, operation
-// daemon.rollout.transfer). The production cadence is ten minutes; the
-// AGENT_REPL_HOLDOUT_WARN_EVERY test knob compresses it so the warning is
-// observable inside a bounded window.
-func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
+// TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout is the
+// old-shim fallback end to end: a shim that never re-announces its session
+// facts cannot be adopted mid-work, so the successor refuses it, the incumbent
+// takes the workspace back at once and asks for the transfer again at
+// FREENESS -- the old way, never unsafe -- naming the holdout on the cadence
+// while the turn runs. The AGENT_REPL_HOLDOUT_WARN_EVERY and
+// AGENT_REPL_HANDOVER_FACTS_BOUND test knobs compress both waits.
+func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing.T) {
 	t.Parallel()
-	// Arrange: a daemon whose holdout cadence is milliseconds, with a
-	// workspace held busy by a turn that never concludes.
+	// Arrange: a running turn on a shim whose next watch re-announces nothing.
 	selfRepo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
@@ -1044,10 +998,8 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 		ExtraEnv: []string{
 			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
+			"AGENT_REPL_HANDOVER_FACTS_BOUND=300ms",
 		},
-		// This test's own drainTriggerDeploy call boots a real successor
-		// within THIS daemon's one context (see drainSelfRepoDaemon), so it
-		// needs the same longer, justified bound.
 		Timeout: harness.HandoverChainTimeout,
 	})
 	f := drainOpenWorkspace(t, d)
@@ -1055,24 +1007,53 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
-	if got := f.submit("forever", "k-holdout-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+	if got := f.submit("forever", "k-refused-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
 	}
 	f.shim.ExpectStartTurn()
-	// THE INCUMBENT'S OWN RUN LOG. Successor and incumbent append to the same
-	// size-rotated file, so the predicate pins the incumbent's pid.
+	// The successor's adoption opens TWO session watches -- its dial's and its
+	// watcher's -- and neither re-announces; the incumbent's take-back after
+	// them re-announces as ever.
+	f.shim.SilenceNextReannouncement()
+	f.shim.SilenceNextReannouncement()
 	incumbentLog := d.RunLogPath()
-
-	// Act: hand over while the turn is still in flight, and never end it.
+	daemonStream := d.WatchDaemonStream()
+	// Act: hand over mid-turn; the participants call the successor.
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	successor := drainDial(announced.GetAddress())
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _ = successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
+	}()
+	go func() {
+		defer wg.Done()
+		_, _ = successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+	}()
+	wg.Wait()
 
-	// Assert: the holdout is named in a periodic warning that repeats.
+	// Assert: the incumbent asks for the transfer again at freeness, and names
+	// the holdout on the cadence while the turn runs.
+	d.AwaitLogRecord(incumbentLog, "the transfer asked again at freeness", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.rollout.transfer" &&
+			r.Message == "asked the bounce registry to transfer the workspace again at its freeness"
+	})
 	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
 		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" && strings.ToLower(r.Level) == "warn" &&
 			namesHoldout(r.Context["holdouts"], f.ws.GetId()) && numeric(r.Context["warnings"]) >= 2
 	})
 	if got := second.Context["cadence"]; got != "25ms" {
 		t.Fatalf("the holdout warning's cadence = %v, want the 25ms the knob set", got)
+	}
+	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
+		t.Fatalf("KillTurn was called %d time(s); the fallback interrupts nothing", got)
 	}
 	d.ExpectWarnings("daemon.rollout.handover")
 }

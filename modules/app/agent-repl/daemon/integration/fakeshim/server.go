@@ -194,6 +194,9 @@ type server struct {
 	// It is the real shim's WatchBash on a run the store holds no row for,
 	// which waits for a first row that never comes.
 	silencedBash map[string]bool
+	// silentReannouncements counts the next WatchSession opens that send no
+	// SessionStarted re-announcement.
+	silentReannouncements int
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
@@ -242,6 +245,25 @@ func (s *server) silenceBash(work string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.silencedBash[work] = true
+}
+
+// silenceReannouncement makes the next WatchSession open re-announce nothing.
+func (s *server) silenceReannouncement() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.silentReannouncements++
+}
+
+// reannouncementSilenced takes one silenced re-announcement, reporting whether
+// there was one to take.
+func (s *server) reannouncementSilenced() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.silentReannouncements == 0 {
+		return false
+	}
+	s.silentReannouncements--
+	return true
 }
 
 // bashSilenced reports whether WatchBash opens for work go unanswered.
@@ -648,7 +670,7 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 		// SessionStarted, once per watch, right after the opening
 		// diagnostics — on EVERY new watch, so a daemon that adopts an
 		// already-started shim learns the facts from the shim.
-		if started := s.startedSession(); started != nil {
+		if started := s.startedSession(); started != nil && !s.reannouncementSilenced() {
 			if err := stream.Send(&shimv1.WatchSessionResponse{
 				Frame: &shimv1.WatchSessionResponse_SessionStarted{SessionStarted: started},
 			}); err != nil {

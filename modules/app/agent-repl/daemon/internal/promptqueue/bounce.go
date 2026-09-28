@@ -71,6 +71,36 @@ type pendingBounce struct {
 	// departure edge is matched to the shim it names: a late edge from a shim
 	// already replaced must not be taken as the end of the new one's work.
 	waitsOn Watcher
+	// across are the shim replacements a DISPATCH-QUIET move is carrying to
+	// the daemon it takes the workspace to: one it overtook (registered
+	// behind work the move does not wait for), and every one that joined
+	// while the move ran. They never run here; the move's seal hands them to
+	// its caller (SealMove), and a move that fails before sealing leaves them
+	// registered here again.
+	across []*bounceStage
+	// sealed reports that the running move has taken what it carries
+	// (SealMove). From then on nothing asked of this daemon can reach the
+	// next one, so a request is refused with bounce.ErrMovedAway.
+	sealed bool
+}
+
+// quietMove reports whether the bounce's MOVE waits only for the delivery
+// lock rather than for freeness: a handover transfer, which ends nothing.
+func (p *pendingBounce) quietMove() bool {
+	return p.move != nil && p.move.req.WaitFor == bounce.GateDispatchQuiet
+}
+
+// overtake hands an unstarted replacement across: the dispatch-quiet move
+// runs now, without waiting for the freeness the replacement waits for, and
+// the replacement runs on the daemon the move takes the workspace to. It
+// reports whether there was one.
+func (p *pendingBounce) overtake() bool {
+	if p.replace == nil || p.replace.started {
+		return false
+	}
+	p.across = append(p.across, p.replace)
+	p.replace = nil
+	return true
 }
 
 // bounceStage is one kind's request and every requester that joined it.
@@ -159,30 +189,52 @@ func (p *pendingBounce) register(req bounce.Request) bool {
 	return true
 }
 
+// joined is how a request joined a running bounce.
+type joined int
+
+// The ways a request joins a running bounce.
+const (
+	// joinedStage is a request that joined a stage of its own kind, or the
+	// running stage when its kind has none.
+	joinedStage joined = iota
+	// queuedMove is a move the bounce had not got, queued behind the running
+	// stage.
+	queuedMove
+	// handedAcross is a replacement joining a running dispatch-quiet move: it
+	// is carried to the daemon the move takes the workspace to, and runs
+	// there after the adoption. Ruling 2 (owner, 2026-09-27): it is never
+	// folded into the move and never told the move's outcome.
+	handedAcross
+)
+
 // joinRunning adds a request to a bounce that is RUNNING. A MOVE the bounce
 // has not got is queued behind the running stage, so a transfer asked while a
-// replacement runs is still made; anything else joins a stage of its own kind
-// (the newest action wins while that stage has not started), or the running
-// stage when its kind has none. It reports whether a stage was queued.
-func (p *pendingBounce) joinRunning(req bounce.Request) (queued bool) {
+// replacement runs is still made; a REPLACEMENT asked while a dispatch-quiet
+// move runs is carried across with it; anything else joins a stage of its own
+// kind (the newest action wins while that stage has not started), or the
+// running stage when its kind has none.
+func (p *pendingBounce) joinRunning(req bounce.Request) joined {
 	slot := p.slot(req)
 	switch {
 	case *slot == nil && isMove(req):
 		*slot = newStage(req)
-		return true
+		return queuedMove
+	case !isMove(req) && p.quietMove() && p.move.started:
+		p.across = append(p.across, newStage(req))
+		return handedAcross
 	case *slot == nil:
 		if running := p.running(); running != nil && req.Done != nil {
 			running.dones = append(running.dones, req.Done)
 		}
-		return false
+		return joinedStage
 	case !(*slot).started:
 		p.register(req)
-		return false
+		return joinedStage
 	default:
 		if req.Done != nil {
 			(*slot).dones = append((*slot).dones, req.Done)
 		}
-		return false
+		return joinedStage
 	}
 }
 
@@ -208,14 +260,20 @@ func (p *pendingBounce) next() *bounceStage {
 	return nil
 }
 
-// ErrBounceMalformed refuses a request missing its reason or its action.
-var ErrBounceMalformed = errors.New("promptqueue: a bounce request needs a reason and an action")
+// ErrBounceMalformed refuses a request missing its reason or its action, or a
+// replacement asking for the dispatch-quiet gate that only a move may take.
+var ErrBounceMalformed = errors.New("promptqueue: a bounce request needs a reason and an action, and only a move may skip freeness")
 
 // RequestBounce implements Queue.
 func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error) {
-	if req.Reason == "" || req.Run == nil {
+	// A REPLACEMENT NEVER SKIPS FREENESS: it ends everything that runs in
+	// the shim it replaces, so only a move -- which ends nothing -- may ask
+	// for the dispatch-quiet gate.
+	quietReplacement := req.WaitFor != bounce.GateFreeness && !isMove(req)
+	if req.Reason == "" || req.Run == nil || quietReplacement {
 		q.deps.Log.Global().Error(opBounce, "refused a malformed bounce request", dlog.Context{
 			"workspace": string(ws), "reason": req.Reason, "has_action": req.Run != nil,
+			"gate": req.WaitFor.String(), "move": isMove(req),
 		})
 		return bounce.Decision{}, fmt.Errorf("bounce %q: %w", ws, ErrBounceMalformed)
 	}
@@ -223,7 +281,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	if err != nil {
 		return bounce.Decision{}, err
 	}
-	log = log.With(dlog.Context{"reason": req.Reason, "force": req.Force})
+	log = log.With(dlog.Context{"reason": req.Reason, "force": req.Force, "gate": req.WaitFor.String()})
 
 	// A requester told at once is told AFTER the delivery lock is released
 	// (registered before the unlock, so it runs after it), exactly as a
@@ -257,13 +315,24 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 			tellNow = func() { req.Done(bounce.ErrUnregistered) }
 		}
 		return decision, nil
+	case existing != nil && existing.sealed:
+		// THE MOVE HAS SEALED WHAT IT CARRIES. Nothing asked of this daemon
+		// from here can reach the daemon the workspace is moving to, and
+		// running it here would act on a workspace this daemon is letting go
+		// of: the caller asks the next daemon, which the transport names.
+		q.mu.Unlock()
+		log.Info(opBounce, "the workspace's move has sealed what it carries; the request is refused so it is asked of the daemon the workspace moves to", nil)
+		return bounce.Decision{}, fmt.Errorf("bounce %q: %w", ws, bounce.ErrMovedAway)
 	case existing != nil && existing.draining:
-		queued := existing.joinRunning(req)
+		how := existing.joinRunning(req)
 		q.mu.Unlock()
 		decision.AlreadyPending, decision.Now = true, true
-		if queued {
+		switch how {
+		case queuedMove:
 			log.Info(opBounce, "a bounce is already running for the workspace; the request's move runs after it", nil)
-		} else {
+		case handedAcross:
+			log.Info(opBounce, "a dispatch-quiet move is running for the workspace; the replacement is carried with it and runs on the daemon it moves to", nil)
+		default:
 			log.Info(opBounce, "a bounce is already running for the workspace; the request joins it", nil)
 		}
 		return decision, nil
@@ -280,8 +349,24 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		state.bounce = existing
 	}
 	force := existing.force()
+	// A DISPATCH-QUIET MOVE IS DECIDED NOW, under the delivery lock this
+	// function holds: no StartTurn is mid-flight, and none can start once the
+	// workspace drains. The work in flight runs on through the move, on the
+	// shim the move detaches and never stops. A replacement registered behind
+	// that work is not waited for: it is carried across and runs on the next
+	// daemon at its freeness.
+	quiet := !free && existing.quietMove()
+	overtook := quiet && existing.overtake()
 	q.mu.Unlock()
 
+	if quiet {
+		decision.Now = true
+		log.Info(opBounce, "a dispatch-quiet move: moving the workspace now; the work in flight runs on through the move", dlog.Context{
+			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
+		})
+		q.startBounceLocked(ws, state, log)
+		return decision, nil
+	}
 	if !free && !force {
 		log.Info(opBounce, "the workspace has work in flight; registered the bounce for when it ends", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached, "already_registered": decision.AlreadyPending,
@@ -586,11 +671,29 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		next = pending.next()
 	}
 	keep := runErr == nil && req.KeepDraining
+	// THE REPLACEMENTS A MOVE WAS CARRYING are its to seal. A move that
+	// failed before it sealed leaves them registered HERE again, where the
+	// workspace is still served; a move that finished without sealing them
+	// broke the carry, and they are failed loudly below.
+	var unsealed []*bounceStage
+	registeredAgain := false
 	if next == nil {
+		if pending != nil {
+			unsealed = pending.across
+			pending.across = nil
+		}
 		if keep && pending != nil {
 			pending.kept = true
 		} else {
 			state.bounce = nil
+			if len(unsealed) > 0 {
+				again := &pendingBounce{waitsOn: pending.waitsOn}
+				for _, s := range unsealed {
+					again.registerStage(s)
+				}
+				state.bounce = again
+				unsealed, registeredAgain = nil, true
+			}
 		}
 	}
 	q.mu.Unlock()
@@ -633,7 +736,26 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		})
 	}
 
-	if !keep {
+	var lost []func(error)
+	for _, s := range unsealed {
+		lost = append(lost, s.dones...)
+	}
+	if len(unsealed) > 0 {
+		log.Error(opBounce, "the move finished without sealing the replacements it carried; they were not handed to the next daemon", dlog.Context{
+			"reason": req.Reason, "carried": len(unsealed),
+		})
+	}
+
+	switch {
+	case keep:
+	case registeredAgain && q.checkRegistryLocked(ws, state, log):
+		// THE REPLACEMENT THE FAILED MOVE WAS CARRYING RUNS HERE NOW, the
+		// workspace being free: it drains the workspace, and its own finish
+		// delivers what is held.
+	default:
+		if registeredAgain {
+			log.Info(opBounce, "the failed move left the replacements it was carrying registered here, behind the workspace's work", nil)
+		}
 		q.resumeDispatchLocked(ctx, ws, log)
 	}
 	state.drain.Unlock()
@@ -641,7 +763,29 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 	for _, done := range dones {
 		done(runErr)
 	}
+	for _, done := range lost {
+		done(fmt.Errorf("bounce %q: %w", ws, errMoveNeverSealed))
+	}
 	return nil
+}
+
+// errMoveNeverSealed is what a replacement's requester is told when the
+// dispatch-quiet move carrying it finished without sealing it: a broken carry,
+// never an outcome.
+var errMoveNeverSealed = errors.New("promptqueue: the move carrying this replacement finished without sealing it, so no daemon runs it")
+
+// registerStage merges a carried stage into the replacement slot of a bounce
+// that has not started, exactly as register merges a request: the newest
+// action wins, a force upgrades it, and every requester is kept.
+func (p *pendingBounce) registerStage(s *bounceStage) {
+	if p.replace == nil {
+		p.replace = &bounceStage{req: s.req, dones: s.dones}
+		return
+	}
+	force := p.replace.req.Force || s.req.Force
+	p.replace.req = s.req
+	p.replace.req.Force = force
+	p.replace.dones = append(p.replace.dones, s.dones...)
 }
 
 // EndKeptDrain implements Queue.

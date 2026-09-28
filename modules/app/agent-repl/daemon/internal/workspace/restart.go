@@ -47,6 +47,14 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, func(err error) {
 		v.finishRestart(detached, log, ws, force, err)
 	})
+	if errors.Is(err, bounce.ErrMovedAway) {
+		// THE WORKSPACE IS MOVING TO ANOTHER DAEMON and its move has sealed
+		// what it carries: the restart is the next daemon's to run, and the
+		// transport answers `transferring_away` naming it, so the caller asks
+		// there.
+		log.Info(opRestart, "the workspace is moving to another daemon; the restart is refused so it is asked of that daemon", dlog.Context{"force": force})
+		return fmt.Errorf("restart %q: %w", ws, err)
+	}
 	if err != nil {
 		log.Error(opRestart, "the bounce registry refused the restart", dlog.Context{"force": force, "cause": err.Error()})
 		return fmt.Errorf("restart %q: %w", ws, err)
@@ -66,6 +74,13 @@ func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.Works
 		// departed first, and nothing is left to replace -- the session was
 		// ended, the workspace closed, or a fresh shim already serves it.
 		log.Info(opRestart, "the restart was unregistered: the shim it would replace departed and nothing is left to replace", dlog.Context{"force": force})
+		return
+	}
+	if errors.Is(err, bounce.ErrHandedAcross) {
+		// AN OUTCOME, NOT A FAILURE (owner ruling, 2026-09-27): the restart
+		// raced a handover's move of the workspace, and the daemon that
+		// adopted it runs the restart -- and the webapp reload after it.
+		log.Info(opRestart, "the restart was handed to the daemon the workspace moved to, which runs it after its adoption", dlog.Context{"force": force})
 		return
 	}
 	if err != nil {
