@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/sourcescan"
 )
 
 func TestOpenRefusesUnusablePaths(t *testing.T) {
@@ -572,24 +573,8 @@ func TestEndTxAfterACommitRecordsNothing(t *testing.T) {
 // Every rollback in this package goes through endTx, so no site can quietly
 // drop a failed one again.
 func TestEveryRollbackGoesThroughEndTx(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	rollbacks := 0
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-
-		// Act
-		rollbacks += strings.Count(string(body), ".Rollback()")
-	}
+	// Act
+	rollbacks := sourcescan.Count(t, ".Rollback()")
 
 	// Assert
 	if rollbacks != 1 {
