@@ -463,11 +463,11 @@ func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 
 // ---- The VIEWED marker: the row's display mode ----------------------------
 //
-// PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a DONE
-// row, and the only thing that lowers it there is the row's next STATUS
-// CHANGE. These lock all three halves, because a marker that never clears, a
-// marker that clears on every push and a marker drawn on live or exceptional
-// work are the three ways this feature fails.
+// PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a
+// turn-end row (done or interrupted), and it is derived from the read-result
+// fact, which only the next turn resets. These lock all three halves, because
+// a marker that never clears, a marker that clears on every push and a marker
+// drawn on live or exceptional work are the three ways this feature fails.
 
 // finished brings the workspace to a DONE row: a live session whose turn
 // completed.
