@@ -49,8 +49,20 @@ type OpenedPage struct {
 // until it ends, so `OpenPage`'s watch pin is read from the same view of the
 // database as the lines it answers with — which is the property that comment
 // asks for, and it never needed the write lock to get it.
+//
+// THE SNAPSHOT ENDS BEFORE THE READ RETURNS, AND THE TRANSACTION'S CONTEXT IS
+// WHAT GUARANTEES IT. A transaction begun on a cancellable context is rolled
+// back by database/sql's own goroutine the moment that context ends, and the
+// caller's deferred Rollback then returns ErrTxDone at once, without waiting
+// for that rollback to finish. So a cancelled read returned while its snapshot
+// was still held, and nothing bounded how long it stayed held. The
+// transaction is therefore begun on context.WithoutCancel(ctx): its end is
+// always the caller's own deferred rollback, on the caller's goroutine. The
+// statements inside it still run on the caller's ctx, so a cancellation still
+// interrupts the read at once. A deferred BEGIN takes no lock and reads
+// nothing, so the uncancellable part never waits on anything.
 func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
-	return d.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	return d.read.BeginTx(context.WithoutCancel(ctx), &sql.TxOptions{ReadOnly: true})
 }
 
 // OpenPage answers one agent's opening page.
