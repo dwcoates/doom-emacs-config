@@ -387,11 +387,12 @@ func TestLedgerRecordsEveryTabInterval(t *testing.T) {
 // TestLedgerRecordsEachRoundsOutcome covers what a closed interval carries: the
 // round's outcome, which is what makes a replayed ledger legible.
 func TestLedgerRecordsEachRoundsOutcome(t *testing.T) {
-	// Arrange: a merge that conflicts and is resolved.
+	// Arrange: a merge that conflicts, is resolved on the branch, and lands on
+	// its second attempt.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{}}
+	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	enqueue(t, h)
@@ -409,7 +410,7 @@ func TestLedgerRecordsEachRoundsOutcome(t *testing.T) {
 			outcomes = append(outcomes, interval.Kind+":"+interval.Outcome)
 		}
 	}
-	want := []string{TabQueue + ":succeeded", TabMerge + ":conflicted", TabConflicts + ":succeeded", TabTests + ":succeeded"}
+	want := []string{TabQueue + ":succeeded", TabMerge + ":conflicted", TabConflicts + ":succeeded", TabMerge + ":succeeded", TabTests + ":succeeded"}
 	if !equal(outcomes, want) {
 		t.Fatalf("the ledger's outcomes are %v, want %v", outcomes, want)
 	}
@@ -651,6 +652,7 @@ func TestLedgerRecordsTheQueueInterval(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	enqueue(t, h)

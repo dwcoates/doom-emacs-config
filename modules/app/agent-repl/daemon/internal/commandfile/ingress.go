@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -233,7 +234,9 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		if err != nil {
 			return err
 		}
-		return i.deps.Merge.Enqueue(ctx, ws)
+		// A COMMAND-FILE MERGE IS AN AGENT'S ASK, made from inside its own
+		// turn, so it never displaces the turn in flight (merge.Requester).
+		return i.deps.Merge.Enqueue(ctx, ws, merge.RequestedByAgent)
 	case TypeClose:
 		ws, err := i.target(ctx, entry)
 		if err != nil {

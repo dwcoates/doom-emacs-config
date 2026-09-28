@@ -786,7 +786,7 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
 }
 
-func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
+func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID, _ merge.Requester) error {
 	if m.enqueueErr != nil {
 		return m.enqueueErr
 	}
