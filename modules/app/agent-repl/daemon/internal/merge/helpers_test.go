@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -400,6 +401,9 @@ type fakeGit struct {
 	sameRepo      bool
 	sameRepoErr   error
 	refs          map[string]string
+	// refSeqs are ResolveRef answers scripted per ref, consumed in order with
+	// the last one standing.
+	refSeqs map[string][]string
 	// outcomes are the MergeNoFF answers, consumed in order.
 	outcomes []gitclient.MergeOutcome
 	// conflicted are the ConflictedFiles answers, consumed in order.
@@ -412,15 +416,36 @@ type fakeGit struct {
 	// commitMessages records what each Commit was asked to record.
 	commitMessages []string
 	landed         []gitclient.Commit
+	landedErr      error
 	changed        []string
 	changedErr     error
-	clean          bool
-	cleanErr       error
+	// changedIn answers ChangedPaths for one range, consumed in order with the
+	// last one standing; a range it does not name answers `changed`.
+	changedIn map[string][][]string
+	// rangesAsked records every range ChangedPaths was asked.
+	rangesAsked []string
+	clean       bool
+	cleanErr    error
+
+	// queueTrees and queueBases record every scratch tree the queue made and
+	// the commit each was made at, in order.
+	queueTrees []string
+	queueBases []string
+	// fastForwards records every landing, as "<dir>@<commit>".
+	fastForwards   []string
+	fastForwardErr error
+	// contained answers IsAncestor: the source branch is already in the target.
+	contained bool
 
 	// calls records what was asked of git, in order.
 	calls []string
-	// removedWorktrees records the teardown's removals.
-	removedWorktrees []string
+	// removedWorktrees records the teardown's removals of a workspace's
+	// worktree; removedQueueTrees the queue's scratch trees it removed.
+	removedWorktrees  []string
+	removedQueueTrees []string
+	// mergeDirs records where every merge was made; mergeErr fails them all.
+	mergeDirs []string
+	mergeErr  error
 }
 
 func newFakeGit(seq func() int) *fakeGit {
@@ -430,6 +455,8 @@ func newFakeGit(seq func() int) *fakeGit {
 		defaultBranch: "master",
 		commonDirs:    map[string]string{},
 		refs:          map[string]string{},
+		refSeqs:       map[string][]string{},
+		changedIn:     map[string][][]string{},
 		clean:         true,
 	}
 }
@@ -457,6 +484,17 @@ func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error
 
 func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 	g.record("resolve_ref")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// A SCRIPTED SEQUENCE answers in order and then keeps answering its last
+	// value, so a ref that moves once (a repair commit, a target that moved
+	// under the gate) is scripted as its two values.
+	if seq := g.refSeqs[ref]; len(seq) > 0 {
+		if len(seq) > 1 {
+			g.refSeqs[ref] = seq[1:]
+		}
+		return seq[0], nil
+	}
 	if sha, ok := g.refs[ref]; ok {
 		return sha, nil
 	}
@@ -468,12 +506,49 @@ func (g *fakeGit) CreateWorktree(context.Context, string, string, string, string
 	return nil
 }
 
+// RemoveWorktree records a removal of one of the queue's own scratch trees
+// apart from the removal of a workspace's worktree, because the two are
+// different acts with different ordering rules.
 func (g *fakeGit) RemoveWorktree(_ context.Context, _, worktreeDir string) error {
+	g.mu.Lock()
+	queueTree := slices.Contains(g.queueTrees, worktreeDir)
+	g.mu.Unlock()
+	if queueTree {
+		g.record("remove_queue_tree")
+		g.mu.Lock()
+		g.removedQueueTrees = append(g.removedQueueTrees, worktreeDir)
+		g.mu.Unlock()
+		return nil
+	}
 	g.record("remove_worktree")
 	g.mu.Lock()
 	g.removedWorktrees = append(g.removedWorktrees, worktreeDir)
 	g.mu.Unlock()
 	return nil
+}
+
+func (g *fakeGit) AddDetachedWorktree(_ context.Context, _, worktreeDir, commit string) error {
+	g.record("add_detached_worktree")
+	g.mu.Lock()
+	g.queueTrees = append(g.queueTrees, worktreeDir)
+	g.queueBases = append(g.queueBases, commit)
+	g.mu.Unlock()
+	return nil
+}
+
+func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
+	g.record("fast_forward")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.fastForwards = append(g.fastForwards, dir+"@"+commit)
+	return g.fastForwardErr
+}
+
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, _ string) (bool, error) {
+	g.record("is_ancestor")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.contained, nil
 }
 
 func (g *fakeGit) Nuke(context.Context, string, string, string) error {
@@ -506,15 +581,23 @@ func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
 	return g.sameRepo, g.sameRepoErr
 }
 
-func (g *fakeGit) MergeNoFF(context.Context, string, string, string) (gitclient.MergeOutcome, error) {
+func (g *fakeGit) MergeNoFF(_ context.Context, dir, _, _ string) (gitclient.MergeOutcome, error) {
 	g.record("merge_no_ff")
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.mergeDirs = append(g.mergeDirs, dir)
+	// The outcomes answer in order and the LAST ONE STANDS: every attempt
+	// makes the merge again, and a branch nobody changed merges the same way.
 	var out gitclient.MergeOutcome
 	if len(g.outcomes) > 0 {
 		out = g.outcomes[0]
-		g.outcomes = g.outcomes[1:]
+		if len(g.outcomes) > 1 {
+			g.outcomes = g.outcomes[1:]
+		}
 	}
-	g.mu.Unlock()
+	if g.mergeErr != nil {
+		return gitclient.MergeOutcome{}, g.mergeErr
+	}
 	return out, nil
 }
 
@@ -558,11 +641,20 @@ func (g *fakeGit) RevertMerge(context.Context, string, string) error {
 
 func (g *fakeGit) LandedRange(context.Context, string, string) ([]gitclient.Commit, error) {
 	g.record("landed_range")
-	return g.landed, nil
+	return g.landed, g.landedErr
 }
 
-func (g *fakeGit) ChangedPaths(context.Context, string, string) ([]string, error) {
+func (g *fakeGit) ChangedPaths(_ context.Context, _, rangeSpec string) ([]string, error) {
 	g.record("changed_paths")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rangesAsked = append(g.rangesAsked, rangeSpec)
+	if seq := g.changedIn[rangeSpec]; len(seq) > 0 {
+		if len(seq) > 1 {
+			g.changedIn[rangeSpec] = seq[1:]
+		}
+		return seq[0], nil
+	}
 	return g.changed, g.changedErr
 }
 
@@ -1063,6 +1155,9 @@ type harness struct {
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
 	displaced *Displaced
+	// captures counts the CaptureDisplaced calls: a merge an agent asked for
+	// must make none.
+	captures int
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
 	// parkedTurns records the turn each guidance was routed under.
@@ -1071,6 +1166,16 @@ type harness struct {
 	awaitedTurns []ids.TurnID
 	// parkedSaid records what guidance was delivered.
 	parkedSaid []*conversationv1.UserSaid
+	// parkedWS records the workspace each guidance was routed to.
+	parkedWS []ids.WorkspaceID
+	// parkedErr fails every guidance route when set.
+	parkedErr error
+	// script is the gate's script, a real file so the gate's preflight finds
+	// it; gateTrees records the tree each gate command was resolved for.
+	script    string
+	gateTrees []string
+	// waiting is signalled when a parked run asks for its slot back.
+	waiting chan ids.WorkspaceID
 
 	// parked is signalled the moment a run parks, so a test synchronizes on the
 	// state rather than on elapsed time.
@@ -1207,10 +1312,14 @@ func newHarness(t *testing.T) *harness {
 	h.rollout = &fakeRollout{db: h.db}
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
-	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "target_dir"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "target_dir", "failure_tail", "escalation_file", "escalation_marker"}
+	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "source_dir", "target_branch", "target_dir", "conflicted_files"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "source_dir", "target_branch", "target_dir", "queue_dir", "archive_path", "failure_tail", "escalation_file", "escalation_marker"}
 
 	h.repoRoot = t.TempDir()
+	h.script = filepath.Join(h.stateDir, "test-all.sh")
+	if err := os.WriteFile(h.script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
+		t.Fatalf("writing the gate's script: %v", err)
+	}
 	h.registerRepo(theRepository, h.repoRoot)
 	h.register(theWorkspace, "ws-one")
 	o, err := newOrchestrator(h.deps())
@@ -1219,7 +1328,21 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.o = o
 	h.parked = make(chan ids.WorkspaceID, 8)
+	h.waiting = make(chan ids.WorkspaceID, 8)
 	o.onPark = func(ws ids.WorkspaceID) { h.parked <- ws }
+	o.onWait = func(ws ids.WorkspaceID) { h.waiting <- ws }
+	// NO RUN OUTLIVES ITS TEST. A test that leaves one parked ends it by
+	// cancelling the context it admitted it under; this waits, bounded, for
+	// every run goroutine to be gone.
+	t.Cleanup(func() {
+		gone := make(chan struct{})
+		go func() { o.live.Wait(); close(gone) }()
+		select {
+		case <-gone:
+		case <-time.After(5 * time.Second):
+			t.Error("a merge run outlived its test")
+		}
+	})
 	return h
 }
 
@@ -1232,9 +1355,14 @@ func (h *harness) deps() Deps {
 		Briefs:      h.loadBrief,
 		SelfRepoDir: "/self/checkout",
 		StateDir:    h.stateDir,
-		TestCommand: []string{"bash", "/fake/test-all.sh"},
-		TestRunner:  h.runner,
-		Painter:     fakePainter{},
+		TestCommand: func(tree string) []string {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.gateTrees = append(h.gateTrees, tree)
+			return []string{"bash", h.script}
+		},
+		TestRunner: h.runner,
+		Painter:    fakePainter{},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.mu.Lock()
 			h.startedSessions = append(h.startedSessions, ws)
@@ -1275,6 +1403,9 @@ func (h *harness) deps() Deps {
 			return close, nil
 		},
 		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (Displaced, bool, error) {
+			h.mu.Lock()
+			h.captures++
+			h.mu.Unlock()
 			if h.displaced == nil {
 				return Displaced{}, false, nil
 			}
@@ -1283,11 +1414,15 @@ func (h *harness) deps() Deps {
 		Freeness:          h.freeness,
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
-		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
+		ParkedRoute: func(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.parkedErr != nil {
+				return h.parkedErr
+			}
 			h.parkedSaid = append(h.parkedSaid, said)
 			h.parkedTurns = append(h.parkedTurns, turn)
+			h.parkedWS = append(h.parkedWS, ws)
 			return nil
 		},
 		Rollout: h.rollout,
@@ -1418,11 +1553,11 @@ func (h *harness) configureActions(before, after []string) {
 }
 
 // escalate writes the record the fixes agent uses to end its loop without a
-// passing suite.
+// passing suite, in its own worktree.
 func (h *harness) escalate(why string) {
 	h.t.Helper()
 	body := EscalationMarker + "\n" + why + "\n"
-	if err := os.WriteFile(filepath.Join(h.targetD, EscalationFile), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(h.sourceD, EscalationFile), []byte(body), 0o644); err != nil {
 		h.t.Fatalf("writing the escalation record: %v", err)
 	}
 }
@@ -1437,11 +1572,27 @@ func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
 	return lease.ID
 }
 
-// enqueue queues the harness's merge, failing the test if it is refused.
+// enqueue queues the harness's merge as the USER asks for one, failing the
+// test if it is refused.
 func enqueue(t *testing.T, h *harness) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
+	}
+}
+
+// waitForWaiting blocks until the harness's parked merge asks for its slot
+// back, then grants it by running the pump once, which returns when the run
+// next parks or ends.
+func resume(t *testing.T, h *harness, ctx context.Context) {
+	t.Helper()
+	select {
+	case <-h.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parked merge never asked for its slot back")
+	}
+	if _, err := h.o.pumpOnce(ctx, h.repoKey()); err != nil {
+		t.Fatalf("granting the resumed merge its slot: %v", err)
 	}
 }
 
@@ -1514,4 +1665,93 @@ func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error)
 	out := make([]wsm.Repository, len(d.repos))
 	copy(out, d.repos)
 	return out, nil
+}
+
+// gateBroken scripts n gate runs that exit 127: the shell could not find the
+// gate's command, so the gate never ran.
+func (h *harness) gateBroken(n int) {
+	for i := 0; i < n; i++ {
+		h.runner.runs = append(h.runner.runs, scriptedRun{
+			Output: "bash: modules/app/agent-repl/bin/test-all.sh: No such file or directory\n", Code: 127})
+	}
+}
+
+// parkOnABrokenGate admits the harness's merge on a gate that exits 127 every
+// time it runs, and returns once the run has parked. The run stays alive,
+// parked, until ctx ends -- so every caller cancels ctx before it returns.
+func parkOnABrokenGate(t *testing.T, h *harness, ctx context.Context, runs int) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateBroken(runs)
+	enqueue(t, h)
+	if err := h.admit(ctx); err != nil {
+		t.Fatalf("admitting the merge: %v", err)
+	}
+	waitForParked(t, h)
+}
+
+// openIntervals names every ledger interval of the harness's merge that was
+// opened and never closed, as "<kind>/<round>".
+func (h *harness) openIntervals() []string {
+	entries, _ := h.db.MergeLedger(context.Background(), theWorkspace)
+	open := map[string]bool{}
+	for _, entry := range entries {
+		for _, interval := range entry.Intervals {
+			key := roundKey(interval.Kind, interval.Round)
+			if interval.EndedAt == nil {
+				open[key] = true
+			} else {
+				delete(open, key)
+			}
+		}
+	}
+	var out []string
+	for key := range open {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// leaseHeld reports whether the harness's workspace still holds a lease.
+func (h *harness) leaseHeld() bool {
+	_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+	return held
+}
+
+// lockFree reports whether the harness repository's kernel lock is free, by
+// taking it and giving it straight back.
+func (h *harness) lockFree(t *testing.T) bool {
+	t.Helper()
+	lock, taken, err := acquireRepoLock(h.o.lockDir, string(h.repoKey()))
+	if err != nil {
+		t.Fatalf("probing the repository lock: %v", err)
+	}
+	if taken {
+		if err := lock.Release(); err != nil {
+			t.Fatalf("releasing the probe's lock: %v", err)
+		}
+	}
+	return taken
+}
+
+// queuedEntries names the workspaces on the harness repository's durable
+// queue, in order.
+func (h *harness) queuedEntries() []string {
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	var out []string
+	for _, entry := range entries {
+		out = append(out, string(entry.Workspace))
+	}
+	return out
+}
+
+// route submits guidance to the harness's parked merge under a bounded wait,
+// so a park that never answers fails the test rather than hanging it.
+func route(h *harness, ctx context.Context, turn ids.TurnID, text string) error {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return h.o.RouteParked(bounded, theWorkspace, turn, saidText(text))
 }

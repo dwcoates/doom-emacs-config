@@ -935,6 +935,7 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f, _, _ := promptMergeFixture(t)
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -971,6 +972,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 	// Arrange: the scripted conflict's brief is concluded, so the run leaves
 	// the conflicts phase and parks awaiting the user's guidance.
 	f, _, _ := promptMergeFixture(t)
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -1009,6 +1011,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	})
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -2141,6 +2144,7 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 
 	// Act: the merge admits, captures the still-open turn as displaced, and
 	// lands with no conflict and a passing gate.
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}

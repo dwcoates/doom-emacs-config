@@ -465,6 +465,9 @@ func contains(args []string, want string) bool {
 // git leaf are exactly what a missing effect would trip.
 func worktree(s *State, repo *Repo, subject []string) Result {
 	switch {
+	case len(subject) >= 2 && subject[1] == "add" && contains(subject, "--detach"):
+		return addDetached(s, repo, subject)
+
 	case len(subject) >= 2 && subject[1] == "add":
 		var branchName, dir, base string
 		for i := 2; i < len(subject); i++ {
@@ -564,6 +567,55 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 	return Result{Stderr: "fatal: fakegit: unsupported worktree command\n", Exit: 128}
 }
 
+// addDetached implements `worktree add --detach <dir> <commit>`: the merge
+// queue's scratch tree, which names no branch.
+func addDetached(s *State, repo *Repo, subject []string) Result {
+	var args []string
+	for _, a := range subject[2:] {
+		if a != "--detach" {
+			args = append(args, a)
+		}
+	}
+	if len(args) != 2 {
+		return Result{Stderr: "fatal: fakegit: `worktree add --detach` needs <dir> <commit>\n", Exit: 128}
+	}
+	dir, base := args[0], args[1]
+	head, ok := s.resolve(repo, nil, base)
+	if !ok {
+		return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", base), Exit: 128}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
+		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	}
+	repo.Worktrees = append(repo.Worktrees, &Worktree{Dir: dir, Head: head})
+	return Result{Stdout: "Preparing worktree (detached HEAD)\n"}
+}
+
+// fastForward implements `merge --ff-only <commit>`: the branch checked out in
+// wt moves to commit only when its head is an ancestor of it.
+func fastForward(s *State, repo *Repo, wt *Worktree, target string) Result {
+	sha, ok := s.resolve(repo, wt, target)
+	if !ok {
+		return Result{Stderr: fmt.Sprintf("merge: %s - not something we can merge\n", target), Exit: 1}
+	}
+	if !s.reachable(sha)[wt.Head] {
+		return Result{Stderr: "fatal: Not possible to fast-forward, aborting.\n", Exit: 128}
+	}
+	wt.Head = sha
+	if wt.Branch != "" {
+		repo.BranchHeads[wt.Branch] = sha
+		for _, other := range repo.Worktrees {
+			if other.Branch == wt.Branch {
+				other.Head = sha
+			}
+		}
+	}
+	return Result{Stdout: "Fast-forward\n"}
+}
+
 func branch(repo *Repo, subject []string) Result {
 	if len(subject) >= 3 && subject[1] == "-D" {
 		name := subject[2]
@@ -593,11 +645,24 @@ func merge(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 	if wt == nil {
 		return Result{Stderr: "fatal: not a working tree\n", Exit: 128}
 	}
+	if contains(subject, "--ff-only") {
+		return fastForward(s, repo, wt, source)
+	}
 	for i, c := range s.Conflicts {
-		if Canon(c.Dir) != Canon(wt.Dir) || c.Branch != source {
+		// A CONFLICT SCRIPTED ON ANY TREE OF THE REPOSITORY applies to a merge
+		// in any of its trees: the queue merges in a scratch tree of its own,
+		// whose path a test does not know, and the conflict is a fact about
+		// the two histories, not about the directory.
+		if !sameRepoTree(repo, c.Dir, wt.Dir) || c.Branch != source {
 			continue
 		}
-		s.Conflicts = append(s.Conflicts[:i], s.Conflicts[i+1:]...)
+		head := repo.BranchHeads[source]
+		if c.SourceHead != "" && c.SourceHead != head {
+			// The branch moved since the conflict was met: resolved.
+			s.Conflicts = append(s.Conflicts[:i], s.Conflicts[i+1:]...)
+			break
+		}
+		c.SourceHead = head
 		wt.Conflicted = c.Paths
 		return Result{
 			Stdout: "Auto-merging\nCONFLICT (content): Merge conflict\n",
@@ -611,7 +676,19 @@ func merge(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 	}
 	landedPaths := s.Commits[sourceHead].pathsOr(nil)
 	c := s.AddCommit(repo, wt.Branch, message, []string{wt.Head, sourceHead}, landedPaths)
+	if wt.Branch == "" {
+		wt.Head = c.SHA
+	}
 	return Result{Stdout: "Merge made by the 'ort' strategy.\n" + c.SHA + "\n"}
+}
+
+// sameRepoTree reports whether a scripted conflict's directory and a merging
+// tree are trees of one repository.
+func sameRepoTree(repo *Repo, scripted, merging string) bool {
+	if Canon(scripted) == Canon(merging) {
+		return true
+	}
+	return repo.Worktree(scripted) != nil || Canon(scripted) == Canon(repo.Dir)
 }
 
 func (c *Commit) pathsOr(fallback []string) []string {
@@ -636,6 +713,9 @@ func commit(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 	wt.Conflicted = nil
 	wt.Dirty = false
 	c := s.AddCommit(repo, wt.Branch, message, parents, conflicted)
+	if wt.Branch == "" {
+		wt.Head = c.SHA
+	}
 	return Result{Stdout: "[" + wt.Branch + " " + s.Abbrev(c.SHA) + "] " + message + "\n"}
 }
 
@@ -717,6 +797,9 @@ func (s *State) rangeCommits(repo *Repo, rangeSpec string) []*Commit {
 	if !found {
 		return nil
 	}
+	// `<a>...<b>` is what b brought since the two diverged: every commit
+	// reachable from b and not from a, which is the two-dot walk.
+	right = strings.TrimPrefix(right, ".")
 	from := s.peel(repo, left)
 	to := s.peel(repo, right)
 	excluded := s.reachable(from)

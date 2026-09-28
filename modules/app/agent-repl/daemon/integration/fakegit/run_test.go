@@ -1480,3 +1480,142 @@ func TestGitDirOfIsWhatRevParseReports(t *testing.T) {
 		t.Fatalf("GitDirOf = (%q, %v), want what rev-parse reported, %q", got, ok, reported.Stdout)
 	}
 }
+
+// --- the merge queue's own tree ------------------------------------------
+
+func TestWorktreeAddDetachChecksTheCommitOutWithNoBranch(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	tree := filepath.Join(t.TempDir(), "queue-tree")
+	base := repo.BranchHeads["main"]
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", "--detach", tree, base})
+
+	// Assert.
+	wt := repo.Worktree(tree)
+	if got.Exit != 0 || wt == nil || wt.Branch != "" || wt.Head != base {
+		t.Fatalf("worktree add --detach = %+v, tree %+v; want a detached tree at %s", got, wt, base)
+	}
+}
+
+func TestAMergeInADetachedTreeMovesOnlyThatTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	tree := filepath.Join(t.TempDir(), "queue-tree")
+	base := repo.BranchHeads["main"]
+	repo.AddBranch("feature", base)
+	s.AddCommit(repo, "feature", "feature work", []string{base}, []string{"f.txt"})
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "--detach", tree, base})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", tree, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(tree).Head == base || repo.BranchHeads["main"] != base {
+		t.Fatalf("merge = %+v; tree head %s, main %s; want the tree moved and main untouched",
+			got, repo.Worktree(tree).Head, repo.BranchHeads["main"])
+	}
+}
+
+func TestMergeFFOnlyMovesTheBranchToADescendant(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	ahead := s.AddCommit(repo, "", "the queue's merge", []string{base}, nil)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge", "--ff-only", ahead.SHA})
+
+	// Assert.
+	if got.Exit != 0 || repo.BranchHeads["main"] != ahead.SHA || repo.Worktree(dir).Head != ahead.SHA {
+		t.Fatalf("merge --ff-only = %+v; main %s; want main fast-forwarded to %s", got, repo.BranchHeads["main"], ahead.SHA)
+	}
+}
+
+func TestMergeFFOnlyRefusesATargetThatMoved(t *testing.T) {
+	// Arrange: the queue's merge was made on base; main moved on since.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	queued := s.AddCommit(repo, "", "the queue's merge", []string{base}, nil)
+	s.AddCommit(repo, "main", "someone else's commit", []string{base}, nil)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge", "--ff-only", queued.SHA})
+
+	// Assert.
+	if got.Exit == 0 || !strings.Contains(got.Stderr, "Not possible to fast-forward") {
+		t.Fatalf("merge --ff-only onto a moved branch = %+v, want git's refusal", got)
+	}
+}
+
+func TestAScriptedConflictStandsWhileTheBranchDoesNotMove(t *testing.T) {
+	// Arrange: a conflict met once.
+	s, repo, dir := world(t)
+	repo.AddBranch("feature", repo.BranchHeads["main"])
+	s.Conflicts = append(s.Conflicts, &Conflict{Dir: dir, Branch: "feature", Paths: []string{"a.txt"}})
+	Run(s, "/", []string{"-C", dir, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+	Run(s, "/", []string{"-C", dir, "merge", "--abort"})
+
+	// Act: the same two histories merged again.
+	got := Run(s, "/", []string{"-C", dir, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+
+	// Assert.
+	if got.Exit == 0 {
+		t.Fatalf("the same merge landed the second time: %+v, want the conflict again", got)
+	}
+}
+
+func TestAScriptedConflictIsGoneOnceTheBranchMoved(t *testing.T) {
+	// Arrange: a conflict met once, then resolved on the branch.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	repo.AddBranch("feature", base)
+	s.Conflicts = append(s.Conflicts, &Conflict{Dir: dir, Branch: "feature", Paths: []string{"a.txt"}})
+	Run(s, "/", []string{"-C", dir, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+	Run(s, "/", []string{"-C", dir, "merge", "--abort"})
+	s.AddCommit(repo, "feature", "resolve the conflict", []string{base}, []string{"a.txt"})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+
+	// Assert.
+	if got.Exit != 0 {
+		t.Fatalf("the merge after the branch moved = %+v, want it to land", got)
+	}
+}
+
+func TestAScriptedConflictAppliesToAnyTreeOfItsRepository(t *testing.T) {
+	// Arrange: a conflict scripted on the main tree, merged in the queue's.
+	s, repo, dir := world(t)
+	tree := filepath.Join(t.TempDir(), "queue-tree")
+	base := repo.BranchHeads["main"]
+	repo.AddBranch("feature", base)
+	s.Conflicts = append(s.Conflicts, &Conflict{Dir: dir, Branch: "feature", Paths: []string{"a.txt"}})
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "--detach", tree, base})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", tree, "merge", "--no-ff", "--no-edit", "-m", "merge feature", "feature"})
+
+	// Assert.
+	if got.Exit == 0 {
+		t.Fatalf("the queue tree's merge landed: %+v, want the repository's scripted conflict", got)
+	}
+}
+
+func TestDiffOverAThreeDotRangeListsWhatTheBranchBrought(t *testing.T) {
+	// Arrange: main moved on its own; the branch changed one file.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	repo.AddBranch("feature", base)
+	s.AddCommit(repo, "feature", "the branch's work", []string{base}, []string{"b.txt"})
+	s.AddCommit(repo, "main", "main's own work", []string{base}, []string{"m.txt"})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "diff", "--name-only", "-z", "main...feature"})
+
+	// Assert.
+	if got.Stdout != "b.txt\x00" {
+		t.Fatalf("diff main...feature = %q, want only what the branch brought", got.Stdout)
+	}
+}

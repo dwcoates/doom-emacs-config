@@ -145,6 +145,11 @@ type Deps struct {
 	// MintTurn mints the turn the daemon acknowledges with. nil means
 	// wsm.NewTurnID.
 	MintTurn func() ids.TurnID
+	// MovedOn, when set, is told each time the queue ACCEPTED a submission of
+	// the workspace's own (a prompt or a session act): the workspace has moved
+	// on, which is what retires a concluded merge's standing state
+	// (merge.Orchestrator.RetireConcluded). nil tells nobody.
+	MovedOn func(ctx context.Context, ws ids.WorkspaceID)
 	// Log is the handler's logger.
 	Log dlog.Surfaces
 }

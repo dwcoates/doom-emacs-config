@@ -185,6 +185,31 @@ func (r *Repo) CommitIn(worktree, file, content string) string {
 	return sha
 }
 
+// CommitWork records one commit of WORK on the branch checked out in the
+// worktree at dir, as the workspace's agent would have made it, and answers
+// its sha. A branch with nothing on it is already on its target, so its merge
+// concludes at once with nothing to land (merge: "already on <target>"); a
+// test that means to exercise a merge's phases commits work first. paths are
+// what the commit touches, `work.txt` when none are named.
+func CommitWork(t *testing.T, dir string, paths ...string) string {
+	t.Helper()
+	if len(paths) == 0 {
+		paths = []string{"work.txt"}
+	}
+	for _, path := range paths {
+		writeFile(t, filepath.Join(dir, path), "work\n")
+	}
+	var sha string
+	World(t).edit(func(s *fakegit.State) {
+		repo, wt := s.FindWorktree(dir)
+		if repo == nil || wt == nil || wt.Branch == "" {
+			t.Fatalf("harness: %s is no worktree with a branch checked out", dir)
+		}
+		sha = s.AddCommit(repo, wt.Branch, "the workspace's work", []string{wt.Head}, paths).SHA
+	})
+	return sha
+}
+
 // Branch creates a branch off the current head and checks it out in the main
 // worktree.
 func (r *Repo) Branch(name string) {
