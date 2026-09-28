@@ -47,6 +47,16 @@ message SessionStarted {
   //
   // The turn in flight, if one is. UNSET when the main thread is idle.
   optional TurnId turn_in_flight = 5;
+  // The turns WAITING behind turn_in_flight, in the order they will run. A
+  // turn the vendor started on its own runs AHEAD of a send already in the
+  // vendor's queue -- the shim delivers that send rather than refusing it,
+  // and matches each reply to its own send by id -- so turn_in_flight names
+  // the RUNNING turn and each turn here stands in flight when the turn ahead
+  // of it ends. A daemon that re-attaches learns every turn the shim holds
+  // from these two fields together; told only the running one, it closed the
+  // waiting turn as ended unobserved. EMPTY whenever turn_in_flight is unset,
+  // and never lists turn_in_flight itself.
+  repeated TurnId turns_waiting = 9;
   // Every detached item live now, each exactly as its spawning stream would
   // have announced it, so a consumer opens the matching stream for each.
   repeated AgentDetachedWork live_work = 6;
