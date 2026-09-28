@@ -263,6 +263,11 @@ type Deps struct {
 	// ReadyBound bounds the wait for a spawned successor to prove it is
 	// serving (Successor.Ready). Zero means DefaultReadyBound.
 	ReadyBound time.Duration
+	// FactsBound bounds a successor's wait, on a MID-WORK adoption, for the
+	// adopted shim to re-announce its session facts. A shim that does not is
+	// refused, and the incumbent transfers the workspace at freeness. Zero
+	// means DefaultFactsBound.
+	FactsBound time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock
 	// Lifetime is the daemon's serving lifetime. Work the controller runs past
@@ -282,6 +287,17 @@ type BounceRegistry interface {
 	// this daemon has taken the workspace back; see
 	// promptqueue.Queue.EndKeptDrain.
 	EndKeptDrain(ws ids.WorkspaceID)
+	// SealMove takes, for a running transfer, what the queue holds for the
+	// workspace only in memory and the replacements the move carries; see
+	// promptqueue.Queue.SealMove.
+	SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handoff, []bounce.Request, error)
+	// UnsealMove puts a seal's memory back for a move that did not land.
+	UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error
+	// AdoptHandoff installs the carried queue memory on the adopting daemon.
+	AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error
+	// RejudgeHeld re-judges the held prompts whose verdicts the seal
+	// superseded, against the adopted shim's running turn.
+	RejudgeHeld(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // ShimBuildFunc answers the installed shim bundle's content hash.
@@ -458,6 +474,16 @@ type ShimFleet interface {
 	// Resume runs StartSession(resume) on c. A cold context is an ANSWER, not
 	// an error: it comes back on Resumed.Cold for the ordinary cold gate.
 	Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) (Resumed, error)
+	// AwaitFacts blocks until the adopted watcher has taken up the session
+	// facts the shim re-announced, or ctx ends: a mid-work adoption lets no
+	// held prompt go before it knows the turn in flight.
+	AwaitFacts(ctx context.Context, ws ids.WorkspaceID) error
+	// ColdGateStanding answers the facts of a cold gate standing on the
+	// workspace, false when none stands: the carry takes it across.
+	ColdGateStanding(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	// AdoptParked dials a running shim parked at its cold gate, holds it with
+	// no watcher, and raises the carried gate on this daemon.
+	AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error)
 }
 
 // Resumed is what a resume answered.
@@ -525,6 +551,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.ReadyBound <= 0 {
 		deps.ReadyBound = DefaultReadyBound
+	}
+	if deps.FactsBound <= 0 {
+		deps.FactsBound = DefaultFactsBound
 	}
 	c := &controller{
 		deps:          deps,

@@ -269,9 +269,15 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 }
 
 // completeHandover is the UNBOUNDED half: every workspace's transfer is
-// asked of the prompt queue's bounce registry AT ONCE, and each happens at its
-// own workspace's freeness — independently, so a busy workspace never delays
-// a free one queued behind it. A forced handover transfers them all now.
+// asked of the prompt queue's bounce registry AT ONCE.
+//
+// A HANDOVER NEVER WAITS ON WORK (owner ruling, 2026-09-27). Each transfer
+// asks for the DISPATCH-QUIET gate, so the registry takes it the moment no
+// delivery is mid-flight, turn and detached work notwithstanding: the transfer
+// detaches the shim without stopping anything, and the successor adopts it
+// mid-turn. Only a transfer the successor REFUSED to adopt mid-work (an old
+// shim) is asked again at freeness (fallBackToFreeness). The layout restart's
+// stand-down is not a handover, and keeps the freeness gate.
 //
 // ONE goroutine follows the handover to its end — the transfers, the adoption
 // windows, the stand-down of what cannot be transferred, the exit — and it
@@ -282,12 +288,17 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 	var windows sync.WaitGroup
 	outcomes := make(chan transferOutcome, len(plan.workspaces))
 	requested := 0
+	gate := bounce.GateDispatchQuiet
+	if plan.restart {
+		gate = bounce.GateFreeness
+	}
 	for _, ws := range plan.workspaces {
 		ws := ws
 		req := bounce.Request{
 			Reason:       string(ReasonHandoverTransfer),
 			Force:        plan.forced,
 			KeepDraining: true,
+			WaitFor:      gate,
 			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
 				return c.transfer(runCtx, ws, plan, plan.snapshot[id], &windows)
 			},
@@ -423,6 +434,20 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.log.Debug(opTransfer, "quiesced the workspace's intake", fields)
 	_, hadShim := c.deps.Shims.Client(ws.ID)
 
+	// SEAL, THEN CARRY, BEFORE THE RELEASE. The queue's memory of the work
+	// in flight -- its acts, its running cut, its semantic head -- and the
+	// standing cold gate are written into the workspace's carry here, while
+	// this daemon still owns the serving row: the successor reads the carry
+	// only after the release below, which is the durable edge proving it was
+	// written. A restart has no successor to carry to.
+	var move *sealedMove
+	if !plan.restart {
+		move, err = c.seal(ctx, ws.ID, fields)
+		if err != nil {
+			return errors.Join(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
+		}
+	}
+
 	// DETACH, NEVER KILL. The shim keeps running and KEEPS its kernel lock
 	// through the whole handover; the lock is the shim's, and the successor
 	// dials the still-locked process. The watches close WITH the detach: the
@@ -433,7 +458,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	case err != nil:
 		c.log.Error(opTransfer, "could not hand the workspace's shim over; taking the workspace back", withCause(fields, err))
 		return errors.Join(fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err),
-			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
+			c.takeBack(ctx, ws.ID, lease, hadShim, move, fields))
 	case handed:
 		c.log.Debug(opTransfer, "detached from the workspace's shim, leaving it running", fields)
 	default:
@@ -443,7 +468,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	moved, err := c.releaseServing(ctx, ws.ID, fields)
 	if err != nil {
 		return errors.Join(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
-			c.takeBack(ctx, ws.ID, lease, hadShim, fields))
+			c.takeBack(ctx, ws.ID, lease, hadShim, move, fields))
 	}
 
 	if plan.restart {
@@ -473,7 +498,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	windows.Add(1)
 	go func() {
 		defer windows.Done()
-		if c.timeAdoption(ctx, ws.ID, lease, handedHold, handed, fields) {
+		if c.timeAdoption(ctx, ws, plan, lease, handedHold, handed, move, windows, fields) {
 			plan.reclaimed.Add(1)
 		}
 	}()
@@ -483,10 +508,12 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 // takeBack is a failed transfer's reclaim: the workspace never reached the
 // successor, so it is served here again. Its answer is the reclaim's own
 // failure, joined onto the transfer's.
-func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, hadShim bool, fields dlog.Context) error {
+func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, hadShim bool, move *sealedMove, fields dlog.Context) error {
 	// The transfer's bounce is still running here and FAILS, which is what
-	// resumes the registry's dispatch; there is no kept drain to end.
-	_, err := c.reclaim(ctx, ws, lease, hadShim, false, fields)
+	// resumes the registry's dispatch; there is no kept drain to end. The
+	// replacements it was carrying are asked for again while it still runs,
+	// and its failure leaves them registered here.
+	_, err := c.reclaim(ctx, ws, lease, hadShim, false, move, fields)
 	return err
 }
 
@@ -511,7 +538,11 @@ func (c *controller) takeBack(ctx context.Context, ws ids.WorkspaceID, lease ids
 // endDrain is set once the transfer's bounce has FINISHED: the registry then
 // keeps the workspace drained for its new owner, and that drain is ended here
 // so dispatch resumes on this daemon.
-func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, reattach, endDrain bool, fields dlog.Context) (bool, error) {
+//
+// A SEALED MOVE IS PUT BACK before the drain ends -- the queue's acts, cut and
+// head are this daemon's again when dispatch resumes -- and the replacements
+// it carried are asked for here after it, when the registry can take them.
+func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, reattach, endDrain bool, move *sealedMove, fields dlog.Context) (bool, error) {
 	ctx = context.WithoutCancel(ctx)
 	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
 	if err != nil {
@@ -533,11 +564,17 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 			failures = append(failures, fmt.Errorf("rollout: reclaim %q: re-attach the shim: %w", ws, err))
 		}
 	}
+	if err := c.unseal(ctx, ws, move, fields); err != nil {
+		failures = append(failures, err)
+	}
 	if err := c.releaseHold(ctx, ws, lease, fields); err != nil {
 		failures = append(failures, err)
 	}
 	if endDrain {
 		c.deps.Bounces.EndKeptDrain(ws)
+	}
+	if err := c.reRequest(ctx, ws, move, fields); err != nil {
+		failures = append(failures, err)
 	}
 	if c.deps.PublishViews != nil {
 		if err := c.deps.PublishViews(ctx, ws); err != nil {
@@ -614,11 +651,79 @@ func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fie
 // lease is the hold this transfer took, which a reclaim releases; handedHold
 // is the hold the successor is expected to drain, which the window waits on
 // (see adopted), empty when nothing will drain one.
-func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease, handedHold ids.LeaseID, detached bool, fields dlog.Context) bool {
+//
+// A MID-WORK ADOPTION THE SUCCESSOR REFUSED is taken back the same way, at
+// once, and the workspace is transferred again at freeness
+// (fallBackToFreeness); the fault is not opened, because nothing failed: an old
+// shim is simply moved the old way.
+//
+// It answers whether the workspace ends this daemon's again.
+func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, lease, handedHold ids.LeaseID, detached bool, move *sealedMove, windows *sync.WaitGroup, fields dlog.Context) bool {
+	switch c.awaitAdoption(ctx, ws.ID, lease, handedHold, detached, move, fields) {
+	case adoptionLanded:
+		handedAcross(move)
+		return false
+	case adoptionRefused:
+		return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
+	case adoptionTakenBack:
+		return true
+	default:
+		return false
+	}
+}
+
+// adoptionOutcome is how one transfer's adoption window ended.
+type adoptionOutcome int
+
+// The adoption outcomes.
+const (
+	// adoptionAbandoned is the window ending with its context, or a take-back
+	// that could not be made: nothing more is decided here.
+	adoptionAbandoned adoptionOutcome = iota
+	// adoptionLanded is the successor owning the workspace.
+	adoptionLanded
+	// adoptionTakenBack is an expired window the workspace was taken back on.
+	adoptionTakenBack
+	// adoptionRefused is a mid-work adoption the successor refused; the
+	// workspace was taken back to be transferred again at freeness.
+	adoptionRefused
+)
+
+// landed is adoptionState's answer, further requiring that the successor has
+// CONSUMED the carry when it was written mid-work. Serving ownership and the
+// drained hold are not the proof then: a mid-work adoption the successor
+// refuses gives the row back -- read from the row alone, that refusal would
+// have been taken for an adoption, and the workspace left served by no daemon.
+func (c *controller) landed(ctx context.Context, ws ids.WorkspaceID, handedHold ids.LeaseID, move *sealedMove, fields dlog.Context) (done, draining bool) {
+	done, draining = c.adoptionState(ctx, ws, handedHold, fields)
+	if !done || c.carryConsumed(ws, move, fields) {
+		return done, draining
+	}
+	return false, true
+}
+
+// carryConsumed reports whether a mid-work move's carry has been taken up by
+// the successor. A move that carried nothing mid-work has nothing to consume.
+func (c *controller) carryConsumed(ws ids.WorkspaceID, move *sealedMove, fields dlog.Context) bool {
+	if move == nil || !move.midWork {
+		return true
+	}
+	_, err := os.Stat(c.carryPath(ws))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return true
+	case err != nil:
+		c.log.Error(opAdoption, "could not read whether the successor consumed the carry; the adoption window bounds the wait", withCause(fields, err))
+	}
+	return false
+}
+
+// awaitAdoption is the window itself.
+func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, lease, handedHold ids.LeaseID, detached bool, move *sealedMove, fields dlog.Context) adoptionOutcome {
 	// An adoption that already landed needs no window: the headless case claims
 	// serving inside Join, before the push it is answering was even read.
-	if c.adopted(ctx, ws, handedHold, fields) {
-		return false
+	if done, _ := c.landed(ctx, ws, handedHold, move, fields); done {
+		return adoptionLanded
 	}
 	// THE WINDOW IS A DEADLINE, NOT A DELAY. The rendezvous closes the moment
 	// every expected participant has adopted, and waiting on it is what lets
@@ -643,14 +748,20 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 		select {
 		case <-ctx.Done():
 			c.log.Debug(opAdoption, "the adoption window ended with its context", fields)
-			return false
+			return adoptionAbandoned
 		case <-done:
-			c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
-			return false
+			done = nil
+			if c.carryConsumed(ws, move, fields) {
+				c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
+				return adoptionLanded
+			}
 		case <-look.C:
-			landed, draining := c.adoptionState(ctx, ws, handedHold, fields)
+			if move != nil && move.midWork && c.refusedMidWork(ws) {
+				return c.takeBackRefused(ctx, ws, lease, detached, move, fields)
+			}
+			landed, draining := c.landed(ctx, ws, handedHold, move, fields)
 			if landed {
-				return false
+				return adoptionLanded
 			}
 			if draining && !claimSeen {
 				claimSeen = true
@@ -661,16 +772,16 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 		}
 	}
 	window := dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}
-	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, merge(fields, window))
+	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, merge(fields, window))
 	if !reclaimed {
 		if err == nil {
 			// The arbitration answered for the successor: it adopted in the
 			// window's last instant.
-			return false
+			return adoptionLanded
 		}
 		c.log.Error(opAdoption, "the adoption window expired and the workspace could not be taken back",
 			withCause(merge(fields, window), err))
-		return false
+		return adoptionAbandoned
 	}
 	workspace := ws
 	if _, faultErr := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
@@ -686,11 +797,82 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, lease
 	if err != nil {
 		c.log.Error(opAdoption, "the adoption window expired; the workspace was taken back, but not cleanly",
 			withCause(merge(fields, window), err))
-		return true
+		return adoptionTakenBack
 	}
 	c.log.Error(opAdoption, "the adoption window expired; the successor never adopted the workspace, so this daemon took it back and serves it again",
 		merge(fields, window))
-	return true
+	return adoptionTakenBack
+}
+
+// takeBackRefused takes back a workspace whose mid-work adoption the
+// successor refused. The successor gave the serving row back before it wrote
+// its refusal, so this daemon's claim is the one that stands.
+func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, detached bool, move *sealedMove, fields dlog.Context) adoptionOutcome {
+	c.log.Info(opAdoption, "the successor refused to adopt the workspace mid-work; taking it back to transfer it at freeness", fields)
+	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, fields)
+	switch {
+	case !reclaimed && err == nil:
+		// The arbitration answered for the successor after all.
+		return adoptionLanded
+	case !reclaimed:
+		c.log.Error(opAdoption, "the successor refused the mid-work adoption and the workspace could not be taken back", withCause(fields, err))
+		return adoptionAbandoned
+	case err != nil:
+		// TAKEN BACK, NOT CLEANLY: it is served here, and a second transfer
+		// over a take-back that did not finish would move what is not whole.
+		c.log.Error(opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again", withCause(fields, err))
+		return adoptionTakenBack
+	}
+	return adoptionRefused
+}
+
+// fallBackToFreeness transfers a workspace whose mid-work adoption was
+// refused AGAIN, at its freeness: the old way, which is never unsafe. It waits
+// for that transfer to run, naming the workspace on the holdout cadence while
+// it waits, and answers whether the workspace ends this daemon's.
+func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, fields dlog.Context) bool {
+	outcome := make(chan error, 1)
+	// NEVER FORCED, a forced handover's included: a forced transfer runs at
+	// once, mid-work again, and the successor would refuse it again.
+	decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, bounce.Request{
+		Reason:       string(ReasonHandoverTransfer),
+		KeepDraining: true,
+		WaitFor:      bounce.GateFreeness,
+		Run: func(runCtx context.Context, _ ids.WorkspaceID) error {
+			return c.transfer(runCtx, ws, plan, plan.snapshot[ws.ID], windows)
+		},
+		Done: func(err error) { outcome <- err },
+	})
+	if err != nil {
+		c.log.Error(opTransfer, "the bounce registry refused the transfer at freeness; the workspace stays served here", withCause(fields, err))
+		return true
+	}
+	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace again at its freeness", merge(fields, dlog.Context{
+		"now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
+	}))
+	for warnings := 0; ; {
+		select {
+		case <-ctx.Done():
+			c.log.Debug(opHandover, "the daemon's lifetime ended while a transfer at freeness was pending", fields)
+			return false
+		case err := <-outcome:
+			if err != nil {
+				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace stays served here", withCause(fields, err))
+				return true
+			}
+			// Its own adoption window, already counted in windows, decides
+			// the rest.
+			return false
+		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
+			warnings++
+			c.log.Warn(opHandover, "still waiting for workspaces to fall free; nothing will be interrupted to hurry them",
+				merge(plan.fields, dlog.Context{
+					"holdouts": []string{string(ws.ID)},
+					"warnings": warnings,
+					"cadence":  c.deps.HoldoutWarnEvery.String(),
+				}))
+		}
+	}
 }
 
 // rendezvousDone answers the channel that closes when this workspace's

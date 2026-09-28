@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
@@ -518,6 +520,13 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	if err := c.awaitServingRelease(ctx, ws, outgoing, fields); err != nil {
 		return err
 	}
+	// A REFUSED MID-WORK ADOPTION IS THE INCUMBENT'S TO TAKE BACK, and its
+	// take-back retires the marker. Until then the released row is the one
+	// the incumbent is about to claim, and no attempt here may race it.
+	if c.refusedMidWork(ws) {
+		c.log.Info(opAdopt, "this daemon refused the workspace's mid-work adoption and the incumbent has not taken it back yet; not adopting", fields)
+		return fmt.Errorf("rollout: adopt %q: %w", ws, ErrMidWorkRefused)
+	}
 
 	// THE HANDLE BECOMES A WRITING ONE HERE. A successor opens read-only
 	// because the incumbent is still the sole writer; adopting a workspace is
@@ -558,6 +567,27 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 	}
 
+	// THE CARRY IS READ BEFORE THE CLAIM: a mid-work adoption this daemon
+	// cannot make safely is refused with the row still unowned, which is the
+	// row the incumbent's take-back claims.
+	carry, carried, err := c.takeCarry(ws, outgoing, fields)
+	if err != nil {
+		return err
+	}
+	if carried && carry.MidWork && dial {
+		if ok, why := midWorkCompatible(carry); !ok {
+			return c.refuseMidWork(ws, why, fields)
+		}
+	}
+	var parked *conversationv1.SessionCold
+	if carried && len(carry.ColdGate) > 0 {
+		parked, err = decodeCold(carry.ColdGate)
+		if err != nil {
+			c.log.Error(opAdopt, "could not decode the carried cold gate; the workspace is not adopted", withCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: decode the carried cold gate: %w", ws, err)
+		}
+	}
+
 	// THE ROW IS CLAIMED BEFORE THE SHIM IS DIALED, through the one
 	// arbitration the incumbent's reclaim also goes through. An incumbent
 	// whose adoption window expired takes the workspace back by the same
@@ -582,17 +612,47 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// workspace served without a session, which its next prompt revives.
 	var dialErr error
 	if dial {
-		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
-			c.log.Error(opAdopt, "could not adopt the workspace's running shim; its held intake is drained all the same", withCause(fields, err))
-			dialErr = fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
+		dialErr = c.dialAdopted(ctx, ws, parked, fields)
+	}
+	// A MID-WORK ADOPTION LETS NO HELD PROMPT GO BEFORE IT KNOWS THE TURN IN
+	// FLIGHT: until the adopted shim's re-announcement is taken up, the
+	// watcher answers no turn for a turn the shim is running, and the drain
+	// below would start a second turn beside it. A shim that never
+	// re-announces is refused, and the incumbent moves it at freeness.
+	if dial && dialErr == nil && carried && carry.MidWork && parked == nil {
+		facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
+		err := c.deps.Shims.AwaitFacts(facts, ws)
+		cancel()
+		if err != nil {
+			c.log.Info(opAdopt, "the adopted shim never re-announced its session facts; the mid-work adoption is refused",
+				withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+			return c.refuseAdopted(ctx, ws, "the adopted shim never re-announced its session facts within "+c.deps.FactsBound.String(), fields)
+		}
+	}
+	// THE CARRIED QUEUE MEMORY IS INSTALLED BEFORE THE HOLD IS DRAINED: the
+	// drain is what runs the carried acts ahead of the held prompts.
+	var carryErr error
+	if carried {
+		if err := c.deps.Bounces.AdoptHandoff(ctx, ws, carry.Queue); err != nil {
+			c.log.Error(opAdopt, "could not install the carried queue memory; the held intake is drained all the same", withCause(fields, err))
+			carryErr = fmt.Errorf("rollout: adopt %q: install the carried queue memory: %w", ws, err)
 		}
 	}
 	if err := c.deps.DrainIntake(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not drain the held intake", withCause(fields, err))
-		return errors.Join(dialErr, fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err))
+		return errors.Join(dialErr, carryErr, c.consumeCarry(ws, carried),
+			fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err))
 	}
-	if dialErr != nil {
-		return dialErr
+	if carried && dialErr == nil && carryErr == nil {
+		if err := c.deps.Bounces.RejudgeHeld(ctx, ws); err != nil {
+			c.log.Error(opAdopt, "could not re-judge the held prompts whose verdicts the move superseded", withCause(fields, err))
+			carryErr = fmt.Errorf("rollout: adopt %q: re-judge the held prompts: %w", ws, err)
+		}
+	}
+	// THE CARRY IS CONSUMED ON EVERY PATH PAST THE DRAIN: its removal is what
+	// tells the incumbent a mid-work adoption landed rather than was refused.
+	if err := errors.Join(dialErr, carryErr, c.consumeCarry(ws, carried)); err != nil {
+		return err
 	}
 	if err := c.deps.PublishViews(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not publish the workspace's fresh views", withCause(fields, err))
@@ -623,6 +683,14 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		dlog.Context{"all_joining_owned": complete})
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
+
+	// THE REPLACEMENTS THE MOVE CARRIED RUN HERE, after the adoption (owner
+	// ruling, 2026-09-27: a restart racing a running move runs on the daemon
+	// the workspace moved to). Each goes through this daemon's own registry,
+	// at this daemon's freeness or at once when it was forced.
+	if carried {
+		c.runCarried(ctx, ws, carry.Replacements, fields)
+	}
 
 	// THE ADOPTED SHIM IS JUDGED NOW THAT IT IS OURS. Its build report arrived
 	// when the adoption dialed it, which was before this daemon owned the

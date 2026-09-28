@@ -147,6 +147,58 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	}
 }
 
+func TestAHandedAcrossRestartIsRecordedAsAnOutcome(t *testing.T) {
+	// Arrange: the restart raced a handover's move and was carried with it.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrHandedAcross
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert: the fake signals only once the completion has run.
+	f.rollout.awaitRelaunch(t)
+	const want = "the restart was handed to the daemon the workspace moved to, which runs it after its adoption"
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation != opRestart {
+			continue
+		}
+		if r.Level == dlog.LevelError || r.Level == dlog.LevelWarn {
+			t.Fatalf("a handed-across restart was recorded at %s: %q", r.Level, r.Message)
+		}
+		if r.Level == dlog.LevelInfo && r.Message == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want %q at INFO", f.log.logger.Records(), want)
+	}
+}
+
+func TestARestartOfAWorkspaceWhoseMoveSealedIsRefusedAsMovedAway(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.refuseErr = bounce.ErrMovedAway
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1", false)
+
+	// Assert: the refusal carries the moved-away cause the transport answers
+	// as transferring_away, and it is not recorded as a failure.
+	if !errors.Is(err, bounce.ErrMovedAway) {
+		t.Fatalf("Restart = %v, want ErrMovedAway", err)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opRestart && (r.Level == dlog.LevelError || r.Level == dlog.LevelWarn) {
+			t.Fatalf("a moved-away restart was recorded at %s: %q", r.Level, r.Message)
+		}
+	}
+}
+
 func TestAnUnregisteredRestartIsRecordedAsAnOutcome(t *testing.T) {
 	// Arrange: the shim departs before the registered restart is taken.
 	f := newFixture(t)

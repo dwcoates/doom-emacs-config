@@ -32,6 +32,9 @@ const (
 	OpSetLiveWork = "set_live_work"
 	// OpSilenceBash makes every later WatchBash open for Work go unanswered.
 	OpSilenceBash = "silence_bash"
+	// OpSilenceReannouncement makes the NEXT WatchSession open send no
+	// SessionStarted re-announcement: a shim from before the re-announcement.
+	OpSilenceReannouncement = "silence_reannouncement"
 )
 
 // Stream names accepted by drop_stream.
@@ -183,7 +186,7 @@ func ParseCommand(line []byte) (Command, error) {
 		if c.Code < 0 || c.Code > 125 {
 			return Command{}, fmt.Errorf("%s: exit code %d out of range", c.Op, c.Code)
 		}
-	case OpHang, OpUnhang, OpInfo:
+	case OpHang, OpUnhang, OpInfo, OpSilenceReannouncement:
 		// no arguments
 	case "":
 		return Command{}, errors.New("fakeshim: control line has no op")
