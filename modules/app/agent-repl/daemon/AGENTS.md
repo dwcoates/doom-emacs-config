@@ -380,6 +380,7 @@ ending row, live and on replay.
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
 | `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
+| `AGENT_REPL_HANDOVER_FACTS_BOUND` | test only | bounds a successor's wait, on a mid-work adoption, for the adopted shim to re-announce its session facts (a Go duration; the default is 10s). A malformed or non-positive value is a BOOT REFUSAL |
 | `AGENT_REPL_WORKTREE_REAP_IDLE` | operator | the landed-worktree reaper's idle threshold (a Go duration; default `24h`): a worktree with any sign of activity newer than this is never judged. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
 | `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
@@ -816,6 +817,45 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   fails after its quiesce is taken back the same way. A handover with any
   reclaimed or failed workspace does not exit.
 
+## A handover never waits on work; a shim replacement does
+
+Owner ruling, 2026-09-27. A handover transfer asks the bounce registry for
+`bounce.GateDispatchQuiet`: it is decided under the per-workspace delivery lock
+(no delivery mid-flight) and does NOT wait for a turn or detached work. The
+transfer detaches the shim (never kills it) and the successor adopts it
+mid-turn. A shim REPLACEMENT (stale build, restart verb, log ceiling) and the
+layout restart's stand-down keep `bounce.GateFreeness`.
+
+- **What lives only in memory travels in the handover carry**
+  (`rollout/carry.go`, `<state>/intent/handover-carry/<ws>.json`). The transfer
+  SEALS the queue (`promptqueue.Queue.SealMove`: queued /clear and /compact
+  acts, the running cut, the semantic head, the interrupting status; verdicts
+  still being judged are superseded, not carried) and writes the carry with the
+  standing cold gate, the shim build last reported, `mid_work`, and the shim
+  replacements the move overtook. It is written BEFORE the serving release, and
+  the successor reads it only after that release.
+- **The successor installs, then drains.** It honors only the outgoing
+  daemon's carry (another daemon's is retired at ERROR), claims the row,
+  dials the shim (`Fleet.AdoptParked` with the carried gate when one stood),
+  awaits the re-announced session facts on a mid-work carry
+  (`Fleet.AwaitFacts`, bounded by `Deps.FactsBound`), installs the queue memory
+  (`AdoptHandoff`), drains the hold, re-judges the superseded verdicts
+  (`RejudgeHeld`), and removes the carry. The removal is the incumbent's proof
+  that a mid-work adoption landed.
+- **An old shim is moved the old way.** A mid-work carry whose shim reported no
+  build is refused before the claim; one whose shim never re-announces is
+  refused after it (shim detached, row given back). Either way the successor
+  writes `<ws>.refused`; the incumbent takes the workspace back at once (no
+  `adoption_window_expired` fault) and asks for the transfer again at
+  FREENESS, never forced.
+- **A replacement racing a running move runs on the successor** (ruling 2).
+  The replacements a move overtook are carried and run through the successor's
+  own registry after its adoption; each requester's `Done` is told
+  `bounce.ErrHandedAcross`. Stale-build replacements are not carried: the
+  successor judges every adopted shim against its own installed build. A move
+  that is taken back puts its queue memory back (`UnsealMove`) and asks for the
+  carried replacements again here.
+
 ## A coalesced bounce runs every kind it was asked, never one in place of another
 
 The prompt queue's bounce registry (`internal/promptqueue/bounce.go`) keeps
@@ -1114,8 +1154,10 @@ per-task stop, or by a forced kill the user explicitly asked for. The daemon
 never forces a kill on the user's behalf for a merge, a rollout or any
 other act of its own; a holder that needs the session quiet waits on the
 fleet's watcher-driven freeness — an admitted merge through `Fleet.AwaitFree`,
-and every shim bounce and handover transfer through the prompt queue's bounce
-registry, which takes it on the freeness edge. A FORCED deploy or restart is
+and every shim bounce through the prompt queue's bounce registry, which takes
+it on the freeness edge. A handover transfer needs nothing quiet and never
+waits on work: it moves the workspace at the dispatch-quiet gate with its work
+running (see "A handover never waits on work"). A FORCED deploy or restart is
 the user's explicit ask, and only it bounces over work in flight.
 
 `forced_kill_guard_test.go` enforces it. Every `KillTurn` call whose force is
