@@ -35,6 +35,7 @@ import { fireResize } from "../../resize-observer.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { inBubbleFold, measureTitle } from "../title-measure.js";
 import { countingTicker, feedId, harness, rowContext, WORKSPACE } from "../harness.js";
+import { orderFor } from "../../feed-order.js";
 
 const ROW = "shell-1";
 const COMMAND = "npm run build -- --watch";
@@ -44,6 +45,7 @@ function ctxFor(answer?: InterruptResponse) {
   const h = harness({ interrupt: () => answer ?? interruptedDetached(1n) });
   const row = create(FeedRowSchema, {
     id: feedId(ROW),
+    order: orderFor(ROW),
     row: { case: "detachedShell", value: { shell: {} } },
   });
   return { h, rc: rowContext(h.ctx, row) };
@@ -211,6 +213,7 @@ describe("drawFeedShellHead clocks", () => {
     const h = harness({ ticker });
     const row = create(FeedRowSchema, {
       id: feedId(ROW),
+      order: orderFor(ROW),
       row: { case: "detachedShell", value: { shell: {} } },
     });
     // Act: the terminal frame.
@@ -683,6 +686,7 @@ function ctxAnswering(answer: InterruptResponse): {
   });
   const row = create(FeedRowSchema, {
     id: feedId(ROW),
+    order: orderFor(ROW),
     row: { case: "detachedShell", value: { shell: {} } },
   });
   return { rc: rowContext(ctx, row), reported };
