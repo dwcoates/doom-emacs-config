@@ -303,6 +303,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	roster := d.WatchRoster()
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -805,31 +806,33 @@ func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
 	}
 }
 
-// TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails covers
+// TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails covers
 // RosterRowStatusMergeFailed: a genuine (non-conflict) error that gives up
-// the run (internal/merge/run.go's emacsMethod, then abort() ->
+// the run (internal/merge/phases.go's attempt, then abort() ->
 // internal/merge/terminal.go's StateFailed) -- as opposed to
 // merge_conflict/parked, which a scripted conflict or a test-gate escalation
 // produce instead (merge_test.go's own tests). The scripted git failure is
-// the harness's repo.ScriptFailure, landed this round for exactly this kind
-// of real, non-conflict git failure.
-func TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails(t *testing.T) {
+// the harness's repo.ScriptFailure. (It was the landed-range read that
+// failed here once; that read now follows a landing that has HAPPENED, so
+// its failure reads merged, not failed -- internal/merge's
+// TestALandingWhoseRangeWillNotReadStillConcludesAsMerged.)
+func TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails(t *testing.T) {
 	t.Parallel()
 	// Arrange: a clean self-repo merge (mergeCleanRepo, merge_test.go) whose
-	// LandedRange git call (`rev-list`, internal/gitclient/gitclient.go) is
-	// scripted to fail after the no-ff merge itself lands cleanly.
+	// no-ff merge, made in the queue's own tree, git refuses outright.
 	f, d, repo, _ := mergeCleanRepo(t)
-	repo.ScriptFailure(repo.Dir, 1, "boom: rev-list exploded", "rev-list")
+	repo.ScriptFailure("", 1, "fatal: refusing to merge unrelated histories", "merge")
 	roster := d.WatchRoster()
-	d.ExpectWarnings("daemon.gitclient.landed_range", "daemon.merge.abort")
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.abort")
 
 	// Act
+	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert
-	got := awaitRoster(t, d, roster, "merge_failed after the landed-range git command fails", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d, roster, "merge_failed after the merge git command fails", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetMergeFailed() != nil
 	})
