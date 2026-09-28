@@ -28,7 +28,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the ten arms the contract carries", () => {
+  it("names the thirteen arms the contract carries", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual(
       [
         "background",
@@ -38,6 +38,9 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
         "idle",
         "interrupted",
         "loading",
+        "mergeConflict",
+        "mergeFailed",
+        "merged",
         "merging",
         "thinking",
         "waiting",
@@ -76,6 +79,12 @@ describe("statusArmClass", () => {
     // The footer speaks about ONE session, so a merge holding it is purple —
     // where a merging ROSTER row spends no color and reports itself by glyph.
     ["merging", "tone-purple"],
+    // A STOPPED merge is not `merging` (owner ruling, 2026-09-28): a conflict
+    // awaiting the user is green, a failure is blue, and a landed merge keeps
+    // the purple it was drawn with while it was a merging step.
+    ["mergeConflict", "tone-green"],
+    ["mergeFailed", "tone-blue"],
+    ["merged", "tone-purple"],
     ["background", "tone-yellow"],
     // blocked is blue, like disconnected and closing: a blocked session cannot
     // proceed until something outside it changes, which renders the agent

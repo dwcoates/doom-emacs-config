@@ -148,7 +148,7 @@ func TestGateArchivesTheWholeRunNotTheTail(t *testing.T) {
 	h.runner.runs = append(h.runner.runs, scriptedRun{Output: output, Code: 1})
 
 	// Act.
-	result, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD,
+	result, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD, h.o.deps.TestCommand(h.targetD),
 		SuiteSelection{Suites: []string{"daemon"}})
 
 	// Assert.
@@ -175,7 +175,7 @@ func TestGateArchiveIsNamedByLeaseAndRound(t *testing.T) {
 	h.runner.runs = append(h.runner.runs, scriptedRun{Code: 0})
 
 	// Act.
-	result, err := h.o.runGate(context.Background(), "lease-7", 3, h.targetD,
+	result, err := h.o.runGate(context.Background(), "lease-7", 3, h.targetD, h.o.deps.TestCommand(h.targetD),
 		SuiteSelection{Suites: []string{"daemon"}})
 
 	// Assert.
@@ -195,7 +195,7 @@ func TestGateRefusesAnUnknownSuiteName(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	_, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD,
+	_, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD, h.o.deps.TestCommand(h.targetD),
 		SuiteSelection{Suites: []string{"not-a-suite"}})
 
 	// Assert.
@@ -213,7 +213,7 @@ func TestGateReportsAFailingSuiteAsAVerdict(t *testing.T) {
 		Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 2\n", Code: 2})
 
 	// Act.
-	result, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD,
+	result, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD, h.o.deps.TestCommand(h.targetD),
 		SuiteSelection{Suites: []string{"daemon"}})
 
 	// Assert.
@@ -234,7 +234,7 @@ func TestGateSurfacesAnUnrunnableScript(t *testing.T) {
 	h.runner.runs = append(h.runner.runs, scriptedRun{Err: boom})
 
 	// Act.
-	_, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD,
+	_, err := h.o.runGate(context.Background(), "lease-1", 1, h.targetD, h.o.deps.TestCommand(h.targetD),
 		SuiteSelection{Suites: []string{"daemon"}})
 
 	// Assert.

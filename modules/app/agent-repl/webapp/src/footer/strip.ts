@@ -76,6 +76,9 @@ import type {
   FooterStatusInterruptedActivity,
   FooterStatusLoading,
   FooterStatusLoadingActivity,
+  FooterStatusMergeConflict,
+  FooterStatusMergeFailed,
+  FooterStatusMerged,
   FooterStatusMerging,
   FooterStatusMergingActivity,
   FooterStatusThinking,
@@ -237,7 +240,8 @@ type SubStatusOneof =
   | FooterStatusBlocked["substatus"]
   | FooterStatusDisconnected["substatus"]
   | FooterStatusClosing["substatus"]
-  | FooterStatusLoading["substatus"];
+  | FooterStatusLoading["substatus"]
+  | FooterStatusMergeConflict["substatus"];
 
 /** Every per-status activity message, as one type to walk. */
 export type FooterActivity =
@@ -384,6 +388,7 @@ function statusParts(
     case "thinking":
     case "interrupted":
     case "merging":
+    case "mergeConflict":
     case "blocked":
     case "disconnected":
     case "closing":
@@ -405,12 +410,24 @@ function statusParts(
         substatusless: false,
       };
     case "background": {
-      // The one arm with NO substatus oneof: the chips and panels carry the
+      // An arm with NO substatus oneof: the chips and panels carry the
       // detail, so the substatus cell merges into the status cell always.
       const background: FooterStatusBackground = status.value;
       return {
         substatus: undefined,
         activity: background.activity,
+        activityRequired: false,
+        substatusless: true,
+      };
+    }
+    case "mergeFailed":
+    case "merged": {
+      // A STOPPED merge's terminal arms declare no substatus oneof either: the
+      // merge bubble carries the account, so the cell merges the same way.
+      const settled: FooterStatusMergeFailed | FooterStatusMerged = status.value;
+      return {
+        substatus: undefined,
+        activity: settled.activity,
         activityRequired: false,
         substatusless: true,
       };

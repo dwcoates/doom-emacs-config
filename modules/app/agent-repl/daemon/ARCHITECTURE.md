@@ -414,28 +414,52 @@ INFO.
 
 ```go
 type Orchestrator interface {
-  Enqueue(ctx, ws) error                         // MergeWorkspace + command-file merge; refuses pre-state (no layout facts, deleted session, already queued/merging)
-  Pause(ctx) error; Resume(ctx) error; Evict(ctx, ws) error
-  AnswerDequeue(ctx, ws, keep bool) error        // AnswerHeldOffer
-  OnInterrupt(ctx, ws)                           // raises the dequeue offer while queued
+  Enqueue(ctx, ws, by Requester) error           // MergeWorkspace (RequestedByUser) + command-file merge (RequestedByAgent); refuses pre-state (no layout facts, deleted session, already queued/merging)
+  Pause(ctx, scope) error; Unpause(ctx, scope) error
+  Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
+  AnswerDequeue(ctx, ws, keep bool) error        // AnswerHeldOffer; releasing a running merge abandons it
+  OnInterrupt(ctx, ws)                           // raises the dequeue offer while queued or running
+  OnWorkspaceClosed(ctx, ws)                     // abandons the workspace's merge, waiting or running
+  RouteParked(ctx, ws, turn, said) error         // a parked merge's guidance: delivered to the workspace's own session and answered
+  RetireConcluded(ctx, ws)                       // a failed/merged state retires once the workspace moves on
   Facts(ws) (MergeFacts, bool)                   // for the footer/sidebar
-  Resume(ctx) error                              // boot: resume or loudly fail in-flight merges
+  Drain(ctx); Recover(ctx) error                 // orderly exit; boot: resume or loudly fail in-flight merges
 }
 ```
-Two methods keyed by `gitclient.SameRepo(target, daemonCheckout)`: Emacs
-repo = pre-prompt → no-ff merge → conflicts (agent, once per conflict
-commit, then parked) → tests (`bin/test-all.sh --suites <selected>`, no
-flake re-run, output archived) → fixes (agent loop until pass or escalation
-record, then parked) → rollout bounce → post-prompt; every other repo =
-pre-prompt → post-prompt. Tabs are FeedMergeTab rows on the merge bubble's
-sub-feed (`feedid.Feed{Merge{leaseID}}`), append-only, round-numbered.
-Briefs are read from `prompts/` at use time (`merge-conflict-resolve.md`,
-`merge-test-failure-resolve.md`). Post-merge worktree removal after
-terminal publication. The displaced user turn is captured durably and
-resubmitted exactly once at lease release. A landing on the daemon's own
-checkout tells the deploy ONCE (`Trigger.Landed(landed []Commit)`, which
-`deploy.Deployer` implements) only after release + terminal, and never waits
-on the build.
+Two methods keyed by `gitclient.SameRepo(target, daemonCheckout)`. Every other
+repo = pre-prompt → post-prompt. The Emacs repo = pre-prompt → ATTEMPTS →
+post-prompt, where one attempt is: a detached scratch tree of the queue's own
+at the target's tip (`<state>/merge-trees/<lease>-<n>`) → no-ff merge there →
+conflicts (the agent brings ITS OWN branch up to date, once per source tip,
+then parked) → tests (the tree's own `bin/test-all.sh --suites <selected>`,
+no flake re-run, output archived; a gate that failed to run parks at once) →
+fixes (the agent commits a repair on its own branch; loop until pass or
+escalation record, then parked) → a fast-forward of the target to the tested
+commit (a target that moved is merged onto again). The target is never a
+working tree for the merge, so a failed, parked or abandoned merge leaves it
+untouched. A branch already contained in the target concludes as merged with
+nothing to land.
+
+A repository's SLOT (`slot.go`) is the one right to make a tree, run the
+gate and move the target; the admission pump is its only grantor and the
+repository's kernel lock travels with it. A PARKED run yields its slot, so
+the merges behind it proceed; once its guidance turn has ended it waits for
+the slot again and makes its merge afresh on the new tip. Every end of a run
+-- landed, failed, abandoned, stopped -- goes through the one teardown, which
+releases the lease, the queue entry, the open ledger intervals, the tree and
+the slot. A repair that changes the merge machinery (`daemon/internal/merge/`,
+`bin/test-all.sh`) is refused and parks. Every brief and every guidance is
+addressed to the merging workspace's own session.
+
+Tabs are FeedMergeTab rows on the merge bubble's sub-feed
+(`feedid.Feed{Merge{leaseID}}`), append-only, round-numbered. Briefs are read
+from `prompts/` at use time (`merge-conflict-resolve.md`,
+`merge-test-failure-resolve.md`). Post-merge worktree removal after terminal
+publication. A user-requested merge captures the displaced user turn durably
+and resubmits it exactly once at lease release; an agent-requested one waits
+for the turn instead. A landing on the daemon's own checkout tells the deploy
+ONCE (`Trigger.Landed(landed []Commit)`, which `deploy.Deployer` implements)
+only after release + terminal, and never waits on the build.
 
 ### rollout (`internal/rollout`)
 

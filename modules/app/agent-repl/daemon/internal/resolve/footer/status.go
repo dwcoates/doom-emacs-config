@@ -4,6 +4,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
 )
 
@@ -14,7 +15,8 @@ import (
 // the resolver can never reach.
 var statusArms = []string{
 	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
-	"waiting", "thinking", "background", "idle",
+	"merge_conflict", "merge_failed", "merged", "waiting", "thinking",
+	"background", "idle",
 }
 
 // The FooterAllowance.status arms this resolver emits, asserted the same way
@@ -25,51 +27,91 @@ var allowanceArms = []string{"allowed", "allowed_warning", "rejected"}
 // its activity line — as ONE tree, so an illegal pairing is unrepresentable
 // rather than forbidden by comment.
 //
-// STATUS PRECEDENCE, strongest claim first:
-//  1. disconnected — one of the three connectivity hops is not serving, so
-//     nothing else the footer could say is knowable right now.
-//  2. closing — a close was requested; its refusal manifests here.
-//  3. interrupted — MOMENTARY, retired by the R1 dwell.
-//  4. loading — MOMENTARY, retired by the R1 dwell.
-//  5. blocked — the session cannot proceed until something outside it changes.
-//  6. merging — the daemon holds this session for a merge.
-//  7. thinking·<the answered remediation> — a standing cold gate's answer is
-//     being SPENT. It outranks `waiting` because the gate it answers is not
-//     lifted until the re-open lands, and drawing the question over the answer
-//     is exactly what made a minute-long compaction look like a dead button
-//     (owner's report, 2026-09-14).
-//  8. waiting — interrupting, then permission, then question, then cold gate.
-//  9. thinking — a turn is in flight.
-//  9. background — detached work runs while the main thread is free.
-//  10. waiting·wakeup — the fallback the contract admits ONLY where the footer
-//     would otherwise read idle, which is why it ranks below background.
-//  11. idle.
+// THE PRECEDENCE IS NOT STATED HERE. It is resolve/ladder's, the one ladder the
+// roster row is projected from too, so the strip and the rail cannot make
+// different coarse claims about one workspace (owner ruling, 2026-09-28). This
+// resolver only draws each rung it can claim (`rung`) and the idle family at
+// the bottom (`idleFamily`), and asserts that what it drew projects back onto
+// the claim the ladder chose.
+//
+// WITHIN a rung the order is this surface's detail:
+//   - thinking: a momentary `loading`, then a standing cold gate's answer
+//     being SPENT (it outranks the whole waiting rung, because the gate it
+//     answers is not lifted until the re-open lands, and drawing the question
+//     over the answer is what made a minute-long compaction look like a dead
+//     button — owner's report, 2026-09-14), then the turn itself;
+//   - waiting: interrupting, then permission, then question, then cold gate;
+//   - idle: the momentary `interrupted`, then background, then the wakeup
+//     fallback the contract admits ONLY where the footer would otherwise read
+//     idle, then idle itself.
 func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	if arm := r.disconnected(s, log); arm != nil {
-		return arm
+	claim, status := ladder.Resolve(s.merge.State, s.parked,
+		func(claim ladder.Claim) (*frontendv1.FooterStatus, bool) {
+			drawn := r.rung(claim, s, log)
+			return drawn, drawn != nil
+		},
+		func() *frontendv1.FooterStatus { return r.idleFamily(s) })
+	if drawn, ok := ladder.FooterClaim(status); !ok || drawn != claim {
+		log.Error("daemon.footer.status_claim",
+			"the footer drew a status that does not project onto the ladder claim it resolved",
+			dlog.Context{
+				"claim":               string(claim),
+				"drawn":               string(drawn),
+				"arm":                 statusName(status),
+				"invariant_violation": "the footer and the roster must make the same coarse claim",
+				"remediation":         "draw the rung's own arm, or place the arm in ladder.FooterClaim",
+			})
 	}
-	if arm := r.closing(s, log); arm != nil {
-		return arm
+	return status
+}
+
+// rung draws one ladder rung, or nil when this workspace's facts make no claim
+// there.
+func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	switch claim {
+	case ladder.Merging:
+		return r.merging(s, log)
+	case ladder.MergeConflict:
+		return r.mergeConflict(s, log)
+	case ladder.Disconnected:
+		return r.disconnected(s, log)
+	case ladder.Closing:
+		return r.closing(s, log)
+	case ladder.MergeFailed:
+		return r.mergeFailed(s, log)
+	case ladder.Merged:
+		return r.merged(s, log)
+	case ladder.Blocked:
+		return r.blocked(s, log)
+	case ladder.Waiting:
+		if s.coldAnswer != nil {
+			// The answer being spent outranks the whole waiting rung; the
+			// thinking rung draws it.
+			return nil
+		}
+		return r.waiting(s, log)
+	case ladder.Thinking:
+		if arm := r.loading(s, log); arm != nil {
+			return arm
+		}
+		if arm := r.coldGateAnswer(s, log); arm != nil {
+			return arm
+		}
+		return r.thinking(s, log)
+	default:
+		log.Error("daemon.footer.status_rung", "the ladder asked the footer for a rung it has no drawing for",
+			dlog.Context{
+				"claim":               string(claim),
+				"invariant_violation": "every ladder rung above idle has a footer drawing",
+				"remediation":         "add the rung to resolver.rung",
+			})
+		return nil
 	}
-	if arm := r.interrupted(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.loading(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.blocked(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.merging(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.coldGateAnswer(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.waiting(s, log); arm != nil {
-		return arm
-	}
-	if arm := r.thinking(s, log); arm != nil {
+}
+
+// idleFamily draws the bottom rung, which always answers.
+func (r *resolver) idleFamily(s *wsState) *frontendv1.FooterStatus {
+	if arm := r.interrupted(s); arm != nil {
 		return arm
 	}
 	if arm := r.background(s); arm != nil {
@@ -83,13 +125,36 @@ func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus 
 
 // disconnected resolves the link's step, or nil while the link serves without
 // degradation.
+//
+// A PARKED SESSION NEVER REACHES HERE. The ladder skips the whole rung while
+// the idle sweep's park stands (resolve/ladder): the sweep put the route down
+// itself and a prompt brings it straight back, so there is no fault to report.
+// The webapp makes that more than a wording question: its composer gate IS
+// this word (webapp/src/main.ts — a `disconnected` status closes the
+// composer), so `dead` for a parked session would withhold the very prompt
+// that revives it.
 func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if !s.linkSeen {
 		// NO LINK STATE YET IS NOT "SERVING". A standing fault that says the
 		// session cannot be reached is evidence in its own right — a bring-up
 		// that never produced a link edge at all is exactly the case row N1 1
 		// of the footer topology audit was about.
-		return r.disconnectedByFault(s, log)
+		if arm := r.disconnectedByFault(s, log); arm != nil {
+			return arm
+		}
+		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted) {
+			return nil
+		}
+		// A TURN ACCEPTED, OR A SESSION ANNOUNCED, ON A ROUTE NEVER SEEN
+		// awaits the bring-up, and the roster draws that window `init`
+		// (resolve/ladder).
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Disconnected{
+			Disconnected: &frontendv1.FooterStatusDisconnected{
+				Substatus: &frontendv1.FooterStatusDisconnected_Starting{
+					Starting: &frontendv1.FooterSubStatusDisconnectedStarting{}},
+				Activity: r.disconnectedActivity(s, log),
+			}}}
 	}
 	arm := &frontendv1.FooterStatusDisconnected{}
 	switch {
@@ -101,20 +166,6 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkRedialing"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
-	case s.link == shimclient.LinkDead && s.parked:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead && s.parked"})
-		// A PARKED SESSION IS IDLE, NOT BROKEN — the same ruling the roster
-		// states at resolve/sidebar/status.go, whose `linkArm` promises to
-		// mirror THIS step "fact for fact, so the dot and the strip cannot
-		// disagree about the same link". The idle sweep put this route down
-		// itself and a prompt brings it straight back, so there is no fault to
-		// report and the status falls through to the idle family.
-		//
-		// The webapp makes that more than a wording question: its composer
-		// gate IS this word (webapp/src/main.ts — a `disconnected` status
-		// closes the composer), so `dead` here withholds the very prompt that
-		// revives the session.
-		return nil
 	case s.link == shimclient.LinkDead && s.everConnected:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead && s.everConnected"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
@@ -201,7 +252,7 @@ func (r *resolver) closing(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 }
 
 // interrupted resolves the momentary interrupted status.
-func (r *resolver) interrupted(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+func (r *resolver) interrupted(s *wsState) *frontendv1.FooterStatus {
 	if s.interrupted == nil {
 		return nil
 	}
@@ -301,13 +352,12 @@ func (r *resolver) blockedByFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	}
 }
 
-// merging projects the merge orchestrator's facts onto the merging phase.
+// merging projects a merge IN FLIGHT onto its phase. The ladder calls it only
+// when the merge state stands on the merging rung, so a stopped merge —
+// conflict, parked, failed, merged — never reaches here: each is its own arm.
 func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	switch s.merge.State {
-	case "", "none":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"\", \"none\""})
-		return nil
 	case "enqueuing":
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"enqueuing\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueuing{
@@ -319,22 +369,6 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 				Position: int32(s.merge.QueuePosition),
 				Depth:    int32(s.merge.QueueDepth),
 			}}
-	case "parked":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"parked\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Parked{
-			Parked: &frontendv1.FooterSubStatusMergingParked{Line: s.merge.ParkedLine}}
-	case "conflict":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"conflict\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Conflicts{
-			Conflicts: &frontendv1.FooterSubStatusMergingConflicts{}}
-	case "failed":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"failed\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Failed{
-			Failed: &frontendv1.FooterSubStatusMergingFailed{}}
-	case "merged":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"merged\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Merged{
-			Merged: &frontendv1.FooterSubStatusMergingMerged{}}
 	case "merging":
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"merging\""})
 		setMergingPhase(arm, s.merge.ActiveTab)
@@ -344,6 +378,32 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 			Merge: &frontendv1.FooterSubStatusMergingMerge{}}
 	}
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
+}
+
+// mergeConflict draws a merge STOPPED awaiting the user: on a conflict, whose
+// name is the whole fact, or parked, whose line is the orchestrator's own.
+func (r *resolver) mergeConflict(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	arm := &frontendv1.FooterStatusMergeConflict{Activity: r.mergingActivity(s)}
+	if s.merge.State == "parked" {
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merge parked"})
+		arm.Substatus = &frontendv1.FooterStatusMergeConflict_Parked{
+			Parked: &frontendv1.FooterSubStatusMergingParked{Line: s.merge.ParkedLine}}
+	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeConflict{MergeConflict: arm}}
+}
+
+// mergeFailed draws a failed merge; the merge bubble carries the account.
+func (r *resolver) mergeFailed(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merge failed"})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeFailed{
+		MergeFailed: &frontendv1.FooterStatusMergeFailed{Activity: r.mergingActivity(s)}}}
+}
+
+// merged draws a landed merge.
+func (r *resolver) merged(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merged"})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merged{
+		Merged: &frontendv1.FooterStatusMerged{Activity: r.mergingActivity(s)}}}
 }
 
 // mergingPhase maps the front entry's ACTIVE TAB onto the phase substatus. The
@@ -451,12 +511,21 @@ func (r *resolver) wakeup(s *wsState) *frontendv1.FooterStatus {
 }
 
 // thinking resolves the turn's step, or nil when no turn is in flight.
+//
+// A VENDOR COMPACTION IS A TURN IN FLIGHT even before the turn-open edge it
+// belongs to lands: `SessionUpdate.compacting` arrives first, and the roster
+// draws `compacting` from that same fact the moment it does. Answering nil
+// there left the strip reading idle beside a rail reading compacting.
 func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	if s.turn == nil {
+	if s.turn == nil && !s.compacting {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusThinking{Activity: r.thinkingActivity(s)}
 	switch {
+	case s.turn == nil:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
+		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
+			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
 	case s.turn.Act == ActClear:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActClear"})
 		arm.Substatus = &frontendv1.FooterStatusThinking_Clearing{
@@ -496,7 +565,10 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 // idle is the bottom of the tree: nothing in flight.
 func (r *resolver) idle(s *wsState) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusIdle{Activity: r.idleActivity(s)}
-	if s.turnEverRan {
+	if s.turnFailed {
+		// The same turn end the roster draws `turn_failed` (ladder.ClassifyFailure).
+		arm.Substatus = &frontendv1.FooterStatusIdle_TurnFailed{TurnFailed: &frontendv1.FooterSubStatusIdleTurnFailed{}}
+	} else if s.turnEverRan {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Done{Done: &frontendv1.FooterSubStatusIdleDone{}}
 	} else {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Ready{Ready: &frontendv1.FooterSubStatusIdleReady{}}
@@ -528,6 +600,12 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:
 		return "loading"
+	case *frontendv1.FooterStatus_MergeConflict:
+		return "merge_conflict"
+	case *frontendv1.FooterStatus_MergeFailed:
+		return "merge_failed"
+	case *frontendv1.FooterStatus_Merged:
+		return "merged"
 	default:
 		return "unset"
 	}

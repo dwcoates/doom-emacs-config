@@ -831,6 +831,10 @@ func (s *footerSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.S
 	s.rec.emit(event{sink: "footer", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
 
+func (s *footerSink) OnSessionStarted(_ ids.WorkspaceID, _ *conversationv1.SessionStarted) {
+	s.rec.emit(event{sink: "footer", method: "OnSessionStarted"})
+}
+
 func (s *footerSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	held := live
 	s.rec.emit(event{sink: "footer", method: "OnLiveWorkChanged", live: &held})
@@ -1554,6 +1558,16 @@ func sessionStarted(turn string, live ...*conversationv1.AgentDetachedWork) *con
 	started := &conversationv1.SessionStarted{VendorSessionId: "vendor-1", LiveWork: live}
 	if turn != "" {
 		started.TurnInFlight = &conversationv1.TurnId{Value: turn}
+	}
+	return started
+}
+
+// sessionStartedWaiting is sessionStarted naming the turns waiting behind the
+// turn in flight, in the order they will run.
+func sessionStartedWaiting(turn string, waiting ...string) *conversationv1.SessionStarted {
+	started := sessionStarted(turn)
+	for _, w := range waiting {
+		started.TurnsWaiting = append(started.TurnsWaiting, &conversationv1.TurnId{Value: w})
 	}
 	return started
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -176,6 +177,14 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		}
 	}
 	if held {
+		// THE QUEUE'S TREES OF THE DEAD RUN GO FIRST. They hold nothing the
+		// target depends on -- the target never moved for them -- and the
+		// next run makes trees of its own under its own lease.
+		repoDir := string(repo)
+		if jobErr == nil {
+			repoDir = job.Layout.TargetDir
+		}
+		o.sweepTrees(ctx, ws, repoDir, lease.ID)
 		if err := o.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
 			log.Error(op, "could not release a recovered merge's lease", dlog.Context{
 				"workspace": string(ws), "lease": string(lease.ID), "error": err.Error()})
@@ -225,6 +234,29 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	}
 	o.publish(ws, MergeFacts{State: StateFailed, Detail: summary})
 	return nil
+}
+
+// sweepTrees removes every scratch tree a dead run of one lease left under the
+// state root. A tree that will not go is recorded and left: it is the queue's
+// own and blocks nothing.
+func (o *orchestrator) sweepTrees(ctx context.Context, ws wsm.WorkspaceID, repoDir string, lease wsm.LeaseID) {
+	const op = "daemon.merge.recover"
+	pattern := filepath.Join(o.deps.StateDir, mergeTreesDir, string(lease)+"-*")
+	trees, err := filepath.Glob(pattern)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not list a dead merge's queue trees", dlog.Context{
+			"workspace": string(ws), "lease": string(lease), "pattern": pattern, "error": err.Error()})
+		return
+	}
+	for _, tree := range trees {
+		if err := o.deps.Git.RemoveWorktree(ctx, repoDir, tree); err != nil {
+			o.deps.Log.Global().Error(op, "could not remove a dead merge's queue tree", dlog.Context{
+				"workspace": string(ws), "lease": string(lease), "tree": tree, "error": err.Error()})
+			continue
+		}
+		o.deps.Log.Global().Info(op, "removed a queue tree a dead merge left", dlog.Context{
+			"workspace": string(ws), "lease": string(lease), "tree": tree})
+	}
 }
 
 // lastTab reports the tab a merge's ledger last opened, which is where a resumed

@@ -782,8 +782,9 @@ body::after {
 
 /* Merge lifecycle: the recycle glyph — spinning while the run is the queue's
    active one (a clean apply in flight, or a conflict being resolved under the
-   same lease), still while merely queued or once the run has failed, and
-   error-red when a conflict or failure involves a human.  `merged` is NOT here: a settled merge has left the pipeline and
+   same lease), still while merely queued or once the run has failed, GREEN on
+   a conflict (an expected state ready for the user) and BLUE on a failure
+   (something is wrong with the workspace) — owner rulings, 2026-09-28.  `merged` is NOT here: a settled merge has left the pipeline and
    renders in the Recently Merged section, where the recycle mark would
    misread as still-queued, so it takes the purple disc below instead. */
 #ws-sidebar .st-merge-enqueuing,
@@ -812,8 +813,12 @@ body::after {
   font-size: 1.3rem;
   line-height: 1;
 }
-#ws-sidebar .st-merge-conflict,
-#ws-sidebar .st-merge-failed { color: var(--err); }
+/* The shared vocabulary's colors for the two colored merge arms: green is the
+   --ok of every other ready dot and blue the --init of every other blue one,
+   so these glyphs read as the same claims (render-colors.json
+   colored_merge_arms). */
+#ws-sidebar .st-merge-conflict { color: var(--ok); }
+#ws-sidebar .st-merge-failed { color: var(--init); }
 /* SPINNING: the workspace is the merge queue's ACTIVE one. `merging` is the
    daemon driving the cherry-pick; `merge-conflict` is the same run still in
    hand, holding the same lease, with the resolution now the work in flight —
@@ -6385,6 +6390,11 @@ bubble-body.bubble-body { display: block; }
 .topbar-warning-span {
   color: var(--muted);
   font-size: 0.95em;
+}
+/* A failed deploy's whole account: its lines kept, a long path wrapped. */
+.topbar-warning-whole {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---- login overlay (src/login) ----------------------------------------- */

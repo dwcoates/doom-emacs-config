@@ -33,6 +33,7 @@ interface RenderColors {
   precedence: string[];
   roster_status: Record<string, string>;
   merge_glyphs: Record<string, string>;
+  colored_merge_arms: string[];
   feed_merge_head_glyph: string;
   footer_status: Record<string, string>;
   footer_allowance: Record<string, string>;
@@ -53,6 +54,10 @@ export const PAINT_CLASSES = vocabFile("paint-classes.json") as PaintClasses;
 
 /** proto arm names are lowerCamel in the generated code, snake_case in the file. */
 const snake = (arm: string): string => arm.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/** Whether the vocabulary declares a merge arm to spend a color beside its glyph. */
+export const isColoredMergeArm = (arm: string): boolean =>
+  RENDER_COLORS.colored_merge_arms.includes(snake(arm));
 
 /** The color the vocabulary assigns a RosterRow.status arm. */
 export const rosterStatusColor = (arm: string): string => lookup(RENDER_COLORS.roster_status, arm, "roster_status");

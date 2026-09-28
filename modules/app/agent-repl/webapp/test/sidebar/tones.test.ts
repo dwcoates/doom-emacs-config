@@ -61,6 +61,18 @@ describe("the status mark", () => {
     expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-blue", glyph: "dot", char: "" });
   });
 
+  it("draws a failed merge as a blue cross", () => {
+    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-blue", glyph: "failed", char: "✕" });
+  });
+
+  it("draws a merge conflict as a green conflict mark", () => {
+    expect(rosterArmMark("mergeConflict")).toEqual({
+      toneClass: "tone-green",
+      glyph: "conflict",
+      char: "⇄",
+    });
+  });
+
   it("draws a question mark for a perspective-less workspace", () => {
     expect(rosterArmMark("inactive")).toEqual({
       toneClass: "tone-none",

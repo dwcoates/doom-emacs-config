@@ -212,6 +212,37 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect(row.querySelector(".footer-substatus-line")?.textContent).toBe("waiting on your call");
   });
 
+  it("draws a parked merge_conflict's composed line", () => {
+    const { row } = drawStrip({
+      status: withSubStatus("mergeConflict", "parked", { line: "waiting on your call" }),
+    });
+    expect(row.querySelector(".footer-substatus-line")?.textContent).toBe("waiting on your call");
+  });
+
+  it("MERGES the cell for a merge_conflict stopped on a conflict with no finer step", () => {
+    const { row } = drawStrip({ status: status("mergeConflict", {}) });
+    expect(row.querySelector(".footer-substatus")).toBeNull();
+  });
+
+  it.each([["mergeFailed"], ["merged"]])(
+    "MERGES the cell for the %s arm, which declares no substatus oneof",
+    (arm) => {
+      const { row } = drawStrip({ status: status(arm, {}) });
+      expect(row.querySelector(".footer-status")?.getAttribute("data-merged")).toBe("true");
+    },
+  );
+
+  it.each([
+    ["mergeConflict", "merge conflict", "tone-green"],
+    ["mergeFailed", "merge failed", "tone-blue"],
+    ["merged", "merged", "tone-purple"],
+  ])("words a stopped merge's %s arm '%s' in %s", (arm, word, tone) => {
+    const { row } = drawStrip({ status: status(arm, {}) });
+    const cell = row.querySelector(".footer-status");
+    expect(cell?.textContent).toBe(word);
+    expect(cell?.classList.contains(tone)).toBe(true);
+  });
+
   it("MERGES the cell for an arm with no substatus oneof at all", () => {
     const { row } = drawStrip({ status: status("background", {}) });
     expect(row.querySelector(".footer-substatus")).toBeNull();
@@ -300,6 +331,9 @@ describe("drawFooterStatusActivity", () => {
     ["thinking", "thinking", "contextInjected", { text: "webapp/CLAUDE.md" }, "webapp/CLAUDE.md"],
     ["blocked", "auth", "authenticating", { line: "open the login" }, "open the login"],
     ["blocked", "queryDied", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
+    // A dead query is a FAILED TURN (owner ruling, 2026-09-28): its line
+    // stands under `idle · turn failed`.
+    ["idle", "turnFailed", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
     ["closing", "blocked", "closeBlocked", { text: "a turn is in flight" }, "a turn is in flight"],
     ["disconnected", "startFailed", "fault", { kind: "resume_failed", detail: "the shim refused" }, "resume failed \u00b7 the shim refused"],
     ["blocked", "daemonImpaired", "fault", { kind: "prompts_dir_missing", detail: "no ~/.claude/prompts" }, "prompts dir missing \u00b7 no ~/.claude/prompts"],
@@ -1028,6 +1062,9 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
     ["disconnected", "dead"],
     ["closing", "blocked"],
     ["loading", "memory"],
+    ["mergeConflict", "parked"],
+    ["mergeFailed", null],
+    ["merged", null],
   ])("stands under the %s arm", (statusCase, subCase) => {
     const { row } = drawStrip({
       status: withActivity(statusCase, subCase, "fault", {
@@ -1352,6 +1389,9 @@ describe("the update activity: a deploy's progress on the strip", () => {
     ["disconnected", "dead"],
     ["closing", "blocked"],
     ["loading", "memory"],
+    ["mergeConflict", "parked"],
+    ["mergeFailed", null],
+    ["merged", null],
   ])("stands under the %s arm", (statusCase, subCase) => {
     const { row } = drawStrip({
       status: withActivity(statusCase, subCase, "update", { phase: { case: "installing", value: {} } }),

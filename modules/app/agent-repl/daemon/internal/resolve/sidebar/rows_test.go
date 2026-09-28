@@ -546,9 +546,7 @@ func TestViewedReportNeverDrawsANonTurnEndRowPartial(t *testing.T) {
 		}, want: "idle_async"},
 		{name: "vendor_blocked", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)
-			r.OnSessionUpdate(theWS, &conversationv1.SessionUpdate{
-				Update: &conversationv1.SessionUpdate_QueryDied{
-					QueryDied: &conversationv1.SessionQueryDied{}}})
+			r.OnSessionUpdate(theWS, rejectedRateLimit())
 		}, want: "vendor_blocked"},
 		{name: "severed", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)

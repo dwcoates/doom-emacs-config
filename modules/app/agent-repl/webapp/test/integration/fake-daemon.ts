@@ -276,6 +276,8 @@ export interface FakeDaemon {
    * meets one skips it quietly, exactly as it skips any arm it cannot draw.
    */
   pushReloadElisp(moduleRoot: string, build: string): void;
+  /** Push `faults_standing` naming one standing fault, as to an Emacs stream. */
+  pushFaultsStanding(faultId: string, line: string): void;
   /**
    * Push the planned-ending arm (`DaemonStreamEnding`) on every live stream of
    * RPC: the frame a daemon standing down in a PLANNED exit sends as a
@@ -1740,6 +1742,19 @@ export function createFakeDaemon(): FakeDaemon {
         rpc === "watchDaemon"
           ? create(WatchDaemonResponseSchema, { push: { case: "ending", value: {} } })
           : create(WatchWorkspaceRosterResponseSchema, { push: { case: "ending", value: {} } }),
+      );
+    },
+    pushFaultsStanding(faultId, line) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, {
+          push: {
+            case: "faultsStanding",
+            value: { faults: [{ faultId, line, fault: { detail: line }, openedAtMs: 1_000n }] },
+          },
+        }),
       );
     },
     pushReloadElisp(moduleRoot, build) {
