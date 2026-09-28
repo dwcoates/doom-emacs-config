@@ -597,6 +597,14 @@ func (s *ShimControl) SilenceBash(work string) {
 	s.send(controlCommand{Op: "silence_bash", Work: work})
 }
 
+// SilenceNextReannouncement makes the next WatchSession open send no
+// SessionStarted re-announcement, as a shim from before the re-announcement
+// would: the successor adopting it mid-work never learns its facts.
+func (s *ShimControl) SilenceNextReannouncement() {
+	s.t.Helper()
+	s.send(controlCommand{Op: "silence_reannouncement"})
+}
+
 // Hang stops the fake answering anything.
 func (s *ShimControl) Hang() {
 	s.t.Helper()
