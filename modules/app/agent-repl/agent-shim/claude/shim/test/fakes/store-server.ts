@@ -590,7 +590,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           while (!state.closed && !context.signal.aborted) {
             const next = state.pending.shift();
             if (next !== undefined) {
-              yield create(storev1.WatchAgentSessionResponseSchema, { line: next });
+              yield create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: next } });
               continue;
             }
             // PARKED, BUT STILL CANCELLABLE. A generator suspended at an await
@@ -610,7 +610,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
               if (state.closed || context.signal.aborted) settle(null);
             });
             if (awaited === null) return;
-            yield create(storev1.WatchAgentSessionResponseSchema, { line: awaited });
+            yield create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: awaited } });
           }
         } finally {
           openTailTokens.delete(token);
