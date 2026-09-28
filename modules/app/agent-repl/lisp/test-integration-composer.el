@@ -44,7 +44,6 @@
 (declare-function agent-repl-input-attachments "input")
 (declare-function agent-repl-send-with-postfix "input")
 (declare-function agent-repl-send-with-prefix "input")
-(declare-function agent-repl-prompt-queue-pending "prompt-queue")
 (declare-function agent-repl--input-waiting "input")
 (declare-function agent-repl-link-up-p "daemon-link")
 (defvar agent-repl-send-posthooks)
@@ -1148,8 +1147,6 @@ the editor situation that caused it."
 (declare-function agent-repl-link-connect "daemon-link")
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-link--cancel-reconnect "daemon-link")
-(declare-function agent-repl--prompt-queue-enqueue "prompt-queue")
-(declare-function agent-repl--prompt-queue-on-finish "prompt-queue")
 (declare-function agent-repl--input-said "input")
 (declare-function agent-repl-host-conn "host")
 (defvar agent-repl-input-notice)
@@ -1447,38 +1444,37 @@ naming one is refused before a request is built.\""
       (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
 
 ;; audit-2 #38
-(ert-deftest agent-repl-itest-composer-deferral-drain-mints-a-fresh-key ()
-  "A DEFERRED prompt drains under a FRESH idempotency key.
-Ledger (R-COMPOSER): \"the drain resends under [the failed key]
-\(deferrals mint fresh)\".  A deferral never attempted anything, so it is
-a new turn rather than a retry — reusing an earlier key would let the
-daemon's duplicate refusal swallow a prompt the user deliberately queued
-for its own turn."
+(ert-deftest agent-repl-itest-composer-deferral-mints-a-fresh-key ()
+  "A DEFERRED prompt is submitted under a FRESH idempotency key.
+A deferral is a first attempt, not a retry, so it is a new turn --
+reusing an earlier key would let the daemon's duplicate refusal swallow a
+prompt the user deliberately deferred to its own turn."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      ;; A first, ordinary submission, so there is a prior key to differ from.
       (let ((first-key (agent-repl--send :user-sent "the first prompt"
-                                         agent-repl-itest-composer--ws)))
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        (agent-repl--prompt-queue-enqueue
-         agent-repl-itest-composer--ws :deferred
-         (agent-repl--input-said "the deferred prompt" nil)
-         :deferred-prompt "the deferred prompt")
-        (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-          ;; Act: the roster's finish edge releases it.
-          (agent-repl--prompt-queue-on-finish agent-repl-itest-composer--ws))
-        (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
-        ;; Assert.
-        (let ((drained-key (agent-repl-itest--body-field
-                            (agent-repl-itest-composer--submit-body daemon 1)
-                            'idempotencyKey)))
-          (should (stringp drained-key))
-          (should-not (equal drained-key first-key))
-          (should (string-match-p
-                   "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-4[0-9a-f]\\{3\\}-[89ab][0-9a-f]\\{3\\}-[0-9a-f]\\{12\\}\\'"
-                   drained-key)))))))
+                                         agent-repl-itest-composer--ws))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "the deferred prompt")))
+        (unwind-protect
+            (progn
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                         (lambda () agent-repl-itest-composer--ws)))
+                ;; Act.
+                (agent-repl-queue-deferred-prompt))
+              (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
+              ;; Assert.
+              (let ((deferred-key (agent-repl-itest--body-field
+                                   (agent-repl-itest-composer--submit-body daemon 1)
+                                   'idempotencyKey)))
+                (should (stringp deferred-key))
+                (should-not (equal deferred-key first-key))
+                (should (string-match-p
+                         "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-4[0-9a-f]\\{3\\}-[89ab][0-9a-f]\\{3\\}-[0-9a-f]\\{12\\}\\'"
+                         deferred-key))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 ;;;; ---- Audit-3 additions (R-SUITE-3) ----
 ;;
@@ -1656,13 +1652,12 @@ send-empty, and must carry no TextBlock at all."
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 ;; audit-3 #47
-(ert-deftest agent-repl-itest-composer-queue-deferred-prompt-clears-the-composer-and-holds-one-entry ()
+(ert-deftest agent-repl-itest-composer-queue-deferred-prompt-clears-the-composer-and-submits-it-deferred ()
   "`agent-repl-queue-deferred-prompt', the REAL command, empties the composer
-and clears its attachments, pushes history, and holds exactly ONE
-`:deferred' entry; the finish edge then drains it with BOTH its text and
-its image.
-Neither suite before this one exercised `agent-repl-queue-deferred-prompt'
-itself -- both used `--prompt-queue-enqueue' directly."
+and clears its attachments, pushes history, and submits the prompt AT ONCE
+with BOTH its text and its image, asking for the deferred delivery -- the
+daemon, not Emacs, holds it until the running turn ends (owner ruling,
+2026-09-28: held prompts survive outages and restarts)."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -1672,61 +1667,43 @@ itself -- both used `--prompt-queue-enqueue' directly."
                   agent-repl-itest-composer--ws "queue this for later")))
         (unwind-protect
             (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                       (lambda () agent-repl-itest-composer--ws))
-                      ((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+                       (lambda () agent-repl-itest-composer--ws)))
               (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
               ;; Act.
               (agent-repl-queue-deferred-prompt)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
               ;; Assert: composer emptied, attachments cleared.
               (should (equal (with-current-buffer buf (buffer-string)) ""))
               (should (null (agent-repl-input-attachments agent-repl-itest-composer--ws)))
               ;; Assert: history carries the raw text.
               (should (equal (car (buffer-local-value 'agent-repl--input-history buf))
                              "queue this for later"))
-              ;; Assert: exactly one deferred entry is pending.
-              (should (equal (length (agent-repl-prompt-queue-pending
-                                      agent-repl-itest-composer--ws :deferred))
-                             1))
-              ;; Act: the finish edge releases it.
-              (agent-repl--prompt-queue-on-finish agent-repl-itest-composer--ws)
-              (agent-repl-itest--await-call daemon "SubmitPrompt")
-              ;; Assert: the drained submission carries BOTH text and image.
+              ;; Assert: ONE submission, deferred, with BOTH text and image.
               (let ((body (agent-repl-itest-composer--submit-body daemon)))
+                (should (equal (length (agent-repl-itest--calls daemon "SubmitPrompt")) 1))
+                (should (equal (agent-repl-itest--body-field body 'delivery)
+                               "SUBMIT_PROMPT_DELIVERY_DEFERRED"))
+                (should (equal (agent-repl-itest--body-field body 'origin)
+                               "PROMPT_ORIGIN_DEFERRED_PROMPT"))
                 (should (equal (car (agent-repl-itest-composer--text-blocks body))
                                "queue this for later"))
                 (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 ;; audit-3 #47
-(ert-deftest agent-repl-itest-composer-finish-edge-releases-only-one-deferred-prompt ()
-  "One finish edge releases exactly ONE deferred prompt, however many are held.
-prompt-queue.el: \"each deferred prompt is meant to be its own discrete
-turn\" -- firing the whole queue at one settle would put several prompts
-into a single turn's wake and lose exactly the guarantee deferral gives."
+(ert-deftest agent-repl-itest-composer-an-ordinary-send-asks-for-no-delivery ()
+  "An ordinary send spells no `delivery': its absence is the ordinary one,
+so only a deferral is ever held for the running turn's end unjudged."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
-        (agent-repl--prompt-queue-enqueue
-         agent-repl-itest-composer--ws :deferred
-         (agent-repl--input-said "first deferred" nil)
-         :deferred-prompt "first deferred")
-        (agent-repl--prompt-queue-enqueue
-         agent-repl-itest-composer--ws :deferred
-         (agent-repl--input-said "second deferred" nil)
-         :deferred-prompt "second deferred")
-        ;; Act: ONE finish edge.
-        (agent-repl--prompt-queue-on-finish agent-repl-itest-composer--ws)
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        ;; Assert: exactly one sent, one still pending.
-        (should (equal (length (agent-repl-itest--calls daemon "SubmitPrompt")) 1))
-        (should (equal (car (agent-repl-itest-composer--text-blocks
-                             (agent-repl-itest-composer--submit-body daemon)))
-                       "first deferred"))
-        (should (equal (length (agent-repl-prompt-queue-pending
-                                agent-repl-itest-composer--ws :deferred))
-                       1))))))
+      ;; Act.
+      (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
+      (agent-repl-itest--await-call daemon "SubmitPrompt")
+      ;; Assert.
+      (should-not (agent-repl-itest--body-field
+                   (agent-repl-itest-composer--submit-body daemon) 'delivery)))))
 
 ;;;; ---- Finding 48: the REAL command sites, not `agent-repl--send' by keyword ----
 ;;
