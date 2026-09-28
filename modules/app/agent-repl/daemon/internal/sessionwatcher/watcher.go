@@ -251,6 +251,9 @@ type watcher struct {
 	// StartSession's answer or the shim's re-announcement. It is what makes a
 	// repeat re-announcement idempotent.
 	started bool
+	// factsIn closes the first time the session facts are taken up, which is
+	// what AwaitSessionFacts waits on.
+	factsIn chan struct{}
 	main    *agentWatch
 
 	// agents is one entry per LIVE DETACHED SUBAGENT, keyed by AgentId.value.
@@ -395,6 +398,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		unseenAsks:   map[string]struct{}{},
 
 		openAtAttach: session.OpenAtAttach,
+		factsIn:      make(chan struct{}),
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	w.unwatch = func() {}
@@ -1643,7 +1647,15 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 // whichever way they arrived: StartSession's own answer, or the shim's
 // re-announcement on an adopted watch.
 func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
+	first := !w.started
 	w.started = true
+	// THE EDGE IS SIGNALLED AFTER THE FACTS ARE TAKEN UP, under the same lock
+	// (the deferred close runs before this function's caller releases it), so
+	// a waiter released by it reads the turn in flight and the reconciled
+	// open-at-attach turns, never the moment before them.
+	if first {
+		defer close(w.factsIn)
+	}
 	w.sinks.Topbar.OnSessionStarted(w.ws, started)
 	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
 	// A RESUMED OR ADOPTED SESSION may already carry prompts with no vendor
