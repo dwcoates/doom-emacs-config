@@ -10,7 +10,8 @@ import type { PersistEntry } from "../../../src/store/persistence.js";
 import { activityOf, foldContext, MAIN_AGENT } from "../../convert/fold-harness.js";
 import { matching } from "../../expect-shapes.js";
 
-import { driveScenario, ofType, toolUseResults } from "../harness.js";
+import { driveScenario, ofType, toolUseResults, toolUses } from "../harness.js";
+import { networkResumePrompt } from "../../../src/engine/network-resume-prompt.js";
 
 const agentIdOf = (driven: Awaited<ReturnType<typeof driveScenario>>): string => {
   const attributed = (driven.messages as unknown as Record<string, unknown>[]).find(
@@ -213,6 +214,94 @@ describe("a detached subagent", () => {
       updated: (ofType(driven, "system", "task_updated")[0]?.patch as { status: string }).status,
       notified: ofType(driven, "system", "task_notification")[0]?.status,
     }).toEqual({ updated: "failed", notified: "failed" });
+  });
+});
+
+describe("a detached subagent the network cuts off", () => {
+  it("states the vendor's server_error class on the agent's own synthetic message", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-network-failed"]);
+    const synthetic = (driven.messages as unknown as Record<string, unknown>[]).find(
+      (m) => m.type === "assistant" && typeof m.error === "string",
+    );
+
+    // Assert
+    expect({
+      error: synthetic?.error,
+      model: (synthetic?.message as { model?: string } | undefined)?.model,
+      parent: typeof synthetic?.parent_tool_use_id,
+    }).toEqual({ error: "server_error", model: "<synthetic>", parent: "string" });
+  });
+
+  it("fails its notification with the ENOTFOUND notice in the summary", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-network-failed"]);
+    const notified = ofType(driven, "system", "task_notification")[0];
+
+    // Assert
+    expect(notified?.status).toBe("failed");
+    expect(String(notified?.summary)).toContain("(ENOTFOUND) (error type server_error)");
+  });
+
+  it("writes the synthetic notice to the agent's own transcript", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-network-failed"]);
+    const agentId = agentIdOf(driven);
+
+    // Assert
+    expect(
+      driven
+        .subagent(agentId)
+        .some((line) => line.type === "assistant" && JSON.stringify(line.message).includes("ENOTFOUND")),
+    ).toBe(true);
+  });
+});
+
+describe("the main agent answering the shim's network-resume prompt", () => {
+  const prompt = networkResumePrompt([
+    { taskId: "a1111111111111111", description: "first" },
+    { taskId: "a2222222222222222", description: "second" },
+  ]);
+
+  it("sends one SendMessage to each agent the prompt names", async () => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+    const sends = toolUses(driven).filter((use) => use.name === "SendMessage");
+
+    // Assert
+    expect(sends.map((use) => (use.input as { to: string }).to)).toEqual(["a1111111111111111", "a2222222222222222"]);
+  });
+
+  it("answers each send as a resume of that SAME agent", async () => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+
+    // Assert
+    expect(
+      toolUseResults(driven.transcript()).map((result) => (result as { resumedAgentId?: string }).resumedAgentId),
+    ).toEqual(["a1111111111111111", "a2222222222222222"]);
+  });
+
+  it("restarts each agent's task under its own id", async () => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+
+    // Assert
+    expect(ofType(driven, "system", "task_started").map((started) => started.task_id)).toEqual([
+      "a1111111111111111",
+      "a2222222222222222",
+    ]);
+  });
+
+  it("completes each resumed agent", async () => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+
+    // Assert
+    expect(ofType(driven, "system", "task_notification").map((notified) => notified.status)).toEqual([
+      "completed",
+      "completed",
+    ]);
   });
 });
 

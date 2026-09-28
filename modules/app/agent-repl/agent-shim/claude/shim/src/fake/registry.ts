@@ -52,7 +52,8 @@ import { QUESTION_SCENARIOS } from "./scenarios/questions.js";
 import { SESSION_SCENARIOS } from "./scenarios/session.js";
 import { SHELL_SCENARIOS } from "./scenarios/shell.js";
 import { SKILL_SCENARIOS } from "./scenarios/skills.js";
-import { SUBAGENT_SCENARIOS } from "./scenarios/subagents.js";
+import { NETWORK_RESUME, SUBAGENT_SCENARIOS } from "./scenarios/subagents.js";
+import { isNetworkResumePrompt } from "../engine/network-resume-prompt.js";
 import { TASK_SCENARIOS } from "./scenarios/tasks.js";
 import { WEB_SCENARIOS } from "./scenarios/web.js";
 
@@ -197,6 +198,12 @@ export function selectScenario(text: string): Scenario {
       );
       return candidate.scenario;
     }
+  }
+  // THE SHIM'S OWN RESUME PROMPT is answered the way the vendor's main agent
+  // answers it: a `SendMessage` per agent it names (engine/network-resume.ts).
+  if (isNetworkResumePrompt(text)) {
+    LOGGER.logVerbose({ scenario: NETWORK_RESUME.name }, "fake registry matched the shim's network-resume prompt");
+    return NETWORK_RESUME;
   }
   if (text.includes(FAIL_TURN_MARKER)) {
     LOGGER.logVerbose({ scenario: FAIL_MARKER.name }, "fake registry matched the e2e failure marker");
