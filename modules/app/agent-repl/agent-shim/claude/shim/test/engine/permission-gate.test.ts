@@ -859,6 +859,103 @@ describe("whose book an ask lands on", () => {
 });
 
 /**
+ * An ask whose book the session must ASK THE STORE for (a subagent whose spawn
+ * this process never saw): `agentFor` answers a promise, and the gate opens the
+ * ask once it settles.
+ */
+describe("an ask whose book is resolved asynchronously", () => {
+  /** A gate whose `agentFor` answers through a promise the test settles. */
+  function deferredGate(): {
+    gate: PermissionGate;
+    written: PersistEntry[];
+    settle: (agent: conversationv1.AgentId | undefined) => void;
+  } {
+    const written: PersistEntry[] = [];
+    let settle: (agent: conversationv1.AgentId | undefined) => void = () => undefined;
+    const answer = new Promise<conversationv1.AgentId | undefined>((resolve) => {
+      settle = resolve;
+    });
+    const gate = new PermissionGate({
+      mainAgentId: () => AGENT,
+      agentFor: () => answer,
+      persist: (entries) => written.push(...entries),
+      keepalive: () => false,
+      turn: () => undefined,
+      nowMs: () => 1000,
+      onPermissionModeSet: () => undefined,
+    });
+    return { gate, written, settle: (agent) => settle(agent) };
+  }
+
+  it("writes the ask on the book the lookup named", async () => {
+    // Arrange.
+    const { gate, written, settle } = deferredGate();
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
+
+    // Act.
+    settle(SUBAGENT);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+  });
+
+  it("writes the ask on the main agent when the lookup named none", async () => {
+    // Arrange.
+    const { gate, written, settle } = deferredGate();
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
+
+    // Act.
+    settle(undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(AGENT.value);
+  });
+
+  it("denies an ask whose lookup spanned a stand-down, so the vendor is never left blocked", async () => {
+    // Arrange.
+    const { gate, settle } = deferredGate();
+    const pending = gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
+    gate.standDown("the main agent was stopped");
+
+    // Act.
+    settle(SUBAGENT);
+    const result = await pending;
+
+    // Assert.
+    expect(result).toEqual({ behavior: "deny", message: "the main agent was stopped" });
+  });
+
+  it("leaves no ask registered after a stand-down the lookup spanned", async () => {
+    // Arrange.
+    const { gate, settle } = deferredGate();
+    const pending = gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
+    gate.standDown("the main agent was stopped");
+
+    // Act.
+    settle(SUBAGENT);
+    await pending;
+
+    // Assert.
+    expect(gate.pendingCount).toBe(0);
+  });
+
+  it("registers nothing until the lookup settles", () => {
+    // Arrange.
+    const { gate } = deferredGate();
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
+
+    // Assert.
+    expect(gate.pendingCount).toBe(0);
+  });
+});
+
+/**
  * The refusal arms and the unlanded oneof paths.
  *
  * Every case below is a REFUSAL or a shape the happy-path scenarios never

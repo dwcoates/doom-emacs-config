@@ -945,6 +945,42 @@ forever, and the run's announcement stayed open in the record.
   terminal landing after a sidecar `EXIT=` row replaces the spool's evidence on
   that row (the tail row keeps the output).
 
+## A resumed subagent is named by the store when this process never saw its spawn (2026-09-27)
+
+A subagent's vendor task id (`task_started.task_id`, the `<id>` of
+`agent-<id>.jsonl`) is its LOCATOR and comes back when `SendMessage` resumes
+it, but the resume's call is the send, never the spawn whose `tool_use_id` IS
+the agent. Two sources name the agent, in this order:
+
+- **The fold's own join** (`TaskKindRegistry.rememberAgent`), recorded when this
+  process sees the task start from its spawn. KEPT, not deleted: it is written
+  synchronously by this process at the spawn, so it covers the window before the
+  sidecar has discovered the transcript and its meta and booked the pairing,
+  and a store outage at the resume. The store alone would refuse a resume that
+  lands in that window.
+- **The store** (`store.v1.GetAgentByVendorTask`, `src/store/locator.ts`), the
+  sidecar's pairing, for what memory structurally cannot know: a process that
+  restarted since the spawn. The shim never reads a vendor file itself.
+
+The engine asks the store at three sites through ONE helper
+(`agentFromStore` in `engine/session.ts`), which hands every answer to the fold
+(`EngineFold.learnTaskAgent`) and writes the one record of the lookup: INFO
+found, ERROR not-found or failed.
+
+- **The announcement.** `EngineFold.taskAwaitingAgent` names a task whose call is
+  known and is not its spawn, with no join; the engine awaits the store inside
+  the serial message loop BEFORE folding, so the fold stays synchronous and no
+  later message is folded ahead. A miss stays the fold's ERROR refusal, with
+  `store_answer` in the record.
+- **The restore.** A live handle whose recorded unit is a send is re-announced
+  `created`, named by the store from the send's settled recipient (the vendor's
+  id for the agent) and described by the agent's own spawn unit
+  (`resumedRecipient` / `resumedAgentAnnouncement` in `store/reconcile.ts`).
+- **The permission gate.** `agentFor` takes the fold's `taskAgent` first, so a
+  resumed agent's ask is never credited to the send; anything nothing on the
+  stream names is looked up by its id. `agentFor` answers a promise only then,
+  and an ask whose lookup spans a stand-down is denied with that stand-down.
+
 ## The store writer: it never drops a row
 
 `src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
