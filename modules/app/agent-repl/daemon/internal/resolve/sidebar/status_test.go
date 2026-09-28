@@ -1088,9 +1088,52 @@ func TestAnUnreadTurnEndHoldsTheRowOverDetachedWork(t *testing.T) {
 			wantStatus: "idle_async",
 		},
 		{
-			name:       "a failed close leaves no unread result, so async shows",
+			name:       "failed with async live is turn_failed, full",
 			how:        wsm.CloseFailed,
 			act:        func(sidebarResolver) {},
+			wantStatus: "turn_failed",
+		},
+		{
+			name:       "orphaned with async live is turn_failed, full",
+			how:        wsm.CloseOrphaned,
+			act:        func(sidebarResolver) {},
+			wantStatus: "turn_failed",
+		},
+		{
+			name:       "agent died with async live is turn_failed, full",
+			how:        wsm.CloseAgentDied,
+			act:        func(sidebarResolver) {},
+			wantStatus: "turn_failed",
+		},
+		{
+			name:       "failed, viewed while async live is idle_async, full",
+			how:        wsm.CloseFailed,
+			act:        func(r sidebarResolver) { r.SetViewed(theWS) },
+			wantStatus: "idle_async",
+		},
+		{
+			name: "failed, async ends after read is turn_failed, partial",
+			how:  wsm.CloseFailed,
+			act: func(r sidebarResolver) {
+				r.SetViewed(theWS)
+				r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+			},
+			wantStatus: "turn_failed",
+			wantViewed: true,
+		},
+		{
+			name:       "failed, async ends while unread is turn_failed, full",
+			how:        wsm.CloseFailed,
+			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
+			wantStatus: "turn_failed",
+		},
+		{
+			name: "failed, a new prompt clears the unread result",
+			how:  wsm.CloseFailed,
+			act: func(r sidebarResolver) {
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurn(theWS, nil)
+			},
 			wantStatus: "idle_async",
 		},
 	}
@@ -1125,6 +1168,12 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 		{name: "completed, viewed", how: wsm.CloseCompleted, viewed: true, wantStatus: "done"},
 		{name: "interrupted, unread", how: wsm.CloseKilled, wantStatus: "interrupted"},
 		{name: "interrupted, viewed", how: wsm.CloseKilled, viewed: true, wantStatus: "interrupted"},
+		{name: "failed, unread", how: wsm.CloseFailed, wantStatus: "turn_failed"},
+		{name: "failed, viewed", how: wsm.CloseFailed, viewed: true, wantStatus: "turn_failed"},
+		{name: "orphaned, unread", how: wsm.CloseOrphaned, wantStatus: "turn_failed"},
+		{name: "orphaned, viewed", how: wsm.CloseOrphaned, viewed: true, wantStatus: "turn_failed"},
+		{name: "agent died, unread", how: wsm.CloseAgentDied, wantStatus: "turn_failed"},
+		{name: "agent died, viewed", how: wsm.CloseAgentDied, viewed: true, wantStatus: "turn_failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1153,20 +1202,27 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 func TestTheUnreadResultTransitionsAreRecorded(t *testing.T) {
 	cases := []struct {
 		name      string
+		how       sidebar.TurnClose
 		act       func(r sidebarResolver)
 		operation string
 	}{
-		{name: "a turn end sets unread", act: func(sidebarResolver) {}, operation: "daemon.sidebar.result_unread"},
-		{name: "an unread result outranks async", act: func(sidebarResolver) {}, operation: "daemon.sidebar.unread_outranks_async"},
-		{name: "a viewed report reads it", act: func(r sidebarResolver) { r.SetViewed(theWS) }, operation: "daemon.sidebar.result_read"},
-		{name: "a new prompt clears it", act: func(r sidebarResolver) {
+		{name: "a turn end sets unread", how: wsm.CloseCompleted, act: func(sidebarResolver) {}, operation: "daemon.sidebar.result_unread"},
+		{name: "an unread result outranks async", how: wsm.CloseCompleted, act: func(sidebarResolver) {}, operation: "daemon.sidebar.unread_outranks_async"},
+		{name: "a viewed report reads it", how: wsm.CloseCompleted, act: func(r sidebarResolver) { r.SetViewed(theWS) }, operation: "daemon.sidebar.result_read"},
+		{name: "a new prompt clears it", how: wsm.CloseCompleted, act: func(r sidebarResolver) {
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+		}, operation: "daemon.sidebar.result_unread_cleared"},
+		{name: "a failed turn end sets unread", how: wsm.CloseFailed, act: func(sidebarResolver) {}, operation: "daemon.sidebar.result_unread"},
+		{name: "an unread failed result outranks async", how: wsm.CloseFailed, act: func(sidebarResolver) {}, operation: "daemon.sidebar.unread_outranks_async"},
+		{name: "a viewed report reads a failed result", how: wsm.CloseFailed, act: func(r sidebarResolver) { r.SetViewed(theWS) }, operation: "daemon.sidebar.result_read"},
+		{name: "a new prompt clears a failed result", how: wsm.CloseFailed, act: func(r sidebarResolver) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 		}, operation: "daemon.sidebar.result_unread_cleared"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			r := endedWithAsync(t, wsm.CloseCompleted)
+			r := endedWithAsync(t, tc.how)
 
 			// Act.
 			tc.act(r)
@@ -1179,5 +1235,22 @@ func TestTheUnreadResultTransitionsAreRecorded(t *testing.T) {
 			}
 			t.Fatalf("no %s record", tc.operation)
 		})
+	}
+}
+
+func TestAnUnknownTurnCloseIsRecordedAndLeavesNoUnreadResult(t *testing.T) {
+	// Arrange: a close no build of the roster has an arm for.
+	unknown := sidebar.TurnClose(99)
+
+	// Act.
+	r := endedWithAsync(t, unknown)
+
+	// Assert: the breach is recorded loudly, and no unread result holds the
+	// row over the live detached work.
+	if !hasError(r.surfaces.Records(), "daemon.sidebar.set_turn_ended") {
+		t.Fatal("no daemon.sidebar.set_turn_ended error record for an unknown close")
+	}
+	if got := statusName(onlyRow(t, r)); got != "idle_async" {
+		t.Fatalf("status = %q, want idle_async", got)
 	}
 }

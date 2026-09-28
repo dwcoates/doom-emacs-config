@@ -255,7 +255,7 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 
 // SetViewed records that the user has READ the last turn's result, which
 // draws the row PARTIAL — but only when the report lands on a TURN-END row
-// (done or interrupted).
+// (done, interrupted or turn_failed).
 //
 // The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
 // fact, and the editor reports it whatever the status. Whether it takes is
@@ -269,7 +269,7 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 // makes the next result unread (startTurn, SetTurnEnded).
 func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
-		"the roster took the editor's viewed report; it reads the result only on a done row",
+		"the roster took the editor's viewed report; it reads the result only on a turn-end row",
 		nil, func(s *wsState, log dlog.Logger) {
 			if !s.lastArmSeen || !isTurnEndArm(s.lastArm) {
 				log.Debug("daemon.sidebar.row_viewed_refused",
@@ -337,18 +337,26 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			s.turnEverRan = true
 			s.lastClose = how
 			s.compacting = false
-			// A COMPLETED or INTERRUPTED turn leaves a result the user has
-			// not read. Any other close leaves no tracked result, but it is
-			// still a NEW ending, so a read state from before it does not
-			// carry over.
-			if how != wsm.CloseCompleted && how != wsm.CloseKilled {
+			// A COMPLETED, INTERRUPTED or FAILED turn leaves a result the
+			// user has not read. A close this build does not know is a
+			// contract breach: it is recorded loudly and leaves no tracked
+			// result, and since it is still a NEW ending, a read state from
+			// before it does not carry over.
+			arm, known := closeArm(how)
+			if !known {
 				s.result = resultNone
+				log.Error("daemon.sidebar.set_turn_ended",
+					"the roster took a turn close it has no turn-end arm for", dlog.Context{
+						"close":               int(how),
+						"invariant_violation": "every turn close resolves to a turn-end arm",
+						"remediation":         "add the close to closeArm",
+					})
 				return
 			}
 			s.result = resultUnread
 			log.Info("daemon.sidebar.result_unread",
 				"the turn ended, so its result is unread until the user views the row", dlog.Context{
-					"status":     s.turnEndArm(),
+					"status":     arm,
 					"async_live": s.asyncLive(),
 				})
 		})
