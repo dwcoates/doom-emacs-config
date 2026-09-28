@@ -13,7 +13,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { AgentId } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
-import type { ConversationThrough, HistoryPage, HistoryPointer } from "../../conversation/v1/history_pb";
+import type { HistoryPage, HistoryPointer } from "../../conversation/v1/history_pb";
 import { file_conversation_v1_history } from "../../conversation/v1/history_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_read_history.proto.
  */
 export const file_shim_v1_endpoint_read_history: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3JlYWRfaGlzdG9yeS5wcm90bxIHc2hpbS52MSKEAgoSUmVhZEhpc3RvcnlSZXF1ZXN0Ei0KBnRhcmdldBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESEQoJcGFnZV9zaXplGAIgASgNEioKBWZpcnN0GAMgASgLMhkuc2hpbS52MS5SZWFkSGlzdG9yeUZpcnN0SAASMAoFYWZ0ZXIYBCABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABI3Cgd0aHJvdWdoGAUgASgLMiQuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblRocm91Z2hIAEIKCghwb3NpdGlvbkIJCgdfdGFyZ2V0IhIKEFJlYWRIaXN0b3J5Rmlyc3QifwoTUmVhZEhpc3RvcnlSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeVN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeUZhaWx1cmVIAEIICgZyZXN1bHQiQAoSUmVhZEhpc3RvcnlTdWNjZXNzEioKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2Ui5QEKElJlYWRIaXN0b3J5RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSOQoNdW5rbm93bl9hZ2VudBgCIAEoCzIgLnNoaW0udjEuUmVhZEhpc3RvcnlVbmtub3duQWdlbnRIABI5Cg1zdGFsZV9wb2ludGVyGAMgASgLMiAuc2hpbS52MS5SZWFkSGlzdG9yeVN0YWxlUG9pbnRlckgAEkEKEXN0b3JlX3VuYXZhaWxhYmxlGAQgASgLMiQuc2hpbS52MS5SZWFkSGlzdG9yeVN0b3JlVW5hdmFpbGFibGVIAEIGCgRraW5kIhkKF1JlYWRIaXN0b3J5VW5rbm93bkFnZW50IhkKF1JlYWRIaXN0b3J5U3RhbGVQb2ludGVyIh0KG1JlYWRIaXN0b3J5U3RvcmVVbmF2YWlsYWJsZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3JlYWRfaGlzdG9yeS5wcm90bxIHc2hpbS52MSLLAQoSUmVhZEhpc3RvcnlSZXF1ZXN0Ei0KBnRhcmdldBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESEQoJcGFnZV9zaXplGAIgASgNEioKBWZpcnN0GAMgASgLMhkuc2hpbS52MS5SZWFkSGlzdG9yeUZpcnN0SAASMAoFYWZ0ZXIYBCABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIAEIKCghwb3NpdGlvbkIJCgdfdGFyZ2V0IhIKEFJlYWRIaXN0b3J5Rmlyc3QifwoTUmVhZEhpc3RvcnlSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeVN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeUZhaWx1cmVIAEIICgZyZXN1bHQiQAoSUmVhZEhpc3RvcnlTdWNjZXNzEioKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2Ui5QEKElJlYWRIaXN0b3J5RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSOQoNdW5rbm93bl9hZ2VudBgCIAEoCzIgLnNoaW0udjEuUmVhZEhpc3RvcnlVbmtub3duQWdlbnRIABI5Cg1zdGFsZV9wb2ludGVyGAMgASgLMiAuc2hpbS52MS5SZWFkSGlzdG9yeVN0YWxlUG9pbnRlckgAEkEKEXN0b3JlX3VuYXZhaWxhYmxlGAQgASgLMiQuc2hpbS52MS5SZWFkSGlzdG9yeVN0b3JlVW5hdmFpbGFibGVIAEIGCgRraW5kIhkKF1JlYWRIaXN0b3J5VW5rbm93bkFnZW50IhkKF1JlYWRIaXN0b3J5U3RhbGVQb2ludGVyIh0KG1JlYWRIaXN0b3J5U3RvcmVVbmF2YWlsYWJsZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
 
 /**
  * Which agent's history, and where in it.
@@ -30,9 +30,8 @@ export const file_shim_v1_endpoint_read_history: GenFile = /*@__PURE__*/
  */
 export type ReadHistoryRequest = Message<"shim.v1.ReadHistoryRequest"> & {
   /**
-   * WHOSE history. UNSET = the session's prompt thread, resolved by the shim.
-   * Any book the store holds may be named — a fork's daemon reads its
-   * parent's book this way; an unknown agent is a refusal.
+   * WHOSE history. UNSET = the session's prompt thread, resolved by the
+   * shim; an unknown agent is a refusal.
    *
    * @generated from field: optional conversation.v1.AgentId target = 1;
    */
@@ -61,22 +60,13 @@ export type ReadHistoryRequest = Message<"shim.v1.ReadHistoryRequest"> & {
     case: "first";
   } | {
     /**
-     * Entries placed strictly BEFORE the entry this pointer names — a pointer
-     * served by a page's `more` arm or by a watched entry, echoed verbatim.
+     * Strictly OLDER than the entry this pointer names — a pointer served by
+     * a page's `more` arm or by a watched entry, echoed verbatim.
      *
      * @generated from field: conversation.v1.HistoryPointer after = 4;
      */
     value: HistoryPointer;
     case: "after";
-  } | {
-    /**
-     * The newest entries placed AT OR BEFORE this bound: the book as it stood
-     * at that instant. `more` then walks older with `after` as usual.
-     *
-     * @generated from field: conversation.v1.ConversationThrough through = 5;
-     */
-    value: ConversationThrough;
-    case: "through";
   } | { case: undefined; value?: undefined };
 };
 

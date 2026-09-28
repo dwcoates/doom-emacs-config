@@ -44,10 +44,8 @@ export type WatchAgentRequest = Message<"shim.v1.WatchAgentRequest"> & {
 
   /**
    * The newest entry the caller already holds. UNSET = repaint: a full first
-   * page in descending conversation place. SET = catch-up: the opening page
-   * carries only entries FIRST WRITTEN AFTER this one — catch-up is about what
-   * was written since, never about place, so a late-written entry placed
-   * earlier in the conversation is delivered rather than skipped. The shim tracks nothing about what it previously served — the
+   * page. SET = catch-up: the opening page carries only entries NEWER than
+   * this. The shim tracks nothing about what it previously served — the
    * caller states its own high-water mark. A fresh agent simply yields an
    * empty page.
    *

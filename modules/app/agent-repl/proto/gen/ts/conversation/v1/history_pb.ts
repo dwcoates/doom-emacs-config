@@ -23,20 +23,19 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/history.proto.
  */
 export const file_conversation_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSKlAgoOSGlzdG9yeUVudHJ5QXQSKwoCYXQYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXISLAoFZW50cnkYAiABKAsyHS5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5EioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSAGIAQESPAoOcmVjb3JkZWRfcGxhY2UYBCABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIABI8Cg5yZWNlaXZlZF9wbGFjZRgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAQgcKBXBsYWNlQgcKBV90dXJuIjMKEUNvbnZlcnNhdGlvblBsYWNlEg0KBWF0X21zGAEgASgDEg8KB29yZGluYWwYAiABKA0iJAoTQ29udmVyc2F0aW9uVGhyb3VnaBINCgVhdF9tcxgBIAEoAyK2AQoMSGlzdG9yeUVudHJ5EjMKC3VzZXJfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgcKBWVudHJ5IkIKC0hpc3RvcnlNb3JlEjMKCmxhc3RfZW50cnkYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXIiDgoMSGlzdG9yeUZsb29yIh8KDkhpc3RvcnlQb2ludGVyEg0KBXZhbHVlGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSKgAQoOSGlzdG9yeUVudHJ5QXQSKwoCYXQYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXISLAoFZW50cnkYAiABKAsyHS5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5EioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQFCBwoFX3R1cm4itgEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
 
 /**
- * One page: a contiguous run of an agent's history in DESCENDING CONVERSATION
- * PLACE (the entry the conversation reached last comes first), and whether
- * older history remains.
+ * One page: a contiguous run of an agent's history, NEWEST FIRST, and
+ * whether older history remains.
  *
  * @generated from message conversation.v1.HistoryPage
  */
 export type HistoryPage = Message<"conversation.v1.HistoryPage"> & {
   /**
-   * The entries, newest place first, each with its pointer, turn and place. A
-   * turn may straddle pages: entries are units that upsert by identity, so a
-   * split costs a consumer nothing.
+   * The entries, newest first, each with its pointer. A turn may straddle
+   * pages: entries are units that upsert by identity, so a split costs a
+   * consumer nothing.
    *
    * @generated from field: repeated conversation.v1.HistoryEntryAt entries = 1;
    */
@@ -76,20 +75,16 @@ export const HistoryPageSchema: GenMessage<HistoryPage> = /*@__PURE__*/
   messageDesc(file_conversation_v1_history, 0);
 
 /**
- * One entry, its pointer, its turn and its place in the conversation — so the
- * caller always holds a resumption pointer for what it has seen, attributes the
- * entry by identity rather than by where it sits among prompts, and orders it
- * by where it happened in the conversation rather than by when it arrived.
+ * One entry, its position, and the turn it belongs to, so the caller always
+ * holds a pointer for the newest thing it has seen — the reconnect mark and the
+ * older-pages walk key — and never has to infer a turn from where an entry sits.
  *
  * @generated from message conversation.v1.HistoryEntryAt
  */
 export type HistoryEntryAt = Message<"conversation.v1.HistoryEntryAt"> & {
   /**
-   * A RESUMPTION TOKEN naming this entry: echoed as `after` to read the
-   * entries placed before it, or as `known_through` to catch up on what was
-   * written after it. It states nothing about order and two pointers are never
-   * compared. Stable across upserts and across the entry gaining a recorded
-   * place: an entry keeps the pointer it was first served with.
+   * This entry's position in the agent's order. Stable across upserts:
+   * order is by the entry's FIRST appearance, never its last write.
    *
    * @generated from field: conversation.v1.HistoryPointer at = 1;
    */
@@ -114,53 +109,13 @@ export type HistoryEntryAt = Message<"conversation.v1.HistoryEntryAt"> & {
    *
    * UNSET: the entry was produced outside any turn, the producer could not
    * name the turn from what it observed (a transcript record whose turn the
-   * vendor's own records do not identify), or no write of the entry stated
-   * one. Never guessed: an unset turn is the producer's honest "not known".
+   * vendor's own records do not identify), or the entry predates this field.
+   * Never guessed: an unset turn is the producer's honest "not known", and a
+   * consumer falls back to whatever it did before stamps existed.
    *
    * @generated from field: optional conversation.v1.TurnId turn = 3;
    */
   turn?: TurnId | undefined;
-
-  /**
-   * WHERE THE ENTRY SITS IN ITS CONVERSATION — the one key a consumer orders
-   * entries by. Arrival order is receipt order, and the two diverge whenever a
-   * conversation's records reach the store out of their own order (a
-   * transcript read again from its start, a resumed session's copy of its
-   * earlier records, a file read late): ordered by arrival, such a record is
-   * drawn after the conversation that followed it.
-   *
-   * A page is served in descending place. A WATCHED entry may arrive placed
-   * BEFORE entries already delivered; a consumer files it by its place, never
-   * at the bottom. A context cut bounds exactly the entries placed before it.
-   *
-   * THE ARM IS WHO ESTABLISHED THE PLACE. Both arms order identically; the arm
-   * lets a consumer state how much of what it drew was ordered by stand-in.
-   * UNSET only when the serving side states no places at all; a consumer then
-   * orders the entry by its own receipt and records that it did.
-   *
-   * @generated from oneof conversation.v1.HistoryEntryAt.place
-   */
-  place: {
-    /**
-     * A producer stated this place from what it observed: the vendor record's
-     * own timestamp, or the instant a live producer first observed the fact.
-     *
-     * @generated from field: conversation.v1.ConversationPlace recorded_place = 4;
-     */
-    value: ConversationPlace;
-    case: "recordedPlace";
-  } | {
-    /**
-     * No write of this entry stated a place, so the store's receipt instant of
-     * its first write stands in (ordinal 0). Exact for an entry written as it
-     * happened; wrong for one first written late — which a later write stating
-     * a place corrects, moving the entry to its recorded place.
-     *
-     * @generated from field: conversation.v1.ConversationPlace received_place = 5;
-     */
-    value: ConversationPlace;
-    case: "receivedPlace";
-  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -169,80 +124,6 @@ export type HistoryEntryAt = Message<"conversation.v1.HistoryEntryAt"> & {
  */
 export const HistoryEntryAtSchema: GenMessage<HistoryEntryAt> = /*@__PURE__*/
   messageDesc(file_conversation_v1_history, 1);
-
-/**
- * Where one entry sits in its conversation: the instant the conversation
- * reached it, and its rank among entries of that instant. Entries are ordered
- * by ascending (at_ms, ordinal); a serving store breaks remaining ties stably,
- * and that tie order carries no meaning.
- *
- * COMPARABLE ACROSS PRODUCERS AND ACROSS BOOKS: every producer states the
- * instant in one clock domain — wall-clock milliseconds since the Unix epoch on
- * the host the conversation runs on — so a stream-observed entry, a
- * transcript-read entry, a daemon-drawn row and an entry of a fork's parent all
- * compare directly.
- *
- * A STATED PLACE NEVER MOVES: the store keeps an entry's FIRST stated place
- * across every later write of it, so a unit settling or a response growing
- * never moves the entry within its book.
- *
- * @generated from message conversation.v1.ConversationPlace
- */
-export type ConversationPlace = Message<"conversation.v1.ConversationPlace"> & {
-  /**
-   * Milliseconds since the Unix epoch at which the conversation reached this
-   * entry. Read from a vendor transcript: the timestamp of the record that
-   * OPENED the entry's unit — a tool call's own record, even when the unit is
-   * first written at its result (the frame's started_at instant). Observed
-   * live: the instant the producer first observed the fact. Always positive.
-   *
-   * @generated from field: int64 at_ms = 1;
-   */
-  atMs: bigint;
-
-  /**
-   * The entry's rank among entries sharing `at_ms`, ascending in conversation
-   * order: its index among the entries one vendor record produced (a
-   * response's blocks in block order), or a live producer's monotonic count of
-   * the entries it stamped within that millisecond.
-   *
-   * @generated from field: uint32 ordinal = 2;
-   */
-  ordinal: number;
-};
-
-/**
- * Describes the message conversation.v1.ConversationPlace.
- * Use `create(ConversationPlaceSchema)` to create a new message.
- */
-export const ConversationPlaceSchema: GenMessage<ConversationPlace> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 2);
-
-/**
- * An INCLUSIVE upper bound on conversation places: it admits every entry
- * whose place's `at_ms` is at or before `at_ms`, whatever its ordinal. It reads
- * a book as it stood at an instant — the head of a fork's parent at the moment
- * the fork copied it — without walking down from everything the book gained
- * since.
- *
- * @generated from message conversation.v1.ConversationThrough
- */
-export type ConversationThrough = Message<"conversation.v1.ConversationThrough"> & {
-  /**
-   * Milliseconds since the Unix epoch, in the same clock domain as
-   * ConversationPlace.at_ms. Must be positive.
-   *
-   * @generated from field: int64 at_ms = 1;
-   */
-  atMs: bigint;
-};
-
-/**
- * Describes the message conversation.v1.ConversationThrough.
- * Use `create(ConversationThroughSchema)` to create a new message.
- */
-export const ConversationThroughSchema: GenMessage<ConversationThrough> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 3);
 
 /**
  * One thing in an agent's history. THE ARM IS WHAT IT IS.
@@ -290,7 +171,7 @@ export type HistoryEntry = Message<"conversation.v1.HistoryEntry"> & {
  * Use `create(HistoryEntrySchema)` to create a new message.
  */
 export const HistoryEntrySchema: GenMessage<HistoryEntry> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 4);
+  messageDesc(file_conversation_v1_history, 2);
 
 /**
  * Older entries remain below this page.
@@ -311,7 +192,7 @@ export type HistoryMore = Message<"conversation.v1.HistoryMore"> & {
  * Use `create(HistoryMoreSchema)` to create a new message.
  */
 export const HistoryMoreSchema: GenMessage<HistoryMore> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 5);
+  messageDesc(file_conversation_v1_history, 3);
 
 /**
  * This page reached the oldest retained entry.
@@ -326,12 +207,12 @@ export type HistoryFloor = Message<"conversation.v1.HistoryFloor"> & {
  * Use `create(HistoryFloorSchema)` to create a new message.
  */
 export const HistoryFloorSchema: GenMessage<HistoryFloor> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 6);
+  messageDesc(file_conversation_v1_history, 4);
 
 /**
- * An opaque, producer-minted name of one entry of one agent's history. Echoed
- * verbatim, never parsed, constructed or compared: a pointer names an entry the
- * caller has DEMONSTRABLY BEEN SERVED, never a position in any order.
+ * An opaque, producer-minted position of one entry in one agent's order.
+ * Echoed verbatim, never parsed or constructed: a pointer names a place the
+ * caller has DEMONSTRABLY BEEN.
  *
  * @generated from message conversation.v1.HistoryPointer
  */
@@ -349,5 +230,5 @@ export type HistoryPointer = Message<"conversation.v1.HistoryPointer"> & {
  * Use `create(HistoryPointerSchema)` to create a new message.
  */
 export const HistoryPointerSchema: GenMessage<HistoryPointer> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_history, 7);
+  messageDesc(file_conversation_v1_history, 5);
 

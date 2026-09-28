@@ -26,7 +26,6 @@ import "google/protobuf/struct.proto";
 
 import "conversation/v1/agent.proto";
 import "conversation/v1/agent_activity.proto";
-import "conversation/v1/history.proto";
 import "conversation/v1/peer.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
@@ -78,27 +77,6 @@ message StoreEntry {
   // last. Present with an empty value is refused — absence is expressed by
   // absence.
   optional conversation.v1.TurnId turn = 6;
-
-  // WHERE THIS FACT SITS IN ITS CONVERSATION (conversation.v1
-  // ConversationPlace), stamped by the producer at the one place it builds this
-  // envelope, so every arm carries it and no arm can forget to. Served as
-  // conversation.v1 HistoryEntryAt.recorded_place.
-  //
-  // THE SIDECAR stamps the timestamp of the vendor record that opened the
-  // unit and the entry's index among that record's entries — both read from
-  // the bytes, so a re-read mints the identical place. THE SHIM stamps the
-  // instant it first observed the fact, at the moment it builds the entry, so a
-  // retried write carries the original instant.
-  //
-  // THE STORE KEEPS A ROW'S FIRST STATED PLACE, as it keeps its first turn: a
-  // write with no place, or with a different one, leaves the stored place
-  // standing, so no write moves a row within its book. A row stored with NO
-  // stated place takes the place the first later write states — the one way a
-  // row first written without one gains its recorded place. UNSET when the
-  // producer can state none (a terminal concluded from the absence of a file);
-  // the store then orders the row by its first-insert receipt instant and serves
-  // that as `received_place`. Present with a non-positive at_ms is refused.
-  optional conversation.v1.ConversationPlace place = 7;
 }
 
 // A fact about an agent's work, and whether it may ever be served.
@@ -312,35 +290,23 @@ message CursorState {
 
 // ---- Page vocabulary shared across the read endpoints ----
 
-// An opaque, store-minted name of one item of one book. Echoed verbatim, never
-// parsed, constructed or compared by a caller. It names the ITEM, not a place
-// in any order: stable across upserts and across the item gaining a recorded
-// place, so an echoed pointer never goes stale because its item was re-placed.
+// An opaque, store-minted position of one item in one book's order. Echoed
+// verbatim, never parsed or constructed by a caller; stable across upserts
+// because order is by the unit's FIRST insert, not its last write.
 message StoreItemPointer {
   string value = 1;
 }
 
-// One line, its pointer, its turn and its place, so the caller always holds a
-// resumption pointer for the newest thing it has seen and can order what it
-// holds by conversation place.
+// One line, its position and its turn, so the caller always holds a reconnect
+// and paging pointer for the newest thing it has seen.
 message StoreLineAt {
-  // This line's resumption pointer.
+  // This line's position in its book's order.
   StoreItemPointer at = 1;
   // The line itself.
   StorePageLine line = 2;
   // The turn the line's row is stamped with, as the store holds it (the row's
   // first stamp — see StoreEntry.turn). UNSET for a row no write ever stamped.
   optional conversation.v1.TurnId turn = 3;
-  // WHERE THE LINE SITS IN ITS CONVERSATION — the key this store orders every
-  // book by, served exactly as conversation.v1 HistoryEntryAt.place. Always set
-  // by this store. THE ARM IS WHO ESTABLISHED IT.
-  oneof place {
-    // The row's first stated place (StoreEntry.place).
-    conversation.v1.ConversationPlace recorded_place = 4;
-    // No write of the row stated a place: its first-insert receipt instant
-    // stands in, with ordinal 0.
-    conversation.v1.ConversationPlace received_place = 5;
-  }
 }
 
 // Older lines exist below this page.

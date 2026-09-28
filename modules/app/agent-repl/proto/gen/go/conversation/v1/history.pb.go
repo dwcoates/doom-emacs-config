@@ -28,14 +28,13 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// One page: a contiguous run of an agent's history in DESCENDING CONVERSATION
-// PLACE (the entry the conversation reached last comes first), and whether
-// older history remains.
+// One page: a contiguous run of an agent's history, NEWEST FIRST, and
+// whether older history remains.
 type HistoryPage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The entries, newest place first, each with its pointer, turn and place. A
-	// turn may straddle pages: entries are units that upsert by identity, so a
-	// split costs a consumer nothing.
+	// The entries, newest first, each with its pointer. A turn may straddle
+	// pages: entries are units that upsert by identity, so a split costs a
+	// consumer nothing.
 	Entries []*HistoryEntryAt `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
 	// WHETHER older history remains — never how much, never where.
 	//
@@ -130,17 +129,13 @@ func (*HistoryPage_More) isHistoryPage_Boundary() {}
 
 func (*HistoryPage_Floor) isHistoryPage_Boundary() {}
 
-// One entry, its pointer, its turn and its place in the conversation — so the
-// caller always holds a resumption pointer for what it has seen, attributes the
-// entry by identity rather than by where it sits among prompts, and orders it
-// by where it happened in the conversation rather than by when it arrived.
+// One entry, its position, and the turn it belongs to, so the caller always
+// holds a pointer for the newest thing it has seen — the reconnect mark and the
+// older-pages walk key — and never has to infer a turn from where an entry sits.
 type HistoryEntryAt struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// A RESUMPTION TOKEN naming this entry: echoed as `after` to read the
-	// entries placed before it, or as `known_through` to catch up on what was
-	// written after it. It states nothing about order and two pointers are never
-	// compared. Stable across upserts and across the entry gaining a recorded
-	// place: an entry keeps the pointer it was first served with.
+	// This entry's position in the agent's order. Stable across upserts:
+	// order is by the entry's FIRST appearance, never its last write.
 	At *HistoryPointer `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
 	// The entry itself.
 	Entry *HistoryEntry `protobuf:"bytes,2,opt,name=entry,proto3" json:"entry,omitempty"`
@@ -155,30 +150,10 @@ type HistoryEntryAt struct {
 	//
 	// UNSET: the entry was produced outside any turn, the producer could not
 	// name the turn from what it observed (a transcript record whose turn the
-	// vendor's own records do not identify), or no write of the entry stated
-	// one. Never guessed: an unset turn is the producer's honest "not known".
-	Turn *TurnId `protobuf:"bytes,3,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
-	// WHERE THE ENTRY SITS IN ITS CONVERSATION — the one key a consumer orders
-	// entries by. Arrival order is receipt order, and the two diverge whenever a
-	// conversation's records reach the store out of their own order (a
-	// transcript read again from its start, a resumed session's copy of its
-	// earlier records, a file read late): ordered by arrival, such a record is
-	// drawn after the conversation that followed it.
-	//
-	// A page is served in descending place. A WATCHED entry may arrive placed
-	// BEFORE entries already delivered; a consumer files it by its place, never
-	// at the bottom. A context cut bounds exactly the entries placed before it.
-	//
-	// THE ARM IS WHO ESTABLISHED THE PLACE. Both arms order identically; the arm
-	// lets a consumer state how much of what it drew was ordered by stand-in.
-	// UNSET only when the serving side states no places at all; a consumer then
-	// orders the entry by its own receipt and records that it did.
-	//
-	// Types that are valid to be assigned to Place:
-	//
-	//	*HistoryEntryAt_RecordedPlace
-	//	*HistoryEntryAt_ReceivedPlace
-	Place         isHistoryEntryAt_Place `protobuf_oneof:"place"`
+	// vendor's own records do not identify), or the entry predates this field.
+	// Never guessed: an unset turn is the producer's honest "not known", and a
+	// consumer falls back to whatever it did before stamps existed.
+	Turn          *TurnId `protobuf:"bytes,3,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -234,179 +209,6 @@ func (x *HistoryEntryAt) GetTurn() *TurnId {
 	return nil
 }
 
-func (x *HistoryEntryAt) GetPlace() isHistoryEntryAt_Place {
-	if x != nil {
-		return x.Place
-	}
-	return nil
-}
-
-func (x *HistoryEntryAt) GetRecordedPlace() *ConversationPlace {
-	if x != nil {
-		if x, ok := x.Place.(*HistoryEntryAt_RecordedPlace); ok {
-			return x.RecordedPlace
-		}
-	}
-	return nil
-}
-
-func (x *HistoryEntryAt) GetReceivedPlace() *ConversationPlace {
-	if x != nil {
-		if x, ok := x.Place.(*HistoryEntryAt_ReceivedPlace); ok {
-			return x.ReceivedPlace
-		}
-	}
-	return nil
-}
-
-type isHistoryEntryAt_Place interface {
-	isHistoryEntryAt_Place()
-}
-
-type HistoryEntryAt_RecordedPlace struct {
-	// A producer stated this place from what it observed: the vendor record's
-	// own timestamp, or the instant a live producer first observed the fact.
-	RecordedPlace *ConversationPlace `protobuf:"bytes,4,opt,name=recorded_place,json=recordedPlace,proto3,oneof"`
-}
-
-type HistoryEntryAt_ReceivedPlace struct {
-	// No write of this entry stated a place, so the store's receipt instant of
-	// its first write stands in (ordinal 0). Exact for an entry written as it
-	// happened; wrong for one first written late — which a later write stating
-	// a place corrects, moving the entry to its recorded place.
-	ReceivedPlace *ConversationPlace `protobuf:"bytes,5,opt,name=received_place,json=receivedPlace,proto3,oneof"`
-}
-
-func (*HistoryEntryAt_RecordedPlace) isHistoryEntryAt_Place() {}
-
-func (*HistoryEntryAt_ReceivedPlace) isHistoryEntryAt_Place() {}
-
-// Where one entry sits in its conversation: the instant the conversation
-// reached it, and its rank among entries of that instant. Entries are ordered
-// by ascending (at_ms, ordinal); a serving store breaks remaining ties stably,
-// and that tie order carries no meaning.
-//
-// COMPARABLE ACROSS PRODUCERS AND ACROSS BOOKS: every producer states the
-// instant in one clock domain — wall-clock milliseconds since the Unix epoch on
-// the host the conversation runs on — so a stream-observed entry, a
-// transcript-read entry, a daemon-drawn row and an entry of a fork's parent all
-// compare directly.
-//
-// A STATED PLACE NEVER MOVES: the store keeps an entry's FIRST stated place
-// across every later write of it, so a unit settling or a response growing
-// never moves the entry within its book.
-type ConversationPlace struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Milliseconds since the Unix epoch at which the conversation reached this
-	// entry. Read from a vendor transcript: the timestamp of the record that
-	// OPENED the entry's unit — a tool call's own record, even when the unit is
-	// first written at its result (the frame's started_at instant). Observed
-	// live: the instant the producer first observed the fact. Always positive.
-	AtMs int64 `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
-	// The entry's rank among entries sharing `at_ms`, ascending in conversation
-	// order: its index among the entries one vendor record produced (a
-	// response's blocks in block order), or a live producer's monotonic count of
-	// the entries it stamped within that millisecond.
-	Ordinal       uint32 `protobuf:"varint,2,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ConversationPlace) Reset() {
-	*x = ConversationPlace{}
-	mi := &file_conversation_v1_history_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConversationPlace) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConversationPlace) ProtoMessage() {}
-
-func (x *ConversationPlace) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConversationPlace.ProtoReflect.Descriptor instead.
-func (*ConversationPlace) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *ConversationPlace) GetAtMs() int64 {
-	if x != nil {
-		return x.AtMs
-	}
-	return 0
-}
-
-func (x *ConversationPlace) GetOrdinal() uint32 {
-	if x != nil {
-		return x.Ordinal
-	}
-	return 0
-}
-
-// An INCLUSIVE upper bound on conversation places: it admits every entry
-// whose place's `at_ms` is at or before `at_ms`, whatever its ordinal. It reads
-// a book as it stood at an instant — the head of a fork's parent at the moment
-// the fork copied it — without walking down from everything the book gained
-// since.
-type ConversationThrough struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Milliseconds since the Unix epoch, in the same clock domain as
-	// ConversationPlace.at_ms. Must be positive.
-	AtMs          int64 `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ConversationThrough) Reset() {
-	*x = ConversationThrough{}
-	mi := &file_conversation_v1_history_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConversationThrough) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConversationThrough) ProtoMessage() {}
-
-func (x *ConversationThrough) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConversationThrough.ProtoReflect.Descriptor instead.
-func (*ConversationThrough) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ConversationThrough) GetAtMs() int64 {
-	if x != nil {
-		return x.AtMs
-	}
-	return 0
-}
-
 // One thing in an agent's history. THE ARM IS WHAT IT IS.
 type HistoryEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -422,7 +224,7 @@ type HistoryEntry struct {
 
 func (x *HistoryEntry) Reset() {
 	*x = HistoryEntry{}
-	mi := &file_conversation_v1_history_proto_msgTypes[4]
+	mi := &file_conversation_v1_history_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -434,7 +236,7 @@ func (x *HistoryEntry) String() string {
 func (*HistoryEntry) ProtoMessage() {}
 
 func (x *HistoryEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[4]
+	mi := &file_conversation_v1_history_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -447,7 +249,7 @@ func (x *HistoryEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryEntry.ProtoReflect.Descriptor instead.
 func (*HistoryEntry) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *HistoryEntry) GetEntry() isHistoryEntry_Entry {
@@ -525,7 +327,7 @@ type HistoryMore struct {
 
 func (x *HistoryMore) Reset() {
 	*x = HistoryMore{}
-	mi := &file_conversation_v1_history_proto_msgTypes[5]
+	mi := &file_conversation_v1_history_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +339,7 @@ func (x *HistoryMore) String() string {
 func (*HistoryMore) ProtoMessage() {}
 
 func (x *HistoryMore) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[5]
+	mi := &file_conversation_v1_history_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +352,7 @@ func (x *HistoryMore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryMore.ProtoReflect.Descriptor instead.
 func (*HistoryMore) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *HistoryMore) GetLastEntry() *HistoryPointer {
@@ -569,7 +371,7 @@ type HistoryFloor struct {
 
 func (x *HistoryFloor) Reset() {
 	*x = HistoryFloor{}
-	mi := &file_conversation_v1_history_proto_msgTypes[6]
+	mi := &file_conversation_v1_history_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +383,7 @@ func (x *HistoryFloor) String() string {
 func (*HistoryFloor) ProtoMessage() {}
 
 func (x *HistoryFloor) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[6]
+	mi := &file_conversation_v1_history_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,12 +396,12 @@ func (x *HistoryFloor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryFloor.ProtoReflect.Descriptor instead.
 func (*HistoryFloor) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{4}
 }
 
-// An opaque, producer-minted name of one entry of one agent's history. Echoed
-// verbatim, never parsed, constructed or compared: a pointer names an entry the
-// caller has DEMONSTRABLY BEEN SERVED, never a position in any order.
+// An opaque, producer-minted position of one entry in one agent's order.
+// Echoed verbatim, never parsed or constructed: a pointer names a place the
+// caller has DEMONSTRABLY BEEN.
 type HistoryPointer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The opaque value.
@@ -610,7 +412,7 @@ type HistoryPointer struct {
 
 func (x *HistoryPointer) Reset() {
 	*x = HistoryPointer{}
-	mi := &file_conversation_v1_history_proto_msgTypes[7]
+	mi := &file_conversation_v1_history_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +424,7 @@ func (x *HistoryPointer) String() string {
 func (*HistoryPointer) ProtoMessage() {}
 
 func (x *HistoryPointer) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_history_proto_msgTypes[7]
+	mi := &file_conversation_v1_history_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +437,7 @@ func (x *HistoryPointer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryPointer.ProtoReflect.Descriptor instead.
 func (*HistoryPointer) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_history_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *HistoryPointer) GetValue() string {
@@ -655,20 +457,12 @@ const file_conversation_v1_history_proto_rawDesc = "" +
 	"\x04more\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryMoreH\x00R\x04more\x125\n" +
 	"\x05floor\x18\x03 \x01(\v2\x1d.conversation.v1.HistoryFloorH\x00R\x05floorB\n" +
 	"\n" +
-	"\bboundary\"\xd4\x02\n" +
+	"\bboundary\"\xb1\x01\n" +
 	"\x0eHistoryEntryAt\x12/\n" +
 	"\x02at\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryPointerR\x02at\x123\n" +
 	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\x120\n" +
-	"\x04turn\x18\x03 \x01(\v2\x17.conversation.v1.TurnIdH\x01R\x04turn\x88\x01\x01\x12K\n" +
-	"\x0erecorded_place\x18\x04 \x01(\v2\".conversation.v1.ConversationPlaceH\x00R\rrecordedPlace\x12K\n" +
-	"\x0ereceived_place\x18\x05 \x01(\v2\".conversation.v1.ConversationPlaceH\x00R\rreceivedPlaceB\a\n" +
-	"\x05placeB\a\n" +
-	"\x05_turn\"B\n" +
-	"\x11ConversationPlace\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x12\x18\n" +
-	"\aordinal\x18\x02 \x01(\rR\aordinal\"*\n" +
-	"\x13ConversationThrough\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"\xdb\x01\n" +
+	"\x04turn\x18\x03 \x01(\v2\x17.conversation.v1.TurnIdH\x00R\x04turn\x88\x01\x01B\a\n" +
+	"\x05_turn\"\xdb\x01\n" +
 	"\fHistoryEntry\x12?\n" +
 	"\vuser_prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptH\x00R\n" +
 	"userPrompt\x12>\n" +
@@ -695,39 +489,35 @@ func file_conversation_v1_history_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_history_proto_rawDescData
 }
 
-var file_conversation_v1_history_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_conversation_v1_history_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_conversation_v1_history_proto_goTypes = []any{
-	(*HistoryPage)(nil),         // 0: conversation.v1.HistoryPage
-	(*HistoryEntryAt)(nil),      // 1: conversation.v1.HistoryEntryAt
-	(*ConversationPlace)(nil),   // 2: conversation.v1.ConversationPlace
-	(*ConversationThrough)(nil), // 3: conversation.v1.ConversationThrough
-	(*HistoryEntry)(nil),        // 4: conversation.v1.HistoryEntry
-	(*HistoryMore)(nil),         // 5: conversation.v1.HistoryMore
-	(*HistoryFloor)(nil),        // 6: conversation.v1.HistoryFloor
-	(*HistoryPointer)(nil),      // 7: conversation.v1.HistoryPointer
-	(*TurnId)(nil),              // 8: conversation.v1.TurnId
-	(*AgentPrompt)(nil),         // 9: conversation.v1.AgentPrompt
-	(*AgentFrame)(nil),          // 10: conversation.v1.AgentFrame
-	(*PeerMessage)(nil),         // 11: conversation.v1.PeerMessage
+	(*HistoryPage)(nil),    // 0: conversation.v1.HistoryPage
+	(*HistoryEntryAt)(nil), // 1: conversation.v1.HistoryEntryAt
+	(*HistoryEntry)(nil),   // 2: conversation.v1.HistoryEntry
+	(*HistoryMore)(nil),    // 3: conversation.v1.HistoryMore
+	(*HistoryFloor)(nil),   // 4: conversation.v1.HistoryFloor
+	(*HistoryPointer)(nil), // 5: conversation.v1.HistoryPointer
+	(*TurnId)(nil),         // 6: conversation.v1.TurnId
+	(*AgentPrompt)(nil),    // 7: conversation.v1.AgentPrompt
+	(*AgentFrame)(nil),     // 8: conversation.v1.AgentFrame
+	(*PeerMessage)(nil),    // 9: conversation.v1.PeerMessage
 }
 var file_conversation_v1_history_proto_depIdxs = []int32{
 	1,  // 0: conversation.v1.HistoryPage.entries:type_name -> conversation.v1.HistoryEntryAt
-	5,  // 1: conversation.v1.HistoryPage.more:type_name -> conversation.v1.HistoryMore
-	6,  // 2: conversation.v1.HistoryPage.floor:type_name -> conversation.v1.HistoryFloor
-	7,  // 3: conversation.v1.HistoryEntryAt.at:type_name -> conversation.v1.HistoryPointer
-	4,  // 4: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
-	8,  // 5: conversation.v1.HistoryEntryAt.turn:type_name -> conversation.v1.TurnId
-	2,  // 6: conversation.v1.HistoryEntryAt.recorded_place:type_name -> conversation.v1.ConversationPlace
-	2,  // 7: conversation.v1.HistoryEntryAt.received_place:type_name -> conversation.v1.ConversationPlace
-	9,  // 8: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
-	10, // 9: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
-	11, // 10: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
-	7,  // 11: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	3,  // 1: conversation.v1.HistoryPage.more:type_name -> conversation.v1.HistoryMore
+	4,  // 2: conversation.v1.HistoryPage.floor:type_name -> conversation.v1.HistoryFloor
+	5,  // 3: conversation.v1.HistoryEntryAt.at:type_name -> conversation.v1.HistoryPointer
+	2,  // 4: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
+	6,  // 5: conversation.v1.HistoryEntryAt.turn:type_name -> conversation.v1.TurnId
+	7,  // 6: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
+	8,  // 7: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
+	9,  // 8: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
+	5,  // 9: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_history_proto_init() }
@@ -742,11 +532,8 @@ func file_conversation_v1_history_proto_init() {
 		(*HistoryPage_More)(nil),
 		(*HistoryPage_Floor)(nil),
 	}
-	file_conversation_v1_history_proto_msgTypes[1].OneofWrappers = []any{
-		(*HistoryEntryAt_RecordedPlace)(nil),
-		(*HistoryEntryAt_ReceivedPlace)(nil),
-	}
-	file_conversation_v1_history_proto_msgTypes[4].OneofWrappers = []any{
+	file_conversation_v1_history_proto_msgTypes[1].OneofWrappers = []any{}
+	file_conversation_v1_history_proto_msgTypes[2].OneofWrappers = []any{
 		(*HistoryEntry_UserPrompt)(nil),
 		(*HistoryEntry_AgentFrame)(nil),
 		(*HistoryEntry_PeerMessage)(nil),
@@ -757,7 +544,7 @@ func file_conversation_v1_history_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_history_proto_rawDesc), len(file_conversation_v1_history_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

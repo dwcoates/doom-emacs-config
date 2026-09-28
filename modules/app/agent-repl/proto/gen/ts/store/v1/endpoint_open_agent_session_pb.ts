@@ -42,13 +42,9 @@ export type OpenAgentSessionRequest = Message<"store.v1.OpenAgentSessionRequest"
 
   /**
    * The newest item the caller already holds. UNSET = repaint: a full first
-   * page in descending conversation place. SET = catch-up: the page carries
-   * only items FIRST WRITTEN AFTER this one — catch-up is about what was
-   * written since, never about place, so a late-written item placed earlier in
-   * the conversation is delivered rather than skipped — ordered by descending
-   * place. An item delivered twice is absorbed by its identity. The store
-   * tracks nothing about what it previously served — the caller states its own
-   * high-water mark.
+   * page. SET = catch-up: the page carries only items NEWER than this, never
+   * it or anything older. The store tracks nothing about what it previously
+   * served — the caller states its own high-water mark.
    *
    * @generated from field: optional store.v1.StoreItemPointer known_through = 3;
    */
