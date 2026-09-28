@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -1060,5 +1061,51 @@ func TestAnUnregisteredShimBounceIsAnOutcomeNotAFailure(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("records = %+v, want the unregistration at INFO", h.log.Records())
+	}
+}
+
+// A RELAUNCH IS A RECOVERY EDGE (health/lifetime.go): the installed
+// replacement is a healthy attach, and a warm resume a started session. A
+// cold answer started nothing yet, so the session-start faults wait for the
+// gate's re-open.
+func TestARelaunchClosesTheFaultsWhoseLifetimeEndsThere(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		cold   bool
+		closes bool
+	}{
+		{"a warm resume closes a refused resume", health.KindResumeFailed, false, true},
+		{"a warm resume closes an undetermined bounce", health.KindBounceUnknown, false, true},
+		{"a cold resume leaves a refused resume standing", health.KindResumeFailed, true, false},
+		{"a cold resume still closes the attach's faults", health.KindShimDied, true, true},
+		{"a relaunch leaves a fault about the conversation standing", health.KindConversationAbandoned, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if tt.cold {
+				h.fleet.resumeCold[ws] = &conversationv1.SessionCold{}
+			}
+			if _, err := h.db.OpenFault(context.Background(), wsm.Fault{Workspace: &ws, Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Act
+			if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+				t.Fatalf("bounce: %v", err)
+			}
+			open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: tt.kind})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenFaults: %v", err)
+			}
+			if closed := len(open) == 0; closed != tt.closes {
+				t.Fatalf("%s closed = %v, want %v", tt.kind, closed, tt.closes)
+			}
+		})
 	}
 }

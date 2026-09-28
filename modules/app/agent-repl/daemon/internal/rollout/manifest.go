@@ -151,7 +151,7 @@ type AdoptedSession struct {
 // and health.KindBounceUnknown are the two SessionFault/HostFault arms the
 // contract spells for a bounce, and a fault opened under this generic kind
 // would reach neither.
-const FaultBounceDisposition = "bounce_disposition"
+const FaultBounceDisposition = health.KindBounceDisposition
 
 // faultKind names the WSM fault kind one disposition is recorded under.
 func faultKind(kind DispositionKind) string {
@@ -534,7 +534,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		"disposition": string(d.Kind),
 		"shim_pid":    session.ShimPID,
 	}
-	id, err := c.deps.DB.OpenFault(ctx, wsm.Fault{
+	record := wsm.Fault{
 		Workspace: &ws,
 		Kind:      faultKind(d.Kind),
 		Detail: fmt.Sprintf("the bounce meant to %s this session; its workspace lock reads %s",
@@ -547,17 +547,14 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 			"vendor_session_id": session.VendorSessionID,
 		},
 		OpenedAt: c.deps.Clock.Now(),
-	})
-	if err != nil {
-		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
-		return false
 	}
-	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled || d.Kind == DispositionDied {
-		// The record exists; nothing needs doing about it. Closing it here is
-		// what keeps the OPEN fault set meaningful without losing the per
+	if health.Momentary(record.Kind) {
+		// The record exists; nothing needs doing about it. Its kind is
+		// MOMENTARY (health/lifetime.go), so it is closed as it is recorded,
+		// which keeps the OPEN fault set meaningful without losing the per
 		// session accounting.
-		if err := c.deps.DB.CloseFault(ctx, id, c.deps.Clock.Now()); err != nil {
-			c.log.Error(opReconcile, "could not resolve an ordinary bounce disposition", withCause(fields, err))
+		if _, err := health.RecordMomentary(ctx, c.deps.DB, c.log, record, c.deps.Clock.Now()); err != nil {
+			c.log.Error(opReconcile, "could not record an ordinary bounce disposition", withCause(fields, err))
 			return false
 		}
 		if d.Kind == DispositionDied {
@@ -576,6 +573,13 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		c.log.Debug(opReconcile, "recorded an ordinary bounce disposition", fields)
 		return true
 	}
+	if _, err := c.deps.DB.OpenFault(ctx, record); err != nil {
+		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
+		return false
+	}
+	// AN UNDETERMINED DISPOSITION STANDS until the workspace next attaches or
+	// starts healthy (health/lifetime.go); the boot's own adoption of a
+	// surviving shim is such an attach, and it fires after this record.
 	c.log.Warn(opReconcile, "a session's bounce disposition needs a human", fields)
 	return true
 }

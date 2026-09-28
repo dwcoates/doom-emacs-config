@@ -192,6 +192,16 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			}
 		}
 
+		// THE INSTALLED REPLACEMENT IS A HEALTHY ATTACH, and a warm resume a
+		// started session: both are recovery edges (health/lifetime.go). A
+		// cold answer started nothing yet; the gate's re-open is its start.
+		workspace := ws
+		scope := health.EdgeScope{Workspace: &workspace}
+		health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeHealthyAttach, scope, c.deps.Clock.Now())
+		if resumed.Cold == nil {
+			health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeSessionStarted, scope, c.deps.Clock.Now())
+		}
+
 		c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
 		return nil
 	}
