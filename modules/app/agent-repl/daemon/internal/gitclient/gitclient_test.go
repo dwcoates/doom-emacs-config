@@ -544,6 +544,57 @@ func TestFastForwardRefusesAnythingButAFastForward(t *testing.T) {
 	fake.assertSubject(0, "merge", "--ff-only", "abc123")
 }
 
+func TestFastForwardCarriesTheMergeQueueMarker(t *testing.T) {
+	// Arrange: the marker is how the repository's hook knows the queue moved
+	// master.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert: exactly one binding, the queue's own.
+	if got := envValues(fake.only().Env, MergeQueueMarker); len(got) != 1 || got[0] != MergeQueueMarker+"=1" {
+		t.Fatalf("%s bindings = %v, want exactly [%s=1]", MergeQueueMarker, got, MergeQueueMarker)
+	}
+}
+
+func TestFastForwardReplacesAnInheritedMergeQueueMarker(t *testing.T) {
+	// Arrange: an inherited value is scrubbed, so the method's is the only one.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+	t.Setenv(MergeQueueMarker, "stale")
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, MergeQueueMarker); len(got) != 1 || got[0] != MergeQueueMarker+"=1" {
+		t.Fatalf("%s bindings = %v, want exactly [%s=1]", MergeQueueMarker, got, MergeQueueMarker)
+	}
+}
+
+func TestFastForwardNeverCarriesTheOwnerOverride(t *testing.T) {
+	// Arrange: the daemon never acts as the owner.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+	t.Setenv(OwnerOverride, "1")
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, OwnerOverride); len(got) != 0 {
+		t.Fatalf("the fast-forward carries %v; the owner override is never the daemon's", got)
+	}
+}
+
 func TestFastForwardRunsInTheTargetCheckout(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)

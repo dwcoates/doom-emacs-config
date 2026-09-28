@@ -45,6 +45,31 @@ func TestScrubEnvStripsEveryRepositorySelectingVar(t *testing.T) {
 	}
 }
 
+func TestScrubEnvStripsInheritedHookMarkers(t *testing.T) {
+	tests := []struct {
+		name    string
+		binding string
+	}{
+		{name: "merge queue marker", binding: MergeQueueMarker + "=1"},
+		{name: "owner override", binding: OwnerOverride + "=1"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: a daemon started from a shell that exported the binding.
+			env := []string{"PATH=/usr/bin", test.binding}
+
+			// Act.
+			scrubbed := scrubEnv(env)
+
+			// Assert.
+			if containsEntry(scrubbed, test.binding) {
+				t.Fatalf("scrubEnv kept %q; a hook marker reaches git only where a method sets it", test.binding)
+			}
+		})
+	}
+}
+
 func TestScrubEnvKeepsUnrelatedBindings(t *testing.T) {
 	// Arrange.
 	env := []string{"PATH=/usr/bin", "HOME=/home/someone", "GIT_AUTHOR_NAME=Someone"}
@@ -87,6 +112,23 @@ func TestScrubEnvPinsLocaleOverInheritedValue(t *testing.T) {
 }
 
 // --- the environment contract, as the child actually sees it ------------
+
+func TestAnInheritedMergeQueueMarkerNeverReachesAnotherGit(t *testing.T) {
+	// Arrange: only FastForward may vouch for a move of master.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("main\n"))
+	t.Setenv(MergeQueueMarker, "1")
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.only().Env, MergeQueueMarker); len(got) != 0 {
+		t.Fatalf("the child's environment carries %v; only the queue's fast-forward sets the marker", got)
+	}
+}
 
 // TestInheritedGitDirNeverReachesTheChild is the regression this leaf exists
 // for: git honors GIT_DIR ahead of `-C dir`, so a hook-leaked one would
