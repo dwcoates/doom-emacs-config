@@ -1155,6 +1155,9 @@ type harness struct {
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
 	displaced *Displaced
+	// captures counts the CaptureDisplaced calls: a merge an agent asked for
+	// must make none.
+	captures int
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
 	// parkedTurns records the turn each guidance was routed under.
@@ -1400,6 +1403,9 @@ func (h *harness) deps() Deps {
 			return close, nil
 		},
 		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (Displaced, bool, error) {
+			h.mu.Lock()
+			h.captures++
+			h.mu.Unlock()
 			if h.displaced == nil {
 				return Displaced{}, false, nil
 			}
@@ -1659,4 +1665,93 @@ func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error)
 	out := make([]wsm.Repository, len(d.repos))
 	copy(out, d.repos)
 	return out, nil
+}
+
+// gateBroken scripts n gate runs that exit 127: the shell could not find the
+// gate's command, so the gate never ran.
+func (h *harness) gateBroken(n int) {
+	for i := 0; i < n; i++ {
+		h.runner.runs = append(h.runner.runs, scriptedRun{
+			Output: "bash: modules/app/agent-repl/bin/test-all.sh: No such file or directory\n", Code: 127})
+	}
+}
+
+// parkOnABrokenGate admits the harness's merge on a gate that exits 127 every
+// time it runs, and returns once the run has parked. The run stays alive,
+// parked, until ctx ends -- so every caller cancels ctx before it returns.
+func parkOnABrokenGate(t *testing.T, h *harness, ctx context.Context, runs int) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateBroken(runs)
+	enqueue(t, h)
+	if err := h.admit(ctx); err != nil {
+		t.Fatalf("admitting the merge: %v", err)
+	}
+	waitForParked(t, h)
+}
+
+// openIntervals names every ledger interval of the harness's merge that was
+// opened and never closed, as "<kind>/<round>".
+func (h *harness) openIntervals() []string {
+	entries, _ := h.db.MergeLedger(context.Background(), theWorkspace)
+	open := map[string]bool{}
+	for _, entry := range entries {
+		for _, interval := range entry.Intervals {
+			key := roundKey(interval.Kind, interval.Round)
+			if interval.EndedAt == nil {
+				open[key] = true
+			} else {
+				delete(open, key)
+			}
+		}
+	}
+	var out []string
+	for key := range open {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// leaseHeld reports whether the harness's workspace still holds a lease.
+func (h *harness) leaseHeld() bool {
+	_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+	return held
+}
+
+// lockFree reports whether the harness repository's kernel lock is free, by
+// taking it and giving it straight back.
+func (h *harness) lockFree(t *testing.T) bool {
+	t.Helper()
+	lock, taken, err := acquireRepoLock(h.o.lockDir, string(h.repoKey()))
+	if err != nil {
+		t.Fatalf("probing the repository lock: %v", err)
+	}
+	if taken {
+		if err := lock.Release(); err != nil {
+			t.Fatalf("releasing the probe's lock: %v", err)
+		}
+	}
+	return taken
+}
+
+// queuedEntries names the workspaces on the harness repository's durable
+// queue, in order.
+func (h *harness) queuedEntries() []string {
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	var out []string
+	for _, entry := range entries {
+		out = append(out, string(entry.Workspace))
+	}
+	return out
+}
+
+// route submits guidance to the harness's parked merge under a bounded wait,
+// so a park that never answers fails the test rather than hanging it.
+func route(h *harness, ctx context.Context, turn ids.TurnID, text string) error {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return h.o.RouteParked(bounded, theWorkspace, turn, saidText(text))
 }
