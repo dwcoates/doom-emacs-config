@@ -25,6 +25,9 @@ type resolver struct {
 	mu     sync.Mutex
 	states map[ids.WorkspaceID]*wsState
 	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]
+	// daemonRaised are the standing daemon-scoped warnings, key to line. A
+	// workspace whose accumulation is made later takes them at once.
+	daemonRaised map[string]string
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -52,6 +55,8 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		opts:   o,
 		states: map[ids.WorkspaceID]*wsState{},
 		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
+
+		daemonRaised: map[string]string{},
 	}, nil
 }
 
@@ -77,6 +82,11 @@ func (r *resolver) stateLocked(ws ids.WorkspaceID) *wsState {
 	s, ok := r.states[ws]
 	if !ok {
 		s = newWSState()
+		// A DAEMON-SCOPED WARNING STANDS ON EVERY STRIP, including one made
+		// after it was raised.
+		for key, line := range r.daemonRaised {
+			s.daemonRaised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
+		}
 		r.states[ws] = s
 	}
 	return s
@@ -597,6 +607,52 @@ func (r *resolver) RaiseWarning(ws ids.WorkspaceID, key, line string) {
 			}
 			s.raised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
 		})
+}
+
+// RaiseDaemonWarning puts a daemon-scoped condition on every strip. A key
+// already raised keeps its place in each list and takes the new sentence.
+func (r *resolver) RaiseDaemonWarning(key, line string) {
+	r.eachStrip("daemon.topbar.raise_daemon_warning", "the topbar took a warning the daemon raised on every strip",
+		dlog.Context{"key": key, "line": line},
+		func() { r.daemonRaised[key] = line },
+		func(s *wsState) {
+			if held, ok := s.daemonRaised[key]; ok {
+				held.line = line
+				return
+			}
+			s.daemonRaised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
+		})
+}
+
+// RetractDaemonWarning takes a daemon-scoped condition off every strip.
+func (r *resolver) RetractDaemonWarning(key string) {
+	r.eachStrip("daemon.topbar.retract_daemon_warning", "the topbar retracted a warning the daemon raised on every strip",
+		dlog.Context{"key": key},
+		func() { delete(r.daemonRaised, key) },
+		func(s *wsState) { delete(s.daemonRaised, key) })
+}
+
+// eachStrip changes the daemon-scoped set, then applies the change to every
+// workspace's accumulation and republishes each one bound to its sink. An
+// unbound accumulation takes the change without a publication, which its
+// binding's first mutation makes.
+func (r *resolver) eachStrip(operation, message string, ctx dlog.Context, daemon func(), apply func(*wsState)) {
+	r.mu.Lock()
+	daemon()
+	var bound []ids.WorkspaceID
+	for ws, s := range r.states {
+		if s.log == nil {
+			apply(s)
+			continue
+		}
+		bound = append(bound, ws)
+	}
+	r.mu.Unlock()
+	ctx["workspaces"] = len(bound)
+	r.log.Global().Info(operation, message, ctx)
+	for _, ws := range bound {
+		r.mutate(ws, operation, message, dlog.Context{"key": ctx["key"]}, apply)
+	}
 }
 
 // ---- TopbarSink -----------------------------------------------------------

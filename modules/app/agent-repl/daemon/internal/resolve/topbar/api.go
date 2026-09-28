@@ -156,6 +156,16 @@ type Resolver interface {
 	// the line rather than adding a second one. The raising site logs the full
 	// context itself; this only makes it visible.
 	RaiseWarning(ws ids.WorkspaceID, key, line string)
+	// RaiseDaemonWarning is RaiseWarning for a condition of the WHOLE DAEMON
+	// — a daemon-scoped fault — which stands on EVERY workspace's warning
+	// strip, present and future, as one line with no overlay. key identifies
+	// the condition, so raising it again restates the line. Unlike a
+	// workspace's raised warning it is RETRACTED when the condition ends
+	// (RetractDaemonWarning): the fault it draws is closed, not merely past.
+	RaiseDaemonWarning(key, line string)
+	// RetractDaemonWarning takes a daemon-scoped warning off every strip. A
+	// key that is not raised retracts nothing.
+	RetractDaemonWarning(key string)
 	// Topic is the workspace's topbar publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView]
 	// StatusFacts answers the session facts the /status panel splices —

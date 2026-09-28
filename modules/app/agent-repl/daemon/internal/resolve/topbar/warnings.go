@@ -267,6 +267,19 @@ func (r *resolver) raisedWarnings(s *wsState) []warning {
 			},
 		})
 	}
+	// THE DAEMON'S OWN CONDITIONS ride the same line: a daemon-scoped fault
+	// is drawn exactly as a raised warning is, on every strip.
+	for key, record := range s.daemonRaised {
+		record := record
+		out = append(out, warning{
+			kind: warnRaised, key: "daemon:" + key, seq: record.seq, line: record.line,
+			detail: func() *frontendv1.TopbarWarning {
+				return &frontendv1.TopbarWarning{
+					Line: &frontendv1.TopbarWarningLine{Text: truncate(record.line, DefaultLineWidth)},
+				}
+			},
+		})
+	}
 	return out
 }
 
