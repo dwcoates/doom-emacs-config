@@ -553,11 +553,13 @@ type DaemonFault_DaemonStateUnreadable struct {
 }
 
 type DaemonFault_DeployFailed struct {
-	// A deploy's build, install or service restart did not go through. It
-	// stands until a later deploy gets through the step that failed, and a
-	// daemon that boots closes the ones an earlier daemon left standing. A
-	// handover whose successor would not start is `successor_spawn_failed`
-	// instead.
+	// A deploy's build, install or service restart did not go through, or
+	// its rollback did not restore the previous build. A failure after the
+	// install began ROLLS BACK (owner ruling, 2026-09-28). A step's fault
+	// stands until a later deploy gets through that step, a rollback's until
+	// a deploy gets all the way through, and a daemon that boots closes the
+	// ones an earlier daemon left standing. A handover whose successor would
+	// not start is `successor_spawn_failed` instead.
 	DeployFailed *DaemonFaultDeployFailed `protobuf:"bytes,9,opt,name=deploy_failed,json=deployFailed,proto3,oneof"`
 }
 
@@ -854,6 +856,7 @@ type DaemonFaultDeployFailed struct {
 	//	*DaemonFaultDeployFailed_Build
 	//	*DaemonFaultDeployFailed_Install
 	//	*DaemonFaultDeployFailed_RestartServices
+	//	*DaemonFaultDeployFailed_Rollback
 	Step          isDaemonFaultDeployFailed_Step `protobuf_oneof:"step"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -923,6 +926,15 @@ func (x *DaemonFaultDeployFailed) GetRestartServices() *DeployServiceRestartFail
 	return nil
 }
 
+func (x *DaemonFaultDeployFailed) GetRollback() *DeployRollbackFailed {
+	if x != nil {
+		if x, ok := x.Step.(*DaemonFaultDeployFailed_Rollback); ok {
+			return x.Rollback
+		}
+	}
+	return nil
+}
+
 type isDaemonFaultDeployFailed_Step interface {
 	isDaemonFaultDeployFailed_Step()
 }
@@ -942,11 +954,76 @@ type DaemonFaultDeployFailed_RestartServices struct {
 	RestartServices *DeployServiceRestartFailed `protobuf:"bytes,3,opt,name=restart_services,json=restartServices,proto3,oneof"`
 }
 
+type DaemonFaultDeployFailed_Rollback struct {
+	// The failed deploy's ROLLBACK did not restore the previous build: a
+	// kept artifact could not be put back, or a service would not restart
+	// onto it. It stands as a fault of its own, beside the step's.
+	Rollback *DeployRollbackFailed `protobuf:"bytes,4,opt,name=rollback,proto3,oneof"`
+}
+
 func (*DaemonFaultDeployFailed_Build) isDaemonFaultDeployFailed_Step() {}
 
 func (*DaemonFaultDeployFailed_Install) isDaemonFaultDeployFailed_Step() {}
 
 func (*DaemonFaultDeployFailed_RestartServices) isDaemonFaultDeployFailed_Step() {}
+
+func (*DaemonFaultDeployFailed_Rollback) isDaemonFaultDeployFailed_Step() {}
+
+// A failed deploy's rollback did not restore the previous build. The host may
+// run neither build cleanly until a deploy gets all the way through.
+type DeployRollbackFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The first component the rollback could not restore. REQUIRED.
+	Component DeployComponent `protobuf:"varint,1,opt,name=component,proto3,enum=agentrepl.v1.DeployComponent" json:"component,omitempty"`
+	// Every failure, in the rollback's own words. REQUIRED.
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeployRollbackFailed) Reset() {
+	*x = DeployRollbackFailed{}
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeployRollbackFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeployRollbackFailed) ProtoMessage() {}
+
+func (x *DeployRollbackFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeployRollbackFailed.ProtoReflect.Descriptor instead.
+func (*DeployRollbackFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *DeployRollbackFailed) GetComponent() DeployComponent {
+	if x != nil {
+		return x.Component
+	}
+	return DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
+}
+
+func (x *DeployRollbackFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
 
 // No arms: DaemonHealth has no refusal site (landing 4).
 type DaemonHealthError struct {
@@ -957,7 +1034,7 @@ type DaemonHealthError struct {
 
 func (x *DaemonHealthError) Reset() {
 	*x = DaemonHealthError{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -969,7 +1046,7 @@ func (x *DaemonHealthError) String() string {
 func (*DaemonHealthError) ProtoMessage() {}
 
 func (x *DaemonHealthError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -982,7 +1059,7 @@ func (x *DaemonHealthError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthError.ProtoReflect.Descriptor instead.
 func (*DaemonHealthError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{15}
 }
 
 var File_agentrepl_v1_endpoint_daemon_health_proto protoreflect.FileDescriptor
@@ -1028,12 +1105,16 @@ const file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc = "" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"2\n" +
 	"\x1cDaemonFaultPromptsDirMissing\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"\x18\n" +
-	"\x16DaemonFaultWsmReadOnly\"\xf0\x01\n" +
+	"\x16DaemonFaultWsmReadOnly\"\xb2\x02\n" +
 	"\x17DaemonFaultDeployFailed\x127\n" +
 	"\x05build\x18\x01 \x01(\v2\x1f.agentrepl.v1.DeployBuildFailedH\x00R\x05build\x12=\n" +
 	"\ainstall\x18\x02 \x01(\v2!.agentrepl.v1.DeployInstallFailedH\x00R\ainstall\x12U\n" +
-	"\x10restart_services\x18\x03 \x01(\v2(.agentrepl.v1.DeployServiceRestartFailedH\x00R\x0frestartServicesB\x06\n" +
-	"\x04step\"\x13\n" +
+	"\x10restart_services\x18\x03 \x01(\v2(.agentrepl.v1.DeployServiceRestartFailedH\x00R\x0frestartServices\x12@\n" +
+	"\brollback\x18\x04 \x01(\v2\".agentrepl.v1.DeployRollbackFailedH\x00R\brollbackB\x06\n" +
+	"\x04step\"k\n" +
+	"\x14DeployRollbackFailed\x12;\n" +
+	"\tcomponent\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.DeployComponentR\tcomponent\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"\x13\n" +
 	"\x11DaemonHealthErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -1048,7 +1129,7 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_endpoint_daemon_health_proto_goTypes = []any{
 	(*DaemonHealthRequest)(nil),              // 0: agentrepl.v1.DaemonHealthRequest
 	(*DaemonHealthResponse)(nil),             // 1: agentrepl.v1.DaemonHealthResponse
@@ -1064,15 +1145,17 @@ var file_agentrepl_v1_endpoint_daemon_health_proto_goTypes = []any{
 	(*DaemonFaultPromptsDirMissing)(nil),     // 11: agentrepl.v1.DaemonFaultPromptsDirMissing
 	(*DaemonFaultWsmReadOnly)(nil),           // 12: agentrepl.v1.DaemonFaultWsmReadOnly
 	(*DaemonFaultDeployFailed)(nil),          // 13: agentrepl.v1.DaemonFaultDeployFailed
-	(*DaemonHealthError)(nil),                // 14: agentrepl.v1.DaemonHealthError
-	(*v1.WorkspaceRef)(nil),                  // 15: workspace.v1.WorkspaceRef
-	(*DeployBuildFailed)(nil),                // 16: agentrepl.v1.DeployBuildFailed
-	(*DeployInstallFailed)(nil),              // 17: agentrepl.v1.DeployInstallFailed
-	(*DeployServiceRestartFailed)(nil),       // 18: agentrepl.v1.DeployServiceRestartFailed
+	(*DeployRollbackFailed)(nil),             // 14: agentrepl.v1.DeployRollbackFailed
+	(*DaemonHealthError)(nil),                // 15: agentrepl.v1.DaemonHealthError
+	(*v1.WorkspaceRef)(nil),                  // 16: workspace.v1.WorkspaceRef
+	(*DeployBuildFailed)(nil),                // 17: agentrepl.v1.DeployBuildFailed
+	(*DeployInstallFailed)(nil),              // 18: agentrepl.v1.DeployInstallFailed
+	(*DeployServiceRestartFailed)(nil),       // 19: agentrepl.v1.DeployServiceRestartFailed
+	(DeployComponent)(0),                     // 20: agentrepl.v1.DeployComponent
 }
 var file_agentrepl_v1_endpoint_daemon_health_proto_depIdxs = []int32{
 	2,  // 0: agentrepl.v1.DaemonHealthResponse.success:type_name -> agentrepl.v1.DaemonHealthSuccess
-	14, // 1: agentrepl.v1.DaemonHealthResponse.error:type_name -> agentrepl.v1.DaemonHealthError
+	15, // 1: agentrepl.v1.DaemonHealthResponse.error:type_name -> agentrepl.v1.DaemonHealthError
 	3,  // 2: agentrepl.v1.DaemonHealthSuccess.healthy:type_name -> agentrepl.v1.DaemonHealthy
 	5,  // 3: agentrepl.v1.DaemonHealthSuccess.unhealthy:type_name -> agentrepl.v1.DaemonUnhealthy
 	4,  // 4: agentrepl.v1.DaemonHealthSuccess.identity:type_name -> agentrepl.v1.DaemonIdentity
@@ -1084,15 +1167,17 @@ var file_agentrepl_v1_endpoint_daemon_health_proto_depIdxs = []int32{
 	12, // 10: agentrepl.v1.DaemonFault.wsm_read_only:type_name -> agentrepl.v1.DaemonFaultWsmReadOnly
 	8,  // 11: agentrepl.v1.DaemonFault.daemon_state_unreadable:type_name -> agentrepl.v1.DaemonFaultDaemonStateUnreadable
 	13, // 12: agentrepl.v1.DaemonFault.deploy_failed:type_name -> agentrepl.v1.DaemonFaultDeployFailed
-	15, // 13: agentrepl.v1.DaemonFaultAdoptionWindowExpired.workspace:type_name -> workspace.v1.WorkspaceRef
-	16, // 14: agentrepl.v1.DaemonFaultDeployFailed.build:type_name -> agentrepl.v1.DeployBuildFailed
-	17, // 15: agentrepl.v1.DaemonFaultDeployFailed.install:type_name -> agentrepl.v1.DeployInstallFailed
-	18, // 16: agentrepl.v1.DaemonFaultDeployFailed.restart_services:type_name -> agentrepl.v1.DeployServiceRestartFailed
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	16, // 13: agentrepl.v1.DaemonFaultAdoptionWindowExpired.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 14: agentrepl.v1.DaemonFaultDeployFailed.build:type_name -> agentrepl.v1.DeployBuildFailed
+	18, // 15: agentrepl.v1.DaemonFaultDeployFailed.install:type_name -> agentrepl.v1.DeployInstallFailed
+	19, // 16: agentrepl.v1.DaemonFaultDeployFailed.restart_services:type_name -> agentrepl.v1.DeployServiceRestartFailed
+	14, // 17: agentrepl.v1.DaemonFaultDeployFailed.rollback:type_name -> agentrepl.v1.DeployRollbackFailed
+	20, // 18: agentrepl.v1.DeployRollbackFailed.component:type_name -> agentrepl.v1.DeployComponent
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_daemon_health_proto_init() }
@@ -1122,6 +1207,7 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_init() {
 		(*DaemonFaultDeployFailed_Build)(nil),
 		(*DaemonFaultDeployFailed_Install)(nil),
 		(*DaemonFaultDeployFailed_RestartServices)(nil),
+		(*DaemonFaultDeployFailed_Rollback)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1129,7 +1215,7 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc), len(file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

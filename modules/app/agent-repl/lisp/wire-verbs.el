@@ -2900,12 +2900,27 @@ oneof unset, which every consumer reads as a contract breach."
 a `DeployServiceRestartFailed'."
   (agent-repl-wire-decode-deploy-service-restart-failed json))
 
+(defun agent-repl-wire-decode-deploy-rollback-failed (json)
+  "Decode DeployRollbackFailed from JSON into (:component K :detail D).
+A failed deploy's rollback did not restore the previous build.  Both are
+REQUIRED."
+  (let ((message "DeployRollbackFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(component detail))
+    (list :component (agent-repl-wire-decode-deploy-component message 'component json)
+          :detail (agent-repl-wire-verbs--decode-required-string message 'detail json))))
+
+(defun agent-repl-wire-decode-daemon-fault-deploy-failed-rollback (json)
+  "Decode DaemonFaultDeployFailed's `rollback' step arm from JSON as a
+`DeployRollbackFailed'."
+  (agent-repl-wire-decode-deploy-rollback-failed json))
+
 (defun agent-repl-wire-decode-daemon-fault-deploy-failed (json)
   "Decode DaemonFaultDeployFailed from JSON into (:step (:arm ARM :value V)).
 THE ARM IS THE STEP THAT FAILED, carrying the very refusal the Deploy rpc
-answered its caller with, so an unset step is a contract breach."
+answered its caller with, or the failed rollback, so an unset step is a
+contract breach."
   (let ((message "DaemonFaultDeployFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(build install restartServices))
+    (agent-repl-wire-verbs--check-keys message json '(build install restartServices rollback))
     (list :step
           (agent-repl-wire-verbs--decode-oneof
            message "step" json
@@ -2914,7 +2929,9 @@ answered its caller with, so an unset step is a contract breach."
                  (list 'install :install
                        #'agent-repl-wire-decode-daemon-fault-deploy-failed-install)
                  (list 'restartServices :restart-services
-                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-restart-services))))))
+                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-restart-services)
+                 (list 'rollback :rollback
+                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-rollback))))))
 
 (defun agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired (json)
   "Decode DaemonFault's `adoption_window_expired' kind arm from JSON as a
