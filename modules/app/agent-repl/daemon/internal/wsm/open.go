@@ -247,7 +247,7 @@ func (s *store) createSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("wsm: begin schema creation on %q: %w", s.path, err)
 	}
-	defer tx.Rollback()
+	defer s.endTx(tx, "daemon.wsm.open", dlog.Context{"path": s.path})
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
 		return fmt.Errorf("wsm: create schema in %q: %w", s.path, err)
 	}
@@ -357,8 +357,9 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	}
 	if err := fn(ctx, tx); err != nil {
 		// The rollback is what makes a refusal mid-transaction leave nothing
-		// behind; its own failure never masks the cause.
-		_ = tx.Rollback()
+		// behind; its own failure is recorded by endTx and never masks the
+		// cause, which is still what this write returns.
+		s.endTx(tx, op, fields)
 		// A WRITE ABOUT A RECORD THAT IS NOT THERE IS THE READ SIDE'S SHAPE,
 		// and it gets the read side's level. `read` has always answered
 		// ErrNotFound at DEBUG; a write that names a row the caller no longer
@@ -421,6 +422,23 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 	}
 	s.log.Debug(op, "read durable state", fields)
 	return nil
+}
+
+// endTx is the one way a transaction in this package ends without a Commit:
+// it rolls tx back and records a failed rollback at ERROR.
+//
+// A FAILED ROLLBACK OUTLIVES ITS CALL. It leaves the connection inside the
+// transaction, still holding its lock or snapshot, and every site used to
+// discard the error, so nothing would have said why the next write waited or
+// the WAL stopped folding. ErrTxDone is not a failure: it is what Rollback
+// answers after a successful Commit.
+func (s *store) endTx(tx *sql.Tx, op string, fields dlog.Context) {
+	err := tx.Rollback()
+	if err == nil || errors.Is(err, sql.ErrTxDone) {
+		return
+	}
+	s.log.Error(op, "could not roll the transaction back, so its connection may still be inside it",
+		withError(fields, fmt.Errorf("wsm: roll back transaction: %w", err)))
 }
 
 // withError copies fields and stamps the error, so a caller's map is never
