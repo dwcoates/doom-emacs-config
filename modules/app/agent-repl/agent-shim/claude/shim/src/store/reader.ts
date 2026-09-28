@@ -1127,7 +1127,7 @@ export function createReader(options: ReaderOptions): Reader {
         create(storev1.ReadAgentPageRequestSchema, {
           book: agent,
           pageSize,
-          after: toStorePointer(after),
+          position: { case: "after", value: toStorePointer(after) },
         }),
       );
     } catch (error) {

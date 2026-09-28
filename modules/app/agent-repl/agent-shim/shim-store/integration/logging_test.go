@@ -105,7 +105,7 @@ func TestAStalePointerProducesExactlyOneNormalLevelRecordOnRead(t *testing.T) {
 
 	// Act
 	assertReadStalePointer(t, readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
-		Book: agentID("main"), PageSize: 10, After: foreign,
+		Book: agentID("main"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: foreign},
 	}))
 
 	// Assert

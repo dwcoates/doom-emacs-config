@@ -651,7 +651,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        },
       }),
     );
 
@@ -670,7 +673,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "2" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "2" }),
+        },
       }),
     );
 
@@ -692,7 +698,10 @@ describe("ReadAgentPage", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 1,
-        after: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "3" }),
+        },
       }),
     );
 
@@ -1079,7 +1088,10 @@ describe("typed read refusals", () => {
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
         pageSize: 10,
-        after: create(storev1.StoreItemPointerSchema, { value: "9" }),
+        position: {
+          case: "after",
+          value: create(storev1.StoreItemPointerSchema, { value: "9" }),
+        },
       }),
     );
 
