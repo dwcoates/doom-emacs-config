@@ -3,7 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
+
+	"agentrepl/shim-store/internal/logging"
 )
 
 // THE STORE IS THE SINGLE WRITER PROCESS, SO ITS WRITES ARE SERIALIZED IN
@@ -250,4 +253,22 @@ func (d *DB) beginWrite(ctx context.Context, class WriteClass) (*sql.Tx, func(),
 		return nil, nil, err
 	}
 	return tx, release, nil
+}
+
+// endTx is the one way a transaction opened by beginWrite or beginRead ends
+// when its caller is done with it: every such caller defers it.
+//
+// A FAILED ROLLBACK IS RECORDED, because it is the one failure that outlives
+// the call. A rollback that fails leaves its connection inside the
+// transaction, still holding the snapshot or the lock, and a snapshot held past
+// its read is what pins the WAL so no checkpoint can copy it. Every site used
+// to discard this error, so a connection stuck that way would have left
+// nothing in the log. ErrTxDone is not a failure: it is what Rollback answers
+// after a successful Commit.
+func (d *DB) endTx(tx *sql.Tx, fields logging.Fields) {
+	err := tx.Rollback()
+	if err == nil || errors.Is(err, sql.ErrTxDone) {
+		return
+	}
+	d.refuse(fields, storagef(err, "ending the transaction")) //nolint:errcheck // recorded here; the caller has already returned
 }
