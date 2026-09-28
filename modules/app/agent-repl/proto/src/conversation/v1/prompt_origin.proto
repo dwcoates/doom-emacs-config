@@ -73,4 +73,22 @@ enum PromptOrigin {
   // to report "resumed after restart" instead of presenting work the user did
   // not just ask for as though they had.
   PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28;
+
+  // A turn the VENDOR started on its own, with no StartTurn behind it.
+  //
+  // The vendor runs turns nobody submitted: a background subagent's hand-back
+  // report arriving makes the main agent reply, and so does a background
+  // task's notification. The shim ADOPTS every such turn as a real turn: it
+  // mints the turn id itself and writes a prompt row of this origin as the
+  // turn's FIRST row, on the same ordered plane as everything the turn goes on
+  // to produce, so no frame and no terminal of the turn is ever without a turn
+  // id, and a consumer learns the turn opened before it sees any of its rows.
+  //
+  // THE ROW IS AN EDGE, NOT WORDS. `said` is empty: nobody said anything, and
+  // what drove the turn (a peer message, a task notification) is its own row.
+  // A feed draws no prompt bubble for it; a consumer that tracks the running
+  // turn opens the turn on it, once.
+  //
+  // Never submitted by a client: only the shim produces it.
+  PROMPT_ORIGIN_VENDOR_STARTED = 29;
 }

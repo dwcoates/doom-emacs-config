@@ -350,6 +350,30 @@ func TestAnOrdinaryPromptStillDrawsItsBubble(t *testing.T) {
 	}
 }
 
+// A RE-SENT PROMPT REPLACES ITS BUBBLE IN PLACE. The file plane writes an
+// edited or re-sent version of a still-unanswered prompt onto the first
+// version's row and turn (shim-sidecar convert/resend.go), so the feed receives
+// the same turn's prompt again with new words: it must redraw the one bubble,
+// never add a second.
+func TestAPromptReServedOnItsTurnWithNewWordsRedrawsTheOneBubble(t *testing.T) {
+	// Arrange: the first version is drawn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "is that not the case?")
+
+	// Act: the re-sent version arrives on the same turn.
+	h.deliverPrompt("turn-1", "is that not the case? it does send some")
+
+	// Assert.
+	rows := h.userPromptRows()
+	if len(rows) != 1 {
+		t.Fatalf("user-prompt rows = %d, want the one bubble redrawn", len(rows))
+	}
+	blocks := rows[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != "is that not the case? it does send some" {
+		t.Fatalf("bubble holds %v, want the re-sent version's words", blocks)
+	}
+}
+
 // THE DIRECTIVE'S PROMPT STAYS SUPPRESSED WHEN THE OTHER PLANE RE-DELIVERS IT
 // LATE. The file plane's copy of the /clear prompt lands after the turn's
 // terminal; a suppression that forgot the turn at the terminal let it draw a
@@ -656,5 +680,46 @@ func TestAnAgentPromptSettlesAtItsTurnsTerminal(t *testing.T) {
 				t.Fatalf("working = %v, want %v", got, tc.wantWorking)
 			}
 		})
+	}
+}
+
+// A VENDOR-STARTED TURN'S PROMPT ROW IS AN EDGE, NOT WORDS. The shim writes it
+// only to open a turn the vendor began on its own, so it draws no bubble.
+func TestAVendorStartedTurnDrawsNoPromptBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-v", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if got := h.userPromptRows(); len(got) != 0 {
+		t.Fatalf("user-prompt rows = %d, want none for a vendor-started turn", len(got))
+	}
+}
+
+// THE SUPPRESSED ROW STILL OPENS ITS TURN, so the turn's rows are stamped with
+// it and its terminal draws the ending and marks the final answer.
+func TestAVendorStartedPromptOpensItsTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-v", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if turn := h.resolver.state(testWorkspace).turnInFlight; turn == nil || *turn != "turn-v" {
+		t.Fatalf("turn in flight = %v, want the vendor-started turn", turn)
+	}
+}
+
+// NO READER NAMES THE USER AS THE AUTHOR of a turn the vendor began.
+func TestTheAuthorLabelOfAVendorStartedTurnIsTheVendor(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+
+	// Assert.
+	if got != "Vendor" {
+		t.Fatalf("author = %q, want Vendor", got)
 	}
 }

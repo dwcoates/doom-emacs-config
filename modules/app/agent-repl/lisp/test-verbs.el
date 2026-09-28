@@ -1870,6 +1870,23 @@ this test needs the genuinely sectionless roster."
     (should (equal (car agent-repl-test-verbs--messages)
                    "agent-repl: deploy: daemon handing over 3 workspaces (1 busy); shim 1 bounced now, 1 registered; webapp reload pushed to 2; store restarted; sidecar up to date; elisp deferred to the successor"))))
 
+(ert-deftest agent-repl-verbs-deploy-restarting-names-both-layouts ()
+  "A layout restart's decision names the running and the fresh state layout."
+  (agent-repl-test-verbs--with
+      '((:deploy . (:response (:arm :success
+                               :value (:components
+                                       ((:component :daemon :build "d"
+                                         :outcome (:arm :restarting
+                                                   :value (:running-state-layout 7
+                                                           :fresh-state-layout 8
+                                                           :workspaces 3 :busy 1
+                                                           :forced t)))))))))
+    ;; Act
+    (agent-repl-deploy nil)
+    ;; Assert
+    (should (equal (car agent-repl-test-verbs--messages)
+                   "agent-repl: deploy: daemon restarting for state layout 7→8, 3 workspaces (1 busy, forced)"))))
+
 (ert-deftest agent-repl-verbs-deploy-forced-success-says-forced ()
   "A forced deploy's answer says it was forced."
   (agent-repl-test-verbs--with

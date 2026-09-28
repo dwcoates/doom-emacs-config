@@ -4,15 +4,19 @@
  *
  * Every `.feed-item` carries `content-visibility: auto` (styles.css), so the
  * browser skips the layout and paint of a row far from the viewport and stands
- * in the `contain-intrinsic-size` guess (`--lazy-h`, ~320px) for its height.
- * The first time the reader scrolls a skipped row into view it lays out for
- * the first time, its real height replaces the guess, and everything below it
- * shifts — the classic content-visibility jitter.
+ * in the `contain-intrinsic-size` guess (320px) for its height. The first time
+ * the reader scrolls a skipped row into view it lays out for the first time,
+ * its real height replaces the guess, and everything below it shifts — the
+ * classic content-visibility jitter.
  *
- * The fix keeps the perf win for rows FAR from the viewport but PRE-RENDERS
- * (forces the layout of) the rows within a band of about five viewport heights
- * above and below it, so by the time the reader reaches one it is already laid
- * out at its true height and nothing shifts. An `IntersectionObserver` rooted
+ * The band keeps the perf win for rows FAR from the viewport but PRE-RENDERS
+ * (forces the layout of) the rows within about five viewport heights above and
+ * below it, so by the time the reader reaches one it is already laid out at its
+ * true height. That first layout still changes a row's height while it is
+ * ABOVE the reader, which moves the content under them unless something anchors
+ * the view: Chromium's native scroll anchoring does, WebKit (the Emacs webview)
+ * has none, so the feed's tail owner anchors it (scroll.ts, `TailFollow`, "THE
+ * FEED OWNS ITS SCROLL ANCHORING"). An `IntersectionObserver` rooted
  * on the feed's scroll box, its margin blown out to that band, is what reports
  * a row entering or leaving it; a row inside wears `OVERSCAN_CLASS`, which
  * turns its `content-visibility` back to `visible` (styles.css), and a row that

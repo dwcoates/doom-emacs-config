@@ -98,22 +98,23 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	return nil
 }
 
-// MarkViewed records that the user has SEEN the workspace, which draws its
-// roster row PARTIAL (the name recedes; the status dot keeps its colour) —
-// only while the row is DONE, which the roster decides (`sidebar.SetViewed`).
+// MarkViewed records that the user has SEEN the workspace, which reads the
+// last turn's result and draws its roster row PARTIAL (the name recedes; the
+// status dot keeps its colour) — only when the row is on a turn-end arm, done
+// or interrupted, which the roster decides (`sidebar.SetViewed`).
 //
 // It does ONE thing, and the things it deliberately does NOT do are the point:
 // it writes no durable record, because the display mode is a view fact that
 // should not survive a restart; it does not revive a parked session, because
 // looking at something is not working on it; and it has no companion "unview"
-// verb, because the roster clears the marker itself on the row's next status
-// change. Idempotent — marking an already-viewed workspace changes nothing.
+// verb, because the roster makes the next result unread itself when the next
+// turn ends. Idempotent — marking an already-viewed workspace changes nothing.
 func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "MarkWorkspaceViewed", ws)
 	if err != nil {
 		return err
 	}
-	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL if it is done", nil)
+	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL if it is on a turn-end arm", nil)
 	v.deps.Sidebar.SetViewed(ws)
 	return nil
 }

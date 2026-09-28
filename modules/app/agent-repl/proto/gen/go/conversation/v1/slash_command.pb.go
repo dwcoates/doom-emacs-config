@@ -98,6 +98,9 @@ const (
 	SessionCommand_SESSION_COMMAND_VIM              SessionCommand = 28
 	SessionCommand_SESSION_COMMAND_REWIND           SessionCommand = 29
 	SessionCommand_SESSION_COMMAND_BUG              SessionCommand = 30
+	SessionCommand_SESSION_COMMAND_EFFORT           SessionCommand = 31
+	SessionCommand_SESSION_COMMAND_PLUGIN           SessionCommand = 32
+	SessionCommand_SESSION_COMMAND_LOW_PRIORITY     SessionCommand = 33
 )
 
 // Enum value maps for SessionCommand.
@@ -134,6 +137,9 @@ var (
 		28: "SESSION_COMMAND_VIM",
 		29: "SESSION_COMMAND_REWIND",
 		30: "SESSION_COMMAND_BUG",
+		31: "SESSION_COMMAND_EFFORT",
+		32: "SESSION_COMMAND_PLUGIN",
+		33: "SESSION_COMMAND_LOW_PRIORITY",
 	}
 	SessionCommand_value = map[string]int32{
 		"SESSION_COMMAND_UNSPECIFIED":      0,
@@ -167,6 +173,9 @@ var (
 		"SESSION_COMMAND_VIM":              28,
 		"SESSION_COMMAND_REWIND":           29,
 		"SESSION_COMMAND_BUG":              30,
+		"SESSION_COMMAND_EFFORT":           31,
+		"SESSION_COMMAND_PLUGIN":           32,
+		"SESSION_COMMAND_LOW_PRIORITY":     33,
 	}
 )
 
@@ -784,7 +793,7 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"durationMsB\t\n" +
 	"\atrigger\"\x1c\n" +
 	"\x1aContextCompactionRequested\"\x1c\n" +
-	"\x1aContextCompactionAutomatic*\x81\v\n" +
+	"\x1aContextCompactionAutomatic*\x92\f\n" +
 	"\x0eSessionCommand\x12\x1f\n" +
 	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x125\n" +
 	"\x15SESSION_COMMAND_CLEAR\x10\x01\x1a\x1a\x92\xa6\x1d\x16\n" +
@@ -852,7 +861,13 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"\a/rewind\x12#\n" +
 	"\x13SESSION_COMMAND_BUG\x10\x1e\x1a\n" +
 	"\x92\xa6\x1d\x06\n" +
-	"\x04/bug:z\n" +
+	"\x04/bug\x12+\n" +
+	"\x16SESSION_COMMAND_EFFORT\x10\x1f\x1a\x0f\x92\xa6\x1d\v\n" +
+	"\a/effort\x10\x01\x12+\n" +
+	"\x16SESSION_COMMAND_PLUGIN\x10 \x1a\x0f\x92\xa6\x1d\v\n" +
+	"\a/plugin\x10\x01\x125\n" +
+	"\x1cSESSION_COMMAND_LOW_PRIORITY\x10!\x1a\x13\x92\xa6\x1d\x0f\n" +
+	"\r/low-priority:z\n" +
 	"\x14session_command_spec\x12!.google.protobuf.EnumValueOptions\x18\xe2\xd4\x03 \x01(\v2#.conversation.v1.SessionCommandSpecR\x12sessionCommandSpecB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (

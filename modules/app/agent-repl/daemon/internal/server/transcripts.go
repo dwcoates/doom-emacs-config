@@ -77,8 +77,8 @@ func (s *server) BindWorkspaceSession(
 //
 // IT REPORTS THROUGH THE OPEN ARM, because a bind IS a session bring-up: it
 // ends the current session and starts one on the chosen conversation through
-// the ordinary resume, which is the very wait `WORKSPACE_OPEN_STAGE_STARTING_-
-// SESSION` names. `workspace_mutation_progress.proto` carries no bind arm of
+// the ordinary resume, which is the very wait the open stage's
+// `starting_session` arm names. `workspace_mutation_progress.proto` carries no bind arm of
 // its own; inventing one here would be a contract decision this layer does not
 // get to make.
 //
@@ -99,7 +99,11 @@ func (r bindProgressReporter) Stage(stage workspace.BindStage) {
 			OpId: r.opID,
 			Event: &agentreplv1.WorkspaceMutationProgress_Open{
 				Open: &agentreplv1.WorkspaceOpenProgress{
-					Stage: agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION,
+					EnteredStage: &agentreplv1.WorkspaceOpenStage{
+						Stage: &agentreplv1.WorkspaceOpenStage_StartingSession{
+							StartingSession: &agentreplv1.WorkspaceOpenStageStartingSession{},
+						},
+					},
 				},
 			},
 		})

@@ -301,7 +301,7 @@ func TestBindWorkspaceSessionRelaysTheStartingSessionStage(t *testing.T) {
 	}
 	prog := stream.Msg().GetMutationProgress()
 	if prog.GetOpId() != "op-bind" ||
-		prog.GetOpen().GetStage() != agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION {
+		openStageArm(prog.GetOpen().GetEnteredStage()) != "starting_session" {
 		t.Fatalf("progress = %v, want the starting-session stage on op-bind", prog)
 	}
 }
