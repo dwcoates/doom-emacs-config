@@ -123,6 +123,10 @@ func describeOutcome(o *agentreplv1.DeployComponentOutcome) (string, error) {
 	case *agentreplv1.DeployComponentOutcome_HandingOver:
 		h := arm.HandingOver
 		return fmt.Sprintf("%s handing-over workspaces=%d busy=%d forced=%t", head, h.GetWorkspaces(), h.GetBusy(), h.GetForced()), nil
+	case *agentreplv1.DeployComponentOutcome_Restarting:
+		r := arm.Restarting
+		return fmt.Sprintf("%s restarting layout=%d→%d workspaces=%d busy=%d forced=%t", head,
+			r.GetRunningStateLayout(), r.GetFreshStateLayout(), r.GetWorkspaces(), r.GetBusy(), r.GetForced()), nil
 	case *agentreplv1.DeployComponentOutcome_Shims:
 		parts := make([]string, 0, len(arm.Shims.GetBounces()))
 		for _, b := range arm.Shims.GetBounces() {
