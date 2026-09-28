@@ -26,7 +26,7 @@
  * The unit run is un-isolated: this file installs no fake clock, unstubs every
  * global it stubs, and leaves the page empty.
  */
-import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -370,15 +370,48 @@ async function teardownPage(): Promise<void> {
   }
 }
 
-// These full-graph boot cases repeatedly reached 1.5s under the isolated
-// Istanbul coverage workers while completing normally. Their five-second
-// local bound keeps the 850ms unit-test default intact and still detects a
-// boot that stops making progress.
-const coverageBootTimeoutMS = 5_000;
+/**
+ * THE FILE'S COLD BOOT IS PAID ONCE, IN A `beforeAll`, UNDER ITS OWN BOUND.
+ *
+ * The first `import("../src/main.js")` in a worker is the first time the
+ * composition root's graph is fetched and compiled: vite-node pulls each module
+ * over an rpc to the main vitest process, one `await` per import, and V8
+ * compiles each on first evaluation. PROFILED (a `--cpu-prof` of both
+ * processes): the boot itself settles in ~2ms and neither awaits anything
+ * serially nor arms a real timer; the cold cost is the worker IDLE on those
+ * module-fetch round trips, plus protobuf-es decoding the generated
+ * descriptors and jsdom parsing the imported stylesheet. Every later import in
+ * the file re-evaluates the same graph from vite-node's transform cache. So
+ * the cold import is ~10x a warm one, and at load it is the round trips that
+ * stretch: MEASURED, cold 0.65-1.3s idle, up to 3.15s over 20 runs at a load
+ * average of ~112 (`yes` x16 plus two looping unit suites), and 5.59s once on
+ * the contended host; warm 55-250ms idle, up to 536ms at ~112 and 1.45s on
+ * that same contended run.
+ *
+ * It used to land on whichever test ran first, and at a load average of ~110
+ * it crossed that test's bound. 15s is ~2.7x the slowest cold import seen.
+ */
+const COLD_BOOT_TIMEOUT_MS = 15_000;
+
+/**
+ * ONE WARM BOOT: a fresh evaluation of the whole mocked graph plus its settle.
+ * ~3x the 1.45s slowest warm test measured above. It is a per-site bound
+ * rather than a raised global because nothing else in the unit suite imports
+ * its subject at run time; the 850ms global stays sized for what it covers.
+ */
+const BOOT_TIMEOUT_MS = 4_500;
+beforeAll(async () => {
+  arrangePage();
+  try {
+    await bootMain();
+  } finally {
+    await teardownPage();
+  }
+}, COLD_BOOT_TIMEOUT_MS);
 
 beforeEach(arrangePage);
-afterEach(teardownPage, coverageBootTimeoutMS);
-describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
+afterEach(teardownPage, BOOT_TIMEOUT_MS);
+describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 
@@ -584,7 +617,7 @@ function chipEvidence(arm: string): string[] {
   );
 }
 
-describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
+describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("files boot_failed in the topbar's warning chip when adoption never completes", async () => {
     page.adopt = () => Promise.reject(new Error("adoption refused"));
 
@@ -693,7 +726,7 @@ describe("the ClientLog sink and the client's link verdict", () => {
   });
 });
 
-describe("the harness", { timeout: coverageBootTimeoutMS }, () => {
+describe("the harness", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("a boot that outlives its test records into its own record, not the next test's", async () => {
     // ARRANGE: a boot held at adoption, the way a timed-out test's boot is
     // still running when the next test arranges its page.
