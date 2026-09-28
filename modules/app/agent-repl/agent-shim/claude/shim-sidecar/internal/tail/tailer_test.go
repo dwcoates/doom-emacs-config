@@ -639,3 +639,60 @@ func TestAFailedPrimeFailsThePollAndIsRetried(t *testing.T) {
 		t.Fatalf("events = %v, want a failed prime handling nothing, then a prime and a handle", h.events)
 	}
 }
+
+// retiringHandler names one retired key per decoded object, and records
+// whether Handle found a list already on the context.
+type retiringHandler struct{ inherited [][]string }
+
+func (r *retiringHandler) Handle(fr []Frame, ctx *Context) []*storev1.StoreEntry {
+	r.inherited = append(r.inherited, append([]string(nil), ctx.Retired...))
+	for _, f := range fr {
+		if f.Obj != nil {
+			ctx.Retired = append(ctx.Retired, "prompt:"+f.Obj["uuid"].(string))
+		}
+	}
+	return nil
+}
+
+func TestAPollCarriesTheKeysItsHandlerRetired(t *testing.T) {
+	// Arrange
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, `{"uuid":"u1"}`+"\n"+`{"uuid":"u2"}`+"\n")
+	tr := New(p, JSONLCodec{}, &retiringHandler{}, &Context{SessionID: "s1"}, testLog())
+
+	// Act
+	result, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+
+	// Assert
+	if got := strings.Join(result.Retired, ","); got != "prompt:u1,prompt:u2" {
+		t.Fatalf("Retired = %q, want both records' keys in record order", got)
+	}
+}
+
+func TestAPollNeverHandsItsHandlerTheLastBatchsRetirements(t *testing.T) {
+	// Arrange: a first batch retired a key and was committed.
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, `{"uuid":"u1"}`+"\n")
+	h := &retiringHandler{}
+	tr := New(p, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog())
+	first, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("first Poll: %v", err)
+	}
+	tr.Commit(first)
+	appendFile(t, p, `{"uuid":"u2"}`+"\n")
+
+	// Act
+	second, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("second Poll: %v", err)
+	}
+
+	// Assert: the second batch's list is its own record's key alone.
+	if len(h.inherited[1]) != 0 || strings.Join(second.Retired, ",") != "prompt:u2" {
+		t.Fatalf("handler inherited %v and the poll carried %v, want nothing inherited and only prompt:u2", h.inherited[1], second.Retired)
+	}
+}

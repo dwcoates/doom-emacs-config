@@ -48,6 +48,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
@@ -1549,6 +1550,17 @@ func validateWriteBatchEnvelope(req *storev1.WriteBatchRequest) (string, string)
 		return "batch.cursor_advance.file_id", "cursor_advance: a CursorState with no file_id keys no row"
 	}
 	return "", ""
+}
+
+// currentConversion is the conversion a stored cursor states when this binary
+// wrote it: the current version, with nothing left to re-derive. A seeded
+// cursor without it reads as one stored before conversion versions existed,
+// and the sidecar re-derives the whole file instead of resuming it.
+func currentConversion() *storev1.CursorConversion {
+	return &storev1.CursorConversion{
+		Version: convert.ConversionVersion,
+		State:   &storev1.CursorConversion_Current{Current: &storev1.CursorConversionCurrent{}},
+	}
 }
 
 // SeedCursors scripts the GetSidecarCursors answer.

@@ -2775,6 +2775,49 @@ func TestAPromptsImageIsDrawnAsAnImageRowRatherThanAnUnsupportedBlock(t *testing
 }
 
 // ==========================================================================
+// A retired entry: the store no longer converts its record to that line.
+// ==========================================================================
+
+// A RETIRED PROMPT LEAVES AN OPEN FEED LIVE. The sidecar's conversion changed
+// and a user-type record it once minted as a prompt (a task notification) no
+// longer converts to one; the shim relays the retirement on WatchAgent's
+// `retired` arm, and the daemon publishes the row's removal on the feed tail.
+func TestARetiredPromptIsRemovedFromAnOpenFeedLive(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open feed that has drawn the prompt.
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	prompt := &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-notification"},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: origin,
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{{
+				Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "<task-notification>"}},
+			}},
+		}},
+	}
+	f.shim.PushUserPrompt(mainAgent, prompt)
+	drawn := awaitRow(t, f, feed, "the drawn prompt row", func(r *frontendv1.FeedRow) bool {
+		return r.GetUserPrompt() != nil && r.GetTurn().GetValue() == "turn-notification"
+	})
+
+	// Act.
+	f.shim.PushRetired(mainAgent, &conversationv1.HistoryEntryAt{
+		At:    &conversationv1.HistoryPointer{Value: "ptr-notification"},
+		Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: prompt}},
+	})
+
+	// Assert.
+	removal := awaitRow(t, f, feed, "the retired prompt's removal", func(r *frontendv1.FeedRow) bool {
+		return r.GetRemoved() != nil
+	})
+	if removal.GetId().GetValue() != drawn.GetId().GetValue() {
+		t.Fatalf("the removal names row %q, want the prompt's own id %q", removal.GetId().GetValue(), drawn.GetId().GetValue())
+	}
+}
+
+// ==========================================================================
 // feed-suite-local helpers.
 // ==========================================================================
 

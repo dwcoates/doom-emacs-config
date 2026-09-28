@@ -841,23 +841,48 @@ func (p *producer) plane() *storev1.Plane {
 	return &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}}
 }
 
+// testConversionVersion is the conversion version a file-plane fixture is
+// stamped with, as the sidecar stamps every entry it writes.
+const testConversionVersion = 1
+
+// conversionVersion is StoreEntry.conversion_version as this producer's plane
+// states it: set on the file plane, unset on the stream plane.
+func (p *producer) conversionVersion() *uint32 {
+	if !p.file {
+		return nil
+	}
+	v := uint32(testConversionVersion)
+	return &v
+}
+
+// currentConversion is the conversion a cursor advance states when its file is
+// read under the current version with nothing to re-derive.
+func currentConversion() *storev1.CursorConversion {
+	return &storev1.CursorConversion{
+		Version: testConversionVersion,
+		State:   &storev1.CursorConversion_Current{Current: &storev1.CursorConversionCurrent{}},
+	}
+}
+
 // agentEntry wraps one StoreAgentUpdate in this producer's envelope.
 func (p *producer) agentEntry(writeID, upsertKey string, update *storev1.StoreAgentUpdate) *storev1.StoreEntry {
 	return &storev1.StoreEntry{
-		Plane:     p.plane(),
-		WriteId:   writeID,
-		UpsertKey: upsertKey,
-		Entry:     &storev1.StoreEntry_AgentUpdate{AgentUpdate: update},
+		Plane:             p.plane(),
+		WriteId:           writeID,
+		UpsertKey:         upsertKey,
+		ConversionVersion: p.conversionVersion(),
+		Entry:             &storev1.StoreEntry_AgentUpdate{AgentUpdate: update},
 	}
 }
 
 // sessionEntry wraps one raw SessionUpdate in this producer's envelope.
 func (p *producer) sessionEntry(writeID, upsertKey string, update *conversationv1.SessionUpdate) *storev1.StoreEntry {
 	return &storev1.StoreEntry{
-		Plane:     p.plane(),
-		WriteId:   writeID,
-		UpsertKey: upsertKey,
-		Entry:     &storev1.StoreEntry_SessionUpdate{SessionUpdate: update},
+		Plane:             p.plane(),
+		WriteId:           writeID,
+		UpsertKey:         upsertKey,
+		ConversionVersion: p.conversionVersion(),
+		Entry:             &storev1.StoreEntry_SessionUpdate{SessionUpdate: update},
 	}
 }
 
@@ -1492,10 +1517,11 @@ func workflowRun(topLevel *conversationv1.AgentId, runAgent string, frame *conve
 
 func cursorState(fileID, path string, offset int64, carry []byte) *storev1.CursorState {
 	return &storev1.CursorState{
-		FileId: fileID,
-		Path:   path,
-		Offset: offset,
-		Carry:  carry,
+		FileId:     fileID,
+		Path:       path,
+		Offset:     offset,
+		Carry:      carry,
+		Conversion: currentConversion(),
 	}
 }
 
@@ -1907,6 +1933,9 @@ func assertBashRunRefused(t *testing.T, stream *bashWatch) {
 type receivedLine struct {
 	pointer string
 	text    string
+	// retired says the frame arrived on the `retired` arm: the store withdrew
+	// the line rather than writing it.
+	retired bool
 }
 
 // receiveLines reads exactly n frames from a stream, failing on a short or
@@ -1935,9 +1964,14 @@ func receiveLinesWithin(t *testing.T, stream *watch, n int, within time.Duration
 				return
 			}
 			at := stream.Msg().GetLine()
+			retired := stream.Msg().GetRetired()
+			if retired != nil {
+				at = retired
+			}
 			lines = append(lines, receivedLine{
 				pointer: at.GetAt().GetValue(),
 				text:    lineText(at.GetLine()),
+				retired: retired != nil,
 			})
 		}
 		done <- result{lines: lines}

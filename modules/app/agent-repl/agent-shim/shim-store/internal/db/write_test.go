@@ -492,7 +492,7 @@ func TestWriteBatchAdvancesTheCursorInTheSameTransaction(t *testing.T) {
 	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries: []*storev1.StoreEntry{entry},
 		CursorAdvance: &storev1.CursorState{
-			FileId: "12:34", Path: "/t/a.jsonl", Offset: 4096, Carry: []byte("half a line"),
+			FileId: "12:34", Path: "/t/a.jsonl", Offset: 4096, Carry: []byte("half a line"), Conversion: currentConversion(),
 		},
 	}, nil)
 
@@ -514,7 +514,7 @@ func TestWriteBatchAcceptsACursorOnlyBatch(t *testing.T) {
 
 	// Act
 	result, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -539,7 +539,7 @@ func TestWriteBatchCommitsNothingWhenALaterEntryIsInvalid(t *testing.T) {
 	// Act
 	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{good, bad},
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 99},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 99, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -560,7 +560,7 @@ func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
 	// that failed, or the sidecar skips the records it never landed.
 	d, _ := newStore(t)
 	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10, Conversion: currentConversion()},
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -568,7 +568,7 @@ func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{pageEntry("w1", "u1", "", promptItem("agent-1"))},
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 999},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 999, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -628,7 +628,7 @@ func TestWriteBatchRefusesACursorWithNoFileIdentity(t *testing.T) {
 
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 1},
+		CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 1, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -644,7 +644,7 @@ func TestWriteBatchRefusesACursorWithNoPath(t *testing.T) {
 
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Offset: 1},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Offset: 1, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -659,7 +659,7 @@ func TestWriteBatchRefusesANegativeCursorOffset(t *testing.T) {
 
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
-		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: -1},
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: -1, Conversion: currentConversion()},
 	}, nil)
 
 	// Assert
@@ -1126,6 +1126,26 @@ var writeBatchStatements = []struct {
 		statement: `UPDATE agent SET ended_at_ms = ?, terminal = ? WHERE agent_id = ?`,
 		args:      []any{testNow, []byte{0}, "agent-1"},
 	},
+	{
+		name:      "the cursor's conversion bookkeeping",
+		statement: upsertConversionSQL,
+		args:      []any{"corpus-file-0", 2, nil},
+	},
+	{
+		name:      "the restamp of an unchanged row",
+		statement: `UPDATE entry SET write_id = ?, frame = ? WHERE position = ?`,
+		args:      []any{"w", []byte{0}, 1},
+	},
+	{
+		name:      "the retirement probe",
+		statement: retireProbeSQL,
+		args:      []any{"prompt:u1"},
+	},
+	{
+		name:      "the retirement itself",
+		statement: retireRowSQL,
+		args:      []any{kindRetired, 2, testNow, 1},
+	},
 }
 
 // ---- the class decides how a batch is committed ----
@@ -1237,7 +1257,7 @@ func TestASplitBulkBatchAdvancesTheCursorOnlyInItsLastTransaction(t *testing.T) 
 			var seen []int64
 			d.transactionCommitted = func(WriteClass) { seen = append(seen, scalar[int64](t, d, test.query)) }
 			b := batch(entriesOf(5)...)
-			b.CursorAdvance = &storev1.CursorState{FileId: "f1", Path: "/t/f1.jsonl", Offset: 100}
+			b.CursorAdvance = &storev1.CursorState{FileId: "f1", Path: "/t/f1.jsonl", Offset: 100, Conversion: currentConversion()}
 			shapes := []*storev1.ShapeObservation{observation("h1", "unparsed", "{a:string}", "{}", 1000)}
 
 			// Act
@@ -1396,5 +1416,190 @@ func TestWriteBatchPublishesTheRowsKeptTurnToLiveWatchers(t *testing.T) {
 	}
 	if got := result.Lines[0].Line.GetTurn().GetValue(); got != "turn-a" {
 		t.Fatalf("published turn = %q, want the row's first stamp %q", got, "turn-a")
+	}
+}
+
+// ---- the conversion version ----
+
+func TestAFilePlaneEntryWithoutAConversionVersionIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	entry := filePageEntry("w1", "u1", "agent-1", promptItem("agent-1"), 1)
+	entry.ConversionVersion = nil
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, batch(entry), nil)
+
+	// Assert
+	if got := RefusalSite(err); got != SiteConversionVersionPlane {
+		t.Fatalf("site = %q (error: %v), want %q", got, err, SiteConversionVersionPlane)
+	}
+}
+
+func TestAFilePlaneEntryAtConversionVersionZeroIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	entry := filePageEntry("w1", "u1", "agent-1", promptItem("agent-1"), 0)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, batch(entry), nil)
+
+	// Assert
+	if got := RefusalField(err); got != "entries[0].conversion_version" {
+		t.Fatalf("field = %q (error: %v), want entries[0].conversion_version", got, err)
+	}
+}
+
+func TestAStreamPlaneEntryCarryingAConversionVersionIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	entry := pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))
+	entry.ConversionVersion = fileVersion()
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-shim", WriteInteractive, batch(entry), nil)
+
+	// Assert
+	if got := RefusalSite(err); got != SiteConversionVersionPlane {
+		t.Fatalf("site = %q (error: %v), want %q", got, err, SiteConversionVersionPlane)
+	}
+}
+
+// ---- the restamp: a re-derivation that changes nothing costs readers nothing ----
+
+func TestAnUnchangedRowReReadUnderANewVersionIsRestampedNotWritten(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{filePageEntry("w-v1", "prompt:u1", "agent-1", promptItem("agent-1"), 1)})
+
+	// Act
+	result := healBatch(t, d, 100, 2, []*storev1.StoreEntry{filePageEntry("w-v2", "prompt:u1", "agent-1", promptItem("agent-1"), 2)})
+
+	// Assert
+	if result.Restamped != 1 || result.Written != 0 || len(result.Lines) != 0 {
+		t.Fatalf("restamped=%d written=%d lines=%d, want one restamp and nothing published", result.Restamped, result.Written, len(result.Lines))
+	}
+}
+
+func TestARestampLeavesTheRowsWriteSeq(t *testing.T) {
+	// Arrange: the write_seq is what a watch replays by.
+	d, _ := newStore(t)
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{filePageEntry("w-v1", "prompt:u1", "agent-1", promptItem("agent-1"), 1)})
+	before := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'prompt:u1'`)
+
+	// Act
+	healBatch(t, d, 100, 2, []*storev1.StoreEntry{filePageEntry("w-v2", "prompt:u1", "agent-1", promptItem("agent-1"), 2)})
+
+	// Assert
+	if after := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'prompt:u1'`); after != before {
+		t.Fatalf("write_seq %d -> %d, want it unchanged", before, after)
+	}
+}
+
+func TestARestampRecordsTheNewConversionVersionOnTheRow(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{filePageEntry("w-v1", "prompt:u1", "agent-1", promptItem("agent-1"), 1)})
+
+	// Act
+	healBatch(t, d, 100, 2, []*storev1.StoreEntry{filePageEntry("w-v2", "prompt:u1", "agent-1", promptItem("agent-1"), 2)})
+
+	// Assert
+	stored := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(scalar[[]byte](t, d, `SELECT frame FROM entry WHERE upsert_key = 'prompt:u1'`), stored); err != nil {
+		t.Fatalf("decoding the row: %v", err)
+	}
+	if stored.GetConversionVersion() != 2 {
+		t.Fatalf("stored conversion_version = %d, want 2", stored.GetConversionVersion())
+	}
+}
+
+func TestARowWhoseContentChangedUnderANewVersionIsWritten(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{filePageEntry("w-v1", "activity:a1", "agent-1", frameItem(activityFrame("agent-1", "a1", proseSaying("old"))), 1)})
+
+	// Act
+	result := healBatch(t, d, 100, 2, []*storev1.StoreEntry{filePageEntry("w-v2", "activity:a1", "agent-1", frameItem(activityFrame("agent-1", "a1", proseSaying("new"))), 2)})
+
+	// Assert
+	if result.Written != 1 || result.Restamped != 0 || len(result.Lines) != 1 {
+		t.Fatalf("written=%d restamped=%d lines=%d, want the re-derived row written and published", result.Written, result.Restamped, len(result.Lines))
+	}
+}
+
+func TestAStreamPlaneWriteOfUnchangedContentIsStillWritten(t *testing.T) {
+	// Arrange: whether live readers have heard a stream write before is not
+	// the store's call.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "prompt:u1", "agent-1", promptItem("agent-1")))
+
+	// Act
+	result := writeOK(t, d, pageEntry("w2", "prompt:u1", "agent-1", promptItem("agent-1")))
+
+	// Assert
+	if result.Written != 1 || result.Restamped != 0 {
+		t.Fatalf("written=%d restamped=%d, want the stream write applied", result.Written, result.Restamped)
+	}
+}
+
+// ---- the cursor's conversion ----
+
+func TestACursorAdvanceWithoutAConversionIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, &storev1.EntryBatch{
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
+	}, nil)
+
+	// Assert
+	if got := RefusalSite(err); got != SiteCursorConversionUnset {
+		t.Fatalf("site = %q (error: %v), want %q", got, err, SiteCursorConversionUnset)
+	}
+}
+
+func TestACursorConversionAtVersionZeroIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, &storev1.EntryBatch{CursorAdvance: cursorAt(10, 0)}, nil)
+
+	// Assert
+	if got := RefusalField(err); got != "cursor_advance.conversion.version" {
+		t.Fatalf("field = %q (error: %v), want cursor_advance.conversion.version", got, err)
+	}
+}
+
+func TestACursorConversionWithNoStateIsRefused(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	cursor := cursorAt(10, 2)
+	cursor.Conversion.State = nil
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, &storev1.EntryBatch{CursorAdvance: cursor}, nil)
+
+	// Assert
+	if got := RefusalField(err); got != "cursor_advance.conversion.state" {
+		t.Fatalf("field = %q (error: %v), want cursor_advance.conversion.state", got, err)
+	}
+}
+
+func TestAHealWhoseThroughIsNotPastTheOffsetIsRefused(t *testing.T) {
+	// Arrange: a re-read that has reached where the old conversion stopped is
+	// `current`, never a heal through its own position.
+	d, _ := newStore(t)
+	cursor := cursorAt(500, 2)
+	cursor.Conversion.State = &storev1.CursorConversion_Healing{Healing: &storev1.CursorConversionHealing{Through: 500}}
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, &storev1.EntryBatch{CursorAdvance: cursor}, nil)
+
+	// Assert
+	if got := RefusalField(err); got != "cursor_advance.conversion.healing.through" {
+		t.Fatalf("field = %q (error: %v), want cursor_advance.conversion.healing.through", got, err)
 	}
 }

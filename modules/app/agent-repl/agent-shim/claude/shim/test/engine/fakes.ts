@@ -24,6 +24,7 @@ import type {
 } from "../../src/sdk/types.js";
 import type {
   AgentPageSession,
+  AgentTailFrame,
   FlushOutcome,
   PersistEntry,
   Persistence,
@@ -316,7 +317,7 @@ export class RecordingPersistence implements Persistence {
   page: conversationv1.HistoryPage = create(conversationv1.HistoryPageSchema, {
     boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
   });
-  tail: conversationv1.HistoryEntryAt[] = [];
+  tail: AgentTailFrame[] = [];
   bashFrames: conversationv1.AgentBash[] = [];
   live: storev1.GetLiveWorkSuccess = create(storev1.GetLiveWorkSuccessSchema, {});
   openError: PersistenceError | undefined;
@@ -414,7 +415,7 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve({
       page: this.page,
       tail: {
-        async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.HistoryEntryAt> {
+        async *[Symbol.asyncIterator](): AsyncIterator<AgentTailFrame> {
           for (const entry of entries) yield entry;
           if (standing) await new Promise<void>(() => undefined);
         },

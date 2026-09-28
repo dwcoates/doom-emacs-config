@@ -107,6 +107,9 @@ type PollResult struct {
 	// never set for a batch the handler HELD a frame in: a hold waits for the
 	// next line on purpose, and an immediate re-poll would force it early.
 	More bool
+	// Retired is the upsert keys the handler found this batch's records no
+	// longer convert to (Context.Retired), in record order.
+	Retired []string
 }
 
 // LastSize returns the file size seen by the last successful poll, and whether
@@ -207,7 +210,12 @@ func (t *Tailer) Poll() (PollResult, error) {
 	if err := t.prime(offset - int64(len(carry))); err != nil {
 		return PollResult{}, err
 	}
+	// A batch's retirements are its own: a stale list from the last Handle
+	// would retire rows on behalf of records this batch never converted.
+	t.ctx.Retired = nil
 	entries := t.handler.Handle(frames, t.ctx)
+	retired := t.ctx.Retired
+	t.ctx.Retired = nil
 	held := t.ctx.HeldDeliveries > 0
 	newOffset, newCarry, records, err = t.applyHold(frames, forced, offset, newOffset, newCarry, records)
 	if err != nil {
@@ -223,6 +231,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// same bytes.
 		Changed: newOffset != t.offset || fileID != t.fileID || len(entries) > 0,
 		More:    bounded && !held,
+		Retired: retired,
 	}
 	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(result.Next.GetOffset())}).
 		LogVerbose("poll decoded frames=%d entries=%d read_bytes=%d carry_bytes=%d held_deliveries=%d changed=%t more=%t",

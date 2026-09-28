@@ -12,6 +12,7 @@ import (
 
 func onFilePlane(entry *storev1.StoreEntry) *storev1.StoreEntry {
 	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+	entry.ConversionVersion = fileVersion()
 	return entry
 }
 

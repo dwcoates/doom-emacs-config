@@ -96,6 +96,21 @@ export interface PersistEntry {
 // ---------------------------------------------------------------------------
 
 /**
+ * One thing a standing tail tells its consumer, in `WatchAgentResponse.frame`'s
+ * own arm names so the consumer relays it without a translation table.
+ *
+ * - `entry`: a line as written (or upserted), at its pointer.
+ * - `retired`: a line the store RETIRED (store.v1 `StoreRetirement`): the
+ *   record behind it no longer converts to it, so no page serves it again. It
+ *   carries the line as last served, at its own pointer, converted exactly as a
+ *   served line is, so the consumer can find and remove what it drew for it.
+ *   The pointer stays a valid `known_through`.
+ */
+export type AgentTailFrame =
+  | { readonly case: "entry"; readonly value: conversationv1.HistoryEntryAt }
+  | { readonly case: "retired"; readonly value: conversationv1.HistoryEntryAt };
+
+/**
  * One agent's book, opened: the page the caller repaints from, and the tail
  * that continues exactly after it.
  *
@@ -107,8 +122,11 @@ export interface PersistEntry {
 export interface AgentPageSession {
   /** The opening page, newest first. */
   readonly page: conversationv1.HistoryPage;
-  /** Every entry written after the page, in order, each with its pointer. */
-  readonly tail: AsyncIterable<conversationv1.HistoryEntryAt>;
+  /**
+   * Every entry written after the page, in order, each with its pointer, and
+   * every retirement of a line the consumer may have drawn.
+   */
+  readonly tail: AsyncIterable<AgentTailFrame>;
   /**
    * Serve everything up to `through`, then END the tail rather than standing.
    *

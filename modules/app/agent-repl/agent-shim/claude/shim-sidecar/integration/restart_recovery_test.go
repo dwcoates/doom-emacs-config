@@ -147,9 +147,10 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	}
 	turnStart := turnStartOffsetAtOrBefore(t, captured.Lines, headBytes)
 	fake.SeedCursors(&storev1.CursorState{
-		FileId: fileID(t, path),
-		Path:   path,
-		Offset: headBytes,
+		FileId:     fileID(t, path),
+		Path:       path,
+		Offset:     headBytes,
+		Conversion: currentConversion(),
 	})
 
 	// Act.

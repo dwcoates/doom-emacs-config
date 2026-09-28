@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -197,13 +198,17 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	}
 	started := d.mono()
 
-	querySQL := `SELECT file_id, path, offset, carry FROM cursor`
+	// THE CONVERSION IS LEFT-JOINED, NOT REQUIRED. A cursor written before
+	// conversion versions existed has no cursor_conversion row, and is served
+	// with the conversion UNSET — which the reader reads as version 0: every
+	// byte below it was converted by a conversion older than any current one.
+	querySQL := cursorsSQL
 	var args []any
 	if fileID != nil {
-		querySQL += ` WHERE file_id = ?`
+		querySQL += ` WHERE c.file_id = ?`
 		args = append(args, *fileID)
 	}
-	querySQL += ` ORDER BY file_id ASC`
+	querySQL += ` ORDER BY c.file_id ASC`
 
 	rows, err := d.read.QueryContext(ctx, querySQL, args...)
 	if err != nil {
@@ -215,10 +220,12 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	for rows.Next() {
 		c := &storev1.CursorState{}
 		var carry []byte
-		if err := rows.Scan(&c.FileId, &c.Path, &c.Offset, &carry); err != nil {
+		var version, through sql.NullInt64
+		if err := rows.Scan(&c.FileId, &c.Path, &c.Offset, &carry, &version, &through); err != nil {
 			return nil, d.refuse(base, storagef(err, "scanning a cursor row"))
 		}
 		c.Carry = carry
+		c.Conversion = cursorConversion(version, through)
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -228,6 +235,26 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	d.traceStatement(ctx, StatementListCursors, "cursor", base, int64(len(out)))
 	d.log.LogVerbose(base, "cursors read cursors=%d one_file=%t", len(out), fileID != nil)
 	return out, nil
+}
+
+// cursorsSQL is the cursor listing with its conversion bookkeeping. The WHERE
+// and ORDER BY clauses are appended by Cursors.
+const cursorsSQL = `SELECT c.file_id, c.path, c.offset, c.carry, v.version, v.healing_through
+  FROM cursor c LEFT JOIN cursor_conversion v ON v.file_id = c.file_id`
+
+// cursorConversion rebuilds a cursor's CursorConversion from its row, or nil
+// for a cursor stored before conversion versions existed.
+func cursorConversion(version, through sql.NullInt64) *storev1.CursorConversion {
+	if !version.Valid {
+		return nil
+	}
+	conv := &storev1.CursorConversion{Version: uint32(version.Int64)}
+	if through.Valid {
+		conv.State = &storev1.CursorConversion_Healing{Healing: &storev1.CursorConversionHealing{Through: through.Int64}}
+	} else {
+		conv.State = &storev1.CursorConversion_Current{Current: &storev1.CursorConversionCurrent{}}
+	}
+	return conv
 }
 
 func (d *DB) scanStrings(ctx context.Context, query string, args ...any) ([]string, error) {
