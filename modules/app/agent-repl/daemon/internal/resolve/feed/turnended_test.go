@@ -4,9 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -14,6 +11,7 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -194,23 +192,14 @@ func TestARebuiltUserStopDrawsItsRecordedCommand(t *testing.T) {
 // spells the interrupted outcome, so the two cannot drift apart.
 func TestOnlyInterruptedArmBuildsTheInterruptedOutcome(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	files := sourcescan.Production(t)
 	fset := token.NewFileSet()
 
 	// Act
 	var builders []string
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		parsed, err := parser.ParseFile(fset, name, source, 0)
+	for _, file := range files {
+		name := file.Name
+		parsed, err := parser.ParseFile(fset, name, file.Source, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}

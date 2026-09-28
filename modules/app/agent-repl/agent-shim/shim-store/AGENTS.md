@@ -566,6 +566,25 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
   and is retried at the next trigger: its mark does not move, so the next
   release re-runs it, and the idle trigger is re-armed. A failed WAL-index read
   is also one `error` record, and the idle trigger retries it.
+- **A PIN THAT OUTLASTS ANY READ IS A WARNING (`store.db.wal-pin`).** One
+  pass that copies nothing is a read in progress. An unbroken run of them that
+  lasts `DefaultPinWarnAfter` (1 minute) is a leaked snapshot, and the WAL grows
+  until it ends. `walPinWatch` follows the run, and the job writes one `warn`
+  record when the run outlasts the policy and one `info` record when a
+  checkpoint copies again. Both carry `wal_frames`, `wal_backfilled`,
+  `wal_read_marks` (the WAL-index reader slots, read under the writer by the
+  pass that copied nothing), `wal_pinned_for_ms`, and the read pool's
+  `read_pool_open`/`read_pool_in_use`/`read_pool_idle`. Read mark 0 held with
+  `wal_backfilled` 0 means a reader opened while the WAL was fully folded and
+  never ended. On 2026-09-28 that went on for four hours with nothing above
+  verbose: modernc.org/sqlite before v1.40.1 leaked a stepped statement when
+  its context ended mid-query.
+- **A READ'S SNAPSHOT ENDS BEFORE THE READ RETURNS.** `beginRead` begins on
+  `context.WithoutCancel(ctx)`, so the rollback is always the caller's own
+  deferred one, not database/sql's asynchronous rollback of a cancelled
+  transaction. Every transaction ends through `endTx`, which records a failed
+  rollback at `error`, since a connection left inside its transaction keeps its
+  snapshot. `TestEveryTransactionEndsThroughEndTx` holds every begin site to it.
 - **THE `-shm` DESCRIPTOR IS NEVER CLOSED WHILE SQLITE HOLDS THE FILE.**
   SQLite locks `-shm` with POSIX fcntl locks, and closing any descriptor a
   process holds on a file drops every fcntl lock that process holds on it. The
