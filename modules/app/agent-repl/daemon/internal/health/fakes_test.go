@@ -143,3 +143,66 @@ func newReporter(t *testing.T, db wsm.DB, live LiveFunc, log dlog.Surfaces) Repo
 // alwaysLive is the liveness probe of a workspace whose session is up and
 // whose link serves.
 func alwaysLive(ids.WorkspaceID) (bool, bool) { return true, true }
+
+// memFaults is an in-memory fault record: the faults it holds stand until
+// they are closed. It embeds wsm.DB so it can stand behind ObserveFaults;
+// every method it does not spell nil-panics.
+type memFaults struct {
+	wsm.DB
+
+	seq    int
+	faults []wsm.Fault
+	closed map[ids.FaultID]time.Time
+
+	readErr  error
+	closeErr error
+}
+
+func newMemFaults() *memFaults { return &memFaults{closed: map[ids.FaultID]time.Time{}} }
+
+// seed records a standing fault directly and answers its id.
+func (m *memFaults) seed(f wsm.Fault) ids.FaultID {
+	id, _ := m.OpenFault(context.Background(), f)
+	return id
+}
+
+func (m *memFaults) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
+	m.seq++
+	f.ID = ids.FaultID("fault-" + string(rune('0'+m.seq)))
+	m.faults = append(m.faults, f)
+	return f.ID, nil
+}
+
+func (m *memFaults) CloseFault(_ context.Context, id ids.FaultID, at time.Time) error {
+	if m.closeErr != nil {
+		return m.closeErr
+	}
+	m.closed[id] = at
+	return nil
+}
+
+func (m *memFaults) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
+	var out []wsm.Fault
+	for _, f := range m.faults {
+		if _, gone := m.closed[f.ID]; gone {
+			continue
+		}
+		if scope.Workspace != nil && (f.Workspace == nil || *f.Workspace != *scope.Workspace) {
+			continue
+		}
+		if scope.Kind != "" && f.Kind != scope.Kind {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+// standing answers whether a fault is still open.
+func (m *memFaults) standing(id ids.FaultID) bool {
+	_, gone := m.closed[id]
+	return !gone
+}
