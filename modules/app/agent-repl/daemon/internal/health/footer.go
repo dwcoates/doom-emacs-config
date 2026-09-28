@@ -127,6 +127,11 @@ var daemonFaultCells = map[string]FaultCell{
 	KindSuccessorSpawnFailed:  {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindStateUnreadable:       {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindAdoptionWindowExpired: {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
+	// NON-ESCALATING: the daemon that ran the deploy keeps serving on the
+	// build it already runs. A failed build installed nothing and a failed
+	// install restarted nothing, so `blocked` would say the daemon cannot
+	// serve a session it is serving.
+	KindDeployFailed: {FaultStatusNone, ""},
 }
 
 // FaultFooterCell answers where one recorded fault lands on the strip, and
@@ -148,11 +153,15 @@ func FaultFooterCell(kind string, daemonScope bool) (FaultCell, bool) {
 //
 // `shim_start_failed` keeps StartFailedDetail: its evidence is an exit code
 // and a stderr ring, and the footer's richer start-failed leaf exists for it.
+// `deploy_failed` keeps DeployFailedDetail, which names the step it failed at.
 // Every other kind says what its `cause` or `detail` evidence says, and falls
 // back to the record's own prose.
 func FaultLineDetail(f wsm.Fault) string {
-	if f.Kind == KindShimStartFailed {
+	switch f.Kind {
+	case KindShimStartFailed:
 		return StartFailedDetail(f)
+	case KindDeployFailed:
+		return DeployFailedDetail(f)
 	}
 	if cause := f.Evidence["cause"]; cause != "" {
 		return cause
