@@ -86,6 +86,11 @@ const (
 	statusMergedDone = "merged"
 )
 
+// worktreeLinePrefix leads the one output line naming the merged workspace's
+// worktree, which the merge-queue skill's driver reads to fetch a failure's
+// reason from that workspace's log.
+const worktreeLinePrefix = "merge-queue: worktree: "
+
 // errStreamEnding is the daemon standing the roster stream down in a planned
 // exit (a handover or a restart); the verb reattaches to whichever daemon then
 // serves.
@@ -384,6 +389,7 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 	}
 	w.file = name
 	fmt.Fprintf(w.out, "merge-queue: enqueued %s (command file %s)\n", w.target.label, name)
+	fmt.Fprintf(w.out, "%s%s\n", worktreeLinePrefix, w.target.dir)
 	return events, nil
 }
 
