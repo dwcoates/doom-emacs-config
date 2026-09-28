@@ -845,6 +845,55 @@ function repeatRecord(before: number): LogRecord | undefined {
   return logRecordsSince(before).find((record) => record.message === REPEAT_MESSAGE);
 }
 
+describe("StartTurn racing a turn the vendor started on its own", () => {
+  const ADOPTED = create(conversationv1.TurnIdSchema, { value: "adopted-1" });
+
+  /** Adopt a vendor turn into the slot while the start writes its prompt row. */
+  function adoptDuringPromptWrite(h: Harness): void {
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await durable(entries);
+      h.open = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+    };
+  }
+
+  it("refuses the start turn_already_open when the vendor's turn was adopted during its awaits", async () => {
+    // Arrange
+    const h = await harness();
+    adoptDuringPromptWrite(h);
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(failureKind(response)).toBe("turnAlreadyOpen");
+  });
+
+  it("delivers nothing into the adopted turn", async () => {
+    // Arrange
+    const h = await harness();
+    adoptDuringPromptWrite(h);
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.submitted).toEqual([]);
+  });
+
+  it("leaves the adopted turn in the slot", async () => {
+    // Arrange
+    const h = await harness();
+    adoptDuringPromptWrite(h);
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.open?.id.value).toBe("adopted-1");
+  });
+});
+
 describe("a repeated StartTurn of a turn id the shim already started", () => {
   /** Hold every durable write until the returned callback runs. */
   function holdDurableWrites(h: Harness): () => void {
