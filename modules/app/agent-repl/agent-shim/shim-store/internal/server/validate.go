@@ -45,6 +45,9 @@ const (
 	SiteVendorTaskEmpty        = "vendor_task_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
+	// SitePositionUnset is a ReadAgentPage that names no position arm: the
+	// verb has no newest-page arm, so an unset position asks for nothing.
+	SitePositionUnset = "position_unset"
 )
 
 // The sites internal/db decides, ALIASED rather than restated.
@@ -68,6 +71,10 @@ const (
 	SiteConversionVersionPlane = db.SiteConversionVersionPlane
 	SiteCursorConversionUnset  = db.SiteCursorConversionUnset
 	SiteRetirementInvalid      = db.SiteRetirementInvalid
+	// The conversation place's sites: a stated place and a `through` bound
+	// must each name a positive instant.
+	SitePlaceNotPositive   = db.SitePlaceNotPositive
+	SiteThroughNotPositive = db.SiteThroughNotPositive
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.
@@ -405,9 +412,20 @@ func validateReadAgentPageRequest(req *storev1.ReadAgentPageRequest) *refusal {
 	if ref := validatePageSize(req.GetPageSize()); ref != nil {
 		return ref
 	}
-	// `after` is REQUIRED: this verb only ever walks older, and the first page
-	// is OpenAgentSession's answer.
-	return validateStoreItemPointer(req.GetAfter(), "after")
+	// THE POSITION IS REQUIRED and THE ARM IS THE POSITION: there is no
+	// newest-page arm, because the newest page is OpenAgentSession's answer.
+	switch position := req.GetPosition().(type) {
+	case *storev1.ReadAgentPageRequest_After:
+		return validateStoreItemPointer(position.After, "after")
+	case *storev1.ReadAgentPageRequest_Through:
+		if position.Through.GetAtMs() <= 0 {
+			return refuse(SiteThroughNotPositive, "through.at_ms",
+				"through.at_ms: %d names no instant — a bound on conversation places is positive", position.Through.GetAtMs())
+		}
+		return nil
+	default:
+		return refuse(SitePositionUnset, "position", "position: neither `after` nor `through` is set, and this verb has no newest-page arm")
+	}
 }
 
 func validateWatchAgentSessionRequest(req *storev1.WatchAgentSessionRequest) *refusal {

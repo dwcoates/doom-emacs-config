@@ -453,9 +453,18 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 
 	*nextSeq++
 	seq := *nextSeq
-	position, err := d.upsertEntry(ctx, tx, r, seq, now)
+	position, firstInsertedAtMs, err := d.upsertEntry(ctx, tx, r, seq, now)
 	if err != nil {
 		return d.refuse(fields, err)
+	}
+	// EVERY BOOKED ROW IS PLACED IN THE SAME TRANSACTION AS ITS WRITE, so the
+	// order index never has a hole a page would have to skip or guess across.
+	var place servedPlace
+	if r.book.Valid {
+		place = placeOf(r.entry, firstInsertedAtMs)
+		if err := d.placeRow(ctx, tx, position, r.book.String, place); err != nil {
+			return d.refuse(fields, err)
+		}
 	}
 	if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
 		return d.refuse(fields, err)
@@ -480,7 +489,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	case kindPageLine:
 		result.Lines = append(result.Lines, LineWritten{
 			AgentID:  r.book.String,
-			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine, Turn: r.entry.GetTurn()},
+			Line:     lineAt(position, r.pageLine, r.entry.GetTurn(), place),
 			WriteSeq: seq,
 		})
 	case kindBash:
@@ -672,7 +681,7 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 		if row.book.Valid != r.book.Valid || row.book.String != r.book.String {
 			return &SkippedEntry{UpsertKey: r.upsertKey, FromBook: nullableBook(row.book), ToBook: nullableBook(r.book)}, "", nil, nil
 		}
-		return nil, row.kind, nil, d.carryStoredTurn(fields, r, row.frame)
+		return nil, row.kind, nil, d.carryStoredStamps(fields, r, row.frame)
 	}
 	if row.kind != r.kind {
 		return nil, "", nil, invalidSitef(SiteUpsertChangesIdentity,
@@ -687,7 +696,7 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 			ToBook:    nullableBook(r.book),
 		}, "", nil, nil
 	}
-	if err := d.carryStoredTurn(fields, r, row.frame); err != nil {
+	if err := d.carryStoredStamps(fields, r, row.frame); err != nil {
 		return nil, "", nil, err
 	}
 	return nil, "", row, nil
@@ -716,8 +725,9 @@ type storedRow struct {
 // are judged this way: a stream-plane write is the shim telling live readers
 // something, and whether they have heard it before is not the store's call.
 //
-// THE TURN HAS ALREADY BEEN CARRIED (carryStoredTurn), so a write that differs
-// only by omitting the stamp the row already holds is the same content.
+// THE TURN AND THE PLACE HAVE ALREADY BEEN CARRIED (carryStoredStamps), so a
+// write that differs only by omitting a stamp the row already holds is the
+// same content.
 func sameContentBarVersion(r routed, prior *storedRow) (bool, error) {
 	if r.plane != planeFile || prior.plane != planeFile {
 		return false, nil
@@ -755,9 +765,11 @@ func (d *DB) restamp(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 	return nil
 }
 
-// carryStoredTurn keeps a row's FIRST turn stamp across every later write of
-// it, which is what StoreEntry.turn promises: a fact never moves between turns,
-// whichever plane wrote it last.
+// carryStoredStamps keeps a row's FIRST turn stamp and its FIRST stated
+// conversation place across every later write of it, which is what
+// StoreEntry.turn and StoreEntry.place promise: a fact never moves between
+// turns, and no write moves a row within its book, whichever plane wrote it
+// last.
 //
 // THE PLANES DO NOT KNOW THE SAME THINGS. The shim stamps the turn it had open;
 // the sidecar stamps only a turn the vendor's records name, and an agent-repl
@@ -769,29 +781,50 @@ func (d *DB) restamp(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 // takes whatever the write carries, which is how a row the file plane wrote
 // first is stamped when the stream plane's copy lands.
 //
+// THE PLACE FOLLOWS THE SAME RULE. The shim states the instant it observed a
+// fact and the sidecar the vendor record's own timestamp, so the two planes'
+// copies of one unit routinely state different places; the first one stated
+// stands. A row stored with no place (a producer that could state none, or a
+// row written before places existed) takes the first place a later write
+// states — the one way a row moves within its book.
+//
 // The write's envelope is rewritten in place and re-serialized, because the
-// stored blob is the one home of the turn (decodeLineAt serves it from there).
-func (d *DB) carryStoredTurn(fields logging.Fields, r *routed, stored []byte) error {
+// stored blob is the one home of the turn (decodeLineAt serves it from there)
+// and the place the order index is written from (placeRow).
+func (d *DB) carryStoredStamps(fields logging.Fields, r *routed, stored []byte) error {
 	prior := &storev1.StoreEntry{}
 	if err := proto.Unmarshal(stored, prior); err != nil {
-		return storagef(err, "the stored frame of row %q cannot be decoded to read its turn", r.upsertKey)
+		return storagef(err, "the stored frame of row %q cannot be decoded to read its turn and place", r.upsertKey)
 	}
-	kept := prior.GetTurn()
-	if kept == nil {
+	rewritten := false
+	if kept := prior.GetTurn(); kept != nil {
+		incoming := r.entry.GetTurn()
+		if incoming.GetValue() != kept.GetValue() {
+			if incoming != nil {
+				d.log.LogVerbose(fields, "row keeps its first turn: stored_turn=%q write_turn=%q entries_index=%d",
+					kept.GetValue(), incoming.GetValue(), r.index)
+			}
+			r.entry.Turn = kept
+			rewritten = true
+		}
+	}
+	if kept := prior.GetPlace(); kept != nil {
+		incoming := r.entry.GetPlace()
+		if !proto.Equal(incoming, kept) {
+			if incoming != nil {
+				d.log.LogVerbose(fields, "row keeps its first stated place: stored_place=%d.%d write_place=%d.%d entries_index=%d",
+					kept.GetAtMs(), kept.GetOrdinal(), incoming.GetAtMs(), incoming.GetOrdinal(), r.index)
+			}
+			r.entry.Place = kept
+			rewritten = true
+		}
+	}
+	if !rewritten {
 		return nil
 	}
-	incoming := r.entry.GetTurn()
-	if incoming.GetValue() == kept.GetValue() {
-		return nil
-	}
-	if incoming != nil {
-		d.log.LogVerbose(fields, "row keeps its first turn: stored_turn=%q write_turn=%q entries_index=%d",
-			kept.GetValue(), incoming.GetValue(), r.index)
-	}
-	r.entry.Turn = kept
 	frame, err := proto.Marshal(r.entry)
 	if err != nil {
-		return storagef(err, "re-serializing row %q with its stored turn", r.upsertKey)
+		return storagef(err, "re-serializing row %q with its stored turn and place", r.upsertKey)
 	}
 	r.frame = frame
 	return nil
@@ -813,7 +846,10 @@ func nullableBook(book sql.NullString) string {
 // content whole and leaves its place in the book exactly where the first insert
 // put it, so a caller paging through a book cannot have a settling unit teleport
 // past it.
-func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) (int64, error) {
+//
+// IT ALSO RETURNS THE ROW'S FIRST-INSERT INSTANT, which no upsert rewrites: the
+// receipt instant a row with no stated place is ordered and served by.
+func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) (int64, int64, error) {
 	const upsertSQL = `INSERT INTO entry (
 	    upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame,
 	    first_inserted_at_ms, last_written_at_ms)
@@ -828,15 +864,15 @@ func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uin
 	    top_level = excluded.top_level,
 	    frame = excluded.frame,
 	    last_written_at_ms = excluded.last_written_at_ms
-	  RETURNING position`
-	var position int64
+	  RETURNING position, first_inserted_at_ms`
+	var position, firstInsertedAtMs int64
 	err := tx.QueryRowContext(ctx, upsertSQL,
 		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, r.frame, now, now,
-	).Scan(&position)
+	).Scan(&position, &firstInsertedAtMs)
 	if err != nil {
-		return 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)
+		return 0, 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)
 	}
-	return position, nil
+	return position, firstInsertedAtMs, nil
 }
 
 // validateCursorState is the base function for store.v1.CursorState.

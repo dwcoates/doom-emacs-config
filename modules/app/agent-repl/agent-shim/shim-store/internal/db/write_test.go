@@ -1603,3 +1603,141 @@ func TestAHealWhoseThroughIsNotPastTheOffsetIsRefused(t *testing.T) {
 		t.Fatalf("field = %q (error: %v), want cursor_advance.conversion.healing.through", got, err)
 	}
 }
+
+// ---- the conversation place ----
+
+// servedPlaceOf reads back the one row of a book as a replay serves it.
+func servedPlaceOf(t *testing.T, d *DB, book string) *storev1.StoreLineAt {
+	t.Helper()
+	lines, err := d.LinesSince(ctx(), book, 0)
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want the one row", len(lines))
+	}
+	return lines[0].Line
+}
+
+func TestWriteBatchKeepsARowsFirstStatedPlaceOverAnotherStatedLater(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 1))
+
+	// Act
+	writeOK(t, d, placed(pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 900, 4))
+
+	// Assert
+	if got := servedPlaceOf(t, d, "agent-1").GetRecordedPlace(); got.GetAtMs() != 500 || got.GetOrdinal() != 1 {
+		t.Fatalf("served place = %v, want the first stated 500.1", got)
+	}
+}
+
+func TestWriteBatchKeepsARowsFirstStatedPlaceOverAWriteStatingNone(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 1))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))))
+
+	// Assert
+	if got := servedPlaceOf(t, d, "agent-1").GetRecordedPlace(); got.GetAtMs() != 500 || got.GetOrdinal() != 1 {
+		t.Fatalf("served place = %v, want the first stated 500.1", got)
+	}
+}
+
+func TestWriteBatchGivesAnUnplacedRowTheFirstPlaceALaterWriteStates(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", prose()))))
+
+	// Act
+	writeOK(t, d, placed(pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 300, 2))
+
+	// Assert
+	if got := servedPlaceOf(t, d, "agent-1").GetRecordedPlace(); got.GetAtMs() != 300 || got.GetOrdinal() != 2 {
+		t.Fatalf("served place = %v, want the later stated 300.2", got)
+	}
+}
+
+func TestWriteBatchServesAnUnplacedRowAtItsReceiptInstant(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", prose()))))
+
+	// Assert
+	if got := servedPlaceOf(t, d, "agent-1").GetReceivedPlace(); got.GetAtMs() != testNow || got.GetOrdinal() != 0 {
+		t.Fatalf("served place = %v, want received %d.0", got, testNow)
+	}
+}
+
+func TestWriteBatchPublishesAWrittenLineWithItsPlace(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	result := writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 1))
+
+	// Assert
+	if got := result.Lines[0].Line.GetRecordedPlace(); got.GetAtMs() != 500 || got.GetOrdinal() != 1 {
+		t.Fatalf("published place = %v, want 500.1", got)
+	}
+}
+
+func TestWriteBatchPublishesTheRowsKeptPlaceToLiveWatchers(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 1))
+
+	// Act
+	result := writeOK(t, d, placed(pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 900, 4))
+
+	// Assert
+	if got := result.Lines[0].Line.GetRecordedPlace(); got.GetAtMs() != 500 || got.GetOrdinal() != 1 {
+		t.Fatalf("published place = %v, want the kept 500.1", got)
+	}
+}
+
+func TestWriteBatchTracesAPlaceALaterWriteDisagreedWith(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 1))
+
+	// Act
+	writeOK(t, d, placed(pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 900, 4))
+
+	// Assert
+	s.assertLogged(t, "debug", "row keeps its first stated place: stored_place=500.1 write_place=900.4")
+}
+
+func TestAFilePlaneReReadStatingTheSamePlaceIsARestamp(t *testing.T) {
+	// Arrange: the sidecar re-reads the record under a new conversion and
+	// mints the identical place, as a deterministic conversion must.
+	d, _ := newStore(t)
+	writeOK(t, d, placed(filePageEntry("w1", "u1", "agent-1", promptItem("agent-1"), 1), 500, 0))
+
+	// Act
+	result := writeOK(t, d, placed(filePageEntry("w2", "u1", "agent-1", promptItem("agent-1"), 2), 500, 0))
+
+	// Assert
+	if result.Restamped != 1 || len(result.Lines) != 0 {
+		t.Fatalf("restamped = %d lines = %d, want a restamp nobody is told about", result.Restamped, len(result.Lines))
+	}
+}
+
+func TestAFilePlaneReReadGivingALegacyRowItsPlaceIsPublished(t *testing.T) {
+	// Arrange: a row the file plane wrote before places existed.
+	d, _ := newStore(t)
+	writeOK(t, d, filePageEntry("w1", "u1", "agent-1", promptItem("agent-1"), 1))
+
+	// Act
+	result := writeOK(t, d, placed(filePageEntry("w2", "u1", "agent-1", promptItem("agent-1"), 2), 500, 0))
+
+	// Assert: the row moved within its book, so its watchers are told.
+	if len(result.Lines) != 1 || result.Lines[0].Line.GetRecordedPlace().GetAtMs() != 500 {
+		t.Fatalf("published = %v, want the row at its new recorded place", result.Lines)
+	}
+}

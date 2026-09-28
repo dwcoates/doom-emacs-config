@@ -56,7 +56,11 @@ type Store interface {
 	// published to live watchers.
 	WriteBatch(ctx context.Context, producer string, class WriteClass, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error)
 	OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error)
+	// ReadPage walks to the lines placed strictly before `after`'s line.
 	ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error)
+	// ReadPageThrough reads the newest lines placed at or before an instant,
+	// refusing a book the store holds no agent row for.
+	ReadPageThrough(ctx context.Context, agentID string, pageSize uint32, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error)
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)
 	BashRun(ctx context.Context, runID string) (BashRunReplay, error)
 	LiveWork(ctx context.Context, session string) (*storev1.GetLiveWorkSuccess, error)

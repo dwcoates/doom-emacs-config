@@ -105,6 +105,10 @@ type fakeStore struct {
 
 	page    *storev1.ReadAgentPageSuccess
 	pageErr error
+	// pageReadBy is which page read the handler called ("after" or
+	// "through"), and throughAtMs the bound a through read named.
+	pageReadBy  string
+	throughAtMs int64
 
 	since    []LineWritten
 	sinceErr error
@@ -188,6 +192,17 @@ func (f *fakeStore) OpenPage(context.Context, string, uint32, *storev1.StoreItem
 }
 
 func (f *fakeStore) ReadPage(context.Context, string, uint32, *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+	f.mu.Lock()
+	f.pageReadBy = "after"
+	f.mu.Unlock()
+	return f.page, f.pageErr
+}
+
+func (f *fakeStore) ReadPageThrough(_ context.Context, _ string, _ uint32, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
+	f.mu.Lock()
+	f.pageReadBy = "through"
+	f.throughAtMs = throughAtMs
+	f.mu.Unlock()
 	return f.page, f.pageErr
 }
 
@@ -1442,8 +1457,8 @@ func TestReadAgentPageRecordsCarryTheAgentAndBook(t *testing.T) {
 	}
 }
 
-func TestReadAgentPageRefusesAMissingAfterPointer(t *testing.T) {
-	// Arrange. This verb only walks older; the first page is the open's answer.
+func TestReadAgentPageRefusesAnUnsetPosition(t *testing.T) {
+	// Arrange. This verb has no newest-page arm; that page is the open's answer.
 	h := newHarness(t, newFakeStore(), 0)
 
 	// Act.
@@ -1477,6 +1492,69 @@ func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
 	}
 	if res.Msg.GetFailure() == nil {
 		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestReadAgentPageWithAnAfterPointerWalksBeforeIt(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
+	})); err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.pageReadBy != "after" {
+		t.Fatalf("page read by %q, want the after read", store.pageReadBy)
+	}
+}
+
+func TestReadAgentPageWithAThroughBoundReadsTheBookAsItStoodThen(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10,
+		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1234}},
+	})); err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.pageReadBy != "through" || store.throughAtMs != 1234 {
+		t.Fatalf("page read by %q through %d, want the through read at 1234", store.pageReadBy, store.throughAtMs)
+	}
+}
+
+func TestReadAgentPageMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
+	// Arrange. A through read of a book the store never heard of is refused,
+	// never served empty.
+	store := newFakeStore()
+	store.pageErr = fmt.Errorf("%w: a1 names no book", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10,
+		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1234}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetUnknownAgent() == nil {
+		t.Fatalf("result = %v, want the unknown_agent arm", res.Msg.GetResult())
 	}
 }
 

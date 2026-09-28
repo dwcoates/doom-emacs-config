@@ -578,14 +578,20 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 	agentID := msg.GetBook().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
-		"read page page_size=%d", msg.GetPageSize())
+		"read page page_size=%d through_at_ms=%d", msg.GetPageSize(), msg.GetThrough().GetAtMs())
 
 	if ref := validateReadAgentPageRequest(msg); ref != nil {
 		s.logRefusal(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
 		return readPageFailure(ref), nil
 	}
 
-	page, err := s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetAfter())
+	var page *storev1.ReadAgentPageSuccess
+	var err error
+	if through := msg.GetThrough(); through != nil {
+		page, err = s.store.ReadPageThrough(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), through.GetAtMs())
+	} else {
+		page, err = s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetAfter())
+	}
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.read-agent-page", err, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
 		return readPageFailure(ref), nil
@@ -608,6 +614,8 @@ func readPageFailure(ref *refusal) *connect.Response[storev1.ReadAgentPageRespon
 		failure.Kind = &storev1.ReadAgentPageFailure_StalePointer{StalePointer: &storev1.ReadAgentPageStalePointer{}}
 	case classStorage:
 		failure.Kind = &storev1.ReadAgentPageFailure_StorageFailure{StorageFailure: &storev1.ReadAgentPageStorageFailure{}}
+	case classUnknownAgent:
+		failure.Kind = &storev1.ReadAgentPageFailure_UnknownAgent{UnknownAgent: &storev1.ReadAgentPageUnknownAgent{}}
 	default:
 		failure.Kind = &storev1.ReadAgentPageFailure_InvalidRequest{
 			InvalidRequest: &storev1.ReadAgentPageInvalidRequest{Field: ref.field},

@@ -99,7 +99,12 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 		return OpenedPage{}, d.refuse(base, err)
 	}
 
-	var floorPosition int64
+	// REPAINT IS THE NEWEST PLACES; CATCH-UP IS WHAT WAS WRITTEN SINCE. A
+	// catch-up is about what the caller has not been told, never about where it
+	// sits: a row first written after the caller's mark but placed earlier in
+	// the conversation (a transcript read late) is delivered rather than
+	// skipped, and the page is still ordered by descending place.
+	statement, args := pageNewestSQL, []any{agentID, kindPageLine}
 	if knownThrough != nil {
 		position, err := decodePointer(knownThrough, "known_through")
 		if err != nil {
@@ -110,10 +115,10 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 			fields.Position = knownThrough.GetValue()
 			return OpenedPage{}, d.refuse(fields, err)
 		}
-		floorPosition = position
+		statement, args = pageWrittenAfterSQL, []any{agentID, kindPageLine, position}
 	}
 
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBoundAboveFloor, floorPosition)
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, statement, args...)
 	if err != nil {
 		return OpenedPage{}, d.refuse(base, err)
 	}
@@ -139,8 +144,13 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	return OpenedPage{Page: page, PinSeq: pinSeq}, nil
 }
 
-// ReadPage walks one book OLDER than a served pointer. There is no first-page
-// arm: the first page is the open's answer and this verb only ever continues.
+// ReadPage walks one book to the lines placed strictly BEFORE a served
+// pointer's line. There is no first-page arm: the first page is the open's
+// answer.
+//
+// THE BOUND IS THE NAMED LINE'S CURRENT PLACE, read in this transaction. A
+// pointer names an item, never a place, so a line that gained its recorded
+// place since it was served is walked on from where it sits now.
 func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
 	base := logging.Fields{Operation: "store.db.read-page", Table: "entry", BookAgentID: agentID}
 	if err := validateBook(agentID, pageSize); err != nil {
@@ -163,11 +173,61 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 		fields.Position = after.GetValue()
 		return nil, d.refuse(fields, err)
 	}
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBoundBelow, position)
+	bound, err := placeOfRow(ctx, tx, position)
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBeforeSQL, agentID, kindPageLine, bound.atMs, bound.ordinal, position)
+	if err != nil {
+		return nil, d.refuse(base, err)
+	}
+	success := continuationPage(lines, more)
+	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
+	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
+	d.log.LogVerbose(base, "page read lines=%d more=%t", len(lines), more)
+	return success, nil
+}
 
+// ReadPageThrough reads the newest lines of one book placed AT OR BEFORE an
+// instant: the book as it stood then. A fork reads its parent's conversation up
+// to the fork point this way, and `more` walks older with ReadPage as usual.
+//
+// A BOOK THE STORE HAS NEVER HEARD OF IS REFUSED (ErrUnknownAgent), never
+// served empty: an empty page would tell a caller with a mistyped book exactly
+// what it tells one reading a book that held nothing yet at that instant.
+func (d *DB) ReadPageThrough(ctx context.Context, agentID string, pageSize uint32, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
+	base := logging.Fields{Operation: "store.db.read-page", Table: "entry", BookAgentID: agentID}
+	if err := validateBook(agentID, pageSize); err != nil {
+		return nil, d.refuse(base, err)
+	}
+	if throughAtMs <= 0 {
+		return nil, d.refuse(base, invalidSitef(SiteThroughNotPositive, "through.at_ms",
+			"through.at_ms is %d — a bound on conversation places is a positive instant", throughAtMs))
+	}
+	started := d.mono()
+
+	tx, err := d.beginRead(ctx)
+	if err != nil {
+		return nil, d.refuse(base, storagef(err, "begin read transaction"))
+	}
+	defer d.endTx(tx, base)
+
+	if err := d.agentIsKnown(ctx, tx, agentID); err != nil {
+		return nil, d.refuse(base, err)
+	}
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageThroughSQL, agentID, kindPageLine, throughAtMs)
+	if err != nil {
+		return nil, d.refuse(base, err)
+	}
+	success := continuationPage(lines, more)
+	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
+	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
+	d.log.LogVerbose(base, "page read through at_ms=%d lines=%d more=%t", throughAtMs, len(lines), more)
+	return success, nil
+}
+
+// continuationPage wraps a ReadAgentPage's lines with its boundary.
+func continuationPage(lines []*storev1.StoreLineAt, more bool) *storev1.ReadAgentPageSuccess {
 	// EVERY CONTINUATION LINE CARRIES ITS OWN POINTER, exactly as the opening
 	// page's do. A reader walking older must be able to echo a real position
 	// back — for a later ReadAgentPage, for a known_through re-open — and a
@@ -181,10 +241,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	} else {
 		success.Boundary = &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}
 	}
-	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
-	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
-	d.log.LogVerbose(base, "page read lines=%d more=%t", len(lines), more)
-	return success, nil
+	return success
 }
 
 // LinesSince is the watch replay: every page line of one book written after a
@@ -213,10 +270,15 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 		var seq uint64
 		var kind string
 		var frame []byte
-		if err := rows.Scan(&position, &seq, &kind, &frame); err != nil {
+		var atMs, ordinal, recorded sql.NullInt64
+		if err := rows.Scan(&position, &seq, &kind, &frame, &atMs, &ordinal, &recorded); err != nil {
 			return nil, d.refuse(base, storagef(err, "scanning a replayed line of book %q", agentID))
 		}
-		line, err := decodeLineAt(frame, position)
+		place, err := scanPlace(position, atMs, ordinal, recorded)
+		if err != nil {
+			return nil, d.refuse(base, err)
+		}
+		line, err := decodeLineAt(frame, position, place)
 		if err != nil {
 			return nil, d.refuse(base, err)
 		}
@@ -293,32 +355,59 @@ const (
 	// write_seq after which to replay). A retired row is replayed too — as its
 	// retirement — because a watcher whose page was read before the row was
 	// retired must still be told to withdraw it.
-	linesSinceSQL = `SELECT position, write_seq, kind, frame FROM entry
-	  WHERE book_agent_id = ? AND kind IN (?, ?) AND write_seq > ?
-	  ORDER BY write_seq ASC`
+	linesSinceSQL = `SELECT e.position, e.write_seq, e.kind, e.frame, p.at_ms, p.ordinal, p.recorded
+	  FROM entry e LEFT JOIN entry_place p ON p.position = e.position
+	  WHERE e.book_agent_id = ? AND e.kind IN (?, ?) AND e.write_seq > ?
+	  ORDER BY e.write_seq ASC`
 
 	// pointerInBookSQL binds (position, book, the page-line kind, the retired
 	// kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS BOOK: a reader
 	// whose high-water mark was that line walks on from it rather than being
 	// sent to repaint a book that only lost a line.
 	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind IN (?, ?)`
-
-	// pageBoundAboveFloor is OpenPage's bound: every line above the floor.
-	pageBoundAboveFloor = `position > ?`
-	// pageBoundBelow is ReadPage's bound: every line older than the pointer.
-	pageBoundBelow = `position < ?`
 )
 
-// pageLinesSQL is one page's statement under one of the two bounds above. It
-// binds (book, the page-line kind, the bound, the page size plus one).
-func pageLinesSQL(boundClause string) string {
-	return `SELECT position, frame FROM entry
-	  WHERE book_agent_id = ? AND kind = ? AND ` + boundClause + `
-	  ORDER BY position DESC LIMIT ?`
-}
+// THE PAGE STATEMENTS. A book is served in DESCENDING CONVERSATION PLACE —
+// (at_ms, ordinal) from `entry_place`, with the row's position as the stable
+// tiebreak, which carries no meaning — and every statement reads the place
+// columns scanPlace turns into the served arm. Each asks for one more row than
+// the page holds (the last bind), which is how the boundary is decided.
+const (
+	// pageNewestSQL binds (book, the page-line kind, limit): the repaint.
+	// Driven from the place index, so the newest page is a seek from its top.
+	pageNewestSQL = `SELECT e.position, e.frame, p.at_ms, p.ordinal, p.recorded
+	  FROM entry_place p CROSS JOIN entry e ON e.position = p.position
+	  WHERE p.book_agent_id = ? AND e.kind = ?
+	  ORDER BY p.at_ms DESC, p.ordinal DESC, p.position DESC LIMIT ?`
 
-// pageLines reads one page of a book, newest first, and reports whether older
-// lines remain below it.
+	// pageBeforeSQL binds (book, the page-line kind, the named line's at_ms,
+	// ordinal and position, limit): every line placed strictly before it.
+	pageBeforeSQL = `SELECT e.position, e.frame, p.at_ms, p.ordinal, p.recorded
+	  FROM entry_place p CROSS JOIN entry e ON e.position = p.position
+	  WHERE p.book_agent_id = ? AND e.kind = ? AND (p.at_ms, p.ordinal, p.position) < (?, ?, ?)
+	  ORDER BY p.at_ms DESC, p.ordinal DESC, p.position DESC LIMIT ?`
+
+	// pageThroughSQL binds (book, the page-line kind, the inclusive bound's
+	// at_ms, limit): the book as it stood at that instant, whatever the
+	// ordinal.
+	pageThroughSQL = `SELECT e.position, e.frame, p.at_ms, p.ordinal, p.recorded
+	  FROM entry_place p CROSS JOIN entry e ON e.position = p.position
+	  WHERE p.book_agent_id = ? AND e.kind = ? AND p.at_ms <= ?
+	  ORDER BY p.at_ms DESC, p.ordinal DESC, p.position DESC LIMIT ?`
+
+	// pageWrittenAfterSQL binds (book, the page-line kind, the caller's mark's
+	// position, limit): the catch-up. `position` is FIRST-INSERT order, so
+	// `position > mark` is exactly "first written after the mark"; driven from
+	// the book's position index, it sorts only the rows written since.
+	pageWrittenAfterSQL = `SELECT e.position, e.frame, p.at_ms, p.ordinal, p.recorded
+	  FROM entry e LEFT JOIN entry_place p ON p.position = e.position
+	  WHERE e.book_agent_id = ? AND e.kind = ? AND e.position > ?
+	  ORDER BY p.at_ms DESC, p.ordinal DESC, e.position DESC LIMIT ?`
+)
+
+// pageLines reads one page of a book with one of the page statements above
+// (its binds less the limit in `args`), and reports whether more lines remain
+// below it.
 //
 // IT ASKS FOR ONE MORE ROW THAN THE PAGE HOLDS. That extra row is how the
 // boundary arm is DECIDED rather than guessed: `more` when the row came back,
@@ -327,8 +416,8 @@ func pageLinesSQL(boundClause string) string {
 //
 // `kind = page_line` is the never-served index doing its work: a keep-alive or
 // a residue row carries no book at all, so no page can reach one.
-func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize uint32, boundClause string, bound int64) ([]*storev1.StoreLineAt, bool, error) {
-	rows, err := tx.QueryContext(ctx, pageLinesSQL(boundClause), agentID, kindPageLine, bound, int64(pageSize)+1)
+func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize uint32, statement string, args ...any) ([]*storev1.StoreLineAt, bool, error) {
+	rows, err := tx.QueryContext(ctx, statement, append(args, int64(pageSize)+1)...)
 	if err != nil {
 		return nil, false, storagef(err, "reading a page of book %q", agentID)
 	}
@@ -343,10 +432,15 @@ func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize
 		}
 		var position int64
 		var frame []byte
-		if err := rows.Scan(&position, &frame); err != nil {
+		var atMs, ordinal, recorded sql.NullInt64
+		if err := rows.Scan(&position, &frame, &atMs, &ordinal, &recorded); err != nil {
 			return nil, false, storagef(err, "scanning a page row of book %q", agentID)
 		}
-		line, err := decodeLineAt(frame, position)
+		place, err := scanPlace(position, atMs, ordinal, recorded)
+		if err != nil {
+			return nil, false, err
+		}
+		line, err := decodeLineAt(frame, position, place)
 		if err != nil {
 			return nil, false, err
 		}
@@ -369,8 +463,9 @@ func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize
 //
 // THE TURN IS THE STORED ENVELOPE'S, which is the row's first stamp: the write
 // path carries it forward into every later write of the row
-// (carryStoredTurn), so the blob is the one place it lives.
-func decodeLineAt(frame []byte, position int64) (*storev1.StoreLineAt, error) {
+// (carryStoredStamps), so the blob is the one place it lives. THE PLACE IS THE
+// ORDER INDEX'S (entry_place), read beside the frame by every serving path.
+func decodeLineAt(frame []byte, position int64, place servedPlace) (*storev1.StoreLineAt, error) {
 	entry := &storev1.StoreEntry{}
 	if err := proto.Unmarshal(frame, entry); err != nil {
 		return nil, storagef(err, "stored frame at position %d cannot be decoded", position)
@@ -379,5 +474,5 @@ func decodeLineAt(frame []byte, position int64) (*storev1.StoreLineAt, error) {
 	if line == nil {
 		return nil, storagef(errNotAPageLine, "stored frame at position %d is indexed as a page line but carries none", position)
 	}
-	return &storev1.StoreLineAt{At: encodePointer(position), Line: line, Turn: entry.GetTurn()}, nil
+	return lineAt(position, line, entry.GetTurn(), place), nil
 }
