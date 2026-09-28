@@ -255,13 +255,10 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 	}
 }
 
-// The cell no longer follows the context window (the fresh-input figures,
-// docs/protobuf-design/fresh-input-token-figures.md §1-2): a context_usage
-// push moves the topbar's chip alone, and the cell moves only with the main
-// agent's own fresh input.
-func TestAContextPushMovesTheChipAndNotTheTokensCell(t *testing.T) {
+func TestFooterTokensCellAndTopbarChipReadOneContextUsage(t *testing.T) {
 	t.Parallel()
-	// Arrange: the context held before the turn is 100k, then a turn opens.
+	// Arrange: the context held before the turn is 100k, stated to both
+	// surfaces by one push; then a turn opens.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
@@ -275,24 +272,23 @@ func TestAContextPushMovesTheChipAndNotTheTokensCell(t *testing.T) {
 		return v.GetStrip().GetTokens().GetInput().GetText() == "0 in"
 	})
 
-	// Act: the context grows by 18.2k, then the main agent states 5k of fresh
-	// input.
+	// Act: ONE mid-turn context_usage push, as the shim states after a main
+	// API response.
 	f.shim.PushSessionUpdate(ftContextUsage(118_200))
+
+	// Assert: the chip states the context held and the cell its growth since
+	// the turn opened, both from that one push.
 	chip := awaitTopbar(t, f, topbar, "the context chip after the mid-turn push", func(v *frontendv1.TopbarView) bool {
 		return v.GetContext().GetText() != "100k"
 	})
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-ctx", ftUsage(1_000, 4_000, 90_000))))
-
-	// Assert: the chip reads the context held; the cell's first move is the
-	// fresh input, never the context's growth.
 	if chip.GetContext().GetText() != "118.2k" {
 		t.Fatalf("context chip = %q, want 118.2k", chip.GetContext().GetText())
 	}
-	cell := awaitFooter(t, f, footer, "the tokens cell's first move", func(v *frontendv1.FooterView) bool {
+	cell := awaitFooter(t, f, footer, "the tokens cell after the mid-turn push", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
 	})
-	if cell.GetStrip().GetTokens().GetInput().GetText() != "5k in" {
-		t.Fatalf("tokens cell = %q, want 5k in: the main agent's fresh input (1k unwritten + 4k written), not the context's 18.2k growth",
+	if cell.GetStrip().GetTokens().GetInput().GetText() != "18.2k in" {
+		t.Fatalf("tokens cell = %q, want 18.2k in: the chip's 118.2k less the 100k the turn opened on",
 			cell.GetStrip().GetTokens().GetInput().GetText())
 	}
 }
