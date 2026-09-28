@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/apiresponses"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/freshinput"
 	"claude-repld/internal/ids"
 )
 
@@ -396,7 +397,7 @@ type totals struct {
 func (out *totals) add(u *conversationv1.TokenUsage) {
 	out.cacheRead += u.GetInputHits().GetRead()
 	out.cacheWrite += u.GetInputMisses().GetWritten()
-	out.misses += u.GetInputMisses().GetWritten() + u.GetInputMisses().GetUnwritten()
+	out.misses += freshinput.Of(u)
 	out.output += u.GetOutputTokens()
 	out.thinking += u.GetOutputThinkingTokens()
 }
