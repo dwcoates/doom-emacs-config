@@ -2637,7 +2637,9 @@ refusal the Deploy rpc answers for it."
                ("{\"install\":{\"component\":\"DEPLOY_COMPONENT_DAEMON\",\"detail\":\"EACCES\"}}"
                 (:arm :install :value (:component :daemon :detail "EACCES")))
                ("{\"restartServices\":{\"component\":\"DEPLOY_COMPONENT_STORE\",\"detail\":\"exit 78\"}}"
-                (:arm :restart-services :value (:component :store :detail "exit 78")))))
+                (:arm :restart-services :value (:component :store :detail "exit 78")))
+               ("{\"rollback\":{\"component\":\"DEPLOY_COMPONENT_DAEMON\",\"detail\":\"EROFS\"}}"
+                (:arm :rollback :value (:component :daemon :detail "EROFS")))))
       (should (equal (list (car case)
                            (agent-repl-wire-decode-daemon-fault
                             (agent-repl-test-wire-verbs--parse
@@ -2654,13 +2656,35 @@ refusal the Deploy rpc answers for it."
                    (agent-repl-test-wire-verbs--parse "{\"deployFailed\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+(defun agent-repl-test-wire-verbs--daemon-fault-breach (json)
+  "Return the `agent-repl-wire-error' data decoding DaemonFault JSON raises."
+  (condition-case err
+      (progn (agent-repl-wire-decode-daemon-fault
+              (agent-repl-test-wire-verbs--parse json))
+             nil)
+    (agent-repl-wire-error (cdr err))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-rollback-failed-without-a-component-is-a-breach ()
+  "A failed rollback names the component it could not restore."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--daemon-fault-breach
+                    "{\"deployFailed\":{\"rollback\":{\"detail\":\"x\"}}}")
+                   '("DeployRollbackFailed" "component" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-rollback-failed-without-detail-is-a-breach ()
+  "A failed rollback says why."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--daemon-fault-breach
+                    "{\"deployFailed\":{\"rollback\":{\"component\":\"DEPLOY_COMPONENT_STORE\"}}}")
+                   '("DeployRollbackFailed" "detail" "required string is empty")))))
+
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-failed-step-arms-pinned ()
-  "DaemonFaultDeployFailed's step oneof has exactly the three arms decoded
+  "DaemonFaultDeployFailed's step oneof has exactly the four arms decoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFaultDeployFailed")
                        #'string<)
-                 (sort (list "build" "install" "restartServices") #'string<))))
+                 (sort (list "build" "install" "restartServices" "rollback") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
   "DaemonFault's kind oneof has exactly the seven arms decoded here."

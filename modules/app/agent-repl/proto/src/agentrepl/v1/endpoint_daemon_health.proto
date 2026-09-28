@@ -78,11 +78,13 @@ message DaemonFault {
     DaemonFaultWsmReadOnly wsm_read_only = 7;
     // The daemon's own state client would not answer the fault read.
     DaemonFaultDaemonStateUnreadable daemon_state_unreadable = 8;
-    // A deploy's build, install or service restart did not go through. It
-    // stands until a later deploy gets through the step that failed, and a
-    // daemon that boots closes the ones an earlier daemon left standing. A
-    // handover whose successor would not start is `successor_spawn_failed`
-    // instead.
+    // A deploy's build, install or service restart did not go through, or
+    // its rollback did not restore the previous build. A failure after the
+    // install began ROLLS BACK (owner ruling, 2026-09-28). A step's fault
+    // stands until a later deploy gets through that step, a rollback's until
+    // a deploy gets all the way through, and a daemon that boots closes the
+    // ones an earlier daemon left standing. A handover whose successor would
+    // not start is `successor_spawn_failed` instead.
     DaemonFaultDeployFailed deploy_failed = 9;
   }
 }
@@ -125,7 +127,19 @@ message DaemonFaultDeployFailed {
     DeployInstallFailed install = 2;
     // A launchd service did not come back onto the installed build.
     DeployServiceRestartFailed restart_services = 3;
+    // The failed deploy's ROLLBACK did not restore the previous build: a
+    // kept artifact could not be put back, or a service would not restart
+    // onto it. It stands as a fault of its own, beside the step's.
+    DeployRollbackFailed rollback = 4;
   }
+}
+// A failed deploy's rollback did not restore the previous build. The host may
+// run neither build cleanly until a deploy gets all the way through.
+message DeployRollbackFailed {
+  // The first component the rollback could not restore. REQUIRED.
+  DeployComponent component = 1;
+  // Every failure, in the rollback's own words. REQUIRED.
+  string detail = 2;
 }
 
 // No arms: DaemonHealth has no refusal site (landing 4).

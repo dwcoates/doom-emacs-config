@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 
@@ -318,10 +319,11 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// reaches only its caller, and a landing's deploy has none. A handover
 	// whose successor would not start is the rollout's own fault.
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
+	var rollback rolledBack
 	defer func() {
 		if err != nil {
 			d.progress(nil)
-			d.recordFailure(ctx, err)
+			d.recordFailure(ctx, err, rollback)
 		}
 	}()
 
@@ -337,6 +339,18 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		}
 	}()
 	fields["staging"] = staging
+
+	// A FAILURE AFTER THE INSTALL BEGAN ROLLS BACK: what the install replaced
+	// is put back, and every service the deploy restarted is restarted onto
+	// it (rollback.go). This defer runs BEFORE the staging directory, which
+	// holds the kept build, is removed, and before the failure is recorded.
+	prev := &previous{root: filepath.Join(staging, ".previous")}
+	defer func() {
+		if err == nil || !prev.touched() {
+			return
+		}
+		rollback = rolledBack{ran: true, err: d.rollback(ctx, prev, nonce, err)}
+	}()
 	d.log.Info(opDeploy, "deploying: building every component into staging", fields)
 
 	if err = d.deps.Builder.Build(ctx, staging); err != nil {
@@ -359,13 +373,13 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	d.stepSucceeded(ctx, health.DeployStepBuild)
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
-	if err = d.install(Staged{Dir: staging}, fresh, nonce); err != nil {
+	if err = d.install(Staged{Dir: staging}, fresh, nonce, prev); err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", withCause(fields, err))
 		return Result{}, err
 	}
 	d.stepSucceeded(ctx, health.DeployStepInstall)
 
-	services, err := d.services(ctx, fresh)
+	services, err := d.services(ctx, fresh, prev)
 	result.Outcomes = append(result.Outcomes, services...)
 	if err != nil {
 		return result, err
@@ -377,6 +391,9 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	if err != nil {
 		return result, err
 	}
+	// A DEPLOY THAT GOT ALL THE WAY THROUGH installed and decided every
+	// component, so no earlier rollback's partial state stands.
+	d.stepSucceeded(ctx, health.DeployStepRollback)
 	d.log.Info(opDeploy, "deployed: every component decided", merge(fields, dlog.Context{"decisions": summarize(result)}))
 	if !movesDaemon(result) {
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
@@ -536,9 +553,9 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 }
 
 // install puts every staged artifact whose content differs from the installed
-// one into place. Nothing has been restarted when it runs, and a failure stops
-// the deploy before anything is.
-func (d *Deployer) install(s Staged, fresh builds, nonce string) error {
+// one into place, KEEPING what stood at every path it writes in prev first, so
+// a later failure can roll it back. Nothing has been restarted when it runs.
+func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous) error {
 	live := d.deps.Live
 	in := installer{nonce: nonce, log: d.log}
 	type artifact struct {
@@ -547,38 +564,55 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string) error {
 		fresh     string
 		installed func() (string, error)
 		install   func() error
+		// writes are the live paths the install writes: the artifact first,
+		// then the stamps beside it.
+		writes []string
+		// tree is a directory artifact; bundle is the shim bundle.
+		tree, bundle bool
 	}
-	cacheBin := func(name string) func() error {
-		return func() error {
-			return in.file(s.CacheBin(name), live.CacheBinPath(name),
-				stampsBeside(filepath.Dir(s.CacheBin(name)), live.CacheBin, name+"."))
+	// livePaths lists an artifact's live path and the live side of its stamps.
+	livePaths := func(artifact string, stamps map[string]string) []string {
+		out := []string{artifact}
+		for _, to := range stamps {
+			out = append(out, to)
 		}
+		sort.Strings(out[1:])
+		return out
 	}
+	cacheBin := func(name string) (func() error, []string) {
+		stamps := stampsBeside(filepath.Dir(s.CacheBin(name)), live.CacheBin, name+".")
+		return func() error {
+			return in.file(s.CacheBin(name), live.CacheBinPath(name), stamps)
+		}, livePaths(live.CacheBinPath(name), stamps)
+	}
+	shimStamps := stampsBeside(filepath.Dir(s.ShimMain()), filepath.Dir(live.ShimMain()), "")
+	daemonStamps := stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), "")
+	storeInstall, storeWrites := cacheBin(buildreport.ServiceStore)
+	sidecarInstall, sidecarWrites := cacheBin(buildreport.ServiceSidecar)
+	lockInstall, lockWrites := cacheBin("shim-lock")
 	artifacts := []artifact{
-		{ComponentShim, "shim", fresh.shim, d.deps.Bundle.Build, func() error {
+		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
 			// THE BUNDLE IS REPLACED ONLY WHILE NO SPAWN HOLDS IT: a spawn
 			// states the hash it read, and node must run those very bytes.
 			return d.deps.Bundle.Replace(func() error {
-				return in.file(s.ShimMain(), live.ShimMain(),
-					stampsBeside(filepath.Dir(s.ShimMain()), filepath.Dir(live.ShimMain()), ""))
+				return in.file(s.ShimMain(), live.ShimMain(), shimStamps)
 			})
-		}},
-		{ComponentWebapp, "webapp", fresh.webapp, func() (string, error) { return buildid.Webapp(live.WebappDist()) }, func() error {
+		}, writes: livePaths(live.ShimMain(), shimStamps), bundle: true},
+		{component: ComponentWebapp, name: "webapp", fresh: fresh.webapp, installed: func() (string, error) { return buildid.Webapp(live.WebappDist()) }, install: func() error {
 			return in.dir(s.WebappDist(), live.WebappDist())
-		}},
-		{ComponentDaemon, "daemon", fresh.daemon, func() (string, error) { return buildid.File(live.DaemonBin()) }, func() error {
-			return in.file(s.DaemonBin(), live.DaemonBin(),
-				stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), ""))
-		}},
-		{ComponentStore, buildreport.ServiceStore, fresh.store, func() (string, error) {
+		}, writes: []string{live.WebappDist()}, tree: true},
+		{component: ComponentDaemon, name: "daemon", fresh: fresh.daemon, installed: func() (string, error) { return buildid.File(live.DaemonBin()) }, install: func() error {
+			return in.file(s.DaemonBin(), live.DaemonBin(), daemonStamps)
+		}, writes: livePaths(live.DaemonBin(), daemonStamps)},
+		{component: ComponentStore, name: buildreport.ServiceStore, fresh: fresh.store, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceStore))
-		}, cacheBin(buildreport.ServiceStore)},
-		{ComponentSidecar, buildreport.ServiceSidecar, fresh.sidecar, func() (string, error) {
+		}, install: storeInstall, writes: storeWrites},
+		{component: ComponentSidecar, name: buildreport.ServiceSidecar, fresh: fresh.sidecar, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceSidecar))
-		}, cacheBin(buildreport.ServiceSidecar)},
-		{ComponentShim, "shim-lock", fresh.lock, func() (string, error) {
+		}, install: sidecarInstall, writes: sidecarWrites},
+		{component: ComponentShim, name: "shim-lock", fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath("shim-lock"))
-		}, cacheBin("shim-lock")},
+		}, install: lockInstall, writes: lockWrites},
 	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}
@@ -594,6 +628,14 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string) error {
 		} else {
 			fields["installed"] = installed
 		}
+		// WHAT STANDS IS KEPT BEFORE IT IS REPLACED, so a later failure can
+		// put it back. A path that cannot be kept is not replaced.
+		for _, path := range a.writes {
+			if err := prev.keep(a.component, a.name, path, a.tree, a.bundle); err != nil {
+				d.log.Error(opInstall, "could not keep the previous build before replacing it; it is not replaced", withCause(fields, err))
+				return &InstallFailed{Component: a.component, Detail: err.Error()}
+			}
+		}
 		if err := a.install(); err != nil {
 			d.log.Error(opInstall, "could not install the fresh build", withCause(fields, err))
 			return &InstallFailed{Component: a.component, Detail: err.Error()}
@@ -606,7 +648,7 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string) error {
 // services restarts the store and the sidecar when the processes launchd runs
 // report a build that is not the fresh one. They hold no turn state, so
 // nothing is waited on.
-func (d *Deployer) services(ctx context.Context, fresh builds) ([]Outcome, error) {
+func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) ([]Outcome, error) {
 	storeStale := d.serviceStale(ComponentStore, buildreport.ServiceStore, fresh.store)
 	sidecarStale := d.serviceStale(ComponentSidecar, buildreport.ServiceSidecar, fresh.sidecar)
 	store := Outcome{Component: ComponentStore, Build: fresh.store, Kind: UpToDate}
@@ -617,6 +659,7 @@ func (d *Deployer) services(ctx context.Context, fresh builds) ([]Outcome, error
 			Components: []deployprogress.Component{deployprogress.Store, deployprogress.Sidecar}})
 		// A STORE RESTART ALWAYS RESTARTS THE SIDECAR: its socket is out while
 		// the store restarts, and a fresh pair is the known-good state.
+		prev.store = true
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
 			d.log.Error(opDecide, "the store restart failed", withCause(dlog.Context{"component": string(ComponentStore)}, err))
 			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentStore, Detail: err.Error()}
@@ -628,6 +671,7 @@ func (d *Deployer) services(ctx context.Context, fresh builds) ([]Outcome, error
 	case sidecarStale:
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 			Components: []deployprogress.Component{deployprogress.Sidecar}})
+		prev.sidecar = true
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
 			d.log.Error(opDecide, "the sidecar restart failed", withCause(dlog.Context{"component": string(ComponentSidecar)}, err))
 			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}

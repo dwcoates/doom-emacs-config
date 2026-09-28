@@ -534,6 +534,14 @@ keeps serving), its line naming the step and the last line of its output. It
 stands until a deploy gets through that step, and a daemon that boots owning
 its state closes the ones an earlier daemon left.
 
+A FAILED DEPLOY ROLLS BACK (owner ruling, 2026-09-28): any failure after the
+install began puts every replaced artifact back and restarts every service
+the deploy restarted onto the restored build, so the host is left exactly on
+the build it ran before; the fault line says `rolled back`. A rollback that
+fails is its own `deploy_failed` fault (the `rollback` step). Both stand in
+the TOPBAR's warning strip as well as on every footer, and the next deploy
+that gets through takes them down from both.
+
 `force` does not wait: every stale shim is bounced at once and a stale daemon
 hands every workspace over at once, ENDING RUNNING TURNS. Emacs asks before a
 forced deploy; the CLI's `-force` says so in its help.

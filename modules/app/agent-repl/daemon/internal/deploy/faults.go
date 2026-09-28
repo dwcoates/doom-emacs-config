@@ -20,7 +20,10 @@ import (
 //
 // ONE FAULT STANDS PER STEP. A step that fails again supersedes its own
 // earlier fault; a step a later deploy gets through closes every fault of
-// that step. A daemon that boots closes the ones an earlier daemon left
+// that step. A failure after the install began is ROLLED BACK (rollback.go),
+// and its fault says so; a rollback that did not restore the previous build
+// is a fault of its own, under the `rollback` step, which only a deploy that
+// gets ALL the way through closes. A daemon that boots closes the ones an earlier daemon left
 // standing, because no strip of the new process draws them: the footer
 // learns of a fault only as it is opened.
 
@@ -39,9 +42,10 @@ type Faults interface {
 // that is no build, install or service restart failure.
 func failureOf(err error) (health.DeployFailure, bool) {
 	var (
-		build   *BuildFailed
-		install *InstallFailed
-		service *ServiceRestartFailed
+		build    *BuildFailed
+		install  *InstallFailed
+		service  *ServiceRestartFailed
+		rollback *RollbackFailed
 	)
 	switch {
 	case errors.As(err, &build):
@@ -50,27 +54,81 @@ func failureOf(err error) (health.DeployFailure, bool) {
 		return health.DeployFailure{Step: health.DeployStepInstall, Component: install.Component.Arm(), Detail: install.Detail}, true
 	case errors.As(err, &service):
 		return health.DeployFailure{Step: health.DeployStepRestartServices, Component: service.Component.Arm(), Detail: service.Detail}, true
+	case errors.As(err, &rollback):
+		return health.DeployFailure{Step: health.DeployStepRollback, Component: rollback.Component.Arm(), Detail: rollback.Detail}, true
 	default:
 		return health.DeployFailure{}, false
 	}
 }
 
+// rolledBack is what a failed deploy's rollback came to.
+type rolledBack struct {
+	// ran is true when the deploy had installed or restarted something, so a
+	// rollback ran.
+	ran bool
+	// err is the rollback's own failure, nil when it restored the previous
+	// build.
+	err error
+}
+
+// state answers the rollback as a DeployFailure spells it.
+func (r rolledBack) state() string {
+	switch {
+	case !r.ran:
+		return health.RollbackNone
+	case r.err != nil:
+		return health.RollbackIncomplete
+	default:
+		return health.RollbackRestored
+	}
+}
+
+// clause says what became of the install, in the fault record's own prose.
+func (r rolledBack) clause() string {
+	switch r.state() {
+	case health.RollbackRestored:
+		return "it was rolled back to the previous build"
+	case health.RollbackIncomplete:
+		return "its rollback did NOT restore the previous build"
+	default:
+		return "nothing was installed"
+	}
+}
+
 // recordFailure opens the fault a failed deploy stands as, superseding the
-// step's earlier one. An error that is no step's failure opens nothing. A
-// fault that cannot be recorded is ERROR: the failure is still the deploy's
-// answer, and its own ERROR record stands.
-func (d *Deployer) recordFailure(ctx context.Context, err error) {
-	failure, ok := failureOf(err)
-	if !ok {
-		d.log.Debug(opFault, "the deploy's failure is no build, install or service restart; it opens no fault", withCause(nil, err))
+// step's earlier one, and — when the rollback did not restore the previous
+// build — the rollback's own fault beside it. An error that is no step's
+// failure opens no step fault. A fault that cannot be recorded is ERROR: the
+// failure is still the deploy's answer, and its own ERROR record stands.
+func (d *Deployer) recordFailure(ctx context.Context, err error, rollback rolledBack) {
+	ctx = context.WithoutCancel(ctx)
+	if failure, ok := failureOf(err); ok {
+		if failure.Step != health.DeployStepBuild {
+			failure.Rollback = rollback.state()
+		}
+		d.openStepFault(ctx, failure, fmt.Sprintf("the deploy failed at its %s step; %s; the running build keeps serving: %v",
+			failure.Step, rollback.clause(), err), err)
+	} else {
+		d.log.Debug(opFault, "the deploy's failure is no build, install or service restart; it opens no step fault", withCause(nil, err))
+	}
+	if rollback.err == nil {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
-	fields := dlog.Context{"step": failure.Step}
+	failure, ok := failureOf(rollback.err)
+	if !ok {
+		d.log.Error(opFault, "the rollback's failure is not a RollbackFailed; it opens no fault", withCause(nil, rollback.err))
+		return
+	}
+	d.openStepFault(ctx, failure, fmt.Sprintf("the failed deploy's rollback did not restore the previous build: %v", rollback.err), rollback.err)
+}
+
+// openStepFault opens one step's fault, closing that step's earlier ones.
+func (d *Deployer) openStepFault(ctx context.Context, failure health.DeployFailure, detail string, cause error) {
+	fields := dlog.Context{"step": failure.Step, "rollback": failure.Rollback}
 	d.closeStepFaults(ctx, failure.Step, "a later failure of the same step supersedes it")
 	id, openErr := d.deps.Faults.OpenFault(ctx, wsm.Fault{
 		Kind:     health.KindDeployFailed,
-		Detail:   fmt.Sprintf("the deploy failed at its %s step; the running build keeps serving: %v", failure.Step, err),
+		Detail:   detail,
 		Evidence: failure.Evidence(),
 		OpenedAt: d.deps.Clock.Now(),
 	})
@@ -78,7 +136,7 @@ func (d *Deployer) recordFailure(ctx context.Context, err error) {
 		d.log.Error(opFault, "could not record the failed deploy as a fault", withCause(fields, openErr))
 		return
 	}
-	d.log.Info(opFault, "recorded the failed deploy as a fault", merge(fields, dlog.Context{"fault": string(id), "cause": err.Error()}))
+	d.log.Info(opFault, "recorded the failed deploy as a fault", merge(fields, dlog.Context{"fault": string(id), "cause": cause.Error()}))
 }
 
 // stepSucceeded closes every standing fault of a step this deploy got

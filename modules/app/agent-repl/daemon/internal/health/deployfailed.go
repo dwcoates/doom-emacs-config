@@ -20,6 +20,24 @@ const (
 	// DeployStepRestartServices is the restart of a launchd service onto the
 	// installed build.
 	DeployStepRestartServices = "restart_services"
+	// DeployStepRollback is the failed deploy's ROLLBACK, which did not
+	// restore the previous build. It is a fault of its own, beside the fault
+	// of the step that failed.
+	DeployStepRollback = "rollback"
+)
+
+// What became of a failed step's install: a failure after the install began
+// rolls back (owner ruling, 2026-09-28).
+const (
+	// RollbackNone is a failure that installed nothing, so nothing was rolled
+	// back: a build, or an install that could not keep the previous build.
+	RollbackNone = ""
+	// RollbackRestored is a failure whose rollback restored the previous
+	// build.
+	RollbackRestored = "restored"
+	// RollbackIncomplete is a failure whose rollback did not restore the
+	// previous build; the rollback's own fault names why.
+	RollbackIncomplete = "incomplete"
 )
 
 // DeployFailure is what a `deploy_failed` fault records: the step, and the
@@ -42,6 +60,9 @@ type DeployFailure struct {
 	Detail string
 	// Log is where the build's whole output is archived; build only.
 	Log string
+	// Rollback is what became of the install, one of the Rollback
+	// constants; set for DeployStepInstall and DeployStepRestartServices.
+	Rollback string
 }
 
 // The evidence keys a DeployFailure is recorded under.
@@ -51,6 +72,7 @@ const (
 	keyComponent = "component"
 	keyDetail    = "detail"
 	keyLog       = "log"
+	keyRollback  = "rollback"
 )
 
 // Evidence is the failure as a fault's evidence.
@@ -60,8 +82,11 @@ func (d DeployFailure) Evidence() map[string]string {
 	case DeployStepBuild:
 		out[keyBuildStep] = d.BuildStep
 		out[keyLog] = d.Log
+	case DeployStepRollback:
+		out[keyComponent] = d.Component.String()
 	default:
 		out[keyComponent] = d.Component.String()
+		out[keyRollback] = d.Rollback
 	}
 	return out
 }
@@ -74,6 +99,7 @@ func DeployFailureOf(f wsm.Fault) DeployFailure {
 		Component: agentreplv1.DeployComponent(agentreplv1.DeployComponent_value[f.Evidence[keyComponent]]),
 		Detail:    f.Evidence[keyDetail],
 		Log:       f.Evidence[keyLog],
+		Rollback:  f.Evidence[keyRollback],
 	}
 }
 
@@ -94,16 +120,21 @@ func (d DeployFailure) arm() *agentreplv1.DaemonFaultDeployFailed {
 		return &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_RestartServices{
 			RestartServices: &agentreplv1.DeployServiceRestartFailed{Component: d.Component, Detail: d.Detail},
 		}}
+	case DeployStepRollback:
+		return &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_Rollback{
+			Rollback: &agentreplv1.DeployRollbackFailed{Component: d.Component, Detail: d.Detail},
+		}}
 	default:
 		return nil
 	}
 }
 
 // DeployFailedDetail composes the ONE line the footer draws for a failed
-// deploy: the step in words, what it failed on, and the last line of the
-// failure's own account (the build's detail is the tail of its output, and
-// the strip has one line to draw). "build webapp: error TS2322", "install
-// store: permission denied", "restart services sidecar: exit 5".
+// deploy: the step in words, what it failed on, what became of the install,
+// and the last line of the failure's own account (the build's detail is the
+// tail of its output, and the strip has one line to draw). "build webapp:
+// error TS2322", "install store, rolled back: permission denied", "restart
+// services sidecar, rollback failed: exit 5", "rollback daemon: EROFS".
 func DeployFailedDetail(f wsm.Fault) string {
 	d := DeployFailureOf(f)
 	if d.Step == "" {
@@ -119,6 +150,12 @@ func DeployFailedDetail(f wsm.Fault) string {
 		subject = ""
 	}
 	head := strings.TrimSpace(strings.ReplaceAll(d.Step, "_", " ") + " " + subject)
+	switch d.Rollback {
+	case RollbackRestored:
+		head += ", rolled back"
+	case RollbackIncomplete:
+		head += ", rollback failed"
+	}
 	tail := lastLine(d.Detail)
 	if tail == "" {
 		return head

@@ -173,11 +173,13 @@ func (b *fakeBuilder) count() int {
 
 // fakeRollout records what the deploy asked of the rollout.
 type fakeRollout struct {
-	mu         sync.Mutex
-	joining    bool
-	rolling    []ids.WorkspaceID
-	handovers  []bool
-	handErr    error
+	mu        sync.Mutex
+	joining   bool
+	rolling   []ids.WorkspaceID
+	handovers []bool
+	handErr   error
+	// onHandOver runs inside the handover, before it answers.
+	onHandOver func()
 	restarts   []bool
 	restartErr error
 	checks     []bool
@@ -193,6 +195,9 @@ func (r *fakeRollout) HandOver(_ context.Context, force bool) (rollout.HandoverA
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.handovers = append(r.handovers, force)
+	if r.onHandOver != nil {
+		r.onHandOver()
+	}
 	acc := r.acceptance
 	acc.Forced = force
 	return acc, r.handErr
@@ -280,20 +285,31 @@ type fakeServices struct {
 	calls      []string
 	storeErr   error
 	sidecarErr error
+	// recovers makes a failing restart fail ONCE: every later restart of
+	// that service succeeds.
+	recovers bool
 }
 
 func (s *fakeServices) RestartStore(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, "store")
-	return s.storeErr
+	err := s.storeErr
+	if s.recovers {
+		s.storeErr = nil
+	}
+	return err
 }
 
 func (s *fakeServices) RestartSidecar(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, "sidecar")
-	return s.sidecarErr
+	err := s.sidecarErr
+	if s.recovers {
+		s.sidecarErr = nil
+	}
+	return err
 }
 
 func (s *fakeServices) Calls() []string {

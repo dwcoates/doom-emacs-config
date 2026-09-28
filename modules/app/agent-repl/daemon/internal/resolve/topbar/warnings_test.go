@@ -1,6 +1,7 @@
 package topbar
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -8,6 +9,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"claude-repld/internal/ids"
 )
 
 // unmodeledStart is an unmodeled tool call as issued.
@@ -666,4 +669,146 @@ func TestADaemonRaisedWarningIsDrawnAsItsLineAlone(t *testing.T) {
 			}
 		})
 	}
+}
+
+// otherWS is a second workspace, for the conditions that stand on every strip.
+const otherWS = ids.WorkspaceID("ws-2")
+
+// readyOther binds and readies otherWS as the harness readies testWS.
+func readyOther(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.r.SetWorkspaceDir(otherWS, t.TempDir()); err != nil {
+		t.Fatalf("SetWorkspaceDir: %v", err)
+	}
+	h.r.SetNaming(otherWS, Naming{Title: "other", Branch: "main", DefaultBranch: "main", ConfigDir: "/Users/dev/.claude"})
+	h.r.SetAccount(otherWS, testAccount("dev@example.com"))
+}
+
+// lines answers a workspace's published warning lines, newest first.
+func lines(t *testing.T, h *harness, ws ids.WorkspaceID) []string {
+	t.Helper()
+	view, ok := h.r.Topic(ws).Latest()
+	if !ok {
+		t.Fatalf("no topbar published for %s", ws)
+	}
+	var out []string
+	for _, w := range view.GetWarnings().GetWarnings() {
+		out = append(out, w.GetLine().GetText())
+	}
+	return out
+}
+
+func TestADaemonWarningStandsOnEveryStrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, h *harness, raise func())
+	}{
+		{"strips that stood before it was raised", func(t *testing.T, h *harness, raise func()) {
+			h.ready(t)
+			readyOther(t, h)
+			raise()
+		}},
+		{"a strip made after it was raised", func(t *testing.T, h *harness, raise func()) {
+			h.ready(t)
+			raise()
+			readyOther(t, h)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			tc.setup(t, h, func() { h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc") })
+
+			// Assert
+			for _, ws := range []ids.WorkspaceID{testWS, otherWS} {
+				if got := lines(t, h, ws); !slices.Contains(got, "deploy failed: build webapp: tsc") {
+					t.Fatalf("%s warning lines = %q, want the daemon's line among them", ws, got)
+				}
+			}
+		})
+	}
+}
+
+func TestADaemonWarningIsItsLineAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+
+	// Assert
+	got := warnings(t, h)
+	if len(got) != 1 || got[0].GetDetail() != nil {
+		t.Fatalf("warnings = %+v, want one line with no overlay", got)
+	}
+}
+
+func TestRaisingADaemonWarningAgainRestatesItsLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.RaiseDaemonWarning("fault-1", "first")
+
+	// Act
+	h.r.RaiseDaemonWarning("fault-1", "second")
+
+	// Assert
+	if got := lines(t, h, testWS); len(got) != 1 || got[0] != "second" {
+		t.Fatalf("warning lines = %q, want the one restated line", got)
+	}
+}
+
+func TestARetractedDaemonWarningLeavesEveryStrip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	readyOther(t, h)
+	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+
+	// Act
+	h.r.RetractDaemonWarning("fault-1")
+
+	// Assert
+	for _, ws := range []ids.WorkspaceID{testWS, otherWS} {
+		if got := lines(t, h, ws); slices.Contains(got, "deploy failed: build webapp: tsc") {
+			t.Fatalf("%s warning lines = %q, want the daemon's line gone", ws, got)
+		}
+	}
+}
+
+func TestARetractedDaemonWarningIsNotDrawnOnALaterStrip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+	h.r.RetractDaemonWarning("fault-1")
+
+	// Act
+	readyOther(t, h)
+
+	// Assert
+	if got := lines(t, h, otherWS); slices.Contains(got, "deploy failed: build webapp: tsc") {
+		t.Fatalf("warning lines = %q, want the retracted line absent", got)
+	}
+}
+
+func TestADaemonWarningIsRecordedOnTheRunLog(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.RaiseDaemonWarning("fault-1", "deploy failed")
+
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.topbar.raise_daemon_warning" && r.Level == "info" && r.Context["workspaces"] == 1 {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the raise at INFO naming the one strip", h.log.Records())
 }
