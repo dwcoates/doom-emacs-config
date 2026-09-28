@@ -88,9 +88,9 @@ describe("the status mark", () => {
     expect(drawStatusMark(arm, "R.status").hasAttribute("data-glyph")).toBe(true);
   });
 
-  it("draws a failed turn end as a blue dot", () => {
+  it("draws a failed turn end as a turquoise dot", () => {
     const mark = drawStatusMark("turnFailed", "R.status");
-    expect(mark.classList.contains("tone-blue")).toBe(true);
+    expect(mark.classList.contains("tone-turquoise")).toBe(true);
     expect(mark.getAttribute("data-glyph")).toBe("dot");
   });
 
