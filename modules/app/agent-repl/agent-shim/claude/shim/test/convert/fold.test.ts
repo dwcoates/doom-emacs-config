@@ -8,7 +8,7 @@
  */
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { logRecordsSince } from "../log-records.js";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
@@ -620,6 +620,80 @@ describe("detached work", () => {
     );
 
     expect(output.entries).toHaveLength(0);
+  });
+});
+
+describe("a subagent resumed by a send whose spawn this fold never saw", () => {
+  /** A fold holding an open `SendMessage` call, as a restarted process's does. */
+  const foldWithOpenSend = (): ReturnType<typeof createFold> => {
+    const fold = createFold();
+    fold.onSdkMessage(
+      assistant("msg-send", [{ type: "tool_use", id: "toolu_send", name: "SendMessage", input: { to: "a5583", message: "go on" } }]),
+      foldContext(),
+    );
+    return fold;
+  };
+  const resumed = {
+    type: "system",
+    subtype: "task_started",
+    uuid: "uuid-resume",
+    session_id: "session-1",
+    task_id: "a5583",
+    tool_use_id: "toolu_send",
+    task_type: "local_agent",
+    description: "resumed",
+  } as unknown as SdkMessage;
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+
+  it("names the resumed task as awaiting the store's answer", () => {
+    // Arrange.
+    const fold = foldWithOpenSend();
+
+    // Act, Assert.
+    expect(fold.taskAwaitingAgent(resumed, foldContext())).toBe("a5583");
+  });
+
+  it("announces the agent the store named", () => {
+    // Arrange.
+    const fold = foldWithOpenSend();
+    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN });
+
+    // Act.
+    const output = fold.onSdkMessage(resumed, foldContext());
+
+    // Assert.
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const kind = (frame?.result.value as conversationv1.AgentDetachedWork).kind?.kind;
+    expect(kind?.case === "subagent" ? kind.value.agentId?.value : undefined).toBe("toolu_spawn");
+  });
+
+  it("knows the task's agent once the store named it", () => {
+    // Arrange.
+    const fold = foldWithOpenSend();
+
+    // Act.
+    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN });
+
+    // Assert.
+    expect(fold.taskAgent("a5583")).toEqual({ kind: "named", agent: SPAWN });
+  });
+
+  it("refuses the announcement with the store's answer when it named none", () => {
+    // Arrange.
+    const fold = foldWithOpenSend();
+    fold.learnTaskAgent("a5583", { kind: "not_found" });
+    const before = logSinkMark();
+
+    // Act.
+    const output = fold.onSdkMessage(resumed, foldContext());
+
+    // Assert.
+    expect(output.entries).toEqual([]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.store_answer),
+    ).toEqual(["not_found: no agent of this session's lineage is paired with the locator"]);
   });
 });
 

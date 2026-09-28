@@ -602,6 +602,72 @@ export function announceLiveWork(
   return announcements;
 }
 
+/** What a live handle's own unit says about the agent a SEND resumed. */
+export type ResumedRecipient =
+  /** The handle's unit is not a send: the ordinary description path owns it. */
+  | { readonly kind: "not_a_send" }
+  /** A send, but its record states no recipient the vendor resolved (it has not settled). */
+  | { readonly kind: "no_recipient" }
+  /** A send that reached its recipient: the vendor task locator it named. */
+  | { readonly kind: "locator"; readonly vendorTaskId: string };
+
+/**
+ * THE VENDOR TASK LOCATOR a live handle's send resumed, read from the record.
+ *
+ * A subagent RESUMED BY `SendMessage` is announced under the send's own id —
+ * the unit it detached from — so after a bounce the handle's unit in the book
+ * is the send, not a spawn, and nothing about it describes the agent. What the
+ * send's settle does state is the recipient the vendor resolved, which is the
+ * vendor's own id for the agent (convert/tools/send-message.ts reads it off
+ * `resumedAgentId`, or the pin's id): the LOCATOR the store pairs with the
+ * agent. The caller asks the store for that pairing.
+ */
+export function resumedRecipient(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  handle: conversationv1.DetachedWorkId,
+): ResumedRecipient {
+  const item = findUnit(entries, create(conversationv1.AgentActivityIdSchema, { value: handle.value }));
+  if (item?.case !== "sendMessage") return { kind: "not_a_send" };
+  const result = item.value.result;
+  if (result.case !== "success") return { kind: "no_recipient" };
+  const locator = result.value.recipientAgentId?.value ?? "";
+  return locator === "" ? { kind: "no_recipient" } : { kind: "locator", vendorTaskId: locator };
+}
+
+/**
+ * The `created` announcement of a RESUMED subagent a restarted consumer has
+ * never seen: addressed by the send's handle, naming the agent the store
+ * paired with its locator, and described by that agent's own spawn unit.
+ *
+ * THE SPAWN IS THE DESCRIPTION. The send says nothing about what the agent is;
+ * the spawn unit (keyed by the agent's id under the minting rule) is the one
+ * record of it, and its created agent must be the agent named here — a
+ * consumer refuses a `created` announcement whose description and kind name
+ * different agents. Undefined when the book holds no describable spawn of it.
+ */
+export function resumedAgentAnnouncement(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  handle: conversationv1.DetachedWorkId,
+  owner: conversationv1.AgentId,
+  agent: conversationv1.AgentId,
+): conversationv1.AgentDetachedWork | undefined {
+  const described = describeDetachable(
+    findUnit(entries, create(conversationv1.AgentActivityIdSchema, { value: agent.value })),
+  );
+  if (described?.work.case !== "subagent") return undefined;
+  const start = described.work.value.result;
+  if (start.case !== "start" || start.value.createdAgentId?.value !== agent.value) return undefined;
+  return create(conversationv1.AgentDetachedWorkSchema, {
+    work: handle,
+    owner,
+    kind: detachedWorkKind({ kind: "subagent", agent }),
+    origin: {
+      case: "created",
+      value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),
+    },
+  });
+}
+
 export function createReconciler(options: ReconcilerOptions): Reconciler {
   /** One session's open obligations, as the store answered them once. */
   const liveWorkOnce = async (
