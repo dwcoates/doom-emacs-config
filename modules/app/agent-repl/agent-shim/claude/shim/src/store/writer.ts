@@ -171,8 +171,57 @@ function agentInfo(entry: PersistEntry): storev1.StoreAgentUpdate["agentInfo"] {
   return { case: "serveableFrame", value: pageLine(entry, item) };
 }
 
-/** One `PersistEntry` as the store's own envelope. */
-export function toStoreEntry(producer: string, entry: PersistEntry): storev1.StoreEntry {
+/**
+ * One row as the writer holds it: what it says, and WHERE IN ITS CONVERSATION
+ * it was placed — the instant this shim first observed it, stamped once at the
+ * writer's door ({@link PlaceClock}) and carried unchanged through every retry.
+ */
+export interface PlacedEntry {
+  readonly entry: PersistEntry;
+  readonly place: conversationv1.ConversationPlace;
+}
+
+/**
+ * THE OBSERVATION CLOCK a row's place is stamped from (store.v1
+ * `StoreEntry.place`): the instant the shim first observed the fact, in
+ * wall-clock milliseconds, and a monotonic count of the rows stamped within
+ * that millisecond as the ordinal.
+ *
+ * IT NEVER RUNS BACKWARDS. A wall clock can step back (an NTP correction);
+ * placing a later observation before an earlier one would draw it above what
+ * the conversation said first, so a step back holds the last instant and keeps
+ * counting ordinals in it. A clock reading that is not a positive instant is a
+ * defect in the injected clock and is refused, never stamped: the store refuses
+ * such a place, and a zero would order the row before the whole conversation.
+ */
+export class PlaceClock {
+  private lastAtMs = 0;
+  private nextOrdinal = 0;
+
+  constructor(private readonly nowMs: () => number) {}
+
+  /** The next place, strictly after every place this clock has stamped. */
+  next(): conversationv1.ConversationPlace {
+    const now = Math.floor(this.nowMs());
+    if (!(now > 0)) {
+      throw new Error(`shim store writer: the observation clock read ${now}, which names no instant`);
+    }
+    if (now > this.lastAtMs) {
+      this.lastAtMs = now;
+      this.nextOrdinal = 0;
+    }
+    const place = create(conversationv1.ConversationPlaceSchema, {
+      atMs: BigInt(this.lastAtMs),
+      ordinal: this.nextOrdinal,
+    });
+    this.nextOrdinal += 1;
+    return place;
+  }
+}
+
+/** One placed row as the store's own envelope. */
+export function toStoreEntry(producer: string, placed: PlacedEntry): storev1.StoreEntry {
+  const { entry, place } = placed;
   if (entry.keepalive) {
     // THE DOOR DROPS EVERY KEEP-ALIVE ENTRY ({@link storedEntries}), so one
     // reaching the envelope is a writer defect, refused like every other
@@ -209,13 +258,16 @@ export function toStoreEntry(producer: string, entry: PersistEntry): storev1.Sto
     entry: arm,
     // THE ONE PLACE A ROW IS STAMPED WITH ITS TURN, for every arm alike.
     ...(entry.turn === undefined ? {} : { turn: entry.turn }),
+    // AND WITH ITS PLACE: the instant the writer's door first observed it,
+    // stamped once there, so a retried batch carries the original instant.
+    place,
   });
 }
 
 /** The batch request one group of entries becomes. */
 export function toWriteBatchRequest(
   producer: string,
-  entries: readonly PersistEntry[],
+  entries: readonly PlacedEntry[],
 ): storev1.WriteBatchRequest {
   return create(storev1.WriteBatchRequestSchema, {
     producer,
@@ -274,8 +326,7 @@ interface DurableGroup {
 }
 
 /** One row waiting to be acked. */
-interface QueuedRow {
-  readonly entry: PersistEntry;
+interface QueuedRow extends PlacedEntry {
   /** Its payload size, the unit the byte bounds are stated in. */
   readonly bytes: number;
   /** The durable write it belongs to, when a caller is waiting on it. */
@@ -405,6 +456,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     }
     return producer;
   };
+
+  /** Where every row this writer enqueues is placed (see {@link PlaceClock}). */
+  const placeClock = new PlaceClock(options.nowMs);
 
   const faultListeners = new Set<(fault: conversationv1.SessionFault) => void>();
   const windowListeners = new Set<(window: conversationv1.SessionDegradedWindow) => void>();
@@ -572,7 +626,11 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const enqueue = (entries: readonly PersistEntry[], durable?: DurableGroup): void => {
     for (const entry of entries) {
       const bytes = payloadBytes(entry);
-      queue.push(durable === undefined ? { entry, bytes } : { entry, bytes, durable });
+      // THE ROW IS PLACED HERE, ONCE: the writer's door is where the shim
+      // first holds the fact, and the place rides the queued row through every
+      // retry rather than being re-read from the clock at each send.
+      const place = placeClock.next();
+      queue.push(durable === undefined ? { entry, place, bytes } : { entry, place, bytes, durable });
       queuedBytes += bytes;
     }
     noteBacklog();
@@ -664,7 +722,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    * the same malformed row while every later batch waits behind it in the one
    * ordered drain.
    */
-  const attempt = async (entries: readonly PersistEntry[]): Promise<BatchFailure | null> => {
+  const attempt = async (entries: readonly PlacedEntry[]): Promise<BatchFailure | null> => {
     // THE ENVELOPE IS BUILT OUTSIDE THE TRANSPORT'S TRY, so a row this writer
     // cannot envelope at all is never mistaken for the store being down.
     // `toStoreEntry` refuses an entry with no servable item and one with an
@@ -800,7 +858,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const deliver = async (batch: readonly QueuedRow[]): Promise<void> => {
     for (let attempts = 1; ; attempts += 1) {
       const startedAt = options.nowMs();
-      const failure = await attempt(batch.map((row) => row.entry));
+      const failure = await attempt(batch);
       if (failure === null) {
         landed(batch, attempts, options.nowMs() - startedAt);
         return;
