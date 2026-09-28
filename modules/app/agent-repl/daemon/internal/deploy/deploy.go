@@ -29,12 +29,14 @@ import (
 	"syscall"
 
 	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/wsm"
@@ -61,6 +63,26 @@ const (
 	ComponentShim    Component = "shim"
 	ComponentWebapp  Component = "webapp"
 )
+
+// Arm names a component on the wire.
+func (c Component) Arm() agentreplv1.DeployComponent {
+	switch c {
+	case ComponentDaemon:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON
+	case ComponentShim:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM
+	case ComponentWebapp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP
+	case ComponentStore:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE
+	case ComponentSidecar:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
+	case ComponentElisp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
+	default:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
+	}
+}
 
 // OutcomeKind is what a deploy decided for one component.
 type OutcomeKind string
@@ -205,7 +227,12 @@ type Deps struct {
 	// update line on every workspace's strip (owner request, 2026-09-27). It
 	// is the ONE entry point for that line.
 	Progress deployprogress.Sink
-	Log      dlog.Surfaces
+	// Faults is the state client a failed build, install or service restart
+	// is recorded through as the daemon-scoped `deploy_failed` fault, and
+	// through which a step a later deploy gets through closes it. It must be
+	// the OBSERVED client (health.ObserveFaults), so the footer draws it.
+	Faults Faults
+	Log    dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -243,6 +270,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the service restarter is required")
 	case deps.Progress == nil:
 		return nil, errors.New("deploy: the progress sink is required")
+	case deps.Faults == nil:
+		return nil, errors.New("deploy: the fault recorder is required")
 	case deps.DaemonBuild == "":
 		return nil, errors.New("deploy: this daemon's own build is required")
 	case deps.StagingRoot == "" || deps.ReportDir == "":
@@ -284,12 +313,15 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 
 	// FROM HERE THE LINE IS THIS DEPLOY'S. A deploy that stops short of the
 	// phase that ends it (updated here, or a handover whose successor says it)
-	// takes its line down: the failure is the caller's answer and, for a
-	// handover whose successor would not start, the fault line's.
+	// takes its line down, and a build, an install or a service restart that
+	// failed stands as the `deploy_failed` fault line: the rpc's answer
+	// reaches only its caller, and a landing's deploy has none. A handover
+	// whose successor would not start is the rollout's own fault.
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
 	defer func() {
 		if err != nil {
 			d.progress(nil)
+			d.recordFailure(ctx, err)
 		}
 	}()
 
@@ -324,18 +356,21 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		return Result{}, err
 	}
 	d.log.Info(opDeploy, "built", merge(fields, dlog.Context{"builds": fresh.fields()}))
+	d.stepSucceeded(ctx, health.DeployStepBuild)
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
 	if err = d.install(Staged{Dir: staging}, fresh, nonce); err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", withCause(fields, err))
 		return Result{}, err
 	}
+	d.stepSucceeded(ctx, health.DeployStepInstall)
 
 	services, err := d.services(ctx, fresh)
 	result.Outcomes = append(result.Outcomes, services...)
 	if err != nil {
 		return result, err
 	}
+	d.stepSucceeded(ctx, health.DeployStepRestartServices)
 	result.Outcomes = append(result.Outcomes, d.elisp(fresh))
 	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, force)
 	result.Outcomes = append(result.Outcomes, rest...)

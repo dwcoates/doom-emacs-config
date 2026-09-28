@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/gitclient"
@@ -908,5 +909,31 @@ func TestNewRefusesAMissingProgressSink(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("New accepted a Deployer with no progress sink")
+	}
+}
+
+func TestAComponentIsNamedOnTheWireByItsOwnArm(t *testing.T) {
+	tests := []struct {
+		component Component
+		want      agentreplv1.DeployComponent
+	}{
+		{ComponentDaemon, agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON},
+		{ComponentShim, agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM},
+		{ComponentWebapp, agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP},
+		{ComponentStore, agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE},
+		{ComponentSidecar, agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR},
+		{ComponentElisp, agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP},
+		{Component("nothing"), agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.component), func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := tt.component.Arm()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("%q.Arm() = %v, want %v", tt.component, got, tt.want)
+			}
+		})
 	}
 }

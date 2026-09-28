@@ -267,3 +267,60 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 			r.Context["kind"] == "update" && strings.Contains(text, "updated")
 	})
 }
+
+// ---- a failed deploy: the deploy_failed fault on the footer -----------------
+
+// footerFault answers the fault line on an idle strip, nil when none stands.
+func footerFault(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityFault {
+	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetFault()
+}
+
+func TestADeployWhoseBuildFailsStandsAsAFaultOnTheFooter(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+
+	// Act
+	resp, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil || resp.Msg.GetError().GetBuildFailed() == nil {
+		t.Fatalf("Deploy = (%v, %v), want the build_failed refusal", resp, err)
+	}
+
+	// Assert: the failure stands on the strip, naming its step and its words.
+	view := awaitFooter(t, f, footer, "the deploy_failed fault line", func(v *frontendv1.FooterView) bool {
+		return footerFault(v).GetKind() == "deploy_failed"
+	})
+	if detail := footerFault(view).GetDetail(); detail != "build: "+harness.FakeDeployBuildRefusal {
+		t.Fatalf("fault detail = %q, want the step and the build's own words", detail)
+	}
+}
+
+func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
+	t.Parallel()
+	// Arrange: a failed deploy's fault stands on the strip.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+	awaitFooter(t, f, footer, "the deploy_failed fault line", func(v *frontendv1.FooterView) bool {
+		return footerFault(v).GetKind() == "deploy_failed"
+	})
+	f.d.StageDeployBuild(harness.DeployCurrent)
+
+	// Act
+	deployOutcomes(t, f.d, false)
+
+	// Assert: the fault comes down and the deploy ends its own story.
+	awaitFooter(t, f, footer, "the fault retracted", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil && footerFault(v) == nil
+	})
+}
