@@ -29,6 +29,7 @@ import (
 	"syscall"
 
 	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/buildid"
@@ -61,6 +62,26 @@ const (
 	ComponentShim    Component = "shim"
 	ComponentWebapp  Component = "webapp"
 )
+
+// Arm names a component on the wire.
+func (c Component) Arm() agentreplv1.DeployComponent {
+	switch c {
+	case ComponentDaemon:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON
+	case ComponentShim:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM
+	case ComponentWebapp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP
+	case ComponentStore:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE
+	case ComponentSidecar:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
+	case ComponentElisp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
+	default:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
+	}
+}
 
 // OutcomeKind is what a deploy decided for one component.
 type OutcomeKind string
