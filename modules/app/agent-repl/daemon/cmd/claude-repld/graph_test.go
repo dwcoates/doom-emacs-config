@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/merge"
+	"claude-repld/internal/rollout"
 
 	"claude-repld/internal/boot"
 	"claude-repld/internal/sessionlock"
@@ -306,5 +307,27 @@ func TestTheDefaultSelfRepoRunsTheCheckoutsOwnTestAll(t *testing.T) {
 	// Assert.
 	if want := filepath.Join(root, "bin", "test-all.sh"); argv[len(argv)-1] != want {
 		t.Fatalf("TestCommandFor(%q) = %v, want the script at %q", selfRepo, argv, want)
+	}
+}
+
+func TestResolveFactsBound(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "blank is the rollout's default", value: "", want: rollout.DefaultFactsBound},
+		{name: "a set value is taken", value: "200ms", want: 200 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act
+			got, err := resolveFactsBound(tc.value)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveFactsBound(%q) = (%v, %v), want %v", tc.value, got, err, tc.want)
+			}
+		})
 	}
 }

@@ -150,6 +150,15 @@ type watcher struct {
 	// just established. A link that comes back with every stream still
 	// standing has nothing to re-open.
 	degraded bool
+	// reconnects counts the connected edges this watcher has CONSUMED from
+	// the client's connectivity feed, and genReconnects is its value when the
+	// current watch generation was opened. They differ exactly when the link
+	// came back during this generation with no stream yet down to answer
+	// (degraded false, so no re-open): the stream that then ends found its
+	// reconnect already spent, and severedLocked re-opens at once rather than
+	// waiting for a connected edge that will never come again.
+	reconnects    uint64
+	genReconnects uint64
 
 	link LinkState
 	// linkNow mirrors link for the lock-free readers; every write to link
@@ -255,6 +264,9 @@ type watcher struct {
 	// StartSession's answer or the shim's re-announcement. It is what makes a
 	// repeat re-announcement idempotent.
 	started bool
+	// factsIn closes the first time the session facts are taken up, which is
+	// what AwaitSessionFacts waits on.
+	factsIn chan struct{}
 	main    *agentWatch
 
 	// agents is one entry per LIVE DETACHED SUBAGENT, keyed by AgentId.value.
@@ -399,6 +411,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		unseenAsks:   map[string]struct{}{},
 
 		openAtAttach: session.OpenAtAttach,
+		factsIn:      make(chan struct{}),
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	w.unwatch = func() {}
@@ -1043,6 +1056,9 @@ func (w *watcher) setLinkLocked(state LinkState) {
 	})
 	w.link = state
 	w.linkNow.Store(int32(state))
+	if state == shimclient.LinkConnected {
+		w.reconnects++
+	}
 	// THE EVIDENCE IS RECORDED BEFORE THE VIEWS DRAW THE LOSS. A client that
 	// sees `dead` in the footer and asks SessionHealth in the same breath must
 	// find the fault already standing; recorded after the publish, the answer
@@ -1143,6 +1159,23 @@ func (w *watcher) severedLocked(operation, detail string, err error, extra ...dl
 		}
 	}
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	// THE RECONNECT MAY ALREADY HAVE BEEN SPENT. The client's own session
+	// stream and this watcher's streams break of one cause, but the client's
+	// redial reaches runLink on the connectivity feed while this ending
+	// arrives on the stream's own goroutine, and nothing orders the two. When
+	// the redial's connected edge was consumed first, the fleet was not yet
+	// degraded, so it re-opened nothing; walking the link to redialing now
+	// would wait on a connected edge that never comes again. MEASURED, the
+	// integration suite 2026-09-28 (~1 run in 50): the session watch stayed
+	// down for good, its re-announcement never came, and the registered
+	// bounce waited forever behind a shell the shim had already concluded.
+	if w.link == shimclient.LinkConnected && w.reconnects != w.genReconnects {
+		w.log.Info("daemon.sessionwatcher.reopen_after_reconnect", "the link came back before this stream's end was seen; re-opening now", dlog.Context{
+			"stream_operation": operation, "reconnects": w.reconnects, "generation_reconnects": w.genReconnects,
+		})
+		w.reopenLocked("a stream ended after the link had already come back")
+		return
+	}
 	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
 }
@@ -1154,6 +1187,7 @@ func (w *watcher) reopenLocked(reason string) {
 	beforeGeneration := w.gen
 	beforeDegraded := w.degraded
 	w.gen++
+	w.genReconnects = w.reconnects
 	// The fleet is whole again from here: any open below that fails calls
 	// severedLocked, which sets the flag afresh.
 	w.degraded = false
@@ -1650,7 +1684,15 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 // whichever way they arrived: StartSession's own answer, or the shim's
 // re-announcement on an adopted watch.
 func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
+	first := !w.started
 	w.started = true
+	// THE EDGE IS SIGNALLED AFTER THE FACTS ARE TAKEN UP, under the same lock
+	// (the deferred close runs before this function's caller releases it), so
+	// a waiter released by it reads the turn in flight and the reconciled
+	// open-at-attach turns, never the moment before them.
+	if first {
+		defer close(w.factsIn)
+	}
 	w.sinks.Topbar.OnSessionStarted(w.ws, started)
 	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
 	// A RESUMED OR ADOPTED SESSION may already carry prompts with no vendor

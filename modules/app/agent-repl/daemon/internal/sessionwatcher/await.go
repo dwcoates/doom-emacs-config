@@ -44,6 +44,35 @@ func (w *watcher) AwaitFree(ctx context.Context) error {
 	}
 }
 
+// AwaitSessionFacts blocks until the session facts have been taken up --
+// StartSession's own answer, or the shim's re-announcement on an adopted
+// watch -- or until ctx ends. It is what an adoption of a shim mid-work waits
+// on before it lets any held prompt go: until the facts are in, TurnInFlight
+// answers nil for a turn the adopted shim is running. A watcher closed first
+// answers ErrWatcherClosed.
+func (w *watcher) AwaitSessionFacts(ctx context.Context) error {
+	w.mu.Lock()
+	closed := w.closed
+	w.mu.Unlock()
+	if closed {
+		return ErrWatcherClosed
+	}
+	select {
+	case <-w.factsIn:
+		return nil
+	case <-w.ctx.Done():
+		// The watcher's own context ends with its Close.
+		select {
+		case <-w.factsIn:
+			return nil
+		default:
+			return ErrWatcherClosed
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // registerFreeWaiter takes the answer that needs no wait, or files a waiter.
 // It is separate from AwaitFree so the registration is one atomic step: the
 // caller — and an in-package test — holds the channel BEFORE the edge it is

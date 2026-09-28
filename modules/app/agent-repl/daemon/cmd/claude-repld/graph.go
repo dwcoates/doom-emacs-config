@@ -563,8 +563,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	factsBound, err := resolveFactsBound(os.Getenv(envHandoverFactsBound))
+	if err != nil {
+		return nil, err
+	}
 	rolloutController, err := rollout.New(rollout.Deps{
 		HoldoutWarnEvery: holdoutWarnEvery,
+		FactsBound:       factsBound,
 		PublishHost:      relay.PublishHostWorkspace,
 		SelfExe:          selfExe,
 		SelfAddress:      p.Claim.Address(),
@@ -1289,6 +1294,18 @@ const envBootAdoptBound = "AGENT_REPL_BOOT_ADOPT_BOUND"
 // report a bound it never used.
 func resolveAdoptBound(value string) (time.Duration, error) {
 	return resolveDurationKnob(envBootAdoptBound, value, boot.DefaultAdoptBound)
+}
+
+// envHandoverFactsBound overrides rollout.DefaultFactsBound. It exists for
+// the integration suite, whose subject includes an adopted shim that never
+// re-announces its session facts.
+const envHandoverFactsBound = "AGENT_REPL_HANDOVER_FACTS_BOUND"
+
+// resolveFactsBound reads the mid-work adoption's facts bound override. Empty
+// is rollout.DefaultFactsBound; a malformed or non-positive value is a
+// REFUSAL, as every duration knob's is.
+func resolveFactsBound(value string) (time.Duration, error) {
+	return resolveDurationKnob(envHandoverFactsBound, value, rollout.DefaultFactsBound)
 }
 
 // footerFaults is the health package's fault sink, drawn on the footer. It

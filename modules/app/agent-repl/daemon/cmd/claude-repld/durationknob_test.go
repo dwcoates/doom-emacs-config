@@ -56,6 +56,7 @@ func TestEveryDurationKnobRefusesInTheSharedWords(t *testing.T) {
 		resolve func(value string) (time.Duration, error)
 	}{
 		{"adopt bound", envBootAdoptBound, resolveAdoptBound},
+		{"handover facts bound", envHandoverFactsBound, resolveFactsBound},
 		{"start bound", envStartSessionBound, resolveStartBound},
 		{"footer dwell", envFooterMomentaryDwell, func(v string) (time.Duration, error) {
 			return resolveFooterMomentaryDwell(0, v)

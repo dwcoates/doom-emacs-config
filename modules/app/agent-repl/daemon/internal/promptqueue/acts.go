@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -51,6 +52,14 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	if queued {
 		state := q.state(ws)
 		q.mu.Lock()
+		if state.bounce != nil && state.bounce.sealed {
+			// THE MOVE HAS SEALED WHAT IT CARRIES: an act queued here now
+			// would be run by no daemon. It is refused so the caller asks the
+			// daemon the workspace moves to.
+			q.mu.Unlock()
+			log.Info(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
+			return fmt.Errorf("session act %q on %q: %w", act.Kind, ws, bounce.ErrMovedAway)
+		}
 		state.acts = append(state.acts, act)
 		depth := len(state.acts)
 		q.mu.Unlock()
