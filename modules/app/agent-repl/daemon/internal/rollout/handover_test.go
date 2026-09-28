@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -591,7 +592,7 @@ func TestAWorkspaceTheSuccessorClaimedIsNotTakenBack(t *testing.T) {
 	}
 
 	// Act
-	reclaimed, err := h.c.reclaim(context.Background(), ws, "", true, true, dlog.Context{})
+	reclaimed, err := h.c.reclaim(context.Background(), ws, "", true, true, nil, dlog.Context{})
 
 	// Assert
 	if err != nil || reclaimed {
@@ -810,92 +811,28 @@ func TestTransferAcceptsServingOwnershipThatAlreadyMoved(t *testing.T) {
 	}
 }
 
-func TestANeverFreeWorkspaceIsWaitedOnForeverAndNamedOnACadence(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	h.freeness.SetFree(ws, false)
-
-	// Act: two holdout cadences pass with the workspace still busy.
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
-		t.Fatalf("HandOver: %v", err)
-	}
-	h.clock.awaitArmed(t, holdoutCadence)
-	h.clock.Fire(holdoutCadence)
-	h.clock.awaitArmed(t, holdoutCadence)
-	h.clock.Fire(holdoutCadence)
-	h.clock.awaitArmed(t, holdoutCadence)
-	warns := levelRecords(records(h.log, opHandover), "warn")
-	h.registry.free(ws)
-	h.clock.awaitArmed(t, adoptionWindow)
-	h.successorAdopts(t)
-	h.clock.Fire(adoptionWindow)
-	awaitExit(t, h)
-
-	// Assert
-	if len(warns) < 2 {
-		t.Fatalf("holdout warnings = %d, want one per cadence while the workspace stayed busy", len(warns))
-	}
-	for _, warn := range warns {
-		if warn.Context["cadence"] != holdoutCadence.String() {
-			t.Fatalf("holdout warning cadence = %v, want the ten-minute ruling", warn.Context["cadence"])
-		}
-		holdouts, _ := warn.Context["holdouts"].([]string)
-		if len(holdouts) != 1 || holdouts[0] != string(ws) {
-			t.Fatalf("holdouts = %v, want the busy workspace named", warn.Context["holdouts"])
-		}
-	}
-}
-
-func TestANeverFreeWorkspaceIsNeverInterruptedToHurryIt(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	shim := h.fleet.live[ws]
-	h.freeness.SetFree(ws, false)
-
-	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
-		t.Fatalf("HandOver: %v", err)
-	}
-	h.clock.awaitArmed(t, holdoutCadence)
-	h.clock.Fire(holdoutCadence)
-	h.clock.awaitArmed(t, holdoutCadence)
-	killed := len(shim.KillRequests()) + len(shim.ForceKills())
-	detached := shim.Detached()
-	h.registry.free(ws)
-	h.clock.awaitArmed(t, adoptionWindow)
-	h.successorAdopts(t)
-	h.clock.Fire(adoptionWindow)
-	awaitExit(t, h)
-
-	// Assert
-	if killed != 0 || detached {
-		t.Fatalf("kills %d, detached %v while waiting; want nothing touched until the workspace fell free", killed, detached)
-	}
-}
-
-func TestABusyWorkspaceDoesNotDelayAFreeOneBehindIt(t *testing.T) {
+func TestAHandoverAsksEveryTransferForTheDispatchQuietGate(t *testing.T) {
 	// Arrange: two workspaces, the first busy.
 	h := newHarness(t)
 	busy, _ := h.workspace(t)
-	free, _ := h.workspace(t)
+	h.workspace(t)
 	h.freeness.SetFree(busy, false)
 
 	// Act
 	if _, err := h.c.HandOver(context.Background(), false); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
-	h.clock.awaitArmed(t, adoptionWindow)
 	h.registry.wait()
 
-	// Assert: the free workspace moved while the busy one is still registered.
-	calls := h.pusher.Calls()
-	if len(calls) != 1 || calls[0].WS != free {
-		t.Fatalf("pushes = %+v, want only the free workspace transferred", calls)
+	// Assert: a handover never waits on work, busy or not.
+	requests := h.registry.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %+v, want one transfer per workspace", requests)
 	}
-	if !h.registry.Pending(busy) {
-		t.Fatalf("the busy workspace's transfer is not registered")
+	for _, call := range requests {
+		if call.Req.WaitFor != bounce.GateDispatchQuiet {
+			t.Fatalf("transfer of %s waits for %s, want dispatch_quiet", call.WS, call.Req.WaitFor)
+		}
 	}
 }
 

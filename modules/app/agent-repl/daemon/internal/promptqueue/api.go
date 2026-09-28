@@ -244,6 +244,22 @@ type Queue interface {
 	// -- and resumes dispatch on what serves the workspace now. A workspace
 	// with no kept drain is success.
 	EndKeptDrain(ws ids.WorkspaceID)
+	// SealMove is a running DISPATCH-QUIET move's seal (handoff.go): it takes
+	// what the queue holds for the workspace only in memory -- the queued
+	// acts, the running cut, the semantic head -- and the shim replacements
+	// the move is carrying, supersedes every verdict still being judged, and
+	// refuses every later request with bounce.ErrMovedAway. Only the move's
+	// own action calls it, once, before it releases the workspace.
+	SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handoff, []bounce.Request, error)
+	// UnsealMove puts back what SealMove took, for a move that did not land.
+	UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error
+	// AdoptHandoff installs what the previous daemon's queue held in memory
+	// for a workspace this daemon is adopting mid-work, BEFORE the adopted
+	// shim is dialed.
+	AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error
+	// RejudgeHeld re-judges, against the adopted shim's running turn, every
+	// held prompt whose verdict the previous daemon's seal superseded.
+	RejudgeHeld(ctx context.Context, ws ids.WorkspaceID) error
 	// OnFree is the watcher's freeness edge: the last turn or detached item
 	// ended. It takes a registered bounce.
 	OnFree(ws ids.WorkspaceID)

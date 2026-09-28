@@ -341,6 +341,10 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
 			q.reviveInBackground(ctx, ws, log)
+			return
+		}
+		if !held {
+			q.releaseActsLocked(ctx, ws, log)
 		}
 		return
 	}
@@ -362,9 +366,34 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
+	if !held {
+		q.releaseActsLocked(ctx, ws, log)
+	}
 	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
 		log.Error(opLeaseChange, "the released hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
+}
+
+// releaseActsLocked runs the acts queued behind a lease the moment its release
+// leaves nothing ahead of them, exactly as a turn end runs them BEFORE it pops
+// a prompt: a /compact queued while the lease stood is never overtaken by a
+// prompt the release lets go. A handover's adoption is the case that needs it
+// -- the carried acts are installed, the turn they waited behind ended during
+// the move, and the release of the handover hold is the only edge left to run
+// them. A draining workspace or a running turn keeps them queued: the bounce's
+// finish, or the turn's end, drains them. The caller holds the delivery lock
+// and has read that no lease stands.
+func (q *queue) releaseActsLocked(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	if q.isDraining(ws) {
+		return
+	}
+	if _, live := q.deps.Client(ws); !live {
+		return
+	}
+	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+		return
+	}
+	q.drainActs(ctx, ws, log)
 }
 
 // sameHold reports whether a standing hold already carries the condition the

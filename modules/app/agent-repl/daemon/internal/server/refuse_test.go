@@ -17,6 +17,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	"google.golang.org/protobuf/proto"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/prompthandler"
@@ -137,6 +138,7 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"no transfer announced", rollout.ErrNoTransferAnnounced, "no_transfer_announced"},
 		{"not yet adopted", rollout.ErrNotYetAdopted, "not_yet_adopted"},
 		{"participant not expected", rollout.ErrParticipantNotExpected, "participant_not_expected"},
+		{"moved away by a sealed handover move", fmt.Errorf("restart %q: %w", "w1", bounce.ErrMovedAway), "transferring_away"},
 	}
 
 	for _, test := range tests {

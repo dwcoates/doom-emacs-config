@@ -315,6 +315,8 @@ type fakeWatcher struct {
 	onClose func()
 	// closeErr is what Close answers.
 	closeErr error
+	// factsErr is what AwaitSessionFacts answers.
+	factsErr error
 }
 
 // Pointers answers the pointers the fixture states; a fixture that states none
@@ -342,6 +344,10 @@ func (w *fakeWatcher) Close() error {
 }
 
 func (w *fakeWatcher) Connected() bool { return true }
+
+// AwaitSessionFacts answers the facts wait the fixture states: at once, with
+// factsErr.
+func (w *fakeWatcher) AwaitSessionFacts(context.Context) error { return w.factsErr }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
 

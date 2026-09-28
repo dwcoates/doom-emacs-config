@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
@@ -152,6 +153,11 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "joining", Reason: err.Error()}), true
 	case errors.Is(err, rollout.ErrParticipantNotExpected):
 		return s.fill(refusal{Arm: "participant_not_expected", Reason: err.Error()}), true
+
+	// A HANDOVER'S MOVE HAS SEALED what it carries to the successor: the
+	// request is the successor's to take, and the arm names its address.
+	case errors.Is(err, bounce.ErrMovedAway):
+		return s.fill(refusal{Arm: workspace.ArmTransferringAway, Reason: err.Error()}), true
 	}
 	return refusal{}, false
 }
