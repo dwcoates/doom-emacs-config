@@ -603,8 +603,15 @@ func (c *controller) awaitReattachedFacts(ctx context.Context, ws ids.WorkspaceI
 	facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
 	defer cancel()
 	if err := c.deps.Shims.AwaitFacts(facts, ws); err != nil {
-		c.log.Error(opTransfer, "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight",
+		c.log.Error(opTransfer, "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight, and the workspace is drawn degraded until it does",
 			withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+		// THE WORKSPACE STAYS USABLE (owner ruling, 2026-09-28): prompts are
+		// still delivered and matched to their replies by id, so the take-back
+		// goes on; every status surface draws the degraded rung until the
+		// shim's session start lifts it.
+		if c.deps.StateUnreported != nil {
+			c.deps.StateUnreported(ws, true)
+		}
 		return fmt.Errorf("rollout: reclaim %q: await the re-attached shim's facts: %w", ws, err)
 	}
 	c.log.Debug(opTransfer, "the re-attached shim's session facts are taken up", fields)

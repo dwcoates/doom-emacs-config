@@ -220,6 +220,10 @@ type Resolver interface {
 	// `disconnected · dead`. It is lifted by the next link state of any kind,
 	// which belongs to the revival's own spawn.
 	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetStateUnreported installs, or lifts, the fact that a shim taken back
+	// after a failed handover has not re-reported its session state: the
+	// degraded rung, drawn `degraded · state_unreported`.
+	SetStateUnreported(ws ids.WorkspaceID, unreported bool)
 	// SetClosing installs a close refusal, nil to clear it.
 	SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked)
 	// SetColdGate installs the standing cold gate.

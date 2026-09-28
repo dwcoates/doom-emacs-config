@@ -599,10 +599,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Shims:            fleet,
 		LockProbe:        fleet.ProbeLock,
 		PublishViews:     views.PublishViews,
-		WriteDaemonAddr:  func(context.Context) error { return p.Claim.Publish() },
-		ShimBuild:        shimBundle.Build,
-		ColdGate:         fleet.RaiseColdGate,
-		Progress:         footerResolver,
+		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
+			footerResolver.SetStateUnreported(ws, unreported)
+			sidebarResolver.SetStateUnreported(ws, unreported)
+		},
+		WriteDaemonAddr: func(context.Context) error { return p.Claim.Publish() },
+		ShimBuild:       shimBundle.Build,
+		ColdGate:        fleet.RaiseColdGate,
+		Progress:        footerResolver,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),

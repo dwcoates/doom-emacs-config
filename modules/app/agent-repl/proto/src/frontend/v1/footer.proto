@@ -251,9 +251,22 @@ message FooterStatus {
     // no longer holds the session, so the composer is OPEN.
     FooterStatusMergeFailed merge_failed = 13;
     // The merge LANDED. It is the same coarse claim as the roster's `merged`
-    // arm. TERMINAL: the merge no longer holds the session, so the composer
-    // is OPEN.
+    // arm. GREEN. TERMINAL: the merge no longer holds the session, so the
+    // composer is OPEN.
     FooterStatusMerged merged = 14;
+    // The last turn FAILED for a reason that is not the vendor's or the
+    // account's: the same turn end the roster draws `turn_failed`. TURQUOISE
+    // (owner ruling, 2026-09-28): something went wrong that wants the user's
+    // attention, but the workspace is USABLE, so the composer is OPEN. It
+    // replaces `idle · turn_failed`, which is no longer emitted.
+    FooterStatusTurnFailed turn_failed = 15;
+    // The session SERVES, but the daemon's view of it is compromised: a shim
+    // component is dropping or delaying what it observes, or a shim taken
+    // back after a failed handover never re-reported its session state. The
+    // same coarse claim as the roster's `degraded` arm. TURQUOISE (owner
+    // ruling, 2026-09-28): the workspace is USABLE, so the composer is OPEN.
+    // It replaces `disconnected · degraded`, which is no longer emitted.
+    FooterStatusDegraded degraded = 16;
   }
 }
 
@@ -267,9 +280,9 @@ message FooterStatusIdle {
     // or asked to (a Stop hook, a deferred tool): an expected stop awaiting
     // the user (owner ruling, 2026-09-28).
     FooterSubStatusIdleDone done = 2;
-    // The last turn FAILED for a reason that is not the vendor's or the
-    // account's (owner ruling, 2026-09-28): the same turn end the roster draws
-    // `turn_failed`. A vendor or account refusal is `blocked` instead.
+    // NO LONGER EMITTED: a failed turn is the `turn_failed` status arm
+    // (owner ruling, 2026-09-28: a failed turn is turquoise, not idle's
+    // green). Kept so an older frame still decodes.
     FooterSubStatusIdleTurnFailed turn_failed = 4;
   }
   // OPTIONAL BY EVIDENCE: an idle session most often has NOTHING finer to
@@ -314,6 +327,36 @@ message FooterSubStatusIdleReady {}
 message FooterSubStatusIdleDone {}
 // The last turn failed for a reason that is not the vendor's or the account's.
 message FooterSubStatusIdleTurnFailed {}
+
+// The last turn failed for a reason that is not the vendor's or the account's.
+message FooterStatusTurnFailed {
+  // No substatus: the feed's turn-end row carries the account, so the
+  // substatus cell merges into the status cell.
+  // OPTIONAL BY EVIDENCE, and the same kinds an idle session carries — the
+  // dead-query line among them.
+  optional FooterStatusIdleActivity activity = 1;
+}
+
+// The session serves, but the daemon's view of it is compromised.
+message FooterStatusDegraded {
+  // Which part of the view is compromised. Exactly one is set.
+  oneof substatus {
+    // A shim component is dropping or delaying what it observes: what is on
+    // screen may have holes from the degraded window.
+    FooterSubStatusDegradedObservation observation = 1;
+    // A shim this daemon took back after a failed handover never re-reported
+    // its session state, so the daemon cannot see whether a turn is in
+    // flight. A prompt is still delivered, and matched to its reply by id.
+    // It clears when the shim re-reports.
+    FooterSubStatusDegradedStateUnreported state_unreported = 2;
+  }
+  // OPTIONAL BY EVIDENCE, and the same kinds an idle session carries.
+  optional FooterStatusIdleActivity activity = 3;
+}
+// A shim component is dropping or delaying what it observes.
+message FooterSubStatusDegradedObservation {}
+// A taken-back shim has not re-reported its session state.
+message FooterSubStatusDegradedStateUnreported {}
 
 // A turn is in flight.
 message FooterStatusThinking {
@@ -915,7 +958,9 @@ message FooterStatusDisconnected {
   oneof substatus {
     // The shim is starting.
     FooterSubStatusDisconnectedStarting starting = 1;
-    // The link serves with degradation.
+    // NO LONGER EMITTED: a link that serves with degradation is USABLE, so
+    // it is the `degraded` status arm (owner ruling, 2026-09-28), never
+    // `disconnected`. Kept so an older frame still decodes.
     FooterSubStatusDisconnectedDegraded degraded = 2;
     // The link was severed and reconnection is being attempted.
     FooterSubStatusDisconnectedSevered severed = 3;

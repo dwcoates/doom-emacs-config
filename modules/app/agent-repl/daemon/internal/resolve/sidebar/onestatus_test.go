@@ -124,6 +124,13 @@ var linkCases = []linkCase{
 		s.footer.OnSessionUpdate(theWS, degradedUpdate())
 		s.roster.OnSessionUpdate(theWS, degradedUpdate())
 	}},
+	// A shim taken back after a failed handover that never re-reported its
+	// session state: the rollout states it to both surfaces at once.
+	{name: "state unreported after a take-back", session: true, apply: func(s *surfaces) {
+		s.link(shimclient.LinkConnected)
+		s.footer.SetStateUnreported(theWS, true)
+		s.roster.SetStateUnreported(theWS, true)
+	}},
 }
 
 // turnCase is one turn state.
