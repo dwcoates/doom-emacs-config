@@ -64,8 +64,7 @@ daemon is asked; everything after the claim is shared:
 Both end in `agent-repl-host--reattached`: the old stream cancelled, the
 host stream re-subscribed on the new daemon (which moves `:conn`/`:ref`, and
 so the page URL), INFO `elisp.host.reattached ... trigger=`, and
-`agent-repl-host-reattached-functions` (the prompt queue releases the
-workspace's outage-held prompts there).
+`agent-repl-host-reattached-functions`.
 
 - The target is ALWAYS `agent-repl-link-live`: the accepted primary the link
   resolved from `daemon.addr` or promoted from an announced successor. A
@@ -97,6 +96,23 @@ workspace's outage-held prompts there).
 Regression, 2026-09-27: a daemon exited without transferring a workspace,
 the link was promoted onto its successor, and the workspace kept its dead
 connection — calls to `127.0.0.1:61043` and a blank webview.
+
+## A prompt the daemon did not take is held on disk, never in memory
+
+Owner ruling, 2026-09-28: held prompts survive outages and restarts of
+Emacs, the daemon and the shim. A submission that gets no answer, or a
+handover refusal, goes down ONE path, `agent-repl--input-hold`, which writes
+it through `held-ingress.el` into the daemon-owned ingress at
+`$AGENT_REPL_STATE_DIR/held-prompts/` (format: daemon ARCHITECTURE.md
+"heldingress"), under the failed attempt's own idempotency key, atomically
+(temp name, then rename). The daemon ingests it into its held queue once it
+serves; Emacs never re-sends it and keeps no copy in memory. The composer's
+mode line shows "N prompts waiting for the daemon", counted from the
+directory at composer birth, on each write and on each host push while the
+line stands. There is no outage queue and no link-up, promotion or reattach
+release edge; `test-prompt-queue.el` fails on any production source naming
+one. `prompt-queue.el` holds only the user's explicit deferral (`SPC j RET`),
+which was never submitted and is released on the roster's finish edge.
 
 ## Workspace create/open/register progress
 
