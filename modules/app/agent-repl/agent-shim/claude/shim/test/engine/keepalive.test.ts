@@ -17,7 +17,9 @@ import {
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  type KeepaliveAttribution,
 } from "../../src/engine/keepalive.js";
+import { SendLedger } from "../../src/engine/sends.js";
 import { CACHE_TTL_1H_MS } from "../../src/engine/cold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
@@ -381,9 +383,57 @@ const taskMessage = (subtype: string, taskId: string, toolUseId?: string): SdkMe
     session_id: "vendor-1",
   }) as unknown as SdkMessage;
 
+/**
+ * The keep-alive scope AS THE SESSION DRIVES IT: beside the one send ledger
+ * that reads every echo (engine/sends.ts). Its keep-alive send is registered in
+ * the ledger the way the session registers every send, and each message is
+ * attributed by the ledger first and tagged by the scope from that verdict.
+ */
+class LedgeredScope {
+  readonly ledger = new SendLedger();
+  readonly scope = new KeepaliveScope();
+
+  begin(uuid: string, turnId: string): void {
+    this.scope.begin(uuid, turnId);
+    this.ledger.sent({ uuid, turnId, keepalive: true });
+  }
+
+  attribute(message: SdkMessage): KeepaliveAttribution {
+    return this.scope.attribute(message, this.ledger.attribute(message));
+  }
+
+  abandon(reason: string): void {
+    const held = this.scope.pendingUuid();
+    this.scope.abandon(reason);
+    if (held !== undefined) this.ledger.forget("keepalive-1", reason);
+  }
+
+  queryBound(): void {
+    this.scope.queryBound();
+    this.ledger.queryBound();
+  }
+
+  pendingUuid(): string | undefined {
+    return this.scope.pendingUuid();
+  }
+
+  producing(): boolean {
+    return this.scope.producing();
+  }
+
+  spawned(toolUseId: string): boolean {
+    return this.scope.spawned(toolUseId);
+  }
+}
+
+/** A scope with no keep-alive pending. */
+function idleScope(): LedgeredScope {
+  return new LedgeredScope();
+}
+
 /** A scope with the keep-alive send pending. */
-function pendingScope(): KeepaliveScope {
-  const scope = new KeepaliveScope();
+function pendingScope(): LedgeredScope {
+  const scope = new LedgeredScope();
   scope.begin(KEEPALIVE_SEND, "keepalive-1");
   return scope;
 }
@@ -400,7 +450,7 @@ function pendingScope(): KeepaliveScope {
 describe("the keep-alive turn scope", () => {
   it("tags nothing while no keep-alive is pending", () => {
     // Arrange
-    const scope = new KeepaliveScope();
+    const scope = idleScope();
 
     // Act
     const tagged = scope.attribute(reply(stampedWith(OTHER_SEND)));
@@ -794,7 +844,7 @@ describe("the keep-alive turn scope", () => {
 
   it("records nothing when abandoning with no keep-alive pending", () => {
     // Arrange
-    const scope = new KeepaliveScope();
+    const scope = idleScope();
     const before = logSinkMark();
 
     // Act

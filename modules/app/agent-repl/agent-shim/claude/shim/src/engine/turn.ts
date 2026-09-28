@@ -16,16 +16,22 @@
  * reaching the vendor twice. The repeat is an invariant violation, recorded at
  * ERROR. See {@link TurnEngine.repeatedStart}.
  *
- * THE ONE WAIT IS BEHIND THE SHIM'S OWN KEEP-ALIVE (2026-09-23). A keep-alive
- * is this process's housekeeping, invisible outside it, so a `StartTurn` that
- * lands while one runs is not refused: it WAITS for the keep-alive to leave the
- * turn slot (its own result, its abandonment, or the query's death) and then
- * opens its turn exactly as it would have on an idle session. The daemon sees
- * only a `StartTurn` that took that much longer. The keep-alive is never
- * interrupted: the SDK declares no attribution for an interrupted send's
- * result, and a keep-alive result the scope cannot recognize would hold the
- * slot forever. See {@link TurnEngine.waitOutKeepalive} for the bound and the
- * caller's abort, which are what keep the wait from losing or doubling a prompt.
+ * THE ONE WAIT IS BEHIND THE SHIM'S OWN TURN (2026-09-23, widened 2026-09-28).
+ * A keep-alive is this process's housekeeping, invisible outside it, and the
+ * network-resume prompt is a send the shim made on its own, so a `StartTurn`
+ * that lands while either holds the send slot is not refused: it WAITS for
+ * that turn to leave the slot (its own result, its abandonment, or the query's
+ * death) and then opens its turn exactly as it would have on an idle session.
+ * The daemon sees only a `StartTurn` that took that much longer. Neither is
+ * ever interrupted. See {@link TurnEngine.waitOutShimTurn} for the bound and
+ * the caller's abort, which are what keep the wait from losing or doubling a
+ * prompt.
+ *
+ * A TURN THE VENDOR STARTED ON ITS OWN IS NEVER WAITED ON, AND NEVER REFUSES
+ * (ruled 2026-09-28). It is adopted beside the send slot, not into it; a
+ * `StartTurn` landing during it is delivered at once, and each turn's frames
+ * are matched to it by the vendor's echo of the send's client uuid
+ * (engine/sends.ts), never by which one happened to be open.
  *
  * R15: THE PROMPT ROW IS WRITTEN AND ACKED FIRST. `StartTurn` writes its
  * `AgentPrompt` row and has the store's DURABLE ACK before the prompt is
@@ -79,9 +85,10 @@ export interface OpenTurn {
   /** True when the shim opened this turn for its own keep-alive. */
   readonly keepalive: boolean;
   /**
-   * True when the VENDOR started this turn on its own and the shim adopted it
-   * (`PromptOrigin.VENDOR_STARTED`): its id is the shim's, minted at adoption,
-   * and no StartTurn stands behind it. Otherwise a real turn in every respect.
+   * True when no StartTurn stands behind this turn and the shim announced it
+   * with a `PromptOrigin.VENDOR_STARTED` prompt row under an id it minted:
+   * a turn the VENDOR started on its own, or the network-resume prompt the
+   * shim sent itself. Otherwise a real turn in every respect.
    */
   readonly adopted?: boolean;
   readonly startedAtMs: number;
@@ -99,28 +106,42 @@ export interface SessionContext {
   /** The one live query, or absence when it is dead or not yet started. */
   query(): QueryLike | undefined;
   readonly nowMs: () => number;
+  /** The turn in the SEND SLOT: a daemon's, the network resume, or the keep-alive. */
   openTurn(): OpenTurn | undefined;
   /**
-   * Settles when the shim's own keep-alive leaves the turn slot, however it
-   * leaves; absence when no keep-alive holds the slot.
+   * The turn the vendor started on its own and the shim adopted, beside the
+   * send slot. It never refuses a StartTurn: the send is matched to its own
+   * reply by the vendor's echo (engine/sends.ts), so both can run.
+   */
+  adoptedTurn(): OpenTurn | undefined;
+  /**
+   * Settles when the shim's OWN turn in the send slot — its keep-alive, or
+   * the network-resume prompt — leaves it, however it leaves; absence when the
+   * slot holds none.
    *
-   * THE SLOT IS RELEASED SYNCHRONOUSLY with the keep-alive's leaving, before
+   * THE SLOT IS RELEASED SYNCHRONOUSLY with that turn's leaving, before
    * anything the leaving path awaits, so a start waiting on this runs ahead of
    * any cadence beat that could take the slot again.
    */
-  keepaliveEnded(): Promise<void> | undefined;
+  shimTurnEnded(): Promise<void> | undefined;
   /** How long a `StartTurn` waits behind a keep-alive before refusing, loudly. */
   readonly keepaliveYieldBudgetMs: number;
   /**
-   * Deliver a prompt to the vendor.
+   * Deliver a prompt to the vendor as the send of `turn`, under a client uuid
+   * the vendor echoes on its reply (engine/sends.ts).
    *
    * The session owns this because the yield obligation may have to REPLACE the
    * query (a rewind is a fresh `resume` + `resumeSessionAt`), and the query is
    * the session's.
    */
-  submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void>;
-  /** Adopt (or clear) the open turn. */
-  setOpenTurn(turn: OpenTurn | undefined): void;
+  submit(said: conversationv1.UserSaid, turn: OpenTurn): Promise<void>;
+  /** Put `turn` in the send slot. */
+  setOpenTurn(turn: OpenTurn): void;
+  /**
+   * Take `turn` out of whichever slot holds it — a refused push, a kill — and
+   * retire its send, so a late echo of it is still recognized as ours.
+   */
+  releaseTurn(turn: OpenTurn): void;
   /**
    * Hold HOW the person commanded the stop about to be issued on `turn`
    * (`KillTurnRequest.commanded_by`, undefined when the caller stated none),
@@ -422,7 +443,7 @@ export class TurnEngine {
       }),
       // Read NOW, synchronously: once the mark is down no beat can open a
       // keep-alive, so the answer cannot change under a kill that reads it.
-      behindKeepalive: this.session.openTurn()?.keepalive === true,
+      behindKeepalive: this.session.shimTurnEnded() !== undefined,
     };
     this.starting = starting;
     try {
@@ -529,11 +550,11 @@ export class TurnEngine {
     signal: AbortSignal | undefined,
   ): Promise<shimv1.StartTurnResponse> {
     const requested = request.turn?.value ?? "";
-    // FIRST, BEFORE ANY OTHER CHECK: a keep-alive in the slot is waited out,
-    // and everything below then judges the session as the keep-alive left it
-    // (a query that died under it answers `query_dead`, exactly as it would
-    // have with no keep-alive in the story).
-    const waited = await this.waitOutKeepalive(requested, signal);
+    // FIRST, BEFORE ANY OTHER CHECK: the shim's own turn in the slot is
+    // waited out, and everything below then judges the session as that turn
+    // left it (a query that died under it answers `query_dead`, exactly as it
+    // would have with no such turn in the story).
+    const waited = await this.waitOutShimTurn(requested, signal);
     if (waited === "expired") {
       return startTurnRefused(
         { kind: "vendorRefused" },
@@ -616,22 +637,35 @@ export class TurnEngine {
     // turn over it would deliver the prompt into a running turn and rename that
     // turn's rows mid-flight, so the start is refused exactly as if the adopted
     // turn had been open when it arrived; nothing was delivered.
-    const adopted = this.session.openTurn();
-    if (adopted !== undefined) {
-      LOGGER.info(
-        { open_turn: adopted.id.value, requested_turn: requested, adopted: adopted.adopted === true },
-        "refused a StartTurn because the vendor started a turn of its own while it was being started",
+    //
+    // A TURN THE VENDOR STARTS ON ITS OWN MEANWHILE DOES NOT TAKE THIS SLOT: it
+    // is adopted beside it (engine/session.ts), and this prompt is delivered
+    // anyway, matched to its own reply by the vendor's echo of its client uuid
+    // (engine/sends.ts, ruled 2026-09-28). So nothing may have taken the send
+    // slot during the awaits: the start mark keeps the keep-alive beat and the
+    // network resume out. One found there anyway is an invariant break, and
+    // the start is refused undelivered rather than pushed into it.
+    const taken = this.session.openTurn();
+    if (taken !== undefined) {
+      LOGGER.error(
+        {
+          open_turn: taken.id.value,
+          requested_turn: requested,
+          detail: "the start mark keeps every other writer of the send slot out while a StartTurn is being started",
+        },
+        "the send slot was taken while a StartTurn was being started; refusing the turn undelivered",
       );
       return startTurnRefused(
         { kind: "turnAlreadyOpen" },
-        `turn ${adopted.id.value} opened while turn ${requested} was being started; nothing was delivered`,
+        `turn ${taken.id.value} took the send slot while turn ${requested} was being started; nothing was delivered`,
       );
     }
-    this.session.setOpenTurn({ id: turn, keepalive: false, startedAtMs: this.session.nowMs() });
+    const opened: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
+    this.session.setOpenTurn(opened);
     try {
-      await this.session.submit(said, false);
+      await this.session.submit(said, opened);
     } catch (err) {
-      this.session.setOpenTurn(undefined);
+      this.session.releaseTurn(opened);
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.error({ turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
       return startTurnRefused({ kind: "vendorRefused" }, detail);
@@ -645,25 +679,27 @@ export class TurnEngine {
   }
 
   /**
-   * Wait for the shim's own keep-alive to leave the turn slot, when one holds it.
+   * Wait for the shim's own turn — its keep-alive, or the network-resume
+   * prompt — to leave the send slot, when one holds it.
    *
    * NO PROMPT IS LOST OR DOUBLED BY THE WAIT. Nothing of the turn exists until
    * the wait is over — no prompt row, no open turn, no send — so every way out
    * of it that is not "free" leaves nothing behind:
-   *   - `expired`: the bound ran out with the keep-alive still open. Refused
-   *     LOUDLY (ERROR): a keep-alive the vendor never answers is a wedged
+   *   - `expired`: the bound ran out with that turn still open. Refused
+   *     LOUDLY (ERROR): a shim turn the vendor never answers is a wedged
    *     session, and the daemon surfaces the refusal as the turn's failure.
    *   - `abandoned`: the caller's signal aborted — the daemon gave up on the
    *     call — so the turn is never delivered behind its back. INFO: the
    *     caller left; nothing is wrong with the session.
    */
-  private async waitOutKeepalive(turn: string, signal: AbortSignal | undefined): Promise<KeepaliveWait> {
-    const ended = this.session.keepaliveEnded();
+  private async waitOutShimTurn(turn: string, signal: AbortSignal | undefined): Promise<KeepaliveWait> {
+    const ended = this.session.shimTurnEnded();
     if (ended === undefined) return "free";
     const budgetMs = this.session.keepaliveYieldBudgetMs;
+    const behind = this.session.openTurn()?.keepalive === true ? "keepalive" : "network_resume";
     LOGGER.info(
-      { turn_id: turn, budget_ms: budgetMs },
-      "a StartTurn arrived while the shim's own keep-alive runs; it waits for the keep-alive to end, then opens its turn",
+      { turn_id: turn, budget_ms: budgetMs, shim_turn: behind },
+      "a StartTurn arrived while the shim's own turn runs; it waits for that turn to end, then opens its turn",
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
@@ -683,16 +719,16 @@ export class TurnEngine {
       const outcome = await Promise.race([ended.then((): KeepaliveWait => "free"), expired, abandoned]);
       if (outcome === "expired") {
         LOGGER.error(
-          { turn_id: turn, budget_ms: budgetMs, detail: "the keep-alive never left the turn slot" },
-          "a StartTurn waited out its budget behind the shim's own keep-alive; refusing the turn undelivered",
+          { turn_id: turn, budget_ms: budgetMs, shim_turn: behind, detail: "the shim's own turn never left the send slot" },
+          "a StartTurn waited out its budget behind the shim's own turn; refusing the turn undelivered",
         );
       } else if (outcome === "abandoned") {
         LOGGER.info(
           { turn_id: turn },
-          "the caller abandoned a StartTurn while it waited behind the shim's own keep-alive; nothing was delivered",
+          "the caller abandoned a StartTurn while it waited behind the shim's own turn; nothing was delivered",
         );
       } else {
-        LOGGER.debug({ turn_id: turn }, "the keep-alive left the turn slot; the waiting StartTurn opens its turn");
+        LOGGER.debug({ turn_id: turn }, "the shim's own turn left the send slot; the waiting StartTurn opens its turn");
       }
       return outcome;
     } finally {
@@ -952,7 +988,7 @@ export class TurnEngine {
     }
     const requested = request.turn?.value ?? "";
     await this.awaitStartOf(requested);
-    const open = this.servedTurn();
+    const open = this.servedTurn(requested);
     // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. Detached work — background
     // subagents, shells, monitors, workflows — outlives the turn that spawned
     // it by design, and it ends only through its own per-task stop or a
@@ -996,7 +1032,7 @@ export class TurnEngine {
     // a shell run was stopped. Every item this kill named concludes, or the
     // consumer is left watching work that will never end.
     this.session.concludeStoppedRuns(spawned);
-    this.session.setOpenTurn(undefined);
+    this.session.releaseTurn(open);
     const killed = create(conversationv1.TurnKilledSchema, {
       how:
         spawned.length === 0
@@ -1028,10 +1064,18 @@ export class TurnEngine {
    * the keep-alive instead would end a send whose result the SDK declares no
    * attribution for, and naming it `not_the_open_turn` would tell the daemon a
    * keep-alive exists.
+   *
+   * TWO TURNS CAN BE SERVED AT ONCE: the send slot's real turn, and a turn the
+   * vendor started on its own beside it. A kill names one, so the one it names
+   * is answered; with none named, or none matching, the vendor-started turn —
+   * the one RUNNING — is, as `SessionStarted.turn_in_flight` states it.
    */
-  private servedTurn(): OpenTurn | undefined {
+  private servedTurn(requested = ""): OpenTurn | undefined {
     const slot = this.session.openTurn();
-    return slot?.keepalive === true ? undefined : slot;
+    const candidates = [this.session.adoptedTurn(), slot?.keepalive === true ? undefined : slot].filter(
+      (turn): turn is OpenTurn => turn !== undefined,
+    );
+    return candidates.find((turn) => turn.id.value === requested) ?? candidates[0];
   }
 
   /**
