@@ -375,7 +375,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// decorated client, so a fault opened anywhere lands on the strip. The
 	// faults the topbar carries (health.FaultTopbarLine) reach its warning
 	// strip through the same hook (owner ruling, 2026-09-28).
-	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, topbarResolver), p.Surfaces)
+	// The same faults reach every Emacs as the standing loud faults on its
+	// WatchDaemon stream (owner request, 2026-09-28): the set is built here,
+	// before the hook and the server, so no open can precede it.
+	loudFaults := health.NewLoudFaults(log)
+	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, topbarResolver, loudFaults), p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -861,6 +865,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Topbar:           topbarResolver,
 			Sidebar:          sidebarResolver,
 			Holds:            holdsResolver,
+			LoudFaults:       loudFaults.Topic(),
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -1331,21 +1336,23 @@ func resolveFactsBound(value string) (time.Duration, error) {
 }
 
 // faultSurfaces is the health package's fault sink: every fault is drawn on
-// the footer, and the ones the topbar carries on its warning strip too. It
+// the footer, and the ones the topbar carries on its warning strip too and in
+// the standing loud faults every Emacs is told. It
 // translates the health verdict into each resolver's own vocabulary and adds
 // nothing: the partition and the lines are health's, the drawing theirs.
 type faultSurfaces struct {
 	footer footer.Resolver
 	topbar topbar.Resolver
+	loud   *health.LoudFaults
 
 	mu sync.Mutex
-	// onTopbar are the open faults raised on the topbar, so a close retracts
-	// exactly those.
+	// onTopbar are the open faults raised on the topbar (and so told to
+	// Emacs), so a close retracts exactly those.
 	onTopbar map[ids.FaultID]bool
 }
 
-func newFaultSurfaces(f footer.Resolver, t topbar.Resolver) *faultSurfaces {
-	return &faultSurfaces{footer: f, topbar: t, onTopbar: map[ids.FaultID]bool{}}
+func newFaultSurfaces(f footer.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
+	return &faultSurfaces{footer: f, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
 }
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
@@ -1369,6 +1376,7 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	f.onTopbar[line.ID] = true
 	f.mu.Unlock()
 	f.topbar.RaiseDaemonWarning(string(line.ID), topbarWarning(line))
+	f.loud.Opened(line)
 }
 
 // topbarWarning is a daemon-scoped fault's topbar row: its line, and for a
@@ -1396,5 +1404,6 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.mu.Unlock()
 	if raised {
 		f.topbar.RetractDaemonWarning(string(id))
+		f.loud.Closed(id)
 	}
 }

@@ -595,3 +595,107 @@ func TestEndStandingStreamSendsOnlyWhenTheLifetimeEnded(t *testing.T) {
 		})
 	}
 }
+
+// standingFaults is a one-fault standing set.
+func standingFaults(id string) *agentreplv1.DaemonFaultsStanding {
+	return &agentreplv1.DaemonFaultsStanding{Faults: []*agentreplv1.DaemonStandingFault{{
+		FaultId: id, Line: "deploy failed: build webapp: tsc",
+		Fault: &agentreplv1.DaemonFault{Detail: "tsc"}, OpenedAtMs: 5,
+	}}}
+}
+
+// openDaemonStream opens WatchDaemon as the named client and proves it
+// subscribed with a drain push it has taken.
+func openDaemonStream(t *testing.T, h *harness, ctx context.Context, req *agentreplv1.WatchDaemonRequest) *connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse] {
+	t.Helper()
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
+	for stream.Receive() {
+		if stream.Msg().GetDrainScheduled() != nil {
+			return stream
+		}
+	}
+	t.Fatalf("the stream ended before the drain proved it: %v", stream.Err())
+	return nil
+}
+
+// emacsDaemonRequest is an Emacs's WatchDaemon request.
+var emacsDaemonRequest = &agentreplv1.WatchDaemonRequest{
+	Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}},
+}
+
+func TestAnEmacsDaemonStreamIsToldTheStandingLoudFaults(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openDaemonStream(t, h, ctx, emacsDaemonRequest)
+
+	// Act.
+	h.LoudFaults.Publish(standingFaults("f-1"))
+
+	// Assert.
+	for stream.Receive() {
+		if standing := stream.Msg().GetFaultsStanding(); standing != nil {
+			if got := standing.GetFaults(); len(got) != 1 || got[0].GetFaultId() != "f-1" {
+				t.Fatalf("faults_standing = %v, want the one fault", standing)
+			}
+			return
+		}
+	}
+	t.Fatalf("the stream ended without faults_standing: %v", stream.Err())
+}
+
+func TestALateEmacsDaemonStreamIsToldWhatStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.LoudFaults.Publish(standingFaults("f-1"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(emacsDaemonRequest))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("the stream ended before its first frame: %v", stream.Err())
+	}
+	if got := stream.Msg().GetFaultsStanding().GetFaults(); len(got) != 1 || got[0].GetFaultId() != "f-1" {
+		t.Fatalf("first frame = %v, want the standing faults replayed", stream.Msg())
+	}
+}
+
+func TestWhichDaemonStreamsSubscribeToTheLoudFaults(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.WatchDaemonRequest
+		want int
+	}{
+		{"an Emacs stream subscribes", emacsDaemonRequest, 1},
+		{"a webview stream does not", &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Webview{Webview: &agentreplv1.WatchDaemonWebview{}},
+		}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act.
+			openDaemonStream(t, h, ctx, tc.req)
+
+			// Assert.
+			if got := h.LoudFaults.Subscribers(); got != tc.want {
+				t.Fatalf("loud-fault subscribers = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

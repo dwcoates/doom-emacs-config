@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -27,6 +29,29 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 	}
 }
 
+// TestNewRefusesMissingLoudFaults pins that the standing loud faults are
+// required: an Emacs stream with nothing to subscribe to would never be told
+// a failed deploy.
+func TestNewRefusesMissingLoudFaults(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	deps := Deps{
+		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Merge: h.Merge,
+		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
+		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
+		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
+		Holds: h.Holds, WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
+	}
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the standing loud faults") {
+		t.Fatalf("New = %v, want the refusal naming the standing loud faults", err)
+	}
+}
+
 // TestNewRefusesAMissingWebappDist pins that the asset origin is required: a
 // surface with no dist directory would serve a blank webview.
 func TestNewRefusesAMissingWebappDist(t *testing.T) {
@@ -37,7 +62,7 @@ func TestNewRefusesAMissingWebappDist(t *testing.T) {
 		Drain: h.Drain, Rollout: h.Rollout, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		Holds: h.Holds, Log: h.Surfaces,
+		Holds: h.Holds, LoudFaults: &h.LoudFaults, Log: h.Surfaces,
 	}
 
 	// Act.
