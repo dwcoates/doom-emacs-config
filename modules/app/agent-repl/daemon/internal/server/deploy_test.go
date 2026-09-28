@@ -84,6 +84,17 @@ func TestDeployAnswersEveryDecision(t *testing.T) {
 			},
 		},
 		{
+			name: "restarting across a layout change",
+			outcome: deploy.Outcome{Component: deploy.ComponentDaemon, Build: "b", Kind: deploy.RestartingAcrossLayout,
+				Handover: rollout.HandoverAcceptance{Workspaces: 4, Busy: 2, Forced: true},
+				Layouts:  deploy.LayoutChange{Running: 7, Fresh: 8}},
+			check: func(o *agentreplv1.DeployComponentOutcome) bool {
+				r := o.GetRestarting()
+				return r.GetRunningStateLayout() == 7 && r.GetFreshStateLayout() == 8 &&
+					r.GetWorkspaces() == 4 && r.GetBusy() == 2 && r.GetForced()
+			},
+		},
+		{
 			name:    "reload pushed",
 			outcome: deploy.Outcome{Component: deploy.ComponentElisp, Build: "b", Kind: deploy.ReloadPushed, Recipients: 2},
 			check:   func(o *agentreplv1.DeployComponentOutcome) bool { return o.GetReloadPushed().GetRecipients() == 2 },
@@ -219,11 +230,13 @@ func TestDeployRefusesADecisionTheContractDoesNotName(t *testing.T) {
 	}{
 		{name: "a component", outcome: deploy.Outcome{Component: "lint", Kind: deploy.UpToDate}, cause: "a component the contract does not name"},
 		{name: "a decision", outcome: deploy.Outcome{Component: deploy.ComponentShim, Kind: "vanished"}, cause: "a decision the contract does not name"},
-		// endpoint_deploy.proto has no arm for a daemon restarted across a
-		// state layout change (only the blue-green handing_over). Until the
-		// contract names one, the rpc says so loudly rather than answering
-		// the restart as a handover or a launchd service restart.
-		{name: "a restart across a layout change", outcome: deploy.Outcome{Component: deploy.ComponentDaemon, Kind: deploy.RestartingAcrossLayout}, cause: "a decision the contract does not name"},
+		// DeployRestarting's two layouts always differ: that difference is why
+		// the outcome is a restart. A decision without one is refused loudly
+		// rather than answered with layouts that say nothing changed.
+		{name: "a layout restart with equal layouts", outcome: deploy.Outcome{Component: deploy.ComponentDaemon, Kind: deploy.RestartingAcrossLayout,
+			Layouts: deploy.LayoutChange{Running: 3, Fresh: 3}}, cause: "a layout restart the contract cannot state"},
+		{name: "a layout restart with a negative layout", outcome: deploy.Outcome{Component: deploy.ComponentDaemon, Kind: deploy.RestartingAcrossLayout,
+			Layouts: deploy.LayoutChange{Running: -1, Fresh: 3}}, cause: "a layout restart the contract cannot state"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

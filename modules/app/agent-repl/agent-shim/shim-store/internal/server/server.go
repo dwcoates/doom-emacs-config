@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-store/internal/db"
@@ -680,6 +681,60 @@ func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse
 	}
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
 		Result: &storev1.GetLiveWorkResponse_Failure{Failure: failure},
+	})
+}
+
+// ---- GetAgentByVendorTask ----
+
+// GetAgentByVendorTask answers which agent of the caller's lineage a vendor task
+// locator names. NOT-FOUND IS AN ANSWER, not a refusal: the storage layer read
+// the record and recorded the outcome at info, found or not, so this layer adds
+// only a verbose trace for either.
+func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
+	session := req.Msg.GetSession().GetValue()
+	task := req.Msg.GetVendorTaskId()
+	fields := logging.Fields{AgentID: session, TaskID: task}
+	log := s.rpcLogger(storev1connect.ShimStoreGetAgentByVendorTaskProcedure, req.Header()).With(fields)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "resolving a vendor task locator to its agent")
+
+	if ref := validateGetAgentByVendorTaskRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-agent-by-vendor-task", ref, logging.Fields{})
+		return agentByVendorTaskFailure(ref), nil
+	}
+
+	agent, found, err := s.store.AgentByVendorTask(correlated(ctx, req.Header()), session, task)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-agent-by-vendor-task", err, fields)
+		return agentByVendorTaskFailure(ref), nil
+	}
+	if !found {
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering not_found")
+		return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
+			Result: &storev1.GetAgentByVendorTaskResponse_NotFound{NotFound: &storev1.GetAgentByVendorTaskNotFound{}},
+		}), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s", agent)
+	return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
+		Result: &storev1.GetAgentByVendorTaskResponse_Success{Success: &storev1.GetAgentByVendorTaskSuccess{
+			Agent: &conversationv1.AgentId{Value: agent},
+		}},
+	}), nil
+}
+
+// agentByVendorTaskFailure has TWO arms: the request was malformed (no session,
+// no locator), or the storage layer failed — which includes a locator the record
+// pairs with two agents of one lineage.
+func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentByVendorTaskResponse] {
+	failure := &storev1.GetAgentByVendorTaskFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetAgentByVendorTaskFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetAgentByVendorTaskInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetAgentByVendorTaskFailure_StorageFailure{StorageFailure: &storev1.GetAgentByVendorTaskStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
+		Result: &storev1.GetAgentByVendorTaskResponse_Failure{Failure: failure},
 	})
 }
 

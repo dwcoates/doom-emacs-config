@@ -82,14 +82,17 @@ export interface ScrollPosition {
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
- * - `prependCompensation`: content above the reader changed height — older
- *   rows landing above, or a bubble whose sub-feed lies wholly above the
- *   viewport collapsing — and the view shifts by exactly that, so the content
- *   under the reader stays put.
+ * - `prependCompensation`: content above the reader changed height, and the
+ *   view shifts by exactly that, so the content under the reader stays put.
+ *   This is THE FEED'S SCROLL ANCHORING (`TailFollow`, "THE FEED OWNS ITS
+ *   SCROLL ANCHORING"): any row above the anchor changing height — its first
+ *   layout under `content-visibility: auto`, a late render, older rows landing
+ *   above, a bubble whose sub-feed lies wholly above the viewport collapsing.
  * - `collapseCompensation`: a thinking bubble wholly ABOVE the reader collapsed
  *   because its own final text landed (the daemon re-pushed it settled); the
  *   view shifts by exactly the height it lost, so the content under
- *   the reader stays put. Same semantics as `prependCompensation`.
+ *   the reader stays put. Same semantics as `prependCompensation`, and the
+ *   same anchoring carries it out; the cause names the case.
  * - `latestVisible`: the reader can SEE the feed's latest entry
  *   (`latestEntryVisible`), so the follow latches where the view already is.
  *   Latching moves nothing; later content then keeps the tail in view, and
@@ -165,6 +168,87 @@ export function latestEntryVisible(g: RevealGeometry): boolean {
   return g.nodeTop < g.boxTop + g.boxHeight && g.nodeTop + g.nodeHeight > g.boxTop;
 }
 
+/** A row's top and bottom edges, in viewport coordinates. */
+export interface RowEdges {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * The feed's rows, as the scroll anchor reads them. Reading moves nothing.
+ *
+ * Only the ROOT rows are candidates: a sub-feed's rows scroll inside their
+ * bubble's own capped box, so their edges move whenever the reader scrolls
+ * that box, which says nothing about the feed.
+ */
+export interface AnchorRows {
+  /** The element whose element children are the feed's rows, in document order. */
+  readonly host: Element;
+  /** The scroll box's own top edge. */
+  viewportTop(): number;
+  /** ROW's edges, or null when it draws no box (a hidden, empty row). */
+  edges(row: Element): RowEdges | null;
+}
+
+/** The root feed's rows in HOST, read off BOX's live layout. */
+export function feedAnchorRows(box: Element, host: Element): AnchorRows {
+  return {
+    host,
+    viewportTop: () => box.getBoundingClientRect().top,
+    edges: (row) => {
+      if (row.getClientRects().length === 0) return null;
+      const r = row.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    },
+  };
+}
+
+/** A row found to anchor on, where its top sat, and whether it starts in view. */
+interface FoundAnchor {
+  row: Element;
+  top: number;
+  /** False for the fallback: no row starts in view, so the last one is taken. */
+  starts: boolean;
+}
+
+/**
+ * THE ANCHOR: the first row whose top sits at or below the viewport's top, so
+ * the first row the reader sees whole from its top. Its top moves only when a
+ * row BEFORE it changes height, which is exactly the movement the reader must
+ * not see; its own growth runs downward from a top that stays put, and a row
+ * after it moves nothing above it. When no row starts in view (one row fills
+ * the viewport and nothing follows it), the last row that draws a box is taken,
+ * flagged as such.
+ *
+ * Rows stand in document order with ascending tops, so the walk starts at HINT
+ * (the previous anchor) and moves only as far as the reader scrolled.
+ */
+function findAnchor(rows: AnchorRows, hint: Element | null, viewTop: number): FoundAnchor | null {
+  let row = hint !== null && hint.parentElement === rows.host ? hint : rows.host.firstElementChild;
+  for (let prev = row?.previousElementSibling ?? null; prev !== null; prev = prev.previousElementSibling) {
+    const edges = rows.edges(prev);
+    if (edges === null) continue;
+    if (edges.top < viewTop) break;
+    row = prev;
+  }
+  let last: FoundAnchor | null = null;
+  for (; row !== null; row = row.nextElementSibling) {
+    const edges = rows.edges(row);
+    if (edges === null) continue;
+    if (edges.top >= viewTop) return { row, top: edges.top, starts: true };
+    last = { row, top: edges.top, starts: false };
+  }
+  return last;
+}
+
+/** What set an anchoring pass off: a size change, a scroll event, or a caller's own measure. */
+type AnchorTrigger = "resize" | "scroll" | "measured";
+
+/** A row's name in a record: its FeedId where it carries one. */
+function rowName(row: Element): string {
+  return row.getAttribute("data-feed-row") ?? row.tagName.toLowerCase();
+}
+
 /**
  * THE SINGLE OWNER OF THE FEED'S SCROLL POSITION.
  *
@@ -203,6 +287,31 @@ export function latestEntryVisible(g: RevealGeometry): boolean {
  * event would read the pre-gesture answer and park the feed under them.
  * `sync` compares the box's live position against the last one this owner
  * knows about, so a read can never precede the movement it is about.
+ *
+ * THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27). Every `.feed-item` is
+ * `content-visibility: auto`, so a row above the reader is first laid out when
+ * the overscan band (feed/overscan.ts) reaches it, and its height changes from
+ * the stylesheet's guess to its real one. Chromium's native CSS scroll
+ * anchoring absorbs that; WebKit, the Emacs webview's engine, has none, and the
+ * content under the reader jumped on every first scroll up (measured: 52 of 120
+ * steps, up to 436px, test/webkit/anchoring.webkit.test.ts). So this owner
+ * anchors, for every change in row height, whatever caused it:
+ *
+ * - it holds ONE anchor (`findAnchor`: the first root row starting in view)
+ *   and that row's top in the box's CONTENT coordinates (viewport top minus
+ *   box top plus `scrollTop`), which the reader's own scrolling never changes;
+ * - on every size change and every scroll event it measures the anchor again
+ *   and, when it moved, shifts `scrollTop` by exactly that before the frame is
+ *   painted (`prependCompensation`), then takes the anchor afresh;
+ * - the callers that already measure a change of their own (older rows landing
+ *   above, a bubble or thinking row wholly above collapsing) go through the
+ *   same pass (`compensate`), so a change is never counted twice;
+ * - a reader following the tail holds no anchor: the follow keeps the tail.
+ *
+ * It measures BEFORE it re-takes, on the scroll event too. A layout read
+ * between a height change and its resize callback (any scroll handler's)
+ * already carries the change, so an anchor taken from it would hide the change
+ * from the pass that should have moved the view.
  */
 export class TailFollow {
   private following = false;
@@ -216,15 +325,26 @@ export class TailFollow {
   private selectionActive = false;
   /** Whether the held-off latch was last reported, so it is reported once per spell. */
   private heldOffReported = false;
+  /** The row the anchoring holds, and its top in the box's content coordinates. */
+  private anchor: { row: Element; at: number; starts: boolean } | null = null;
+  /** Where the next anchor search starts: the last anchor, kept across a follow. */
+  private anchorHint: Element | null = null;
+  /** The part of the last correction the box's own rounding did not take. */
+  private anchorCarry = 0;
+  /** Whether a missing anchor was last reported, so it is reported once per spell. */
+  private missingReported = false;
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
    * read (a fixture) has no latest entry, and the latest-visible latch never
-   * fires on it.
+   * fires on it. ROWS are the rows the anchoring reads; without them (a
+   * fixture, a box with no feed) nothing is anchored, and a caller's own
+   * measure is all a compensation has.
    */
   constructor(
     private readonly box: ReanchorBox,
     private readonly readLatest: ReadLatest = () => null,
+    private readonly rows: AnchorRows | null = null,
   ) {
     this.lastTop = box.scrollTop;
   }
@@ -270,6 +390,7 @@ export class TailFollow {
     this.selectionActive = true;
     this.release();
     if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
+    this.takeAnchor();
   }
 
   /**
@@ -279,19 +400,20 @@ export class TailFollow {
   detachedWorkSelected(geometry: RevealGeometry): void {
     this.release();
     this.shift("detachedWorkSelected", detachedWorkDelta(geometry, this.box));
+    this.takeAnchor();
     this.latchIfLatestVisible();
   }
 
   /**
    * The content above the reader changed by GROWN px (older rows landing: a
    * positive figure; a sub-feed wholly above the viewport collapsing: a
-   * negative one): shift by exactly that, so the content under them stays put.
-   * A following reader is already at the tail, which the follow keeps, so
-   * nothing is added on top of it.
+   * negative one): shift by exactly that, so the content under them stays put
+   * (`compensate`, the anchoring's own pass). A following reader is already at
+   * the tail, which the follow keeps, so nothing is added on top of it.
    */
   prependCompensation(grown: number): void {
     if (this.isFollowing()) return;
-    this.shift("prependCompensation", grown);
+    this.compensate("prependCompensation", grown);
   }
 
   /**
@@ -306,7 +428,7 @@ export class TailFollow {
     if (this.isFollowing()) return;
     const delta = collapseDelta(geometry);
     if (delta === 0) return;
-    this.shift("collapseCompensation", delta);
+    this.compensate("collapseCompensation", delta);
   }
 
   /**
@@ -328,6 +450,7 @@ export class TailFollow {
    */
   onScroll(): void {
     this.sync();
+    this.reanchor("scroll");
     this.latchIfLatestVisible();
   }
 
@@ -343,9 +466,12 @@ export class TailFollow {
   /**
    * A resize of the box or of its content. A standing follow keeps the tail on
    * the settled layout (the docked footer taking height, a deferred card
-   * settling); a reader who scrolled away is left exactly where they are.
+   * settling); for a reader who scrolled away, the anchoring keeps the content
+   * under them where it was.
    */
   onResize(): void {
+    this.sync();
+    this.reanchor("resize");
     this.follow();
   }
 
@@ -368,6 +494,7 @@ export class TailFollow {
     this.lastTop = this.box.scrollTop;
     this.following = true;
     this.cause = cause;
+    this.anchor = null;
     // The reader's last input spoke about a position this park has replaced.
     this.touched = false;
     // A follow that found the box already at its tail moved nothing, and is
@@ -383,6 +510,126 @@ export class TailFollow {
     if (delta !== 0) this.box.scrollTop += delta;
     this.lastTop = this.box.scrollTop;
     recordMove(cause, from, this.lastTop, false);
+  }
+
+  /**
+   * A CALLER MEASURED A CHANGE ABOVE THE READER (older rows landing, a row or a
+   * sub-feed wholly above collapsing) and hands its own figure, MEASURED, in
+   * the same task as the change. It is the same anchoring pass, run at once
+   * rather than at the next size change: the anchor, when one starts in view,
+   * is measured and the view follows it -- the one figure that also carries
+   * any change the caller did not make -- and the anchor is taken afresh, so
+   * the size change that follows finds nothing left to correct. With no such
+   * anchor (no rows to read, or only the fallback row, whose top a change
+   * inside it does not move) the caller's figure is the change.
+   */
+  private compensate(cause: ScrollCause, measured: number): void {
+    const held = this.anchor;
+    const now = held !== null && held.starts ? this.anchorTop(held.row) : null;
+    if (held === null || now === null) {
+      this.shift(cause, measured);
+      this.takeAnchor();
+      return;
+    }
+    const delta = now - held.at;
+    if (delta !== measured) {
+      log.debug(`a ${cause} measured ${measured.toString()}px; the anchor moved ${delta.toString()}px, and the view follows the anchor`, {
+        operation: "scroll.anchor-measure-differs",
+        context: { cause, measured, delta, anchor: rowName(held.row) },
+      });
+    }
+    if (delta !== 0) this.correct(cause, "measured", delta, held.row);
+    this.takeAnchor();
+  }
+
+  /**
+   * THE ANCHORING PASS: measure the held anchor, move the view by however far
+   * it moved, and take the anchor afresh. A following reader holds none.
+   */
+  private reanchor(trigger: AnchorTrigger): void {
+    if (this.rows === null) return;
+    if (this.following) {
+      this.anchor = null;
+      return;
+    }
+    const held = this.anchor;
+    if (held !== null) {
+      const now = this.anchorTop(held.row);
+      if (now === null) {
+        log.debug("the scroll anchor left the feed or stopped drawing; a new one is taken", {
+          operation: "scroll.anchor-lost",
+          context: { trigger, anchor: rowName(held.row) },
+        });
+      } else if (now !== held.at) {
+        this.correct("prependCompensation", trigger, now - held.at, held.row);
+      }
+    }
+    this.takeAnchor();
+    this.reportMissingAnchor(trigger);
+  }
+
+  /**
+   * Move the view by DELTA, the distance ROW's top moved in the content, so it
+   * sits where the reader last saw it. The box rounds `scrollTop`, so what it
+   * did not take is carried into the next correction instead of accumulating.
+   */
+  private correct(cause: ScrollCause, trigger: AnchorTrigger, delta: number, row: Element): void {
+    this.sync();
+    const from = this.box.scrollTop;
+    const wanted = from + delta + this.anchorCarry;
+    this.shift(cause, wanted - from);
+    const carry = wanted - this.box.scrollTop;
+    // More than a pixel short is the box's clamp at an edge, not rounding.
+    this.anchorCarry = Math.abs(carry) < 1 ? carry : 0;
+    log.debug(`the rows above the reader moved ${delta.toString()}px; the view moved with them`, {
+      operation: "scroll.anchor-corrected",
+      context: { cause, trigger, delta, anchor: rowName(row), from, to: this.box.scrollTop },
+    });
+  }
+
+  /** Take the anchor from the live layout: none while following, or with no rows to read. */
+  private takeAnchor(): void {
+    this.anchor = null;
+    if (this.rows === null || this.following) return;
+    const viewTop = this.rows.viewportTop();
+    const found = findAnchor(this.rows, this.anchorHint, viewTop);
+    if (found === null) return;
+    this.anchorHint = found.row;
+    this.anchor = { row: found.row, at: found.top - viewTop + this.box.scrollTop, starts: found.starts };
+  }
+
+  /** ROW's top in the box's content coordinates, or null when it is no longer a drawn row. */
+  private anchorTop(row: Element): number | null {
+    if (this.rows === null || row.parentElement !== this.rows.host) return null;
+    const edges = this.rows.edges(row);
+    if (edges === null) return null;
+    return edges.top - this.rows.viewportTop() + this.box.scrollTop;
+  }
+
+  /**
+   * A SIZE CHANGE WITH NOTHING TO ANCHOR ON is the anchoring failing: the
+   * reader is off the tail, the box scrolls, the feed draws rows, and not one
+   * of them draws a box to hold still. Reported once per spell.
+   */
+  private reportMissingAnchor(trigger: AnchorTrigger): void {
+    if (this.anchor !== null || this.rows === null) {
+      this.missingReported = false;
+      return;
+    }
+    const scrolls = this.box.scrollHeight > this.box.clientHeight;
+    const drawn = this.rows.host.childElementCount;
+    if (trigger !== "resize" || !scrolls || drawn === 0 || this.missingReported) return;
+    this.missingReported = true;
+    log.error("a height changed while the reader is off the tail, and no feed row can anchor the view", {
+      operation: "scroll.anchor-missing",
+      context: {
+        trigger,
+        rows: drawn,
+        scroll_top: this.box.scrollTop,
+        scroll_height: this.box.scrollHeight,
+        client_height: this.box.clientHeight,
+      },
+    });
   }
 
   /**
@@ -409,6 +656,7 @@ export class TailFollow {
     }
     this.following = true;
     this.cause = "latestVisible";
+    this.anchor = null;
     // The input that brought the entry into view has been spent on this latch.
     this.touched = false;
     this.lastTop = this.box.scrollTop;

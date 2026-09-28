@@ -694,6 +694,88 @@ func TestAnAdoptionThatLandedRecordsNoFault(t *testing.T) {
 	}
 }
 
+// TestTheIncumbentDoesNotExitBeforeTheSuccessorDrainsTheHandedHold pins the
+// ordering the successor's adoption rests on: it claims the serving row BEFORE
+// it dials the shim and drains the handover hold, so a window that ended at the
+// claim let this daemon exit mid-adoption, and its state handle's close
+// released the hold under the successor's drain ("wsm: not found"). The window
+// now ends only once the hold this transfer handed over is gone.
+func TestTheIncumbentDoesNotExitBeforeTheSuccessorDrainsTheHandedHold(t *testing.T) {
+	// Arrange
+	var ws ids.WorkspaceID
+	probe := &servingProbeDB{looks: make(chan struct{}, 64)}
+	heldAtExit := make(chan bool, 1)
+	h := newHarness(t, func(d *Deps) {
+		probe.DB = d.DB
+		d.DB = probe
+		d.Exit = func(ctx context.Context) error {
+			_, held, err := probe.DB.Lease(ctx, ws)
+			if err != nil {
+				t.Errorf("Lease at the exit: %v", err)
+			}
+			heldAtExit <- held
+			return nil
+		}
+	})
+	ws, _ = h.workspace(t)
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	hold, held, err := h.db.Lease(context.Background(), ws)
+	if err != nil || !held {
+		t.Fatalf("Lease after the transfer = (held %v, %v), want the handed quiesce hold", held, err)
+	}
+
+	// Act: the successor claims the row, and the window looks at it twice
+	// while the hold it has yet to drain still stands.
+	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-successor")); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	probe.armed.Store(true)
+	for range 2 {
+		select {
+		case <-probe.looks:
+		case held := <-heldAtExit:
+			t.Fatalf("the incumbent exited after the successor's claim with the hold standing = %v, want it to wait for the drain", held)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the adoption window never looked at the claimed workspace")
+		}
+	}
+	if err := h.db.ReleaseLease(context.Background(), hold.ID); err != nil {
+		t.Fatalf("ReleaseLease (the successor's drain): %v", err)
+	}
+
+	// Assert
+	select {
+	case held := <-heldAtExit:
+		if held {
+			t.Fatalf("the incumbent exited with the handed hold still standing")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the incumbent never exited after the successor drained the hold; steps %v", h.order.Taken())
+	}
+}
+
+// servingProbeDB signals every serving-ownership read once armed, so a test
+// knows the adoption window has looked at a claim it made.
+type servingProbeDB struct {
+	wsm.DB
+	armed atomic.Bool
+	looks chan struct{}
+}
+
+func (d *servingProbeDB) Serving(ctx context.Context, ws wsm.WorkspaceID) (*wsm.InstanceID, error) {
+	owner, err := d.DB.Serving(ctx, ws)
+	if d.armed.Load() {
+		select {
+		case d.looks <- struct{}{}:
+		default:
+		}
+	}
+	return owner, err
+}
+
 func TestTransferAcceptsServingOwnershipThatAlreadyMoved(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

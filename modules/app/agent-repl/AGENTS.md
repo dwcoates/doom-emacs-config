@@ -500,6 +500,20 @@ How the daemon puts each component into service:
      `config.el` load order, then the heartbeat and timer re-arm check), and a
      stale webview `reload_webapp`.
 
+EVERY PHASE IS ON THE FOOTER (owner request, 2026-09-27). The deploy states
+each phase through ONE entry point (`internal/deployprogress.Sink`, the footer
+resolver) and the line stands on every workspace's strip, below a fault and
+above everything else: building, installing, restarting services, handing over,
+a busy workspace's `waiting` (its own turn and background counts), and a
+momentary `updated` the daemon that stays says, or the successor says after a
+handover (it reads `Manifest.deploy`). A deploy's handover draws no webapp
+banner; a successor that will not start is the `successor_spawn_failed` fault.
+A build, install or service restart that FAILS takes the line down and stands
+as the daemon-scoped `deploy_failed` fault (non-escalating: the running build
+keeps serving), its line naming the step and the last line of its output. It
+stands until a deploy gets through that step, and a daemon that boots owning
+its state closes the ones an earlier daemon left.
+
 `force` does not wait: every stale shim is bounced at once and a stale daemon
 hands every workspace over at once, ENDING RUNNING TURNS. Emacs asks before a
 forced deploy; the CLI's `-force` says so in its help.
@@ -1070,11 +1084,18 @@ what the user has SEEN; the colour says what the workspace is DOING.
 **THE DAEMON IS THE SINGLE SOURCE OF THIS MODE.** A roster row carrying
 `RosterRowViewed` is **partial**; a row without it is **full**. Both the Emacs
 tab-bar and the webapp sidebar RENDER the mode from that marker and nothing
-else, so they cannot disagree. The daemon raises the marker on
-`MarkWorkspaceViewed` and clears it on ANY status change, from any origin (a
-user's prompt, a shim frame, a merge, a session that died). A first sighting is
-not a change, and a push restating the same arm is not a change, or nothing
-could ever stay partial.
+else, so they cannot disagree.
+
+**THE MARKER IS DERIVED FROM A READ FACT** (owner ruling, 2026-09-27). A turn
+that completes or is interrupted leaves its result UNREAD;
+`MarkWorkspaceViewed` on the row while it shows that turn-end arm (`done` or
+`interrupted`) READS it; the next turn resets it. The daemon draws the marker
+exactly when the row stands on a turn-end arm and the result is read, resolved
+in the same render as the status. An UNREAD turn end outranks `idle_async`, so
+a turn that finishes while detached work runs shows its green `done` (or
+`interrupted`) until the user has viewed it; once viewed the row shows
+`idle_async`, full; when the work ends the row returns to its turn-end arm
+PARTIAL, never a fresh full one claiming an unread result.
 
 **Emacs DETECTS and REPORTS; it does not decide.** The 5-second dwell is
 measured in Emacs, because only Emacs knows what the user is standing in front
@@ -1087,9 +1108,9 @@ visible latency is ruled acceptable.
 
 | | applies PARTIAL | restores FULL |
 |---|---|---|
-| daemon (the source) | `sidebar.Resolver.SetViewed` | `wsState.noteArm` (daemon/internal/resolve/sidebar/state.go) |
+| daemon (the source) | `sidebar.Resolver.SetViewed` reads the result | `wsState.viewedOn` derives the marker; `startTurn`/`SetTurnEnded` reset the fact (daemon/internal/resolve/sidebar/state.go, resolver.go) |
 | Emacs (renders the marker) | reports via `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` re-arms the dwell (status.el) |
-| webapp (renders the marker) | `ViewedRegistry.modeFor` (webapp/src/sidebar/viewed.ts) | the same function, on the arm change |
+| webapp (renders the marker) | `viewedMode` (webapp/src/sidebar/viewed.ts) | the same function, from the wire alone |
 
 Emacs's restore reports NOTHING: the daemon originated the clear. It hangs off
 ONE hook, `agent-repl-roster-viewed-cleared-functions` (roster.el), which fires
@@ -1206,7 +1227,7 @@ raise: that is exactly how three kinds came to have a path and sixteen did not.
 | `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
 | `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
 | `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
-| unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned` — NON-ESCALATING |
+| unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned`, `deploy_failed` (daemon scope) — NON-ESCALATING |
 
 The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
 `shim_start_failed`, which keeps `FooterStatusActivityStartFailed` because it

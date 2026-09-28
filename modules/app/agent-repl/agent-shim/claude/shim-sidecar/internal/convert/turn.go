@@ -6,10 +6,11 @@ package convert
 // Every entry the sidecar writes carries StoreEntry.turn when the turn is
 // known, and NO turn otherwise — never a guess. The only turns this plane can
 // name are the ones it MINTS: an adopted external prompt's turn is the prompt
-// record's own uuid (user.go, externalPrompt). An agent-repl turn's id is the
-// daemon's, and nothing the vendor writes carries it, so the records of such a
-// turn are left unstamped here and the store keeps the stamp the stream plane
-// wrote (the store's first-stamp rule).
+// record's own uuid (user.go, externalPrompt) — for an edited or re-sent
+// version of an unanswered prompt, the FIRST version's (resend.go). An
+// agent-repl turn's id is the daemon's, and nothing the vendor writes carries
+// it, so the records of such a turn are left unstamped here and the store keeps
+// the stamp the stream plane wrote (the store's first-stamp rule).
 //
 // THE ATTRIBUTION IS THE TRANSCRIPT'S OWN STRUCTURE, the same links the
 // keep-alive rule reads (keepalive.go), never arrival order:

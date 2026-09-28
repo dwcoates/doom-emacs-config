@@ -16,8 +16,8 @@
 // @generated from file agentrepl/v1/workspace_mutation_progress.proto (package agentrepl.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { CreateWorkspaceError } from "./endpoint_create_workspace_pb";
 import { file_agentrepl_v1_endpoint_create_workspace } from "./endpoint_create_workspace_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_mutation_progress.proto.
  */
 export const file_agentrepl_v1_workspace_mutation_progress: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEioQEKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIAEIHCgVldmVudCJIChVXb3Jrc3BhY2VPcGVuUHJvZ3Jlc3MSLwoFc3RhZ2UYASABKA4yIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlIt8BChdXb3Jrc3BhY2VDcmVhdGVQcm9ncmVzcxI7Cg1lbnRlcmVkX3N0YWdlGAQgASgLMiIuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlSAASOwoJc3VjY2VlZGVkGAIgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZEgAEjUKBmZhaWxlZBgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVGYWlsZWRIAEIGCgRzdGVwSgQIARACUgVzdGFnZSJrChVXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSNQoHcmVmdXNhbBgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VFcnJvckgAEhIKCGludGVybmFsGAIgASgJSABCBwoFY2F1c2UiiAIKFFdvcmtzcGFjZUNyZWF0ZVN0YWdlEkcKDWRlcml2aW5nX25hbWUYASABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWVIABJPChFjcmVhdGluZ193b3JrdHJlZRgCIAEoCzIyLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUNyZWF0aW5nV29ya3RyZWVIABJNChBzdGFydGluZ19zZXNzaW9uGAMgASgLMjEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uSABCBwoFc3RhZ2UiIgogV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWUiJgokV29ya3NwYWNlQ3JlYXRlU3RhZ2VDcmVhdGluZ1dvcmt0cmVlIiUKI1dvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uIlcKGFdvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkqhwIKEldvcmtzcGFjZU9wZW5TdGFnZRIkCiBXT1JLU1BBQ0VfT1BFTl9TVEFHRV9VTlNQRUNJRklFRBAAEioKJldPUktTUEFDRV9PUEVOX1NUQUdFX0NIRUNLSU5HX1dPUktUUkVFEAESKQolV09SS1NQQUNFX09QRU5fU1RBR0VfU1RBUlRJTkdfU0VTU0lPThACEiEKHVdPUktTUEFDRV9PUEVOX1NUQUdFX1JFVklWSU5HEAMSKAokV09SS1NQQUNFX09QRU5fU1RBR0VfQ0xFQVJJTkdfQ0xPU0VEEAQSJwojV09SS1NQQUNFX09QRU5fU1RBR0VfQ0hFQ0tJTkdfQlVJTEQQBUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEioQEKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIAEIHCgVldmVudCJdChVXb3Jrc3BhY2VPcGVuUHJvZ3Jlc3MSNwoNZW50ZXJlZF9zdGFnZRgCIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VKBAgBEAJSBXN0YWdlIosDChJXb3Jrc3BhY2VPcGVuU3RhZ2USTQoRY2hlY2tpbmdfd29ya3RyZWUYASABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlQ2hlY2tpbmdXb3JrdHJlZUgAEksKEHN0YXJ0aW5nX3Nlc3Npb24YAiABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlU3RhcnRpbmdTZXNzaW9uSAASPAoIcmV2aXZpbmcYAyABKAsyKC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlUmV2aXZpbmdIABJJCg9jbGVhcmluZ19jbG9zZWQYBCABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlQ2xlYXJpbmdDbG9zZWRIABJHCg5jaGVja2luZ19idWlsZBgFIAEoCzItLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ0J1aWxkSABCBwoFc3RhZ2UiJAoiV29ya3NwYWNlT3BlblN0YWdlQ2hlY2tpbmdXb3JrdHJlZSIjCiFXb3Jrc3BhY2VPcGVuU3RhZ2VTdGFydGluZ1Nlc3Npb24iHAoaV29ya3NwYWNlT3BlblN0YWdlUmV2aXZpbmciIgogV29ya3NwYWNlT3BlblN0YWdlQ2xlYXJpbmdDbG9zZWQiIQofV29ya3NwYWNlT3BlblN0YWdlQ2hlY2tpbmdCdWlsZCLfAQoXV29ya3NwYWNlQ3JlYXRlUHJvZ3Jlc3MSOwoNZW50ZXJlZF9zdGFnZRgEIAEoCzIiLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUgAEjsKCXN1Y2NlZWRlZBgCIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdWNjZWVkZWRIABI1CgZmYWlsZWQYAyABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlRmFpbGVkSABCBgoEc3RlcEoECAEQAlIFc3RhZ2UiawoVV29ya3NwYWNlQ3JlYXRlRmFpbGVkEjUKB3JlZnVzYWwYASABKAsyIi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRXJyb3JIABISCghpbnRlcm5hbBgCIAEoCUgAQgcKBWNhdXNlIogCChRXb3Jrc3BhY2VDcmVhdGVTdGFnZRJHCg1kZXJpdmluZ19uYW1lGAEgASgLMi4uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlRGVyaXZpbmdOYW1lSAASTwoRY3JlYXRpbmdfd29ya3RyZWUYAiABKAsyMi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VDcmVhdGluZ1dvcmt0cmVlSAASTQoQc3RhcnRpbmdfc2Vzc2lvbhgDIAEoCzIxLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZVN0YXJ0aW5nU2Vzc2lvbkgAQgcKBXN0YWdlIiIKIFdvcmtzcGFjZUNyZWF0ZVN0YWdlRGVyaXZpbmdOYW1lIiYKJFdvcmtzcGFjZUNyZWF0ZVN0YWdlQ3JlYXRpbmdXb3JrdHJlZSIlCiNXb3Jrc3BhY2VDcmVhdGVTdGFnZVN0YXJ0aW5nU2Vzc2lvbiJXChhXb3Jrc3BhY2VDcmVhdGVTdWNjZWVkZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * One staged-progress push for one in-flight workspace mutation.
@@ -89,9 +89,9 @@ export type WorkspaceOpenProgress = Message<"agentrepl.v1.WorkspaceOpenProgress"
   /**
    * The stage the open has just entered.
    *
-   * @generated from field: agentrepl.v1.WorkspaceOpenStage stage = 1;
+   * @generated from field: agentrepl.v1.WorkspaceOpenStage entered_stage = 2;
    */
-  stage: WorkspaceOpenStage;
+  enteredStage?: WorkspaceOpenStage | undefined;
 };
 
 /**
@@ -100,6 +100,157 @@ export type WorkspaceOpenProgress = Message<"agentrepl.v1.WorkspaceOpenProgress"
  */
 export const WorkspaceOpenProgressSchema: GenMessage<WorkspaceOpenProgress> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_mutation_progress, 1);
+
+/**
+ * The stages an open passes through while its rpc is in flight. Emitted only
+ * for the stages the open actually reaches: a workspace that was not
+ * hibernated never emits `REVIVING`, and one that was not closed never emits
+ * `CLEARING_CLOSED`.
+ * A stage an open passes through. THE SET ARM IS THE STAGE. A client words each
+ * arm as one minibuffer line; a stage that is entered replaces the line of the
+ * one before it.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStage
+ */
+export type WorkspaceOpenStage = Message<"agentrepl.v1.WorkspaceOpenStage"> & {
+  /**
+   * The stage just entered. An open enters only the stages its workspace
+   * needs: a workspace that is not parked never enters `reviving`, and one
+   * that is not closed never enters `clearing_closed`.
+   *
+   * @generated from oneof agentrepl.v1.WorkspaceOpenStage.stage
+   */
+  stage: {
+    /**
+     * The daemon is confirming the workspace's worktree is still on disk. An
+     * open whose directory is gone is refused here.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceOpenStageCheckingWorktree checking_worktree = 1;
+     */
+    value: WorkspaceOpenStageCheckingWorktree;
+    case: "checkingWorktree";
+  } | {
+    /**
+     * The daemon is bringing the session up — spawning the shim and resuming
+     * the vendor conversation. Usually the slowest stage.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceOpenStageStartingSession starting_session = 2;
+     */
+    value: WorkspaceOpenStageStartingSession;
+    case: "startingSession";
+  } | {
+    /**
+     * The daemon is lifting a hibernation park off the workspace.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceOpenStageReviving reviving = 3;
+     */
+    value: WorkspaceOpenStageReviving;
+    case: "reviving";
+  } | {
+    /**
+     * The daemon is clearing the workspace's closed flag, which is what puts
+     * its row back among the open ones.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceOpenStageClearingClosed clearing_closed = 4;
+     */
+    value: WorkspaceOpenStageClearingClosed;
+    case: "clearingClosed";
+  } | {
+    /**
+     * The daemon is checking the shim against the deployed build and bouncing
+     * it when stale.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceOpenStageCheckingBuild checking_build = 5;
+     */
+    value: WorkspaceOpenStageCheckingBuild;
+    case: "checkingBuild";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStage.
+ * Use `create(WorkspaceOpenStageSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageSchema: GenMessage<WorkspaceOpenStage> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 2);
+
+/**
+ * The worktree check. It carries nothing: the arm being set is the whole fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStageCheckingWorktree
+ */
+export type WorkspaceOpenStageCheckingWorktree = Message<"agentrepl.v1.WorkspaceOpenStageCheckingWorktree"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStageCheckingWorktree.
+ * Use `create(WorkspaceOpenStageCheckingWorktreeSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageCheckingWorktreeSchema: GenMessage<WorkspaceOpenStageCheckingWorktree> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 3);
+
+/**
+ * The session bring-up. It carries nothing: the arm being set is the whole
+ * fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStageStartingSession
+ */
+export type WorkspaceOpenStageStartingSession = Message<"agentrepl.v1.WorkspaceOpenStageStartingSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStageStartingSession.
+ * Use `create(WorkspaceOpenStageStartingSessionSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageStartingSessionSchema: GenMessage<WorkspaceOpenStageStartingSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 4);
+
+/**
+ * The hibernation revival. It carries nothing: the arm being set is the whole
+ * fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStageReviving
+ */
+export type WorkspaceOpenStageReviving = Message<"agentrepl.v1.WorkspaceOpenStageReviving"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStageReviving.
+ * Use `create(WorkspaceOpenStageRevivingSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageRevivingSchema: GenMessage<WorkspaceOpenStageReviving> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 5);
+
+/**
+ * The closed-flag clear. It carries nothing: the arm being set is the whole
+ * fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStageClearingClosed
+ */
+export type WorkspaceOpenStageClearingClosed = Message<"agentrepl.v1.WorkspaceOpenStageClearingClosed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStageClearingClosed.
+ * Use `create(WorkspaceOpenStageClearingClosedSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageClearingClosedSchema: GenMessage<WorkspaceOpenStageClearingClosed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 6);
+
+/**
+ * The build check. It carries nothing: the arm being set is the whole fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenStageCheckingBuild
+ */
+export type WorkspaceOpenStageCheckingBuild = Message<"agentrepl.v1.WorkspaceOpenStageCheckingBuild"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenStageCheckingBuild.
+ * Use `create(WorkspaceOpenStageCheckingBuildSchema)` to create a new message.
+ */
+export const WorkspaceOpenStageCheckingBuildSchema: GenMessage<WorkspaceOpenStageCheckingBuild> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 7);
 
 /**
  * The progress of one CreateWorkspace, from just after the ack to the terminal
@@ -156,7 +307,7 @@ export type WorkspaceCreateProgress = Message<"agentrepl.v1.WorkspaceCreateProgr
  * Use `create(WorkspaceCreateProgressSchema)` to create a new message.
  */
 export const WorkspaceCreateProgressSchema: GenMessage<WorkspaceCreateProgress> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 2);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 8);
 
 /**
  * The terminal failure of a background create. THE ARM IS THE KIND OF FAILURE,
@@ -197,7 +348,7 @@ export type WorkspaceCreateFailed = Message<"agentrepl.v1.WorkspaceCreateFailed"
  * Use `create(WorkspaceCreateFailedSchema)` to create a new message.
  */
 export const WorkspaceCreateFailedSchema: GenMessage<WorkspaceCreateFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 3);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 9);
 
 /**
  * A stage a create passes through between the ack and its terminal outcome.
@@ -256,7 +407,7 @@ export type WorkspaceCreateStage = Message<"agentrepl.v1.WorkspaceCreateStage"> 
  * Use `create(WorkspaceCreateStageSchema)` to create a new message.
  */
 export const WorkspaceCreateStageSchema: GenMessage<WorkspaceCreateStage> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 4);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 10);
 
 /**
  * The naming stage. It carries nothing: the arm being set is the whole fact.
@@ -271,7 +422,7 @@ export type WorkspaceCreateStageDerivingName = Message<"agentrepl.v1.WorkspaceCr
  * Use `create(WorkspaceCreateStageDerivingNameSchema)` to create a new message.
  */
 export const WorkspaceCreateStageDerivingNameSchema: GenMessage<WorkspaceCreateStageDerivingName> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 5);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 11);
 
 /**
  * The worktree stage. It carries nothing: the arm being set is the whole fact.
@@ -286,7 +437,7 @@ export type WorkspaceCreateStageCreatingWorktree = Message<"agentrepl.v1.Workspa
  * Use `create(WorkspaceCreateStageCreatingWorktreeSchema)` to create a new message.
  */
 export const WorkspaceCreateStageCreatingWorktreeSchema: GenMessage<WorkspaceCreateStageCreatingWorktree> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 6);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 12);
 
 /**
  * The session bring-up stage. It carries nothing: the arm being set is the
@@ -302,7 +453,7 @@ export type WorkspaceCreateStageStartingSession = Message<"agentrepl.v1.Workspac
  * Use `create(WorkspaceCreateStageStartingSessionSchema)` to create a new message.
  */
 export const WorkspaceCreateStageStartingSessionSchema: GenMessage<WorkspaceCreateStageStartingSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 7);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 13);
 
 /**
  * The terminal success of a create, on the progress channel.
@@ -334,65 +485,5 @@ export type WorkspaceCreateSucceeded = Message<"agentrepl.v1.WorkspaceCreateSucc
  * Use `create(WorkspaceCreateSucceededSchema)` to create a new message.
  */
 export const WorkspaceCreateSucceededSchema: GenMessage<WorkspaceCreateSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 8);
-
-/**
- * The stages an open passes through while its rpc is in flight. Emitted only
- * for the stages the open actually reaches: a workspace that was not
- * hibernated never emits `REVIVING`, and one that was not closed never emits
- * `CLEARING_CLOSED`.
- *
- * @generated from enum agentrepl.v1.WorkspaceOpenStage
- */
-export enum WorkspaceOpenStage {
-  /**
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * The daemon is confirming the workspace's worktree is still on disk. An
-   * open whose directory is gone is refused here.
-   *
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE = 1;
-   */
-  CHECKING_WORKTREE = 1,
-
-  /**
-   * The daemon is bringing the session up — spawning the shim and resuming
-   * the vendor conversation. THE SLOW STAGE, and the reason this enum exists.
-   *
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_STARTING_SESSION = 2;
-   */
-  STARTING_SESSION = 2,
-
-  /**
-   * The daemon is lifting a hibernation park off the workspace.
-   *
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_REVIVING = 3;
-   */
-  REVIVING = 3,
-
-  /**
-   * The daemon is clearing the workspace's closed flag, which is what puts
-   * its row back among the open ones.
-   *
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_CLEARING_CLOSED = 4;
-   */
-  CLEARING_CLOSED = 4,
-
-  /**
-   * The daemon is checking the shim against the deployed build and bouncing
-   * it when stale.
-   *
-   * @generated from enum value: WORKSPACE_OPEN_STAGE_CHECKING_BUILD = 5;
-   */
-  CHECKING_BUILD = 5,
-}
-
-/**
- * Describes the enum agentrepl.v1.WorkspaceOpenStage.
- */
-export const WorkspaceOpenStageSchema: GenEnum<WorkspaceOpenStage> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_workspace_mutation_progress, 0);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 14);
 

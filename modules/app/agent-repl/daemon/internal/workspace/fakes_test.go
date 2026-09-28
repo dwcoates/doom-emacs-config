@@ -443,6 +443,30 @@ func (d *fakeDB) ConversationPrompts(_ context.Context, id ids.WorkspaceID) ([]w
 	return d.conversations[id], nil
 }
 
+// RecentConversationPrompts is the bounded fixture form of
+// ConversationPrompts: the same scripted rows, truncated to the most recent
+// `limit`, ordinals renumbered from zero, so a naming test can assert the
+// call reads a tail rather than the whole scripted conversation.
+func (d *fakeDB) RecentConversationPrompts(_ context.Context, id ids.WorkspaceID, limit int) ([]wsm.PortedPrompt, error) {
+	if d.conversationErr != nil {
+		return nil, d.conversationErr
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	all := d.conversations[id]
+	tail := all
+	if len(tail) > limit {
+		tail = tail[len(tail)-limit:]
+	}
+	out := make([]wsm.PortedPrompt, len(tail))
+	for i, row := range tail {
+		row.Ordinal = int64(i)
+		out[i] = row
+	}
+	return out, nil
+}
+
 func (d *fakeDB) PortedPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.PortedPrompt, error) {
 	return d.portedPrompts[id], nil
 }

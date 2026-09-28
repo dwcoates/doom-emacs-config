@@ -5,9 +5,11 @@ package integration
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
 
@@ -145,4 +147,180 @@ func TestADeployPushesTheElispReloadToAStaleEmacsAlone(t *testing.T) {
 		}
 	}
 	t.Fatalf("the stale Emacs's stream ended without the reload: %v", stream.Err())
+}
+
+// ---- the update line: a deploy's progress on the footer --------------------
+
+// footerUpdatePhase names the update line's phase arm on a pushed footer, ""
+// when the strip carries none.
+func footerUpdatePhase(v *frontendv1.FooterView) string {
+	var update *frontendv1.FooterStatusActivityUpdate
+	switch arm := v.GetStrip().GetStatus().GetStatus().(type) {
+	case *frontendv1.FooterStatus_Idle:
+		update = arm.Idle.GetActivity().GetUpdate()
+	case *frontendv1.FooterStatus_Thinking:
+		update = arm.Thinking.GetActivity().GetUpdate()
+	}
+	switch update.GetPhase().(type) {
+	case *frontendv1.FooterStatusActivityUpdate_Building:
+		return "building"
+	case *frontendv1.FooterStatusActivityUpdate_Installing:
+		return "installing"
+	case *frontendv1.FooterStatusActivityUpdate_RestartingServices:
+		return "restarting_services"
+	case *frontendv1.FooterStatusActivityUpdate_HandingOver:
+		return "handing_over"
+	case *frontendv1.FooterStatusActivityUpdate_Waiting:
+		return "waiting"
+	case *frontendv1.FooterStatusActivityUpdate_Updated:
+		return "updated"
+	default:
+		return ""
+	}
+}
+
+func TestADeployShowsItsPhasesOnTheFooterAndRetiresUpdated(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+
+	// Act
+	deployOutcomes(t, f.d, false)
+
+	// Assert: every phase arrives in order, then the momentary updated goes.
+	for _, want := range []string{"building", "installing", "updated"} {
+		awaitFooter(t, f, footer, "the "+want+" line", func(v *frontendv1.FooterView) bool {
+			return footerUpdatePhase(v) == want
+		})
+	}
+	awaitFooter(t, f, footer, "the updated line retired", func(v *frontendv1.FooterView) bool {
+		return footerUpdatePhase(v) == ""
+	})
+}
+
+func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *testing.T) {
+	t.Parallel()
+	// Arrange: a turn in flight, with both participants open so the successor
+	// adopts only when they ask it to.
+	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.HandoverChainTimeout})
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	host := d.WatchHost(f.ws)
+	f.web = d.WatchWeb(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	footer := d.WatchFooter(f.ws)
+	openTurnOn(t, f, "k-deploy-progress")
+	daemonStream := d.WatchDaemonStream()
+
+	// Act: an UNFORCED deploy of a newer daemon hands over at freeness.
+	d.StageDeployBuild(harness.DeployStaleDaemon)
+	if _, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the handover accepted", err)
+	}
+
+	// Assert: the busy workspace says what its move waits on.
+	waiting := awaitFooter(t, f, footer, "the waiting line", func(v *frontendv1.FooterView) bool {
+		return footerUpdatePhase(v) == "waiting"
+	})
+	counts := waiting.GetStrip().GetStatus().GetThinking().GetActivity().GetUpdate().GetWaiting()
+	if counts.GetTurns() != 1 || counts.GetBackground() != 0 {
+		t.Fatalf("waiting = %+v, want the one turn in flight", counts)
+	}
+
+	// Act: the turn ends, so the workspace falls free and transfers.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	successor := drainDial(announced.GetAddress())
+	var wg sync.WaitGroup
+	var hostErr, webErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, hostErr = successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
+	}()
+	go func() {
+		defer wg.Done()
+		_, webErr = successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+	}()
+	wg.Wait()
+	if hostErr != nil || webErr != nil {
+		t.Fatalf("AdoptHostWorkspace = %v, AdoptWebWorkspace = %v; want both to succeed", hostErr, webErr)
+	}
+
+	// Assert: the SUCCESSOR ends the story once the incumbent is gone: its
+	// footer takes the momentary updated line onto every strip.
+	d.AwaitRunLogRecordFromAnyProcess("the successor's updated line", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.footer.deploy_progress" && r.Context["phase"] == "updated"
+	})
+	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the updated line on this workspace's strip", func(r harness.LogRecord) bool {
+		text, _ := r.Context["text"].(string)
+		return r.PID != d.PID() && r.Operation == "daemon.footer.activity_line_changed" &&
+			r.Context["kind"] == "update" && strings.Contains(text, "updated")
+	})
+}
+
+// ---- a failed deploy: the deploy_failed fault on the footer -----------------
+
+// footerFault answers the fault line on an idle strip, nil when none stands.
+func footerFault(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityFault {
+	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetFault()
+}
+
+func TestADeployWhoseBuildFailsStandsAsAFaultOnTheFooter(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+
+	// Act
+	resp, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil || resp.Msg.GetError().GetBuildFailed() == nil {
+		t.Fatalf("Deploy = (%v, %v), want the build_failed refusal", resp, err)
+	}
+
+	// Assert: the failure stands on the strip, naming its step and its words.
+	view := awaitFooter(t, f, footer, "the deploy_failed fault line", func(v *frontendv1.FooterView) bool {
+		return footerFault(v).GetKind() == "deploy_failed"
+	})
+	if detail := footerFault(view).GetDetail(); detail != "build: "+harness.FakeDeployBuildRefusal {
+		t.Fatalf("fault detail = %q, want the step and the build's own words", detail)
+	}
+}
+
+func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
+	t.Parallel()
+	// Arrange: a failed deploy's fault stands on the strip.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.d.StageDeployBuild(harness.DeployFails)
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
+	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+	awaitFooter(t, f, footer, "the deploy_failed fault line", func(v *frontendv1.FooterView) bool {
+		return footerFault(v).GetKind() == "deploy_failed"
+	})
+	f.d.StageDeployBuild(harness.DeployCurrent)
+
+	// Act
+	deployOutcomes(t, f.d, false)
+
+	// Assert: the fault comes down and the deploy ends its own story.
+	awaitFooter(t, f, footer, "the fault retracted", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil && footerFault(v) == nil
+	})
 }

@@ -67,6 +67,9 @@ type WriteResult struct {
 	// BashRows is the bash rows this write produced, ready for the WatchBashRun
 	// fan-out. A run's rows are published exactly as a book's lines are.
 	BashRows []BashRowWritten
+	// Locators is how many vendor task pairings this batch stated. A COUNT,
+	// like Shapes: a re-stated pairing is absorbed and still counts.
+	Locators int
 	// Shapes is how many residue shape observations this batch folded into the
 	// catalog. A COUNT and not a list: the store's answer is the same whichever
 	// row each landed on, and the producer already knows which hashes it sent.
@@ -160,8 +163,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 	}
 	entries := batch.GetEntries()
 	cursor := batch.GetCursorAdvance()
-	if len(entries) == 0 && cursor == nil && len(shapes) == 0 {
-		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance nor a shape observation"))
+	locators := batch.GetAgentLocators()
+	if len(entries) == 0 && cursor == nil && len(shapes) == 0 && len(locators) == 0 {
+		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance nor a shape observation nor an agent locator"))
 	}
 
 	// Validation first and whole, so a refusal names the offending entry
@@ -193,10 +197,23 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 			return result, d.refuse(base, err)
 		}
 	}
+	for i, locator := range locators {
+		if err := validateAgentLocator(locator, i); err != nil {
+			return result, d.refuse(base, err)
+		}
+	}
 
 	remaining := routes
 	for transaction := 1; ; transaction++ {
-		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes, batch.GetRetirements())
+		// THE PAIRINGS RIDE THE FIRST TRANSACTION, the one carrying the agent's
+		// first rows, so a lookup can answer from the moment any of them is
+		// durable. A later transaction's failure leaves them committed, and the
+		// re-read re-states them into the absorbing insert.
+		var first []*storev1.AgentLocator
+		if transaction == 1 {
+			first = locators
+		}
+		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes, first, batch.GetRetirements())
 		if err != nil {
 			if transaction > 1 {
 				// THE LEADING TRANSACTIONS STAY COMMITTED, and the record says so,
@@ -226,6 +243,7 @@ func (r *WriteResult) merge(part WriteResult) {
 	r.Shapes += part.Shapes
 	r.Restamped += part.Restamped
 	r.Retired += part.Retired
+	r.Locators += part.Locators
 }
 
 // writeTransaction commits ONE transaction of a batch: every remaining entry
@@ -234,7 +252,7 @@ func (r *WriteResult) merge(part WriteResult) {
 // advance only when it consumed the last of them. Its outcome is returned only
 // once it has COMMITTED; a rolled-back transaction contributes nothing.
 func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class WriteClass, transaction int, routes []routed,
-	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation, retirements []*storev1.StoreRetirement) (WriteResult, int, error) {
+	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation, locators []*storev1.AgentLocator, retirements []*storev1.StoreRetirement) (WriteResult, int, error) {
 	var result WriteResult
 	consumed := 0
 
@@ -302,6 +320,11 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	final := consumed == len(routes)
 
+	if err := d.applyAgentLocators(ctx, tx, locators, now); err != nil {
+		return WriteResult{}, 0, d.refuse(base, err)
+	}
+	result.Locators = len(locators)
+
 	if final {
 		// THE RETIREMENTS RIDE THE CURSOR ADVANCE'S TRANSACTION, AFTER EVERY
 		// ENTRY. A record's retirement and the rows it now converts to are one
@@ -336,8 +359,8 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
-	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d cursor_advance=%t final=%t",
-		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, final && cursor != nil, final)
+	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d locators=%d cursor_advance=%t final=%t",
+		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, result.Locators, final && cursor != nil, final)
 	return result, consumed, nil
 }
 
@@ -389,6 +412,24 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		result.Skipped = append(result.Skipped, *skip)
 		d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
 			skip.FromBook, skip.ToBook, r.index)
+		return nil
+	}
+
+	held, err := d.fileTerminalHeld(ctx, tx, r)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+	if held {
+		// THE TRANSCRIPT'S TERMINAL OUTRANKS THE STREAM'S (owner ruling
+		// 2026-09-27). The file plane's terminal carries the spool's exit code
+		// and output; the stream plane's says only that the run ended. The
+		// stored row is kept, this entry lands nothing (no upsert, no ledger
+		// row, no watcher row), and the writer is answered success: this is an
+		// expected precedence decision, not a fault.
+		result.Absorbed++
+		info := fields
+		info.Level = "info"
+		d.log.Log(info, "stream-plane bash terminal not applied: the row already holds the file plane's terminal, which outranks it entries_index=%d", r.index)
 		return nil
 	}
 
@@ -881,3 +922,32 @@ const upsertConversionSQL = `INSERT INTO cursor_conversion (file_id, version, he
   VALUES (?, ?, ?)
   ON CONFLICT(file_id) DO UPDATE SET
     version = excluded.version, healing_through = excluded.healing_through`
+
+// fileTerminalHeld reports whether r is a stream-plane bash TERMINAL arriving
+// at a row that already holds a file-plane terminal. That is the one
+// supersession the store refuses by plane: for a bash run's terminal the file
+// plane outranks the stream plane, never the reverse. Every other write —
+// any non-bash row, any non-terminal arm, a file-plane write, a stream write
+// over a stream-plane or non-terminal row — supersedes as usual.
+func (d *DB) fileTerminalHeld(ctx context.Context, tx *sql.Tx, r routed) (bool, error) {
+	if r.kind != kindBash || r.plane != planeStream || !BashRowIsTerminal(r.bashRow) {
+		return false, nil
+	}
+	var plane int64
+	var stored []byte
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT plane, frame FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&plane, &stored); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, storagef(err, "reading the plane of bash row %q", r.upsertKey)
+	}
+	if plane != planeFile {
+		return false, nil
+	}
+	entry := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(stored, entry); err != nil {
+		return false, storagef(err, "the stored frame of bash row %q cannot be decoded", r.upsertKey)
+	}
+	return BashRowIsTerminal(entry.GetAgentUpdate().GetBash()), nil
+}

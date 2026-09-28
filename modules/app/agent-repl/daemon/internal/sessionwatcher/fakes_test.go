@@ -874,6 +874,11 @@ func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how Turn
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnEnded", turn: &held, close: how})
 }
 
+func (s *lifecycleSink) OnTurnAdopted(_ ids.WorkspaceID, turn ids.TurnID) {
+	held := turn
+	s.rec.emit(event{sink: "lifecycle", method: "OnTurnAdopted", turn: &held})
+}
+
 func (s *lifecycleSink) OnTurnsEndedUnobserved(_ ids.WorkspaceID, turns []ids.TurnID) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnsEndedUnobserved", turns: append([]ids.TurnID(nil), turns...)})
 }

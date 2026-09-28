@@ -92,6 +92,16 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 				dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String()})
 			return
 		}
+		// A VENDOR-STARTED TURN'S PROMPT ROW IS AN EDGE, NOT WORDS. Nobody said
+		// anything: the shim wrote it only to open a turn the vendor began on
+		// its own, and what drove that turn (a hand-back, a task notification)
+		// is its own row. The turn opened above; no bubble is drawn.
+		if prompt.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED {
+			log.Debug("daemon.feed.vendor_started_prompt_suppressed",
+				"a vendor-started turn's prompt row opened its turn and drew no user-prompt bubble",
+				dlog.Context{"turn": turn.GetValue()})
+			return
+		}
 		if !placed {
 			return
 		}
@@ -286,6 +296,11 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		return "Resumed after restart"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED:
 		return "Workspace brief"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED:
+		// drawAgentPrompt draws no row for this origin; the label only keeps
+		// any other reader from naming the user as the author of a turn the
+		// vendor began on its own.
+		return "Vendor"
 	}
 	return "You"
 }

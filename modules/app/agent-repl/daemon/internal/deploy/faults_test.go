@@ -1,0 +1,298 @@
+package deploy
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"claude-repld/internal/health"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// failInstall makes the fresh daemon uninstallable: its live directory is
+// read-only.
+func failInstall(t *testing.T, h *harness) {
+	t.Helper()
+	dir := filepath.Dir(h.live.DaemonBin())
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// deployFault seeds a standing `deploy_failed` fault of one step.
+func deployFault(t *testing.T, h *harness, step string) ids.FaultID {
+	t.Helper()
+	failure := health.DeployFailure{Step: step, BuildStep: "webapp", Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "earlier"}
+	return h.faults.seed(t, wsm.Fault{Kind: health.KindDeployFailed, Evidence: failure.Evidence()})
+}
+
+// standingSteps names the step of every standing `deploy_failed` fault.
+func standingSteps(t *testing.T, h *harness) []string {
+	t.Helper()
+	var steps []string
+	for _, f := range h.faults.standing(t) {
+		if f.Kind == health.KindDeployFailed {
+			steps = append(steps, health.DeployFailureOf(f).Step)
+		}
+	}
+	return steps
+}
+
+func TestEachFailingStepOpensTheFaultNamingIt(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    health.DeployFailure
+	}{
+		{"a failed build names its step, its output and its log", func(t *testing.T, h *harness) {
+			h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc: 3 errors", Log: "/logs/build.log"}
+		}, health.DeployFailure{Step: health.DeployStepBuild, BuildStep: "webapp", Detail: "tsc: 3 errors", Log: "/logs/build.log"}},
+		{"a build that staged nothing names the artifact it could not hash", func(t *testing.T, h *harness) {
+			h.builder.build = artifacts{}
+			h.builder.stageNothing = true
+		}, health.DeployFailure{Step: health.DeployStepBuild, BuildStep: "shim"}},
+		{"a failed install names the component", func(t *testing.T, h *harness) {
+			failInstall(t, h)
+		}, health.DeployFailure{Step: health.DeployStepInstall, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON}},
+		{"a failed store restart names the store", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+			h.services.storeErr = errors.New("launchctl refused")
+		}, health.DeployFailure{Step: health.DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "launchctl refused"}},
+		{"a failed sidecar restart names the sidecar", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
+			h.services.sidecarErr = errors.New("bootstrap refused")
+		}, health.DeployFailure{Step: health.DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "bootstrap refused"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("Deploy succeeded, want the failure")
+			}
+			standing := h.faults.standing(t)
+			if len(standing) != 1 || standing[0].Kind != health.KindDeployFailed || standing[0].Workspace != nil {
+				t.Fatalf("standing faults = %+v, want one daemon-scoped deploy_failed", standing)
+			}
+			got := health.DeployFailureOf(standing[0])
+			if got.Step != tc.want.Step || got.BuildStep != tc.want.BuildStep || got.Component != tc.want.Component || got.Log != tc.want.Log {
+				t.Fatalf("recorded failure = %+v, want %+v", got, tc.want)
+			}
+			if tc.want.Detail != "" && got.Detail != tc.want.Detail {
+				t.Fatalf("recorded detail = %q, want %q", got.Detail, tc.want.Detail)
+			}
+			if !logged(h.log, "info", opFault, "recorded the failed deploy as a fault") {
+				t.Fatalf("records = %+v, want the open at INFO", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestALaterDeployThatGetsThroughTheStepClosesItsFault(t *testing.T) {
+	tests := []struct {
+		name string
+		step string
+	}{
+		{"the build", health.DeployStepBuild},
+		{"the install", health.DeployStepInstall},
+		{"the service restart", health.DeployStepRestartServices},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			id := deployFault(t, h, tc.step)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if !h.faults.closed[id] {
+				t.Fatalf("the %s fault still stands after a deploy got through it", tc.step)
+			}
+			if !logged(h.log, "info", opFault, "closed a standing deploy fault") {
+				t.Fatalf("records = %+v, want the close at INFO", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestAStepTheDeployNeverReachedKeepsItsFault(t *testing.T) {
+	// Arrange: an earlier install failed, and this deploy fails to build.
+	h := newHarness(t)
+	id := deployFault(t, h, health.DeployStepInstall)
+	h.builder.fail = &BuildFailed{Step: "proto", Detail: "protoc"}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the build failure")
+	}
+	if h.faults.closed[id] {
+		t.Fatalf("the install fault was closed by a deploy that never installed")
+	}
+	if got := standingSteps(t, h); len(got) != 2 {
+		t.Fatalf("standing steps = %v, want the install's and the build's", got)
+	}
+}
+
+func TestAStepThatFailsAgainSupersedesItsOwnFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	earlier := deployFault(t, h, health.DeployStepBuild)
+	h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc"}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the build failure")
+	}
+	if !h.faults.closed[earlier] {
+		t.Fatalf("the earlier build fault still stands beside the new one")
+	}
+	if got := standingSteps(t, h); len(got) != 1 {
+		t.Fatalf("standing steps = %v, want the one newest build fault", got)
+	}
+}
+
+func TestAFailureThatIsNoStepOpensNoFault(t *testing.T) {
+	// Arrange: the handover is refused after every step got through.
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.rollout.handErr = errors.New("the successor never proved it was serving")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Deploy succeeded, want the refused handover")
+	}
+	if got := h.faults.standing(t); len(got) != 0 {
+		t.Fatalf("standing faults = %+v, want none: a refused handover is the rollout's fault", got)
+	}
+}
+
+func TestAFailedDeployWhoseFaultCannotBeRecordedSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc"}
+	h.faults.openErr = errors.New("state client closed")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) {
+		t.Fatalf("Deploy = %v, want the build failure still the answer", err)
+	}
+	if !logged(h.log, "error", opFault, "could not record the failed deploy as a fault") {
+		t.Fatalf("records = %+v, want the unrecorded fault at ERROR", h.log.Records())
+	}
+}
+
+func TestAStandingFaultThatCannotBeReadSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.faults.readErr = errors.New("state client closed")
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if !logged(h.log, "error", opFault, "could not read the standing deploy faults to close them") {
+		t.Fatalf("records = %+v, want the unreadable faults at ERROR", h.log.Records())
+	}
+}
+
+func TestAStandingFaultThatCannotBeClosedSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id := deployFault(t, h, health.DeployStepBuild)
+	h.faults.closeErr = errors.New("state client closed")
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if h.faults.closed[id] {
+		t.Fatalf("a close that failed closed the fault")
+	}
+	if !logged(h.log, "error", opFault, "could not close a standing deploy fault") {
+		t.Fatalf("records = %+v, want the failed close at ERROR", h.log.Records())
+	}
+}
+
+func TestABootingDaemonClosesEveryDeployFaultAnEarlierOneLeft(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	build := deployFault(t, h, health.DeployStepBuild)
+	install := deployFault(t, h, health.DeployStepInstall)
+	other := h.faults.seed(t, wsm.Fault{Kind: health.KindSuccessorSpawnFailed})
+
+	// Act
+	h.d.CloseEarlierFailures(context.Background())
+
+	// Assert
+	if !h.faults.closed[build] || !h.faults.closed[install] {
+		t.Fatalf("closed = %v, want both deploy faults closed", h.faults.closed)
+	}
+	if h.faults.closed[other] {
+		t.Fatalf("a fault of another kind was closed")
+	}
+}
+
+func TestAWorkspaceScopedDeployFaultIsNotTheDeploys(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := ids.WorkspaceID("ws-a")
+	id := h.faults.seed(t, wsm.Fault{Kind: health.KindDeployFailed, Workspace: &ws,
+		Evidence: health.DeployFailure{Step: health.DeployStepBuild}.Evidence()})
+
+	// Act
+	h.d.CloseEarlierFailures(context.Background())
+
+	// Assert
+	if h.faults.closed[id] {
+		t.Fatalf("a workspace-scoped fault was closed as the deploy's")
+	}
+}
+
+func TestNewRefusesAMissingFaultRecorder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.d.deps
+	deps.Faults = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a Deployer with no fault recorder")
+	}
+}

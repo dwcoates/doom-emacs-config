@@ -2207,3 +2207,194 @@ func TestRouteRetiredPointerIsNotAdoptedAsTheMark(t *testing.T) {
 		t.Fatalf("main mark = %q, want the retired row's old pointer never adopted", got)
 	}
 }
+
+// THE VENDOR-STARTED TURN. The vendor runs turns nobody submitted (a
+// subagent's hand-back, a task notification); the shim adopts each and opens
+// it with a PROMPT_ORIGIN_VENDOR_STARTED prompt row, the one statement anywhere
+// that the turn opened. These tests hold the watcher to taking it up.
+
+// vendorPrompt is the vendor-started prompt row the shim writes as a turn's
+// first.
+func vendorPrompt(turn, agent string) *conversationv1.AgentPrompt {
+	return &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: turn},
+		Agent:  agentID(agent),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	}
+}
+
+// entryVendorPrompt wraps a vendor-started prompt row as one live entry.
+func entryVendorPrompt(turn, agent string) *shimv1.WatchAgentResponse {
+	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{
+		Entry: &conversationv1.HistoryEntryAt{
+			At: &conversationv1.HistoryPointer{Value: "ptr-" + turn},
+			Entry: &conversationv1.HistoryEntry{
+				Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: vendorPrompt(turn, agent)},
+			},
+		},
+	}}
+}
+
+// adoptionHarness is a watcher whose session runs no turn and whose main agent
+// is already named, so a routed prompt provokes only what the adoption does.
+func adoptionHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	return h
+}
+
+func TestAVendorStartedPromptStandsItsTurnInFlight(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-v" {
+		t.Fatalf("turn in flight = %v, want turn-v", turn)
+	}
+}
+
+func TestAVendorStartedPromptTellsEveryTurnOpenObserver(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	got := h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert: the views take the open edge under the lock, the feed draws the
+	// row, and the queue is told off the lock.
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnPrompt", "lifecycle.OnTurnAdopted"})
+	adopted := requireEvent(t, got, "lifecycle.OnTurnAdopted")
+	if adopted.turn == nil || *adopted.turn != "turn-v" {
+		t.Fatalf("adopted turn = %v, want turn-v", adopted.turn)
+	}
+}
+
+func TestAVendorStartedAdoptionIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.sessionwatcher.turn_adopted") {
+		t.Fatal("the adoption has no info record")
+	}
+}
+
+func TestAVendorStartedPromptServedAgainAdoptsNothingMore(t *testing.T) {
+	// Arrange: the turn was already taken up once.
+	h := adoptionHarness(t)
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Act.
+	got := h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnPrompt"})
+}
+
+func TestAVendorStartedPromptReServedAfterItsTurnEndedStandsNothing(t *testing.T) {
+	// Arrange: the adopted turn ran to its terminal.
+	h := adoptionHarness(t)
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+	h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-turn-v-terminal"))
+
+	// Act: the store's re-opened watch serves the row again.
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none: a re-served row stands nothing back up", *turn)
+	}
+}
+
+func TestAVendorStartedPromptNamingNoTurnIsAnError(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.route(h.main, entryVendorPrompt("", "main-1"))
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_adopted_unidentified") {
+		t.Fatal("a vendor-started prompt naming no turn was not recorded at error")
+	}
+}
+
+func TestAVendorStartedPromptNamingNoTurnStandsNothing(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.route(h.main, entryVendorPrompt("", "main-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none", *turn)
+	}
+}
+
+func TestAVendorStartedPromptDisplacesATurnStillOpening(t *testing.T) {
+	// Arrange: the queue is handing a turn of its own to the shim, which will
+	// refuse it because the vendor's turn holds the slot.
+	h := adoptionHarness(t)
+	h.w.OnTurnOpening("ws-1", "turn-q")
+
+	// Act.
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-v" {
+		t.Fatalf("turn in flight = %v, want the vendor-started turn-v", turn)
+	}
+}
+
+func TestAVendorStartedPromptOnASubagentWatchStandsNothing(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.routeNow(func(w *watcher) {
+		w.routePromptLocked(&agentWatch{id: agentID("sub-1")}, vendorPrompt("turn-v", "sub-1"))
+	})
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none: only the main watch adopts", *turn)
+	}
+}
+
+func TestAnAdoptedTurnsTerminalEndsIt(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Act.
+	got := h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-turn-v-terminal"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-v" || ended.close != wsm.CloseCompleted {
+		t.Fatalf("turn ended = (%v, %v), want turn-v completed", ended.turn, ended.close)
+	}
+}
+
+func TestAnAdoptionIsHandedOverBeforeATurnEndOnTheSameFlush(t *testing.T) {
+	// Arrange: a turn short enough to open and end within one flush.
+	h := adoptionHarness(t)
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.pendingTurnEnds = append(w.pendingTurnEnds, endedTurn{turn: "turn-v", how: wsm.CloseCompleted})
+		w.pendingAdoptions = append(w.pendingAdoptions, ids.TurnID("turn-v"))
+	})
+
+	// Assert.
+	assertNames(t, got, []string{"lifecycle.OnTurnAdopted", "lifecycle.OnTurnEnded"})
+}

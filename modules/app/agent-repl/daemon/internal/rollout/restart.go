@@ -134,6 +134,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 	snapshot := make(map[ids.WorkspaceID]Participants, len(workspaces))
 	manifest := c.manifest(ctx, "", workspaces, snapshot)
 	manifest.Forced = force
+	manifest.Deploy = true
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		c.log.Error(opHandover, "the intent manifest could not be written; the restart is abandoned before anything was announced",
 			withCause(merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
@@ -213,5 +214,6 @@ func (c *controller) abandonRestart(ctx context.Context, plan *handoverPlan, cau
 	}
 	c.log.Error(opHandover, "the restart cannot finish; every workspace it stood down was taken back and this daemon keeps serving",
 		withCause(merge(fields, dlog.Context{"taken_back": len(moved)}), errors.Join(append([]error{cause}, failures...)...)))
+	c.clearDeployLine("the restart was abandoned", fields)
 	c.abandonHandover(ctx, plan.slot, fields, cause)
 }

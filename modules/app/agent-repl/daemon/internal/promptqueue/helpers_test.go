@@ -67,6 +67,8 @@ type fakeDB struct {
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
 	closeTurnErrs map[ids.TurnID]error
+	// putTurnErr fails every turn-row write.
+	putTurnErr error
 	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
 	orphansErr error
 	claimErr   error
@@ -269,6 +271,9 @@ func (d *fakeDB) AllHeldPrompts(context.Context) ([]wsm.HeldPrompt, error) {
 func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.putTurnErr != nil {
+		return d.putTurnErr
+	}
 	copied := t
 	d.turns[t.ID] = &copied
 	return nil
@@ -954,6 +959,9 @@ type harness struct {
 	reviveErr  error
 	reviveHook func()
 	noSession  bool
+	// clientReaped answers no client while the watcher stays: the shim a
+	// revival brought up has since died and been reaped.
+	clientReaped bool
 	// coldGate is the standing gate's own account, empty when no gate stands.
 	coldGate string
 
@@ -999,7 +1007,7 @@ func newHarness(t *testing.T) *harness {
 		Footer:  h.footer,
 		Sidebar: h.sidebar,
 		Holds:   h.holds,
-		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
 			h.revivals++
 			if h.reviveErr != nil {

@@ -2145,6 +2145,61 @@ func TestTurnEndedConcludedStampsTheAnsweringResponse(t *testing.T) {
 	}
 }
 
+// A TURN THE VENDOR STARTED ON ITS OWN IS A REAL TURN. The shim adopts it and
+// opens it with a VENDOR_STARTED prompt row: the daemon stands it in flight, a
+// prompt sent meanwhile is held behind it rather than started into it, and its
+// stamped terminal ends it through the ordinary path -- the concluded row names
+// the answering response, and only then is the held prompt delivered.
+func TestAVendorStartedTurnHoldsAPromptAndItsEndStampsTheAnsweringResponse(t *testing.T) {
+	t.Parallel()
+	// Arrange: the vendor starts a turn; a prompt is sent while it runs.
+	f := newOpened(t, harness.Opts{})
+	const vendorTurn = "turn-vendor-started"
+	tail := f.watchRootFeed()
+	holds := f.d.WatchHolds(f.ws)
+	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: vendorTurn},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record of the adopted turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
+	})
+	held := f.submit("the held prompt", "k-behind-vendor", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the prompt held for the vendor turn's end", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
+	})
+	if n := f.shim.Count(harness.RPCStartTurn); n != 0 {
+		t.Fatalf("StartTurn count = %d while the vendor turn runs, want the prompt held", n)
+	}
+	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-vendor-answer"),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "the hand-back is in"}},
+		}}},
+	}))
+	answer := awaitRow(t, f, tail, "the vendor turn's answering response", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetResponse().GetSuccess() != nil })
+
+	// Act
+	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, successFrame(mainAgent, activityID("resp-vendor-answer")))
+
+	// Assert: the turn's end marks and names its answer, and the held prompt
+	// goes next.
+	awaitRow(t, f, tail, "the answering response marked as the final answer", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == answer.GetId().GetValue() && r.GetActivity().GetResponse().GetFinalAnswer()
+	})
+	terminal := awaitRow(t, f, tail, "the vendor turn's terminal row", func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetConcluded() != nil })
+	if terminal.GetTurn().GetValue() != vendorTurn {
+		t.Fatalf("terminal row turn = %q, want %q", terminal.GetTurn().GetValue(), vendorTurn)
+	}
+	if terminal.GetTurnEnded().GetConcluded().GetAnswer().GetValue() != answer.GetId().GetValue() {
+		t.Fatalf("the concluded terminal's answer = %v, want it to name the answering response %v", terminal.GetTurnEnded().GetConcluded().GetAnswer(), answer.GetId())
+	}
+	if got := text(f.shim.ExpectStartTurn().GetSaid()); got != "the held prompt" {
+		t.Fatalf("the StartTurn after the vendor turn said %q, want the held prompt", got)
+	}
+}
+
 // A TERMINAL ENDS THE TURN ITS STAMP NAMES. A stray terminal stamped with a
 // turn nobody opened arrives first; it must not end the open turn, and the
 // open turn's own stamped terminal is the one that draws its end.

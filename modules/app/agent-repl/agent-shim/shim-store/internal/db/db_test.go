@@ -520,6 +520,36 @@ func TestOpenRecordsASupersededSchemaVersionAtInfo(t *testing.T) {
 	}
 }
 
+func TestOpenRecreatesAVersionSevenDatabaseWithTheVendorTaskTable(t *testing.T) {
+	// Arrange: the shape version 7 shipped — every table but vendor_task, and
+	// its stamp. The locator pairing is a shape change, so such a database is
+	// nuked and recreated rather than altered.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(`DROP TABLE vendor_task; UPDATE schema_meta SET version = 7`); err != nil {
+		t.Fatalf("reshaping to version 7: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+
+	// Act
+	s, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	s.assertLogged(t, "info", "found version=7")
+	if got := scalar[int](t, second, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vendor_task'`); got != 1 {
+		t.Fatalf("vendor_task tables = %d, want 1 after the recreate", got)
+	}
+}
+
 func TestOpenNamesBothVersionsWhenItReplacesASupersededSchema(t *testing.T) {
 	// Arrange: the operator's question at a nuke is "from what, to what". The
 	// live record said neither until it did (found version=5, want version=6).

@@ -82,6 +82,21 @@ func TestFaultFooterCellPartitionsEveryDaemonKind(t *testing.T) {
 	}
 }
 
+// TestFaultFooterCellLeavesTheStatusToAFailedDeploy: the daemon that ran the
+// deploy keeps serving, so the fault claims the activity line alone.
+func TestFaultFooterCellLeavesTheStatusToAFailedDeploy(t *testing.T) {
+	// Arrange, Act
+	got, ok := FaultFooterCell(KindDeployFailed, true)
+
+	// Assert
+	if !ok {
+		t.Fatalf("FaultFooterCell(%q, daemon) has no footer cell", KindDeployFailed)
+	}
+	if got != (FaultCell{}) {
+		t.Fatalf("FaultFooterCell(%q, daemon) = %+v, want the non-escalating cell", KindDeployFailed, got)
+	}
+}
+
 // TestFaultFooterCellRefusesTheAccountingKind is the one kind that draws
 // nothing, and the reason it draws nothing.
 func TestFaultFooterCellRefusesTheAccountingKind(t *testing.T) {
@@ -105,6 +120,21 @@ func TestFaultLineDetailReadsTheStartFailureFromItsEvidence(t *testing.T) {
 
 	// Assert
 	if want := "exit 127: two"; got != want {
+		t.Fatalf("FaultLineDetail = %q, want %q", got, want)
+	}
+}
+
+func TestFaultLineDetailNamesTheDeployStepThatFailed(t *testing.T) {
+	// Arrange
+	f := wsm.Fault{Kind: KindDeployFailed, Detail: "prose", Evidence: DeployFailure{
+		Step: DeployStepBuild, BuildStep: "webapp", Detail: "first\nerror TS2322\n",
+	}.Evidence()}
+
+	// Act
+	got := FaultLineDetail(f)
+
+	// Assert
+	if want := "build webapp: error TS2322"; got != want {
 		t.Fatalf("FaultLineDetail = %q, want %q", got, want)
 	}
 }

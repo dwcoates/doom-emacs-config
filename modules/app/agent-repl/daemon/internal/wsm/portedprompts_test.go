@@ -2,7 +2,9 @@ package wsm
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestPutPortedPromptsRoundTripsTheConversation(t *testing.T) {
@@ -133,6 +135,103 @@ func TestConversationPromptsNumbersTheOrdinalsContiguouslyFromZero(t *testing.T)
 	}
 	if len(got) != 2 || got[0].Ordinal != 0 || got[1].Ordinal != 1 {
 		t.Fatalf("ConversationPrompts() ordinals = %d and %d, want 0 and 1", got[0].Ordinal, got[1].Ordinal)
+	}
+}
+
+func TestRecentConversationPromptsReturnsTheMostRecentNInOrder(t *testing.T) {
+	// Arrange — five of the workspace's own turns, each a distinct instant
+	// later than the last, so "most recent" is unambiguous.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	for i := 0; i < 5; i++ {
+		text := fmt.Sprintf("turn-%d", i)
+		at := instant.Add(time.Duration(i) * time.Minute)
+		if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Text: text, Origin: "webapp", StartedAt: at}); err != nil {
+			t.Fatalf("PutTurn(%s): %v", text, err)
+		}
+	}
+
+	// Act — ask for only the newest 3.
+	got, err := s.RecentConversationPrompts(context.Background(), ws.ID, 3)
+
+	// Assert — the three newest, oldest-first, ordinals renumbered from zero.
+	if err != nil {
+		t.Fatalf("RecentConversationPrompts: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("RecentConversationPrompts() = %+v, want 3 rows", got)
+	}
+	wantTexts := []string{"turn-2", "turn-3", "turn-4"}
+	for i, want := range wantTexts {
+		if got[i].Text != want || got[i].Ordinal != int64(i) {
+			t.Fatalf("RecentConversationPrompts()[%d] = %+v, want text %q ordinal %d", i, got[i], want, i)
+		}
+	}
+}
+
+func TestRecentConversationPromptsFillsFromInheritedWhenOwnIsShortOfTheLimit(t *testing.T) {
+	// Arrange — two inherited rows (the grandparent's) and one of the
+	// workspace's own turns; a limit of 2 must reach back into the inherited
+	// tail for the one row it is still short.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutPortedPrompts(context.Background(), ws.ID, []PortedPrompt{
+		{Workspace: ws.ID, Turn: NewTurnID(), Ordinal: 0, Text: "grandparent-older", Origin: "webapp", StartedAt: instant},
+		{Workspace: ws.ID, Turn: NewTurnID(), Ordinal: 1, Text: "grandparent-newer", Origin: "webapp", StartedAt: instant.Add(time.Minute)},
+	}); err != nil {
+		t.Fatalf("PutPortedPrompts: %v", err)
+	}
+	if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Text: "mine", Origin: "webapp", StartedAt: instant.Add(2 * time.Minute)}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act.
+	got, err := s.RecentConversationPrompts(context.Background(), ws.ID, 2)
+
+	// Assert — the newest inherited row, then the workspace's own.
+	if err != nil {
+		t.Fatalf("RecentConversationPrompts: %v", err)
+	}
+	if len(got) != 2 || got[0].Text != "grandparent-newer" || got[1].Text != "mine" {
+		t.Fatalf("RecentConversationPrompts() = %+v, want the newest inherited row before the workspace's own", got)
+	}
+	if got[0].Ordinal != 0 || got[1].Ordinal != 1 {
+		t.Fatalf("RecentConversationPrompts() ordinals = %d and %d, want 0 and 1", got[0].Ordinal, got[1].Ordinal)
+	}
+}
+
+func TestRecentConversationPromptsNeverNarrowsWhatConversationPromptsAnswers(t *testing.T) {
+	// Arrange — more of the workspace's own turns than the bounded limit this
+	// test asks for, so ConversationPrompts (what a fork PORTS) and
+	// RecentConversationPrompts (what the naming digest reads) can be told
+	// apart by their row counts.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	for i := 0; i < 4; i++ {
+		text := fmt.Sprintf("turn-%d", i)
+		at := instant.Add(time.Duration(i) * time.Minute)
+		if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Text: text, Origin: "webapp", StartedAt: at}); err != nil {
+			t.Fatalf("PutTurn(%s): %v", text, err)
+		}
+	}
+
+	// Act.
+	all, err := s.ConversationPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("ConversationPrompts: %v", err)
+	}
+	bounded, err := s.RecentConversationPrompts(context.Background(), ws.ID, 2)
+	if err != nil {
+		t.Fatalf("RecentConversationPrompts: %v", err)
+	}
+
+	// Assert — a fork's port still reads the WHOLE conversation; only the
+	// bounded reader is truncated.
+	if len(all) != 4 {
+		t.Fatalf("ConversationPrompts() = %+v, want every turn a fork inherits", all)
+	}
+	if len(bounded) != 2 {
+		t.Fatalf("RecentConversationPrompts() = %+v, want the bounded 2", bounded)
 	}
 }
 

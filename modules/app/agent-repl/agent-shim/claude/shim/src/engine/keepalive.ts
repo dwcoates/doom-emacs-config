@@ -277,7 +277,7 @@ function answeredSends(message: SdkMessage): readonly string[] | undefined {
 }
 
 /** A frame that is a turn's REPLY rather than its preamble: the vendor stamps the first of these. */
-function isTopLevelReply(message: SdkMessage): boolean {
+export function isTopLevelReply(message: SdkMessage): boolean {
   if (message.type === "assistant") return message.parent_tool_use_id === null;
   // Every declared stream event is a reply frame: the SDK's event union has no
   // `ping` arm, which is the one kind the vendor leaves unstamped.

@@ -41,7 +41,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/store.proto.
  */
 export const file_store_v1_store: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEitgIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBAUIHCgVlbnRyeUIHCgVfdHVybkIVChNfY29udmVyc2lvbl92ZXJzaW9uIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSKqAQoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoLcmV0aXJlbWVudHMYAyADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnRCEQoPX2N1cnNvcl9hZHZhbmNlIkEKD1N0b3JlUmV0aXJlbWVudBISCgp1cHNlcnRfa2V5GAEgASgJEhoKEmNvbnZlcnNpb25fdmVyc2lvbhgCIAEoDSKPAQoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDBIzCgpjb252ZXJzaW9uGAUgASgLMhouc3RvcmUudjEuQ3Vyc29yQ29udmVyc2lvbkgAiAEBQg0KC19jb252ZXJzaW9uIpgBChBDdXJzb3JDb252ZXJzaW9uEg8KB3ZlcnNpb24YASABKA0SNAoHY3VycmVudBgCIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25DdXJyZW50SAASNAoHaGVhbGluZxgDIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IZWFsaW5nSABCBwoFc3RhdGUiGQoXQ3Vyc29yQ29udmVyc2lvbkN1cnJlbnQiKgoXQ3Vyc29yQ29udmVyc2lvbkhlYWxpbmcSDwoHdGhyb3VnaBgBIAEoAyIhChBTdG9yZUl0ZW1Qb2ludGVyEg0KBXZhbHVlGAEgASgJIpEBCgtTdG9yZUxpbmVBdBImCgJhdBgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXISJQoEbGluZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmUSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBAUIHCgVfdHVybiJCChFSZWFkQWdlbnRQYWdlTW9yZRItCglsYXN0X2l0ZW0YASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyIhQKElJlYWRBZ2VudFBhZ2VGbG9vciIiChFBZ2VudFNlc3Npb25Ub2tlbhINCgV2YWx1ZRgBIAEoCSKgAQoQQWdlbnRTZXNzaW9uUGFnZRIkCgVsaW5lcxgBIAMoCzIVLnN0b3JlLnYxLlN0b3JlTGluZUF0EisKBG1vcmUYAiABKAsyGy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlTW9yZUgAEi0KBWZsb29yGAMgASgLMhwuc3RvcmUudjEuUmVhZEFnZW50UGFnZUZsb29ySABCCgoIYm91bmRhcnlCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEitgIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBAUIHCgVlbnRyeUIHCgVfdHVybkIVChNfY29udmVyc2lvbl92ZXJzaW9uIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSLaAQoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnRCEQoPX2N1cnNvcl9hZHZhbmNlIk8KDEFnZW50TG9jYXRvchIWCg52ZW5kb3JfdGFza19pZBgBIAEoCRInCgVhZ2VudBgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIkEKD1N0b3JlUmV0aXJlbWVudBISCgp1cHNlcnRfa2V5GAEgASgJEhoKEmNvbnZlcnNpb25fdmVyc2lvbhgCIAEoDSKPAQoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDBIzCgpjb252ZXJzaW9uGAUgASgLMhouc3RvcmUudjEuQ3Vyc29yQ29udmVyc2lvbkgAiAEBQg0KC19jb252ZXJzaW9uIpgBChBDdXJzb3JDb252ZXJzaW9uEg8KB3ZlcnNpb24YASABKA0SNAoHY3VycmVudBgCIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25DdXJyZW50SAASNAoHaGVhbGluZxgDIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IZWFsaW5nSABCBwoFc3RhdGUiGQoXQ3Vyc29yQ29udmVyc2lvbkN1cnJlbnQiKgoXQ3Vyc29yQ29udmVyc2lvbkhlYWxpbmcSDwoHdGhyb3VnaBgBIAEoAyIhChBTdG9yZUl0ZW1Qb2ludGVyEg0KBXZhbHVlGAEgASgJIpEBCgtTdG9yZUxpbmVBdBImCgJhdBgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXISJQoEbGluZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmUSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBAUIHCgVfdHVybiJCChFSZWFkQWdlbnRQYWdlTW9yZRItCglsYXN0X2l0ZW0YASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyIhQKElJlYWRBZ2VudFBhZ2VGbG9vciIiChFBZ2VudFNlc3Npb25Ub2tlbhINCgV2YWx1ZRgBIAEoCSKgAQoQQWdlbnRTZXNzaW9uUGFnZRIkCgVsaW5lcxgBIAMoCzIVLnN0b3JlLnYxLlN0b3JlTGluZUF0EisKBG1vcmUYAiABKAsyGy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlTW9yZUgAEi0KBWZsb29yGAMgASgLMhwuc3RvcmUudjEuUmVhZEFnZW50UGFnZUZsb29ySABCCgoIYm91bmRhcnlCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * One write: a conversation.v1 fact inside the storage envelope.
@@ -69,6 +69,14 @@ export type StoreEntry = Message<"store.v1.StoreEntry"> & {
    * this write supersedes it whole. Opaque to the store — the producer maps
    * it (a prompt's TurnId, a unit's activity id, a run's id); the store has
    * exactly one place it looks, never a per-kind rule.
+   *
+   * ONE EXCEPTION (owner ruling 2026-09-27): a bash run's TERMINAL row
+   * (StoreAgentBash whose frame is `success` or `failure`) held from the FILE
+   * plane is never superseded by a STREAM-plane terminal. The file plane's
+   * terminal carries the spool's exit code and output; the stream plane's says
+   * only that the run ended. The refused write is absorbed — answered success,
+   * nothing stored, nothing served — and a file-plane terminal still
+   * supersedes a stream-plane one.
    *
    * @generated from field: string upsert_key = 3;
    */
@@ -583,6 +591,22 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
   cursorAdvance?: CursorState | undefined;
 
   /**
+   * THE VENDOR TASK LOCATORS of the subagents these records book, each paired
+   * with the agent it names. The sidecar states one for every batch it reads
+   * from a subagent's transcript: the locator from the file's name, the agent
+   * from the spawning call its meta file states. Empty for every other batch,
+   * and always empty from the stream plane.
+   *
+   * IT RIDES THE SAME WRITE as the agent's rows, so the pairing is on record
+   * from the agent's first batch onward and GetAgentByVendorTask can answer
+   * for any agent that has ever run. Re-stating a pairing already on record is
+   * absorbed; the store keeps one row per (locator, agent).
+   *
+   * @generated from field: repeated store.v1.AgentLocator agent_locators = 3;
+   */
+  agentLocators: AgentLocator[];
+
+  /**
    * STORED ROWS THIS BATCH'S RECORDS NO LONGER CONVERT TO. Only the sidecar
    * sends any, and only while it re-reads a transcript whose rows an older
    * conversion produced (CursorConversionHealing): for each re-read record it
@@ -592,7 +616,7 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
    * one, so a re-read cut short never retires past the position it resumes
    * from.
    *
-   * @generated from field: repeated store.v1.StoreRetirement retirements = 3;
+   * @generated from field: repeated store.v1.StoreRetirement retirements = 4;
    */
   retirements: StoreRetirement[];
 };
@@ -603,6 +627,40 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
  */
 export const EntryBatchSchema: GenMessage<EntryBatch> = /*@__PURE__*/
   messageDesc(file_store_v1_store, 13);
+
+/**
+ * One subagent's vendor task locator, paired with the agent it names.
+ *
+ * THE LOCATOR IS NEVER THE AGENT. The vendor names a subagent's files and its
+ * task by `<id>` (`agent-<id>.jsonl`, `task_started.task_id`), while every
+ * plane books the agent under the `tool_use_id` of the call that spawned it
+ * (the cross-plane minting rule). This message is the one place the two are
+ * joined, and a consumer compares both for equality only.
+ *
+ * @generated from message store.v1.AgentLocator
+ */
+export type AgentLocator = Message<"store.v1.AgentLocator"> & {
+  /**
+   * The vendor's own `<id>`, verbatim. REQUIRED, non-empty.
+   *
+   * @generated from field: string vendor_task_id = 1;
+   */
+  vendorTaskId: string;
+
+  /**
+   * The agent the locator names. REQUIRED, non-empty.
+   *
+   * @generated from field: conversation.v1.AgentId agent = 2;
+   */
+  agent?: AgentId | undefined;
+};
+
+/**
+ * Describes the message store.v1.AgentLocator.
+ * Use `create(AgentLocatorSchema)` to create a new message.
+ */
+export const AgentLocatorSchema: GenMessage<AgentLocator> = /*@__PURE__*/
+  messageDesc(file_store_v1_store, 14);
 
 /**
  * One stored row a re-read record no longer converts to.
@@ -645,7 +703,7 @@ export type StoreRetirement = Message<"store.v1.StoreRetirement"> & {
  * Use `create(StoreRetirementSchema)` to create a new message.
  */
 export const StoreRetirementSchema: GenMessage<StoreRetirement> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 14);
+  messageDesc(file_store_v1_store, 15);
 
 /**
  * Where one file has been read to.
@@ -700,7 +758,7 @@ export type CursorState = Message<"store.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 15);
+  messageDesc(file_store_v1_store, 16);
 
 /**
  * The conversion bookkeeping of one file's cursor: the version its bytes were
@@ -759,7 +817,7 @@ export type CursorConversion = Message<"store.v1.CursorConversion"> & {
  * Use `create(CursorConversionSchema)` to create a new message.
  */
 export const CursorConversionSchema: GenMessage<CursorConversion> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 16);
+  messageDesc(file_store_v1_store, 17);
 
 /**
  * Nothing past the offset was converted under an older version.
@@ -774,7 +832,7 @@ export type CursorConversionCurrent = Message<"store.v1.CursorConversionCurrent"
  * Use `create(CursorConversionCurrentSchema)` to create a new message.
  */
 export const CursorConversionCurrentSchema: GenMessage<CursorConversionCurrent> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 17);
+  messageDesc(file_store_v1_store, 18);
 
 /**
  * A re-derivation of the file under CursorConversion.version is in progress.
@@ -797,7 +855,7 @@ export type CursorConversionHealing = Message<"store.v1.CursorConversionHealing"
  * Use `create(CursorConversionHealingSchema)` to create a new message.
  */
 export const CursorConversionHealingSchema: GenMessage<CursorConversionHealing> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 18);
+  messageDesc(file_store_v1_store, 19);
 
 /**
  * An opaque, store-minted position of one item in one book's order. Echoed
@@ -818,7 +876,7 @@ export type StoreItemPointer = Message<"store.v1.StoreItemPointer"> & {
  * Use `create(StoreItemPointerSchema)` to create a new message.
  */
 export const StoreItemPointerSchema: GenMessage<StoreItemPointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 19);
+  messageDesc(file_store_v1_store, 20);
 
 /**
  * One line, its position and its turn, so the caller always holds a reconnect
@@ -855,7 +913,7 @@ export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
  * Use `create(StoreLineAtSchema)` to create a new message.
  */
 export const StoreLineAtSchema: GenMessage<StoreLineAt> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 20);
+  messageDesc(file_store_v1_store, 21);
 
 /**
  * Older lines exist below this page.
@@ -876,7 +934,7 @@ export type ReadAgentPageMore = Message<"store.v1.ReadAgentPageMore"> & {
  * Use `create(ReadAgentPageMoreSchema)` to create a new message.
  */
 export const ReadAgentPageMoreSchema: GenMessage<ReadAgentPageMore> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 21);
+  messageDesc(file_store_v1_store, 22);
 
 /**
  * This page reached the oldest retained line.
@@ -891,7 +949,7 @@ export type ReadAgentPageFloor = Message<"store.v1.ReadAgentPageFloor"> & {
  * Use `create(ReadAgentPageFloorSchema)` to create a new message.
  */
 export const ReadAgentPageFloorSchema: GenMessage<ReadAgentPageFloor> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 22);
+  messageDesc(file_store_v1_store, 23);
 
 /**
  * The address of one opened reading session: an opaque, store-minted token —
@@ -912,7 +970,7 @@ export type AgentSessionToken = Message<"store.v1.AgentSessionToken"> & {
  * Use `create(AgentSessionTokenSchema)` to create a new message.
  */
 export const AgentSessionTokenSchema: GenMessage<AgentSessionToken> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 23);
+  messageDesc(file_store_v1_store, 24);
 
 /**
  * The opening page, newest first.
@@ -953,5 +1011,5 @@ export type AgentSessionPage = Message<"store.v1.AgentSessionPage"> & {
  * Use `create(AgentSessionPageSchema)` to create a new message.
  */
 export const AgentSessionPageSchema: GenMessage<AgentSessionPage> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 24);
+  messageDesc(file_store_v1_store, 25);
 
