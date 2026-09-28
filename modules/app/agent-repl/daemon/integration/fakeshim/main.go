@@ -405,7 +405,7 @@ func (p *process) apply(line []byte) Reply {
 		}
 		p.srv.rememberPushedBash(f)
 		p.srv.rememberPushedPermission(agent, f)
-		p.srv.settleTurn(agent, f)
+		p.srv.settleTurn(agent, cmd.Turn, f)
 		p.srv.agents.publish(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
@@ -418,6 +418,7 @@ func (p *process) apply(line []byte) Reply {
 		if agent == "" {
 			agent = prompt.GetAgent().GetValue()
 		}
+		p.srv.adoptTurn(agent, prompt)
 		p.srv.agents.publish(agentFrame{agent: agent, prompt: prompt})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
