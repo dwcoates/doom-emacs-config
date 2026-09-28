@@ -69,14 +69,14 @@ export const BUBBLE_VARIANTS = {
 } as const satisfies Record<ResponseVariant | PromptVariant, BubbleRole>;
 
 /**
- * A CAPPED bubble's collapsed line limit: the shared feed cap, one line (a held
- * prompt, a landed thinking bubble), or none past the header strip (a peer
- * message). Each kind states its limit itself, never through another kind's
+ * A CAPPED bubble's collapsed line limit: the shared feed cap, five lines (a
+ * user or subagent prompt), one line (a held prompt, a landed thinking bubble),
+ * or none past the header strip (a peer message). Each kind states its limit itself, never through another kind's
  * constant, so changing one kind's cap never moves another's. A closed set,
  * because the stylesheet maps each value to its line count
  * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
  */
-export type CappedLines = "feed" | 1 | 0;
+export type CappedLines = "feed" | 5 | 1 | 0;
 
 /**
  * THE UNCAPPED MODE (owner request, 2026-09-27): a bubble shown at its FULL
@@ -93,7 +93,7 @@ export const BUBBLE_UNCAPPED = "none";
 export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
 
 /** Every CAPPED value, each of which the stylesheet must map to a line count. */
-export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 1, 0];
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 5, 1, 0];
 
 /** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
 export function isCapped(cap: BubbleCapLines): cap is CappedLines {
@@ -123,6 +123,14 @@ export type BubbleMore = typeof BUBBLE_MORE_FADE | typeof BUBBLE_MORE_ELLIPSIS;
  * unrepresentable rather than drawn inexactly.
  */
 export const ELLIPSIS_CAP_LINES = 1 satisfies CappedLines;
+
+/**
+ * A user or subagent prompt's collapsed line limit (owner request, 2026-09-28):
+ * FIVE lines, far below the shared feed cap a response keeps, so a long prompt
+ * never pushes its answer off the screen. Both prompt rows state it through
+ * this one constant, so the two cannot drift apart.
+ */
+export const PROMPT_CAP_LINES = 5 satisfies CappedLines;
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";
