@@ -81,6 +81,13 @@ type Manifest struct {
 	// for freeness, and the successor bounces the stale shims it adopts at once
 	// too, rather than registering them behind their work.
 	Forced bool `json:"forced"`
+	// Deploy records that a DEPLOY wrote this manifest: its handover or its
+	// layout restart. The successor that reads it is the one daemon left to
+	// finish the deploy's story on the footer (`updated`), because the
+	// outgoing daemon's streams end at the transfer. HandOver and Restart
+	// exist for the deploy alone, so both set it; a manifest an older daemon
+	// wrote carries none, and no line is drawn for it.
+	Deploy bool `json:"deploy"`
 	// Sessions is one record per session, in workspace order.
 	Sessions []ManifestSession `json:"sessions"`
 }
