@@ -212,17 +212,35 @@ func (d *Daemon) WatchRoster() *Stream[*frontendv1.WorkspaceRoster] {
 	return d.WatchRosterOn(d.Client())
 }
 
-// WatchRosterOn opens a roster stream on an explicit client, for the tests
-// whose subject is two independent subscribers.
-func (d *Daemon) WatchRosterOn(client interface {
+// rosterClient is what opens a roster stream.
+type rosterClient interface {
 	WatchWorkspaceRoster(context.Context, *connect.Request[agentreplv1.WatchWorkspaceRosterRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchWorkspaceRosterResponse], error)
-}) *Stream[*frontendv1.WorkspaceRoster] {
+}
+
+// WatchRosterOn opens a roster stream on an explicit client, for the tests
+// whose subject is two independent subscribers. It SELECTS the `roster` arm:
+// the planned-ending frame a stand-down sends last is not a roster, and never
+// reaches this channel as a nil one.
+func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.WorkspaceRoster] {
+	d.t.Helper()
+	return runStreamSelecting(d.t, d.ctx,
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchWorkspaceRosterResponse], error) {
+			return client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+		},
+		func(r *agentreplv1.WatchWorkspaceRosterResponse) (*frontendv1.WorkspaceRoster, bool) {
+			return r.GetRoster(), r.GetRoster() != nil
+		})
+}
+
+// WatchRosterFramesOn opens a roster stream on an explicit client and carries
+// every frame whole, the planned ending included.
+func (d *Daemon) WatchRosterFramesOn(client rosterClient) *Stream[*agentreplv1.WatchWorkspaceRosterResponse] {
 	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchWorkspaceRosterResponse], error) {
 			return client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
 		},
-		func(r *agentreplv1.WatchWorkspaceRosterResponse) *frontendv1.WorkspaceRoster { return r.GetRoster() })
+		func(r *agentreplv1.WatchWorkspaceRosterResponse) *agentreplv1.WatchWorkspaceRosterResponse { return r })
 }
 
 // WatchHost opens the workspace's host stream (Emacs's view) on the daemon's

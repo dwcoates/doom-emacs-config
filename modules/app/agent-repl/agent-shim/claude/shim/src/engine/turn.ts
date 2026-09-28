@@ -78,6 +78,12 @@ export interface OpenTurn {
   readonly id: conversationv1.TurnId;
   /** True when the shim opened this turn for its own keep-alive. */
   readonly keepalive: boolean;
+  /**
+   * True when the VENDOR started this turn on its own and the shim adopted it
+   * (`PromptOrigin.VENDOR_STARTED`): its id is the shim's, minted at adoption,
+   * and no StartTurn stands behind it. Otherwise a real turn in every respect.
+   */
+  readonly adopted?: boolean;
   readonly startedAtMs: number;
 }
 
@@ -604,6 +610,23 @@ export class TurnEngine {
     // the turn it just opened, and everything the turn goes on to produce
     // reaches it on its own WatchAgent.
     const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
+    // THE SLOT IS JUDGED AGAIN AFTER THE AWAITS. The vendor can start a turn of
+    // its own while this start writes its prompt row and reads its page, and
+    // the shim adopts that turn into the slot (engine/session.ts). Opening this
+    // turn over it would deliver the prompt into a running turn and rename that
+    // turn's rows mid-flight, so the start is refused exactly as if the adopted
+    // turn had been open when it arrived; nothing was delivered.
+    const adopted = this.session.openTurn();
+    if (adopted !== undefined) {
+      LOGGER.info(
+        { open_turn: adopted.id.value, requested_turn: requested, adopted: adopted.adopted === true },
+        "refused a StartTurn because the vendor started a turn of its own while it was being started",
+      );
+      return startTurnRefused(
+        { kind: "turnAlreadyOpen" },
+        `turn ${adopted.id.value} opened while turn ${requested} was being started; nothing was delivered`,
+      );
+    }
     this.session.setOpenTurn({ id: turn, keepalive: false, startedAtMs: this.session.nowMs() });
     try {
       await this.session.submit(said, false);

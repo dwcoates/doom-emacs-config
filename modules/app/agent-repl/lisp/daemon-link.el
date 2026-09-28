@@ -219,6 +219,12 @@ Nil when no bounce stands.  THE WHOLE CAUSE, not just its arm keyword:
 indicator names THAT reason rather than a fixed phrase for the arm — the
 arm alone would tell the user a drain is happening but never why.")
 
+(defvar agent-repl-link--ending-conn nil
+  "The connection whose `WatchDaemon' stream carried the planned ending, or nil.
+The daemon on it is standing down in a PLANNED exit and the frame was
+the stream\='s last (`DaemonStreamEnding'), so the clean end that follows
+is recorded at INFO rather than as a link that went down unannounced.")
+
 (defvar agent-repl-link--reconnect-timer nil
   "The pending reconnect timer, or nil when no reconnect is scheduled.")
 
@@ -398,6 +404,7 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
           agent-repl-link--pending-successor-stream nil
           agent-repl-link--quiet-until-ms nil
           agent-repl-link--bounce-cause nil
+          agent-repl-link--ending-conn nil
           agent-repl-link-drain nil)
     (dolist (conn conns) (agent-repl-connect-close conn)))
   (agent-repl-link--refresh-indicator))
@@ -480,6 +487,8 @@ the reconnect hooks would re-register a fleet that is already registered."
           agent-repl-link--primary-stream agent-repl-link--successor-stream
           agent-repl-link--successor nil
           agent-repl-link--successor-stream nil)
+    (when (eq agent-repl-link--ending-conn old)
+      (setq agent-repl-link--ending-conn nil))
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-promoted address=%S"
                       (agent-repl-connect-connection-address agent-repl-link--primary))
     ;; BEFORE the close, and BEFORE any consumer sees the old connection
@@ -495,7 +504,9 @@ the reconnect hooks would re-register a fleet that is already registered."
   "React to the `WatchDaemon' stream on CONN closing with OUTCOME.
 OUTCOME is connect.el's vocabulary: `(:cancelled)' is the client's own
 graceful close and means nothing here; `(:ended)' is a producer-side end
-of a STANDING stream, which the contract calls a transport failure; and
+of a STANDING stream, which the contract calls a transport failure unless
+the stream\='s last frame was the planned ending
+\(`agent-repl-link--ending-conn'), when the link goes down at INFO; and
 `(:error DETAIL)' is one already."
   (let ((kind (car outcome)))
     (cond
@@ -542,14 +553,28 @@ of a STANDING stream, which the contract calls a transport failure; and
       ;; The old daemon finished and dropped its stream after a handover.
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
       (agent-repl-link--promote-successor))
+     ((and (eq kind :ended) (eq conn agent-repl-link--ending-conn))
+      ;; THE DAEMON SAID SO FIRST: a planned stand-down with no successor to
+      ;; promote.  The same walk as an unannounced loss -- down hooks, then
+      ;; the reconnect loop that resolves the live daemon -- recorded at INFO.
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address=%S"
+                        (agent-repl-connect-connection-address conn))
+      (agent-repl-link--primary-down conn))
      (t
       (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome=%S address=%S" outcome
                         (agent-repl-connect-connection-address conn))
-      (setq agent-repl-link--primary nil
-            agent-repl-link--primary-stream nil)
-      (agent-repl-link--run-hook 'agent-repl-link-down-functions conn)
-      (agent-repl-connect-close conn)
-      (agent-repl-link--schedule-reconnect)))))
+      (agent-repl-link--primary-down conn)))))
+
+(defun agent-repl-link--primary-down (conn)
+  "Take the link down after the primary CONN\='s stream ended.
+The down hooks run, CONN is closed, and the reconnect loop resolves the
+live daemon afresh.  The caller has already recorded why."
+  (setq agent-repl-link--primary nil
+        agent-repl-link--primary-stream nil
+        agent-repl-link--ending-conn nil)
+  (agent-repl-link--run-hook 'agent-repl-link-down-functions conn)
+  (agent-repl-connect-close conn)
+  (agent-repl-link--schedule-reconnect))
 
 ;;;; ---- Pushes ----
 
@@ -568,6 +593,13 @@ of a STANDING stream, which the contract calls a transport failure; and
       ;; A deploy found this Emacs on older elisp.  elisp-build.el checks the
       ;; root and schedules the load OUT of this process filter.
       (:reload-elisp (agent-repl-elisp-reload-handle value))
+      ;; The daemon is standing down on purpose and this was the stream's
+      ;; last frame; `agent-repl-link--handle-close' reads the mark.
+      (:ending
+       (setq agent-repl-link--ending-conn conn)
+       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                         "elisp.link.stream-ending address=%S"
+                         (agent-repl-connect-connection-address conn)))
       (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm=%S push=%S"
                             arm push)))))
 

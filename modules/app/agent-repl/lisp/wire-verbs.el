@@ -2406,6 +2406,20 @@ unknown name are all contract breaches."
           :busy (agent-repl-wire--decode-uint32 message 'busy json)
           :forced (agent-repl-wire--decode-bool message 'forced json))))
 
+(defun agent-repl-wire-decode-deploy-restarting (json)
+  "Decode DeployRestarting from JSON.
+Returns (:running-state-layout N :fresh-state-layout N :workspaces N
+:busy N :forced B): a stop-then-start restart because the fresh build
+writes a different state layout than the running one."
+  (let ((message "DeployRestarting"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(runningStateLayout freshStateLayout workspaces busy forced))
+    (list :running-state-layout (agent-repl-wire--decode-uint32 message 'runningStateLayout json)
+          :fresh-state-layout (agent-repl-wire--decode-uint32 message 'freshStateLayout json)
+          :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
+          :busy (agent-repl-wire--decode-uint32 message 'busy json)
+          :forced (agent-repl-wire--decode-bool message 'forced json))))
+
 (defun agent-repl-wire-decode-deploy-bounced-now (json)
   "Decode DeployBouncedNow from JSON into (:forced B)."
   (let ((message "DeployBouncedNow"))
@@ -2476,6 +2490,10 @@ REQUIRED, and THE ARM IS WHEN, so an unset one is a breach."
   "Decode DeployComponentOutcome's `handing_over' arm from JSON."
   (agent-repl-wire-decode-deploy-handing-over json))
 
+(defun agent-repl-wire-decode-deploy-component-outcome-restarting (json)
+  "Decode DeployComponentOutcome's `restarting' arm from JSON."
+  (agent-repl-wire-decode-deploy-restarting json))
+
 (defun agent-repl-wire-decode-deploy-component-outcome-shims (json)
   "Decode DeployComponentOutcome's `shims' arm from JSON."
   (agent-repl-wire-decode-deploy-shim-bounces json))
@@ -2496,7 +2514,8 @@ unset one is a contract breach."
   (let ((message "DeployComponentOutcome"))
     (agent-repl-wire-verbs--check-keys
      message json
-     '(component build upToDate restarted handingOver shims reloadPushed deferredToSuccessor))
+     '(component build upToDate restarted handingOver shims reloadPushed deferredToSuccessor
+       restarting))
     (list :component (agent-repl-wire-decode-deploy-component message 'component json)
           :build (agent-repl-wire-verbs--decode-required-string message 'build json)
           :outcome
@@ -2513,7 +2532,9 @@ unset one is a contract breach."
                  (list 'reloadPushed :reload-pushed
                        #'agent-repl-wire-decode-deploy-component-outcome-reload-pushed)
                  (list 'deferredToSuccessor :deferred-to-successor
-                       #'agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor))))))
+                       #'agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor)
+                 (list 'restarting :restarting
+                       #'agent-repl-wire-decode-deploy-component-outcome-restarting))))))
 
 (defun agent-repl-wire-decode-deploy-success-components (json)
   "Decode DeploySuccess' `components' element from JSON."
@@ -2864,6 +2885,37 @@ oneof unset, which every consumer reads as a contract breach."
     (agent-repl-wire-verbs--check-keys message json '(cause))
     (list :cause (agent-repl-wire-verbs--decode-string message 'cause json))))
 
+(defun agent-repl-wire-decode-daemon-fault-deploy-failed-build (json)
+  "Decode DaemonFaultDeployFailed's `build' step arm from JSON as a
+`DeployBuildFailed'."
+  (agent-repl-wire-decode-deploy-build-failed json))
+
+(defun agent-repl-wire-decode-daemon-fault-deploy-failed-install (json)
+  "Decode DaemonFaultDeployFailed's `install' step arm from JSON as a
+`DeployInstallFailed'."
+  (agent-repl-wire-decode-deploy-install-failed json))
+
+(defun agent-repl-wire-decode-daemon-fault-deploy-failed-restart-services (json)
+  "Decode DaemonFaultDeployFailed's `restart_services' step arm from JSON as
+a `DeployServiceRestartFailed'."
+  (agent-repl-wire-decode-deploy-service-restart-failed json))
+
+(defun agent-repl-wire-decode-daemon-fault-deploy-failed (json)
+  "Decode DaemonFaultDeployFailed from JSON into (:step (:arm ARM :value V)).
+THE ARM IS THE STEP THAT FAILED, carrying the very refusal the Deploy rpc
+answered its caller with, so an unset step is a contract breach."
+  (let ((message "DaemonFaultDeployFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(build install restartServices))
+    (list :step
+          (agent-repl-wire-verbs--decode-oneof
+           message "step" json
+           (list (list 'build :build
+                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-build)
+                 (list 'install :install
+                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-install)
+                 (list 'restartServices :restart-services
+                       #'agent-repl-wire-decode-daemon-fault-deploy-failed-restart-services))))))
+
 (defun agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired (json)
   "Decode DaemonFault's `adoption_window_expired' kind arm from JSON as a
 `DaemonFaultAdoptionWindowExpired'."
@@ -2894,6 +2946,11 @@ oneof unset, which every consumer reads as a contract breach."
 `DaemonFaultDaemonStateUnreadable'."
   (agent-repl-wire-decode-daemon-fault-daemon-state-unreadable json))
 
+(defun agent-repl-wire-decode-daemon-fault-kind-deploy-failed (json)
+  "Decode DaemonFault's `deploy_failed' kind arm from JSON as a
+`DaemonFaultDeployFailed'."
+  (agent-repl-wire-decode-daemon-fault-deploy-failed json))
+
 (defun agent-repl-wire-decode-daemon-fault-kind (json)
   "Decode DaemonFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE KIND IS A TYPED ARM: `detail' carries only what prose must, so a
@@ -2905,12 +2962,13 @@ fault with no kind is a contract breach."
                  (list 'successorSpawnFailed :successor-spawn-failed #'agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed)
                  (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
                  (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
-                 (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable))))
+                 (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable)
+                 (list 'deployFailed :deploy-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-failed))))
 
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable deployFailed))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 

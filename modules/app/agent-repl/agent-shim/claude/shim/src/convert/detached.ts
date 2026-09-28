@@ -271,7 +271,10 @@ interface TaskFacts {
  *   reach this stream): the task's call is taken as its spawn, as the minting
  *   rule reads a task's `tool_use_id`, and the join is recorded.
  * - Otherwise the call is known NOT to be a spawn and no join names the agent —
- *   a resume of an agent this process never saw spawn. Refused, at ERROR: the
+ *   a resume of an agent this process never saw spawn. The engine has already
+ *   asked the STORE for the pairing by then ({@link taskAwaitingAgent}); a
+ *   found agent was remembered as the join above, so reaching here means the
+ *   store named none either. Refused, at ERROR, with the store's answer: the
  *   send's id is not the agent, and naming it as one would address a book
  *   nobody writes.
  */
@@ -294,13 +297,18 @@ function runningAgent(facts: TaskFacts, taskKinds: TaskKindRegistry): conversati
     taskKinds.rememberAgent(facts.taskId, agent);
     return agent;
   }
-  const detail = `the task's call ${facts.toolUseId} is a ${facts.call.toolName}, not a spawn, and no spawn of task ${facts.taskId} was seen by this process`;
+  // THE STORE WAS ASKED FIRST (engine: `taskAwaitingAgent`), and its answer is
+  // part of this record: a refusal the store could have prevented reads
+  // differently from one it could not.
+  const store = taskKinds.storeAnswerOf(facts.taskId) ?? "not asked";
+  const detail = `the task's call ${facts.toolUseId} is a ${facts.call.toolName}, not a spawn, no spawn of task ${facts.taskId} was seen by this process, and the store answered ${store}`;
   LOGGER.error(
     {
       uuid: facts.uuid,
       task_id: facts.taskId,
       tool_use_id: facts.toolUseId,
       tool: facts.call.toolName,
+      store_answer: store,
       detail,
     },
     "a subagent task started from a call that is not its spawn, and this process never saw the spawn; the running agent cannot be named and the announcement is refused",
@@ -757,6 +765,14 @@ export interface TaskKindRegistry {
   /** The agent remembered for a task, or `undefined` if this process never named one. */
   agentOf(taskId: string): conversationv1.AgentId | undefined;
   /**
+   * Remember what the STORE answered when asked which agent a task names, for
+   * a task it did not name one for — so the refusal that follows can say so.
+   * Forgotten with the task's other facts.
+   */
+  rememberStoreAnswer(taskId: string, answer: string): void;
+  /** The store's remembered answer for a task, or `undefined` if it was never asked. */
+  storeAnswerOf(taskId: string): string | undefined;
+  /**
    * Remember WHY a task's work left the turn.
    *
    * THE CAUSE IS STATED ONCE AND RESTATED NEVER. A shell's cause rides its own
@@ -843,6 +859,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       foreground?: boolean;
       owner?: conversationv1.AgentId;
       call?: PendingCall;
+      storeAnswer?: string;
     }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
@@ -881,6 +898,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     agentOf(taskId) {
       return agents.get(taskId);
+    },
+    rememberStoreAnswer(taskId, storeAnswer) {
+      reserve(facts, FACTS_LOST);
+      facts.set(taskId, { ...facts.get(taskId), storeAnswer });
+    },
+    storeAnswerOf(taskId) {
+      return facts.get(taskId)?.storeAnswer;
     },
     rememberCause(taskId, cause) {
       reserve(facts, FACTS_LOST);
@@ -926,6 +950,70 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       return true;
     },
   };
+}
+
+/** The task subtypes whose conversion names the agent a subagent task runs. */
+const AGENT_NAMING_SUBTYPES: ReadonlySet<string> = new Set(["task_started", "task_updated", "task_notification"]);
+
+/**
+ * THE TASK WHOSE AGENT THE STORE MUST NAME BEFORE THIS MESSAGE IS FOLDED, or
+ * `undefined` when the fold can name it itself (or need not name one at all).
+ *
+ * It is exactly the case {@link runningAgent} would otherwise refuse: a subagent
+ * task whose call is known and is NOT its spawn (a `SendMessage` that resumed
+ * it), with no join in this process naming the agent — a resume of an agent
+ * this process never saw spawn, typically because it restarted since. The
+ * engine awaits the store's answer and hands it back through
+ * {@link TaskKindRegistry.rememberAgent} / {@link TaskKindRegistry.rememberStoreAnswer}
+ * before folding, so the fold itself stays synchronous.
+ *
+ * A PURE READ of what the fold already holds: it records nothing, so asking it
+ * twice, or asking and then not folding, changes nothing.
+ */
+export function taskAwaitingAgent(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): string | undefined {
+  if (message.type !== "system") return undefined;
+  const raw = message as unknown as RawTask;
+  if (raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return undefined;
+  if (raw.skip_transcript === true) return undefined;
+  const taskId = raw.task_id;
+  if (typeof taskId !== "string" || taskId === "") return undefined;
+  if (taskKinds.agentOf(taskId) !== undefined) return undefined;
+  const known = context.liveTask(taskId);
+  const taskType = raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType;
+  if (taskKindOf(taskType) !== "subagent") return undefined;
+  const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
+  if (toolUseId === undefined || toolUseId === "") return undefined;
+  const call = calls.peek(toolUseId) ?? taskKinds.callOf(taskId);
+  if (call === undefined || isSpawnCall(call)) return undefined;
+  return taskId;
+}
+
+/** What the fold knows about WHICH AGENT one vendor task is running. */
+export type TaskAgentKnowledge =
+  /** The agent, by a join this process holds or by the task's own spawning call. */
+  | { readonly kind: "named"; readonly agent: conversationv1.AgentId }
+  /** The task started from a call known NOT to be its spawn, and nothing names its agent. */
+  | { readonly kind: "not_its_spawn" }
+  /** The fold holds nothing about this task's agent. */
+  | { readonly kind: "unknown" };
+
+/**
+ * Which agent a vendor task is running, AS THE FOLD KNOWS IT — the one answer
+ * every other reader of the pairing (the permission gate's book for an ask)
+ * takes, so the gate cannot credit a resumed agent's ask to the send that
+ * woke it.
+ */
+export function taskAgentKnowledge(taskKinds: TaskKindRegistry, taskId: string): TaskAgentKnowledge {
+  const joined = taskKinds.agentOf(taskId);
+  if (joined !== undefined) return { kind: "named", agent: joined };
+  const call = taskKinds.callOf(taskId);
+  if (call === undefined) return { kind: "unknown" };
+  return isSpawnCall(call) ? { kind: "named", agent: subagentId(call.toolUseId) } : { kind: "not_its_spawn" };
 }
 
 /** Every task-stream message. */

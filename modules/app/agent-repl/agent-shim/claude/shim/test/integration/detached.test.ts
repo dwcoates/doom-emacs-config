@@ -65,6 +65,7 @@ import {
 } from "../integration-support/store.js";
 import {
   awaitSpoolExit,
+  findSubagentLocatorByToolUseId,
   findSubagentMetaByToolUseId,
   readSpools,
   readTranscript,
@@ -1251,6 +1252,91 @@ describe("subagents", () => {
     expect(entryFrame(own)?.agentId?.value).toBe(created);
     stream.close();
     child.close();
+  });
+});
+
+describe("a subagent resumed by SendMessage after the shim restarted", () => {
+  /** The agent a subagent announcement names. */
+  const announcedAgent = (work: conversationv1.AgentDetachedWork): string =>
+    work.kind?.kind.case === "subagent" ? (work.kind.kind.value.agentId?.value ?? "") : "";
+
+  /**
+   * Spawn a background subagent in one shim, stop that shim, and hand the
+   * store the pairing the SIDECAR reads from the vendor's own files — the
+   * locator from the meta file's name, the agent from its spawning call.
+   */
+  async function spawnedThenRestarted(): Promise<{
+    first: Awaited<ReturnType<typeof spawnShim>>;
+    second: Awaited<ReturnType<typeof spawnShim>>;
+    spawned: string;
+    locator: string;
+  }> {
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached" }));
+    const spawned = announcedAgent(await awaitAnnouncement(stream));
+    stream.close();
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    const locator = findSubagentLocatorByToolUseId(first.dirs, started.vendorSessionId, spawned);
+    const store = createStoreClient(first.dirs.storeSocket);
+    const written = await store.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: sidecarProducer(started.vendorSessionId),
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "bulk", value: create(storev1.WriteClassBulkSchema, {}) },
+        }),
+        batch: create(storev1.EntryBatchSchema, {
+          agentLocators: [
+            create(storev1.AgentLocatorSchema, {
+              vendorTaskId: locator,
+              agent: create(conversationv1.AgentIdSchema, { value: spawned }),
+            }),
+          ],
+        }),
+      }),
+    );
+    if (written.result.case !== "success") throw new Error("the store refused the sidecar's pairing");
+    const second = await spawnShim({ reuse: first.dirs });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
+    return { first, second, spawned, locator };
+  }
+
+  test("the resume is announced with the agent its spawn created, named by the store", async () => {
+    // Arrange.
+    const { second, spawned, locator } = await spawnedThenRestarted();
+    const stream = await openAgentStream(second);
+
+    // Act.
+    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: `!subagent-resumed ${locator}` }));
+    const frame = await stream.until((f) => {
+      if (f.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(f))?.result;
+      return result?.case === "detachedWork" && result.value.work?.value !== spawned;
+    });
+    stream.close();
+
+    // Assert.
+    const result = entryFrame(watchAgentEntry(frame))?.result;
+    expect(result?.case === "detachedWork" ? announcedAgent(result.value) : "").toBe(spawned);
+  });
+
+  test("the restarted shim asks the store for the locator the resume names", async () => {
+    // Arrange: the store outlives the shim, as the launchd service does.
+    const { first, second, locator } = await spawnedThenRestarted();
+    const stream = await openAgentStream(second);
+
+    // Act.
+    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: `!subagent-resumed ${locator}` }));
+    await awaitAnnouncement(stream);
+    stream.close();
+
+    // Assert.
+    const asked = (first.store?.reads() ?? [])
+      .filter((read) => read.rpc === "GetAgentByVendorTask")
+      .map((read) => (read.request as storev1.GetAgentByVendorTaskRequest).vendorTaskId);
+    expect(asked).toEqual([locator]);
   });
 });
 

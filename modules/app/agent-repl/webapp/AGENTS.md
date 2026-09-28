@@ -106,6 +106,7 @@ and are contract on the same terms:
 | `data-held-action="release"` | the held card's release control | `release` — the wire verb and the hook; the control is LABELLED "Send now" (`SEND_NOW_LABEL`, src/tray/held-prompt.ts), which is also its accessible name, and its forbidding-arm tooltips (`NO_RELEASE_TITLES`) say "send", never "release" | send-now-label, 2026-09-23 |
 | `data-held-action="edit"` / `data-editing` / `data-held-status="editing"` | the held card's Edit control (between Send now and Cancel), the card while its entry carries `HeldPrompt.editing`, and that entry's `editing` status badge in the header strip | `edit`; `true` — absent when the daemon states no edit; the badge's tone is `HELD_STATUS_BADGES.editing` | edit-held-prompt, 2026-09-23 |
 | `.entry-selected` class (with `data-revealed` / `data-selected-response` on the row) | the CARD of the selected feed entry — the row's first element child (a bubble, a tool card, a detached bubble's fold), never the full-width `.feed-item` | — (the row states WHICH act selected it: `data-revealed` while a footer detached-work jump's landing stands, `data-selected-response` while the reply-to-a-past-response selection names it; `syncSelectedEntry` (src/feed/selected-entry.ts) derives the class from those facts, and the chrome mirror re-derives it after every body draw so a replaced card inherits it. The stylesheet draws an inset `--selected-response` outline, and on a final response turns its own border blue instead; the old `.row-revealed` bar and `.response-selected` class are gone) | selected-mark-on-card, 2026-09-23 |
+| `data-phase` + `.footer-activity-update` class | the footer activity line drawing a deploy's `FooterStatusActivityUpdate` | the phase arm's case name (`building`, `installing`, `restartingServices`, `handingOver`, `waiting`, `updated`); the waiting counts wear `data-datum="count"` | deploy-progress-in-footer, 2026-09-27 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
@@ -115,7 +116,21 @@ npm test                   the unit suites (vitest + jsdom)
 npm run typecheck          tsc over src/ AND test/, integration suite included
 npm run build              typecheck plus vite build
 npm run test:integration   the whole app against a loopback fake daemon
+npm run test:webkit        real headless WebKit over the real stylesheet (test/webkit/)
 ```
+
+`npm run test:webkit` (`vitest.webkit.config.ts`) is the suite for behavior
+jsdom cannot lay out, run in Playwright's headless WebKit, the Emacs webview's
+engine. `playwright-core` is a pinned devDependency (1.48.2, whose WebKit build
+is `webkit-2083`); a machine without that build fetches it once with
+`npx playwright-core install webkit`. Each test bundles a page entry
+(`test/webkit/*-page.ts`) into one classic script with vite and loads it with
+`src/styles.css` through `setContent`, with no server and no network. It is out
+of `npm test` because it takes seconds. Today it holds one file:
+`anchoring.webkit.test.ts`, which scrolls a fresh 400-row feed up 120 steps and
+asserts that no PAINTED frame moves the content under the reader. It samples in
+a ResizeObserver created after the feed's own, so it reads the layout the
+feed's corrections left, not a between-frames state no frame ever shows.
 
 The test and coverage scripts (and their `pre*` hooks) run through
 `../bin/background.sh`, at background priority; every vitest config imports
@@ -193,6 +208,17 @@ hand any more:
   what lifts it), and a push does NOT lift one: only a unary the daemon
   answered, or a stream that reads again, does. Nothing else in the webapp
   composes a footer cell, and no new arm was added to the proto for it.
+- **A PLANNED ENDING IS NOT A FAULT.** The daemon, roster and host streams
+  carry an `ending` arm (`DaemonStreamEnding`) a daemon standing down in a
+  planned exit sends as a stream's last frame. `watchStream`'s
+  `plannedEnding` recognizer (wired by the sidebar and the lifecycle's
+  `WatchDaemon`) consumes the frame before `onPush`, and a run that then ends
+  cleanly is logged at info (`rpc.stream-ended-planned`) and reopened at once
+  with NO `daemonUnreachable` filed. A clean end without it, or an error after
+  it, is the unreachable failure it always was. The daemon sends the frame on
+  its dedicated rpcs only; a page mux subscription is not given one (the
+  `WatchPage` stream has no ending arm), so today the page's own end still
+  reads as the failure.
 - **THE TOPBAR'S WARNING CHIP IS THE ONE PLACE AN ERROR IS SHOWN** (owner
   ruling, 2026-09-23). The chip and its dropdown (`src/topbar/warnings.ts`)
   are the canonical surface on which the webapp makes an error visible: no
@@ -207,17 +233,15 @@ hand any more:
   oneof, an unset non-optional message field, or an unknown arm is a
   `MalformedView` — never a default, never something else drawn instead. An
   absent `optional` field means draw nothing.
-- **ONE VIEWED MODE.** `ViewedRegistry` (src/sidebar/viewed.ts) decides every
+- **ONE VIEWED MODE.** `viewedMode` (src/sidebar/viewed.ts) decides every
   row's FULL/PARTIAL display mode, and nothing else reads `RosterRowViewed`. In
   PARTIAL the row's NAME greys to `--muted` and NOTHING else changes — the
-  status dot keeps its tone. It is the ONE deliberate piece of memory in the
-  stateless renderer: it remembers the status arm it last drew per workspace,
-  so that a row whose arm CHANGED is drawn FULL even while the wire still
-  carries the marker. That rule is the daemon's own (it clears the marker on
-  the same edge) and the Emacs tab-bar's; the three may never disagree, and the
-  module-root AGENTS.md section "The viewed mode" owns the invariant. The pass
-  is bracketed like the blink pass, because both groupings draw every row and
-  the two copies must resolve identically.
+  status dot keeps its tone. It reads the wire's marker and nothing else: the
+  daemon derives the marker from the workspace's read-result fact in the same
+  render that resolves the status, so a status change never overrides it (a
+  read turn end returning from `idle_async` arrives PARTIAL on that very push).
+  The module-root AGENTS.md section "The viewed mode" owns the cross-surface
+  invariant.
 - **ONE REFUSAL HOOK.** `src/rpc/refuse.ts`. `refusalOf` for a call site that
   words its own refusal, `drawTypedRefusal` for one that lets the hook draw it,
   `crossCuttingSentence` for one that composes its own sentence — all three
@@ -373,7 +397,18 @@ hand any more:
   viewport top-aligned, clamped at the feed's edges), and a reveal opens only
   the containers selecting the row requires. `prependCompensation` also covers
   a bubble whose sub-feed lies wholly above the viewport collapsing (a
-  negative shift). The expanded footer's section is capped at
+  negative shift). THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27): WebKit has
+  no native CSS scroll anchoring, and every `.feed-item` is
+  `content-visibility: auto`, so a row above the reader changes height when it
+  is first laid out. `TailFollow` holds one anchor, the first root row that
+  starts in view (`feedAnchorRows`), at its top in content coordinates. On every
+  size change and scroll event it measures that anchor BEFORE re-taking it, and
+  shifts by however far it moved (`prependCompensation`). The prepend,
+  sub-feed-collapse and thinking-collapse compensations are the same pass
+  (`compensate`), and a tail-following reader holds no anchor. Each correction
+  is DEBUG `scroll.anchor-corrected` (cause, trigger, delta, anchor). A height
+  change off the tail with no row to anchor on is ERROR `scroll.anchor-missing`.
+  `npm run test:webkit` is its regression test. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.
@@ -467,6 +502,7 @@ npm run lint             # eslint, type-aware, over src/, test/ and the root con
 npm run typecheck        # tsc over src/ and test/
 npm test                 # the unit suite (un-isolated; see vitest.config.ts)
 npm run test:integration # the whole app under jsdom against the fake daemon
+npm run test:webkit      # real headless WebKit: scroll anchoring (see Commands)
 npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```
@@ -554,6 +590,7 @@ duration actually observed, never left at a tool default. Measured against
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
 | `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
+| webkit `hookTimeout` (`vitest.webkit.config.ts`) | 10000ms (default) | 90000ms | 29.4s (bundle, launch and the 120-step pass, all in `beforeAll`) | a real browser pass; the tests only read its result, so `testTimeout` stays 850ms |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
 **Every integration file that boots the app calls `bootColdOnce()` at its top

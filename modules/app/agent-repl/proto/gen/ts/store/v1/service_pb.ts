@@ -13,6 +13,8 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GetAgentByVendorTaskRequestSchema, GetAgentByVendorTaskResponseSchema } from "./endpoint_get_agent_by_vendor_task_pb";
+import { file_store_v1_endpoint_get_agent_by_vendor_task } from "./endpoint_get_agent_by_vendor_task_pb";
 import type { GetLiveWorkRequestSchema, GetLiveWorkResponseSchema } from "./endpoint_get_live_work_pb";
 import { file_store_v1_endpoint_get_live_work } from "./endpoint_get_live_work_pb";
 import type { GetSidecarCursorsRequestSchema, GetSidecarCursorsResponseSchema } from "./endpoint_get_sidecar_cursors_pb";
@@ -36,7 +38,7 @@ import { file_store_v1_endpoint_write_batch } from "./endpoint_write_batch_pb";
  * Describes the file store/v1/service.proto.
  */
 export const file_store_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTKGBgoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USTwoMV2F0Y2hCYXNoUnVuEh0uc3RvcmUudjEuV2F0Y2hCYXNoUnVuUmVxdWVzdBoeLnN0b3JlLnYxLldhdGNoQmFzaFJ1blJlc3BvbnNlMAESSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUxpc3RSZXNpZHVlU2hhcGVzEiIuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXF1ZXN0GiMuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXNwb25zZRJcChFHZXRTaWRlY2FyQ3Vyc29ycxIiLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVxdWVzdBojLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVzcG9uc2USSgoLR2V0TGl2ZVdvcmsSHC5zdG9yZS52MS5HZXRMaXZlV29ya1JlcXVlc3QaHS5zdG9yZS52MS5HZXRMaXZlV29ya1Jlc3BvbnNlEkcKCldyaXRlQmF0Y2gSGy5zdG9yZS52MS5Xcml0ZUJhdGNoUmVxdWVzdBocLnN0b3JlLnYxLldyaXRlQmF0Y2hSZXNwb25zZUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_list_residue_shapes, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_watch_bash_run, file_store_v1_endpoint_write_batch]);
+  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTLtBgoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USTwoMV2F0Y2hCYXNoUnVuEh0uc3RvcmUudjEuV2F0Y2hCYXNoUnVuUmVxdWVzdBoeLnN0b3JlLnYxLldhdGNoQmFzaFJ1blJlc3BvbnNlMAESSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUxpc3RSZXNpZHVlU2hhcGVzEiIuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXF1ZXN0GiMuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXNwb25zZRJcChFHZXRTaWRlY2FyQ3Vyc29ycxIiLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVxdWVzdBojLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVzcG9uc2USSgoLR2V0TGl2ZVdvcmsSHC5zdG9yZS52MS5HZXRMaXZlV29ya1JlcXVlc3QaHS5zdG9yZS52MS5HZXRMaXZlV29ya1Jlc3BvbnNlEmUKFEdldEFnZW50QnlWZW5kb3JUYXNrEiUuc3RvcmUudjEuR2V0QWdlbnRCeVZlbmRvclRhc2tSZXF1ZXN0GiYuc3RvcmUudjEuR2V0QWdlbnRCeVZlbmRvclRhc2tSZXNwb25zZRJHCgpXcml0ZUJhdGNoEhsuc3RvcmUudjEuV3JpdGVCYXRjaFJlcXVlc3QaHC5zdG9yZS52MS5Xcml0ZUJhdGNoUmVzcG9uc2VCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_store_v1_endpoint_get_agent_by_vendor_task, file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_list_residue_shapes, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_watch_bash_run, file_store_v1_endpoint_write_batch]);
 
 /**
  * ---- Reads: what the shim recovers and serves from durable state ----
@@ -134,6 +136,20 @@ export const ShimStore: GenService<{
     methodKind: "unary";
     input: typeof GetLiveWorkRequestSchema;
     output: typeof GetLiveWorkResponseSchema;
+  },
+  /**
+   * WHICH AGENT a vendor task locator names, within the caller's lineage. The
+   * shim asks when a subagent task starts from a call that is not its spawn
+   * (a resume) and this process never saw the spawn, when it restores such an
+   * agent, and when that agent raises an ask. The pairing is the sidecar's,
+   * written with the agent's first rows (EntryBatch.agent_locators).
+   *
+   * @generated from rpc store.v1.ShimStore.GetAgentByVendorTask
+   */
+  getAgentByVendorTask: {
+    methodKind: "unary";
+    input: typeof GetAgentByVendorTaskRequestSchema;
+    output: typeof GetAgentByVendorTaskResponseSchema;
   },
   /**
    * One batch, durable or nothing, cursor advance in the same transaction.

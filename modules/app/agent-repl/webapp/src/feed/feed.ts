@@ -27,6 +27,7 @@ import {
   TailFollow,
   installIntentScroll,
   observeScrollBox,
+  feedAnchorRows,
   revealGeometry,
 } from "../scroll.js";
 import {
@@ -111,10 +112,17 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   const tail =
     scrollBox === null
       ? null
-      : new TailFollow(scrollBox, () => {
-          const entry = latestEntry(scrollBox);
-          return entry === null ? null : revealGeometry(scrollBox, entry);
-        });
+      : new TailFollow(
+          scrollBox,
+          () => {
+            const entry = latestEntry(scrollBox);
+            return entry === null ? null : revealGeometry(scrollBox, entry);
+          },
+          // THE SCROLL ANCHOR'S ROWS: the root feed's own, in HOST. WebKit
+          // has no native scroll anchoring, so the tail owner holds the
+          // content under a reader who is off the tail (scroll.ts).
+          feedAnchorRows(scrollBox, host),
+        );
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
   // The size half is the footer occlusion (see `observeScrollBox`) — the

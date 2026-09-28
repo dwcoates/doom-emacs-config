@@ -29,11 +29,14 @@ import (
 	"syscall"
 
 	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/buildid"
+	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/wsm"
@@ -60,6 +63,26 @@ const (
 	ComponentShim    Component = "shim"
 	ComponentWebapp  Component = "webapp"
 )
+
+// Arm names a component on the wire.
+func (c Component) Arm() agentreplv1.DeployComponent {
+	switch c {
+	case ComponentDaemon:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON
+	case ComponentShim:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM
+	case ComponentWebapp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP
+	case ComponentStore:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE
+	case ComponentSidecar:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
+	case ComponentElisp:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
+	default:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
+	}
+}
 
 // OutcomeKind is what a deploy decided for one component.
 type OutcomeKind string
@@ -200,7 +223,16 @@ type Deps struct {
 	// wsm.LayoutVersion, which is what this binary was built with.
 	RunningLayout int
 	Clock         Clock
-	Log           dlog.Surfaces
+	// Progress is where the deploy states each phase it enters: the footer's
+	// update line on every workspace's strip (owner request, 2026-09-27). It
+	// is the ONE entry point for that line.
+	Progress deployprogress.Sink
+	// Faults is the state client a failed build, install or service restart
+	// is recorded through as the daemon-scoped `deploy_failed` fault, and
+	// through which a step a later deploy gets through closes it. It must be
+	// the OBSERVED client (health.ObserveFaults), so the footer draws it.
+	Faults Faults
+	Log    dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -236,6 +268,10 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the connected clients are required")
 	case deps.Services == nil:
 		return nil, errors.New("deploy: the service restarter is required")
+	case deps.Progress == nil:
+		return nil, errors.New("deploy: the progress sink is required")
+	case deps.Faults == nil:
+		return nil, errors.New("deploy: the fault recorder is required")
 	case deps.DaemonBuild == "":
 		return nil, errors.New("deploy: this daemon's own build is required")
 	case deps.StagingRoot == "" || deps.ReportDir == "":
@@ -258,7 +294,7 @@ func New(deps Deps) (*Deployer, error) {
 
 // Deploy builds, installs and puts into service what is out of date. See the
 // package doc. It answers the DECISIONS, not their completion.
-func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
+func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err error) {
 	fields := dlog.Context{"forced": force, "daemon_build": d.deps.DaemonBuild}
 	if !d.begin() {
 		d.log.Info(opDeploy, "refused a deploy while one is running", fields)
@@ -275,6 +311,20 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
 		return Result{}, &rollout.ErrAlreadyRollingOut{WaitingOn: waiting}
 	}
 
+	// FROM HERE THE LINE IS THIS DEPLOY'S. A deploy that stops short of the
+	// phase that ends it (updated here, or a handover whose successor says it)
+	// takes its line down, and a build, an install or a service restart that
+	// failed stands as the `deploy_failed` fault line: the rpc's answer
+	// reaches only its caller, and a landing's deploy has none. A handover
+	// whose successor would not start is the rollout's own fault.
+	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
+	defer func() {
+		if err != nil {
+			d.progress(nil)
+			d.recordFailure(ctx, err)
+		}
+	}()
+
 	nonce := nonceOf(d.deps.Clock.Now().UnixNano())
 	staging := filepath.Join(d.deps.StagingRoot, nonce)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -289,7 +339,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
 	fields["staging"] = staging
 	d.log.Info(opDeploy, "deploying: building every component into staging", fields)
 
-	if err := d.deps.Builder.Build(ctx, staging); err != nil {
+	if err = d.deps.Builder.Build(ctx, staging); err != nil {
 		var failed *BuildFailed
 		if !errors.As(err, &failed) {
 			failed = &BuildFailed{Step: "build", Detail: err.Error()}
@@ -306,18 +356,21 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
 		return Result{}, err
 	}
 	d.log.Info(opDeploy, "built", merge(fields, dlog.Context{"builds": fresh.fields()}))
+	d.stepSucceeded(ctx, health.DeployStepBuild)
 
-	if err := d.install(Staged{Dir: staging}, fresh, nonce); err != nil {
+	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
+	if err = d.install(Staged{Dir: staging}, fresh, nonce); err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", withCause(fields, err))
 		return Result{}, err
 	}
+	d.stepSucceeded(ctx, health.DeployStepInstall)
 
-	result := Result{}
 	services, err := d.services(ctx, fresh)
 	result.Outcomes = append(result.Outcomes, services...)
 	if err != nil {
 		return result, err
 	}
+	d.stepSucceeded(ctx, health.DeployStepRestartServices)
 	result.Outcomes = append(result.Outcomes, d.elisp(fresh))
 	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, force)
 	result.Outcomes = append(result.Outcomes, rest...)
@@ -325,7 +378,49 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (Result, error) {
 		return result, err
 	}
 	d.log.Info(opDeploy, "deployed: every component decided", merge(fields, dlog.Context{"decisions": summarize(result)}))
+	if !movesDaemon(result) {
+		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
+		// leaves `updated` to its successor, whose streams are the ones left.
+		d.progress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferredNotes(result)})
+	}
 	return result, nil
+}
+
+// builtComponents are the running components a deploy's build stages, named
+// on the building line. shim-lock rides with the shim (see Targets).
+var builtComponents = []deployprogress.Component{
+	deployprogress.Shim, deployprogress.Webapp, deployprogress.Daemon,
+	deployprogress.Store, deployprogress.Sidecar,
+}
+
+// progress states one phase on the update line.
+func (d *Deployer) progress(p *deployprogress.Progress) {
+	d.deps.Progress.SetDeployProgress(p)
+}
+
+// movesDaemon reports whether the deploy handed this daemon over or restarted
+// it, in which case its successor says `updated`.
+func movesDaemon(r Result) bool {
+	for _, o := range r.Outcomes {
+		if o.Kind == HandingOver || o.Kind == RestartingAcrossLayout {
+			return true
+		}
+	}
+	return false
+}
+
+// deferredNotes are the per-workspace notes a deploy that stays leaves: a
+// stale shim REGISTERED behind its work is replaced when the session is idle.
+func deferredNotes(r Result) map[ids.WorkspaceID][]deployprogress.Note {
+	notes := map[ids.WorkspaceID][]deployprogress.Note{}
+	for _, o := range r.Outcomes {
+		for _, shim := range o.Shims {
+			if !shim.Decision.Now {
+				notes[shim.Workspace] = append(notes[shim.Workspace], deployprogress.ShimWhenIdle)
+			}
+		}
+	}
+	return notes
 }
 
 // Landed is the merge orchestrator's hook: ONE COMPLETE CHANGE landed on
@@ -518,6 +613,8 @@ func (d *Deployer) services(ctx context.Context, fresh builds) ([]Outcome, error
 	sidecar := Outcome{Component: ComponentSidecar, Build: fresh.sidecar, Kind: UpToDate}
 	switch {
 	case storeStale:
+		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+			Components: []deployprogress.Component{deployprogress.Store, deployprogress.Sidecar}})
 		// A STORE RESTART ALWAYS RESTARTS THE SIDECAR: its socket is out while
 		// the store restarts, and a fresh pair is the known-good state.
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
@@ -529,6 +626,8 @@ func (d *Deployer) services(ctx context.Context, fresh builds) ([]Outcome, error
 			"store_build": fresh.store, "sidecar_build": fresh.sidecar,
 		})
 	case sidecarStale:
+		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+			Components: []deployprogress.Component{deployprogress.Sidecar}})
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
 			d.log.Error(opDecide, "the sidecar restart failed", withCause(dlog.Context{"component": string(ComponentSidecar)}, err))
 			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
@@ -608,6 +707,8 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		fields["running_layout"], fields["fresh_layout"] = d.deps.RunningLayout, layout
 		if layout != d.deps.RunningLayout {
 			d.log.Info(opDecide, "this daemon runs an older build whose state layout differs from the fresh one; restarting it rather than handing over", fields)
+			d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+				Components: []deployprogress.Component{deployprogress.Daemon}, Draining: !force})
 			accepted, err := d.deps.Rollout.Restart(ctx, force)
 			if err != nil {
 				d.log.Error(opDecide, "the restart was not accepted", withCause(fields, err))
@@ -622,6 +723,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 			}, nil
 		}
 		d.log.Info(opDecide, "this daemon runs an older build; handing over", fields)
+		d.progress(&deployprogress.Progress{Phase: deployprogress.HandingOver, Draining: !force})
 		accepted, err := d.deps.Rollout.HandOver(ctx, force)
 		if err != nil {
 			d.log.Error(opDecide, "the handover was not accepted", withCause(dlog.Context{"forced": force}, err))

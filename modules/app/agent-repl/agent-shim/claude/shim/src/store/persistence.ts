@@ -26,6 +26,7 @@
 import type { conversationv1, storev1 } from "../proto.js";
 import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
+import type { VendorTaskAnswer } from "./locator.js";
 
 // ---------------------------------------------------------------------------
 // What one write is
@@ -381,6 +382,12 @@ export interface Persistence {
    */
   liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess>;
   /**
+   * WHICH AGENT a vendor task locator names, within the lineage of `session`
+   * (store/locator.ts). Never rejects: a failure is the `failed` answer, and the
+   * caller writes the one record for whatever came back.
+   */
+  agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer>;
+  /**
    * One detached shell run's lifecycle frames: its start, its tail, its
    * terminal.
    *
@@ -554,6 +561,8 @@ export function unavailablePersistence(): Persistence {
     readFirstPage: () => Promise.reject(refuse("readFirstPage")),
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
     liveWork: () => Promise.reject(refuse("liveWork")),
+    agentByVendorTask: () =>
+      Promise.resolve({ kind: "failed", detail: "shim persistence: agentByVendorTask has no store to reach in this build" }),
     openBashRun: () => Promise.reject(refuse("openBashRun")),
     onFault: () => () => undefined,
     onDegradedWindow: () => () => undefined,

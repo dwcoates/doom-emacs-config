@@ -1020,6 +1020,10 @@ func (p *proxyStore) GetLiveWork(context.Context, *connect.Request[storev1.GetLi
 	return nil, p.unexpected("GetLiveWork")
 }
 
+func (p *proxyStore) GetAgentByVendorTask(context.Context, *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
+	return nil, p.unexpected("GetAgentByVendorTask")
+}
+
 func (p *proxyStore) ListResidueShapes(context.Context, *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
 	return nil, p.unexpected("ListResidueShapes")
 }

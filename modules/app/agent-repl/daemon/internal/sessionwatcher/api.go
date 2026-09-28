@@ -300,6 +300,14 @@ type LifecycleSink interface {
 	// OnTurnEnded is what pops the prompt queue and releases a
 	// hold-for-turn-end.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how TurnClose)
+	// OnTurnAdopted is a turn the VENDOR started on its own (a subagent's
+	// hand-back arriving, a task notification), which the shim adopted and
+	// announced with a PromptOrigin.VENDOR_STARTED prompt row. It is the queue
+	// that owns the turn rows and the roster's turn fact, so the queue records
+	// it exactly as it records a turn it delivered, and a held prompt waits
+	// behind it. Told off the lock, like OnTurnEnded, and always BEFORE that
+	// turn's own OnTurnEnded.
+	OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnTurnsEndedUnobserved hands over the turns an adoption found open that
 	// the adopted shim's own facts say are no longer in flight: each ended
 	// while no daemon was watching. They were never this watcher's turn in

@@ -1201,7 +1201,7 @@ run exactly once and only one `WatchDaemon' subscriber ever stands."
 ;; audit-3 #16
 (ert-deftest agent-repl-itest-daemon-unhealthy-faults-all-kinds-reach-the-health-buffer ()
   "Every `DaemonFault' KIND, not just `wsmReadOnly', reaches the health buffer.
-endpoint_daemon_health.proto declares six typed kinds; whichever one a
+endpoint_daemon_health.proto declares seven typed kinds; whichever one a
 daemon carries, adoption still happens (unhealthy is an answer) and the
 fault's dynamic detail still renders -- the kind classifies the fault, it
 does not gate whether the user gets to see it."
@@ -1215,7 +1215,10 @@ does not gate whether the user gets to see it."
                        '(successorSpawnFailed . ((detail . "spawn refused: address in use"))))
                  (cons "prompts-dir-missing"
                        '(promptsDirMissing . ((path . "/does/not/exist/prompts"))))
-                 (cons "wsm-read-only" '(wsmReadOnly . ()))))
+                 (cons "wsm-read-only" '(wsmReadOnly . ()))
+                 (cons "deploy-failed"
+                       '(deployFailed
+                         . ((build . ((step . "webapp") (detail . "tsc: 1 error") (log . "/l"))))))))
     (let* ((label (car case))
            (kind-cell (cdr case))
            (detail (format "audit-3-16 fault detail for %s" label))

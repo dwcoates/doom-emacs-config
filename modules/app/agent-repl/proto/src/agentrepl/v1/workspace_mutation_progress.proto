@@ -45,38 +45,70 @@ message WorkspaceMutationProgress {
 // What the rpc cannot carry is the WAIT inside it, which is what these stages
 // are.
 message WorkspaceOpenProgress {
+  // Field 1 and the name `stage` are retired: they named an enum-typed stage,
+  // and keeping them unused means a reader built against that shape never
+  // misreads this message.
+  reserved 1;
+  reserved "stage";
+
   // The stage the open has just entered.
-  WorkspaceOpenStage stage = 1;
+  WorkspaceOpenStage entered_stage = 2;
 }
 
 // The stages an open passes through while its rpc is in flight. Emitted only
 // for the stages the open actually reaches: a workspace that was not
 // hibernated never emits `REVIVING`, and one that was not closed never emits
 // `CLEARING_CLOSED`.
-enum WorkspaceOpenStage {
-  WORKSPACE_OPEN_STAGE_UNSPECIFIED = 0;
-  // The daemon is confirming the workspace's worktree is still on disk. An
-  // open whose directory is gone is refused here.
-  WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE = 1;
-  // The daemon is bringing the session up — spawning the shim and resuming
-  // the vendor conversation. THE SLOW STAGE, and the reason this enum exists.
-  WORKSPACE_OPEN_STAGE_STARTING_SESSION = 2;
-  // The daemon is lifting a hibernation park off the workspace.
-  WORKSPACE_OPEN_STAGE_REVIVING = 3;
-  // The daemon is clearing the workspace's closed flag, which is what puts
-  // its row back among the open ones.
-  WORKSPACE_OPEN_STAGE_CLEARING_CLOSED = 4;
-  // The daemon is checking the shim against the deployed build and bouncing
-  // it when stale.
-  WORKSPACE_OPEN_STAGE_CHECKING_BUILD = 5;
+// A stage an open passes through. THE SET ARM IS THE STAGE. A client words each
+// arm as one minibuffer line; a stage that is entered replaces the line of the
+// one before it.
+message WorkspaceOpenStage {
+  // The stage just entered. An open enters only the stages its workspace
+  // needs: a workspace that is not parked never enters `reviving`, and one
+  // that is not closed never enters `clearing_closed`.
+  oneof stage {
+    // The daemon is confirming the workspace's worktree is still on disk. An
+    // open whose directory is gone is refused here.
+    WorkspaceOpenStageCheckingWorktree checking_worktree = 1;
+    // The daemon is bringing the session up — spawning the shim and resuming
+    // the vendor conversation. Usually the slowest stage.
+    WorkspaceOpenStageStartingSession starting_session = 2;
+    // The daemon is lifting a hibernation park off the workspace.
+    WorkspaceOpenStageReviving reviving = 3;
+    // The daemon is clearing the workspace's closed flag, which is what puts
+    // its row back among the open ones.
+    WorkspaceOpenStageClearingClosed clearing_closed = 4;
+    // The daemon is checking the shim against the deployed build and bouncing
+    // it when stale.
+    WorkspaceOpenStageCheckingBuild checking_build = 5;
+  }
 }
+
+// The worktree check. It carries nothing: the arm being set is the whole fact.
+message WorkspaceOpenStageCheckingWorktree {}
+
+// The session bring-up. It carries nothing: the arm being set is the whole
+// fact.
+message WorkspaceOpenStageStartingSession {}
+
+// The hibernation revival. It carries nothing: the arm being set is the whole
+// fact.
+message WorkspaceOpenStageReviving {}
+
+// The closed-flag clear. It carries nothing: the arm being set is the whole
+// fact.
+message WorkspaceOpenStageClearingClosed {}
+
+// The build check. It carries nothing: the arm being set is the whole fact.
+message WorkspaceOpenStageCheckingBuild {}
 
 // The progress of one CreateWorkspace, from just after the ack to the terminal
 // outcome. THE ARM IS THE STEP: a stage while the work runs, or exactly one of
 // the two terminal steps.
 message WorkspaceCreateProgress {
-  // Field 1 carried the stage as an enum; the stage is now a message on its own
-  // field, so a reader built against either shape never misreads the other.
+  // Field 1 and the name `stage` are retired: they named an enum-typed stage,
+  // and keeping them unused means a reader built against that shape never
+  // misreads this message.
   reserved 1;
   reserved "stage";
 

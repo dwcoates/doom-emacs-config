@@ -162,6 +162,31 @@ func serveTopicWith[T comparable, R any](
 	}
 }
 
+// endStandingStream sends a standing stream's `DaemonStreamEnding` frame as
+// its LAST frame when the daemon's own lifetime is what ended it -- and only
+// then. The lifetime ends in `Close`, and `Close` runs on the planned exit
+// alone (`serve` calls it through `Serving.EndStreams` on every stand-down: a
+// handover, a restart, a drain, a signal, a state-root loss), so a client that
+// reads this frame knows the clean end after it was planned. A stream its
+// CLIENT ended is sent nothing: nobody is listening. An unplanned death never
+// reaches here at all, which is exactly how the client tells the two apart.
+//
+// IT RUNS ONLY ON A DEDICATED RPC'S OWN STREAM, never inside a page's mux: a
+// page subscription's sink ends with the page's stream at the same lifetime
+// edge, so an ending sent there would race the page's own end, and the page
+// stream has no planned-ending arm of its own for the frame to belong to.
+func endStandingStream[R any](s *server, rpc string, log dlog.Logger, out streamSink[R], ending *R) {
+	if s.life.Err() == nil {
+		return
+	}
+	if err := out.Send(ending); err != nil {
+		log.Debug(rpc, "the standing stream's client went away before its planned ending",
+			dlog.Context{"cause": err.Error()})
+		return
+	}
+	log.Debug(rpc, "sent the standing stream's planned ending", nil)
+}
+
 // refuseStream answers a refused stream open. A Watch* rpc has NO `<Rpc>Error`
 // message — a refused open is a Connect error BEFORE any frame — and by ruling
 // (landing 6) that is the SETTLED shape rather than an unlanded arm, so the
@@ -178,7 +203,14 @@ func (s *server) WatchWorkspaceRoster(
 	req *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
 	out *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse],
 ) error {
-	return s.watchWorkspaceRoster(ctx, req.Msg, out)
+	const rpc = "WatchWorkspaceRoster"
+	if err := s.watchWorkspaceRoster(ctx, req.Msg, out); err != nil {
+		return err
+	}
+	endStandingStream(s, rpc, s.log, out, &agentreplv1.WatchWorkspaceRosterResponse{
+		Push: &agentreplv1.WatchWorkspaceRosterResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+	})
+	return nil
 }
 
 // watchWorkspaceRoster is the body, written to whatever sink carries it: the
@@ -190,7 +222,9 @@ func (s *server) watchWorkspaceRoster(
 ) error {
 	return serveTopic(s, ctx, "WatchWorkspaceRoster", s.log, s.deps.Sidebar.Topic(), out,
 		func(roster *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
-			return &agentreplv1.WatchWorkspaceRosterResponse{Roster: roster}
+			return &agentreplv1.WatchWorkspaceRosterResponse{
+				Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: roster},
+			}
 		})
 }
 
@@ -316,7 +350,13 @@ func (s *server) WatchHostWorkspace(
 	// subscription its opening `host` push — including the first one, before
 	// any session edge has ever fired.
 	s.PublishHostWorkspace(ctx, subject.Record.ID)
-	return s.serveHost(ctx, rpc, subject.Log, subject.Record.ID, out)
+	if err := s.serveHost(ctx, rpc, subject.Log, subject.Record.ID, out); err != nil {
+		return err
+	}
+	endStandingStream(s, rpc, subject.Log, out, &agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+	})
+	return nil
 }
 
 // serveHost serves the host stream's TWO topics onto one wire: the `host`
@@ -485,7 +525,13 @@ func (s *server) WatchDaemon(
 	req *connect.Request[agentreplv1.WatchDaemonRequest],
 	out *connect.ServerStream[agentreplv1.WatchDaemonResponse],
 ) error {
-	return s.watchDaemon(ctx, req.Msg, out)
+	if err := s.watchDaemon(ctx, req.Msg, out); err != nil {
+		return err
+	}
+	endStandingStream(s, "WatchDaemon", s.log, out, &agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+	})
+	return nil
 }
 
 // watchDaemon is the body, written to whatever sink carries it. It merges the

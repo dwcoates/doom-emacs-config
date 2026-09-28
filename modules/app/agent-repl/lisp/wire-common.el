@@ -292,6 +292,17 @@ request is built only from complete values."
     (agent-repl-wire--fail message-name '- "expected an empty message"))
   nil)
 
+;;;; ---- agentrepl.v1.DaemonStreamEnding ----
+
+;; The LAST frame of a standing stream whose daemon stands down in a PLANNED
+;; exit (daemon_stream_ending.proto).  It rides the host, daemon and roster
+;; streams alike, so its one decoder is shared here.
+(defun agent-repl-wire-decode-daemon-stream-ending (value)
+  "Decode VALUE as the empty `DaemonStreamEnding' -- presence is the fact.
+The stream's clean end that follows it is PLANNED: the consumer logs it
+at INFO and reattaches to the live daemon rather than calling it lost."
+  (agent-repl-wire--decode-empty "DaemonStreamEnding" value))
+
 ;;;; ---- workspace.v1.WorkspaceRef ----
 
 (defun agent-repl-wire-decode-workspace-ref (value)
@@ -599,8 +610,18 @@ RAW is the untyped Struct, kept verbatim: nothing is drawn from it."
   "The whole `conversation.v1.PromptOrigin' vocabulary, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: every send site must choose a real
 value, so the zero value has no elisp spelling to reach for by accident.
-A test pins this table against the checked-in Go bindings, so an enum
-value landed in the proto without a keyword here fails loudly.")
+A test pins this table against the checked-in Go bindings, minus the
+shim-only values, so an enum value landed in the proto without a keyword
+here fails loudly.
+Values listed in `agent-repl-wire-shim-only-prompt-origins' are ABSENT too:
+no client ever sends them.")
+
+(defconst agent-repl-wire-shim-only-prompt-origins
+  '("PROMPT_ORIGIN_VENDOR_STARTED")
+  "PromptOrigin values only the shim produces, never a client send.
+VENDOR_STARTED names a turn the vendor began on its own, which the shim
+adopts; an editor submit carrying it would claim the vendor started a
+turn the user in fact sent, so it has no elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.

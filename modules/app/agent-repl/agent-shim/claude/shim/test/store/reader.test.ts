@@ -776,6 +776,7 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     getWorkflow: refuse,
     getSidecarCursors: refuse,
     getLiveWork: refuse,
+    getAgentByVendorTask: refuse,
     writeBatch: refuse,
     ...overrides,
   };

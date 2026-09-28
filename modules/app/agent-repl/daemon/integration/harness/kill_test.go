@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestKillNeverSignalsAReapedProcess pins the property that keeps the cleanup
@@ -44,7 +45,8 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			// Arrange: a real child in a group of its own, under a bare
 			// Daemon carrying only the fields the kill path touches. The
 			// reaped flag is set directly, because the assertion is about
-			// what Kill DOES with it, not about how it comes to be set.
+			// what Kill DOES with it, not about how it comes to be set. The
+			// mark Kill reads is reapBegun, set before cmd.Wait frees the pid.
 			cmd := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
@@ -52,9 +54,9 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			}
 			d := &Daemon{t: t, cmd: cmd}
 			if tc.reaped {
-				d.mu.Lock()
-				d.exited = true
-				d.mu.Unlock()
+				d.sigMu.Lock()
+				d.reapBegun = true
+				d.sigMu.Unlock()
 				t.Cleanup(func() {
 					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 					_ = cmd.Wait()
@@ -172,37 +174,61 @@ func groupUnderKill(t *testing.T, script string) (*Daemon, int) {
 	return d, member
 }
 
-// TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt pins the ordering the
-// daemon's teardown depends on: at the instant before the SIGKILL, the leader
-// and its member are BOTH stopped and neither is dead, so no member can die
-// while the leader can still run.
-func TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt(t *testing.T) {
+// TestKillEndsTheLeaderBeforeSignalingAnyMember pins the ordering the
+// daemon's teardown depends on: at the instant the group is signaled to die,
+// the leader has already exited, so no member can die while the leader can
+// still run. It reads the leader alone, because exiting is irrevocable and a
+// stop is not: a member inside execve when the group is stopped runs again
+// once its exec completes, and the leader's exit orphans the group, which
+// continues its stopped members.
+func TestKillEndsTheLeaderBeforeSignalingAnyMember(t *testing.T) {
 	// Arrange
-	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
-	var leaderState, memberState processState
-	var leaderErr, memberErr error
-	d.afterFreeze = func() {
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	var leaderState processState
+	var leaderErr error
+	d.afterLeaderExit = func() {
 		leaderState, leaderErr = readProcessState(d.cmd.Process.Pid)
-		memberState, memberErr = readProcessState(member)
 	}
 
 	// Act
 	d.Kill()
 
 	// Assert
-	if leaderErr != nil || memberErr != nil {
-		t.Fatalf("reading the frozen group: leader %v, member %v", leaderErr, memberErr)
+	if leaderErr != nil {
+		t.Fatalf("reading the leader before the group kill: %v", leaderErr)
 	}
-	if leaderState.name != "stopped" {
-		t.Fatalf("the leader was %s when the kill was sent, want stopped", leaderState.name)
-	}
-	if memberState.name != "stopped" {
-		t.Fatalf("the member was %s when the kill was sent, want stopped", memberState.name)
+	if !leaderState.exited {
+		t.Fatalf("the leader was %s when the group kill was sent, want exited", leaderState.name)
 	}
 }
 
-// TestKillEndsEveryMemberOfTheGroup pins that freezing first still kills the
-// whole group, not only its leader.
+// TestKillOwnsTheReapARacingWaitLeftInFlight is Stop giving up on SIGTERM and
+// falling through to Kill: the bounded wait it gave up on leaves a reap in
+// flight, and that reap must not free the leader's pid, and with it the group
+// id, between the leader's SIGKILL and the group's.
+func TestKillOwnsTheReapARacingWaitLeftInFlight(t *testing.T) {
+	// Arrange: a reap in flight, as Stop's expired wait leaves one.
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	d.awaitReapWithin(0)
+	reapedDuringKill := false
+	d.afterLeaderExit = func() {
+		reapedDuringKill = d.awaitReapWithin(50 * time.Millisecond)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if reapedDuringKill {
+		t.Fatal("the in-flight reap freed the leader between its SIGKILL and the group's, want it held until the group kill")
+	}
+	if !d.reaped() {
+		t.Fatal("the leader is unreaped after Kill")
+	}
+}
+
+// TestKillEndsEveryMemberOfTheGroup pins that ending the leader first still
+// kills the whole group, not only its leader.
 func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
 	// Arrange
 	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
@@ -224,7 +250,7 @@ func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
 // TestKillLeavesTheLeaderNoInstantToObserveAMemberDying is the defect as the
 // daemon lived it: a leader that records the death of its member (the daemon
 // logging "git was killed by a signal") must never get to, because the member
-// only dies once the leader can no longer run.
+// only dies once the leader has exited.
 func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 	// Arrange: the leader writes the marker the moment its member dies.
 	marker := filepath.Join(t.TempDir(), "observed")
@@ -235,7 +261,230 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 
 	// Assert
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the leader recorded its member's death (stat %v), want it frozen before the member died", err)
+		t.Fatalf("the leader recorded its member's death (stat %v), want it dead before the member died", err)
+	}
+}
+
+// TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold is the
+// flake's condition made certain: a stop the kernel discards, as it does for
+// a member inside execve, must not give the leader an instant to record its
+// member's death. The whole group is continued after the stop, so neither
+// leader nor member is held by it.
+func TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold(t *testing.T) {
+	// Arrange: the leader writes the marker the moment its member dies.
+	marker := filepath.Join(t.TempDir(), "observed")
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait $!; : > "+marker)
+	var contErr error
+	d.afterGroupStopped = func() {
+		contErr = syscall.Kill(-d.cmd.Process.Pid, syscall.SIGCONT)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if contErr != nil {
+		t.Fatalf("continuing the stopped group: %v", contErr)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the leader recorded its member's death (stat %v), want it dead before the member died", err)
+	}
+}
+
+// respawningStray starts a stand-in for a live daemon the harness never
+// started (a layout change's replacement): a process naming stateDir that
+// spawns a child naming it too, and spawns another the moment that child
+// dies, the way a daemon revives a shim that died on its own. It answers the
+// respawner, its first child's pid, and a read that blocks until the
+// respawner reports its next child and answers that child's pid.
+func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int, func() int) {
+	t.Helper()
+	script := `while :; do /bin/sh -c 'while :; do /bin/sleep 1; done' "$0/child" & echo $!; wait $!; done`
+	cmd := exec.Command("/bin/sh", "-c", script, stateDir)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the respawner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	pids := bufio.NewReader(out)
+	next := func() int {
+		t.Helper()
+		line, err := pids.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read the child's pid: %v", err)
+		}
+		child, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			t.Fatalf("the child's pid %q: %v", line, err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+		return child
+	}
+	return cmd, next(), next
+}
+
+// TestReapStraysFreezesEveryStrayBeforeKillingAny pins the ordering that
+// keeps a live stray from replacing what the sweep kills: at the instant a
+// stray dies, every other stray is already stopped, so a respawner that would
+// bring the dead one back cannot run.
+func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	respawner, child, _ := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	var respawnerState processState
+	var stateErr, exitErr error
+	d.afterStraysFrozen = func() {
+		// The child dies first, as it did under a snapshot-then-kill sweep.
+		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+			exitErr = err
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+		defer cancel()
+		exitErr = WaitProcessExit(ctx, child)
+		respawnerState, stateErr = readProcessState(respawner.Process.Pid)
+	}
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if exitErr != nil || stateErr != nil {
+		t.Fatalf("killing the child first: exit %v, reading the respawner %v", exitErr, stateErr)
+	}
+	if respawnerState.name != "stopped" {
+		t.Fatalf("the respawner was %s when its child died, want stopped", respawnerState.name)
+	}
+}
+
+// TestReapStraysLeavesNoReplacementOfAStrayKilledFirst is the leak as the
+// layout-restart test lived it: a stray killed ahead of the live process that
+// supervises it is not brought back, and nothing naming the state directory
+// is left running.
+func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	_, child, _ := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	d.afterStraysFrozen = func() { _ = syscall.Kill(child, syscall.SIGKILL) }
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if err := d.leakedStrays(); err != nil {
+		t.Fatalf("leakedStrays after the reap = %v, want none", err)
+	}
+}
+
+// TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop is the hole a
+// freeze alone left: a stray whose stop the kernel discards, as it does for a
+// process inside execve, runs on through the sweep and spawns a replacement
+// no listing so far has named. The respawner is continued once it is stopped
+// and its child killed, and the sweep begins its kills only once the
+// replacement exists, so the replacement is certain, not raced for.
+func TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	respawner, child, next := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	escaped := false
+	var escapeErr error
+	d.afterStraysFrozen = func() {
+		if escaped {
+			return
+		}
+		escaped = true
+		if err := syscall.Kill(respawner.Process.Pid, syscall.SIGCONT); err != nil {
+			escapeErr = err
+			return
+		}
+		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+			escapeErr = err
+			return
+		}
+		next()
+	}
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if escapeErr != nil {
+		t.Fatalf("letting the respawner escape its stop: %v", escapeErr)
+	}
+	if err := d.leakedStrays(); err != nil {
+		t.Fatalf("leakedStrays after the reap = %v, want none", err)
+	}
+}
+
+func TestLeakedStrays(t *testing.T) {
+	cases := []struct {
+		name string
+		// arrange leaves the state directory's process set in the state
+		// under test.
+		arrange    func(t *testing.T, stateDir string)
+		wantLeaked bool
+	}{
+		{
+			name:       "no process names the state directory",
+			arrange:    func(*testing.T, string) {},
+			wantLeaked: false,
+		},
+		{
+			name: "a running process naming the state directory is a leak",
+			arrange: func(t *testing.T, stateDir string) {
+				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			},
+			wantLeaked: true,
+		},
+		{
+			name: "an exited, unreaped process naming the state directory is not a leak",
+			arrange: func(t *testing.T, stateDir string) {
+				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				t.Cleanup(func() { _ = cmd.Wait() })
+				if err := cmd.Process.Kill(); err != nil {
+					t.Fatalf("SIGKILL: %v", err)
+				}
+				if err := awaitFrozen(cmd.Process.Pid, DefaultTimeout); err != nil {
+					t.Fatalf("await the exit: %v", err)
+				}
+			},
+			wantLeaked: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			stateDir := t.TempDir()
+			tc.arrange(t, stateDir)
+			d := &Daemon{t: t, StateDir: stateDir}
+
+			// Act
+			err := d.leakedStrays()
+
+			// Assert
+			if leaked := errors.Is(err, ErrLeakedProcess); leaked != tc.wantLeaked {
+				t.Fatalf("leakedStrays() = %v, want a leak reported = %v", err, tc.wantLeaked)
+			}
+			if !tc.wantLeaked && err != nil {
+				t.Fatalf("leakedStrays() = %v, want nil", err)
+			}
+		})
 	}
 }
 

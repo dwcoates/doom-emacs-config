@@ -50,7 +50,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_deploy.proto.
  */
 export const file_agentrepl_v1_endpoint_deploy: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGVwbG95LnByb3RvEgxhZ2VudHJlcGwudjEiHgoNRGVwbG95UmVxdWVzdBINCgVmb3JjZRgBIAEoCCJ2Cg5EZXBsb3lSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuYWdlbnRyZXBsLnYxLkRlcGxveVN1Y2Nlc3NIABIqCgVlcnJvchgCIAEoCzIZLmFnZW50cmVwbC52MS5EZXBsb3lFcnJvckgAQggKBnJlc3VsdCJJCg1EZXBsb3lTdWNjZXNzEjgKCmNvbXBvbmVudHMYASADKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50T3V0Y29tZSLDAwoWRGVwbG95Q29tcG9uZW50T3V0Y29tZRIwCgljb21wb25lbnQYASABKA4yHS5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50Eg0KBWJ1aWxkGAIgASgJEjIKCnVwX3RvX2RhdGUYAyABKAsyHC5hZ2VudHJlcGwudjEuRGVwbG95VXBUb0RhdGVIABI5CglyZXN0YXJ0ZWQYBCABKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95U2VydmljZVJlc3RhcnRlZEgAEjcKDGhhbmRpbmdfb3ZlchgFIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lIYW5kaW5nT3ZlckgAEjAKBXNoaW1zGAYgASgLMh8uYWdlbnRyZXBsLnYxLkRlcGxveVNoaW1Cb3VuY2VzSAASOQoNcmVsb2FkX3B1c2hlZBgHIAEoCzIgLmFnZW50cmVwbC52MS5EZXBsb3lSZWxvYWRQdXNoZWRIABJIChVkZWZlcnJlZF90b19zdWNjZXNzb3IYCCABKAsyJy5hZ2VudHJlcGwudjEuRGVwbG95RGVmZXJyZWRUb1N1Y2Nlc3NvckgAQgkKB291dGNvbWUiEAoORGVwbG95VXBUb0RhdGUiGAoWRGVwbG95U2VydmljZVJlc3RhcnRlZCJFChFEZXBsb3lIYW5kaW5nT3ZlchISCgp3b3Jrc3BhY2VzGAEgASgNEgwKBGJ1c3kYAiABKA0SDgoGZm9yY2VkGAMgASgIIkQKEURlcGxveVNoaW1Cb3VuY2VzEi8KB2JvdW5jZXMYASADKAsyHi5hZ2VudHJlcGwudjEuRGVwbG95U2hpbUJvdW5jZSKgAQoQRGVwbG95U2hpbUJvdW5jZRIRCgl3b3Jrc3BhY2UYASABKAkSNQoLYm91bmNlZF9ub3cYAiABKAsyHi5hZ2VudHJlcGwudjEuRGVwbG95Qm91bmNlZE5vd0gAEjoKCnJlZ2lzdGVyZWQYAyABKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95Qm91bmNlUmVnaXN0ZXJlZEgAQgYKBHdoZW4iIgoQRGVwbG95Qm91bmNlZE5vdxIOCgZmb3JjZWQYASABKAgiRwoWRGVwbG95Qm91bmNlUmVnaXN0ZXJlZBIWCg50dXJuX2luX2ZsaWdodBgBIAEoCBIVCg1kZXRhY2hlZF93b3JrGAIgASgNIigKEkRlcGxveVJlbG9hZFB1c2hlZBISCgpyZWNpcGllbnRzGAEgASgNIhsKGURlcGxveURlZmVycmVkVG9TdWNjZXNzb3IikQMKC0RlcGxveUVycm9yEjcKDGJ1aWxkX2ZhaWxlZBgBIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lCdWlsZEZhaWxlZEgAEkEKEWFscmVhZHlfZGVwbG95aW5nGAIgASgLMiQuYWdlbnRyZXBsLnYxLkRlcGxveUFscmVhZHlEZXBsb3lpbmdIABJEChNhbHJlYWR5X3JvbGxpbmdfb3V0GAMgASgLMiUuYWdlbnRyZXBsLnYxLkRlcGxveUFscmVhZHlSb2xsaW5nT3V0SAASLgoHam9pbmluZxgEIAEoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lKb2luaW5nSAASSgoWc2VydmljZV9yZXN0YXJ0X2ZhaWxlZBgFIAEoCzIoLmFnZW50cmVwbC52MS5EZXBsb3lTZXJ2aWNlUmVzdGFydEZhaWxlZEgAEjsKDmluc3RhbGxfZmFpbGVkGAYgASgLMiEuYWdlbnRyZXBsLnYxLkRlcGxveUluc3RhbGxGYWlsZWRIAEIHCgVjYXVzZSI+ChFEZXBsb3lCdWlsZEZhaWxlZBIMCgRzdGVwGAEgASgJEg4KBmRldGFpbBgCIAEoCRILCgNsb2cYAyABKAkiGAoWRGVwbG95QWxyZWFkeURlcGxveWluZyItChdEZXBsb3lBbHJlYWR5Um9sbGluZ091dBISCgp3YWl0aW5nX29uGAEgAygJIg8KDURlcGxveUpvaW5pbmciXgoaRGVwbG95U2VydmljZVJlc3RhcnRGYWlsZWQSMAoJY29tcG9uZW50GAEgASgOMh0uYWdlbnRyZXBsLnYxLkRlcGxveUNvbXBvbmVudBIOCgZkZXRhaWwYAiABKAkiVwoTRGVwbG95SW5zdGFsbEZhaWxlZBIwCgljb21wb25lbnQYASABKA4yHS5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50Eg4KBmRldGFpbBgCIAEoCSreAQoPRGVwbG95Q29tcG9uZW50EiAKHERFUExPWV9DT01QT05FTlRfVU5TUEVDSUZJRUQQABIbChdERVBMT1lfQ09NUE9ORU5UX0RBRU1PThABEhkKFURFUExPWV9DT01QT05FTlRfU0hJTRACEhsKF0RFUExPWV9DT01QT05FTlRfV0VCQVBQEAMSGgoWREVQTE9ZX0NPTVBPTkVOVF9TVE9SRRAEEhwKGERFUExPWV9DT01QT05FTlRfU0lERUNBUhAFEhoKFkRFUExPWV9DT01QT05FTlRfRUxJU1AQBkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CiJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGVwbG95LnByb3RvEgxhZ2VudHJlcGwudjEiHgoNRGVwbG95UmVxdWVzdBINCgVmb3JjZRgBIAEoCCJ2Cg5EZXBsb3lSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuYWdlbnRyZXBsLnYxLkRlcGxveVN1Y2Nlc3NIABIqCgVlcnJvchgCIAEoCzIZLmFnZW50cmVwbC52MS5EZXBsb3lFcnJvckgAQggKBnJlc3VsdCJJCg1EZXBsb3lTdWNjZXNzEjgKCmNvbXBvbmVudHMYASADKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50T3V0Y29tZSL5AwoWRGVwbG95Q29tcG9uZW50T3V0Y29tZRIwCgljb21wb25lbnQYASABKA4yHS5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50Eg0KBWJ1aWxkGAIgASgJEjIKCnVwX3RvX2RhdGUYAyABKAsyHC5hZ2VudHJlcGwudjEuRGVwbG95VXBUb0RhdGVIABI5CglyZXN0YXJ0ZWQYBCABKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95U2VydmljZVJlc3RhcnRlZEgAEjcKDGhhbmRpbmdfb3ZlchgFIAEoCzIfLmFnZW50cmVwbC52MS5EZXBsb3lIYW5kaW5nT3ZlckgAEjAKBXNoaW1zGAYgASgLMh8uYWdlbnRyZXBsLnYxLkRlcGxveVNoaW1Cb3VuY2VzSAASOQoNcmVsb2FkX3B1c2hlZBgHIAEoCzIgLmFnZW50cmVwbC52MS5EZXBsb3lSZWxvYWRQdXNoZWRIABJIChVkZWZlcnJlZF90b19zdWNjZXNzb3IYCCABKAsyJy5hZ2VudHJlcGwudjEuRGVwbG95RGVmZXJyZWRUb1N1Y2Nlc3NvckgAEjQKCnJlc3RhcnRpbmcYCSABKAsyHi5hZ2VudHJlcGwudjEuRGVwbG95UmVzdGFydGluZ0gAQgkKB291dGNvbWUiEAoORGVwbG95VXBUb0RhdGUiGAoWRGVwbG95U2VydmljZVJlc3RhcnRlZCJFChFEZXBsb3lIYW5kaW5nT3ZlchISCgp3b3Jrc3BhY2VzGAEgASgNEgwKBGJ1c3kYAiABKA0SDgoGZm9yY2VkGAMgASgIIn4KEERlcGxveVJlc3RhcnRpbmcSHAoUcnVubmluZ19zdGF0ZV9sYXlvdXQYASABKA0SGgoSZnJlc2hfc3RhdGVfbGF5b3V0GAIgASgNEhIKCndvcmtzcGFjZXMYAyABKA0SDAoEYnVzeRgEIAEoDRIOCgZmb3JjZWQYBSABKAgiRAoRRGVwbG95U2hpbUJvdW5jZXMSLwoHYm91bmNlcxgBIAMoCzIeLmFnZW50cmVwbC52MS5EZXBsb3lTaGltQm91bmNlIqABChBEZXBsb3lTaGltQm91bmNlEhEKCXdvcmtzcGFjZRgBIAEoCRI1Cgtib3VuY2VkX25vdxgCIAEoCzIeLmFnZW50cmVwbC52MS5EZXBsb3lCb3VuY2VkTm93SAASOgoKcmVnaXN0ZXJlZBgDIAEoCzIkLmFnZW50cmVwbC52MS5EZXBsb3lCb3VuY2VSZWdpc3RlcmVkSABCBgoEd2hlbiIiChBEZXBsb3lCb3VuY2VkTm93Eg4KBmZvcmNlZBgBIAEoCCJHChZEZXBsb3lCb3VuY2VSZWdpc3RlcmVkEhYKDnR1cm5faW5fZmxpZ2h0GAEgASgIEhUKDWRldGFjaGVkX3dvcmsYAiABKA0iKAoSRGVwbG95UmVsb2FkUHVzaGVkEhIKCnJlY2lwaWVudHMYASABKA0iGwoZRGVwbG95RGVmZXJyZWRUb1N1Y2Nlc3NvciKRAwoLRGVwbG95RXJyb3ISNwoMYnVpbGRfZmFpbGVkGAEgASgLMh8uYWdlbnRyZXBsLnYxLkRlcGxveUJ1aWxkRmFpbGVkSAASQQoRYWxyZWFkeV9kZXBsb3lpbmcYAiABKAsyJC5hZ2VudHJlcGwudjEuRGVwbG95QWxyZWFkeURlcGxveWluZ0gAEkQKE2FscmVhZHlfcm9sbGluZ19vdXQYAyABKAsyJS5hZ2VudHJlcGwudjEuRGVwbG95QWxyZWFkeVJvbGxpbmdPdXRIABIuCgdqb2luaW5nGAQgASgLMhsuYWdlbnRyZXBsLnYxLkRlcGxveUpvaW5pbmdIABJKChZzZXJ2aWNlX3Jlc3RhcnRfZmFpbGVkGAUgASgLMiguYWdlbnRyZXBsLnYxLkRlcGxveVNlcnZpY2VSZXN0YXJ0RmFpbGVkSAASOwoOaW5zdGFsbF9mYWlsZWQYBiABKAsyIS5hZ2VudHJlcGwudjEuRGVwbG95SW5zdGFsbEZhaWxlZEgAQgcKBWNhdXNlIj4KEURlcGxveUJ1aWxkRmFpbGVkEgwKBHN0ZXAYASABKAkSDgoGZGV0YWlsGAIgASgJEgsKA2xvZxgDIAEoCSIYChZEZXBsb3lBbHJlYWR5RGVwbG95aW5nIi0KF0RlcGxveUFscmVhZHlSb2xsaW5nT3V0EhIKCndhaXRpbmdfb24YASADKAkiDwoNRGVwbG95Sm9pbmluZyJeChpEZXBsb3lTZXJ2aWNlUmVzdGFydEZhaWxlZBIwCgljb21wb25lbnQYASABKA4yHS5hZ2VudHJlcGwudjEuRGVwbG95Q29tcG9uZW50Eg4KBmRldGFpbBgCIAEoCSJXChNEZXBsb3lJbnN0YWxsRmFpbGVkEjAKCWNvbXBvbmVudBgBIAEoDjIdLmFnZW50cmVwbC52MS5EZXBsb3lDb21wb25lbnQSDgoGZGV0YWlsGAIgASgJKt4BCg9EZXBsb3lDb21wb25lbnQSIAocREVQTE9ZX0NPTVBPTkVOVF9VTlNQRUNJRklFRBAAEhsKF0RFUExPWV9DT01QT05FTlRfREFFTU9OEAESGQoVREVQTE9ZX0NPTVBPTkVOVF9TSElNEAISGwoXREVQTE9ZX0NPTVBPTkVOVF9XRUJBUFAQAxIaChZERVBMT1lfQ09NUE9ORU5UX1NUT1JFEAQSHAoYREVQTE9ZX0NPTVBPTkVOVF9TSURFQ0FSEAUSGgoWREVQTE9ZX0NPTVBPTkVOVF9FTElTUBAGQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
 
 /**
  * @generated from message agentrepl.v1.DeployRequest
@@ -203,6 +203,16 @@ export type DeployComponentOutcome = Message<"agentrepl.v1.DeployComponentOutcom
      */
     value: DeployDeferredToSuccessor;
     case: "deferredToSuccessor";
+  } | {
+    /**
+     * The daemon is being replaced by a stop-then-start restart instead of a
+     * handover, because the fresh build expects a different state-database
+     * layout than the running one and only a sole writer may migrate it.
+     *
+     * @generated from field: agentrepl.v1.DeployRestarting restarting = 9;
+     */
+    value: DeployRestarting;
+    case: "restarting";
   } | { case: undefined; value?: undefined };
 };
 
@@ -280,6 +290,62 @@ export const DeployHandingOverSchema: GenMessage<DeployHandingOver> = /*@__PURE_
   messageDesc(file_agentrepl_v1_endpoint_deploy, 6);
 
 /**
+ * A stop-then-start restart of the daemon began. Each workspace stands down at
+ * its own freeness (its shim is detached and left running), the daemon exits,
+ * and the fresh binary takes the boot lock, migrates the state database as its
+ * only writer, and adopts the running shims. Clients see the daemon go away
+ * and come back rather than a handover's transfer notice.
+ *
+ * @generated from message agentrepl.v1.DeployRestarting
+ */
+export type DeployRestarting = Message<"agentrepl.v1.DeployRestarting"> & {
+  /**
+   * The state-database layout version the running daemon serves.
+   *
+   * @generated from field: uint32 running_state_layout = 1;
+   */
+  runningStateLayout: number;
+
+  /**
+   * The state-database layout version the fresh build requires. Always
+   * different from `running_state_layout`; that difference is why this
+   * outcome is a restart and not a handover.
+   *
+   * @generated from field: uint32 fresh_state_layout = 2;
+   */
+  freshStateLayout: number;
+
+  /**
+   * How many workspaces this daemon serves and will stand down.
+   *
+   * @generated from field: uint32 workspaces = 3;
+   */
+  workspaces: number;
+
+  /**
+   * How many of them were NOT free at the decision. Their stand-down waits for
+   * their work to end unless the deploy is forced.
+   *
+   * @generated from field: uint32 busy = 4;
+   */
+  busy: number;
+
+  /**
+   * The restart does not wait for freeness.
+   *
+   * @generated from field: bool forced = 5;
+   */
+  forced: boolean;
+};
+
+/**
+ * Describes the message agentrepl.v1.DeployRestarting.
+ * Use `create(DeployRestartingSchema)` to create a new message.
+ */
+export const DeployRestartingSchema: GenMessage<DeployRestarting> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 7);
+
+/**
  * The out-of-date shims and what became of each.
  *
  * @generated from message agentrepl.v1.DeployShimBounces
@@ -296,7 +362,7 @@ export type DeployShimBounces = Message<"agentrepl.v1.DeployShimBounces"> & {
  * Use `create(DeployShimBouncesSchema)` to create a new message.
  */
 export const DeployShimBouncesSchema: GenMessage<DeployShimBounces> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 7);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 8);
 
 /**
  * One out-of-date shim.
@@ -341,7 +407,7 @@ export type DeployShimBounce = Message<"agentrepl.v1.DeployShimBounce"> & {
  * Use `create(DeployShimBounceSchema)` to create a new message.
  */
 export const DeployShimBounceSchema: GenMessage<DeployShimBounce> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 8);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 9);
 
 /**
  * @generated from message agentrepl.v1.DeployBouncedNow
@@ -360,7 +426,7 @@ export type DeployBouncedNow = Message<"agentrepl.v1.DeployBouncedNow"> & {
  * Use `create(DeployBouncedNowSchema)` to create a new message.
  */
 export const DeployBouncedNowSchema: GenMessage<DeployBouncedNow> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 9);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 10);
 
 /**
  * What the registered bounce is waiting on.
@@ -390,7 +456,7 @@ export type DeployBounceRegistered = Message<"agentrepl.v1.DeployBounceRegistere
  * Use `create(DeployBounceRegisteredSchema)` to create a new message.
  */
 export const DeployBounceRegisteredSchema: GenMessage<DeployBounceRegistered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 10);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 11);
 
 /**
  * A reload push.
@@ -412,7 +478,7 @@ export type DeployReloadPushed = Message<"agentrepl.v1.DeployReloadPushed"> & {
  * Use `create(DeployReloadPushedSchema)` to create a new message.
  */
 export const DeployReloadPushedSchema: GenMessage<DeployReloadPushed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 11);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 12);
 
 /**
  * Presence is the fact.
@@ -427,7 +493,7 @@ export type DeployDeferredToSuccessor = Message<"agentrepl.v1.DeployDeferredToSu
  * Use `create(DeployDeferredToSuccessorSchema)` to create a new message.
  */
 export const DeployDeferredToSuccessorSchema: GenMessage<DeployDeferredToSuccessor> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 12);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 13);
 
 /**
  * @generated from message agentrepl.v1.DeployError
@@ -480,7 +546,7 @@ export type DeployError = Message<"agentrepl.v1.DeployError"> & {
  * Use `create(DeployErrorSchema)` to create a new message.
  */
 export const DeployErrorSchema: GenMessage<DeployError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 13);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 14);
 
 /**
  * A build step failed. NOTHING WAS DEPLOYED: no artifact was installed and
@@ -517,7 +583,7 @@ export type DeployBuildFailed = Message<"agentrepl.v1.DeployBuildFailed"> & {
  * Use `create(DeployBuildFailedSchema)` to create a new message.
  */
 export const DeployBuildFailedSchema: GenMessage<DeployBuildFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 14);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 15);
 
 /**
  * A deploy is already running. Deploys are never run beside each other: the
@@ -533,7 +599,7 @@ export type DeployAlreadyDeploying = Message<"agentrepl.v1.DeployAlreadyDeployin
  * Use `create(DeployAlreadyDeployingSchema)` to create a new message.
  */
 export const DeployAlreadyDeployingSchema: GenMessage<DeployAlreadyDeploying> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 15);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 16);
 
 /**
  * A handover is already in flight — typically waiting on a busy workspace —
@@ -556,7 +622,7 @@ export type DeployAlreadyRollingOut = Message<"agentrepl.v1.DeployAlreadyRolling
  * Use `create(DeployAlreadyRollingOutSchema)` to create a new message.
  */
 export const DeployAlreadyRollingOutSchema: GenMessage<DeployAlreadyRollingOut> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 16);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 17);
 
 /**
  * This daemon is itself a successor still JOINING — it serves nothing yet.
@@ -571,7 +637,7 @@ export type DeployJoining = Message<"agentrepl.v1.DeployJoining"> & {
  * Use `create(DeployJoiningSchema)` to create a new message.
  */
 export const DeployJoiningSchema: GenMessage<DeployJoining> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 17);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 18);
 
 /**
  * A launchd service did not come back onto the fresh build. The artifacts are
@@ -600,7 +666,7 @@ export type DeployServiceRestartFailed = Message<"agentrepl.v1.DeployServiceRest
  * Use `create(DeployServiceRestartFailedSchema)` to create a new message.
  */
 export const DeployServiceRestartFailedSchema: GenMessage<DeployServiceRestartFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 18);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 19);
 
 /**
  * The staged artifacts could not be installed. Nothing was restarted.
@@ -628,7 +694,7 @@ export type DeployInstallFailed = Message<"agentrepl.v1.DeployInstallFailed"> & 
  * Use `create(DeployInstallFailedSchema)` to create a new message.
  */
 export const DeployInstallFailedSchema: GenMessage<DeployInstallFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_deploy, 19);
+  messageDesc(file_agentrepl_v1_endpoint_deploy, 20);
 
 /**
  * A deployable part of the stack.
