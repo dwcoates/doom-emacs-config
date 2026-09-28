@@ -895,11 +895,19 @@ func (s *sidebarSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	s.rec.emit(event{sink: "sidebar", method: "OnLiveWorkChanged", live: &held})
 }
 
-type lifecycleSink struct{ rec *recorder }
+type lifecycleSink struct {
+	rec *recorder
+	// onTurnEnded, when set, runs inside OnTurnEnded: what the queue would do
+	// on the same call, such as ask the watcher which turn is running.
+	onTurnEnded func()
+}
 
 func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how TurnClose) {
 	held := turn
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnEnded", turn: &held, close: how})
+	if s.onTurnEnded != nil {
+		s.onTurnEnded()
+	}
 }
 
 func (s *lifecycleSink) OnTurnAdopted(_ ids.WorkspaceID, turn ids.TurnID) {
@@ -983,6 +991,9 @@ type harness struct {
 	main    *fakeStream[*shimv1.WatchAgentResponse]
 	mainReq *shimv1.WatchAgentRequest
 
+	// lifecycle is the lifecycle sink the watcher was built with.
+	lifecycle *lifecycleSink
+
 	// sentinels counts the sentinels sent, so each one is a row of its own:
 	// a cut is routed once per pointer, and a second sentinel at the first
 	// one's pointer would be dropped as a replay.
@@ -1047,6 +1058,7 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry) *harness {
 	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
+	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
 		prep(h.client)
 	}
@@ -1061,7 +1073,7 @@ func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), 
 		Footer:    &footerSink{rec: h.rec},
 		Topbar:    &topbarSink{rec: h.rec},
 		Sidebar:   &sidebarSink{rec: h.rec},
-		Lifecycle: &lifecycleSink{rec: h.rec},
+		Lifecycle: h.lifecycle,
 		Stalls:    stalls,
 	}, h.log)
 	if err != nil {

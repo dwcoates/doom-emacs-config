@@ -196,6 +196,13 @@ export interface EngineFold {
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
   /** Which agent a vendor task is running, as the fold knows it. */
   taskAgent(taskId: string): TaskAgentKnowledge;
+  /**
+   * The terminal of a turn the vendor ABSORBED into another: a vendor-started
+   * turn that folded one of the shim's sends in, whose own `result` will
+   * therefore never come (engine/sends.ts). `context.turnId` names the
+   * absorbed turn and `coordinate` keys its terminal; `turnEnded` is set.
+   */
+  concludeAbsorbedTurn(context: FoldContext, coordinate: string): EngineFoldOutput;
 }
 
 /**
@@ -230,5 +237,11 @@ export function turnBoundaryOnlyFold(): EngineFold {
     taskAwaitingAgent: (): undefined => undefined,
     learnTaskAgent: (): void => undefined,
     taskAgent: (): TaskAgentKnowledge => ({ kind: "unknown" }),
+    // THE BOUNDARY IS STILL A BOUNDARY: an absorbed turn ends here, and the
+    // engine needs that end exactly as it needs a result's.
+    concludeAbsorbedTurn: (context): EngineFoldOutput => ({
+      entries: [],
+      turnEnded: { frame: create(conversationv1.AgentFrameSchema, { agentId: context.mainAgentId }) },
+    }),
   };
 }

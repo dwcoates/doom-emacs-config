@@ -2217,6 +2217,64 @@ func TestAVendorStartedTurnHoldsAPromptAndItsEndStampsTheAnsweringResponse(t *te
 	}
 }
 
+// A PROMPT RACING A VENDOR-STARTED TURN RUNS BEHIND IT (ruled 2026-09-28).
+// The prompt was delivered and accepted, and only then did the shim announce a
+// turn the vendor started on its own: the shim matches each reply to its send
+// by id and never refuses the prompt, so the vendor's turn runs first and the
+// prompt's turn after it. The vendor turn's end must not end the prompt's turn
+// nor pop a held prompt into it; the prompt's own stamped terminal ends it, and
+// only then is the held prompt delivered.
+func TestAPromptRacingAVendorStartedTurnEndsOnItsOwnTerminalAndHoldsTheNextBehindIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: the racing prompt is accepted, the vendor's own turn is
+	// announced behind its back, and a second prompt is sent while both run.
+	f := newOpened(t, harness.Opts{})
+	const vendorTurn = "turn-vendor-raced"
+	tail := f.watchRootFeed()
+	holds := f.d.WatchHolds(f.ws)
+	racing := f.submit("the racing prompt", "k-racing", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn().GetValue()
+	if got := text(f.shim.ExpectStartTurn().GetSaid()); got != "the racing prompt" {
+		t.Fatalf("the first StartTurn said %q, want the racing prompt", got)
+	}
+	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: vendorTurn},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record of the adopted turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
+	})
+	held := f.submit("the held prompt", "k-behind-both", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the prompt held for a turn end", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
+	})
+	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, successFrame(mainAgent, nil))
+	vendorEnd := awaitRow(t, f, tail, "the vendor turn's terminal row", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded() != nil && r.GetTurn().GetValue() == vendorTurn
+	})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record that the vendor turn ended while the racing turn runs", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" && r.Level == "info" && r.Context["turn_in_flight"] == racing
+	})
+	startsAfterVendorEnd := f.shim.Count(harness.RPCStartTurn)
+
+	// Act
+	f.shim.PushAgentFrameIn(mainAgent, racing, successFrame(mainAgent, nil))
+
+	// Assert
+	racingEnd := awaitRow(t, f, tail, "the racing turn's terminal row", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded() != nil && r.GetTurn().GetValue() == racing
+	})
+	if vendorEnd.GetTurnEnded().GetConcluded() == nil || racingEnd.GetTurnEnded().GetConcluded() == nil {
+		t.Fatalf("terminal rows = (%v, %v), want both turns concluded by their own terminals", vendorEnd.GetTurnEnded(), racingEnd.GetTurnEnded())
+	}
+	if startsAfterVendorEnd != 1 {
+		t.Fatalf("StartTurn count after the vendor turn ended = %d, want 1: nothing popped into the racing turn", startsAfterVendorEnd)
+	}
+	if got := text(f.shim.ExpectStartTurn().GetSaid()); got != "the held prompt" {
+		t.Fatalf("the StartTurn after the racing turn ended said %q, want the held prompt", got)
+	}
+}
+
 // A TERMINAL ENDS THE TURN ITS STAMP NAMES. A stray terminal stamped with a
 // turn nobody opened arrives first; it must not end the open turn, and the
 // open turn's own stamped terminal is the one that draws its end.
