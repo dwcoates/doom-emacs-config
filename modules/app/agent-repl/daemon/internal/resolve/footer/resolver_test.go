@@ -653,8 +653,11 @@ func TestTheDwellRetiresTheMomentaryLoadingStatus(t *testing.T) {
 }
 
 func TestTheTurnOpenEdgeRaisesSubmittingBeforeAnyFrame(t *testing.T) {
-	// Arrange
+	// Arrange: the edge comes from the session watcher, which only exists
+	// over a route that has been seen; a turn on a route NEVER seen is the
+	// bring-up window instead (ladder.AwaitingBringUp).
 	h := newHarness(t)
+	connected(h)
 
 	// Act
 	h.r.OnTurnOpened(testWS, "turn-1")
@@ -682,8 +685,9 @@ func TestTheTurnOpenEdgeStartsTheStripsClock(t *testing.T) {
 
 func TestTheTurnOpenEdgeKeepsAnAlreadyInstalledAct(t *testing.T) {
 	// Arrange: the daemon named the act (a compaction) before the shim
-	// answered StartTurn.
+	// answered StartTurn, over a route that has been seen.
 	h := newHarness(t)
+	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 
 	// Act
