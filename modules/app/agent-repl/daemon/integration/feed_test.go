@@ -1931,8 +1931,22 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 		}}},
 	}))
 	bubble := awaitRow(t, f, tail, "the spawn's bubble", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetSubagent() != nil })
+	// The subagent's own API response states its usage: 12,400 fresh input
+	// (10,000 cache writes + 2,400 unwritten), beside cache reads and output
+	// that are not fresh input.
+	f.shim.PushAgentFrame("sub-2", activityFrame("sub-2", &conversationv1.AgentActivity{
+		ActivityId: activityID("sub-2-thinking"),
+		Usage: &conversationv1.TokenUsage{
+			InputHits:    &conversationv1.TokenCacheHits{Read: 300_000},
+			InputMisses:  &conversationv1.TokenCacheMisses{Written: 10_000, Unwritten: 2_400},
+			OutputTokens: 7_000,
+		},
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
+		}},
+	}))
 
-	// Act
+	// Act: the spawn settles with the vendor's totals, which are not the figure.
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("spawn-2"),
 		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Success{
@@ -1941,7 +1955,7 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 				Report: &conversationv1.AgentSubagentReport{Prose: &conversationv1.AgentResponseProse{Markdown: "fixed"}},
 				Totals: &conversationv1.AgentSubagentTotals{
 					DurationMs: 1000,
-					Usage:      &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{OutputTokens: 12_400}},
+					Usage:      &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{OutputTokens: 99_000}},
 				},
 				SettledAt: settledAt(2),
 			},
@@ -1955,8 +1969,11 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 	if settled.GetActivity().GetSubagent().GetSettled().GetSucceeded() == nil {
 		t.Fatalf("the settled bubble's outcome = %v, want succeeded", settled.GetActivity().GetSubagent().GetSettled().GetOutcome())
 	}
-	if settled.GetActivity().GetSubagent().GetTokens().GetText() == "" {
-		t.Fatal("the settled bubble carries no token sum, want one formatted from the totals")
+	// The figure is the subagent's lifetime fresh input (AGENTS.md, "Fresh
+	// input is the one token quantity every spend figure counts"), tallied from
+	// its own usage frames, never the settled totals.
+	if got := settled.GetActivity().GetSubagent().GetTokens().GetText(); got != "12.4k tok" {
+		t.Fatalf("the settled bubble's figure = %q, want the subagent's lifetime fresh input %q", got, "12.4k tok")
 	}
 }
 
