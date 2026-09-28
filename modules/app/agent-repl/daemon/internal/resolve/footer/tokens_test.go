@@ -564,80 +564,95 @@ func cellText(t *testing.T, h *harness) string {
 	return h.view(t).GetStrip().GetTokens().GetInput().GetText()
 }
 
-func TestTheCellIsTheMainAgentsContextGrowth(t *testing.T) {
+// panelGrowth is the panel's context-growth line: the main agent's context
+// growth, which the cell no longer shows.
+func panelGrowth(t *testing.T, h *harness) string {
+	t.Helper()
+	return h.view(t).GetExpanded().GetTokens().GetContextGrowth().GetValue()
+}
+
+// cellHeat is the strip's tokens cell heat, nil while the cell is uncolored.
+func cellHeat(t *testing.T, h *harness) *frontendv1.FooterTokensCellInputHeat {
+	t.Helper()
+	return h.view(t).GetStrip().GetTokens().GetInput().GetHeat()
+}
+
+func TestTheCellIsTheMainAgentsFreshInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
 		want    string
 	}{
 		{
-			name: "the growth since the turn opened",
+			name: "cache writes and uncached input both count",
 			arrange: func(h *harness) {
-				readContext(h, 100_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
-				readContext(h, 118_200)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_000, 200, 0, 0)))
 			},
 			want: "18.2k in",
 		},
 		{
-			name: "the main agent's own uncached spend is not the figure",
+			name: "cache reads and output never count",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(90_000, 1_000, 0, 5_000, 0)))
+			},
+			want: "1k in",
+		},
+		{
+			name: "every main API response of the turn is summed",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 10_000, 0, 0, 0)))
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-2", "success", usage(0, 8_200, 0, 0, 0)))
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "the context window's growth is not the figure",
 			arrange: func(h *harness) {
 				readContext(h, 100_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
-				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 90_000, 0, 0, 0)))
-				readContext(h, 118_200)
+				readContext(h, 140_000)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
 			},
 			want: "18.2k in",
 		},
 		{
 			name: "an in-turn subagent's spend is excluded",
 			arrange: func(h *harness) {
-				readContext(h, 100_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
 				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", detachedAgent.GetValue(), "Explore", ""))
 				h.r.OnActivity(testWS, detachedAgent, responseFrame("sub-1", "success", usage(0, 50_000, 0, 0, 0)))
-				readContext(h, 118_200)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
 			},
 			want: "18.2k in",
 		},
 		{
 			name: "a detached agent's spend is excluded",
 			arrange: func(h *harness) {
-				readContext(h, 100_000)
 				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
 				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 50_000, 0, 0, 0)))
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
 				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-2", "success", usage(0, 70_000, 0, 0, 0)))
-				readContext(h, 118_200)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
 			},
 			want: "18.2k in",
 		},
 		{
-			name: "a turn with no reading since it opened has grown nothing",
+			name: "a turn whose main agent stated no usage yet reads zero",
 			arrange: func(h *harness) {
-				readContext(h, 100_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			},
 			want: "0 in",
 		},
 		{
-			name: "a turn opened before any reading takes its baseline from the first",
+			name: "the previous turn's main spend does not carry over",
 			arrange: func(h *harness) {
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
-				readContext(h, 100_000, 101_000)
-			},
-			want: "1k in",
-		},
-		{
-			name: "the turn-open edge re-takes the baseline the accepted turn took",
-			arrange: func(h *harness) {
-				readContext(h, 100_000)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 40_000, 0, 0, 0)))
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
-				// The previous turn's closing reading lands after the prompt was
-				// accepted and before the vendor opened the turn.
-				readContext(h, 104_000)
-				h.r.OnTurnOpened(testWS, testTurnID)
-				readContext(h, 105_000)
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-2", "success", usage(0, 1_000, 0, 0, 0)))
 			},
 			want: "1k in",
 		},
@@ -659,14 +674,51 @@ func TestTheCellIsTheMainAgentsContextGrowth(t *testing.T) {
 	}
 }
 
-func TestTheCellMovesWithEachMidTurnReading(t *testing.T) {
+func TestTheCellsHeatFollowsTheGradientStops(t *testing.T) {
+	tests := []struct {
+		name  string
+		fresh uint64
+		want  float64
+	}{
+		{name: "zero is green", fresh: 0, want: 0},
+		{name: "halfway to the yellow stop", fresh: 15_000, want: 1.0 / 6},
+		{name: "the yellow stop", fresh: 30_000, want: 1.0 / 3},
+		{name: "halfway from yellow to orange", fresh: 40_000, want: 0.5},
+		{name: "the orange stop", fresh: 50_000, want: 2.0 / 3},
+		{name: "halfway from orange to red", fresh: 75_000, want: 5.0 / 6},
+		{name: "the red stop", fresh: 100_000, want: 1},
+		{name: "past the red stop holds at red", fresh: 400_000, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, tt.fresh, 0, 0, 0)))
+
+			// Assert
+			heat := cellHeat(t, h)
+			if heat == nil {
+				t.Fatal("heat = unset, want a position while the turn runs")
+			}
+			if diff := heat.GetPosition() - tt.want; diff > 1e-9 || diff < -1e-9 {
+				t.Fatalf("heat = %v, want %v", heat.GetPosition(), tt.want)
+			}
+		})
+	}
+}
+
+func TestThePanelsContextGrowthMovesWithEachMidTurnReading(t *testing.T) {
 	tests := []struct {
 		name     string
 		readings []int64
 		want     string
 	}{
-		{name: "the first reading after one response", readings: []int64{110_000}, want: "10k in"},
-		{name: "a later reading replaces it", readings: []int64{110_000, 125_000}, want: "25k in"},
+		{name: "the first reading after one response", readings: []int64{110_000}, want: "10k"},
+		{name: "a later reading replaces it", readings: []int64{110_000, 125_000}, want: "25k"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -680,8 +732,8 @@ func TestTheCellMovesWithEachMidTurnReading(t *testing.T) {
 			readContext(h, tt.readings...)
 
 			// Assert
-			if got := cellText(t, h); got != tt.want {
-				t.Fatalf("cell = %q, want %q", got, tt.want)
+			if got := panelGrowth(t, h); got != tt.want {
+				t.Fatalf("panel growth = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -691,25 +743,25 @@ func TestAContextCutRebasesTheGrowth(t *testing.T) {
 	tests := []struct {
 		name         string
 		act          func(h *harness)
-		wantCell     string
+		wantGrowth   string
 		wantSinceCut bool
 	}{
 		{
 			name:         "a reading below the baseline is a cut, and the growth restarts from it",
 			act:          func(h *harness) { readContext(h, 150_000, 30_000) },
-			wantCell:     "0 in",
+			wantGrowth:   "0",
 			wantSinceCut: true,
 		},
 		{
 			name:         "growth after the cut is measured from the post-cut size",
 			act:          func(h *harness) { readContext(h, 150_000, 30_000, 35_000) },
-			wantCell:     "5k in",
+			wantGrowth:   "5k",
 			wantSinceCut: true,
 		},
 		{
 			name:         "a reading at the baseline is no cut",
 			act:          func(h *harness) { readContext(h, 100_000) },
-			wantCell:     "0 in",
+			wantGrowth:   "0",
 			wantSinceCut: false,
 		},
 		{
@@ -718,7 +770,7 @@ func TestAContextCutRebasesTheGrowth(t *testing.T) {
 				readContext(h, 150_000, 30_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			},
-			wantCell:     "0 in",
+			wantGrowth:   "0",
 			wantSinceCut: false,
 		},
 	}
@@ -734,8 +786,8 @@ func TestAContextCutRebasesTheGrowth(t *testing.T) {
 			tt.act(h)
 
 			// Assert
-			if got := cellText(t, h); got != tt.wantCell {
-				t.Fatalf("cell = %q, want %q", got, tt.wantCell)
+			if got := panelGrowth(t, h); got != tt.wantGrowth {
+				t.Fatalf("panel growth = %q, want %q", got, tt.wantGrowth)
 			}
 			sinceCut := h.view(t).GetExpanded().GetTokens().GetContextGrowth().GetSinceCut() != nil
 			if sinceCut != tt.wantSinceCut {
@@ -784,6 +836,9 @@ func TestTheIdleCellIsTheStatedDash(t *testing.T) {
 			// Assert
 			if got := cellText(t, h); got != "--" {
 				t.Fatalf("idle cell = %q, want the daemon's stated \"--\"", got)
+			}
+			if heat := cellHeat(t, h); heat != nil {
+				t.Fatalf("idle heat = %v, want unset so the dash draws uncolored", heat)
 			}
 		})
 	}
@@ -1056,41 +1111,41 @@ func TestDetachedSpendStaysInThePanelAcrossTurns(t *testing.T) {
 
 func TestContextReadingsAreRecorded(t *testing.T) {
 	tests := []struct {
-		name      string
-		act       func(h *harness)
-		level     string
-		operation string
-		wantCell  string
+		name       string
+		act        func(h *harness)
+		level      string
+		operation  string
+		wantGrowth string
 	}{
 		{
 			name: "a reading with no payload is refused at WARN and the growth stands",
 			act: func(h *harness) {
 				h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextUsage{}})
 			},
-			level:     dlog.LevelWarn,
-			operation: "daemon.footer.context_usage_unreadable",
-			wantCell:  "10k in",
+			level:      dlog.LevelWarn,
+			operation:  "daemon.footer.context_usage_unreadable",
+			wantGrowth: "10k",
 		},
 		{
-			name:      "a negative reading is refused at WARN and the growth stands",
-			act:       func(h *harness) { readContext(h, -5) },
-			level:     dlog.LevelWarn,
-			operation: "daemon.footer.context_usage_unreadable",
-			wantCell:  "10k in",
+			name:       "a negative reading is refused at WARN and the growth stands",
+			act:        func(h *harness) { readContext(h, -5) },
+			level:      dlog.LevelWarn,
+			operation:  "daemon.footer.context_usage_unreadable",
+			wantGrowth: "10k",
 		},
 		{
-			name:      "a cut is recorded at INFO",
-			act:       func(h *harness) { readContext(h, 20_000) },
-			level:     dlog.LevelInfo,
-			operation: "daemon.footer.context_cut_rebased",
-			wantCell:  "0 in",
+			name:       "a cut is recorded at INFO",
+			act:        func(h *harness) { readContext(h, 20_000) },
+			level:      dlog.LevelInfo,
+			operation:  "daemon.footer.context_cut_rebased",
+			wantGrowth: "0",
 		},
 		{
-			name:      "an ordinary reading is recorded at DEBUG",
-			act:       func(h *harness) { readContext(h, 112_000) },
-			level:     dlog.LevelDebug,
-			operation: "daemon.footer.context_held",
-			wantCell:  "12k in",
+			name:       "an ordinary reading is recorded at DEBUG",
+			act:        func(h *harness) { readContext(h, 112_000) },
+			level:      dlog.LevelDebug,
+			operation:  "daemon.footer.context_held",
+			wantGrowth: "12k",
 		},
 	}
 	for _, tt := range tests {
@@ -1109,8 +1164,8 @@ func TestContextReadingsAreRecorded(t *testing.T) {
 			if !hasLevel(h.log.Records(), tt.level, tt.operation) {
 				t.Fatalf("records = %+v, want %s %s", h.log.Records(), tt.level, tt.operation)
 			}
-			if got := cellText(t, h); got != tt.wantCell {
-				t.Fatalf("cell = %q, want %q", got, tt.wantCell)
+			if got := panelGrowth(t, h); got != tt.wantGrowth {
+				t.Fatalf("panel growth = %q, want %q", got, tt.wantGrowth)
 			}
 		})
 	}

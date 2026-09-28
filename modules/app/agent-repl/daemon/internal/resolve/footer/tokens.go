@@ -33,13 +33,14 @@ const mainGroup = "\x00main"
 // session's is the topbar's, a different fact and a different component).
 //
 // IT HOLDS TWO DIFFERENT FACTS, and they never feed each other:
-//   - the CELL's figure is the main agent's context growth (ctx below), read
-//     from `SessionContextUsage.total_tokens` — the same fact the topbar's
-//     context chip draws — so the chip and the cell cannot disagree;
-//   - the PANEL's spend is the per-unit usage (usage below), per agent and
-//     summed, subagents and detached agents included. The expensive-turn alarm
-//     reads this spend, never the growth: a cold cache re-bills the whole
-//     prefix without growing the context at all.
+//   - the per-unit usage (usage below), per agent and summed, subagents and
+//     detached agents included. The CELL's figure is the MAIN agent's share of
+//     it — its fresh input (freshinput.Of) — and the PANEL draws every agent's.
+//     The expensive-turn alarm reads the whole spend, never the growth: a cold
+//     cache re-bills the whole prefix without growing the context at all;
+//   - the main agent's context growth (ctx below), read from
+//     `SessionContextUsage.total_tokens` — the same fact the topbar's context
+//     chip draws — which only the panel's context-growth line shows.
 //
 // DOUBLE-COUNT PREVENTION IS STRUCTURAL HERE: usage is stamped on exactly one
 // unit per API response, and a unit's frames UPSERT, so the same usage arrives
@@ -73,7 +74,7 @@ type tokenState struct {
 	// opened reports whether a turn has opened on this accounting (reset sets
 	// it); together with settled it says whether a turn is open right now.
 	opened bool
-	// ctx is the main agent's context growth, the cell's figure.
+	// ctx is the main agent's context growth, the panel's context-growth line.
 	ctx contextGrowth
 	// responses files this turn's units under the API RESPONSE each arrived
 	// in, and is the verdict's denominator. THE RECONCILIATION IS PER API
@@ -481,20 +482,50 @@ func (t *tokenState) evaluateAlarm(threshold uint64) {
 		figures.Tokens(over), figures.Tokens(threshold))
 }
 
-// cell renders the strip's tokens cell: the main agent's context growth while
-// a turn is in flight, and the idle figure otherwise. A turn in flight with no
-// context reading yet has grown nothing anyone has measured, so it reads zero.
-// The glyphs keep their own lifetimes, so an idle cell still carries the most
-// recent turn's alarm and verdict.
+// mainFresh answers the main agent's fresh input this turn: the fresh input of
+// every unit filed under the main agent's panel entry. Zero before the main
+// agent has stated any usage.
+func (t *tokenState) mainFresh() uint64 {
+	sums, ok := t.groupSums()[mainGroup]
+	if !ok {
+		return 0
+	}
+	return sums.misses
+}
+
+// heatStops are the fresh-input figures the cell's four gradient colors sit at
+// — green, yellow, orange, red — evenly spaced along the gradient, so stop i is
+// position i/3 (FooterTokensCellInputHeat).
+var heatStops = [...]uint64{0, 30_000, 50_000, 100_000}
+
+// heatPosition maps a fresh-input figure onto the cell's gradient,
+// piecewise-linearly between the stops bracketing it, and holds every figure
+// at or past the last stop at red.
+func heatPosition(fresh uint64) float64 {
+	last := len(heatStops) - 1
+	for i := 1; i <= last; i++ {
+		if fresh >= heatStops[i] {
+			continue
+		}
+		lo, hi := heatStops[i-1], heatStops[i]
+		within := float64(fresh-lo) / float64(hi-lo)
+		return (float64(i-1) + within) / float64(last)
+	}
+	return 1
+}
+
+// cell renders the strip's tokens cell: the main agent's fresh input this turn,
+// with its heat, while a turn is in flight, and the uncolored idle figure
+// otherwise. The glyphs keep their own lifetimes, so an idle cell still carries
+// the most recent turn's alarm and verdict.
 func (t *tokenState) cell(inFlight bool) *frontendv1.FooterTokensCell {
-	text := idleFigure
+	input := &frontendv1.FooterTokensCellInput{Text: idleFigure}
 	if inFlight {
-		growth, _ := t.ctx.value()
-		text = figures.Tokens(growth) + " in"
+		fresh := t.mainFresh()
+		input.Text = figures.Tokens(fresh) + " in"
+		input.Heat = &frontendv1.FooterTokensCellInputHeat{Position: heatPosition(fresh)}
 	}
-	out := &frontendv1.FooterTokensCell{
-		Input: &frontendv1.FooterTokensCellInput{Text: text},
-	}
+	out := &frontendv1.FooterTokensCell{Input: input}
 	if t.alarmTripped {
 		out.Alarm = &frontendv1.FooterTokensCellAlarm{}
 	}
