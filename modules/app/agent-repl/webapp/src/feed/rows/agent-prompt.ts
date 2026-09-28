@@ -14,7 +14,7 @@
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
 import { log } from "../../log.js";
-import { drawBubble } from "../../bubble/draw.js";
+import { PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { armName } from "../renderers.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -69,7 +69,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       working: msg.working,
       strip,
       content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
-      capLines: "feed",
+      capLines: PROMPT_CAP_LINES,
     },
     previous,
   ).bubble;
