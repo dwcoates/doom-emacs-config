@@ -1,12 +1,12 @@
 module agentrepl/shim-claude-sidecar
 
-go 1.23.0
+go 1.24.0
 
 require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	connectrpc.com/connect v1.17.0
-	golang.org/x/sys v0.35.0
+	golang.org/x/sys v0.37.0
 	google.golang.org/protobuf v1.36.11
 )
 
