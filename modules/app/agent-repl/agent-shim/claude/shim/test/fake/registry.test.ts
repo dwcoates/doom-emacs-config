@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { ALIASES, SCENARIOS, scenarioNames, selectScenario } from "../../src/fake/registry.js";
+import { networkResumePrompt } from "../../src/engine/network-resume-prompt.js";
 import { renderScenarioTable, TABLE_HEADING } from "../../scripts/scenario-table.js";
 
 const agentsMd = (): string =>
@@ -75,6 +76,11 @@ describe("selection", () => {
   it("selects the failing turn from a marker buried in prose", () => {
     // Arrange + Act + Assert
     expect(selectScenario("do the thing e2e-fail-this-turn please").name).toBe("fail-marker");
+  });
+
+  it("selects the network-resume answer for the shim's own resume prompt", () => {
+    // Arrange + Act + Assert
+    expect(selectScenario(networkResumePrompt([{ taskId: "a1", description: "d" }])).name).toBe("network-resume");
   });
 
   it("lets an explicit !name beat the failure marker", () => {
