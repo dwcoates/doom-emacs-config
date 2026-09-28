@@ -1116,6 +1116,34 @@ func TestWatchDeliversALineWrittenAfterThePin(t *testing.T) {
 	}
 }
 
+func TestWatchDeliversARetirementOnTheRetiredArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. The file plane's re-derivation retires a line the watcher drew.
+	retired := line("a1", "p3", 6)
+	retired.Retired = true
+	store.mu.Lock()
+	store.writeResult = WriteResult{Retired: 1, Lines: []LineWritten{retired}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a retirement: %v", stream.Err())
+	}
+	if got := stream.Msg().GetRetired().GetAt().GetValue(); got != "p3" {
+		t.Fatalf("retired pointer = %q (frame %v), want %q", got, stream.Msg().GetFrame(), "p3")
+	}
+}
+
 func TestWatchNeverDeliversALineAtOrBelowThePin(t *testing.T) {
 	// Arrange. The page was read at write ordinal 5.
 	store := newFakeStore()
