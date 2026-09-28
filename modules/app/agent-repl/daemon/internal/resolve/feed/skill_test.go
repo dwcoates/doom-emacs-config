@@ -175,7 +175,7 @@ func TestExactlyTwoFramesMakeTheCardAndNothingFoldsUnderIt(t *testing.T) {
 
 	// Act: ordinary work afterwards.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-2", "working on it"), nil, noAddress())
+		responseSuccessActivity("unit-2", "working on it"), nil, nil, noAddress())
 
 	// Assert: the later row is its OWN top-level row — nothing delimits a
 	// skill's scope at the source, so no window folds it under the card.

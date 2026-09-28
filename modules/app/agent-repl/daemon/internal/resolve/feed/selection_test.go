@@ -26,9 +26,9 @@ func (h *harness) concludeAnswer(turn, unit, markdown string) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame(unit, &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	id := ids.TurnID(turn)
-	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith(unit), nil, noAddress())
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith(unit), nil, nil, noAddress())
 }
 
 // TestFinalResponsesAreOrderedOldestFirst pins that concluded answers accrue in
@@ -66,7 +66,7 @@ func TestFinalResponsesAreDedupedAcrossReplayedTerminals(t *testing.T) {
 
 	// Act: the same terminal arrives again (the file plane after the stream).
 	id := ids.TurnID("turn-1")
-	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith("unit-1"), nil, noAddress())
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith("unit-1"), nil, nil, noAddress())
 
 	// Assert.
 	if got := h.resolver.FinalResponses(testWorkspace); len(got) != 1 {
@@ -136,13 +136,13 @@ func TestABackgroundedConclusionStampsNoAnswerRow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "some prose"},
-		}, nil), nil, noAddress())
+		}, nil), nil, nil, noAddress())
 	id := ids.TurnID("turn-1")
 
 	// Act: conclude with backgrounded (no answer unit).
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Backgrounded{Backgrounded: &conversationv1.AgentBackgrounded{}},
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 
 	// Assert.
 	rows := h.responseRows()

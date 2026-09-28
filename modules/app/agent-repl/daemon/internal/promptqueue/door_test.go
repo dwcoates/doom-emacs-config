@@ -108,7 +108,7 @@ func (w *doorWorld) endings(t *testing.T, resolver feed.Resolver) int {
 // does before the queue hears of the end.
 func (w *doorWorld) terminal(success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	turn := w.turn
-	w.feed.OnAgentTerminal(w.ws, doorAgent(), &turn, success, failure, sessionwatcher.OutputAddress{})
+	w.feed.OnAgentTerminal(w.ws, doorAgent(), &turn, success, failure, nil, sessionwatcher.OutputAddress{})
 }
 
 // replayPage is the turn's page as a fresh daemon replays it: its prompt, and

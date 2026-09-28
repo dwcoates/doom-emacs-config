@@ -192,6 +192,20 @@ type wsState struct {
 	// in force only while that entry is drawn (drawingEntry). Nil for an
 	// unstamped entry, which is what selects the positional fallback.
 	entryTurn *ids.TurnID
+	// entryPlace is the CONVERSATION PLACE of the entry being drawn
+	// (HistoryEntryAt.place), in force only while that entry is drawn
+	// (placingEntry): what the order key of every row it first draws is
+	// minted from (order.go). Nil for an entry whose serving side stated none,
+	// and outside any entry.
+	entryPlace *conversationv1.ConversationPlace
+	// inEntry reports that an entry is being drawn at all, placed or not, so a
+	// row an unplaced entry draws is recorded as the protocol's receipt-order
+	// fallback rather than as a row the daemon made itself.
+	inEntry bool
+	// replayTail is, per feed key, the order key the replay in progress last
+	// placed or restated in that feed: what a row the replay makes itself
+	// follows (order.go). Emptied at the start of every replay.
+	replayTail map[string]string
 	// knownTurns is every turn this feed has seen OPENED: a prompt drawn for
 	// it, or the daemon handing it over (entryturn.go).
 	knownTurns map[ids.TurnID]bool
@@ -359,9 +373,8 @@ func (p rowPlane) inheritedPast() bool {
 	return p == planePorted || p == planeInherited
 }
 
-// String names a plane for a log record. The feed orders by plane THEN seq, so
-// a row's plane and seq are the whole story of where it landed relative to
-// every other row — which is what a "why did this row sort here" trace needs.
+// String names a plane for a log record. A row's plane is recorded beside its
+// order key, which is the whole story of where it landed (order.go).
 func (p rowPlane) String() string {
 	switch p {
 	case planePorted:
@@ -376,20 +389,18 @@ func (p rowPlane) String() string {
 	return "unknown"
 }
 
-// rowRank is one row's place in its feed's order.
+// rowRank is one row's place in its feed's order, fixed at its first draw.
 type rowRank struct {
+	// plane is the plane the row was first drawn in.
 	plane rowPlane
-	// seq is the publication sequence the row was FIRST drawn at, which
-	// orders rows within one plane.
-	seq uint64
+	// key is the row's order key (order.go): what the feed sorts by, and what
+	// every publication of the row carries as FeedRow.order.
+	key string
 }
 
 // before reports whether this rank sorts ahead of other.
 func (r rowRank) before(other rowRank) bool {
-	if r.plane != other.plane {
-		return r.plane < other.plane
-	}
-	return r.seq < other.seq
+	return r.key < other.key
 }
 
 // feedState is one feed: its rows in first-appearance order, the publication
@@ -397,8 +408,8 @@ func (r rowRank) before(other rowRank) bool {
 type feedState struct {
 	// key is the encoded feed address.
 	key string
-	// order is the row ids in ORDERING-KEY order (see rowPlane); an upsert
-	// never moves a row.
+	// order is the row ids in ORDER-KEY order (order.go); an upsert never
+	// moves a row.
 	order []string
 	// rank is each row's ordering key, kept so an insertion knows where the
 	// row belongs among the rows already drawn.
@@ -412,6 +423,12 @@ type feedState struct {
 	// superseded (superseded.go): the record `upsert` stamps
 	// FeedResponse.superseded from on every draw.
 	superseded map[string]bool
+	// entryRows is, per entry base, how many rows that entry has first drawn
+	// in this feed: the next row's sub-index (order.go).
+	entryRows map[string]uint32
+	// followers is, per entry base, how many rows have been minted to follow
+	// it (order.go).
+	followers map[string]uint32
 	// seq is the publication counter: every upsert publication takes the next
 	// value, and a watch token pins to one.
 	seq uint64
@@ -437,13 +454,14 @@ type loggedRow struct {
 	row *frontendv1.FeedRow
 }
 
-// walk is one reader's page position: the index into order of the OLDEST row
-// it has been served. Ephemeral, dropped on every open and on CloseReader.
+// walk is one reader's page position: the order key of the OLDEST row it has
+// been served. Ephemeral, dropped on every open and on CloseReader.
 type walk struct {
 	// feedKey is the feed this walk is of.
 	feedKey string
-	// oldest is the index of the oldest row served so far.
-	oldest int
+	// oldest is the order key of the oldest row served so far; nil when the
+	// walk has been served nothing, which stands it at the feed's start.
+	oldest *string
 	// standing reports whether the walk has been opened at all.
 	standing bool
 }
@@ -606,6 +624,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
 		stalls:               map[string]*stallState{},
+		replayTail:           map[string]string{},
 
 		unitAccount:   map[string]string{},
 		unitFresh:     map[string]uint64{},
@@ -632,6 +651,8 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 		rank:       map[string]rowRank{},
 		nonDurable: map[string]bool{},
 		superseded: map[string]bool{},
+		entryRows:  map[string]uint32{},
+		followers:  map[string]uint32{},
 		retention:  r.deps.TailRetention,
 		subs:       map[*tailSub]struct{}{},
 	}
@@ -655,6 +676,44 @@ func (f *feedState) insert(id string, rank rowRank) {
 	f.order = append(f.order, "")
 	copy(f.order[at+1:], f.order[at:])
 	f.order[at] = id
+}
+
+// firstRank is the rank a row takes at its first draw: the rank of the row it
+// replaces when the placement says so, a freshly minted key otherwise.
+func (r *resolver) firstRank(s *wsState, f *feedState, id string, at placement) (rowRank, string) {
+	if at.inherit != nil {
+		// THE ROW TAKES THE PLACE OF THE ONE IT REPLACES, so a page walk
+		// draws it where that row stood rather than below everything drawn
+		// since.
+		return *at.inherit, "inherited"
+	}
+	key, how := r.mintOrder(s, f, id)
+	return rowRank{plane: s.plane, key: key}, how
+}
+
+// recordRepublication records that an already-placed row was published again
+// to the tails following its feed, and why. A late or reordered row on screen
+// is explained by these records, so every re-push a reader can see is at INFO
+// — except the one that is the conversation happening: a live entry growing
+// its own row (a streamed response, a tool's result), which is DEBUG because
+// it is every frame of every turn.
+func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank rowRank) {
+	if len(f.subs) == 0 {
+		return
+	}
+	reason := "daemon_restated"
+	switch {
+	case s.plane.replayed() || s.plane == planePorted:
+		reason = "history_replay"
+	case s.inEntry:
+		r.logger(s.id).Debug("daemon.feed.row_republished",
+			"a live entry updated a row already placed; it was published to the feed's open tails",
+			dlog.Context{"feed": f.key, "row": id, "key": rank.key, "reason": "live_entry", "tails": len(f.subs)})
+		return
+	}
+	r.logger(s.id).Info("daemon.feed.row_republished",
+		"a row already placed was published again to the feed's open tails",
+		dlog.Context{"feed": f.key, "row": id, "key": rank.key, "reason": reason, "plane": s.plane.String(), "tails": len(f.subs)})
 }
 
 // feedKey renders a feed address as the string this resolver keys by.
@@ -799,6 +858,17 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// record, so every draw of the fold restates it (superseded.go).
 	stampSuperseded(f, id, snapshot)
 	existing, seen := f.rows[id]
+	// THE ROW'S ORDER KEY IS FIXED AT ITS FIRST DRAW and stated on every
+	// publication of it (order.go), so it is settled before the snapshot is
+	// compared with what was published last.
+	rank, how := f.rank[id], "restated"
+	if !seen {
+		rank, how = r.firstRank(s, f, id, at)
+	}
+	r.stampOrder(s, f, id, snapshot, rank.key)
+	if s.plane != planeLive {
+		s.replayTail[f.key] = rank.key
+	}
 	if seen && proto.Equal(existing, snapshot) {
 		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
 		// re-opening with the start it already announced, a re-delivered
@@ -810,30 +880,29 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		return
 	}
 	f.seq++
+	if seen {
+		r.recordRepublication(s, f, id, rank)
+	}
 	if !seen {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
-		rank := rowRank{plane: s.plane, seq: f.seq}
-		if at.inherit != nil {
-			// THE ROW TAKES THE PLACE OF THE ONE IT REPLACES, so a page walk
-			// draws it where that row stood rather than below everything
-			// drawn since.
-			rank = *at.inherit
-		}
 		f.insert(id, rank)
-		// THE ORDERING TRACE. A row's plane and seq are fixed HERE, at first
-		// draw, and the feed sorts by (plane, seq) forever after — so this one
-		// line per row is the whole account of why any row landed where it did
-		// relative to every other (e.g. a directive prompt re-delivered on the
-		// live plane after a later prompt sorts AFTER it, by a higher seq in the
-		// same plane). At INFO so it survives at normal verbosity; the row id
-		// encodes the feed, kind and key, and the turn ties it to its turn.
+		// THE ORDERING TRACE. A row's order key is fixed HERE, at first draw,
+		// and the feed sorts by it forever after — so this one line per row is
+		// the whole account of why any row landed where it did relative to
+		// every other: `how` says whether the key came from the row's entry's
+		// conversation place, from following the row before it, or from the
+		// row it replaced. At INFO so it survives at normal verbosity; the row
+		// id encodes the feed, kind and key, and the turn ties it to its turn.
 		r.logger(s.id).Info("daemon.feed.row_placed",
 			"a row was placed in the feed order at first draw",
 			dlog.Context{
 				"feed":  f.key,
 				"row":   id,
-				"plane": f.rank[id].plane.String(),
-				"seq":   f.rank[id].seq,
+				"plane": rank.plane.String(),
+				"key":   rank.key,
+				"how":   how,
+				"index": f.indexOf(id),
+				"seq":   f.seq,
 				"turn":  row.GetTurn().GetValue(),
 			})
 		// A RESPONSE ROW'S PLACEMENT SUPERSEDES THE THINKING ROW BEFORE IT. The
@@ -921,14 +990,13 @@ func (r *resolver) holdPushes(s *wsState) func() {
 // context withholds every row that sorts ABOVE it: a page walk clamps to it
 // (see pages.go), and the live push must too. Without this a row first drawn
 // AFTER the divider yet sorting above it — a file-plane history row the
-// sidecar forwards late — would be pushed to every tail, which appends by
-// arrival and so lands it BELOW the divider on screen, where nothing retracts
-// it.
+// sidecar forwards late — would be pushed to every tail, and a reader would
+// draw a row the cut ended back above the divider.
 //
 // A FORK'S INHERITED PAST IS NEVER PUSHED (lineage.go): it sorts above every
-// row the fork has of its own, so appended by arrival it would land below them
-// — and an inherited cut would truncate the fork's own conversation off the
-// reader's screen. Pages serve it where it belongs.
+// row the fork has of its own, and an inherited cut pushed live would truncate
+// the fork's own conversation off the reader's screen. Pages serve it where it
+// belongs.
 func (r *resolver) withheldFromPush(s *wsState, f *feedState, id string) bool {
 	if rank, ok := f.rank[id]; ok && rank.plane == planeInherited {
 		r.logger(s.id).Debug("daemon.feed.push_withheld_inherited",
@@ -974,6 +1042,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 		return false
 	}
 	wasResponse := isResponseRow(f.rows[id])
+	key := f.rank[id].key
 	delete(f.rows, id)
 	delete(f.nonDurable, id)
 	delete(f.rank, id)
@@ -999,21 +1068,28 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	// sequence, append it to the retained log so a tail that connects later
 	// replays it, and enqueue it to every connected tail so an open feed
 	// updates NOW. The removal row carries ONLY its id — the arm's presence is
-	// the instruction, and the client drops the row that id keys.
-	removal := &frontendv1.FeedRow{
-		Id:  &frontendv1.FeedId{Value: id},
-		Row: &frontendv1.FeedRow_Removed{Removed: &frontendv1.FeedRowRemoved{}},
-	}
+	// the instruction, and the client drops the row that id keys. It carries
+	// the removed row's order key, as every row does.
+	removal := removalRow(id, key)
 	f.seq++
 	r.logger(s.id).Info("daemon.feed.row_retired",
 		"a row was retired and its removal published on the feed tail",
-		dlog.Context{"feed": f.key, "row": id, "seq": f.seq})
+		dlog.Context{"feed": f.key, "row": id, "key": key, "seq": f.seq})
 	f.log = append(f.log, &loggedRow{seq: f.seq, row: removal})
 	if len(f.log) > f.retention {
 		f.log = f.log[len(f.log)-f.retention:]
 	}
 	r.publish(s, f, removal)
 	return true
+}
+
+// removalRow is the publication that retracts row ID, whose order key was KEY.
+func removalRow(id, key string) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{
+		Id:    &frontendv1.FeedId{Value: id},
+		Order: &frontendv1.FeedRowOrder{Key: key},
+		Row:   &frontendv1.FeedRow_Removed{Removed: &frontendv1.FeedRowRemoved{}},
+	}
 }
 
 // rowID composes a row's identity from the address of what it DRAWS.
