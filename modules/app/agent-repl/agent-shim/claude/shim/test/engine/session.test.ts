@@ -1838,6 +1838,67 @@ describe("a turn the vendor started on its own", () => {
     expect([adopted?.startsWith("adopted-"), inFlight === adopted]).toEqual([true, true]);
   });
 
+  /** The SessionStarted a new WatchSession re-announces. */
+  async function reannounced(h: Harness): Promise<conversationv1.SessionStarted | undefined> {
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+    return second.frame.case === "sessionStarted" ? second.frame.value : undefined;
+  }
+
+  it.each([
+    {
+      name: "a StartTurn's send waits behind the adopted turn",
+      arrange: async (h: Harness) => {
+        await h.engine.onSdkMessage(assistantMessage("reply"));
+        await startDuring(h, "turn-1");
+      },
+      inFlight: (h: Harness) => adoptions(h)[0]?.id?.value,
+      waiting: ["turn-1"],
+    },
+    {
+      name: "the adopted turn runs alone",
+      arrange: async (h: Harness) => {
+        await h.engine.onSdkMessage(assistantMessage("reply"));
+      },
+      inFlight: (h: Harness) => adoptions(h)[0]?.id?.value,
+      waiting: [],
+    },
+    {
+      name: "the keep-alive holds the send slot beside the adopted turn",
+      arrange: async (h: Harness) => {
+        h.scheduler.fire(0);
+        await new Promise((resolve) => setImmediate(resolve));
+        await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
+      },
+      inFlight: (h: Harness) => adoptions(h)[0]?.id?.value,
+      waiting: [],
+    },
+    {
+      name: "a StartTurn runs with no adopted turn",
+      arrange: async (h: Harness) => {
+        await startDuring(h, "turn-1");
+      },
+      inFlight: () => "turn-1",
+      waiting: [],
+    },
+  ])("re-announces the turns waiting behind the turn in flight when $name", async ({ arrange, inFlight, waiting }) => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await arrange(h);
+
+    // Act
+    const start = await reannounced(h);
+
+    // Assert
+    expect({
+      inFlight: start?.turnInFlight?.value,
+      waiting: start?.turnsWaiting.map((turn) => turn.value),
+    }).toEqual({ inFlight: inFlight(h), waiting });
+  });
+
   it("charges a killed turn's stop result to the killed turn and adopts nothing", async () => {
     // Arrange
     const h = harness();
