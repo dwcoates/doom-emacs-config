@@ -738,9 +738,11 @@ A build, install or service restart that fails also opens the daemon-scoped
 `deploy_failed` fault (`DaemonFaultDeployFailed`, whose `step` arm carries the
 rpc's own refusal) through the observed state client, superseding that step's
 earlier fault; a step a later deploy gets through closes every fault of that
-step, and a non-joining daemon closes the ones an earlier daemon left at boot
+step, and a non-joining daemon fires the daemon-boot recovery edge at boot
 (`Deployer.CloseEarlierFailures`), since no strip of the new process draws
-them. Records go under `daemon.deploy.fault`.
+them. Each close goes through `health.CloseOnEdge` on the edge the kind's
+lifetime declares (`internal/health/lifetime.go`) and is recorded under
+`daemon.health.close_on_edge`; opens go under `daemon.deploy.fault`.
 
 One deploy runs at a time (`already_deploying`); a landing that arrives while
 one runs is covered by ONE follow-up deploy. Every decision is a record under
