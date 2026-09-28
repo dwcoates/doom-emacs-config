@@ -2406,6 +2406,20 @@ unknown name are all contract breaches."
           :busy (agent-repl-wire--decode-uint32 message 'busy json)
           :forced (agent-repl-wire--decode-bool message 'forced json))))
 
+(defun agent-repl-wire-decode-deploy-restarting (json)
+  "Decode DeployRestarting from JSON.
+Returns (:running-state-layout N :fresh-state-layout N :workspaces N
+:busy N :forced B): a stop-then-start restart because the fresh build
+writes a different state layout than the running one."
+  (let ((message "DeployRestarting"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(runningStateLayout freshStateLayout workspaces busy forced))
+    (list :running-state-layout (agent-repl-wire--decode-uint32 message 'runningStateLayout json)
+          :fresh-state-layout (agent-repl-wire--decode-uint32 message 'freshStateLayout json)
+          :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
+          :busy (agent-repl-wire--decode-uint32 message 'busy json)
+          :forced (agent-repl-wire--decode-bool message 'forced json))))
+
 (defun agent-repl-wire-decode-deploy-bounced-now (json)
   "Decode DeployBouncedNow from JSON into (:forced B)."
   (let ((message "DeployBouncedNow"))
@@ -2476,6 +2490,10 @@ REQUIRED, and THE ARM IS WHEN, so an unset one is a breach."
   "Decode DeployComponentOutcome's `handing_over' arm from JSON."
   (agent-repl-wire-decode-deploy-handing-over json))
 
+(defun agent-repl-wire-decode-deploy-component-outcome-restarting (json)
+  "Decode DeployComponentOutcome's `restarting' arm from JSON."
+  (agent-repl-wire-decode-deploy-restarting json))
+
 (defun agent-repl-wire-decode-deploy-component-outcome-shims (json)
   "Decode DeployComponentOutcome's `shims' arm from JSON."
   (agent-repl-wire-decode-deploy-shim-bounces json))
@@ -2496,7 +2514,8 @@ unset one is a contract breach."
   (let ((message "DeployComponentOutcome"))
     (agent-repl-wire-verbs--check-keys
      message json
-     '(component build upToDate restarted handingOver shims reloadPushed deferredToSuccessor))
+     '(component build upToDate restarted handingOver shims reloadPushed deferredToSuccessor
+       restarting))
     (list :component (agent-repl-wire-decode-deploy-component message 'component json)
           :build (agent-repl-wire-verbs--decode-required-string message 'build json)
           :outcome
@@ -2513,7 +2532,9 @@ unset one is a contract breach."
                  (list 'reloadPushed :reload-pushed
                        #'agent-repl-wire-decode-deploy-component-outcome-reload-pushed)
                  (list 'deferredToSuccessor :deferred-to-successor
-                       #'agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor))))))
+                       #'agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor)
+                 (list 'restarting :restarting
+                       #'agent-repl-wire-decode-deploy-component-outcome-restarting))))))
 
 (defun agent-repl-wire-decode-deploy-success-components (json)
   "Decode DeploySuccess' `components' element from JSON."

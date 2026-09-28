@@ -708,8 +708,30 @@ composer and vendor_info arms together."
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
-                             "mutationProgress" "reloadElisp")
+                             "mutationProgress" "reloadElisp" "ending")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-daemon-ending-decodes-to-its-arm ()
+  "The daemon stream's planned ending decodes to the `:ending' arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response "{\"ending\":{}}")
+                 '(:arm :ending :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-host-push-arms-pinned ()
+  "The host stream's push arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                        "WatchHostWorkspaceResponse")
+                       #'string<)
+                 (sort (list "host" "notification" "transferred" "reloadWebapp"
+                             "openInEditor" "ending")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
+  "The host stream's planned ending decodes to the `:ending' arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response "{\"ending\":{}}")
+                 '(:arm :ending :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-reload-elisp-decodes-its-root-and-build ()
   "A deploy's reload push carries the root to load from and the build it is."
@@ -1262,38 +1284,89 @@ replaces it."
                    '("elisp.wire.contract-breach message=WorkspaceCreateStage field=teleporting reason=unknown field")))))
 
 
+(defun agent-repl-test-wire-host--open-stage-push (op-id stage-json)
+  "Return a WatchDaemonResponse JSON carrying OP-ID's open entered_stage STAGE-JSON."
+  (concat "{\"mutationProgress\":{\"opId\":\"" op-id "\",\"open\":{"
+          "\"enteredStage\":" stage-json "}}}"))
+
 (ert-deftest agent-repl-test-wire-host-mutation-progress-open-stage ()
   "An open stage push decodes to the op id and the stage keyword."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-watch-daemon-response
-                  (concat "{\"mutationProgress\":{\"opId\":\"op-6\",\"open\":{"
-                          "\"stage\":\"WORKSPACE_OPEN_STAGE_STARTING_SESSION\"}}}"))
+                  (agent-repl-test-wire-host--open-stage-push
+                   "op-6" "{\"startingSession\":{}}"))
                  '(:arm :mutation-progress
                    :value (:op-id "op-6"
                            :event (:arm :open
                                    :value (:stage :starting-session)))))))
 
-(ert-deftest agent-repl-test-wire-host-mutation-progress-open-reviving-stage ()
-  "The conditional revival stage decodes on its own name."
-  (should (equal (plist-get
-                  (plist-get
-                   (plist-get
-                    (agent-repl-test-wire-host--decode
-                     #'agent-repl-wire-decode-watch-daemon-response
-                     (concat "{\"mutationProgress\":{\"opId\":\"op-7\",\"open\":{"
-                             "\"stage\":\"WORKSPACE_OPEN_STAGE_REVIVING\"}}}"))
-                    :value)
-                   :event)
-                  :value)
-                 '(:stage :reviving))))
+(ert-deftest agent-repl-test-wire-host-open-stage-checking-worktree ()
+  "The checking_worktree arm decodes to `:checking-worktree'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"checkingWorktree\":{}}")
+              :checking-worktree)))
+
+(ert-deftest agent-repl-test-wire-host-open-stage-starting-session ()
+  "The starting_session arm decodes to `:starting-session'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"startingSession\":{}}")
+              :starting-session)))
+
+(ert-deftest agent-repl-test-wire-host-open-stage-reviving ()
+  "The conditional reviving arm decodes to `:reviving'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"reviving\":{}}")
+              :reviving)))
+
+(ert-deftest agent-repl-test-wire-host-open-stage-clearing-closed ()
+  "The conditional clearing_closed arm decodes to `:clearing-closed'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"clearingClosed\":{}}")
+              :clearing-closed)))
+
+(ert-deftest agent-repl-test-wire-host-open-stage-checking-build ()
+  "The checking_build arm decodes to `:checking-build'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"checkingBuild\":{}}")
+              :checking-build)))
+
+(ert-deftest agent-repl-test-wire-host-open-stage-unset-is-a-breach ()
+  "An open entered_stage with no arm set is refused, not read as some stage."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-open-stage "{}")
+                 '("WorkspaceOpenStage" stage "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-open-progress-absent-stage-is-a-breach ()
+  "An open progress push with no entered_stage is refused, not read as some stage."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-open-progress "{}")
+                 '("WorkspaceOpenProgress" enteredStage "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-open-progress-retired-stage-field-is-a-breach ()
+  "A push on the retired field-1 open `stage' enum is refused, never misread."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-open-progress
+                  "{\"stage\":\"WORKSPACE_OPEN_STAGE_STARTING_SESSION\"}")
+                 '("WorkspaceOpenProgress" stage "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-open-stage-is-a-breach ()
-  "An unknown open-stage enum name is refused, not guessed at."
-  (should-error
-   (agent-repl-test-wire-host--decode
-    #'agent-repl-wire-decode-watch-daemon-response
-    (concat "{\"mutationProgress\":{\"opId\":\"op-8\",\"open\":{"
-            "\"stage\":\"WORKSPACE_OPEN_STAGE_TELEPORT\"}}}"))))
+  "An unknown open-stage arm is refused as an unknown field, not guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (agent-repl-test-wire-host--open-stage-push "op-8" "{\"teleporting\":{}}"))
+                 '("WorkspaceOpenStage" teleporting "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-open-stage-is-logged ()
+  "An unknown open-stage arm is recorded at ERROR before it is refused."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+      (condition-case nil
+          (agent-repl-wire-decode-workspace-open-stage
+           (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))
+        (agent-repl-wire-error nil)))
+    (should (equal logged
+                   '("elisp.wire.contract-breach message=WorkspaceOpenStage field=teleporting reason=unknown field")))))
 
 
 (provide 'test-wire-host)
