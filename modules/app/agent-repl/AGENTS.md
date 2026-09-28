@@ -811,6 +811,19 @@ because afterwards nobody can say it happened, in what order, or why.
 The fix is to emit the missing record at the site that performs the action, once,
 naming the action and the subject it acted on.
 
+IF YOU CANNOT SEE IT IN THE LOGS, THE FIX IS ALWAYS THE LOGS. This covers every
+diagnosis, not only tests, and it covers STATES as well as actions. A condition
+that persists (a pinned WAL, a stuck queue, a held lock, a slow edge) is a
+defect in the logs if nothing above verbose says it is happening. Probing a
+live process, reading raw SQLite files, or running a one-off experiment may
+show where the record belongs. None of them is the answer. The investigation
+is finished when the record that would have shown the fault has landed, with
+enough structured context to diagnose that fault from the log alone, and has a
+test. On 2026-09-28 the store's checkpoints copied nothing for four hours while
+the WAL passed 137 MB, and the only record of it was verbose. Finding it took
+reading the `-shm` read marks by hand. The fix was the driver bug and ALSO the
+`store.db.wal-pin` warning that would have named it.
+
 CHATTINESS IS NOT A REASON TO STAY SILENT; IT IS A REASON TO PICK THE RIGHT
 LEVEL. Do not skip a record because the log would get noisy, and do not promote
 one to WARN so it is easier to find. Both are how a log stops being readable.
