@@ -13,6 +13,7 @@ import {
 } from "../../../src/breathing.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
+  PROMPT_CAP_LINES,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
@@ -143,9 +144,9 @@ describe("drawFeedUserPrompt: its spec", () => {
     expect(el.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("user");
   });
 
-  it("collapses at the shared feed cap", () => {
+  it("collapses at the five-line prompt cap", () => {
     const el = drawFeedUserPrompt(prompt([]));
-    expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("feed");
+    expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(PROMPT_CAP_LINES));
   });
 
   it("stays expandable on a click, unlike a response (which is never abbreviated)", () => {

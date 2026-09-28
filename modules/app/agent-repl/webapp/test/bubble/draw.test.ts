@@ -20,6 +20,7 @@ import {
   BUBBLE_UNCAPPED,
   BUBBLE_VARIANT_ATTRIBUTE,
   ELLIPSIS_CAP_LINES,
+  PROMPT_CAP_LINES,
   SAYS_ATTRIBUTE,
   drawBubble,
   isCapped,
@@ -229,6 +230,16 @@ describe("drawBubble: the uncapped mode", () => {
   it("answers the capped values as capped", () => {
     // Arrange / Act / Assert
     expect(BUBBLE_CAP_LINES.every((cap) => isCapped(cap))).toBe(true);
+  });
+
+  it("caps a prompt at five collapsed lines", () => {
+    // Arrange / Act / Assert
+    expect(PROMPT_CAP_LINES).toBe(5);
+  });
+
+  it("lists the prompt cap among the capped values the stylesheet maps", () => {
+    // Arrange / Act / Assert
+    expect(BUBBLE_CAP_LINES).toContain(PROMPT_CAP_LINES);
   });
 
   it("answers the uncapped mode as not capped", () => {
