@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/commandfile"
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/rollout"
@@ -148,6 +149,15 @@ func main() {
 		// prints the daemon's decisions.
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		code := runDeployVerb(ctx, os.Args[2:], dialDaemon, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
+	if len(os.Args) > 1 && os.Args[1] == mergeQueueVerb {
+		// THE VERB STARTS NOTHING: it drops a command file for the serving
+		// daemon and reads the outcome off its roster.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		code := runMergeQueueVerb(ctx, os.Args[2:], dialMergeQueueDaemon,
+			mergeQueueEnv{getwd: os.Getwd, poll: commandfile.DefaultInterval}, os.Stdout, os.Stderr)
 		stop()
 		os.Exit(code)
 	}

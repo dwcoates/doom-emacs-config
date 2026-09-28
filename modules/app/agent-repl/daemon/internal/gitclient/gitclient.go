@@ -163,8 +163,13 @@ func (c *client) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, 
 // `--ff-only` is the whole contract: a branch that moved since commit was
 // built on is REFUSED by git rather than merged into, so the caller can never
 // land a tree it did not test.
+//
+// IT IS THE ONE GIT THAT CARRIES MergeQueueMarker: the repository's
+// reference-transaction hook lets master move only under it (when the
+// repository enforces the queue), so no other method may ever set it.
 func (c *client) FastForward(ctx context.Context, dir, commit string) error {
-	_, err := c.run(ctx, "daemon.gitclient.fast_forward", dir, "merge", "--ff-only", commit)
+	_, err := c.runWithEnv(ctx, "daemon.gitclient.fast_forward", dir,
+		[]string{MergeQueueMarker + "=1"}, "merge", "--ff-only", commit)
 	return err
 }
 

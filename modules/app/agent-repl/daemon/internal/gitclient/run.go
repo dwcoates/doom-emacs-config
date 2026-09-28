@@ -51,6 +51,24 @@ var strippedVars = []string{
 	"GIT_CEILING_DIRECTORIES",
 }
 
+// MergeQueueMarker is the binding the merge queue's fast-forward carries into
+// git, and the ONLY way the repository's reference-transaction hook
+// (.githooks/reference-transaction) tells a move of master the queue made from
+// one somebody made by hand. OwnerOverride is the owner's escape hatch through
+// the same hook. The hook spells both names; TestTheHookSpellsTheMarkers holds
+// the two spellings together.
+const (
+	MergeQueueMarker = "AGENT_REPL_MERGE_QUEUE"
+	OwnerOverride    = "AGENT_REPL_OWNER_OVERRIDE"
+)
+
+// hookMarkerVars are stripped from the INHERITED environment like the
+// repository selectors: a daemon started from a shell that exported either one
+// would otherwise vouch for every git it runs. The marker reaches git only
+// where a method sets it (FastForward), and the owner override never does,
+// because the daemon never acts as the owner.
+var hookMarkerVars = []string{MergeQueueMarker, OwnerOverride}
+
 // pinnedVars are the bindings the daemon SETS rather than inherits.
 // GIT_TERMINAL_PROMPT=0 makes a git that wants a credential fail instead of
 // blocking a daemon that has no terminal; LC_ALL=C pins the message and status
@@ -62,8 +80,10 @@ var pinnedVars = []string{
 	"LC_ALL=C",
 }
 
-// scrubEnv returns env with every repository-selecting binding removed and the
-// pinned bindings appended. It is the whole environment contract.
+// scrubEnv returns env with every repository-selecting binding and every hook
+// marker removed, and the pinned bindings appended. It is the whole
+// environment contract; a method's own bindings (withEnv) are appended after
+// it.
 func scrubEnv(env []string) []string {
 	kept := make([]string, 0, len(env)+len(pinnedVars))
 	for _, entry := range env {
@@ -84,6 +104,11 @@ func isScrubbed(entry string) bool {
 	}
 	for _, stripped := range strippedVars {
 		if name == stripped {
+			return true
+		}
+	}
+	for _, marker := range hookMarkerVars {
+		if name == marker {
 			return true
 		}
 	}
@@ -160,10 +185,13 @@ func (in invocation) logContext() dlog.Context {
 // what happened. The returned error is non-nil only when git could not be run
 // at all — a git that ran and exited nonzero is reported through exitCode, and
 // it is the caller that decides whether that is a failure or an answer.
-func (c *client) invoke(ctx context.Context, dir string, args ...string) (invocation, error) {
+//
+// extra are the method's own bindings, appended after the scrub so a marker
+// the method sets is the only one present.
+func (c *client) invoke(ctx context.Context, dir string, extra []string, args ...string) (invocation, error) {
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = scrubEnv(os.Environ())
+	cmd.Env = append(scrubEnv(os.Environ()), extra...)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -221,7 +249,12 @@ func (c *client) invoke(ctx context.Context, dir string, args ...string) (invoca
 // run is the ordinary path: it invokes git, treats any nonzero exit as a
 // failure, logs the outcome once, and returns trimmed stdout.
 func (c *client) run(ctx context.Context, operation, dir string, args ...string) (string, error) {
-	in, err := c.runRaw(ctx, operation, dir, args...)
+	return c.runWithEnv(ctx, operation, dir, nil, args...)
+}
+
+// runWithEnv is run with the method's own bindings added to git's environment.
+func (c *client) runWithEnv(ctx context.Context, operation, dir string, extra []string, args ...string) (string, error) {
+	in, err := c.runRawWithEnv(ctx, operation, dir, extra, args...)
 	if err != nil {
 		return "", err
 	}
@@ -237,7 +270,13 @@ func (c *client) run(ctx context.Context, operation, dir string, args ...string)
 // the caller to judge. It is what the methods whose ANSWER is an exit code
 // (MergeNoFF's conflict, IsClean's dirty tree) use.
 func (c *client) runRaw(ctx context.Context, operation, dir string, args ...string) (invocation, error) {
-	in, err := c.invoke(ctx, dir, args...)
+	return c.runRawWithEnv(ctx, operation, dir, nil, args...)
+}
+
+// runRawWithEnv is runRaw with the method's own bindings added to git's
+// environment.
+func (c *client) runRawWithEnv(ctx context.Context, operation, dir string, extra []string, args ...string) (invocation, error) {
+	in, err := c.invoke(ctx, dir, extra, args...)
 	if err != nil {
 		var cancelled *Cancelled
 		if errors.As(err, &cancelled) {
