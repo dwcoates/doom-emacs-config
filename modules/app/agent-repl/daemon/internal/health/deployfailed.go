@@ -40,6 +40,20 @@ const (
 	RollbackIncomplete = "incomplete"
 )
 
+// RollbackClause says what became of a failed step's install, one of the
+// Rollback constants, in the prose the fault record and the topbar's overlay
+// share.
+func RollbackClause(rollback string) string {
+	switch rollback {
+	case RollbackRestored:
+		return "it was rolled back to the previous build"
+	case RollbackIncomplete:
+		return "its rollback did NOT restore the previous build"
+	default:
+		return "nothing was installed"
+	}
+}
+
 // DeployFailure is what a `deploy_failed` fault records: the step, and the
 // same facts the Deploy rpc's refusal for that step carries. It is the ONE
 // place the fault's evidence is written and read, so the deploy that opens the
