@@ -73,15 +73,15 @@ const SlowQueryOperation = "store.db.slow-query"
 // (`replay`, `max_seq`, `ingest`, `message_page`) named the (session_id, seq)
 // addressing and died with it.
 const (
-	StatementWriteBatch  = "write_batch"
-	StatementOpenPage    = "open_page"
-	StatementReadPage    = "read_page"
-	StatementLinesSince  = "lines_since"
-	StatementLiveWork    = "live_work"
+	StatementWriteBatch = "write_batch"
+	StatementOpenPage   = "open_page"
+	StatementReadPage   = "read_page"
+	StatementLinesSince = "lines_since"
+	StatementLiveWork   = "live_work"
 	// StatementAgentByVendorTask is the lineage-scoped locator lookup.
 	StatementAgentByVendorTask = "agent_by_vendor_task"
-	StatementListCursors = "list_cursors"
-	StatementBashRun     = "bash_run"
+	StatementListCursors       = "list_cursors"
+	StatementBashRun           = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.
 	StatementResidueShapes = "residue_shapes"
 	// StatementLedgerSweep is one transaction of the write-ledger sweep. It
