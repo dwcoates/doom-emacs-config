@@ -363,6 +363,16 @@ the narrower/alternate state**:
   recorded one (the shape is a live session's log, 2026-09-27).
 - `!subagent-detached-live`, `!subagent-detached-hold`, `!subagent-failed` —
   declared subagent states; no capture recorded any of the three.
+- `!subagent-network-failed` — GROUNDED IN PRODUCTION RECORDS, not a capture:
+  its synthetic error message and failed notification are the 2026-09-27
+  outage's own records (the subagent transcript's `<synthetic>` /
+  `error: "server_error"` line and the main transcript's `<task-notification>`
+  summary). The capture harness quarantines API errors, so no capture can hold
+  one.
+- `!network-resume` — UNGROUNDED, selected by the shim's own resume marker
+  rather than a `!` prompt: the main agent's `SendMessage` answer is the
+  `!send-message-resumed` shape (itself declared), repeated per agent the
+  prompt names.
 - `!subagent-interleaved` — GROUNDED IN SHAPE by `subagent-detached` (the
   launch, the sidechain attribution and the completion notification), but the
   INTERLEAVING itself is ungrounded: no capture streams a subagent's response
