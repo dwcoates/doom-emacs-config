@@ -4,6 +4,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +15,9 @@ import (
 
 	"claude-repld/internal/sourcescan"
 )
+
+// daemonRoot is the daemon module's root, relative to this package.
+const daemonRoot = "../.."
 
 // stringConsts parses this package's production sources and answers every
 // string constant whose name satisfies keep, name to value.
@@ -66,6 +73,41 @@ func edgeConsts(t *testing.T) map[string]string {
 		typ, ok := spec.Type.(*ast.Ident)
 		return ok && typ.Name == "Edge"
 	})
+}
+
+// productionSources answers the daemon's production Go sources outside this
+// package's lifetime table, keyed by path: every place an edge can be fired
+// from. The integration suite and test files fire nothing in production.
+func productionSources(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(daemonRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "integration" || d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if filepath.Clean(path) == filepath.Join(daemonRoot, "internal", "health", "lifetime.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out[path] = string(body)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the daemon sources: %v", err)
+	}
+	return out
 }
 
 func TestEveryFaultKindDeclaresALifetime(t *testing.T) {
@@ -145,6 +187,38 @@ func TestEveryDeclaredEdgeIsARecoveryEdgeConstant(t *testing.T) {
 				if !ok {
 					t.Fatalf("%q declares the edge %q, which no Edge constant names", kind, edge)
 				}
+			}
+		})
+	}
+}
+
+func TestEveryRecoveryEdgeHasACaller(t *testing.T) {
+	// Arrange
+	edges := edgeConsts(t)
+	sources := productionSources(t)
+	names := make([]string, 0, len(edges))
+	for name := range edges {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			// Act
+			qualified := regexp.MustCompile(`\bhealth\.` + name + `\b`)
+			bare := regexp.MustCompile(`\b` + name + `\b`)
+			called := false
+			for path, body := range sources {
+				inPackage := filepath.Dir(filepath.Clean(path)) == filepath.Join(daemonRoot, "internal", "health")
+				if (inPackage && bare.MatchString(body)) || qualified.MatchString(body) {
+					called = true
+					break
+				}
+			}
+
+			// Assert
+			if !called {
+				t.Fatalf("the recovery edge %s (%q) has no caller; every fault that declares it would stand for good", name, edges[name])
 			}
 		})
 	}
