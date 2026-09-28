@@ -58,6 +58,7 @@ import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { shellElements } from "./shell.js";
+import { composerClosedFor } from "./vocab.js";
 
 /**
  * This page's own identity, for correlating its records against the daemon's.
@@ -276,16 +277,15 @@ export async function boot(): Promise<void> {
     createPromptWaveDriver().start();
 
     const footer = mountFooter(shell.footer, ctx, { selectDetachedWork: (id) => feed.selectDetachedWork(id) });
-    // THE GATE IS THE FOOTER'S OWN WORD (R7). A composer closes while the
-    // workspace is merging, closing, or disconnected, and the sentence it
-    // shows is the footer's status arm rather than a second vocabulary this
-    // end invented for the same three states. `merging` is a merge IN FLIGHT
-    // only: a merge stopped on a conflict, failed or landed is its own arm
-    // (mergeConflict, mergeFailed, merged), and none of them holds the
-    // session, so the composer stays open under all three.
+    // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
+    // composer is closed exactly when the footer's status arm is blue (the
+    // workspace is unusable: disconnected, closing, blocked) or purple (a
+    // merge in flight holds it) — render-colors.json#composer_closed_colors —
+    // and the sentence it shows is the footer's status arm rather than a
+    // second vocabulary. Every other arm is a usable workspace, turquoise
+    // included, so its composer is open.
     footer.onStatus((statusCase) => {
-      const closed =
-        statusCase === "merging" || statusCase === "closing" || statusCase === "disconnected";
+      const closed = composerClosedFor(statusCase);
       gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);
     });
 

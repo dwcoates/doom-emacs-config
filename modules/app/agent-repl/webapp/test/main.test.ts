@@ -575,12 +575,24 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     },
   );
 
-  test("opens the gate when the footer reports a status that is not one of the three", async () => {
+  // THE COMPOSER INVARIANT (owner ruling, 2026-09-28): the gate is closed
+  // exactly when the footer's color is blue (unusable) or purple (a merge
+  // holds it). One row per arm the ruling places on either side of the line.
+  test.each([
+    ["disconnected", "closed"],
+    ["closing", "closed"],
+    ["blocked", "closed"],
+    ["merging", "closed"],
+    ["turnFailed", "open"],
+    ["degraded", "open"],
+    ["idle", "open"],
+    ["thinking", "open"],
+  ])("sets the gate %s -> %s by the footer's color", async (arm, want) => {
     await bootMain();
 
-    page.onFooterStatus?.("running");
+    page.onFooterStatus?.(arm);
 
-    expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
+    expect(page.gateSet).toHaveBeenCalledWith(want, want === "closed" ? arm : undefined);
   });
 
   test("draws a dev-mode command panel beside the composer that asked for it", async () => {
