@@ -788,7 +788,11 @@ wire."
                                            :value (:turn-in-flight t :detached-work 2)))))))
                ("\"reloadPushed\":{\"recipients\":4}"
                 (:arm :reload-pushed :value (:recipients 4)))
-               ("\"deferredToSuccessor\":{}" (:arm :deferred-to-successor :value nil))))
+               ("\"deferredToSuccessor\":{}" (:arm :deferred-to-successor :value nil))
+               ("\"restarting\":{\"runningStateLayout\":7,\"freshStateLayout\":8,\"workspaces\":3,\"busy\":1,\"forced\":true}"
+                (:arm :restarting
+                 :value (:running-state-layout 7 :fresh-state-layout 8
+                         :workspaces 3 :busy 1 :forced t)))))
       (should (equal (list (car case)
                            (plist-get
                             (car (plist-get
@@ -953,7 +957,7 @@ wire."
   "Every Deploy oneof carries exactly the arms this codec decodes."
   (dolist (case '(("DeployComponentOutcome"
                    ("upToDate" "restarted" "handingOver" "shims" "reloadPushed"
-                    "deferredToSuccessor"))
+                    "deferredToSuccessor" "restarting"))
                   ("DeployShimBounce" ("bouncedNow" "registered"))
                   ("DeployError"
                    ("buildFailed" "alreadyDeploying" "alreadyRollingOut" "joining"

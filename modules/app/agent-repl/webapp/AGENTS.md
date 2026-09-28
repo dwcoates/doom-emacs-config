@@ -208,6 +208,17 @@ hand any more:
   what lifts it), and a push does NOT lift one: only a unary the daemon
   answered, or a stream that reads again, does. Nothing else in the webapp
   composes a footer cell, and no new arm was added to the proto for it.
+- **A PLANNED ENDING IS NOT A FAULT.** The daemon, roster and host streams
+  carry an `ending` arm (`DaemonStreamEnding`) a daemon standing down in a
+  planned exit sends as a stream's last frame. `watchStream`'s
+  `plannedEnding` recognizer (wired by the sidebar and the lifecycle's
+  `WatchDaemon`) consumes the frame before `onPush`, and a run that then ends
+  cleanly is logged at info (`rpc.stream-ended-planned`) and reopened at once
+  with NO `daemonUnreachable` filed. A clean end without it, or an error after
+  it, is the unreachable failure it always was. The daemon sends the frame on
+  its dedicated rpcs only; a page mux subscription is not given one (the
+  `WatchPage` stream has no ending arm), so today the page's own end still
+  reads as the failure.
 - **THE TOPBAR'S WARNING CHIP IS THE ONE PLACE AN ERROR IS SHOWN** (owner
   ruling, 2026-09-23). The chip and its dropdown (`src/topbar/warnings.ts`)
   are the canonical surface on which the webapp makes an error visible: no

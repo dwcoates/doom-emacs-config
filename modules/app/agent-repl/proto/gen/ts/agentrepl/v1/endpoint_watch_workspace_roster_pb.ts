@@ -9,6 +9,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { DaemonStreamEnding } from "./daemon_stream_ending_pb";
+import { file_agentrepl_v1_daemon_stream_ending } from "./daemon_stream_ending_pb";
 import type { WorkspaceRoster } from "../../frontend/v1/sidebar_pb";
 import { file_frontend_v1_sidebar } from "../../frontend/v1/sidebar_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -17,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_workspace_roster.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_workspace_roster: GenFile = /*@__PURE__*/
-  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd29ya3NwYWNlX3Jvc3Rlci5wcm90bxIMYWdlbnRyZXBsLnYxIh0KG1dhdGNoV29ya3NwYWNlUm9zdGVyUmVxdWVzdCJMChxXYXRjaFdvcmtzcGFjZVJvc3RlclJlc3BvbnNlEiwKBnJvc3RlchgBIAEoCzIcLmZyb250ZW5kLnYxLldvcmtzcGFjZVJvc3RlckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_sidebar]);
+  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd29ya3NwYWNlX3Jvc3Rlci5wcm90bxIMYWdlbnRyZXBsLnYxIh0KG1dhdGNoV29ya3NwYWNlUm9zdGVyUmVxdWVzdCKKAQocV2F0Y2hXb3Jrc3BhY2VSb3N0ZXJSZXNwb25zZRIuCgZyb3N0ZXIYASABKAsyHC5mcm9udGVuZC52MS5Xb3Jrc3BhY2VSb3N0ZXJIABIyCgZlbmRpbmcYAiABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSABCBgoEcHVzaEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_daemon_stream_ending, file_frontend_v1_sidebar]);
 
 /**
  * Opens the stream. Empty on purpose: the roster is global.
@@ -41,11 +43,29 @@ export const WatchWorkspaceRosterRequestSchema: GenMessage<WatchWorkspaceRosterR
  */
 export type WatchWorkspaceRosterResponse = Message<"agentrepl.v1.WatchWorkspaceRosterResponse"> & {
   /**
-   * The roster, whole.
+   * What this frame carries: the roster, or the planned end of the stream.
    *
-   * @generated from field: frontend.v1.WorkspaceRoster roster = 1;
+   * @generated from oneof agentrepl.v1.WatchWorkspaceRosterResponse.push
    */
-  roster?: WorkspaceRoster | undefined;
+  push: {
+    /**
+     * The whole roster, re-pushed on every change.
+     *
+     * @generated from field: frontend.v1.WorkspaceRoster roster = 1;
+     */
+    value: WorkspaceRoster;
+    case: "roster";
+  } | {
+    /**
+     * The daemon is standing down in a planned exit and this is the stream's
+     * last frame; the client reattaches to the live daemon without treating
+     * the end as a fault. See the message.
+     *
+     * @generated from field: agentrepl.v1.DaemonStreamEnding ending = 2;
+     */
+    value: DaemonStreamEnding;
+    case: "ending";
+  } | { case: undefined; value?: undefined };
 };
 
 /**

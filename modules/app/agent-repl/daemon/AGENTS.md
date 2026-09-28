@@ -161,10 +161,20 @@ and h2c through a real exit.
 | --- | --- | --- |
 | `streamsEndBound` (cmd/claude-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
 
-The end frame is Connect's plain end-of-stream: the contract has no terminal
-ARM for a stand-down on these streams (a transfer is announced by the
-`transferred` push BEFORE it, never as a terminal frame), so a client reads a
-clean end and re-resolves the live daemon itself.
+The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
+`WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
+`ending` arm (`DaemonStreamEnding`, daemon_stream_ending.proto), which says the
+end is PLANNED. The dedicated rpc handler sends it (`endStandingStream`,
+internal/server/streams.go) when its body returned because the surface's
+lifetime ended — and the lifetime ends only in `Close`, which only the planned
+exit runs — so every stand-down path above sends it and an unplanned death
+never does; a stream its client ended is sent nothing. It carries no address:
+a client re-resolves the live daemon itself (a transfer is still announced by
+the `transferred` push, never by the ending). A page's mux carries no ending on
+its roster or daemon subscriptions: those sinks end with the page's own stream
+at the same lifetime edge, and `WatchPage` has no ending arm.
+`integration/exit_streams_test.go` pins the ending then the clean end on each
+of the three.
 
 ### The shim link's requests own the bytes they promise
 
@@ -849,12 +859,16 @@ deferred to the replacement):
 A restart that cannot finish (a failed stand-down, a replacement that will not
 start) takes EVERY workspace back, frees the slot and keeps serving, at ERROR.
 
-OPEN CONTRACT QUESTION: `endpoint_deploy.proto` has no daemon arm for this
-restart (only the blue-green `handing_over`), so the `Deploy` rpc answers a
-layout-change deploy as an internal failure naming the unnamed decision while
-the restart proceeds; a landing's deploy (no rpc) is unaffected. The
-announcement reuses `self_merge_rollout` with the address unset, whose comment
-describes a handover. Both await the owner's ruling.
+The `Deploy` rpc answers this decision with the daemon's
+`DeployComponentOutcome.restarting` arm (`DeployRestarting`: the running and
+fresh state layouts, the workspaces standing down, how many were busy, and
+whether it is forced); equal or negative layouts are refused as a decision the
+arm cannot state. `claude-repld deploy` prints it as
+`daemon build=… restarting layout=N→M workspaces=W busy=B forced=F`.
+
+OPEN CONTRACT QUESTION: the announcement reuses `self_merge_rollout` with the
+address unset, whose comment describes a handover. It awaits the owner's
+ruling.
 
 ## Logging
 
@@ -961,9 +975,9 @@ Two mutations report stages today and they do NOT work the same way:
 Each verb takes its reporter as a proto-free interface (`CreateProgress`,
 `OpenProgress`) so the verb layer never names a wire type; the server maps the
 verb's own stage vocabulary onto the wire (a create's onto its own
-`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto the
-`WorkspaceOpenStage` enum), and an unmapped stage is logged at ERROR and NOT
-relayed rather than sent unset or as UNSPECIFIED. A stage is reported
+`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto its own
+`WorkspaceOpenStage` oneof arm on `entered_stage`), and an unmapped stage is
+logged at ERROR and NOT relayed rather than sent with its oneof unset. A stage is reported
 only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
