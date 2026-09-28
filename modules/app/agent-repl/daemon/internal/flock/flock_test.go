@@ -1,6 +1,7 @@
 package flock
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,36 @@ func TestTryExclusiveCreatesTheDirectory(t *testing.T) {
 	// Assert.
 	if err != nil || !ok {
 		t.Fatalf("TryExclusive under a missing directory = (%v, %v), want the lock", ok, err)
+	}
+	lock.Release()
+}
+
+func TestTryExclusiveInNeverCreatesADirectory(t *testing.T) {
+	// Arrange
+	missing := filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, ok, err := TryExclusiveIn(filepath.Join(missing, "a.lock"))
+
+	// Assert
+	if !errors.Is(err, os.ErrNotExist) || ok {
+		t.Fatalf("TryExclusiveIn under a missing directory = (%v, %v), want an os.ErrNotExist error", ok, err)
+	}
+	if _, statErr := os.Stat(missing); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v, want the directory still absent", missing, statErr)
+	}
+}
+
+func TestTryExclusiveInTakesAFreeLockInAnExistingDirectory(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "a.lock")
+
+	// Act
+	lock, ok, err := TryExclusiveIn(path)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("TryExclusiveIn = (%v, %v), want the lock", ok, err)
 	}
 	lock.Release()
 }

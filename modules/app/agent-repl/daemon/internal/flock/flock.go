@@ -32,6 +32,16 @@ func TryExclusive(path string) (*Lock, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, false, fmt.Errorf("creating the lock directory %s: %w", filepath.Dir(path), err)
 	}
+	return TryExclusiveIn(path)
+}
+
+// TryExclusiveIn is TryExclusive for a lock that lives INSIDE a directory the
+// caller does not own the existence of: it creates the lock file but NEVER a
+// directory. A missing directory is an error wrapping os.ErrNotExist. A lock
+// beside the entries of a shared state root must not recreate that root: a
+// daemon whose root was deleted would otherwise put the path back and read its
+// own recreation as "replaced by another directory".
+func TryExclusiveIn(path string) (*Lock, bool, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, false, fmt.Errorf("opening the lock %s: %w", path, err)
