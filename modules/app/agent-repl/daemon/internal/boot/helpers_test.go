@@ -177,12 +177,18 @@ type fakeRollout struct {
 	// adopted is the adopted set the boot handed Reconcile, which is what the
 	// no-manifest accounting keys on.
 	adopted []rollout.AdoptedSession
+	// onReconcile runs inside Reconcile, where the real controller records
+	// the bounce dispositions as faults.
+	onReconcile func()
 }
 
 func (r *fakeRollout) Reconcile(_ context.Context, adopted []rollout.AdoptedSession) ([]rollout.Disposition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adopted = append([]rollout.AdoptedSession(nil), adopted...)
+	if r.onReconcile != nil {
+		r.onReconcile()
+	}
 	if r.boundNow != nil {
 		r.boundAtReconcile = r.boundNow()
 	}
