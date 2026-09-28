@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -356,20 +357,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}
+	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
+	// every row it cannot place, and before the fault hook, which raises the
+	// faults the topbar carries (a failed deploy) onto every strip.
+	topbarResolver, err := topbar.New(colors, p.Surfaces)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
+	}
+
 	// EVERY FAULT REACHES THE FOOTER (the owner's ruling of 2026-09-13). The
 	// footer learns about faults from the ONE place faults are written —
 	// the state client every raise site shares — rather than from plumbing
 	// beside each raise, which is how three fault kinds came to have a footer
 	// path and sixteen did not. Every collaborator built below takes the
-	// decorated client, so a fault opened anywhere lands on the strip.
-	p.DB = health.ObserveFaults(p.DB, footerFaults{footerResolver}, p.Surfaces)
-
-	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
-	// every row it cannot place.
-	topbarResolver, err := topbar.New(colors, p.Surfaces)
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
-	}
+	// decorated client, so a fault opened anywhere lands on the strip. The
+	// faults the topbar carries (health.FaultTopbarLine) reach its warning
+	// strip through the same hook (owner ruling, 2026-09-28).
+	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, topbarResolver), p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -1308,14 +1312,28 @@ func resolveFactsBound(value string) (time.Duration, error) {
 	return resolveDurationKnob(envHandoverFactsBound, value, rollout.DefaultFactsBound)
 }
 
-// footerFaults is the health package's fault sink, drawn on the footer. It
-// translates the health verdict into the resolver's own vocabulary and adds
-// nothing: the partition is health's, the drawing is the footer's.
-type footerFaults struct{ footer footer.Resolver }
+// faultSurfaces is the health package's fault sink: every fault is drawn on
+// the footer, and the ones the topbar carries on its warning strip too. It
+// translates the health verdict into each resolver's own vocabulary and adds
+// nothing: the partition and the lines are health's, the drawing theirs.
+type faultSurfaces struct {
+	footer footer.Resolver
+	topbar topbar.Resolver
+
+	mu sync.Mutex
+	// onTopbar are the open faults raised on the topbar, so a close retracts
+	// exactly those.
+	onTopbar map[ids.FaultID]bool
+}
+
+func newFaultSurfaces(f footer.Resolver, t topbar.Resolver) *faultSurfaces {
+	return &faultSurfaces{footer: f, topbar: t, onTopbar: map[ids.FaultID]bool{}}
+}
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
-// strip when the fault is daemon-scoped.
-func (f footerFaults) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
+// strip when the fault is daemon-scoped, and on the topbar when it carries
+// the fault.
+func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	f.footer.OpenFault(ws, footer.Fault{
 		ID:        string(line.ID),
 		Kind:      line.Kind,
@@ -1324,9 +1342,26 @@ func (f footerFaults) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		Detail:    line.Detail,
 		At:        line.At,
 	})
+	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
+	// states no line for any other.
+	if line.Topbar == "" || ws != "" {
+		return
+	}
+	f.mu.Lock()
+	f.onTopbar[line.ID] = true
+	f.mu.Unlock()
+	f.topbar.RaiseDaemonWarning(string(line.ID), line.Topbar)
 }
 
-// FaultClosed retracts it again.
-func (f footerFaults) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
+// FaultClosed retracts it again, from the topbar too when it was raised
+// there.
+func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
+	f.mu.Lock()
+	raised := f.onTopbar[id]
+	delete(f.onTopbar, id)
+	f.mu.Unlock()
+	if raised {
+		f.topbar.RetractDaemonWarning(string(id))
+	}
 }
