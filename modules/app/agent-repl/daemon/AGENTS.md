@@ -55,7 +55,14 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   member of the daemon's group die while the daemon can run, and never rest
   that ordering on a stop: on Darwin a SIGSTOP that reaches a process inside
   execve is discarded when the exec completes, after the process has already
-  read as stopped.
+  read as stopped. Every signal to the daemon and its reap share one owner
+  (`Daemon.sigMu`): the reap marks itself begun under it before `cmd.Wait`
+  frees the pid, so no signal can reach a recycled pid or group id.
+- **The stray reap rests on exits too** (`harness.Daemon.ReapStrays`): it
+  runs in rounds of freeze, SIGKILL and the kernel's exit event for every
+  listed stray until a listing names none still live, so a stray whose stop
+  exec discarded cannot leave a replacement behind. `ErrLeakedProcess` is the
+  backstop for whatever the round budget leaves.
   Reclaim tests make their dead roots in a private `runRootSpace`, never in
   `hostRunRoots`, which every other run on the host reclaims.
 - **The suite bounds its own load**: `harness.DefaultDaemonSlots` (8,

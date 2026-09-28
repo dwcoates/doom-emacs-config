@@ -63,3 +63,22 @@ func stateOf(stat int8, flag int32) (processState, error) {
 		return processState{}, fmt.Errorf("unknown p_stat %d", stat)
 	}
 }
+
+// groupExited reports whether every process in process group pgid has
+// exited: a group of zombies, or no group at all.
+func groupExited(pgid int) (bool, error) {
+	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
+	if err != nil {
+		return false, fmt.Errorf("list process group %d: %w", pgid, err)
+	}
+	for _, m := range members {
+		state, err := stateOf(m.Proc.P_stat, m.Proc.P_flag)
+		if err != nil {
+			return false, fmt.Errorf("process %d of group %d: %w", m.Proc.P_pid, pgid, err)
+		}
+		if !state.exited {
+			return false, nil
+		}
+	}
+	return true, nil
+}
