@@ -397,6 +397,14 @@ func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
 }
 
+// SetStateUnreported installs, or lifts, the fact that a shim taken back after
+// a failed handover has not re-reported its session state. A session start
+// lifts it too (OnSessionStarted), which is the re-report it waits for.
+func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
+	r.mutate(ws, "daemon.footer.set_state_unreported", "the footer took whether the shim's session state is unreported",
+		dlog.Context{"unreported": unreported}, func(s *wsState) { s.stateUnreported = unreported })
+}
+
 // SetClosing installs a close refusal.
 func (r *resolver) SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked) {
 	ctx := dlog.Context{"blocked": blocked != nil}
@@ -585,6 +593,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
+			s.stateUnreported = false
 		})
 }
 

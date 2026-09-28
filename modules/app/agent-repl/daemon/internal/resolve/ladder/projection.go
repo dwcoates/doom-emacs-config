@@ -19,7 +19,7 @@ var rosterArmClaims = map[string]Claim{
 	"severed":         Disconnected,
 	"dead":            Disconnected,
 	"start_failed":    Disconnected,
-	"degraded":        Disconnected,
+	"degraded":        Degraded,
 	"merge_failed":    MergeFailed,
 	"merged":          Merged,
 	"vendor_blocked":  Blocked,
@@ -77,6 +77,8 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 		return Merged, true
 	case *frontendv1.FooterStatus_Blocked:
 		return Blocked, true
+	case *frontendv1.FooterStatus_Degraded:
+		return Degraded, true
 	case *frontendv1.FooterStatus_Waiting:
 		if arm.Waiting.GetWakeup() != nil {
 			return Idle, true
@@ -85,7 +87,7 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 	case *frontendv1.FooterStatus_Thinking, *frontendv1.FooterStatus_Loading:
 		return Thinking, true
 	case *frontendv1.FooterStatus_Interrupted, *frontendv1.FooterStatus_Background,
-		*frontendv1.FooterStatus_Idle:
+		*frontendv1.FooterStatus_Idle, *frontendv1.FooterStatus_TurnFailed:
 		return Idle, true
 	default:
 		return "", false

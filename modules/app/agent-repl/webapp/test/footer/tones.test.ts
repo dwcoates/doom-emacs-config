@@ -28,12 +28,13 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the thirteen arms the contract carries", () => {
+  it("names the fifteen arms the contract carries", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual(
       [
         "background",
         "blocked",
         "closing",
+        "degraded",
         "disconnected",
         "idle",
         "interrupted",
@@ -43,6 +44,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
         "merged",
         "merging",
         "thinking",
+        "turnFailed",
         "waiting",
       ].sort(),
     );
@@ -83,7 +85,9 @@ describe("statusArmClass", () => {
     // awaiting the user is green, a failure is blue, and a landed merge is
     // green (owner ruling, 2026-09-28).
     ["mergeConflict", "tone-green"],
-    ["mergeFailed", "tone-blue"],
+    ["mergeFailed", "tone-turquoise"],
+    ["turnFailed", "tone-turquoise"],
+    ["degraded", "tone-turquoise"],
     ["merged", "tone-green"],
     ["background", "tone-yellow"],
     // blocked is blue, like disconnected and closing: a blocked session cannot

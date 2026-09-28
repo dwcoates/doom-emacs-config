@@ -234,7 +234,7 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
 
   it.each([
     ["mergeConflict", "merge conflict", "tone-green"],
-    ["mergeFailed", "merge failed", "tone-blue"],
+    ["mergeFailed", "merge failed", "tone-turquoise"],
     ["merged", "merged", "tone-green"],
   ])("words a stopped merge's %s arm '%s' in %s", (arm, word, tone) => {
     const { row } = drawStrip({ status: status(arm, {}) });

@@ -25,7 +25,9 @@ import (
 //
 // WITHIN a rung the order is this surface's detail:
 //   - merging: enqueuing, queued and merging are the one rung;
-//   - disconnected: start_failed, dead, severed, init, degraded (linkArm);
+//   - disconnected: start_failed, dead, severed, init (linkArm);
+//   - degraded: a taken-back shim's unreported state, or an open observation
+//     window — both drawn `degraded`;
 //   - thinking: clearing, then compacting, then submitting, then thinking;
 //   - idle: none (no session was ever created), then the last turn's end
 //     while its result is UNREAD (done, interrupted or turn_failed — it
@@ -91,6 +93,15 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 		return linkArm(s, session)
 	case ladder.Closing:
 		// The roster observes no close refusal; only the footer claims it.
+		return ""
+	case ladder.Degraded:
+		if !s.linkSeen || noSessionArm(s, session) != "" {
+			return ""
+		}
+		if s.stateUnreported || s.degraded {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.stateUnreported || s.degraded"})
+			return "degraded"
+		}
 		return ""
 	case ladder.Blocked:
 		if s.vendorBlocked {
@@ -190,8 +201,6 @@ func linkArm(s *wsState, session *wsm.Session) string {
 		return "dead"
 	case s.link == shimclient.LinkDead:
 		return "start_failed"
-	case s.degraded:
-		return "degraded"
 	default:
 		// A CONNECTED route is proven, so the row is NOT a link fault. `init`
 		// belongs to a route still being established — dialing, or a session
