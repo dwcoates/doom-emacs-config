@@ -4,14 +4,15 @@
 // carries facts about the DAEMON ITSELF, never any workspace's state (the
 // channel-separation ruling: workspace-dependent and workspace-independent
 // channels are distinct types). Its pushed facts: the graceful-rollout
-// shutdown announcement, the standing drain schedule, and a deploy's elisp
-// reload.
+// shutdown announcement, the standing drain schedule, a deploy's elisp
+// reload, and (to Emacs) the daemon's standing faults it surfaces loudly.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/daemon_stream_ending.proto";
+import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/drain_reason.proto";
 import "agentrepl/v1/workspace_mutation_progress.proto";
 
@@ -79,7 +80,37 @@ message WatchDaemonResponse {
     // last frame; the client reattaches to the live daemon without treating
     // the end as a fault. See the message.
     DaemonStreamEnding ending = 6;
+    // THE DAEMON'S STANDING LOUD FAULTS, WHOLE: every daemon-scoped fault
+    // that stands right now and that every client surfaces loudly — exactly
+    // the ones the topbar's warning strip carries (a failed deploy, and a
+    // failed deploy's rollback). STATE, not an event: pushed whenever one
+    // opens or closes, and replayed to a late subscriber, so an Emacs that
+    // reconnects is told what stands rather than what happened while it was
+    // away. A client surfaces each fault id ONCE, however often it is
+    // re-told. Sent ONLY on an Emacs stream: a webview draws the same faults
+    // on its topbar and footer, whose views already carry them.
+    DaemonFaultsStanding faults_standing = 7;
   }
+}
+
+// Every standing loud fault, oldest first. An empty list is the daemon
+// saying none stands (the last one closed).
+message DaemonFaultsStanding {
+  repeated DaemonStandingFault faults = 1;
+}
+
+// One standing loud fault.
+message DaemonStandingFault {
+  // The fault record's id: what a client dedupes on. REQUIRED.
+  string fault_id = 1;
+  // The ONE line a client shows, composed by the daemon — the topbar
+  // warning row's very line ("deploy failed: install store, rolled back:
+  // permission denied"). REQUIRED.
+  string line = 2;
+  // The fault, typed, exactly as DaemonHealth answers it. REQUIRED.
+  DaemonFault fault = 3;
+  // When it opened, epoch ms.
+  int64 opened_at_ms = 4;
 }
 
 // Hot-load the checkout's elisp. EMACS OWNS THE LOAD: the daemon has no route

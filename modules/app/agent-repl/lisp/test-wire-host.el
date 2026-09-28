@@ -708,8 +708,66 @@ composer and vendor_info arms together."
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
-                             "mutationProgress" "reloadElisp" "ending")
+                             "mutationProgress" "reloadElisp" "ending" "faultsStanding")
                        #'string<))))
+
+(defconst agent-repl-test-wire-host--standing-fault-json
+  (concat "{\"faultId\":\"f-1\",\"line\":\"deploy failed: build webapp: tsc\","
+          "\"fault\":{\"detail\":\"the deploy failed\",\"deployFailed\":{\"build\":"
+          "{\"step\":\"webapp\",\"detail\":\"tsc\",\"log\":\"/s/build.log\"}}},"
+          "\"openedAtMs\":\"1756400000000\"}")
+  "One standing loud fault: a failed deploy's build.")
+
+(ert-deftest agent-repl-test-wire-host-faults-standing-decodes-each-fault ()
+  "The standing loud faults decode to their id, line, typed fault and instant."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"faultsStanding\":{\"faults\":["
+                          agent-repl-test-wire-host--standing-fault-json "]}}"))
+                 '(:arm :faults-standing
+                   :value (:faults
+                           ((:fault-id "f-1"
+                             :line "deploy failed: build webapp: tsc"
+                             :fault (:detail "the deploy failed"
+                                     :kind (:arm :deploy-failed
+                                            :value (:step (:arm :build
+                                                           :value (:step "webapp" :detail "tsc"
+                                                                   :log "/s/build.log")))))
+                             :opened-at-ms 1756400000000)))))))
+
+(ert-deftest agent-repl-test-wire-host-faults-standing-empty-is-none-standing ()
+  "An empty standing set decodes to no faults: the last one closed."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response "{\"faultsStanding\":{}}")
+                 '(:arm :faults-standing :value (:faults nil)))))
+
+(ert-deftest agent-repl-test-wire-host-standing-fault-without-an-id-is-refused ()
+  "A standing fault without an id is a breach: the id is what a client surfaces a fault once by."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-standing-fault
+                  "{\"line\":\"x\",\"fault\":{}}")
+                 '("DaemonStandingFault" faultId "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-standing-fault-without-a-line-is-refused ()
+  "A standing fault without a line is a breach: the line is the one sentence a client shows."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-standing-fault
+                  "{\"faultId\":\"f-1\",\"fault\":{}}")
+                 '("DaemonStandingFault" line "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-standing-fault-without-its-fault-is-refused ()
+  "A standing fault without its fault is a breach: the typed fault is required."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-standing-fault
+                  "{\"faultId\":\"f-1\",\"line\":\"x\"}")
+                 '("DaemonStandingFault" fault "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-standing-fault-with-an-unknown-field-is-refused ()
+  "A standing fault with an unknown field is a breach: a field the message does not declare is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-standing-fault
+                  "{\"faultId\":\"f-1\",\"line\":\"x\",\"fault\":{},\"extra\":1}")
+                 '("DaemonStandingFault" extra "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-daemon-ending-decodes-to-its-arm ()
   "The daemon stream's planned ending decodes to the `:ending' arm."

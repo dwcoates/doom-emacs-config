@@ -92,6 +92,9 @@ type unmodeledCall struct {
 type raisedRecord struct {
 	// line is the dropdown row's sentence.
 	line string
+	// deployFailed is a failed deploy's overlay, nil for a row with none.
+	// Only a daemon-scoped warning carries one.
+	deployFailed *DeployFailedOverlay
 	// seq is the observation order.
 	seq int
 }
