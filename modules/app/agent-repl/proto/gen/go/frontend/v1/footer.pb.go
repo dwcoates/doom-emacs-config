@@ -294,7 +294,8 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 //	|------------|-----------|----------------------------------------------|
 //	| (whatever  | (whatever | shim_reported, classifier_failed,            |
 //	|  stands)   |  stands)  | bounce_unknown, conversation_abandoned,      |
-//	|            |           | final_answer_unresolved                      |
+//	|            |           | final_answer_unresolved,                     |
+//	|            |           | deploy_failed (daemon)                       |
 //
 // WHY THOSE FOUR DO NOT ESCALATE, since the ruling's worked example put them
 // under `disconnected · degraded`: the shim answered in every one of them. A
@@ -315,6 +316,13 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 // told apart by the `why` value SessionFaultFinalAnswerUnresolved carries,
 // never by a substatus, because a substatus is only legal under a status the
 // fault claims and neither claimable status would be true here.
+//
+// `deploy_failed` is daemon-scoped and joins them because the daemon that ran
+// the deploy KEEPS SERVING on the build it already runs: a build that failed
+// installed nothing, an install that failed restarted nothing, and a service
+// that did not come back has its own faults. `blocked` would close no
+// composer, but it would still say the daemon cannot serve a session it is
+// serving. The fault line names the step and its last line of output.
 //
 // `bounce_disposition` is the one recorded kind with no footer cell, for the
 // same reason it has no wire arm: it is opened and closed in one breath as

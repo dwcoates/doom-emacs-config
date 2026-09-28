@@ -712,6 +712,14 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
    bounce registry (`rollout.CheckStaleness`), and each workspace whose webview
    reported an older `webapp_build` gets `reload_webapp`.
 
+A build, install or service restart that fails also opens the daemon-scoped
+`deploy_failed` fault (`DaemonFaultDeployFailed`, whose `step` arm carries the
+rpc's own refusal) through the observed state client, superseding that step's
+earlier fault; a step a later deploy gets through closes every fault of that
+step, and a non-joining daemon closes the ones an earlier daemon left at boot
+(`Deployer.CloseEarlierFailures`), since no strip of the new process draws
+them. Records go under `daemon.deploy.fault`.
+
 One deploy runs at a time (`already_deploying`); a landing that arrives while
 one runs is covered by ONE follow-up deploy. Every decision is a record under
 `daemon.deploy.run` / `daemon.deploy.decide` / `daemon.deploy.install` /
