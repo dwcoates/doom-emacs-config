@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_watch_agent_session.proto.
  */
 export const file_store_v1_endpoint_watch_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("CitzdG9yZS92MS9lbmRwb2ludF93YXRjaF9hZ2VudF9zZXNzaW9uLnByb3RvEghzdG9yZS52MSJGChhXYXRjaEFnZW50U2Vzc2lvblJlcXVlc3QSKgoFd2F0Y2gYASABKAsyGy5zdG9yZS52MS5BZ2VudFNlc3Npb25Ub2tlbiJAChlXYXRjaEFnZW50U2Vzc2lvblJlc3BvbnNlEiMKBGxpbmUYASABKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdEIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_store_v1_store]);
+  fileDesc("CitzdG9yZS92MS9lbmRwb2ludF93YXRjaF9hZ2VudF9zZXNzaW9uLnByb3RvEghzdG9yZS52MSJGChhXYXRjaEFnZW50U2Vzc2lvblJlcXVlc3QSKgoFd2F0Y2gYASABKAsyGy5zdG9yZS52MS5BZ2VudFNlc3Npb25Ub2tlbiJ1ChlXYXRjaEFnZW50U2Vzc2lvblJlc3BvbnNlEiUKBGxpbmUYASABKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdEgAEigKB3JldGlyZWQYAiABKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdEgAQgcKBWZyYW1lQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_store]);
 
 /**
  * Follow one opened reading session.
@@ -48,11 +48,30 @@ export const WatchAgentSessionRequestSchema: GenMessage<WatchAgentSessionRequest
  */
 export type WatchAgentSessionResponse = Message<"store.v1.WatchAgentSessionResponse"> & {
   /**
-   * The line, with its pointer — the caller's next high-water mark.
+   * THE ARM IS WHAT HAPPENED TO THE LINE.
    *
-   * @generated from field: store.v1.StoreLineAt line = 1;
+   * @generated from oneof store.v1.WatchAgentSessionResponse.frame
    */
-  line?: StoreLineAt | undefined;
+  frame: {
+    /**
+     * The line, with its pointer — the caller's next high-water mark.
+     *
+     * @generated from field: store.v1.StoreLineAt line = 1;
+     */
+    value: StoreLineAt;
+    case: "line";
+  } | {
+    /**
+     * A line the store RETIRED (StoreRetirement): the record behind it no
+     * longer converts to it. It carries the line as it was last served, at its
+     * own pointer, so the caller finds what it drew for it and removes it. No
+     * page serves the line again; its pointer stays valid in its book.
+     *
+     * @generated from field: store.v1.StoreLineAt retired = 2;
+     */
+    value: StoreLineAt;
+    case: "retired";
+  } | { case: undefined; value?: undefined };
 };
 
 /**

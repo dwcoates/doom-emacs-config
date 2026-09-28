@@ -82,6 +82,18 @@ const (
 	// two-tier queue needs to know whether a write is interactive or bulk, and
 	// the store refuses to guess it from content.
 	SiteWriteClassUnset = "write_class_unset"
+	// SiteConversionVersionPlane is an entry whose conversion_version
+	// disagrees with its plane: a file-plane entry with none (or zero), or a
+	// stream-plane entry with one.
+	SiteConversionVersionPlane = "conversion_version_plane"
+	// SiteCursorConversionUnset is a cursor advance that does not state the
+	// conversion the file was read under, or states an impossible one (version
+	// zero, no state arm, a heal whose `through` is not past the offset).
+	SiteCursorConversionUnset = "cursor_conversion_unset"
+	// SiteRetirementInvalid is a StoreRetirement naming no key or no version,
+	// or a batch carrying retirements with no cursor advance to commit them
+	// beside.
+	SiteRetirementInvalid = "retirement_invalid"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name

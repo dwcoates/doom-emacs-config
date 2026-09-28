@@ -18,11 +18,22 @@ import (
 	sharedlogging "agentrepl/logging"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/livelock"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
 )
+
+// currentConversion is the conversion a stored cursor states when this binary
+// wrote it: the current version, with nothing left to re-derive. A seeded
+// cursor without it reads as a pre-versioning one and starts a heal.
+func currentConversion() *storev1.CursorConversion {
+	return &storev1.CursorConversion{
+		Version: convert.ConversionVersion,
+		State:   &storev1.CursorConversion_Current{Current: &storev1.CursorConversionCurrent{}},
+	}
+}
 
 func TestMain(m *testing.M) {
 	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {

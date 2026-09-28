@@ -66,7 +66,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			wantField: "entries[0].entry",
 			wantSite:  "entry_arm_unset",
 			entry: func(p *producer) *storev1.StoreEntry {
-				return &storev1.StoreEntry{Plane: p.plane(), WriteId: "w-valid", UpsertKey: "u-valid"}
+				return &storev1.StoreEntry{Plane: p.plane(), ConversionVersion: p.conversionVersion(), WriteId: "w-valid", UpsertKey: "u-valid"}
 			},
 		},
 		{
