@@ -7,10 +7,17 @@
  * rows out and which head a bubble row wears.
  *
  * WHAT IT OWNS
- *  - THE ORDER, keyed by `FeedId.value`. A page arrives oldest → newest; a tail
- *    push with a known id REPLACES that row in place (which is how a response
- *    grows and how a settled card lands), and an unknown id APPENDS. Nothing is
- *    accumulated across pushes — a row is replaced whole, never merged.
+ *  - THE ORDER, keyed by `FeedId.value` and PLACED BY `FeedRow.order` — the
+ *    daemon's opaque key for where the row belongs, never when it arrived
+ *    (owner ruling, 2026-09-27: a late row lands where it would have been had
+ *    it not been late). Every new row, from a page or a push, is inserted at
+ *    its key's position by a binary search over the held rows' keys
+ *    (`positionOf`); a push of a known id REPLACES that row in place (which is
+ *    how a response grows and how a settled card lands) and never moves it. A
+ *    pushed row whose key sorts before every held row while older pages remain
+ *    belongs to unloaded history: it is not drawn, and the walk brings it in its
+ *    place. Nothing is accumulated across pushes — a row is replaced whole,
+ *    never merged.
  *  - THE ELEMENTS. Each row gets one `<article>` of chrome that outlives its
  *    body: the body is redrawn on each push while the chrome, the nesting slot
  *    and (for a bubble) the open sub-feed inside it survive.
@@ -39,6 +46,7 @@ import {
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+import { guardMalformed } from "../rpc/guard.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
 import type { ScrollPosition, TailFollow } from "../scroll.js";
@@ -114,6 +122,16 @@ function responseOf(row: FeedRow): FeedResponse | null {
   return row.row.value.unit.value;
 }
 
+/** The row a new row is inserted above, sampled before the insert. */
+interface InsertSample {
+  id: string;
+  element: HTMLElement;
+  /** The scroll box's top edge. */
+  boxTop: number;
+  /** The row's top edge before the insert. */
+  top: number;
+}
+
 /** A bubble, as the controller holds it: an element plus its own lifecycle. */
 export interface BubbleLike extends Handle {
   /** The element that goes in the row's body slot. */
@@ -169,6 +187,12 @@ export interface FeedControllerOptions {
 /** One row, as the controller holds it. */
 interface RowState {
   row: FeedRow;
+  /**
+   * The row's `FeedRow.order` key as first placed. FIXED for the row's life: a
+   * later push carrying another key is a daemon invariant violation, logged, and
+   * never moves the row (`keepKey`).
+   */
+  key: string;
   element: HTMLElement;
   body: HTMLElement | null;
   bubble: BubbleLike | null;
@@ -221,6 +245,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // row it centered, so a re-push of the same state moves nothing.
   let selectionActive = false;
   let centeredOn: string | null = null;
+  // THE WALK'S EDGE, as the last page stated it: whether older pages remain
+  // unloaded above the oldest held row. Null until the first page lands. It is
+  // what decides whether a pushed row sorting before every held row is drawn
+  // (the feed is at its start) or left to the walk (unloaded history).
+  let walkEdge: "hasMore" | "atStart" | null = null;
 
   opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
 
@@ -276,7 +305,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   };
 
   loadMore.addEventListener("click", () => {
-    void loadOlder();
+    void guardMalformed(opts.ctx, "feed.load-older", loadOlder());
   });
 
   const bodyHandle = opts.body(bodyMount, subfeed, opts.bodyContext);
@@ -367,10 +396,16 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     });
     switch (result.case) {
       case "success": {
+        // EVERY ROW'S KEY IS READ BEFORE ANYTHING CHANGES: a page with one row
+        // the daemon did not place is refused whole, and the rows already on
+        // screen stay as they were rather than giving way to half a page.
+        const incoming = result.value.rows;
+        const keys = incoming.map(orderKeyOf);
         replaceTicking(errorSlot);
         const edge = requireCase(result.value.edge, "FeedPageSuccess.edge");
         if (edge.case === "hasMore") opts.host.prepend(loadMore);
         else loadMore.remove();
+        walkEdge = edge.case;
         crumbs = requireMessage(result.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
         const above = placement === "prepend" ? sampleFirstRow() : null;
         if (placement === "replace") {
@@ -385,10 +420,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
           );
           clearRows();
         }
-        const incoming = result.value.rows;
-        for (let i = 0; i < incoming.length; i += 1) {
-          adopt(incoming[i], placement === "prepend" ? i : order.length);
-        }
+        for (let i = 0; i < incoming.length; i += 1) adoptPageRow(incoming[i], keys[i]);
+        logPagePlaced(placement, keys);
         // A ROW THE REPLACE DID NOT SERVE AGAIN IS GONE: its keys drop rather
         // than linger for a row that will never be drawn.
         if (placement === "replace") retainRows(carriedFolds, new Set(states.keys()));
@@ -441,17 +474,19 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     replaceTicking(errorSlot, [el]);
   }
 
-  /** One live upsert: replace in place if seen, append if new. */
+  /** One live upsert: replace in place if seen, insert at its key if new. */
   function upsert(row: FeedRow): void {
     const id = requireMessage(row.id, "FeedRow.id").value;
+    const key = orderKeyOf(row);
+    const held = states.get(id);
     // A REMOVAL is the DUAL of an upsert, delivered on the same tail: the
     // daemon retired the row it keys, so drop it live rather than replace it.
     if (row.row.case === "removed") {
+      if (held !== undefined) keepKey(held, id, key);
       remove(id);
       announce();
       return;
     }
-    const held = states.get(id);
     // A RE-PUSH OF THE ROW EXACTLY AS DRAWN CHANGES NOTHING, so it draws
     // nothing. The daemon repaints its opening page on every turn open (up to
     // 200 rows re-pushed unchanged); redrawing each one rebuilt its element and
@@ -464,17 +499,191 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       });
       return;
     }
-    const known = held !== undefined;
-    log.debug(`${known ? "replacing" : "appending"} feed row ${id}`, {
-      operation: known ? "feed.row-replaced" : "feed.row-appended",
+    if (held !== undefined) {
+      replaceHeld(held, row, id, key);
+      return;
+    }
+    insertPushed(row, id, key);
+  }
+
+  /** A push of a row this feed holds: redrawn IN PLACE, never moved. */
+  function replaceHeld(held: RowState, row: FeedRow, id: string, key: string): void {
+    log.debug(`replacing feed row ${id}`, {
+      operation: "feed.row-replaced",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
-    const collapsing = held !== undefined && isLandingEdge(held.row, row) ? sampleCollapse(id, held) : null;
-    adopt(row, known ? -1 : order.length);
+    keepKey(held, id, key);
+    const collapsing = isLandingEdge(held.row, row) ? sampleCollapse(id, held) : null;
+    updateHeld(held, row);
     truncateAtSeparation(row, id);
     announce();
     keepPlaceAboveCollapse(collapsing);
-    if (!known && isSentPrompt(row)) parkOnSentPrompt(id);
+  }
+
+  /**
+   * A push of a row this feed has never held: placed at ITS KEY, whatever the
+   * moment it arrived. A key sorting before every held row while older pages
+   * remain is unloaded history and is not drawn; the walk serves it in place.
+   */
+  function insertPushed(row: FeedRow, id: string, key: string): void {
+    const index = positionOf(key, id);
+    if (index === 0 && order.length > 0 && walkEdge === "hasMore") {
+      log.info(`feed row ${id} sorts before every loaded row; it is unloaded history, left to the walk`, {
+        operation: "feed.row-placed",
+        context: { feed: feedName(), row: id, key, outcome: "unloadedHistory", oldest: keyAt(0) },
+      });
+      return;
+    }
+    const atTail = index === order.length;
+    log.info(
+      atTail
+        ? `feed row ${id} appended at the tail`
+        : `feed row ${id} inserted at position ${index.toString()} of ${order.length.toString()}`,
+      {
+        operation: "feed.row-placed",
+        context: { feed: feedName(), row: id, key, outcome: atTail ? "appended" : "inserted", position: index },
+      },
+    );
+    const below = atTail ? null : sampleSuccessor(index);
+    insertAt(row, id, key, index);
+    truncateAtSeparation(row, id);
+    announce();
+    keepPlaceAboveInsert(below);
+    if (isSentPrompt(row)) parkOnSentPrompt(id);
+  }
+
+  /**
+   * A page's row: a held one is redrawn in place (its key kept), a new one is
+   * inserted at its key. A page is never unloaded history — it IS the walk.
+   */
+  function adoptPageRow(row: FeedRow, key: string): void {
+    const id = requireMessage(row.id, "FeedRow.id").value;
+    const held = states.get(id);
+    if (held !== undefined) {
+      keepKey(held, id, key);
+      updateHeld(held, row);
+      return;
+    }
+    const index = positionOf(key, id);
+    log.debug(`page row ${id} placed at position ${index.toString()}`, {
+      operation: "feed.page-row-placed",
+      context: { feed: feedName(), row: id, key, position: index },
+    });
+    insertAt(row, id, key, index);
+  }
+
+  /** One INFO record per page placed: how many rows, and the keys they span. */
+  function logPagePlaced(placement: "replace" | "prepend", keys: readonly string[]): void {
+    log.info(`placed a ${placement} page of ${keys.length.toString()} rows by their keys`, {
+      operation: "feed.page-placed",
+      context: {
+        feed: feedName(),
+        placement,
+        rows: keys.length,
+        first_key: keys[0] ?? "none",
+        last_key: keys[keys.length - 1] ?? "none",
+        held: order.length,
+      },
+    });
+  }
+
+  /**
+   * THE KEY IS FIXED FOR THE ROW'S LIFE (FeedRowOrder). A push of a held row
+   * carrying another key is the daemon's invariant violation: recorded at
+   * ERROR with both keys, and the row stays exactly where its first key put it.
+   */
+  function keepKey(held: RowState, id: string, key: string): void {
+    if (held.key === key) return;
+    log.error(`feed row ${id} was re-pushed with a different order key; it stays where it was placed`, {
+      operation: "feed.row-order-changed",
+      context: { feed: feedName(), row: id, placed_key: held.key, pushed_key: key },
+    });
+  }
+
+  /**
+   * Where KEY belongs among the held rows: the index of the first row whose key
+   * sorts AFTER it, found by binary search. Keys compare as strings, code unit
+   * by code unit, and are never parsed (FeedRowOrder). A key already held by
+   * another row is the daemon's invariant violation, recorded at ERROR; the row
+   * still lands just after its twin.
+   */
+  function positionOf(key: string, id: string): number {
+    let lo = 0;
+    let hi = order.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (keyAt(mid) <= key) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && keyAt(lo - 1) === key) {
+      log.error(`feed row ${id} carries an order key another row of this feed already holds`, {
+        operation: "feed.row-order-duplicate",
+        context: { feed: feedName(), row: id, key, holder: order[lo - 1] },
+      });
+    }
+    return lo;
+  }
+
+  /** The key of the row held at INDEX. */
+  function keyAt(index: number): string {
+    const id = order[index];
+    const state = states.get(id);
+    if (state === undefined) throw new Error(`feed: row ${id} is ordered but not held`);
+    return state.key;
+  }
+
+  /**
+   * Sample the row a new row is inserted just above (the one now at INDEX), its
+   * top and the scroll box's top, BEFORE the insert. Null without a scroll box
+   * (a sub-feed; the same standing a prepend has there).
+   */
+  function sampleSuccessor(index: number): InsertSample | null {
+    if (opts.scroll === undefined) return null;
+    const id = order[index];
+    const state = states.get(id);
+    if (state === undefined) throw new Error(`feed: row ${id} is ordered but not held`);
+    return {
+      id,
+      element: state.element,
+      boxTop: opts.scroll.box.getBoundingClientRect().top,
+      top: state.element.getBoundingClientRect().top,
+    };
+  }
+
+  /**
+   * KEEP THE READER'S CONTENT IN PLACE WHEN A LATE ROW LANDS ABOVE THEM.
+   *
+   * A row inserted at its key goes just above the row sampled before the
+   * insert. When that row started ABOVE the viewport, so does the new one, and
+   * everything the reader sees moved down by exactly how far the sampled row
+   * moved: the view shifts by that, through the tail owner
+   * (`prependCompensation`, the same pass a prepend uses — no new writer). A
+   * row landing in view or below it moves nothing; a following reader is kept
+   * at the tail by `announce`. The sampled row DETACHED is an invariant
+   * violation (an insert only adds a row), recorded as one.
+   */
+  function keepPlaceAboveInsert(below: InsertSample | null): void {
+    if (opts.scroll === undefined || below === null) return;
+    if (!below.element.isConnected) {
+      log.error("an insert detached the row the reader's place was measured from", {
+        operation: "feed.insert-anchor-detached",
+        context: { feed: feedName(), row: below.id },
+      });
+      return;
+    }
+    if (below.top >= below.boxTop) {
+      log.debug("a late row landed in or below the viewport; the view stays", {
+        operation: "feed.insert-in-view",
+        context: { feed: feedName(), row: below.id, top: below.top, box_top: below.boxTop },
+      });
+      return;
+    }
+    const grown = below.element.getBoundingClientRect().top - below.top;
+    log.debug(`a late row grew ${grown.toString()}px above the reader; the view shifts by it`, {
+      operation: "feed.insert-kept-place",
+      context: { feed: feedName(), row: below.id, grown },
+    });
+    opts.scroll.tail.prependCompensation(grown);
   }
 
   /**
@@ -770,29 +979,29 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
-   * Put ROW in the store at INDEX (-1 = keep its place).
-   *
-   * A row already held keeps its element and its place and is only marked
-   * dirty — that is what makes an upsert a REPLACEMENT of the drawing rather
-   * than a rebuild of the row, and what lets an open bubble survive a re-push
-   * of its own head.
+   * Redraw a HELD row from its re-push. It keeps its element and its place and
+   * is only marked dirty — that is what makes an upsert a REPLACEMENT of the
+   * drawing rather than a rebuild of the row, and what lets an open bubble
+   * survive a re-push of its own head.
    */
-  function adopt(row: FeedRow, index: number): void {
-    const id = requireMessage(row.id, "FeedRow.id").value;
-    const held = states.get(id);
-    if (held !== undefined && movePromptWaveInPlace(held, row)) return;
-    if (held !== undefined) {
-      held.row = row;
-      held.dirty = true;
-      applyRowAttributes(held.element, row);
-      return;
-    }
+  function updateHeld(held: RowState, row: FeedRow): void {
+    if (movePromptWaveInPlace(held, row)) return;
+    held.row = row;
+    held.dirty = true;
+    applyRowAttributes(held.element, row);
+  }
+
+  /**
+   * Put a NEW row in the store at INDEX, the position its KEY was found at
+   * (`positionOf`). This is the one place a row enters the order.
+   */
+  function insertAt(row: FeedRow, id: string, key: string, index: number): void {
     const element = document.createElement("article");
     element.className = "feed-item";
     applyRowAttributes(element, row);
-    const state: RowState = { row, element, body: null, bubble: null, dirty: true };
+    const state: RowState = { row, key, element, body: null, bubble: null, dirty: true };
     states.set(id, state);
-    order.splice(index < 0 ? order.length : index, 0, id);
+    order.splice(index, 0, id);
     // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
     // reader reaches it. Every row born on this feed passes here exactly once,
     // bubble or not, so this is the one place a row starts being watched.
@@ -1216,6 +1425,19 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     listeners.clear();
     opts.host.replaceChildren();
   }
+}
+
+/**
+ * ROW's place in its feed: the daemon's `FeedRow.order` key, verbatim.
+ *
+ * REQUIRED on every row a page or a push carries, a removal included; a row
+ * without it, or with an empty key, is a malformed view — refused, never
+ * defaulted to where it happened to arrive.
+ */
+export function orderKeyOf(row: FeedRow): string {
+  const key = requireMessage(row.order, "FeedRow.order").key;
+  if (key === "") throw new MalformedView("FeedRow.order.key", "a feed row's order key is empty");
+  return key;
 }
 
 /** A prompt row's `working` flag, or null for a row that is not a prompt. */
