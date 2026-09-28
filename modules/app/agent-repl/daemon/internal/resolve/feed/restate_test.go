@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/sourcescan"
 )
 
 func TestRestateRowPublishesTheEditedSnapshotAndLeavesTheStoredRowAlone(t *testing.T) {
@@ -47,23 +46,15 @@ func TestEveryStoredRowRestatementGoesThroughRestateRow(t *testing.T) {
 	// Arrange: the only production files allowed to snapshot a row by hand are
 	// the publication path itself and the restatement helper.
 	allowed := map[string]bool{"resolver.go": true, "restate.go": true}
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	var offenders []string
 
 	// Act.
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") || allowed[path] {
+	for _, file := range sourcescan.Production(t) {
+		if allowed[file.Name] {
 			continue
 		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if strings.Contains(string(src), "proto.Clone(") {
-			offenders = append(offenders, path)
+		if strings.Contains(string(file.Source), "proto.Clone(") {
+			offenders = append(offenders, file.Name)
 		}
 	}
 
