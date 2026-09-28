@@ -22,6 +22,25 @@ import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
+// HOW a submitted prompt is delivered, when it asks for something other than
+// the ordinary delivery. The ordinary delivery is the field's ABSENCE: a prompt
+// goes to the session at once when nothing runs, and while a turn runs it is
+// held and classified against that turn, which may interject it.
+enum SubmitPromptDelivery {
+  // Never sent: a request carrying it is refused as InvalidArgument. The
+  // ordinary delivery is an ABSENT `delivery`, never this value.
+  SUBMIT_PROMPT_DELIVERY_UNSPECIFIED = 0;
+  // DEFERRED: run as ITS OWN turn after the current one, never interjected.
+  // It goes to the session at once when nothing runs. While a turn runs it is
+  // held until that turn ends and is then delivered as a turn of its own:
+  // it is never classified, so it can never earn an interject. It is held
+  // like any other held prompt -- it shows in the held tray, a merge or a cold
+  // gate keeps it held, and it survives a restart of the daemon, the shim and
+  // the client -- and a turn end delivers held prompts one at a time, oldest
+  // first, so several deferred prompts run as that many turns in order.
+  SUBMIT_PROMPT_DELIVERY_DEFERRED = 1;
+}
+
 // What the user typed, submitted whole.
 message SubmitPromptRequest {
   // The workspace this submission belongs to — the daemon-minted ref,
@@ -58,6 +77,11 @@ message SubmitPromptRequest {
   // set-but-unresolvable feedid is the daemon's to refuse, exactly as `feed`
   // is. Additive and mutually compatible with every existing field.
   optional frontend.v1.FeedId reference_response_feedid = 6;
+  // OPTIONAL delivery mode. ABSENT is the ordinary delivery; set, it names the
+  // one other delivery the daemon honors (SubmitPromptDelivery). Additive and
+  // mutually compatible with every existing field. Set to UNSPECIFIED, the
+  // request is refused as InvalidArgument.
+  optional SubmitPromptDelivery delivery = 7;
 }
 
 // THE ARM IS THE OUTCOME.
