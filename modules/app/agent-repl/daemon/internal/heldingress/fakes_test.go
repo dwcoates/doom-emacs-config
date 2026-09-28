@@ -78,6 +78,8 @@ type world struct {
 	publishedSaw []int
 	now          time.Time
 	remove       func(string) error
+	// serves is what the ingress's serving answer says.
+	serves bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -91,7 +93,8 @@ func newWorld(t *testing.T) *world {
 			"/work/one": {ID: "ws-one", Dir: "/work/one"},
 			"/work/two": {ID: "ws-two", Dir: "/work/two"},
 		},
-		now: fixedNow,
+		now:    fixedNow,
+		serves: true,
 	}
 }
 
@@ -107,6 +110,7 @@ func (w *world) ingress() Ingress {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))
 		},
+		Serves: func() bool { return w.serves },
 		Log:    w.log,
 		Remove: w.remove,
 		Now:    func() time.Time { return w.now },
