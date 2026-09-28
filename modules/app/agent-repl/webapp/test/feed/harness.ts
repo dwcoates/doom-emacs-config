@@ -61,6 +61,7 @@ import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
+import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -296,6 +297,7 @@ export function userPromptRow(
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "userPrompt",
@@ -321,6 +323,7 @@ export function agentPromptRow(
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "agentPrompt",
@@ -347,6 +350,7 @@ export function turnEndedRow(
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "turnEnded",
@@ -392,6 +396,7 @@ export function separationRow(
         : { case: "compacted", value: { summary: { markdown: summary }, fold: { folded: true } } };
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: {
       case: "separation",
       value: { label: { text: "context compacted" }, kind },
@@ -408,6 +413,7 @@ export function responseRow(
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     parent: parent === undefined ? undefined : { row: feedId(parent) },
     turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
@@ -435,6 +441,7 @@ export function toolCallRow(
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     turn: opts.turn === undefined ? undefined : create(TurnIdSchema, { value: opts.turn }),
     row: {
       case: "activity",
@@ -506,6 +513,7 @@ export function subagentRow(
   });
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row:
       opts.detached === true
         ? { case: "detachedSubagent", value: { subagent } }
@@ -517,6 +525,7 @@ export function subagentRow(
 export function mergeRow(id: string, folded = true): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: {
       case: "activity",
       value: {
@@ -541,6 +550,7 @@ export function mergeRow(id: string, folded = true): FeedRow {
 export function mergeTabRow(id: string, label = "queue"): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: {
       case: "mergeTab",
       value: {

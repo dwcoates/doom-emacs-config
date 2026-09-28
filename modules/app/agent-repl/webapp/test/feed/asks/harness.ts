@@ -34,6 +34,7 @@ import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+import { orderFor } from "../../feed-order.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 export const ROW_ID = "ask-1";
@@ -118,7 +119,7 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
         composerEnabled: false,
       }),
       feed: "root",
-      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }), order: orderFor(ROW_ID) }),
       revealRow: async () => false,
       previous,
     },
