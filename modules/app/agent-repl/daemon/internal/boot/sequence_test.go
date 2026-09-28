@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
@@ -39,6 +40,50 @@ func TestAdoptsASurvivingShimRatherThanRespawningIt(t *testing.T) {
 	}
 	if len(report.Adopted) != 1 || report.Adopted[0] != ws.ID {
 		t.Fatalf("report.Adopted = %v, want [%v]", report.Adopted, ws.ID)
+	}
+}
+
+// AN ADOPTION IS A HEALTHY ATTACH, and the boot fires its recovery edge AFTER
+// the manifest is reconciled, because the reconcile is what records an
+// undetermined bounce. Before, a `bounce_unknown` recorded for a workspace
+// this very boot had adopted stood for over 30 minutes (2026-09-27).
+func TestTheBootClosesAnAdoptedWorkspacesUndeterminedBounce(t *testing.T) {
+	tests := []struct {
+		name   string
+		lock   sessionlock.State
+		closes bool
+	}{
+		{"an adopted workspace attached healthy", sessionlock.StateHeld, true},
+		{"a client-less workspace has not attached yet", sessionlock.StateFree, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws := h.register(t, t.TempDir(), tt.lock)
+			workspace := ws.ID
+			h.rollout.onReconcile = func() {
+				if _, err := h.db.OpenFault(context.Background(), wsm.Fault{
+					Workspace: &workspace, Kind: health.KindBounceUnknown,
+				}); err != nil {
+					t.Errorf("OpenFault: %v", err)
+				}
+			}
+
+			// Act.
+			if _, err := h.seq.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &workspace, Kind: health.KindBounceUnknown})
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenFaults: %v", err)
+			}
+			if closed := len(open) == 0; closed != tt.closes {
+				t.Fatalf("bounce_unknown closed = %v, want %v", closed, tt.closes)
+			}
+		})
 	}
 }
 
