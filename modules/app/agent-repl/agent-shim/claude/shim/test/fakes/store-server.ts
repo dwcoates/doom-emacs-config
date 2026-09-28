@@ -16,16 +16,25 @@
  *
  * # The semantics it reproduces, and why each matters
  *
- *   - UPSERT BY KEY, FIRST-INSERT ORDER. A row re-sent under the same
- *     `upsert_key` REPLACES the row in place and keeps its original position
- *     and pointer. That is what makes a unit that starts, updates and ends
- *     appear ONCE in a book, and it is the single behavior most shim code
- *     depends on.
- *   - PAGES ARE NEWEST FIRST, and `more.last_item` points at the page's OLDEST
- *     line — the pointer the next `ReadAgentPage` echoes to walk older.
+ *   - UPSERT BY KEY. A row re-sent under the same `upsert_key` REPLACES the
+ *     row in place and keeps its original pointer. That is what makes a unit
+ *     that starts, updates and ends appear ONCE in a book, and it is the single
+ *     behavior most shim code depends on.
+ *   - EVERY LINE HAS A CONVERSATION PLACE, AND PAGES ARE IN DESCENDING PLACE.
+ *     A row keeps its FIRST stated `StoreEntry.place` (served as
+ *     `recorded_place`); a row stored with none is served at its receipt
+ *     instant (`received_place`, ordinal 0) until a later write states one.
+ *     This fake's receipt instant is the latest instant it has placed any row
+ *     at, so an unplaced row sorts where it arrived. Ties break by pointer.
+ *     `more.last_item` points at the page's last (lowest-placed) line — the
+ *     pointer the next `ReadAgentPage` echoes to walk on.
+ *   - `ReadAgentPage.after` serves the lines placed strictly before the named
+ *     line's CURRENT place; `through` serves the newest lines placed at or
+ *     before an instant, and refuses a book with no agent row as
+ *     `unknown_agent`; an unset position is `invalid_request`.
  *   - `known_through` IS THE CALLER'S HIGH-WATER MARK. The store remembers
- *     nothing about what it served; a set pointer means "only items strictly
- *     newer than this".
+ *     nothing about what it served; a set pointer means "only items FIRST
+ *     WRITTEN after this one", ordered by descending place.
  *   - THE TAIL IS PURE: it carries WRITES, never replays. Opening a reading
  *     session delivers nothing to the tail, so the opening page is never
  *     repeated and open-then-watch is race-free. But EVERY write is a tail
@@ -71,6 +80,11 @@ interface StoredRow {
   line: storev1.StorePageLine;
   /** The row's FIRST turn stamp, kept across upserts as the real store keeps it. */
   turn: conversationv1.TurnId | undefined;
+  /**
+   * Where the row sits in its conversation, and who established it: the
+   * row's first stated place, or its receipt instant standing in.
+   */
+  place: { atMs: bigint; ordinal: number; recorded: boolean };
 }
 
 /** An opened reading session: which book, and where its tail begins. */
@@ -308,12 +322,33 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const pointerOf = (row: StoredRow): storev1.StoreItemPointer =>
     create(storev1.StoreItemPointerSchema, { value: row.pointer });
 
-  const lineAt = (row: StoredRow): storev1.StoreLineAt =>
-    create(storev1.StoreLineAtSchema, {
+  const lineAt = (row: StoredRow): storev1.StoreLineAt => {
+    const place = create(conversationv1.ConversationPlaceSchema, {
+      atMs: row.place.atMs,
+      ordinal: row.place.ordinal,
+    });
+    return create(storev1.StoreLineAtSchema, {
       at: pointerOf(row),
       line: row.line,
       ...(row.turn === undefined ? {} : { turn: row.turn }),
+      place: row.place.recorded
+        ? { case: "recordedPlace", value: place }
+        : { case: "receivedPlace", value: place },
     });
+  };
+
+  /** The latest instant any row was placed at: this fake's receipt clock. */
+  let latestPlacedAt = 1n;
+
+  /** Ascending conversation order of two rows: place, then pointer. */
+  const placeOrder = (a: StoredRow, b: StoredRow): number => {
+    if (a.place.atMs !== b.place.atMs) return a.place.atMs < b.place.atMs ? -1 : 1;
+    if (a.place.ordinal !== b.place.ordinal) return a.place.ordinal - b.place.ordinal;
+    return Number(a.pointer) - Number(b.pointer);
+  };
+
+  /** A book's rows in ascending conversation place. */
+  const placedRowsOf = (agentId: string): StoredRow[] => [...rowsOf(agentId)].sort(placeOrder);
 
   /**
    * Deliver a line to every tail watching its book.
@@ -343,16 +378,31 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     upsertKey: string,
     line: storev1.StorePageLine,
     turn: conversationv1.TurnId | undefined,
+    stated: conversationv1.ConversationPlace | undefined,
   ): void => {
     const bookId = line.pageAgentId?.value ?? "";
+    if (stated !== undefined && stated.atMs > latestPlacedAt) latestPlacedAt = stated.atMs;
     const existing = rowsByKey.get(upsertKey);
     if (existing !== undefined) {
       existing.line = line;
       existing.turn ??= turn;
+      // THE FIRST STATED PLACE STANDS; a row with none takes the first stated.
+      if (!existing.place.recorded && stated !== undefined) {
+        existing.place = { atMs: stated.atMs, ordinal: stated.ordinal, recorded: true };
+      }
       fanOut(bookId, existing);
       return;
     }
-    const row: StoredRow = { pointer: String(nextPointer++), upsertKey, line, turn };
+    const row: StoredRow = {
+      pointer: String(nextPointer++),
+      upsertKey,
+      line,
+      turn,
+      place:
+        stated === undefined
+          ? { atMs: latestPlacedAt, ordinal: 0, recorded: false }
+          : { atMs: stated.atMs, ordinal: stated.ordinal, recorded: true },
+    };
     rowsByKey.set(upsertKey, row);
     const book = books.get(bookId) ?? [];
     book.push(row);
@@ -444,7 +494,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       case "serveableFrame":
         registerFromLine(info.value);
         recordLiveness(info.value);
-        upsertPageLine(entry.upsertKey, info.value, entry.turn);
+        upsertPageLine(entry.upsertKey, info.value, entry.turn, entry.place);
         return;
       case "unservedItem": {
         unservedRows.push(info.value);
@@ -528,9 +578,10 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
             },
           });
         }
-        const all = rowsOf(bookId);
+        const all = placedRowsOf(bookId);
         const floorPointer =
           request.knownThrough === undefined ? -1 : Number(request.knownThrough.value);
+        // CATCH-UP IS WRITE ORDER: first written after the mark, in place order.
         const eligible = all.filter((row) => Number(row.pointer) > floorPointer);
         const budget = request.pageSize;
         // Newest first: take from the end, then reverse.
@@ -702,11 +753,48 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           });
         }
         const bookId = request.book?.value ?? "";
-        const after = Number(
-          request.position.case === "after" ? request.position.value.value : "0",
-        );
-        // Strictly OLDER than `after`, newest first.
-        const older = rowsOf(bookId).filter((row) => Number(row.pointer) < after);
+        const refuseRead = (
+          detail: string,
+          kind: storev1.ReadAgentPageFailure["kind"],
+        ): storev1.ReadAgentPageResponse =>
+          create(storev1.ReadAgentPageResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.ReadAgentPageFailureSchema, { detail, kind }),
+            },
+          });
+        let older: StoredRow[];
+        switch (request.position.case) {
+          case "after": {
+            // Strictly BEFORE the named line's CURRENT place.
+            const pointer = request.position.value.value;
+            const named = rowsOf(bookId).find((row) => row.pointer === pointer);
+            if (named === undefined) {
+              return refuseRead(`fake store: pointer ${JSON.stringify(pointer)} names no line of ${JSON.stringify(bookId)}`, {
+                case: "stalePointer",
+                value: create(storev1.ReadAgentPageStalePointerSchema, {}),
+              });
+            }
+            older = placedRowsOf(bookId).filter((row) => placeOrder(row, named) < 0);
+            break;
+          }
+          case "through": {
+            if (!knownAgents.has(bookId)) {
+              return refuseRead(`fake store holds no agent row for ${JSON.stringify(bookId)}`, {
+                case: "unknownAgent",
+                value: create(storev1.ReadAgentPageUnknownAgentSchema, {}),
+              });
+            }
+            const bound = request.position.value.atMs;
+            older = placedRowsOf(bookId).filter((row) => row.place.atMs <= bound);
+            break;
+          }
+          default:
+            return refuseRead("fake store: ReadAgentPage names no position", {
+              case: "invalidRequest",
+              value: create(storev1.ReadAgentPageInvalidRequestSchema, { field: "position" }),
+            });
+        }
         const window = older.slice(Math.max(0, older.length - request.pageSize));
         // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page
         // is a reconnect mark like any other.
