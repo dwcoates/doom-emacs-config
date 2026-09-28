@@ -1091,6 +1091,42 @@ It is decided in one place, `internal/resolve/feed/superseded.go`:
 - Pages serve the stored rows, so replay, pages and live agree; a sub-feed
   follows the rule within itself and never across feeds.
 
+## A retired entry removes what the feed drew for it
+
+`WatchAgentResponse.retired` is a page line the store RETIRED: the sidecar's
+conversion changed and the vendor record behind the row no longer converts to
+it. The frame carries the entry as last served, at its own pointer.
+`sessionwatcher.routeRetiredLocked` routes it; the feed side is
+`internal/resolve/feed/retired.go`.
+
+- **Three kinds are retirable.** A user prompt goes to
+  `FeedSink.OnPromptRetired`, which retires `prompt:<turn>` and an agent
+  prompt's `out`/`in` ends. A peer message goes to `OnPeerMessageRetired`,
+  which retires `peer:<id>` (bubble or hand-back badge). An agent frame
+  carrying `api_error` goes to `OnApiErrorRetired`.
+- **Anything else is a contract violation.** It is ERROR
+  `daemon.sessionwatcher.retired_unretirable` naming the kind, and nothing is
+  drawn or undone.
+- **Rows are found by identity, on every feed.** Each feed is asked for the ids
+  the entry's key mints there, and only rows that exist go through `retire`.
+  So a `FeedRowRemoved` reaches every open tail and replays to a later one
+  (`daemon.feed.row_retired`). An entry that drew nothing (a directive's
+  suppressed prompt, one placed nowhere) is DEBUG
+  `daemon.feed.retired_entry_undrawn`, never a warning.
+- **An api error draws no row**, so what its retirement undoes is its
+  evidence line on its STAMPED turn's pending evidence. An unstamped one
+  withdraws nothing, because the turn it was charged to is not recoverable. A
+  terminal already drawn keeps its headline, because evidence is dropped at
+  the turn's end. The footer's momentary retry notice is not touched.
+- **The retired pointer is not adopted as the watch's mark.** The row keeps
+  its old position, so taking it would walk `known_through` backwards.
+- **Turn bookkeeping stays.** The watcher's `knownTurns` and the resolver's
+  known, in-flight and stamp turns are left as the prompt set them.
+  Forgetting a known turn would turn a later terminal naming it into ERROR
+  `terminal_turn_unknown` against a healthy session.
+
+The integration fake pushes one with `push_retired` (`ShimControl.PushRetired`).
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one

@@ -892,8 +892,9 @@ func TestEveryReadStatementBuildsNoAutomaticIndex(t *testing.T) {
 	}{
 		{name: "the open-page lines", statement: pageLinesSQL(pageBoundAboveFloor), args: []any{"agent-1", kindPageLine, 0, 11}},
 		{name: "the read-page lines", statement: pageLinesSQL(pageBoundBelow), args: []any{"agent-1", kindPageLine, 100, 11}},
-		{name: "the stale-pointer probe", statement: pointerInBookSQL, args: []any{1, "agent-1", kindPageLine}},
-		{name: "the lines-since replay", statement: linesSinceSQL, args: []any{"agent-1", kindPageLine, 0}},
+		{name: "the stale-pointer probe", statement: pointerInBookSQL, args: []any{1, "agent-1", kindPageLine, kindRetired}},
+		{name: "the cursor listing with its conversion", statement: cursorsSQL + ` WHERE c.file_id = ? ORDER BY c.file_id ASC`, args: []any{"12:34"}},
+		{name: "the lines-since replay", statement: linesSinceSQL, args: []any{"agent-1", kindPageLine, kindRetired, 0}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -123,6 +123,14 @@ type Context struct {
 	RecordsObserved int64
 	BytesObserved   int64
 
+	// Retired is the upsert keys the handler found this batch's records no
+	// longer convert to (convert.RetiredKeys): for each converted record, the
+	// keys only that record could ever have produced and its entries now do not
+	// carry. The TAILER clears it before every Handle and carries it out on
+	// PollResult.Retired; the reader decides whether they are sent — only a
+	// re-read of bytes an older conversion produced has anything to retire.
+	Retired []string
+
 	// --- the hold ------------------------------------------------------------
 	//
 	// A record can be UNSETTLED at the end of a batch: its meaning depends on

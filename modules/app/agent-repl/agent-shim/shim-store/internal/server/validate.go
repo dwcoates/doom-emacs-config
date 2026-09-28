@@ -64,6 +64,10 @@ const (
 	SiteUnknownAgent          = db.SiteUnknownAgent
 	SiteSessionEmpty          = db.SiteSessionEmpty
 	SiteWriteClassUnset       = db.SiteWriteClassUnset
+	// The conversion heal's sites, decided inside the batch by internal/db.
+	SiteConversionVersionPlane = db.SiteConversionVersionPlane
+	SiteCursorConversionUnset  = db.SiteCursorConversionUnset
+	SiteRetirementInvalid      = db.SiteRetirementInvalid
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.

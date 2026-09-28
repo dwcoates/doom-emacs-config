@@ -11,6 +11,7 @@ import (
 
 	sharedlogging "agentrepl/logging"
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 )
 
 // active_test.go — ONLY FILES THAT BELONG TO AN ACTIVE WORKSPACE ARE WATCHED.
@@ -125,7 +126,7 @@ func TestActivationCatchesUpFromTheCursor(t *testing.T) {
 	key := h.closedWorkspace(t, "sess-reopened")
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.inactiveTranscript(t, "sess-reopened", promptLine, assistantLine, promptLine, assistantLine)
-	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn))}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()}}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestAReopenedWorkspaceIsReadAgainFromItsCursor(t *testing.T) {
 	committed := h.sc.watchers[path].tailer.Offset()
 	h.advance(h.sc.tracker.Windows().AgentSilence + time.Minute)
 	h.tick()
-	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: committed}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: committed, Conversion: currentConversion()}}
 
 	// Act: the workspace is opened again.
 	h.activate(t, "sess-ending")
@@ -477,5 +478,33 @@ func BenchmarkPollTick(b *testing.B) {
 				h.tick()
 			}
 		})
+	}
+}
+
+func TestAHealingDormantTranscriptIsNeverDropped(t *testing.T) {
+	// Arrange: a resumed heal has read the whole file, which now ends before
+	// where the older conversion stopped, and the file has been silent far
+	// past every drain window.
+	h := newHarness(t, &fakeStore{})
+	h.closedWorkspace(t, "sess-closed")
+	path := h.inactiveTranscript(t, "sess-closed", healNotificationLine)
+	size := fileSizeOf(t, path)
+	h.store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path), Path: path, Offset: size,
+		Conversion: &storev1.CursorConversion{Version: convert.ConversionVersion, State: &storev1.CursorConversion_Healing{
+			Healing: &storev1.CursorConversionHealing{Through: size + 1000},
+		}},
+	}}
+	h.advance(24 * time.Hour)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.tick()
+
+	// Assert.
+	if _, watched := h.sc.watchers[path]; !watched {
+		t.Fatal("a transcript was dropped with its re-derivation still owed")
 	}
 }

@@ -25,6 +25,11 @@
  */
 import { askPermission, conclude, scenario, visibleThinking } from "./support.js";
 import { FAKE_SIGNATURE } from "./support.js";
+import {
+  NETWORK_RESUME_MARKER,
+  NETWORK_RESUME_MESSAGE,
+  resumePromptTargets,
+} from "../../engine/network-resume-prompt.js";
 
 /** The `AgentOutput` a completed synchronous subagent answers with. */
 function completedAgentOutput(fields: {
@@ -697,6 +702,81 @@ const SUBAGENT_INTERLEAVED = scenario({
   },
 });
 
+/** The vendor's own notice when the API host could not be reached (2026-09-27 incident). */
+const UNREACHABLE_NOTICE = "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)";
+
+const SUBAGENT_NETWORK_FAILED = scenario({
+  name: "subagent-network-failed",
+  prompt: "!subagent-network-failed",
+  emits:
+    "a detached `Agent` the vendor ENDS because the API was unreachable, in the 2026-09-27 incident's shape: " +
+    "after the turn, the agent's own SYNTHETIC error message (`model: \"<synthetic>\"`, `error: \"server_error\"`, " +
+    "the vendor's ENOTFOUND notice) and then a failed `task_notification` whose summary carries the same notice " +
+    "and `(error type server_error)`",
+  writes:
+    "the agent's `.meta.json` and transcript (the synthetic error record lands there, as it did in the " +
+    "incident's transcript), its spool, and the main transcript's lines",
+  arms: "AgentSubagentFailure — and the shim's network resume: the agent waits for the API and is then continued",
+  async run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-network-failed" }, "fake network-killed detached-subagent turn");
+    const description = "A sweep the network will cut off";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: "Sweep.",
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({ agentType: "general-purpose", description, toolUseId: call.toolUseId, spawnDepth: 1 });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: "Sweep." },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      prompt: "Sweep.",
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    conclude(ctx, "Dispatched an agent the network will cut off.");
+    await ctx.tick();
+    ctx.assistant([{ type: "text", text: UNREACHABLE_NOTICE }], {
+      agent: {
+        agentId,
+        parentToolUseId: call.toolUseId,
+        subagentType: "general-purpose",
+        taskDescription: description,
+      },
+      model: "<synthetic>",
+      error: "server_error",
+      noReasoning: true,
+    });
+    ctx.files.spool(agentId).append(writer.read());
+    ctx.endTask(agentId);
+    ctx.systemMessage("task_updated", { task_id: agentId, patch: { status: "failed", error: UNREACHABLE_NOTICE } });
+    ctx.systemMessage("task_notification", {
+      task_id: agentId,
+      tool_use_id: call.toolUseId,
+      status: "failed",
+      output_file: ctx.files.spoolPathFor(agentId),
+      summary:
+        `Agent "${description}" failed: Agent terminated early due to an API error: ` +
+        `${UNREACHABLE_NOTICE} (error type server_error)`,
+      usage: { total_tokens: 400, tool_uses: 0, duration_ms: 120 },
+    });
+    ctx.announceLiveTasks();
+  },
+});
+
 const SUBAGENT_RESUMED = scenario({
   name: "subagent-resumed",
   prompt: "!subagent-resumed",
@@ -742,6 +822,67 @@ const SUBAGENT_RESUMED = scenario({
   },
 });
 
+export const NETWORK_RESUME = scenario({
+  name: "network-resume",
+  prompt: NETWORK_RESUME_MARKER,
+  emits:
+    "the MAIN agent answering the shim's own network-resume prompt: one `SendMessage` per agent the prompt names, " +
+    "each answered WITH `resumedAgentId` (the vendor resuming that SAME agent from its transcript) after that " +
+    "agent's `task_started` under the `SendMessage` call, and — after the turn — one model-authored message of " +
+    "the resumed agent and its completed `task_notification`",
+  writes: "the tool_use and tool_result lines, the closing text line, and each resumed agent's reply in its own transcript",
+  arms:
+    "AgentSendMessage.delivery=resumed_recipient per agent, then AgentSubagentSuccess for the SAME agent the " +
+    "outage failed",
+  async run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "network-resume" }, "fake network-resume turn");
+    const resumed = resumePromptTargets(ctx.prompt).map((agentId) => {
+      const call = ctx.toolUse("SendMessage", {
+        to: agentId,
+        summary: "Resume after network outage",
+        message: NETWORK_RESUME_MESSAGE,
+      });
+      // THE VENDOR STARTS THE RESUMED AGENT'S TASK FROM THE SEND, before the
+      // send's result, exactly as `subagent-resumed` replays it.
+      ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description: "resumed" });
+      ctx.toolResult(call, "Agent resumed from transcript.", {
+        success: true,
+        message:
+          `Agent "${agentId}" had no active task; resumed from transcript in the background with your message. ` +
+          `You'll be notified when it finishes. Output: ${ctx.files.spoolPathFor(agentId)}`,
+        resumedAgentId: agentId,
+        pin: { id: agentId, name: agentId, ref: "2175c2" },
+      });
+      return { agentId, call };
+    });
+    ctx.announceLiveTasks();
+    conclude(ctx, "Resumed the agents the network outage cut off.");
+    await ctx.tick();
+    for (const { agentId, call } of resumed) {
+      ctx.assistant([{ type: "text", text: "Picking up where I left off." }], {
+        agent: {
+          agentId,
+          parentToolUseId: call.toolUseId,
+          subagentType: "general-purpose",
+          taskDescription: "resumed",
+        },
+        model: "fake-sonnet-5",
+        noReasoning: true,
+      });
+      ctx.endTask(agentId);
+      ctx.systemMessage("task_notification", {
+        task_id: agentId,
+        tool_use_id: call.toolUseId,
+        status: "completed",
+        output_file: ctx.files.spoolPathFor(agentId),
+        summary: `Agent "${agentId}" finished`,
+        usage: { total_tokens: 400, tool_uses: 0, duration_ms: 120 },
+      });
+    }
+    ctx.announceLiveTasks();
+  },
+});
+
 export const SUBAGENT_SCENARIOS = [
   SUBAGENT_SYNC,
   SUBAGENT_DETACHED,
@@ -751,6 +892,8 @@ export const SUBAGENT_SCENARIOS = [
   SUBAGENT_DETACHED_HOLD,
   SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,
+  SUBAGENT_NETWORK_FAILED,
+  NETWORK_RESUME,
   CANCEL_ALL,
   USAGE_HISTORICAL,
 ];

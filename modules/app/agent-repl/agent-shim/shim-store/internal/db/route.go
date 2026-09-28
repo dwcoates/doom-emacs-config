@@ -30,6 +30,15 @@ const (
 	kindWorkflow         = "workflow"
 	kindSessionUpdate    = "session_update"
 	kindDetachedWork     = "detached_work"
+	// kindRetired is a PAGE LINE the file plane's re-derivation RETIRED
+	// (store.v1 StoreRetirement): the record behind it no longer converts to
+	// it. It is never WRITTEN as an entry's kind — only retire.go turns a row
+	// into one. The row keeps its book, position and last frame, so its
+	// pointer stays valid and a standing watch replays the retirement by
+	// write_seq, while every page (which reads kindPageLine alone) stops
+	// serving it. A real page line under the same key takes it back
+	// (applyIdentityPolicy).
+	kindRetired = "retired"
 )
 
 // Plane column values. The observing plane is a producer-side fact the store is
@@ -153,6 +162,9 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 	if entry.Turn != nil && entry.GetTurn().GetValue() == "" {
 		return routed{}, invalidFieldf(entryField(index, "turn"), "entries[%d].turn is present with an empty value (write_id=%q) — absence is expressed by absence, never by an empty identifier", index, r.writeID)
 	}
+	if err := validateConversionVersion(entry, plane, index); err != nil {
+		return routed{}, err
+	}
 
 	frame, err := proto.Marshal(entry)
 	if err != nil {
@@ -186,6 +198,32 @@ func validatePlane(plane *storev1.Plane, index int) (int64, error) {
 		return planeFile, nil
 	default:
 		return 0, invalidFieldf(entryField(index, "plane"), "entries[%d].plane sets no arm — the entry does not name the producer that observed it", index)
+	}
+}
+
+// validateConversionVersion holds StoreEntry.conversion_version to its plane:
+// SET, and above zero, on every file-plane entry, and UNSET on every
+// stream-plane one.
+//
+// THE VERSION IS WHAT A RETIREMENT IS DECIDED BY. A file-plane row that
+// carried none would read as version 0 forever, so every later re-read would
+// consider it produced by a superseded conversion; a stream-plane row carrying
+// one would claim a file conversion produced it. Either is a producer defect
+// the store refuses rather than stores.
+func validateConversionVersion(entry *storev1.StoreEntry, plane int64, index int) error {
+	field := entryField(index, "conversion_version")
+	switch {
+	case plane == planeFile && entry.ConversionVersion == nil:
+		return invalidSitef(SiteConversionVersionPlane, field,
+			"entries[%d] (write_id=%q) is a file-plane entry with no conversion_version — every row the file plane produces records the conversion that produced it", index, entry.GetWriteId())
+	case plane == planeFile && entry.GetConversionVersion() == 0:
+		return invalidSitef(SiteConversionVersionPlane, field,
+			"entries[%d] (write_id=%q) is a file-plane entry with conversion_version 0, which names no conversion", index, entry.GetWriteId())
+	case plane == planeStream && entry.ConversionVersion != nil:
+		return invalidSitef(SiteConversionVersionPlane, field,
+			"entries[%d] (write_id=%q) is a stream-plane entry carrying conversion_version %d — the stream plane converts nothing from a file", index, entry.GetWriteId(), entry.GetConversionVersion())
+	default:
+		return nil
 	}
 }
 
