@@ -99,6 +99,7 @@ import { formatAge, formatCountdown, formatTickedAge, formatTickedElapsed } from
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { protoArmName } from "../vocab.js";
 import type { FooterPanel } from "./expanded.js";
@@ -1145,12 +1146,37 @@ export function drawFooterTokensCell(u: FooterTokensCell, deps: StripDeps): HTML
   return cell;
 }
 
-/** The cell's one figure, exactly as the daemon formatted it. */
+/** The cell's one figure, exactly as the daemon formatted it, in its heat's color. */
 export function drawFooterTokensCellInput(u: FooterTokensCellInput): HTMLElement {
   const input = document.createElement("span");
   input.className = "footer-tokens-input";
   input.textContent = u.text;
+  if (u.heat !== undefined) {
+    const position = u.heat.position;
+    input.setAttribute("data-heat", String(position));
+    input.style.color = footerTokensHeatColor(position, "FooterTokensCellInput.heat.position");
+  }
   return input;
+}
+
+/** How many colors the heat gradient runs through (`--token-heat-0` … `-3`). */
+const HEAT_COLORS = 4;
+
+/**
+ * The color at POSITION on the heat gradient: the two theme colors bracketing
+ * it, mixed by how far between them it sits. The daemon owns where a figure
+ * falls (FooterTokensCellInputHeat); the stylesheet owns the four colors, so
+ * this only interpolates. A position outside [0, 1] is a daemon contract
+ * breach and is refused.
+ */
+export function footerTokensHeatColor(position: number, path: string): string {
+  if (!Number.isFinite(position) || position < 0 || position > 1) {
+    throw new MalformedView(path, `heat position ${String(position)} is outside [0, 1]`);
+  }
+  const segments = HEAT_COLORS - 1;
+  const lower = Math.min(Math.floor(position * segments), segments - 1);
+  const upperShare = Math.round((position * segments - lower) * 100);
+  return `color-mix(in oklab, var(--token-heat-${String(lower)}), var(--token-heat-${String(lower + 1)}) ${String(upperShare)}%)`;
 }
 
 /**

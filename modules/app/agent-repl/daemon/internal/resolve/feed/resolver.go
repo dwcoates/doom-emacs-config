@@ -293,20 +293,19 @@ type wsState struct {
 	// silent empty prefix.
 	answerMarkdown map[string]string
 
-	// apiResponseSeq numbers the API responses observed so far; a unit
-	// arriving with usage opens the next one.
-	apiResponseSeq uint64
-	// unitAPIResponse files each unit under the API response it arrived in.
-	unitAPIResponse map[string]uint64
-	// apiResponseTurn records the turn each API response was filed under, so a
-	// response bubble's stamp can sum ONLY its own turn's responses. Keyed by
-	// the response's number; the empty string is "no turn in flight" (units
-	// seen before any prompt).
-	apiResponseTurn map[uint64]string
-	// apiResponseTurnTokens is each API response's TURN-SCOPED token count —
-	// fresh input plus output, cached context excluded (see usage.go) — keyed
-	// by the response's number. Absent means that response stated no usage.
-	apiResponseTurnTokens map[uint64]uint64
+	// THE FRESH-INPUT ACCOUNTS (usage.go). unitAccount files each
+	// usage-carrying unit in its agent's account — the main agent's turn or a
+	// subagent's lifetime — and unitFresh is that unit's fresh input, replaced
+	// on every restating frame.
+	unitAccount map[string]string
+	unitFresh   map[string]uint64
+	// accountTally is each account's fresh input so far; accountStated reports
+	// that the account stated any usage at all (absence draws no stamp).
+	accountTally  map[string]uint64
+	accountStated map[string]bool
+	// accountLanded is each account's tally when its latest response bubble
+	// LANDED: the base the account's next bubble counts its delta from.
+	accountLanded map[string]uint64
 }
 
 // subFeedHead is the bubble row a sub-feed lives inside.
@@ -608,9 +607,11 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		answerMarkdown:       map[string]string{},
 		stalls:               map[string]*stallState{},
 
-		unitAPIResponse:       map[string]uint64{},
-		apiResponseTurn:       map[uint64]string{},
-		apiResponseTurnTokens: map[uint64]uint64{},
+		unitAccount:   map[string]string{},
+		unitFresh:     map[string]uint64{},
+		accountTally:  map[string]uint64{},
+		accountStated: map[string]bool{},
+		accountLanded: map[string]uint64{},
 
 		plane: planeLive,
 	}

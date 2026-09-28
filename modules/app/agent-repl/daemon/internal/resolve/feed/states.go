@@ -152,6 +152,14 @@ type proseState struct {
 	// usage is the formatted cost corner, kept across pushes because usage is
 	// stated when the response opens and restated as it grows.
 	usage string
+	// account is the fresh-input account the bubble's stamp is read off (the
+	// main agent's turn, or a subagent's lifetime), learned on the first draw;
+	// base is that account's landed mark then, which the delta counts from.
+	account string
+	base    uint64
+	// frozen records that the stamp LANDED: the bubble settled (or turned
+	// green) and its figure never moves again (usage.go).
+	frozen bool
 	// settled records that the terminal frame restated the whole, so a late
 	// fragment can never re-open a closed bubble.
 	settled bool

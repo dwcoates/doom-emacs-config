@@ -766,6 +766,9 @@ type fakeRegistry struct {
 	park bool
 	// unsealedCh announces every UnsealMove.
 	unsealedCh chan ids.WorkspaceID
+	// order, when set, records every request as a step, so a test asserts
+	// what came before it.
+	order *steps
 	// asked announces every request, so a test synchronizes on one having
 	// been made rather than polling for it.
 	asked chan registryCall
@@ -830,6 +833,9 @@ func (r *fakeRegistry) RejudgeHeld(_ context.Context, ws ids.WorkspaceID) error 
 }
 
 func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error) {
+	if r.order != nil {
+		r.order.record("request:" + req.Reason + ":" + req.WaitFor.String())
+	}
 	r.mu.Lock()
 	r.requests = append(r.requests, registryCall{WS: ws, Req: req})
 	select {
