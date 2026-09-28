@@ -46,6 +46,7 @@
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 (declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
+(declare-function agent-repl-wire-decode-daemon-fault "wire-verbs")
 (declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
@@ -1317,6 +1318,56 @@ it, and drops any it does not recognize."
                      (open :open
                            agent-repl-wire-decode-workspace-mutation-progress-open)))))))
 
+(defun agent-repl-wire-decode-daemon-standing-fault-fault (value)
+  "Decode `DaemonStandingFault''s `fault' field VALUE as a `DaemonFault'.
+The typed fault is DaemonHealth's own, decoded by the one codec it has."
+  (agent-repl-wire-decode-daemon-fault value))
+
+(defun agent-repl-wire-decode-daemon-standing-fault (value)
+  "Decode VALUE as `DaemonStandingFault'.
+Returns `(:fault-id ID :line LINE :fault FAULT :opened-at-ms MS)'.  THE ID
+AND THE LINE ARE REQUIRED: the id is what a client surfaces a fault once
+by, and the line is the one sentence it shows, so an empty one is a
+contract breach rather than a fault to echo as a blank."
+  (let ((object (agent-repl-wire--object "DaemonStandingFault" value)))
+    (agent-repl-wire--check-keys "DaemonStandingFault" object
+                                 '(faultId line fault openedAtMs))
+    (let ((id (agent-repl-wire--decode-string "DaemonStandingFault" 'faultId object))
+          (line (agent-repl-wire--decode-string "DaemonStandingFault" 'line object)))
+      (when (string-empty-p id)
+        (agent-repl-wire--fail "DaemonStandingFault" 'faultId "required string is empty"))
+      (when (string-empty-p line)
+        (agent-repl-wire--fail "DaemonStandingFault" 'line "required string is empty"))
+      (agent-repl-wire--decoded
+       "DaemonStandingFault"
+       (list :fault-id id
+             :line line
+             :fault (agent-repl-wire--decode-message
+                     "DaemonStandingFault" 'fault object
+                     #'agent-repl-wire-decode-daemon-standing-fault-fault)
+             :opened-at-ms (agent-repl-wire--decode-int64
+                            "DaemonStandingFault" 'openedAtMs object))))))
+
+(defun agent-repl-wire-decode-daemon-faults-standing-faults (value)
+  "Decode one element of `DaemonFaultsStanding''s repeated `faults' VALUE."
+  (agent-repl-wire-decode-daemon-standing-fault value))
+
+(defun agent-repl-wire-decode-daemon-faults-standing (value)
+  "Decode VALUE as `DaemonFaultsStanding', a plist `(:faults LIST)'.
+The daemon's WHOLE standing set of loud faults, oldest first; an empty
+list is the daemon saying none stands."
+  (let ((object (agent-repl-wire--object "DaemonFaultsStanding" value)))
+    (agent-repl-wire--check-keys "DaemonFaultsStanding" object '(faults))
+    (agent-repl-wire--decoded
+     "DaemonFaultsStanding"
+     (list :faults (agent-repl-wire--decode-repeated
+                    "DaemonFaultsStanding" 'faults object
+                    #'agent-repl-wire-decode-daemon-faults-standing-faults)))))
+
+(defun agent-repl-wire-decode-watch-daemon-response-faults-standing (value)
+  "Decode `WatchDaemonResponse''s `faults_standing' push arm VALUE."
+  (agent-repl-wire-decode-daemon-faults-standing value))
+
 (defun agent-repl-wire-decode-watch-daemon-response-push (value)
   "Decode `WatchDaemonResponse''s `push' oneof from the object VALUE."
   (agent-repl-wire--decode-oneof
@@ -1328,7 +1379,9 @@ it, and drops any it does not recognize."
      (mutationProgress :mutation-progress
                        agent-repl-wire-decode-workspace-mutation-progress)
      (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp)
-     (ending :ending agent-repl-wire-decode-watch-daemon-response-ending))))
+     (ending :ending agent-repl-wire-decode-watch-daemon-response-ending)
+     (faultsStanding :faults-standing
+                     agent-repl-wire-decode-watch-daemon-response-faults-standing))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-ending (value)
   "Decode `WatchDaemonResponse''s `ending' push arm VALUE."
@@ -1344,7 +1397,7 @@ it, and drops any it does not recognize."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending))
+       ending faultsStanding))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
