@@ -315,6 +315,9 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
   capture addresses a subagent; `!subagent-resumed`'s resume `task_started`
   from the send is the shape a live session's log showed (2026-09-27);
 - `!subagent-failed` — no capture has a failed subagent;
+- `!subagent-network-failed` / `!network-resume` — the failure's records are
+  the 2026-09-27 outage's own (production records, not a capture), and the
+  resume answer is the declared `!send-message-resumed` shape per agent;
 - `!subagent-interleaved` — no capture streams a subagent's response INTO an
   open main block; the shape is the one a live session's logs showed, where a
   background subagent's `message_start` landed between two deltas of the main
@@ -384,6 +387,8 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!subagent-detached-hold` | a detached `Agent` left LIVE, and then the turn that spawned it HOLDS: nothing further until an interrupt lands, which ends the turn the way an interrupted turn ends. Whether the agent survives that interrupt is the vendor's `perTaskStopAffordance` posture, never the scenario's | the agent's `.meta.json` and `agent-<id>.jsonl`, its spool, and the main transcript's lines | AgentSubagent detached_work live UNDER AN OPEN TURN, and AgentInterrupted.by_user for the turn while the agent stays live |
 | `!subagent-detached-utterance` | a detached `Agent` left LIVE after the turn ends, whose only post-turn activity is ONE ordinary sidechain assistant text line — a mid-flight utterance with `IsSidechain`/`AgentId`/`SourceToolUseId` set and NO completion. Nothing here ever finishes the agent | the agent's `.meta.json` and `agent-<id>.jsonl` (the utterance lands there too), its spool, and the main transcript's lines | AgentSubagent detached_work left live; the utterance itself proves the router keeps a live subagent's prose OUT of the top-level feed rather than adding a new arm |
 | `!subagent-failed` | a detached `Agent` that ends in failure: `task_updated{status:"failed"}` and a failed `task_notification` | the agent's `.meta.json` and transcript, its spool, and the main transcript's lines | AgentSubagentFailure |
+| `!subagent-network-failed` | a detached `Agent` the vendor ENDS because the API was unreachable, in the 2026-09-27 incident's shape: after the turn, the agent's own SYNTHETIC error message (`model: "<synthetic>"`, `error: "server_error"`, the vendor's ENOTFOUND notice) and then a failed `task_notification` whose summary carries the same notice and `(error type server_error)` | the agent's `.meta.json` and transcript (the synthetic error record lands there, as it did in the incident's transcript), its spool, and the main transcript's lines | AgentSubagentFailure — and the shim's network resume: the agent waits for the API and is then continued |
+| `<!--agent-repl:network-resume-->` | the MAIN agent answering the shim's own network-resume prompt: one `SendMessage` per agent the prompt names, each answered WITH `resumedAgentId` (the vendor resuming that SAME agent from its transcript) after that agent's `task_started` under the `SendMessage` call, and — after the turn — one model-authored message of the resumed agent and its completed `task_notification` | the tool_use and tool_result lines, the closing text line, and each resumed agent's reply in its own transcript | AgentSendMessage.delivery=resumed_recipient per agent, then AgentSubagentSuccess for the SAME agent the outage failed |
 | `!cancel-all` | THREE detached items launched in one turn — two agents and a shell — left LIVE. The cancel is the caller's `stopTask` per item; emptying the live set makes the engine write the vendor's `agents_killed` record | both agents' `.meta.json` and transcripts, the shell's spool, and the main transcript's lines | the fan-wide cancel: AgentSubagentFailure.cause=stopped_by_user per item, plus the agents_killed record |
 | `!usage-historical` | prose only on the main stream. The historical usage record itself is written ONLY to a NESTED subagent's own transcript file (spawnDepth 2), as a FILE-plane assistant record with NO paired STREAM-plane `message_start` — the historical case that must retain usage without inventing a generation duration. UNGROUNDED, INVENTED: no capture carries a file-plane-only historical usage record with nested-subagent attribution and this sub-field set | the nested subagent's `agent-<id>.meta.json` and `agent-<id>.jsonl` carrying one untimed assistant record, plus the main turn's ordinary lines | ungrounded — see MANIFEST.md; the usage sub-fields (cache_creation split, server_tool_use, service_tier, speed, inference_geo) are the ones a session-usage aggregation would need to attribute to an untimed nested actor |
 | `!plan` | an `EnterPlanMode` call, prose written under plan mode, then an `ExitPlanMode` answered with the plan and the path it was saved to, plus the vendor's `plan_mode_exit` attachment | the tool_use and tool_result lines for both calls, a `plan_mode_exit` attachment line, the closing text line | AgentPlanMode.act=enter/exit with AgentPlanModeEntered and AgentPlanModeExited |
@@ -982,6 +987,53 @@ found, ERROR not-found or failed.
   resumed agent's ask is never credited to the send; anything nothing on the
   stream names is looked up by its id. `agentFor` answers a promise only then,
   and an ask whose lookup spans a stand-down is denied with that stand-down.
+
+## A background subagent a network outage killed is resumed (2026-09-27)
+
+Owner ruling after the 2026-09-27 DNS outage. `src/engine/network-resume.ts`
+owns the rule, `src/engine/api-reachability.ts` the probe, and
+`deliverNetworkResume` in `src/engine/session.ts` the delivery.
+
+- **Only a network failure is resumed.** `classifyAgentFailure` reads the
+  vendor's structured error class first, then a connection code, then an HTTP
+  status (an answer means reachable), and the vendor's prose last. Auth,
+  billing, quota, overload, rate limits, invalid requests and model errors are
+  never resumed.
+- **One probe loop per process**, shared by every waiting agent, on a FIXED
+  five-second beat with no backoff. It exists only while something waits, and
+  stand-down or the vendor query dying cancels it.
+- **The probe spends no tokens.** It is a `HEAD` of the host the vendor is
+  configured for: `ANTHROPIC_BASE_URL` or the default, through
+  `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` exempts the host.
+- **The wait is bounded.** Thirty minutes from the failure, then the wait
+  gives up at ERROR and the agent keeps its failure terminal.
+- **One resume per failure event.** A resumed run that fails again restarts
+  the window only if the model answered for it since the resume, so a
+  resume-then-fail loop cannot outlive the first window.
+- **The resume is the vendor's own `SendMessage`.** The shim asks the MAIN
+  agent, with a marked prompt (`src/engine/network-resume-prompt.ts`), to
+  continue each named agent. The vendor resumes the same agent from its
+  transcript, and the fold names it through the one resumed-agent identity
+  path above (the fold's join, else the store).
+- **The resume's turn is ADOPTED before the push** (`adoptTurn`, the path a
+  vendor-started turn takes): a shim-minted id and a `VENDOR_STARTED` prompt
+  row. A `StartTurn` arriving before the vendor's first reply is refused
+  `turnAlreadyOpen` and waits behind it. It is delivered only on an idle main
+  agent; an open turn or a `StartTurn` in flight makes the beat wait.
+- **Every transition is one record** under `shim.engine.network_resume`, with
+  `outcome` = `waiting`, `resumed`, `not_resumed`, `abandoned` or `gave_up`
+  (ERROR).
+- **Not yet visible in the footer or live work.** Showing "waiting to resume"
+  needs a proto arm the owner has not ruled on; until then the wait is visible
+  in the log only, and the feed row keeps its failure.
+
+`--fake`-only levers (a real session never honors them):
+
+| Env | Meaning |
+| --- | --- |
+| `AGENT_REPL_FAKE_API_REACHABLE_GATE` | a path whose existence is the API being reachable; unset means always reachable |
+| `AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS` | the probe beat |
+| `AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS` | the give-up window |
 
 ## The store writer: it never drops a row
 
