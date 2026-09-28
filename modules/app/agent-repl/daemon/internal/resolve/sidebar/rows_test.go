@@ -464,7 +464,7 @@ func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 // ---- The VIEWED marker: the row's display mode ----------------------------
 //
 // PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a
-// turn-end row (done or interrupted), and it is derived from the read-result
+// turn-end row (done, interrupted or turn_failed), and it is derived from the read-result
 // fact, which only the next turn resets. These lock all three halves, because
 // a marker that never clears, a marker that clears on every push and a marker
 // drawn on live or exceptional work are the three ways this feature fails.
@@ -830,5 +830,26 @@ func TestAReadResultStaysReadAcrossALinkBlip(t *testing.T) {
 	}
 	if got := row.GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want a read result to stay read across an arm change that is not a new result")
+	}
+}
+
+func TestAReadFailedResultStaysReadAcrossALinkBlip(t *testing.T) {
+	// Arrange: a turn_failed row the user has read.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseFailed)
+	r.SetViewed(theWS)
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Act: the route comes back; no new result arrived in between.
+	r.OnLink(theWS, shimclient.LinkConnected)
+
+	// Assert: the result is still read, so the row is PARTIAL again.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "turn_failed" {
+		t.Fatalf("status = %q, want turn_failed — the arrangement did not restore the link", got)
+	}
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want a read failed result to stay read across an arm change that is not a new result")
 	}
 }
