@@ -436,6 +436,42 @@ func TestASubagentFailureDoesNotBlockTheRow(t *testing.T) {
 	}
 }
 
+func TestViewingAVendorBlockedRowReadsTheFailedTurnsResult(t *testing.T) {
+	// Arrange: a vendor failure blocks the row over the failed turn's end.
+	r := live(t, arrange(t))
+	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
+		ModelError: &conversationv1.AgentModelError{}}})
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want vendor_blocked — the arrangement missed the arm", got)
+	}
+
+	// Act: the user views the blocked row, and the block then lifts.
+	r.SetViewed(theWS)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
+
+	// Assert: the failed turn's end is READ, so it is drawn PARTIAL.
+	row := onlyRow(t, r)
+	if statusName(row) != "turn_failed" || row.GetViewed() == nil {
+		t.Fatalf("status = %q viewed = %v, want a READ turn_failed", statusName(row), row.GetViewed())
+	}
+}
+
+func TestAnUnviewedVendorBlockedRowLeavesTheResultUnread(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
+		ModelError: &conversationv1.AgentModelError{}}})
+
+	// Act: the block lifts with no view.
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
+
+	// Assert.
+	row := onlyRow(t, r)
+	if statusName(row) != "turn_failed" || row.GetViewed() != nil {
+		t.Fatalf("status = %q viewed = %v, want an UNREAD turn_failed", statusName(row), row.GetViewed())
+	}
+}
+
 func TestRowIsInactiveWhenClosedWithNoLiveSession(t *testing.T) {
 	// Arrange.
 	closed := workspace(string(theWS), "one")

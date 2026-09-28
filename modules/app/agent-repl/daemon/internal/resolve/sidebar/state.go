@@ -213,6 +213,15 @@ func isTurnEndArm(arm string) bool {
 	return arm == armDone || arm == armInterrupted || arm == armTurnFailed
 }
 
+// readsResult reports whether a viewed report on arm READS the last turn's
+// result: a turn-end arm, or `vendor_blocked`, which a failed turn raised and
+// which stands over that turn's end until the block lifts (owner ruling,
+// 2026-09-28). The PARTIAL marker is still drawn on a turn end alone
+// (viewedOn).
+func readsResult(arm string) bool {
+	return isTurnEndArm(arm) || arm == "vendor_blocked"
+}
+
 // turnEndArm names the turn-end arm the last close resolves to. A close this
 // build does not know was refused loudly when it was installed
 // (SetTurnEnded), so it is never unread; it keeps the row on `done`, the arm
