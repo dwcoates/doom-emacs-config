@@ -631,7 +631,7 @@ tombstoned workspace), where it is the best name the record has."
     (setq stream (agent-repl-rpc-watch-host-workspace
                   conn ref
                   (lambda (push)
-                    (agent-repl-host--handle-push (funcall current) push))
+                    (agent-repl-host--handle-push (funcall current) push stream))
                   (lambda (outcome)
                     (agent-repl-host--handle-close (funcall current) outcome stream))
                   (lambda ()
@@ -704,10 +704,32 @@ untouched, because closing a tab is a VIEW act."
   (remhash ws agent-repl-host--by-name)
   (agent-repl--info ws "elisp.host.forgotten ws=%s" ws))
 
+(defun agent-repl-host--note-ending (ws stream)
+  "Record that STREAM, WS\='s host stream, carried the planned ending.
+The daemon is standing down in a PLANNED exit and this is the stream\='s
+last frame (`DaemonStreamEnding'), so the clean end that follows is
+expected, not lost: `agent-repl-host--handle-close' reads the mark.
+STREAM nil means the stream standing for WS now."
+  (agent-repl-host--put ws :ending-stream (or stream (agent-repl-host-stream ws)))
+  (agent-repl--info ws "elisp.host.stream-ending ws=%s" ws))
+
+(defun agent-repl-host--planned-end-p (ws outcome stream)
+  "Return non-nil when STREAM closing with OUTCOME is WS\='s planned end.
+Only a CLEAN end (`(:ended)') of the very stream that carried the
+planned-ending frame is planned; an error after the ending, or the end of
+a stream that never carried it, is a loss."
+  (let ((marked (plist-get (agent-repl-host--entry ws) :ending-stream)))
+    (and (eq (car outcome) :ended)
+         marked
+         (eq marked (or stream (agent-repl-host-stream ws))))))
+
 (defun agent-repl-host--handle-close (ws outcome &optional stream)
   "React to WS's host STREAM closing with OUTCOME.
-`(:cancelled)' is Emacs's own unsubscribe and is normal.  Anything else
-is the producer dropping a STANDING stream, which the contract calls a
+`(:cancelled)' is Emacs's own unsubscribe and is normal.  A clean end
+after the stream carried the planned ending (`agent-repl-host--note-ending')
+is the daemon standing down on purpose: it is recorded at INFO and WS
+follows the live daemon with trigger `planned-ending'.  Anything else is
+the producer dropping a STANDING stream, which the contract calls a
 transport failure: it is recorded at ERROR, the dead stream is dropped,
 and WS FOLLOWS THE LIVE DAEMON (`agent-repl-host--follow-live-daemon').
 
@@ -726,7 +748,17 @@ it.  STREAM nil means the caller did not name the stream."
     (agent-repl--log ws "elisp.host.stale-stream-close ws=%s outcome=%S" ws outcome))
    ((eq (car outcome) :cancelled)
     (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
+   ((agent-repl-host--planned-end-p ws outcome stream)
+    ;; THE DAEMON SAID SO FIRST.  Its last frame was the planned ending, so
+    ;; this clean end is a stand-down, not a fault: INFO, and the same
+    ;; single walk onto the live daemon a loss takes.
+    (agent-repl--info ws "elisp.host.stream-ended-planned ws=%s" ws)
+    (agent-repl-host-release-restart-hold ws "planned-ending")
+    (agent-repl-host--put ws :ending-stream nil)
+    (agent-repl-host--put ws :stream nil)
+    (agent-repl-host--follow-live-daemon ws "planned-ending"))
    (t
+    (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
     ;; NOTHING CAN RESOLVE THE HOLD ANY MORE.  The hold is a bet that the
     ;; daemon's next push settles it; a dropped standing stream means no
@@ -738,8 +770,10 @@ it.  STREAM nil means the caller did not name the stream."
 
 ;;;; ---- Pushes ----
 
-(defun agent-repl-host--handle-push (ws push)
-  "Dispatch one decoded `WatchHostWorkspace' PUSH for workspace WS."
+(defun agent-repl-host--handle-push (ws push &optional stream)
+  "Dispatch one decoded `WatchHostWorkspace' PUSH for workspace WS.
+STREAM is the stream PUSH arrived on; nil means the caller did not name
+it, and the stream standing for WS now is meant."
   (let ((arm (plist-get push :arm))
         (value (plist-get push :value)))
     (pcase arm
@@ -748,6 +782,7 @@ it.  STREAM nil means the caller did not name the stream."
       (:transferred (agent-repl-host--transferred ws value))
       (:reload-webapp (agent-repl-host--reload-webapp ws))
       (:open-in-editor (agent-repl-host--open-in-editor ws value))
+      (:ending (agent-repl-host--note-ending ws stream))
       (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S push=%S"
                             ws arm push)))))
 
@@ -943,7 +978,8 @@ is recorded; ON-SETTLED is called once the walk has an outcome."
 
 (defun agent-repl-host--follow-live-daemon (ws trigger)
   "Re-attach WS, which lost its daemon, to the LIVE one -- or wait for it.
-TRIGGER names how the loss was found (`stream-lost', `dead-connection').
+TRIGGER names how the loss was found (`stream-lost', `dead-connection',
+`planned-ending').
 
 THE LIVE DAEMON IS THE LINK\='S (`agent-repl-link-live'), the one source
 the primary itself is resolved from, so a workspace never follows an

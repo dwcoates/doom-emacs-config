@@ -55,6 +55,14 @@ type StoreEntry struct {
 	// this write supersedes it whole. Opaque to the store — the producer maps
 	// it (a prompt's TurnId, a unit's activity id, a run's id); the store has
 	// exactly one place it looks, never a per-kind rule.
+	//
+	// ONE EXCEPTION (owner ruling 2026-09-27): a bash run's TERMINAL row
+	// (StoreAgentBash whose frame is `success` or `failure`) held from the FILE
+	// plane is never superseded by a STREAM-plane terminal. The file plane's
+	// terminal carries the spool's exit code and output; the stream plane's says
+	// only that the run ended. The refused write is absorbed — answered success,
+	// nothing stored, nothing served — and a file-plane terminal still
+	// supersedes a stream-plane one.
 	UpsertKey string `protobuf:"bytes,3,opt,name=upsert_key,json=upsertKey,proto3" json:"upsert_key,omitempty"`
 	// What kind of fact this is. THE ARM IS THE KIND.
 	//
@@ -1066,6 +1074,17 @@ type EntryBatch struct {
 	// Where the producer had read to when it produced these. Unset for
 	// stream-plane producers, which have no file to be positioned in.
 	CursorAdvance *CursorState `protobuf:"bytes,2,opt,name=cursor_advance,json=cursorAdvance,proto3,oneof" json:"cursor_advance,omitempty"`
+	// THE VENDOR TASK LOCATORS of the subagents these records book, each paired
+	// with the agent it names. The sidecar states one for every batch it reads
+	// from a subagent's transcript: the locator from the file's name, the agent
+	// from the spawning call its meta file states. Empty for every other batch,
+	// and always empty from the stream plane.
+	//
+	// IT RIDES THE SAME WRITE as the agent's rows, so the pairing is on record
+	// from the agent's first batch onward and GetAgentByVendorTask can answer
+	// for any agent that has ever run. Re-stating a pairing already on record is
+	// absorbed; the store keeps one row per (locator, agent).
+	AgentLocators []*AgentLocator `protobuf:"bytes,3,rep,name=agent_locators,json=agentLocators,proto3" json:"agent_locators,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1114,6 +1133,74 @@ func (x *EntryBatch) GetCursorAdvance() *CursorState {
 	return nil
 }
 
+func (x *EntryBatch) GetAgentLocators() []*AgentLocator {
+	if x != nil {
+		return x.AgentLocators
+	}
+	return nil
+}
+
+// One subagent's vendor task locator, paired with the agent it names.
+//
+// THE LOCATOR IS NEVER THE AGENT. The vendor names a subagent's files and its
+// task by `<id>` (`agent-<id>.jsonl`, `task_started.task_id`), while every
+// plane books the agent under the `tool_use_id` of the call that spawned it
+// (the cross-plane minting rule). This message is the one place the two are
+// joined, and a consumer compares both for equality only.
+type AgentLocator struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor's own `<id>`, verbatim. REQUIRED, non-empty.
+	VendorTaskId string `protobuf:"bytes,1,opt,name=vendor_task_id,json=vendorTaskId,proto3" json:"vendor_task_id,omitempty"`
+	// The agent the locator names. REQUIRED, non-empty.
+	Agent         *v1.AgentId `protobuf:"bytes,2,opt,name=agent,proto3" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentLocator) Reset() {
+	*x = AgentLocator{}
+	mi := &file_store_v1_store_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentLocator) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentLocator) ProtoMessage() {}
+
+func (x *AgentLocator) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_store_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentLocator.ProtoReflect.Descriptor instead.
+func (*AgentLocator) Descriptor() ([]byte, []int) {
+	return file_store_v1_store_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AgentLocator) GetVendorTaskId() string {
+	if x != nil {
+		return x.VendorTaskId
+	}
+	return ""
+}
+
+func (x *AgentLocator) GetAgent() *v1.AgentId {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
 // Where one file has been read to.
 type CursorState struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1134,7 +1221,7 @@ type CursorState struct {
 
 func (x *CursorState) Reset() {
 	*x = CursorState{}
-	mi := &file_store_v1_store_proto_msgTypes[14]
+	mi := &file_store_v1_store_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1146,7 +1233,7 @@ func (x *CursorState) String() string {
 func (*CursorState) ProtoMessage() {}
 
 func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[14]
+	mi := &file_store_v1_store_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1159,7 +1246,7 @@ func (x *CursorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
 func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{14}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CursorState) GetFileId() string {
@@ -1202,7 +1289,7 @@ type StoreItemPointer struct {
 
 func (x *StoreItemPointer) Reset() {
 	*x = StoreItemPointer{}
-	mi := &file_store_v1_store_proto_msgTypes[15]
+	mi := &file_store_v1_store_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1214,7 +1301,7 @@ func (x *StoreItemPointer) String() string {
 func (*StoreItemPointer) ProtoMessage() {}
 
 func (x *StoreItemPointer) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[15]
+	mi := &file_store_v1_store_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1227,7 +1314,7 @@ func (x *StoreItemPointer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreItemPointer.ProtoReflect.Descriptor instead.
 func (*StoreItemPointer) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{15}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StoreItemPointer) GetValue() string {
@@ -1254,7 +1341,7 @@ type StoreLineAt struct {
 
 func (x *StoreLineAt) Reset() {
 	*x = StoreLineAt{}
-	mi := &file_store_v1_store_proto_msgTypes[16]
+	mi := &file_store_v1_store_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1353,7 @@ func (x *StoreLineAt) String() string {
 func (*StoreLineAt) ProtoMessage() {}
 
 func (x *StoreLineAt) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[16]
+	mi := &file_store_v1_store_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1366,7 @@ func (x *StoreLineAt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreLineAt.ProtoReflect.Descriptor instead.
 func (*StoreLineAt) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{16}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StoreLineAt) GetAt() *StoreItemPointer {
@@ -1314,7 +1401,7 @@ type ReadAgentPageMore struct {
 
 func (x *ReadAgentPageMore) Reset() {
 	*x = ReadAgentPageMore{}
-	mi := &file_store_v1_store_proto_msgTypes[17]
+	mi := &file_store_v1_store_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1326,7 +1413,7 @@ func (x *ReadAgentPageMore) String() string {
 func (*ReadAgentPageMore) ProtoMessage() {}
 
 func (x *ReadAgentPageMore) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[17]
+	mi := &file_store_v1_store_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1339,7 +1426,7 @@ func (x *ReadAgentPageMore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAgentPageMore.ProtoReflect.Descriptor instead.
 func (*ReadAgentPageMore) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{17}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ReadAgentPageMore) GetLastItem() *StoreItemPointer {
@@ -1358,7 +1445,7 @@ type ReadAgentPageFloor struct {
 
 func (x *ReadAgentPageFloor) Reset() {
 	*x = ReadAgentPageFloor{}
-	mi := &file_store_v1_store_proto_msgTypes[18]
+	mi := &file_store_v1_store_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1370,7 +1457,7 @@ func (x *ReadAgentPageFloor) String() string {
 func (*ReadAgentPageFloor) ProtoMessage() {}
 
 func (x *ReadAgentPageFloor) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[18]
+	mi := &file_store_v1_store_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1383,7 +1470,7 @@ func (x *ReadAgentPageFloor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAgentPageFloor.ProtoReflect.Descriptor instead.
 func (*ReadAgentPageFloor) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{18}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{19}
 }
 
 // The address of one opened reading session: an opaque, store-minted token —
@@ -1398,7 +1485,7 @@ type AgentSessionToken struct {
 
 func (x *AgentSessionToken) Reset() {
 	*x = AgentSessionToken{}
-	mi := &file_store_v1_store_proto_msgTypes[19]
+	mi := &file_store_v1_store_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1497,7 @@ func (x *AgentSessionToken) String() string {
 func (*AgentSessionToken) ProtoMessage() {}
 
 func (x *AgentSessionToken) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[19]
+	mi := &file_store_v1_store_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1510,7 @@ func (x *AgentSessionToken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSessionToken.ProtoReflect.Descriptor instead.
 func (*AgentSessionToken) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{19}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AgentSessionToken) GetValue() string {
@@ -1452,7 +1539,7 @@ type AgentSessionPage struct {
 
 func (x *AgentSessionPage) Reset() {
 	*x = AgentSessionPage{}
-	mi := &file_store_v1_store_proto_msgTypes[20]
+	mi := &file_store_v1_store_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1464,7 +1551,7 @@ func (x *AgentSessionPage) String() string {
 func (*AgentSessionPage) ProtoMessage() {}
 
 func (x *AgentSessionPage) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_store_proto_msgTypes[20]
+	mi := &file_store_v1_store_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1477,7 +1564,7 @@ func (x *AgentSessionPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSessionPage.ProtoReflect.Descriptor instead.
 func (*AgentSessionPage) Descriptor() ([]byte, []int) {
-	return file_store_v1_store_proto_rawDescGZIP(), []int{20}
+	return file_store_v1_store_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AgentSessionPage) GetLines() []*StoreLineAt {
@@ -1593,12 +1680,16 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\x06offset\x18\x02 \x01(\x04R\x06offset\x12\x1f\n" +
 	"\vparse_error\x18\x03 \x01(\tR\n" +
 	"parseError\x12\x10\n" +
-	"\x03raw\x18\x04 \x01(\tR\x03raw\"\x92\x01\n" +
+	"\x03raw\x18\x04 \x01(\tR\x03raw\"\xd1\x01\n" +
 	"\n" +
 	"EntryBatch\x12.\n" +
 	"\aentries\x18\x01 \x03(\v2\x14.store.v1.StoreEntryR\aentries\x12A\n" +
-	"\x0ecursor_advance\x18\x02 \x01(\v2\x15.store.v1.CursorStateH\x00R\rcursorAdvance\x88\x01\x01B\x11\n" +
-	"\x0f_cursor_advance\"h\n" +
+	"\x0ecursor_advance\x18\x02 \x01(\v2\x15.store.v1.CursorStateH\x00R\rcursorAdvance\x88\x01\x01\x12=\n" +
+	"\x0eagent_locators\x18\x03 \x03(\v2\x16.store.v1.AgentLocatorR\ragentLocatorsB\x11\n" +
+	"\x0f_cursor_advance\"d\n" +
+	"\fAgentLocator\x12$\n" +
+	"\x0evendor_task_id\x18\x01 \x01(\tR\fvendorTaskId\x12.\n" +
+	"\x05agent\x18\x02 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\"h\n" +
 	"\vCursorState\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -1635,7 +1726,7 @@ func file_store_v1_store_proto_rawDescGZIP() []byte {
 	return file_store_v1_store_proto_rawDescData
 }
 
-var file_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_store_v1_store_proto_goTypes = []any{
 	(*StoreEntry)(nil),          // 0: store.v1.StoreEntry
 	(*StoreAgentUpdate)(nil),    // 1: store.v1.StoreAgentUpdate
@@ -1651,64 +1742,67 @@ var file_store_v1_store_proto_goTypes = []any{
 	(*StoreUnknown)(nil),        // 11: store.v1.StoreUnknown
 	(*StoreUnparsed)(nil),       // 12: store.v1.StoreUnparsed
 	(*EntryBatch)(nil),          // 13: store.v1.EntryBatch
-	(*CursorState)(nil),         // 14: store.v1.CursorState
-	(*StoreItemPointer)(nil),    // 15: store.v1.StoreItemPointer
-	(*StoreLineAt)(nil),         // 16: store.v1.StoreLineAt
-	(*ReadAgentPageMore)(nil),   // 17: store.v1.ReadAgentPageMore
-	(*ReadAgentPageFloor)(nil),  // 18: store.v1.ReadAgentPageFloor
-	(*AgentSessionToken)(nil),   // 19: store.v1.AgentSessionToken
-	(*AgentSessionPage)(nil),    // 20: store.v1.AgentSessionPage
-	(*v1.SessionUpdate)(nil),    // 21: conversation.v1.SessionUpdate
-	(*v1.TurnId)(nil),           // 22: conversation.v1.TurnId
-	(*v1.AgentId)(nil),          // 23: conversation.v1.AgentId
-	(*v1.AgentPrompt)(nil),      // 24: conversation.v1.AgentPrompt
-	(*v1.AgentFrame)(nil),       // 25: conversation.v1.AgentFrame
-	(*v1.PeerMessage)(nil),      // 26: conversation.v1.PeerMessage
-	(*v1.AgentActivityId)(nil),  // 27: conversation.v1.AgentActivityId
-	(*v1.AgentBash)(nil),        // 28: conversation.v1.AgentBash
-	(*v1.AgentWorkflow)(nil),    // 29: conversation.v1.AgentWorkflow
-	(*structpb.Struct)(nil),     // 30: google.protobuf.Struct
+	(*AgentLocator)(nil),        // 14: store.v1.AgentLocator
+	(*CursorState)(nil),         // 15: store.v1.CursorState
+	(*StoreItemPointer)(nil),    // 16: store.v1.StoreItemPointer
+	(*StoreLineAt)(nil),         // 17: store.v1.StoreLineAt
+	(*ReadAgentPageMore)(nil),   // 18: store.v1.ReadAgentPageMore
+	(*ReadAgentPageFloor)(nil),  // 19: store.v1.ReadAgentPageFloor
+	(*AgentSessionToken)(nil),   // 20: store.v1.AgentSessionToken
+	(*AgentSessionPage)(nil),    // 21: store.v1.AgentSessionPage
+	(*v1.SessionUpdate)(nil),    // 22: conversation.v1.SessionUpdate
+	(*v1.TurnId)(nil),           // 23: conversation.v1.TurnId
+	(*v1.AgentId)(nil),          // 24: conversation.v1.AgentId
+	(*v1.AgentPrompt)(nil),      // 25: conversation.v1.AgentPrompt
+	(*v1.AgentFrame)(nil),       // 26: conversation.v1.AgentFrame
+	(*v1.PeerMessage)(nil),      // 27: conversation.v1.PeerMessage
+	(*v1.AgentActivityId)(nil),  // 28: conversation.v1.AgentActivityId
+	(*v1.AgentBash)(nil),        // 29: conversation.v1.AgentBash
+	(*v1.AgentWorkflow)(nil),    // 30: conversation.v1.AgentWorkflow
+	(*structpb.Struct)(nil),     // 31: google.protobuf.Struct
 }
 var file_store_v1_store_proto_depIdxs = []int32{
 	6,  // 0: store.v1.StoreEntry.plane:type_name -> store.v1.Plane
 	1,  // 1: store.v1.StoreEntry.agent_update:type_name -> store.v1.StoreAgentUpdate
-	21, // 2: store.v1.StoreEntry.session_update:type_name -> conversation.v1.SessionUpdate
-	22, // 3: store.v1.StoreEntry.turn:type_name -> conversation.v1.TurnId
-	23, // 4: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
+	22, // 2: store.v1.StoreEntry.session_update:type_name -> conversation.v1.SessionUpdate
+	23, // 3: store.v1.StoreEntry.turn:type_name -> conversation.v1.TurnId
+	24, // 4: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
 	2,  // 5: store.v1.StoreAgentUpdate.serveable_frame:type_name -> store.v1.StorePageLine
 	9,  // 6: store.v1.StoreAgentUpdate.unserved_item:type_name -> store.v1.StoreUnservedItem
 	4,  // 7: store.v1.StoreAgentUpdate.bash:type_name -> store.v1.StoreAgentBash
 	5,  // 8: store.v1.StoreAgentUpdate.workflow:type_name -> store.v1.StoreAgentWorkflow
-	23, // 9: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
+	24, // 9: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
 	3,  // 10: store.v1.StorePageLine.agent_item:type_name -> store.v1.StoreAgentItem
-	24, // 11: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
-	25, // 12: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
-	26, // 13: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
-	27, // 14: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
-	28, // 15: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
-	23, // 16: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
-	29, // 17: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
+	25, // 11: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
+	26, // 12: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
+	27, // 13: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
+	28, // 14: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
+	29, // 15: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
+	24, // 16: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
+	30, // 17: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
 	7,  // 18: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
 	8,  // 19: store.v1.Plane.file:type_name -> store.v1.PlaneFile
 	10, // 20: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
 	11, // 21: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
 	12, // 22: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
-	30, // 23: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
-	30, // 24: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
+	31, // 23: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
+	31, // 24: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
 	0,  // 25: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
-	14, // 26: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
-	15, // 27: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
-	2,  // 28: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
-	22, // 29: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
-	15, // 30: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
-	16, // 31: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
-	17, // 32: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
-	18, // 33: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	15, // 26: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
+	14, // 27: store.v1.EntryBatch.agent_locators:type_name -> store.v1.AgentLocator
+	24, // 28: store.v1.AgentLocator.agent:type_name -> conversation.v1.AgentId
+	16, // 29: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
+	2,  // 30: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
+	23, // 31: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
+	16, // 32: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
+	17, // 33: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
+	18, // 34: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
+	19, // 35: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }
@@ -1741,8 +1835,8 @@ func file_store_v1_store_proto_init() {
 		(*StoreUnservedItem_Unparsed)(nil),
 	}
 	file_store_v1_store_proto_msgTypes[13].OneofWrappers = []any{}
-	file_store_v1_store_proto_msgTypes[16].OneofWrappers = []any{}
-	file_store_v1_store_proto_msgTypes[20].OneofWrappers = []any{
+	file_store_v1_store_proto_msgTypes[17].OneofWrappers = []any{}
+	file_store_v1_store_proto_msgTypes[21].OneofWrappers = []any{
 		(*AgentSessionPage_More)(nil),
 		(*AgentSessionPage_Floor)(nil),
 	}
@@ -1752,7 +1846,7 @@ func file_store_v1_store_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_store_proto_rawDesc), len(file_store_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

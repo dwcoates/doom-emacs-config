@@ -1823,6 +1823,26 @@ stands a fresh subscriber."
         (agent-repl-itest--await-subscriber daemon "roster")
         (should (equal 1 (length (agent-repl-itest--subscribers daemon "roster"))))))))
 
+(ert-deftest agent-repl-itest-roster-a-clean-end-after-the-planned-ending-is-info ()
+  "A clean end after the daemon's planned ending is a stand-down at INFO.
+The daemon's last frame (`DaemonStreamEnding') says the end is PLANNED, so
+roster.el writes no ERROR and keeps the last view."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-end-planned" "itest-end-planned" 'ready))))
+      (agent-repl-itest-roster--await-view daemon)
+      (let ((kept agent-repl-roster-view))
+        ;; Act.
+        (agent-repl-itest--push daemon "roster" '((ending . ())))
+        (agent-repl-itest--await-log daemon "elisp.roster.stream-ending" "info")
+        (agent-repl-itest--end daemon "roster")
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.roster.stream-close: reason=planned-ending" "info")
+        (should-not (agent-repl-itest--logged-p daemon "elisp.roster.stream-close" "error"))
+        (should (equal agent-repl-roster-view kept))))))
+
 ;; audit-3 #35
 (ert-deftest agent-repl-itest-roster-an-aborted-stream-is-a-loud-error-the-view-is-kept-and-a-fresh-subscribe-stands ()
   "The roster stream ABORTING (no end frame at all) is a loud ERROR too.

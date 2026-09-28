@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/wsm"
 )
@@ -20,6 +21,7 @@ func TestDaemonFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "successor spawn failed", fault: wsm.Fault{Kind: KindSuccessorSpawnFailed}},
 		{name: "prompts dir missing", fault: wsm.Fault{Kind: KindPromptsDirMissing}},
 		{name: "wsm read only", fault: wsm.Fault{Kind: KindWsmReadOnly}},
+		{name: "deploy failed", fault: wsm.Fault{Kind: KindDeployFailed, Evidence: DeployFailure{Step: DeployStepBuild}.Evidence()}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,6 +75,66 @@ func TestDaemonFaultCarriesTheExpiredWorkspaceRef(t *testing.T) {
 	ref := got.GetAdoptionWindowExpired().GetWorkspace()
 	if ref.GetId() != "w1" || ref.GetDir() != "/tree/w1" {
 		t.Fatalf("workspace ref = %v, want the recorded id and dir", ref)
+	}
+}
+
+func TestDaemonFaultCarriesTheFailedDeployStep(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure DeployFailure
+		want    *agentreplv1.DaemonFaultDeployFailed
+	}{
+		{
+			name:    "a failed build names its step, its output and its log",
+			failure: DeployFailure{Step: DeployStepBuild, BuildStep: "webapp", Detail: "tsc: 1 error", Log: "/s/deploy/logs/build-1.log"},
+			want: &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_Build{
+				Build: &agentreplv1.DeployBuildFailed{Step: "webapp", Detail: "tsc: 1 error", Log: "/s/deploy/logs/build-1.log"},
+			}},
+		},
+		{
+			name:    "a failed install names the component",
+			failure: DeployFailure{Step: DeployStepInstall, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "permission denied"},
+			want: &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_Install{
+				Install: &agentreplv1.DeployInstallFailed{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, Detail: "permission denied"},
+			}},
+		},
+		{
+			name:    "a failed service restart names the service",
+			failure: DeployFailure{Step: DeployStepRestartServices, Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "exit 5"},
+			want: &agentreplv1.DaemonFaultDeployFailed{Step: &agentreplv1.DaemonFaultDeployFailed_RestartServices{
+				RestartServices: &agentreplv1.DeployServiceRestartFailed{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR, Detail: "exit 5"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			fault := wsm.Fault{Kind: KindDeployFailed, Detail: "prose", Evidence: tt.failure.Evidence()}
+
+			// Act.
+			got := daemonFault(fault).GetDeployFailed()
+
+			// Assert.
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("deploy_failed arm = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDaemonFaultOfADeployStepNoArmSpellsKeepsItsDetailLine(t *testing.T) {
+	// Arrange: a record whose step the oneof does not spell.
+	fault := wsm.Fault{Kind: KindDeployFailed, Detail: "the evidence", Evidence: map[string]string{"step": "layout"}}
+
+	// Act.
+	got := daemonFault(fault)
+
+	// Assert.
+	if got.GetKind() != nil {
+		t.Fatalf("kind = %v, want no typed arm for a step no arm spells", got.GetKind())
+	}
+	if got.GetDetail() != "deploy_failed: the evidence" {
+		t.Fatalf("detail = %q, want the kind and the evidence", got.GetDetail())
 	}
 }
 

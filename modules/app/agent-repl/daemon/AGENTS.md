@@ -44,14 +44,25 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   every defer and `t.Cleanup`, and before this a day of such runs filled the
   disk and left daemons spinning. The root is under `/tmp` and short, so the
   103-byte socket path budget holds without a `TMPDIR=/tmp` override.
-- **A daemon's teardown FREEZES its process group before killing it**
-  (`harness.Daemon.Kill`): SIGSTOP to the group, the kernel's own report that
-  the leader is stopped, then SIGKILL. A bare `kill(-pgid, SIGKILL)` is walked
-  member by member and can be preempted between them, so under load the
-  daemon outlived its in-flight git (or a shim still in its group between fork
-  and setpgid) and logged that death at ERROR, failing the warning sweep on a
-  record the teardown itself caused. Never add a signal path to the harness
-  that lets a member of the daemon's group die while the daemon can run.
+- **A daemon's teardown ENDS ITS LEADER before signaling any member of its
+  group** (`harness.Daemon.Kill`): SIGSTOP to the group as containment, then
+  SIGKILL to the leader alone, the kernel's exit event for it, and only then
+  SIGKILL to the group. A bare `kill(-pgid, SIGKILL)` is walked member by
+  member and can be preempted between them, so under load the daemon outlived
+  its in-flight git (or a shim still in its group between fork and setpgid)
+  and logged that death at ERROR, failing the warning sweep on a record the
+  teardown itself caused. Never add a signal path to the harness that lets a
+  member of the daemon's group die while the daemon can run, and never rest
+  that ordering on a stop: on Darwin a SIGSTOP that reaches a process inside
+  execve is discarded when the exec completes, after the process has already
+  read as stopped. Every signal to the daemon and its reap share one owner
+  (`Daemon.sigMu`): the reap marks itself begun under it before `cmd.Wait`
+  frees the pid, so no signal can reach a recycled pid or group id.
+- **The stray reap rests on exits too** (`harness.Daemon.ReapStrays`): it
+  runs in rounds of freeze, SIGKILL and the kernel's exit event for every
+  listed stray until a listing names none still live, so a stray whose stop
+  exec discarded cannot leave a replacement behind. `ErrLeakedProcess` is the
+  backstop for whatever the round budget leaves.
   Reclaim tests make their dead roots in a private `runRootSpace`, never in
   `hostRunRoots`, which every other run on the host reclaims.
 - **The suite bounds its own load**: `harness.DefaultDaemonSlots` (8,
@@ -150,10 +161,20 @@ and h2c through a real exit.
 | --- | --- | --- |
 | `streamsEndBound` (cmd/claude-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
 
-The end frame is Connect's plain end-of-stream: the contract has no terminal
-ARM for a stand-down on these streams (a transfer is announced by the
-`transferred` push BEFORE it, never as a terminal frame), so a client reads a
-clean end and re-resolves the live daemon itself.
+The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
+`WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
+`ending` arm (`DaemonStreamEnding`, daemon_stream_ending.proto), which says the
+end is PLANNED. The dedicated rpc handler sends it (`endStandingStream`,
+internal/server/streams.go) when its body returned because the surface's
+lifetime ended — and the lifetime ends only in `Close`, which only the planned
+exit runs — so every stand-down path above sends it and an unplanned death
+never does; a stream its client ended is sent nothing. It carries no address:
+a client re-resolves the live daemon itself (a transfer is still announced by
+the `transferred` push, never by the ending). A page's mux carries no ending on
+its roster or daemon subscriptions: those sinks end with the page's own stream
+at the same lifetime edge, and `WatchPage` has no ending arm.
+`integration/exit_streams_test.go` pins the ending then the clean end on each
+of the three.
 
 ### The shim link's requests own the bytes they promise
 
@@ -712,6 +733,14 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
    bounce registry (`rollout.CheckStaleness`), and each workspace whose webview
    reported an older `webapp_build` gets `reload_webapp`.
 
+A build, install or service restart that fails also opens the daemon-scoped
+`deploy_failed` fault (`DaemonFaultDeployFailed`, whose `step` arm carries the
+rpc's own refusal) through the observed state client, superseding that step's
+earlier fault; a step a later deploy gets through closes every fault of that
+step, and a non-joining daemon closes the ones an earlier daemon left at boot
+(`Deployer.CloseEarlierFailures`), since no strip of the new process draws
+them. Records go under `daemon.deploy.fault`.
+
 One deploy runs at a time (`already_deploying`); a landing that arrives while
 one runs is covered by ONE follow-up deploy. Every decision is a record under
 `daemon.deploy.run` / `daemon.deploy.decide` / `daemon.deploy.install` /
@@ -771,6 +800,13 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   `wsm.ClaimUnownedServing` (claim only if unowned or already ours), and only
   the side whose claim stood dials the shim -- the successor now claims BEFORE
   it dials, and drains the handover hold on every path past a won claim.
+- **An adoption is finished when the hold is drained, not when the row is
+  claimed.** The successor claims serving, then dials the shim, then drains
+  the transfer's quiesce hold; the incumbent's adoption window
+  (`timeAdoption`/`adopted`) ends only once serving is another instance's AND
+  the hold it handed over is gone. Ending it at the claim let the incumbent
+  exit mid-adoption, and its handle's close released the hold under the
+  successor's drain (`handover: drain ...: release the hold: wsm: not found`).
 - **An expired adoption window reclaims.** The incumbent takes the workspace
   back: claim, re-adopt the detached shim (a handed-over client leaves the
   fleet's session map with its detach, so `Adopt` really dials), release the
@@ -823,12 +859,16 @@ deferred to the replacement):
 A restart that cannot finish (a failed stand-down, a replacement that will not
 start) takes EVERY workspace back, frees the slot and keeps serving, at ERROR.
 
-OPEN CONTRACT QUESTION: `endpoint_deploy.proto` has no daemon arm for this
-restart (only the blue-green `handing_over`), so the `Deploy` rpc answers a
-layout-change deploy as an internal failure naming the unnamed decision while
-the restart proceeds; a landing's deploy (no rpc) is unaffected. The
-announcement reuses `self_merge_rollout` with the address unset, whose comment
-describes a handover. Both await the owner's ruling.
+The `Deploy` rpc answers this decision with the daemon's
+`DeployComponentOutcome.restarting` arm (`DeployRestarting`: the running and
+fresh state layouts, the workspaces standing down, how many were busy, and
+whether it is forced); equal or negative layouts are refused as a decision the
+arm cannot state. `claude-repld deploy` prints it as
+`daemon build=… restarting layout=N→M workspaces=W busy=B forced=F`.
+
+OPEN CONTRACT QUESTION: the announcement reuses `self_merge_rollout` with the
+address unset, whose comment describes a handover. It awaits the owner's
+ruling.
 
 ## Logging
 
@@ -935,9 +975,9 @@ Two mutations report stages today and they do NOT work the same way:
 Each verb takes its reporter as a proto-free interface (`CreateProgress`,
 `OpenProgress`) so the verb layer never names a wire type; the server maps the
 verb's own stage vocabulary onto the wire (a create's onto its own
-`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto the
-`WorkspaceOpenStage` enum), and an unmapped stage is logged at ERROR and NOT
-relayed rather than sent unset or as UNSPECIFIED. A stage is reported
+`WorkspaceCreateStage` oneof arm on `entered_stage`, an open's onto its own
+`WorkspaceOpenStage` oneof arm on `entered_stage`), and an unmapped stage is
+logged at ERROR and NOT relayed rather than sent with its oneof unset. A stage is reported
 only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
@@ -1085,26 +1125,33 @@ authorizes it: today the confirm challenge (`interruptTurn`), a restart
 (`forceEndTurn`), and the two adapters that forward their caller's force. A new
 forced site fails the unit suite until it is listed with its reason.
 
-## The roster row's viewed mode is cleared by the RENDER, not by a setter
+## The roster row's viewed mode is DERIVED from a read fact, never stored
 
 `RosterRowViewed` is the row's display mode: present is PARTIAL (the client
-recedes the row's NAME), absent is FULL. `sidebar.Resolver.SetViewed` raises it
-— the editor's `MarkWorkspaceViewed` is the only caller, because dwell is an
-editor fact — and there is deliberately NO setter that lowers it.
+recedes the row's NAME), absent is FULL. It is not a field anywhere: `row()`
+computes it from `wsState.viewedOn(arm)`, which is true exactly when the arm is
+a turn end (`isTurnEndArm`: `done` or `interrupted`) and `wsState.result` is
+`resultRead`.
 
-It is lowered in exactly one place: `wsState.noteArm`, called from `row()` as
-each row's status arm is resolved for publication, which clears the marker
-whenever the arm differs from the one last published for that workspace.
-**Hanging the clear off the render rather than off any particular fact-setter
-is the point**: every origin of a status change — an accepted turn, a shim
-frame, a merge, a dead session — reaches the row through that one funnel, so
-"any status change restores FULL" holds without every present and future setter
-having to remember to clear anything.
+The fact, `wsState.result`, has three writers and no others:
 
-The mode is in-memory only and writes no durable record: it is a view fact and
-must not outlive a restart. The editor's tab-bar draws the same mode from its
-own latch, on the same reset rule; the module-root AGENTS.md section "The
-viewed mode" owns the cross-surface invariant.
+- `SetTurnEnded` sets it `resultUnread` on a completed or killed close, and
+  `resultNone` on any other close.
+- `SetViewed` (the editor's `MarkWorkspaceViewed`) sets it `resultRead`, but
+  only when the arm LAST PUBLISHED for the row is a turn end; otherwise it is
+  refused and recorded (`daemon.sidebar.row_viewed_refused`).
+- `startTurn` (a new prompt) resets it to `resultNone`.
+
+An unread result outranks `idle_async` in `statusArm` (see the precedence in
+status.go). **Deriving the marker rather than clearing it on an arm change is
+the point**: the read fact outlives the arm changes that are not a new result
+(detached work starting or ending, a link blip, a merge), so a read turn end
+returning from `idle_async` is PARTIAL on the very push that changes its arm,
+and a client draws the marker as it arrives with no rule of its own.
+
+The fact is in-memory only and writes no durable record: it is a view fact and
+must not outlive a restart. The module-root AGENTS.md section "The viewed
+mode" owns the cross-surface invariant.
 
 ## THE LIVE-SHIM INVARIANT: a workspace whose shim is live carries NO terminal session record
 

@@ -27,6 +27,9 @@ const (
 	// KindWsmReadOnly is a state client that opened read-only, so nothing can
 	// be recorded.
 	KindWsmReadOnly = "wsm_read_only"
+	// KindDeployFailed is a deploy whose build, install or service restart
+	// did not go through. Its evidence is a DeployFailure's.
+	KindDeployFailed = "deploy_failed"
 )
 
 // The SESSION-scope fault kinds, spelled exactly as SessionFault's kind oneof
@@ -137,6 +140,10 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 	case KindStateUnreadable:
 		out.Kind = &agentreplv1.DaemonFault_DaemonStateUnreadable{
 			DaemonStateUnreadable: &agentreplv1.DaemonFaultDaemonStateUnreadable{Cause: evidenceCause(f)},
+		}
+	case KindDeployFailed:
+		if arm := DeployFailureOf(f).arm(); arm != nil {
+			out.Kind = &agentreplv1.DaemonFault_DeployFailed{DeployFailed: arm}
 		}
 	}
 	return out

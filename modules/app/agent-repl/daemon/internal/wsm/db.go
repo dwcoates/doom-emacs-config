@@ -177,6 +177,12 @@ type DB interface {
 	// workspace itself inherited followed by every prompt of its own, in one
 	// order with contiguous ordinals.
 	ConversationPrompts(ctx context.Context, id WorkspaceID) ([]PortedPrompt, error)
+	// RecentConversationPrompts is a BOUNDED ConversationPrompts: the same rows,
+	// truncated to the most recent `limit`, oldest first, read with a SQL LIMIT
+	// on each table rather than a whole-history load. It is for a reader that
+	// only ever needs the newest rows, such as the fork-naming digest; it never
+	// changes what a fork inherits, which still reads ConversationPrompts.
+	RecentConversationPrompts(ctx context.Context, id WorkspaceID, limit int) ([]PortedPrompt, error)
 	// AllDisplacedTurns loads every turn still marked displaced, across every
 	// workspace and REGARDLESS of whether the turn is still open: a merge
 	// displaces a turn by ending it, so the record a boot has to put back is

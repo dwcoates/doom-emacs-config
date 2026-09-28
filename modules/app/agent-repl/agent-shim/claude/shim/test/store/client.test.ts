@@ -37,7 +37,7 @@ describe("createStoreClient", () => {
     expect(() => createStoreClient("")).toThrow(/store socket path is required/);
   });
 
-  it("exposes exactly the seven store.v1 verbs", async () => {
+  it("exposes exactly the store.v1 verbs the shim calls", async () => {
     // Arrange.
     const client = createStoreClient(await fakeStore());
 
@@ -46,6 +46,7 @@ describe("createStoreClient", () => {
 
     // Assert.
     expect(verbs).toEqual([
+      "getAgentByVendorTask",
       "getLiveWork",
       "getSidecarCursors",
       "getWorkflow",

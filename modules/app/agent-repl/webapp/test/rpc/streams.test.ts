@@ -467,6 +467,146 @@ describe("watchStream: a stream that ended", () => {
   });
 });
 
+/**
+ * The stand-in planned-ending frame: a footer response with NO footer. The
+ * footer stream carries no ending arm; the recognizer is a predicate, so
+ * "no footer" stands in for `push.case === "ending"`.
+ */
+function endingPush(): WatchFooterResponse {
+  return create(WatchFooterResponseSchema, {});
+}
+
+/** Open with a `plannedEnding` recognizer that names `endingPush()` frames. */
+function openWithEnding(
+  ctx: AppContext,
+  onPush: (r: WatchFooterResponse) => void,
+) {
+  return watchStream(ctx, {
+    name: "WatchFooter",
+    schema: WatchFooterResponseSchema,
+    open: (client, signal) => client.watchFooter({ workspace: WORKSPACE }, { signal }),
+    plannedEnding: (r) => r.footer === undefined,
+    onPush,
+    backoff: BACKOFF,
+  });
+}
+
+describe("watchStream: a planned ending", () => {
+  it("files NO daemonUnreachable when the run ends cleanly after the ending", async () => {
+    // ARRANGE: run 1 ends as planned; the reopened run 2 STANDS, as a live
+    // daemon's stream does, so any card filed could only be run 1's.
+    const sink = new RecordingSink();
+    let opens = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchFooter: async function* () {
+          opens += 1;
+          if (opens === 1) {
+            yield push();
+            yield endingPush();
+            return;
+          }
+          await new Promise<never>(() => undefined);
+        },
+      });
+    });
+    // ACT
+    const handle = openWithEnding(contextFor(createAgentReplClient(transport), sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("reopens at once, without waiting out a backoff", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const ending = endingPush();
+    const { client, state } = scriptedClient([[ending], [], []]);
+    // ACT
+    const handle = openWithEnding(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT: the planned end reopened with no clock advance.
+    expect(state.openCount).toBe(2);
+  });
+
+  it("never hands the ending frame to onPush", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const ending = endingPush();
+    const { client } = scriptedClient([[ending], []]);
+    const seen: WatchFooterResponse[] = [];
+    // ACT
+    const handle = openWithEnding(contextFor(client, sink), (r) => seen.push(r));
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(seen).toEqual([]);
+  });
+
+  it("still files daemonUnreachable for a clean end WITHOUT the ending", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = openWithEnding(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("still files daemonUnreachable for a run that THROWS after the ending", async () => {
+    // ARRANGE: the run delivers the ending, then the transport fails.
+    const sink = new RecordingSink();
+    const ending = endingPush();
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchFooter: async function* () {
+          yield ending;
+          throw new ConnectError("gone", Code.Unavailable);
+        },
+      });
+    });
+    // ACT
+    const handle = openWithEnding(contextFor(createAgentReplClient(transport), sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("does not carry the ending into the next run", async () => {
+    // ARRANGE: run 1 ends as planned; run 2 ends cleanly with NO ending.
+    const sink = new RecordingSink();
+    const ending = endingPush();
+    const { client } = scriptedClient([[ending], [push()], []]);
+    // ACT
+    const handle = openWithEnding(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("logs the planned end at info, never as a transport failure", async () => {
+    // ARRANGE
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const ending = endingPush();
+    const { client } = scriptedClient([[ending], [push()]]);
+    // ACT
+    const handle = openWithEnding(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(
+      lines.some(([level, line]) => level === "info" && line.includes("rpc.stream-ended-planned")),
+    ).toBe(true);
+  });
+});
+
 describe("watchStream: cancel", () => {
   it("stops reopening", async () => {
     const sink = new RecordingSink();

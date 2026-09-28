@@ -374,13 +374,22 @@ does not write to the durable sink."
                   (lambda () (agent-repl-wire-encode-prompt-origin :invented)))
                  '("PromptOrigin" origin "unknown prompt origin"))))
 
+(ert-deftest agent-repl-test-wire-common-prompt-origin-refuses-a-shim-only-origin ()
+  "A shim-only origin has no keyword, so `:vendor-started' is refused before send."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda () (agent-repl-wire-encode-prompt-origin :vendor-started)))
+                 '("PromptOrigin" origin "unknown prompt origin"))))
+
 (ert-deftest agent-repl-test-wire-common-prompt-origin-table-matches-the-bindings ()
-  "The keyword table covers the declared enum exactly, minus UNSPECIFIED.
-Read from the checked-in Go bindings, so a value landed in the proto
-without a keyword here fails this test instead of failing a send."
-  (let ((declared (sort (delete "PROMPT_ORIGIN_UNSPECIFIED"
-                                (agent-repl-test--generated-enum-names
-                                 "conversation/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_"))
+  "The keyword table covers the declared enum exactly, minus UNSPECIFIED
+and the shim-only values. Read from the checked-in Go bindings, so a value
+landed in the proto without a keyword here fails this test instead of
+failing a send."
+  (let ((declared (sort (seq-difference
+                         (delete "PROMPT_ORIGIN_UNSPECIFIED"
+                                 (agent-repl-test--generated-enum-names
+                                  "conversation/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_"))
+                         agent-repl-wire-shim-only-prompt-origins)
                         #'string<))
         (spelled (sort (mapcar #'cdr agent-repl-wire-prompt-origins) #'string<)))
     (should (equal spelled declared))))
@@ -841,6 +850,21 @@ that tells its three cases apart."
                     (agent-repl-wire-decode-lock-holder-failure
                      (agent-repl-test-wire-common--parse "{\"binary\":\"b\",\"osError\":\"x\"}"))))
                  '("LockHolderFailure" osError "unknown field"))))
+
+;;;; ---- DaemonStreamEnding ----
+
+(ert-deftest agent-repl-test-wire-common-daemon-stream-ending-decodes-to-nil ()
+  "The planned ending is an empty message: its presence is the whole fact."
+  (should (null (agent-repl-test-wire-common--decode
+                 #'agent-repl-wire-decode-daemon-stream-ending "{}"))))
+
+(ert-deftest agent-repl-test-wire-common-daemon-stream-ending-refuses-a-field ()
+  "A field on the ending is a schema this consumer does not hold."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-daemon-stream-ending
+                     (agent-repl-test-wire-common--parse "{\"address\":\"x\"}"))))
+                 '("DaemonStreamEnding" address "unknown field"))))
 
 (provide 'test-wire-common)
 

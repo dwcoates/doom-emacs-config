@@ -115,6 +115,10 @@ func TestGoldenCorpusVendorSpecificKindsAreTheDeclaredSet(t *testing.T) {
 		"attachment/structured_output": true, "attachment/task_reminder": true,
 		"attachment/ultra_effort_enter": true, "attachment/ultra_effort_exit": true,
 		"attachment/ultrathink_effort": true,
+		// The context-window reminder the CLI attaches to every prompt, first
+		// carried by the re-sent-prompt fixture (transcript-lines/
+		// user-prompt-resend.jsonl).
+		"attachment/total_tokens_reminder": true,
 		// The diagnostics attachment when no adjacent change was observed.
 		"attachment/diagnostics": true,
 		// The hook outcomes. READ AND KEPT WHOLE, never served: the STREAM plane

@@ -365,6 +365,21 @@ func (c *Client) resolveWorkspace(
 	// This is distinct from the stream never delivering a snapshot at all (it
 	// errored or never connected), which stays a transport failure below.
 	if stream.Receive() {
+		switch stream.Msg().GetPush().(type) {
+		case *agentreplv1.WatchWorkspaceRosterResponse_Roster:
+		case *agentreplv1.WatchWorkspaceRosterResponse_Ending:
+			// THE DAEMON IS STANDING DOWN BEFORE IT DELIVERED A ROSTER: a
+			// planned exit, not an answer. It says nothing about whether the
+			// dir is a workspace, so it is never read as "absent"; the daemon
+			// that sent it is on its way out, which is the restart transient
+			// ErrForwardTargetNotThere names, retried against whichever daemon
+			// daemon.addr names next.
+			return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended as the daemon stood down in a planned exit, before delivering a roster for workspace %q: %w",
+				address, wanted, logging.ErrForwardTargetNotThere)
+		default:
+			return nil, fmt.Errorf("WatchWorkspaceRoster at %s delivered a frame with no push arm this client reads (%T), not a roster for workspace %q",
+				address, stream.Msg().GetPush(), wanted)
+		}
 		ref, err := workspaceRefInRoster(stream.Msg().GetRoster(), wanted)
 		if err != nil {
 			return nil, fmt.Errorf("resolve workspace ref from roster at %s: %w", address, err)

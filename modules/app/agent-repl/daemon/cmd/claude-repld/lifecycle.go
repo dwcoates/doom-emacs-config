@@ -202,6 +202,12 @@ func (s *lifecycleSink) reportBuild(ws ids.WorkspaceID, build string) {
 	controller.ShimReported(ws, build)
 }
 
+// OnTurnAdopted records, through the queue that owns the turn rows, a turn
+// the vendor started on its own.
+func (s *lifecycleSink) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
+	s.queue.OnTurnAdopted(ws, turn)
+}
+
 // OnTurnsEndedUnobserved closes, through the queue that owns the turn rows,
 // the turns an adoption found open that the adopted shim no longer runs.
 func (s *lifecycleSink) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {

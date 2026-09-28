@@ -151,6 +151,17 @@ overwrites their real `shim-store.build.json`.
   announced (the spool, its readability, the detach cause, the timeout);
   unpacking any of that here too would give one fact two homes that can disagree.
 - `workflow` — the table exists and **NOTHING routes into it this wave**.
+- `vendor_task` — one row per (vendor task locator, agent): the `<id>` of a
+  subagent's `agent-<id>.jsonl` (the stream's `task_id`) paired with the agent
+  it names (the spawning call's `tool_use_id`). The sidecar states it on every
+  batch of a subagent transcript (`EntryBatch.agent_locators`), it commits in
+  the FIRST transaction of that batch, and a re-statement is absorbed.
+  `GetAgentByVendorTask` reads it scoped to the caller's lineage, exactly as
+  `GetLiveWork` is: not-found is an answer recorded at info (only the shim knows
+  whether it expected one), and a locator paired with two agents of one lineage
+  is refused as a storage failure at ERROR rather than chosen between. It exists
+  because a SendMessage resume names the send, not the spawn, and a shim that
+  restarted since the spawn has nothing else to name the running agent by.
 
 `agent`/`workflow`/`detached_work` are UNPACKED to columns because the store
 filters and joins on them; `entry`'s frame stays a BLOB because activity
@@ -642,6 +653,16 @@ and not something this change touches.
   do. Producers key the rows (`bash:<run>:start`, `bash:<run>:tail`,
   `bash:<run>:terminal`); **the store never parses a key.** It is still not a
   page line: a run has no book, and its reader is `WatchBashRun`.
+- **A BASH RUN'S FILE-PLANE TERMINAL OUTRANKS ITS STREAM-PLANE TERMINAL**
+  (owner ruling 2026-09-27, `fileTerminalHeld`). The one exception to "the last
+  write supersedes whole": a stream-plane write whose bash frame is terminal
+  (`success`/`failure`) landing on a row that holds a FILE-plane terminal is
+  absorbed — counted in `Absorbed`, no upsert, no ledger row, no watcher row —
+  and recorded ONCE per refused write at INFO. The sidecar's terminal carries
+  the spool's exit code and output; the shim's says only that the run ended.
+  A file-plane terminal still supersedes a stream-plane one, file supersedes
+  file, stream supersedes stream, and every non-terminal or non-bash row is
+  unchanged.
 - **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
   is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
   tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one

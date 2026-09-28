@@ -1035,6 +1035,30 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
     );
   });
 
+  // A FAILED DEPLOY. The daemon names the step and its last line of output;
+  // the strip draws it through the same line, with no table keyed on it.
+  it("draws a failed deploy with the step it failed at", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "deploy_failed",
+        detail: "build webapp: error TS2322",
+      }),
+    });
+    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
+      "deploy failed \u00b7 build webapp: error TS2322",
+    );
+  });
+
+  it("leaves the idle status standing under a failed deploy", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "deploy_failed",
+        detail: "restart services store: exit 5",
+      }),
+    });
+    expect(row.querySelector(".footer-status")?.textContent?.toLowerCase()).toContain("idle");
+  });
+
   // IT NEVER ESCALATES THE STATUS. The session is serving and the prose is on
   // screen; `disconnected` would close the composer over a healthy session.
   it("stands as the activity line under an ordinary idle status", () => {
@@ -1211,5 +1235,102 @@ describe("the footer status word's per-letter colour sweep", () => {
 
     // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
     expect(statusLetters(row)).toHaveLength(0);
+  });
+});
+
+// ---- a deploy's progress: the update line ----------------------------------
+
+describe("the update activity: a deploy's progress on the strip", () => {
+  const updateText = (update: Record<string, unknown>): string | null | undefined => {
+    const { row } = drawStrip({ status: withActivity("idle", null, "update", update) });
+    return row.querySelector(".footer-activity-update")?.textContent;
+  };
+
+  it("draws the building phase with the components it builds", () => {
+    expect(
+      updateText({
+        phase: {
+          case: "building",
+          value: { components: [{ component: { case: "shim", value: {} } }, { component: { case: "webapp", value: {} } }] },
+        },
+      }),
+    ).toBe("building · shim, webapp");
+  });
+
+  it("draws a phase with no payload as its arm name alone", () => {
+    expect(updateText({ phase: { case: "handingOver", value: {} } })).toBe("handing over");
+  });
+
+  it("draws the services being restarted", () => {
+    expect(
+      updateText({
+        phase: {
+          case: "restartingServices",
+          value: { services: [{ component: { case: "store", value: {} } }, { component: { case: "sidecar", value: {} } }] },
+        },
+      }),
+    ).toBe("restarting services · store, sidecar");
+  });
+
+  it("draws what a waiting workspace's move waits on", () => {
+    expect(updateText({ phase: { case: "waiting", value: { turns: 1, background: 2 } } })).toBe(
+      "waiting · 1 turn, 2 background",
+    );
+  });
+
+  it("colours the waiting counts as figures", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "update", { phase: { case: "waiting", value: { turns: 0, background: 3 } } }),
+    });
+    const figures = row.querySelectorAll(".footer-activity-update [data-datum='count']");
+    expect([...figures].map((f) => f.textContent)).toEqual(["3"]);
+  });
+
+  it("draws the notes after the phase", () => {
+    expect(
+      updateText({
+        phase: { case: "updated", value: {} },
+        notes: [{ note: { case: "shimWhenIdle", value: {} } }],
+      }),
+    ).toBe("updated · shim when idle");
+  });
+
+  it("stamps the phase arm on the line", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "update", { phase: { case: "installing", value: {} } }),
+    });
+    expect(row.querySelector(".footer-activity-update")?.getAttribute("data-phase")).toBe("installing");
+  });
+
+  it("refuses an update line whose phase is unset", () => {
+    expect(() => drawStrip({ status: withActivity("idle", null, "update", {}) })).toThrow(MalformedView);
+  });
+
+  it("refuses a component whose arm is unset", () => {
+    expect(() =>
+      drawStrip({
+        status: withActivity("idle", null, "update", {
+          phase: { case: "building", value: { components: [{}] } },
+        }),
+      }),
+    ).toThrow(MalformedView);
+  });
+
+  it.each([
+    ["idle", null],
+    ["thinking", "thinking"],
+    ["waiting", "permission"],
+    ["interrupted", "byUser"],
+    ["merging", "merge"],
+    ["background", null],
+    ["blocked", "daemonImpaired"],
+    ["disconnected", "dead"],
+    ["closing", "blocked"],
+    ["loading", "memory"],
+  ])("stands under the %s arm", (statusCase, subCase) => {
+    const { row } = drawStrip({
+      status: withActivity(statusCase, subCase, "update", { phase: { case: "installing", value: {} } }),
+    });
+    expect(row.querySelector(".footer-activity-update")?.textContent).toBe("installing");
   });
 });

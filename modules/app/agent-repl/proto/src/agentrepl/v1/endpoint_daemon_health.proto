@@ -7,6 +7,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_deploy.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -77,6 +78,12 @@ message DaemonFault {
     DaemonFaultWsmReadOnly wsm_read_only = 7;
     // The daemon's own state client would not answer the fault read.
     DaemonFaultDaemonStateUnreadable daemon_state_unreadable = 8;
+    // A deploy's build, install or service restart did not go through. It
+    // stands until a later deploy gets through the step that failed, and a
+    // daemon that boots closes the ones an earlier daemon left standing. A
+    // handover whose successor would not start is `successor_spawn_failed`
+    // instead.
+    DaemonFaultDeployFailed deploy_failed = 9;
   }
 }
 message DaemonFaultAdoptionWindowExpired {
@@ -106,6 +113,20 @@ message DaemonFaultPromptsDirMissing {
   string path = 1;
 }
 message DaemonFaultWsmReadOnly {}
+message DaemonFaultDeployFailed {
+  // THE ARM IS THE STEP THAT FAILED, and it carries the very refusal the
+  // Deploy rpc answered its caller with, so the fault and the answer cannot
+  // say two different things about one failure. Exactly one; unset is
+  // malformed.
+  oneof step {
+    // The build did not stage every artifact: nothing was installed.
+    DeployBuildFailed build = 1;
+    // A staged artifact could not be installed: nothing was restarted.
+    DeployInstallFailed install = 2;
+    // A launchd service did not come back onto the installed build.
+    DeployServiceRestartFailed restart_services = 3;
+  }
+}
 
 // No arms: DaemonHealth has no refusal site (landing 4).
 message DaemonHealthError {

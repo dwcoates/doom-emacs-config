@@ -62,22 +62,26 @@ const (
 	ShimStoreGetSidecarCursorsProcedure = "/store.v1.ShimStore/GetSidecarCursors"
 	// ShimStoreGetLiveWorkProcedure is the fully-qualified name of the ShimStore's GetLiveWork RPC.
 	ShimStoreGetLiveWorkProcedure = "/store.v1.ShimStore/GetLiveWork"
+	// ShimStoreGetAgentByVendorTaskProcedure is the fully-qualified name of the ShimStore's
+	// GetAgentByVendorTask RPC.
+	ShimStoreGetAgentByVendorTaskProcedure = "/store.v1.ShimStore/GetAgentByVendorTask"
 	// ShimStoreWriteBatchProcedure is the fully-qualified name of the ShimStore's WriteBatch RPC.
 	ShimStoreWriteBatchProcedure = "/store.v1.ShimStore/WriteBatch"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	shimStoreServiceDescriptor                 = v1.File_store_v1_service_proto.Services().ByName("ShimStore")
-	shimStoreOpenAgentSessionMethodDescriptor  = shimStoreServiceDescriptor.Methods().ByName("OpenAgentSession")
-	shimStoreWatchAgentSessionMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("WatchAgentSession")
-	shimStoreReadAgentPageMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
-	shimStoreWatchBashRunMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
-	shimStoreGetWorkflowMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
-	shimStoreListResidueShapesMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("ListResidueShapes")
-	shimStoreGetSidecarCursorsMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
-	shimStoreGetLiveWorkMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
-	shimStoreWriteBatchMethodDescriptor        = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
+	shimStoreServiceDescriptor                    = v1.File_store_v1_service_proto.Services().ByName("ShimStore")
+	shimStoreOpenAgentSessionMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("OpenAgentSession")
+	shimStoreWatchAgentSessionMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("WatchAgentSession")
+	shimStoreReadAgentPageMethodDescriptor        = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
+	shimStoreWatchBashRunMethodDescriptor         = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
+	shimStoreGetWorkflowMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
+	shimStoreListResidueShapesMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("ListResidueShapes")
+	shimStoreGetSidecarCursorsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
+	shimStoreGetLiveWorkMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
+	shimStoreGetAgentByVendorTaskMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
+	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
 // ShimStoreClient is a client for the store.v1.ShimStore service.
@@ -109,6 +113,12 @@ type ShimStoreClient interface {
 	// unscoped request is refused. The shim resolves each at session start —
 	// re-adopt or close.
 	GetLiveWork(context.Context, *connect.Request[v1.GetLiveWorkRequest]) (*connect.Response[v1.GetLiveWorkResponse], error)
+	// WHICH AGENT a vendor task locator names, within the caller's lineage. The
+	// shim asks when a subagent task starts from a call that is not its spawn
+	// (a resume) and this process never saw the spawn, when it restores such an
+	// agent, and when that agent raises an ask. The pairing is the sidecar's,
+	// written with the agent's first rows (EntryBatch.agent_locators).
+	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -171,6 +181,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetLiveWorkMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getAgentByVendorTask: connect.NewClient[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse](
+			httpClient,
+			baseURL+ShimStoreGetAgentByVendorTaskProcedure,
+			connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		writeBatch: connect.NewClient[v1.WriteBatchRequest, v1.WriteBatchResponse](
 			httpClient,
 			baseURL+ShimStoreWriteBatchProcedure,
@@ -182,15 +198,16 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // shimStoreClient implements ShimStoreClient.
 type shimStoreClient struct {
-	openAgentSession  *connect.Client[v1.OpenAgentSessionRequest, v1.OpenAgentSessionResponse]
-	watchAgentSession *connect.Client[v1.WatchAgentSessionRequest, v1.WatchAgentSessionResponse]
-	readAgentPage     *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
-	watchBashRun      *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
-	getWorkflow       *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
-	listResidueShapes *connect.Client[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse]
-	getSidecarCursors *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
-	getLiveWork       *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
-	writeBatch        *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
+	openAgentSession     *connect.Client[v1.OpenAgentSessionRequest, v1.OpenAgentSessionResponse]
+	watchAgentSession    *connect.Client[v1.WatchAgentSessionRequest, v1.WatchAgentSessionResponse]
+	readAgentPage        *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
+	watchBashRun         *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
+	getWorkflow          *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
+	listResidueShapes    *connect.Client[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse]
+	getSidecarCursors    *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
+	getLiveWork          *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
+	getAgentByVendorTask *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
+	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
 // OpenAgentSession calls store.v1.ShimStore.OpenAgentSession.
@@ -233,6 +250,11 @@ func (c *shimStoreClient) GetLiveWork(ctx context.Context, req *connect.Request[
 	return c.getLiveWork.CallUnary(ctx, req)
 }
 
+// GetAgentByVendorTask calls store.v1.ShimStore.GetAgentByVendorTask.
+func (c *shimStoreClient) GetAgentByVendorTask(ctx context.Context, req *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error) {
+	return c.getAgentByVendorTask.CallUnary(ctx, req)
+}
+
 // WriteBatch calls store.v1.ShimStore.WriteBatch.
 func (c *shimStoreClient) WriteBatch(ctx context.Context, req *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
 	return c.writeBatch.CallUnary(ctx, req)
@@ -267,6 +289,12 @@ type ShimStoreHandler interface {
 	// unscoped request is refused. The shim resolves each at session start —
 	// re-adopt or close.
 	GetLiveWork(context.Context, *connect.Request[v1.GetLiveWorkRequest]) (*connect.Response[v1.GetLiveWorkResponse], error)
+	// WHICH AGENT a vendor task locator names, within the caller's lineage. The
+	// shim asks when a subagent task starts from a call that is not its spawn
+	// (a resume) and this process never saw the spawn, when it restores such an
+	// agent, and when that agent raises an ask. The pairing is the sidecar's,
+	// written with the agent's first rows (EntryBatch.agent_locators).
+	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -325,6 +353,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetLiveWorkMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetAgentByVendorTaskHandler := connect.NewUnaryHandler(
+		ShimStoreGetAgentByVendorTaskProcedure,
+		svc.GetAgentByVendorTask,
+		connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreWriteBatchHandler := connect.NewUnaryHandler(
 		ShimStoreWriteBatchProcedure,
 		svc.WriteBatch,
@@ -349,6 +383,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetSidecarCursorsHandler.ServeHTTP(w, r)
 		case ShimStoreGetLiveWorkProcedure:
 			shimStoreGetLiveWorkHandler.ServeHTTP(w, r)
+		case ShimStoreGetAgentByVendorTaskProcedure:
+			shimStoreGetAgentByVendorTaskHandler.ServeHTTP(w, r)
 		case ShimStoreWriteBatchProcedure:
 			shimStoreWriteBatchHandler.ServeHTTP(w, r)
 		default:
@@ -390,6 +426,10 @@ func (UnimplementedShimStoreHandler) GetSidecarCursors(context.Context, *connect
 
 func (UnimplementedShimStoreHandler) GetLiveWork(context.Context, *connect.Request[v1.GetLiveWorkRequest]) (*connect.Response[v1.GetLiveWorkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetLiveWork is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetAgentByVendorTask is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {

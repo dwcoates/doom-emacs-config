@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -418,5 +421,153 @@ func TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest(t *testing.T)
 	}
 	if got := h.db.closedTurns["turn-2"]; got != wsm.CloseOrphaned {
 		t.Fatalf("turn-2 close = %s, want orphaned despite turn-1's failure", closeName(got))
+	}
+}
+
+// THE ADOPTED TURN. A turn the vendor started on its own is recorded exactly as
+// a delivered turn is, so its end closes through the one door.
+
+// TestOnTurnAdoptedRecordsTheTurnsDurableRow covers the row: written open, with
+// the vendor-started origin.
+func TestOnTurnAdoptedRecordsTheTurnsDurableRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	got, ok := h.db.turns["vendor-turn"]
+	if !ok {
+		t.Fatal("no turn row was written for the adopted turn")
+	}
+	if got.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED.String() || got.Close != nil {
+		t.Fatalf("row = %+v, want an open vendor-started row", got)
+	}
+}
+
+// TestOnTurnAdoptedGivesTheRosterTheTurn covers the roster: the turn fact is the
+// daemon's own, so the roster takes it thinking.
+func TestOnTurnAdoptedGivesTheRosterTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	turns := h.sidebar.rosterTurns()
+	if len(turns) != 1 || turns[0] == nil || turns[0].Act != footer.ActPrompt {
+		t.Fatalf("roster turns = %v, want the adopted turn installed", turns)
+	}
+}
+
+// TestOnTurnAdoptedIsRecordedAtInfo covers the record: the adoption is an
+// ordinary event, stated at INFO naming the turn.
+func TestOnTurnAdoptedIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	beforeRecords := len(h.log.Records())
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	for _, record := range h.log.Records()[beforeRecords:] {
+		if record.Level == "info" && record.Operation == "daemon.promptqueue.turn_adopted" && record.Context["turn"] == "vendor-turn" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an info daemon.promptqueue.turn_adopted naming vendor-turn", h.log.Records()[beforeRecords:])
+}
+
+// TestOnTurnAdoptedDeliversNothing covers the hold: a prompt held behind the
+// running work is never delivered into the adopted turn.
+func TestOnTurnAdoptedDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "vendor-turn", "")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v after the adoption, want nothing delivered", started)
+	}
+}
+
+// TestOnTurnAdoptedRecordsAFailedRowWriteAtError covers the error path: a row
+// that could not be written is loud.
+func TestOnTurnAdoptedRecordsAFailedRowWriteAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.putTurnErr = errors.New("the store is down")
+	beforeRecords := len(h.log.Records())
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	for _, record := range h.log.Records()[beforeRecords:] {
+		if record.Level == "error" && record.Operation == "daemon.promptqueue.turn_adopted" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an error daemon.promptqueue.turn_adopted", h.log.Records()[beforeRecords:])
+}
+
+// TestOnTurnAdoptedStillGivesTheRosterTheTurnWhenTheRowWriteFails covers what a
+// failed write does not undo: the turn is running whether or not its row was
+// written.
+func TestOnTurnAdoptedStillGivesTheRosterTheTurnWhenTheRowWriteFails(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.putTurnErr = errors.New("the store is down")
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	if turns := h.sidebar.rosterTurns(); len(turns) != 1 || turns[0] == nil {
+		t.Fatalf("roster turns = %v, want the adopted turn installed", turns)
+	}
+}
+
+// ANOTHER TURN ALREADY RUNS. A turn end arriving after a vendor-started turn was
+// adopted (or another turn delivered) must not treat the session as free.
+
+// TestOnTurnEndedWhileAnotherTurnRunsDeliversNothing covers the pop: nothing
+// held is started into the running turn.
+func TestOnTurnEndedWhileAnotherTurnRunsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want the held prompt to wait for the running turn", started)
+	}
+}
+
+// TestOnTurnEndedWhileAnotherTurnRunsLeavesTheRosterAlone covers the roster:
+// its thinking is the running turn's, so the earlier turn's end does not close it.
+func TestOnTurnEndedWhileAnotherTurnRunsLeavesTheRosterAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if ends := h.sidebar.rosterEnds(); len(ends) != 0 {
+		t.Fatalf("roster ends = %v, want none while another turn runs", ends)
+	}
+}
+
+// TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow covers the door: the
+// ended turn's row closes all the same.
+func TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if got, closed := h.db.closedTurns["earlier-turn"]; !closed || got != wsm.CloseCompleted {
+		t.Fatalf("close = (%s, closed %v), want completed", closeName(got), closed)
 	}
 }

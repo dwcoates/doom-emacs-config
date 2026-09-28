@@ -266,18 +266,18 @@ type openProgressReporter struct {
 }
 
 func (r openProgressReporter) Stage(stage workspace.OpenStage) {
-	var wire agentreplv1.WorkspaceOpenStage
+	wire := &agentreplv1.WorkspaceOpenStage{}
 	switch stage {
 	case workspace.OpenStageCheckingWorktree:
-		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_CheckingWorktree{CheckingWorktree: &agentreplv1.WorkspaceOpenStageCheckingWorktree{}}
 	case workspace.OpenStageStartingSession:
-		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_StartingSession{StartingSession: &agentreplv1.WorkspaceOpenStageStartingSession{}}
 	case workspace.OpenStageReviving:
-		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_REVIVING
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_Reviving{Reviving: &agentreplv1.WorkspaceOpenStageReviving{}}
 	case workspace.OpenStageClearingClosed:
-		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CLEARING_CLOSED
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_ClearingClosed{ClearingClosed: &agentreplv1.WorkspaceOpenStageClearingClosed{}}
 	case workspace.OpenStageCheckingBuild:
-		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_BUILD
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_CheckingBuild{CheckingBuild: &agentreplv1.WorkspaceOpenStageCheckingBuild{}}
 	default:
 		// An unmapped stage is a bug in this switch, not a client condition —
 		// but an open's progress relay must never take the open down, so it is
@@ -289,7 +289,7 @@ func (r openProgressReporter) Stage(stage workspace.OpenStage) {
 	r.server.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
 		OpId: r.opID,
 		Event: &agentreplv1.WorkspaceMutationProgress_Open{
-			Open: &agentreplv1.WorkspaceOpenProgress{Stage: wire},
+			Open: &agentreplv1.WorkspaceOpenProgress{EnteredStage: wire},
 		},
 	})
 }
@@ -594,9 +594,10 @@ func (s *server) SelectWorkspace(
 }
 
 // MarkWorkspaceViewed records that the user has SEEN this workspace, which
-// draws its roster row PARTIAL until the row's status changes — if the row is
-// DONE; on any other status the roster drops the report. It is
-// idempotent, and it is the editor's verb: dwell is an editor fact.
+// reads the last turn's result and draws its roster row PARTIAL on its
+// turn-end arm until the next turn — if the row is done or interrupted; on any
+// other status the roster drops the report. It is idempotent, and it is the
+// editor's verb: dwell is an editor fact.
 func (s *server) MarkWorkspaceViewed(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],
