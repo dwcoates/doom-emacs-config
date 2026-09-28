@@ -720,12 +720,14 @@ describe("openBashRun", () => {
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
     );
-    const first = run[Symbol.asyncIterator]().next();
+    // THE REJECTION IS OBSERVED AT ONCE: it settles while the write below is
+    // awaited, and an unobserved rejection is an unhandled one.
+    const first = expect(run[Symbol.asyncIterator]().next()).rejects.toMatchObject({ kind: "unknown_work" });
 
     plane.write([bashStartEntry()]);
     await plane.flush();
 
-    await expect(first).rejects.toMatchObject({ kind: "unknown_work" });
+    await first;
   });
 });
 
