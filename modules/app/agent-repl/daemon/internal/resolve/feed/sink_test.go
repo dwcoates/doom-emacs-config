@@ -154,7 +154,7 @@ func TestEveryRowThisTurnProducesCarriesItsTurnStamp(t *testing.T) {
 
 	// Act: a later row that names no turn of its own.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "answering"), nil, noAddress())
+		responseSuccessActivity("unit-1", "answering"), nil, nil, noAddress())
 
 	// Assert.
 	for _, row := range h.rows(rootFeed()) {
@@ -168,7 +168,7 @@ func TestRowsProducedWithNoTurnInFlightCarryNoStamp(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "unattributed"), nil, noAddress())
+		responseSuccessActivity("unit-1", "unattributed"), nil, nil, noAddress())
 
 	// Assert: a row that belongs to no turn says so rather than borrowing one.
 	if got := h.only(rootFeed()).GetTurn(); got != nil {
@@ -186,7 +186,7 @@ func TestTheTurnStampIsClearedByItsTerminal(t *testing.T) {
 
 	// Act: work after the turn ended.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "after the end"), nil, noAddress())
+		responseSuccessActivity("unit-1", "after the end"), nil, nil, noAddress())
 
 	// Assert.
 	for _, row := range h.rows(rootFeed()) {
@@ -210,7 +210,7 @@ func TestAnAgentsOwnRowsFollowItsSubFeedOnceItsSpawnIsSeen(t *testing.T) {
 			Batch:     twoQuestionBatch(),
 			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 		}},
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 
 	// Assert: THE CONNECTION IS THE PLACEMENT — the card is on the bubble's own
 	// feed, and it carries no parent naming the bubble.

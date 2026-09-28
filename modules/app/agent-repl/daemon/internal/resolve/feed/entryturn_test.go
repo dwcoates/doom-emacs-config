@@ -27,7 +27,7 @@ func TestALiveRowIsStampedWithItsEntrysTurn(t *testing.T) {
 
 			// Act
 			h.resolver.OnActivity(testWorkspace, mainAgent(),
-				responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), tc.stamp, noAddress())
+				responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), tc.stamp, nil, noAddress())
 
 			// Assert
 			if got := h.activityRow("unit-1").GetTurn().GetValue(); got != tc.want {

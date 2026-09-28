@@ -120,7 +120,7 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 		fresh.feedAddrs[key] = old.feedAddrs[key]
 	}
 	for reader, w := range old.readers {
-		fresh.readers[reader] = &walk{feedKey: w.feedKey, oldest: 0, standing: w.standing}
+		fresh.readers[reader] = &walk{feedKey: w.feedKey, standing: w.standing}
 	}
 	fresh.synthSeq = old.synthSeq
 	fresh.stallSeq = old.stallSeq
@@ -147,10 +147,7 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	dropped := len(f.order)
 	for _, id := range f.order {
 		f.seq++
-		removal := &frontendv1.FeedRow{
-			Id:  &frontendv1.FeedId{Value: id},
-			Row: &frontendv1.FeedRow_Removed{Removed: &frontendv1.FeedRowRemoved{}},
-		}
+		removal := removalRow(id, f.rank[id].key)
 		f.log = append(f.log, &loggedRow{seq: f.seq, row: removal})
 		for sub := range f.subs {
 			sub.enqueue(removal)
@@ -164,6 +161,8 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	f.rows = map[string]*frontendv1.FeedRow{}
 	f.nonDurable = map[string]bool{}
 	f.superseded = map[string]bool{}
+	f.entryRows = map[string]uint32{}
+	f.followers = map[string]uint32{}
 	// THE TRUNCATION NOTICE GOES TOO. It says older history exists above the
 	// oldest row the replay delivered, and it was a statement about the
 	// conversation whose rows have just been retired.
