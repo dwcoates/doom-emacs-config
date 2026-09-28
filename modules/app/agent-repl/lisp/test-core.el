@@ -329,6 +329,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("core.el" agent-repl-print-git-branch
      "agent-repl loaded on branch: %s"
      "answers the interactive branch-report command")
+    ("daemon-link.el" agent-repl-link--faults-standing "agent-repl: %s"
+     "surfaces a failed deploy (the daemon's loud faults) however it was started")
     ("daemon.el" agent-repl-frontend-daemon-ensure "agent-repl: %s"
      "surfaces a daemon readiness failure to the requesting user")
     ("daemon.el" agent-repl-frontend-daemon-stop

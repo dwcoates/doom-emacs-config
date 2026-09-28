@@ -231,6 +231,35 @@ describe("a reload_elisp push reaching a webview", () => {
   });
 });
 
+// `faults_standing` IS EMACS'S TOO. The daemon subscribes only Emacs streams to
+// it; a webview draws the same faults on its topbar and footer, and one that
+// met the push would skip it as skew.
+describe("a faults_standing push reaching a webview", () => {
+  it("raises no failure card", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.pushFaultsStanding("f-1", "deploy failed: build webapp: tsc");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("leaves the stream standing, so the next push it DOES know still lands", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    harness.fake.pushFaultsStanding("f-1", "deploy failed: build webapp: tsc");
+    await harness.settle();
+    // Act
+    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+  });
+});
+
 describe("the drain banner", () => {
   it.each(DRAIN_REASON_ARMS)("draws a scheduled drain for the %s reason", async (arm) => {
     // Arrange

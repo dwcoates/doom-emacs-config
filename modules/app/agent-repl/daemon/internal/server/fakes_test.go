@@ -791,27 +791,29 @@ func (f *fakeHolds) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.DaemonHold
 
 // harness is one running surface over real Connect handlers.
 type harness struct {
-	t          *testing.T
-	Server     Server
-	HTTP       *httptest.Server
-	Client     agentreplv1connect.AgentReplClient
-	DB         *fakeDB
-	Ownership  *fakeOwnership
-	Verbs      *fakeVerbs
-	Prompts    *fakePrompts
-	Queue      *fakeQueue
-	Merge      *fakeMerge
-	Drain      *fakeDrain
-	Rollout    *fakeRollout
-	Deployer   *fakeDeployer
-	Health     *fakeHealth
-	Facts      *fakeSessionFacts
-	Login      *fakeLogin
-	Feed       *fakeFeed
-	Footer     *fakeFooter
-	Topbar     *fakeTopbar
-	Sidebar    *fakeSidebar
-	Holds      *fakeHolds
+	t         *testing.T
+	Server    Server
+	HTTP      *httptest.Server
+	Client    agentreplv1connect.AgentReplClient
+	DB        *fakeDB
+	Ownership *fakeOwnership
+	Verbs     *fakeVerbs
+	Prompts   *fakePrompts
+	Queue     *fakeQueue
+	Merge     *fakeMerge
+	Drain     *fakeDrain
+	Rollout   *fakeRollout
+	Deployer  *fakeDeployer
+	Health    *fakeHealth
+	Facts     *fakeSessionFacts
+	Login     *fakeLogin
+	Feed      *fakeFeed
+	Footer    *fakeFooter
+	Topbar    *fakeTopbar
+	Sidebar   *fakeSidebar
+	Holds     *fakeHolds
+	// LoudFaults is the standing loud faults every Emacs stream is told.
+	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	Surfaces   *fakeSurfaces
 	WebappDist string
 }
@@ -875,6 +877,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Topbar:           h.Topbar,
 		Sidebar:          h.Sidebar,
 		Holds:            h.Holds,
+		LoudFaults:       &h.LoudFaults,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,

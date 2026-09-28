@@ -201,6 +201,9 @@ type FaultLine struct {
 	// Topbar is the line the topbar's warning strip draws for the fault,
 	// empty when the topbar does not carry it (FaultTopbarLine).
 	Topbar string
+	// Record is the fault as it was recorded, for a surface that renders
+	// more of it than the line (the topbar's overlay, Emacs's typed fault).
+	Record wsm.Fault
 }
 
 // FaultSink is told about every fault the daemon opens and closes. It is the
@@ -266,6 +269,7 @@ func (o *observedDB) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, e
 		Detail: FaultLineDetail(f),
 		At:     f.OpenedAt,
 		Topbar: FaultTopbarLine(f, f.Workspace == nil),
+		Record: f,
 	})
 	return id, nil
 }
