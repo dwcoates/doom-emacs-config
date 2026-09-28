@@ -369,3 +369,52 @@ func TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest(t *testing.T)
 		t.Fatalf("turn-2 close = %s, want orphaned despite turn-1's failure", closeName(got))
 	}
 }
+
+// ANOTHER TURN ALREADY RUNS. A turn end arriving after a vendor-started turn was
+// adopted (or another turn delivered) must not treat the session as free.
+
+// TestOnTurnEndedWhileAnotherTurnRunsDeliversNothing covers the pop: nothing
+// held is started into the running turn.
+func TestOnTurnEndedWhileAnotherTurnRunsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want the held prompt to wait for the running turn", started)
+	}
+}
+
+// TestOnTurnEndedWhileAnotherTurnRunsLeavesTheRosterAlone covers the roster:
+// its thinking is the running turn's, so the earlier turn's end does not close it.
+func TestOnTurnEndedWhileAnotherTurnRunsLeavesTheRosterAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if ends := h.sidebar.rosterEnds(); len(ends) != 0 {
+		t.Fatalf("roster ends = %v, want none while another turn runs", ends)
+	}
+}
+
+// TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow covers the door: the
+// ended turn's row closes all the same.
+func TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if got, closed := h.db.closedTurns["earlier-turn"]; !closed || got != wsm.CloseCompleted {
+		t.Fatalf("close = (%s, closed %v), want completed", closeName(got), closed)
+	}
+}
