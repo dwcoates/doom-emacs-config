@@ -552,6 +552,15 @@ type fakeFleet struct {
 	handOverErr map[ids.WorkspaceID]error
 	// onAdopt, when set, runs as each Adopt arrives, before it answers.
 	onAdopt func(ws ids.WorkspaceID)
+	// factsErr is what AwaitFacts answers, per workspace; nil is the adopted
+	// shim's re-announcement having landed.
+	factsErr map[ids.WorkspaceID]error
+	// coldGates is the cold gate standing per workspace.
+	coldGates map[ids.WorkspaceID]*conversationv1.SessionCold
+	// parkedAdoptions records every AdoptParked, with the gate it raised.
+	parkedAdoptions map[ids.WorkspaceID]*conversationv1.SessionCold
+	// factsAwaited records every AwaitFacts.
+	factsAwaited []ids.WorkspaceID
 
 	installs  []ids.WorkspaceID
 	adoptions []ids.WorkspaceID
@@ -570,8 +579,47 @@ func newFakeFleet(order *steps) *fakeFleet {
 		resumeErr:    make(map[ids.WorkspaceID]error),
 		resumeCold:   make(map[ids.WorkspaceID]*conversationv1.SessionCold),
 		handOverErr:  make(map[ids.WorkspaceID]error),
+		factsErr:     make(map[ids.WorkspaceID]error),
+		coldGates:    make(map[ids.WorkspaceID]*conversationv1.SessionCold),
 		order:        order,
+
+		parkedAdoptions: make(map[ids.WorkspaceID]*conversationv1.SessionCold),
 	}
+}
+
+// AwaitFacts answers the scripted re-announcement.
+func (f *fakeFleet) AwaitFacts(_ context.Context, ws ids.WorkspaceID) error {
+	f.order.record("await_facts")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.factsAwaited = append(f.factsAwaited, ws)
+	return f.factsErr[ws]
+}
+
+// ColdGateStanding answers the scripted standing gate.
+func (f *fakeFleet) ColdGateStanding(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cold, ok := f.coldGates[ws]
+	return cold, ok
+}
+
+// AdoptParked records the parked adoption and holds the dialed shim live.
+func (f *fakeFleet) AdoptParked(_ context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error) {
+	f.order.record("adopt_parked")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.parkedAdoptions[ws] = cold
+	c := newFakeShim(4343, f.order)
+	f.live[ws] = c
+	return c, nil
+}
+
+// FactsAwaited answers every workspace AwaitFacts was asked of, in order.
+func (f *fakeFleet) FactsAwaited() []ids.WorkspaceID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), f.factsAwaited...)
 }
 
 func (f *fakeFleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
@@ -704,6 +752,23 @@ type fakeRegistry struct {
 	// runCtx is the context each bounce runs on; nil is context.Background(),
 	// which is what the queue's own runs are detached onto.
 	runCtx context.Context
+	// sealed is what SealMove answers per workspace, and sealErr its failure.
+	sealed  map[ids.WorkspaceID]bounce.Handoff
+	across  map[ids.WorkspaceID][]bounce.Request
+	sealErr error
+	// unsealed and adoptedHandoffs record what was put back and installed.
+	unsealed        map[ids.WorkspaceID]bounce.Handoff
+	adoptedHandoffs map[ids.WorkspaceID]bounce.Handoff
+	adoptHandoffErr error
+	rejudged        []ids.WorkspaceID
+	// park registers every request unrun, forced or not, so a test asserts
+	// what was asked without the bounce running.
+	park bool
+	// unsealedCh announces every UnsealMove.
+	unsealedCh chan ids.WorkspaceID
+	// asked announces every request, so a test synchronizes on one having
+	// been made rather than polling for it.
+	asked chan registryCall
 }
 
 // registryCall is one recorded request.
@@ -713,18 +778,78 @@ type registryCall struct {
 }
 
 func newFakeRegistry(freeness *fakeFreeness) *fakeRegistry {
-	return &fakeRegistry{freeness: freeness, pending: make(map[ids.WorkspaceID]bounce.Request)}
+	return &fakeRegistry{
+		freeness: freeness, pending: make(map[ids.WorkspaceID]bounce.Request),
+		sealed: make(map[ids.WorkspaceID]bounce.Handoff), across: make(map[ids.WorkspaceID][]bounce.Request),
+		unsealed: make(map[ids.WorkspaceID]bounce.Handoff), adoptedHandoffs: make(map[ids.WorkspaceID]bounce.Handoff),
+		asked: make(chan registryCall, 64), unsealedCh: make(chan ids.WorkspaceID, 16),
+	}
+}
+
+// SealMove answers the scripted queue memory and carried replacements.
+func (r *fakeRegistry) SealMove(_ context.Context, ws ids.WorkspaceID) (bounce.Handoff, []bounce.Request, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sealErr != nil {
+		return bounce.Handoff{}, nil, r.sealErr
+	}
+	across := r.across[ws]
+	delete(r.across, ws)
+	return r.sealed[ws], across, nil
+}
+
+// UnsealMove records what was put back.
+func (r *fakeRegistry) UnsealMove(_ context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unsealed[ws] = handoff
+	select {
+	case r.unsealedCh <- ws:
+	default:
+	}
+	return nil
+}
+
+// AdoptHandoff records what was installed.
+func (r *fakeRegistry) AdoptHandoff(_ context.Context, ws ids.WorkspaceID, handoff bounce.Handoff) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.adoptHandoffErr != nil {
+		return r.adoptHandoffErr
+	}
+	r.adoptedHandoffs[ws] = handoff
+	return nil
+}
+
+// RejudgeHeld records the re-judgement.
+func (r *fakeRegistry) RejudgeHeld(_ context.Context, ws ids.WorkspaceID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rejudged = append(r.rejudged, ws)
+	return nil
 }
 
 func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error) {
 	r.mu.Lock()
 	r.requests = append(r.requests, registryCall{WS: ws, Req: req})
+	select {
+	case r.asked <- registryCall{WS: ws, Req: req}:
+	default:
+	}
 	if r.err != nil {
 		err := r.err
 		r.mu.Unlock()
 		return bounce.Decision{}, err
 	}
-	free := r.freeness.Free(ws)
+	if r.park {
+		r.pending[ws] = req
+		r.mu.Unlock()
+		return bounce.Decision{}, nil
+	}
+	// A DISPATCH-QUIET MOVE runs at once, turn and detached work
+	// notwithstanding: the delivery lock is the only thing it waits on, and
+	// the fake has no delivery in flight.
+	free := r.freeness.Free(ws) || req.WaitFor == bounce.GateDispatchQuiet
 	if !free && !req.Force {
 		r.pending[ws] = req
 		r.mu.Unlock()
@@ -790,6 +915,22 @@ func (r *fakeRegistry) free(ws ids.WorkspaceID) bool {
 		r.run(ws, req)
 	}
 	return ok
+}
+
+// awaitRequest blocks until a request matching want has been made.
+func (r *fakeRegistry) awaitRequest(t *testing.T, want func(registryCall) bool) registryCall {
+	t.Helper()
+	for {
+		select {
+		case call := <-r.asked:
+			if want(call) {
+				return call
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no matching bounce request was ever made; requests %+v", r.Requests())
+			return registryCall{}
+		}
+	}
 }
 
 // wait joins every bounce the fake started.
@@ -1109,6 +1250,10 @@ func (h *harness) successorAdopts(t *testing.T) {
 		h.c.mu.Unlock()
 		if e == nil {
 			t.Fatalf("no rendezvous is armed for the transferred workspace %s", call.WS)
+		}
+		// The successor consumes the carry as its adoption lands.
+		if err := os.Remove(h.c.carryPath(call.WS)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("consume the carry of %s: %v", call.WS, err)
 		}
 		e.settle(nil)
 	}

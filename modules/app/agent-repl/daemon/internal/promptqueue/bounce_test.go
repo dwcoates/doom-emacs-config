@@ -1267,3 +1267,181 @@ func TestADepartureDropsTheReplacementButTakesTheMove(t *testing.T) {
 		t.Fatalf("records = %+v, want the move taken without the replacement", h.log.Records())
 	}
 }
+
+// quietMoving is a move that waits only for the delivery lock: a handover's
+// transfer.
+func (g *gate) quietMoving(reason string) bounce.Request {
+	req := g.moving(reason)
+	req.WaitFor = bounce.GateDispatchQuiet
+	return req
+}
+
+// busy puts a turn and a monitor in flight on the workspace's shim.
+func busy(t *testing.T, h *harness) {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	h.watcher.detached(monitors(1))
+}
+
+// startQuietMove asks for a dispatch-quiet move and waits for its action to
+// start.
+func startQuietMove(t *testing.T, h *harness, transfer *gate) {
+	t.Helper()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.quietMoving("handover_transfer")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	transfer.awaitStart(t)
+}
+
+// A HANDOVER NEVER WAITS ON WORK (owner ruling, 2026-09-27): a dispatch-quiet
+// move is decided at once under the delivery lock, over a turn and detached
+// work in flight, and it ends none of them.
+func TestADispatchQuietMoveRunsAtOnceOverWorkInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	busy(t, h)
+	transfer := newGate()
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.quietMoving("handover_transfer"))
+
+	// Assert
+	if err != nil || !decision.Now || decision.Forced || !decision.TurnInFlight || decision.DetachedWork != 1 {
+		t.Fatalf("RequestBounce = (%+v, %v), want the move started now, unforced, over the turn and the monitor", decision, err)
+	}
+	transfer.awaitStart(t)
+	if kills := h.sender.killed(); len(kills) != 0 {
+		t.Fatalf("KillTurn was sent for %v, want nothing interrupted by a move", kills)
+	}
+	transfer.finish(h, nil)
+}
+
+func TestADispatchQuietMoveOvertakesAReplacementRegisteredBehindWork(t *testing.T) {
+	// Arrange: a stale-build replacement waits for the workspace's freeness.
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	registerBehindWork(t, h, restart.relaunching("build_stale"))
+
+	// Act
+	startQuietMove(t, h, transfer)
+
+	// Assert: the move runs without it, and the seal hands it to the move.
+	if restart.runs.Load() != 0 {
+		t.Fatalf("the overtaken replacement ran on the daemon the workspace is leaving")
+	}
+	_, carried, err := h.q.SealMove(context.Background(), theWorkspace)
+	if err != nil || len(carried) != 1 || carried[0].Reason != "build_stale" {
+		t.Fatalf("SealMove = (%+v, %v), want the overtaken replacement carried", carried, err)
+	}
+	transfer.finish(h, nil)
+}
+
+// Ruling 2 (owner, 2026-09-27): a forced restart racing a transfer that is
+// already running is not folded into the transfer; it runs on the successor.
+func TestAReplacementJoiningARunningQuietMoveIsCarriedAcross(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	busy(t, h)
+	restart, transfer := newGate(), newGate()
+	startQuietMove(t, h, transfer)
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.request("restart_verb", true))
+
+	// Assert
+	if err != nil || !decision.AlreadyPending {
+		t.Fatalf("RequestBounce = (%+v, %v), want the restart to join the running move", decision, err)
+	}
+	_, carried, err := h.q.SealMove(context.Background(), theWorkspace)
+	if err != nil || len(carried) != 1 || carried[0].Reason != "restart_verb" || !carried[0].Force {
+		t.Fatalf("SealMove = (%+v, %v), want the forced restart carried across", carried, err)
+	}
+	transfer.finish(h, nil)
+	if err := transfer.awaitDone(t); err != nil {
+		t.Fatalf("transfer done = %v, want its own clean finish", err)
+	}
+	select {
+	case got := <-restart.done:
+		t.Fatalf("the restart's requester was told %v, want nothing until the next daemon runs it", got)
+	default:
+	}
+	if restart.runs.Load() != 0 {
+		t.Fatalf("the carried restart ran on the daemon the workspace left")
+	}
+}
+
+func TestARequestAfterTheMoveSealedIsRefusedAsMovedAway(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	busy(t, h)
+	restart, transfer := newGate(), newGate()
+	startQuietMove(t, h, transfer)
+	if _, _, err := h.q.SealMove(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("SealMove: %v", err)
+	}
+
+	// Act
+	_, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.request("restart_verb", true))
+
+	// Assert
+	if !errors.Is(err, bounce.ErrMovedAway) {
+		t.Fatalf("RequestBounce after the seal = %v, want ErrMovedAway", err)
+	}
+	transfer.finish(h, nil)
+}
+
+func TestAReplacementAskingForTheDispatchQuietGateIsMalformed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	restart := newGate()
+	req := restart.relaunching("restart_verb")
+	req.WaitFor = bounce.GateDispatchQuiet
+
+	// Act
+	_, err := h.q.RequestBounce(context.Background(), theWorkspace, req)
+
+	// Assert
+	if !errors.Is(err, ErrBounceMalformed) {
+		t.Fatalf("RequestBounce = %v, want ErrBounceMalformed", err)
+	}
+}
+
+func TestAMoveThatFailsBeforeSealingLeavesItsReplacementRegisteredHere(t *testing.T) {
+	// Arrange: the move overtook a replacement and then failed unsealed.
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	registerBehindWork(t, h, restart.relaunching("build_stale"))
+	startQuietMove(t, h, transfer)
+	transfer.finish(h, errors.New("the quiesce failed"))
+
+	// Act: the workspace's work ends.
+	h.watcher.idle()
+	h.watcher.detached(monitors(0))
+	h.q.OnFree(theWorkspace)
+
+	// Assert: the replacement runs here, at the freeness it waited for.
+	restart.awaitStart(t)
+	restart.finish(h, nil)
+	if err := restart.awaitDone(t); err != nil {
+		t.Fatalf("restart done = %v, want its own clean finish here", err)
+	}
+}
+
+func TestAMoveThatFinishesWithoutSealingFailsItsCarriedReplacementLoudly(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	registerBehindWork(t, h, restart.relaunching("build_stale"))
+	startQuietMove(t, h, transfer)
+
+	// Act: the move finishes and never sealed what it carried.
+	transfer.finish(h, nil)
+
+	// Assert
+	if err := restart.awaitDone(t); !errors.Is(err, errMoveNeverSealed) {
+		t.Fatalf("restart done = %v, want errMoveNeverSealed", err)
+	}
+	if !recordWith(h.log.Records(), "error", opBounce, "the move finished without sealing the replacements it carried; they were not handed to the next daemon") {
+		t.Fatalf("records = %+v, want the broken carry at ERROR", h.log.Records())
+	}
+}
