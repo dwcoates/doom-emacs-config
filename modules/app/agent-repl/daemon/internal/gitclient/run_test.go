@@ -876,3 +876,26 @@ func TestAGitCancelledBeforeItsSpawnIsRecordedWithoutAPid(t *testing.T) {
 		t.Fatalf("the cancellation record names pid %v for a git that never started", pid)
 	}
 }
+
+// TestTheHookSpellsTheMarkers holds the two spellings of the hook markers
+// together: the daemon sets them by the constants, and the repository's
+// reference-transaction hook reads them by name.
+func TestTheHookSpellsTheMarkers(t *testing.T) {
+	// Arrange.
+	hook, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "..", ".githooks", "reference-transaction"))
+	if err != nil {
+		t.Fatalf("reading the reference-transaction hook: %v", err)
+	}
+
+	for _, marker := range []string{MergeQueueMarker, OwnerOverride} {
+		t.Run(marker, func(t *testing.T) {
+			// Act.
+			want := `="` + marker + `"`
+
+			// Assert.
+			if !strings.Contains(string(hook), want) {
+				t.Fatalf("the hook does not bind %s; the daemon and the hook must spell it the same", marker)
+			}
+		})
+	}
+}
