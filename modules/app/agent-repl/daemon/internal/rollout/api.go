@@ -97,6 +97,11 @@ type Controller interface {
 	// RollingOut reports whether a handover is in flight, and the workspaces it
 	// has not transferred yet.
 	RollingOut() ([]ids.WorkspaceID, bool)
+	// ServesIntake reports whether THIS daemon takes the on-disk intakes (the
+	// command-file and held-prompt ingresses): it is not a successor still
+	// joining, and no handover or restart of its own is in flight. See
+	// internal/intakegate.
+	ServesIntake() bool
 	// Join is the JOINING daemon's half: read the intent manifest, reconcile it
 	// against the kernel locks, arm the rendezvous, and adopt every headless
 	// workspace at once. A daemon that is not joining finds no manifest and
@@ -130,8 +135,8 @@ type Controller interface {
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
 	//
-	// adopted is the SESSIONS whose surviving shim this boot adopted — never an
-	// inert survivor. A shim takes the workspace lock at StartSession and not
+	// survivors.Adopted is the SESSIONS whose surviving shim this boot adopted
+	// — never an inert survivor. A shim takes the workspace lock at StartSession and not
 	// at process start (agent-shim/claude/shim/src/engine/session.ts, "it lands
 	// HERE rather than at process start because an inert shim owns no
 	// conversation"), so a live shim whose lock reads FREE carries NO SESSION:
@@ -140,12 +145,16 @@ type Controller interface {
 	// lock-held survivors, and passing an inert one would raise a fault over a
 	// workspace that never had a session to lose.
 	//
+	// AN ADOPTED SESSION NEVER RECORDS bounce_unknown: its adoption accounts
+	// for it (PRESERVED), with a manifest or without one.
+	//
 	// With NO MANIFEST — a crash or a force-kill, where the outgoing daemon
-	// never stood down — each adopted SESSION is one whose bounce nobody
+	// never stood down — each session in survivors.Unadopted (the lock says it
+	// may survive, and this boot did not adopt it) is one whose bounce nobody
 	// accounted for, and BOUNCE ACCOUNTABILITY says which sessions were left
 	// unaccounted is surfaced per workspace rather than passed over, so each
 	// gets an OPEN bounce_unknown fault.
-	Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error)
+	Reconcile(ctx context.Context, survivors Survivors) ([]Disposition, error)
 }
 
 // HandoverAcceptance is a handover that was ACCEPTED and is under way. It is

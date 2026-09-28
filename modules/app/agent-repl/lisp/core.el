@@ -708,12 +708,11 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (fork     (plist-get plist :fork-session-id))
                (rtimer   (plist-get plist :ready-timer))
                (pri      (plist-get plist :priority))
-               (pshow    (plist-get plist :pending-show-panels))
-               (dprompts (plist-get plist :deferred-prompts)))
+               (pshow    (plist-get plist :pending-show-panels)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " fe=%s in=%s"
                           " wt=%s fork=%s"
-                          " rtmr=%s pri=%s pshow=%s defq=%s}")
+                          " rtmr=%s pri=%s pshow=%s}")
                   ws
                   (or id "-")
                   (or dir "-")
@@ -726,8 +725,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (or fork "-")
                   (if rtimer "t" "-")
                   (or pri "-")
-                  (if pshow "t" "-")
-                  (if dprompts (length dprompts) "-")))))))
+                  (if pshow "t" "-")))))))
 
 (defvar agent-repl--log-format-bug-captured nil
   "Set to t once a non-string FMT has been captured by `agent-repl--log-format'.

@@ -18,6 +18,7 @@ func TestNewRefusesMissingCollaborators(t *testing.T) {
 	full := Deps{
 		Dir: "/output", Verbs: newFakeVerbs(), Merge: &fakeMerge{},
 		Prompts: &fakePrompts{}, Log: newFakeSurfaces(),
+		Serves: func() bool { return true },
 	}
 	tests := []struct {
 		name  string
@@ -28,6 +29,7 @@ func TestNewRefusesMissingCollaborators(t *testing.T) {
 		{name: "no merge orchestrator", strip: func(d *Deps) { d.Merge = nil }},
 		{name: "no prompt handler", strip: func(d *Deps) { d.Prompts = nil }},
 		{name: "no log surfaces", strip: func(d *Deps) { d.Log = nil }},
+		{name: "no serving answer", strip: func(d *Deps) { d.Serves = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -497,6 +499,58 @@ func TestApplyFileRefusesAMissingFile(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("ApplyFile(missing) = nil error, want the claim failure surfaced")
+	}
+}
+
+func TestApplyFileOfAFileAnotherSweeperClaimedIsNoFault(t *testing.T) {
+	// Arrange: the file is already gone -- a handover's other daemon, finishing
+	// a sweep it began, renamed it into its own claim first.
+	f := newFixture(t)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), filepath.Join(f.dir, "workspace_commands_gone.json"))
+
+	// Assert.
+	if !errors.Is(err, ErrClaimedElsewhere) {
+		t.Fatalf("ApplyFile(claimed elsewhere) = %v, want ErrClaimedElsewhere", err)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" || r.Level == "warn" {
+			t.Fatalf("record %+v: losing the claim to another sweeper is the exclusivity working, never a fault", r)
+		}
+	}
+}
+
+func TestASweepAppliesTheIntakeOnlyWhileThisDaemonServes(t *testing.T) {
+	tests := []struct {
+		name       string
+		serves     bool
+		wantMerges int
+	}{
+		{name: "a serving daemon applies the file", serves: true, wantMerges: 1},
+		{name: "a daemon that does not serve leaves it", serves: false, wantMerges: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.serves = tt.serves
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+			ctx, cancel := context.WithCancel(context.Background())
+
+			// Act: the first sweep runs before the loop selects on the ticker.
+			cancel()
+			_ = f.ingress.Run(ctx)
+
+			// Assert.
+			if len(f.merge.enqueued) != tt.wantMerges {
+				t.Fatalf("enqueued merges = %v, want %d", f.merge.enqueued, tt.wantMerges)
+			}
+			if _, err := os.Stat(path); tt.serves == (err == nil) {
+				t.Fatalf("stat %s = %v: the file must be claimed exactly when this daemon serves", path, err)
+			}
+		})
 	}
 }
 

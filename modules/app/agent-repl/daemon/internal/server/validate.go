@@ -10,6 +10,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"claude-repld/internal/prompthandler"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one
@@ -170,6 +172,12 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 		if err := validateFeedID("reference_response_feedid", req.GetReferenceResponseFeedid()); err != nil {
 			return err
 		}
+	}
+	// AN ABSENT delivery is the ordinary one; a present one must name a
+	// delivery the daemon honors. UNSPECIFIED is never sent, and a value this
+	// build does not know is never read as the ordinary delivery.
+	if _, err := prompthandler.DeliveryOf(req.Delivery); err != nil {
+		return invalid("delivery", err.Error())
 	}
 	return nil
 }

@@ -100,7 +100,7 @@
 (declare-function agent-repl-rpc-adjust-feed-text-scale "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
 (declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
-(declare-function agent-repl-held-ingress-write "held-ingress" (ws said origin key))
+(declare-function agent-repl-held-ingress-write "held-ingress" (ws said origin key &optional delivery))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
 
@@ -1039,7 +1039,7 @@ SubmitPrompt is one.  A lagging client self-heals from the refusal, so
 telling the user their submission was refused would be reporting a fault
 during the one rollout that is supposed to be invisible.")
 
-(defun agent-repl--input-on-handover-refusal (ws said origin raw arm key)
+(defun agent-repl--input-on-handover-refusal (ws said origin raw arm key &optional delivery)
   "Route ARM, a handover refusal of WS's submission, and HOLD the prompt.
 Two acts, both required.  host.el walks the handover -- the redial, the
 adopt, the webview -- because the refusal is the same fact its own pushes
@@ -1050,11 +1050,35 @@ for the daemon to recognize a duplicate.  The daemon that owns the
 workspace once the handover ends ingests it.
 
 The composer KEEPS its text: nothing here says the prompt landed, and the
-user is left able to see exactly what they wrote."
-  (agent-repl--info ws "elisp.input.handover-refusal ws=%s origin=%S arm=%S key=%s"
-                    ws origin (plist-get arm :arm) key)
+user is left able to see exactly what they wrote.  DELIVERY is the
+attempt's own `SubmitPromptDelivery' keyword (nil for the ordinary one),
+held with it so the re-drive asks for the same delivery."
+  (agent-repl--info ws "elisp.input.handover-refusal ws=%s origin=%S arm=%S key=%s delivery=%S"
+                    ws origin (plist-get arm :arm) key delivery)
   (agent-repl-host-handle-refusal ws arm)
-  (agent-repl--input-hold ws said origin raw key))
+  (agent-repl--input-hold ws said origin raw key delivery))
+
+(defconst agent-repl--input-deferred-held-arms '(:merging :cold-gate :no-session)
+  "Refusal arms a DEFERRED submission is HELD through rather than refused by.
+Each is a standing condition the daemon answers \='not now\=' for -- a merge
+in flight, a cold gate the user answers in the panel, a session the daemon
+is bringing up -- and a deferral already asked for \='later\='.  So the
+prompt goes to the durable held-prompt ingress under its own key and
+delivery, whose retry holds it until the condition clears, instead of
+being drawn as a refusal the user must resubmit (owner ruling, 2026-09-28:
+a cold gate and a merge still hold deferred prompts).")
+
+(defun agent-repl--input-on-deferred-refusal (ws said origin raw arm key)
+  "Hold WS's DEFERRED submission, which the daemon answered ARM, on disk.
+ARM is one of `agent-repl--input-deferred-held-arms'.  It is an ANSWER
+about a standing condition, not a fault, so it is recorded at INFO; the
+prompt is written to the held-prompt ingress under KEY with its deferred
+delivery, and the daemon's ingress re-drives it until the condition
+clears."
+  (agent-repl--info ws "elisp.input.deferred-held ws=%s origin=%S arm=%S key=%s"
+                    ws origin arm key)
+  (when (agent-repl--input-hold ws said origin raw key :deferred)
+    (agent-repl--input-flash ws "deferred -- held until the daemon can take it")))
 
 (defconst agent-repl--input-bubble-refusal-labels
   '((:not-deliverable . "no route to that agent")
@@ -1097,7 +1121,7 @@ A workspace with NO SESSION AT ALL, which is the daemon's own to bring
 up.  Nothing is owed by the user and nothing is owed by this composer, so
 the sentence states the fact and the prompt is neither held nor lost.")
 
-(defun agent-repl--input-on-error (ws said origin raw error key &optional snapshot)
+(defun agent-repl--input-on-error (ws said origin raw error key &optional snapshot delivery)
   "Handle a `SubmitPromptError' for WS.
 EVERY arm here is the daemon saying the prompt did NOT land, so the FIRST
 thing this does is hand SNAPSHOT to `agent-repl--input-restore\=': a
@@ -1124,80 +1148,84 @@ has no treatment for: it is recorded at ERROR naming the arm and drawn to
 the user, and the text stays where it is.
 
 SAID, RAW and KEY are the submission\='s own, carried so a handover
-refusal can re-drive the very prompt that was refused."
+refusal can re-drive the very prompt that was refused.  DELIVERY is its
+`SubmitPromptDelivery' keyword: a DEFERRED submission is HELD through the
+arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
   (agent-repl--input-restore ws snapshot)
   (let* ((reason (plist-get error :reason))
          (arm (plist-get reason :arm)))
-    (pcase arm
-      (:merging
-       (agent-repl--warn ws "elisp.input.refused-merging ws=%s origin=%S" ws origin)
-       (agent-repl--input-flash ws "refused: merge in flight")
-       (message "agent-repl: refused -- a merge is in flight for this workspace"))
-      (:duplicate-submission
-       ;; The key was already accepted for this workspace, so the earlier
-       ;; submission stands.  Nothing landed twice and nothing is owed a
-       ;; resend: this is an ANSWER about identity, not a transport
-       ;; failure, so the prompt is NOT queued.  The text and the
-       ;; attachments stay put so the user can see what they wrote.
-       (agent-repl--warn ws "elisp.input.duplicate-submission ws=%s origin=%S arm=%S key=%s"
-                         ws origin arm key)
-       (agent-repl--input-flash ws "already submitted")
-       (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
-      (:cold-gate
-       ;; The session is PARKED AT ITS COLD GATE.  It exists and is
-       ;; serving; it simply takes no prompt until the user answers the
-       ;; gate in the panel, so this is an ANSWER about a standing the
-       ;; user resolves, not a fault and not an outage: it is recorded at
-       ;; WARN, the prompt is NOT queued (a re-drive would meet the same
-       ;; gate), and the text stays where it is.  The gate's own `detail'
-       ;; -- the same sentence the gate card and the footer carry -- is
-       ;; echoed verbatim; it is never switched on.
-       (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
-         (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
-                           ws origin arm detail)
-         (agent-repl--input-flash ws agent-repl--input-cold-gate-flash)
-         (message "agent-repl: %s%s" agent-repl--input-cold-gate-flash
-                  (if (string-empty-p detail) "" (format " (%s)" detail)))))
-      ((or :model-not-in-catalog :model-refused)
-       ;; A `/model' ACT WAS REFUSED: the model is not in this session's
-       ;; catalog, or the vendor refused the change.  The act was not
-       ;; applied and the session runs on as before.  This is an ANSWER,
-       ;; never an outage -- before the arm existed the refusal left the
-       ;; daemon as a bare 400 and this composer HELD the prompt as if the
-       ;; daemon were unreachable, so nothing ran and nothing said why.
-       ;; Recorded at INFO (a refusal the user asked for, not a defect),
-       ;; not queued (a re-drive meets the same refusal), and the refusal's
-       ;; own sentence is shown verbatim.
-       (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
-         (agent-repl--info ws "elisp.input.refused-model ws=%s origin=%S arm=%S detail=%s"
-                           ws origin arm detail)
-         (agent-repl--input-flash ws "model change refused")
-         (message "agent-repl: model change refused%s"
-                  (if (string-empty-p detail) "" (format " -- %s" detail)))))
-      (:no-session
-       ;; The workspace has NO SESSION AT ALL, which is the daemon's own
-       ;; to bring up.  Like the cold gate this is an answer rather than a
-       ;; transport failure, so it is recorded at WARN and the prompt is
-       ;; not queued; the text stays so the user can resubmit once the
-       ;; session is up.
-       (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
-       (agent-repl--input-flash ws agent-repl--input-no-session-flash)
-       (message "agent-repl: %s" agent-repl--input-no-session-flash))
-      (:bubble-refused
-       ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
-       ;; the refusal BY KIND.  Both kinds are the same answer to the user
-       ;; ("not this agent, not now"), so both are drawn alike and neither
-       ;; is queued: a re-drive would meet the same refusal.  The shim's
-       ;; `detail' is echoed verbatim for the human and for the log; it is
-       ;; never switched on.
-       (agent-repl--input-on-bubble-refusal ws origin (plist-get reason :value)))
-      ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
-       (agent-repl--input-on-handover-refusal ws said origin raw reason key))
-      (_
-       (agent-repl--error ws "elisp.input.unknown-error-arm ws=%s arm=%S" ws arm)
-       (message "agent-repl: submission refused (%S)" arm)))))
+    (if (and (eq delivery :deferred) (memq arm agent-repl--input-deferred-held-arms))
+        (agent-repl--input-on-deferred-refusal ws said origin raw arm key)
+      (pcase arm
+        (:merging
+         (agent-repl--warn ws "elisp.input.refused-merging ws=%s origin=%S" ws origin)
+         (agent-repl--input-flash ws "refused: merge in flight")
+         (message "agent-repl: refused -- a merge is in flight for this workspace"))
+        (:duplicate-submission
+         ;; The key was already accepted for this workspace, so the earlier
+         ;; submission stands.  Nothing landed twice and nothing is owed a
+         ;; resend: this is an ANSWER about identity, not a transport
+         ;; failure, so the prompt is NOT queued.  The text and the
+         ;; attachments stay put so the user can see what they wrote.
+         (agent-repl--warn ws "elisp.input.duplicate-submission ws=%s origin=%S arm=%S key=%s"
+                           ws origin arm key)
+         (agent-repl--input-flash ws "already submitted")
+         (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
+        (:cold-gate
+         ;; The session is PARKED AT ITS COLD GATE.  It exists and is
+         ;; serving; it simply takes no prompt until the user answers the
+         ;; gate in the panel, so this is an ANSWER about a standing the
+         ;; user resolves, not a fault and not an outage: it is recorded at
+         ;; WARN, the prompt is NOT queued (a re-drive would meet the same
+         ;; gate), and the text stays where it is.  The gate's own `detail'
+         ;; -- the same sentence the gate card and the footer carry -- is
+         ;; echoed verbatim; it is never switched on.
+         (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+           (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
+                             ws origin arm detail)
+           (agent-repl--input-flash ws agent-repl--input-cold-gate-flash)
+           (message "agent-repl: %s%s" agent-repl--input-cold-gate-flash
+                    (if (string-empty-p detail) "" (format " (%s)" detail)))))
+        ((or :model-not-in-catalog :model-refused)
+         ;; A `/model' ACT WAS REFUSED: the model is not in this session's
+         ;; catalog, or the vendor refused the change.  The act was not
+         ;; applied and the session runs on as before.  This is an ANSWER,
+         ;; never an outage -- before the arm existed the refusal left the
+         ;; daemon as a bare 400 and this composer HELD the prompt as if the
+         ;; daemon were unreachable, so nothing ran and nothing said why.
+         ;; Recorded at INFO (a refusal the user asked for, not a defect),
+         ;; not queued (a re-drive meets the same refusal), and the refusal's
+         ;; own sentence is shown verbatim.
+         (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+           (agent-repl--info ws "elisp.input.refused-model ws=%s origin=%S arm=%S detail=%s"
+                             ws origin arm detail)
+           (agent-repl--input-flash ws "model change refused")
+           (message "agent-repl: model change refused%s"
+                    (if (string-empty-p detail) "" (format " -- %s" detail)))))
+        (:no-session
+         ;; The workspace has NO SESSION AT ALL, which is the daemon's own
+         ;; to bring up.  Like the cold gate this is an answer rather than a
+         ;; transport failure, so it is recorded at WARN and the prompt is
+         ;; not queued; the text stays so the user can resubmit once the
+         ;; session is up.
+         (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--input-flash ws agent-repl--input-no-session-flash)
+         (message "agent-repl: %s" agent-repl--input-no-session-flash))
+        (:bubble-refused
+         ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
+         ;; the refusal BY KIND.  Both kinds are the same answer to the user
+         ;; ("not this agent, not now"), so both are drawn alike and neither
+         ;; is queued: a re-drive would meet the same refusal.  The shim's
+         ;; `detail' is echoed verbatim for the human and for the log; it is
+         ;; never switched on.
+         (agent-repl--input-on-bubble-refusal ws origin (plist-get reason :value)))
+        ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
+         (agent-repl--input-on-handover-refusal ws said origin raw reason key delivery))
+        (_
+         (agent-repl--error ws "elisp.input.unknown-error-arm ws=%s arm=%S" ws arm)
+         (message "agent-repl: submission refused (%S)" arm))))))
 
-(defun agent-repl--input-on-failure (ws said origin raw detail key)
+(defun agent-repl--input-on-failure (ws said origin raw detail key &optional delivery)
   "Handle a TRANSPORT failure for WS's submission.
 The daemon never answered, so nothing is known about whether the prompt
 landed.  The full SAID is written to the durable held-prompt ingress
@@ -1209,15 +1237,18 @@ restore of the composer.
 
 KEY is THIS attempt\='s idempotency key and rides into the entry: the
 re-drive is a RETRY of this submission, not a second turn, so the daemon
-answers an attempt that did land as a duplicate and delivers it once."
+answers an attempt that did land as a duplicate and delivers it once.
+DELIVERY rides with it, so a deferred prompt is re-driven deferred."
   (agent-repl--error ws "elisp.input.transport-failure ws=%s origin=%S key=%s detail=%S"
                      ws origin key detail)
-  (when (agent-repl--input-hold ws said origin raw key)
+  (when (agent-repl--input-hold ws said origin raw key delivery)
     (agent-repl--input-flash ws "send failed -- held until the daemon is back")
     (message "agent-repl: the daemon did not answer; the prompt is held")))
 
-(defun agent-repl--input-hold (ws said origin raw key)
-  "Hold SAID for WS in the durable ingress under ORIGIN and KEY.
+(defun agent-repl--input-hold (ws said origin raw key &optional delivery)
+  "Hold SAID for WS in the durable ingress under ORIGIN, KEY and DELIVERY.
+DELIVERY is the attempt's `SubmitPromptDelivery' keyword, nil for the
+ordinary delivery.
 THE ONE PATH a prompt the daemon did not take goes down: it is written to
 disk (`agent-repl-held-ingress-write'), where it survives a restart of
 Emacs, the daemon and the shim, and the daemon ingests it into its own
@@ -1226,7 +1257,7 @@ entry's path, or nil when it could not be written -- then the failure is
 an ERROR record and a message naming RAW, which the history ring also
 still holds, so the words are never lost silently."
   (condition-case err
-      (agent-repl-held-ingress-write ws said origin key)
+      (agent-repl-held-ingress-write ws said origin key delivery)
     (error
      (agent-repl--error ws "elisp.input.hold-failed ws=%s origin=%S key=%s cause=%S"
                         ws origin key err)
@@ -1234,7 +1265,7 @@ still holds, so the words are never lost silently."
               (error-message-string err) raw)
      nil)))
 
-(cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer snapshot)
+(cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer snapshot delivery)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
 Resolves the workspace ref and the connection, mints the idempotency key,
 and dispatches the answer arms.  Returns the idempotency key.
@@ -1246,6 +1277,10 @@ FROM-BUFFER says RAW was read out of the composer, and rides all the way
 to the acceptance because only a composer-sourced submission may erase
 the composer.  A canned command, a metaprompt read and a queue re-drive
 all compose their own text and leave the user\='s draft alone.
+
+DELIVERY is the `SubmitPromptDelivery' keyword the submission asks for
+(`:deferred' for `SPC j RET'), nil for the ordinary delivery.  It rides the
+request and every path that holds the prompt on disk.
 
 The ref is REQUIRED on every submit: it names WHICH workspace the
 submission belongs to, and it is the daemon-minted echo token, never a
@@ -1261,11 +1296,11 @@ value Emacs constructs from a path."
        (unless conn
          (agent-repl--warn ws "elisp.input.submit-no-conn ws=%s origin=%S" ws origin)
          (agent-repl--input-on-failure
-          ws said origin raw (list :kind :transport :message "no daemon connection") key)
+          ws said origin raw (list :kind :transport :message "no daemon connection") key delivery)
          (cl-return-from agent-repl--input-submit key))
-       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d reply-to=%s"
+       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d reply-to=%s delivery=%S"
                          ws origin key (length (plist-get (plist-get said :content) :blocks))
-                         (and (agent-repl--input-response-selection-value ws) t))
+                         (and (agent-repl--input-response-selection-value ws) t) delivery)
        (agent-repl-rpc-submit-prompt
         conn
         ;; A reply-to-a-past-response selection rides ALONGSIDE the composed
@@ -1274,9 +1309,9 @@ value Emacs constructs from a path."
         (let ((request (list :said said :idempotency-key key
                              :origin origin :workspace ref))
               (feedid (agent-repl--input-response-selection-value ws)))
-          (if feedid
-              (append request (list :reference-response-feedid feedid))
-            request))
+          (append request
+                  (when feedid (list :reference-response-feedid feedid))
+                  (when delivery (list :delivery delivery))))
         :on-response
         (lambda (response)
           (agent-repl--with-log-context
@@ -1286,7 +1321,7 @@ value Emacs constructs from a path."
                (:success (agent-repl--input-on-success
                           ws raw origin (plist-get response :value) from-buffer))
                (:error (agent-repl--input-on-error
-                        ws said origin raw (plist-get response :value) key snapshot))
+                        ws said origin raw (plist-get response :value) key snapshot delivery))
                (arm
                 (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S"
                                    ws arm))))))
@@ -1295,7 +1330,7 @@ value Emacs constructs from a path."
           (agent-repl--with-log-context
            ws key
            (lambda ()
-             (agent-repl--input-on-failure ws said origin raw detail key)))))
+             (agent-repl--input-on-failure ws said origin raw detail key delivery)))))
        key))))
 
 ;;;; ---- The send pipeline ------------------------------------------------

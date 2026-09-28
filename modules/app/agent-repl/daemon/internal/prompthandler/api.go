@@ -49,23 +49,23 @@ var (
 	ErrDuplicateSubmission = errors.New("prompthandler: that idempotency key already claimed a turn")
 )
 
-// redriveKey marks a context whose submission RE-DRIVES an earlier attempt.
-type redriveKey struct{}
-
 // WithRedrive marks ctx's submission as a re-drive of an attempt its caller
 // already made under the same idempotency key -- the held-prompt ingress's
 // resubmission of a prompt a client could not hand to a live daemon. For such
 // a submission ErrDuplicateSubmission is the EXPECTED answer when the earlier
 // attempt did land, so it is recorded at INFO rather than as the WARN an
-// unexplained duplicate is.
+// unexplained duplicate is; and a refusal about a standing condition is the
+// re-driver's to record, so the queue records it at DEBUG.
+//
+// It sets the queue's own mark (promptqueue.WithRedrive): the handler and the
+// queue read ONE mark, so the two can never disagree about a submission.
 func WithRedrive(ctx context.Context) context.Context {
-	return context.WithValue(ctx, redriveKey{}, true)
+	return promptqueue.WithRedrive(ctx)
 }
 
 // isRedrive reports whether ctx carries WithRedrive's mark.
 func isRedrive(ctx context.Context) bool {
-	marked, _ := ctx.Value(redriveKey{}).(bool)
-	return marked
+	return promptqueue.IsRedrive(ctx)
 }
 
 // Recognition is what the daemon made of a submission.
@@ -115,9 +115,12 @@ type Handler interface {
 	// Submit runs one submission: recognize it, mirror what it produced into
 	// the root feed, and forward an ordinary prompt to the queue. origin is
 	// REQUIRED — an UNSPECIFIED origin is refused here, before anything is
-	// minted or mirrored. feed, when set, addresses a subagent bubble's
-	// composer; recognition is unchanged either way.
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, target *feedid.Ref) (Outcome, error)
+	// minted or mirrored. delivery is how the prompt asked to be delivered
+	// (agentrepl.v1 SubmitPromptDelivery; wsm.DeliveryOrdinary for an absent
+	// field) and is carried to the queue, which stores it on any hold. feed,
+	// when set, addresses a subagent bubble's composer; recognition is
+	// unchanged either way.
+	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error)
 	// Recognize reports what the daemon makes of a submission's text without
 	// acting on it. It is exported so the recognition table has one home and
 	// one test surface.

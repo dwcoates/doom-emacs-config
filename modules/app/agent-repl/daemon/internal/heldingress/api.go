@@ -28,6 +28,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/intakegate"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/wsm"
 )
@@ -64,6 +65,10 @@ type Deps struct {
 	// entry's file is removed, so a client re-counting the directory on that
 	// push reads the removal.
 	PublishHost func(ws ids.WorkspaceID)
+	// Serves reports whether THIS daemon takes the intake now:
+	// rollout.Controller.ServesIntake. A sweep while it answers false takes
+	// nothing. See internal/intakegate.
+	Serves func() bool
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
 
@@ -77,6 +82,9 @@ type Deps struct {
 	// QuarantineDir is where a malformed file is renamed to; empty means
 	// "quarantine" beneath Dir.
 	QuarantineDir string
+	// LockPath is the kernel lock a sweep holds for its whole run; empty means
+	// LockName beneath Dir.
+	LockPath string
 	// Remove deletes an ingested entry's file; nil means os.Remove. It is a
 	// seam so a test can stand in for a crash between the acceptance and the
 	// removal.
@@ -101,6 +109,10 @@ const DefaultRetryCeiling = 10 * time.Second
 // names deliberately do not match, so a half-written entry is never read.
 const Glob = "held_*.json"
 
+// LockName is the sweep lock's file name beneath the ingress directory. It
+// does not match Glob, so it is never read as an entry.
+const LockName = ".sweep.lock"
+
 // New builds the ingress.
 func New(deps Deps) (Ingress, error) {
 	switch {
@@ -112,6 +124,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("heldingress: the prompt handler is required")
 	case deps.PublishHost == nil:
 		return nil, fmt.Errorf("heldingress: the host publisher is required")
+	case deps.Serves == nil:
+		return nil, fmt.Errorf("heldingress: the serving answer is required")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("heldingress: log surfaces are required")
 	}
@@ -124,11 +138,18 @@ func New(deps Deps) (Ingress, error) {
 	if deps.QuarantineDir == "" {
 		deps.QuarantineDir = filepath.Join(deps.Dir, "quarantine")
 	}
+	if deps.LockPath == "" {
+		deps.LockPath = filepath.Join(deps.Dir, LockName)
+	}
 	if deps.Remove == nil {
 		deps.Remove = removeFile
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	return &ingress{deps: deps, retries: map[string]retry{}}, nil
+	return &ingress{
+		deps:    deps,
+		retries: map[string]retry{},
+		gate:    intakegate.New(deps.Serves, deps.Log.Global().With(dlog.Context{"dir": deps.Dir}), opGate),
+	}, nil
 }

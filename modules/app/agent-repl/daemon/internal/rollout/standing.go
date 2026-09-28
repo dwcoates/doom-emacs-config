@@ -102,3 +102,20 @@ func (c *controller) untransfer(ws ids.WorkspaceID) {
 	}
 	c.logTransition(opTransfer, ws, "serving_standing", previous, "", dlog.Context{"reclaimed": true})
 }
+
+// ServesIntake implements Controller.
+//
+// THE TWO DAEMONS OF A HANDOVER NEVER BOTH ANSWER TRUE. The incumbent answers
+// false from the moment it claims the rollout slot, before it spawns anything;
+// the successor answers false until it owns every workspace it was handed,
+// which is only after the incumbent released each of them. A handover that is
+// abandoned empties the slot, so the incumbent takes intake again. One whose
+// transfers partly failed keeps its slot (it does not exit), and the successor
+// never finishes joining, so NEITHER takes intake: the entries wait on disk,
+// beside the ERROR that handover already stated, rather than being taken by a
+// daemon that may not serve their workspace.
+func (c *controller) ServesIntake() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.stillJoiningLocked() && c.handover == nil
+}

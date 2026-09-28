@@ -32,6 +32,9 @@
 (defvar agent-repl-test-input--refusals nil
   "Handover refusals handed to host.el, as (WS ARM-PLIST).")
 
+(defvar agent-repl-test-input--held-deliveries nil
+  "The delivery each held-prompt ingress write carried, newest first.")
+
 (defvar agent-repl-test-input--queued nil
   "Prompts written to the held-prompt ingress, as (WS SAID ORIGIN KEY).")
 
@@ -67,6 +70,7 @@ fake would not exercise them."
   (declare (indent 0))
   `(let ((agent-repl-test-input--submitted nil)
          (agent-repl-test-input--queued nil)
+         (agent-repl-test-input--held-deliveries nil)
          (agent-repl-test-input--hold-error nil)
          (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
@@ -110,12 +114,13 @@ fake would not exercise them."
                        (lambda (ws arm)
                          (push (list ws arm) agent-repl-test-input--refusals)))
                       ((symbol-function 'agent-repl-held-ingress-write)
-                       (lambda (ws said origin key)
+                       (lambda (ws said origin key &optional delivery)
                          (when agent-repl-test-input--hold-error
                            (signal (car agent-repl-test-input--hold-error)
                                    (cdr agent-repl-test-input--hold-error)))
                          (push (list ws said origin key)
                                agent-repl-test-input--queued)
+                         (push delivery agent-repl-test-input--held-deliveries)
                          (format "/state/held-prompts/held_x_%s.json" key)))
                       ((symbol-function 'run-at-time) (lambda (&rest _) nil))
                       ((symbol-function 'agent-repl--register-timer)
@@ -2142,5 +2147,90 @@ that the send and the discard branch to it."
           (agent-repl-discard-input))
         ;; Assert
         (should (null cancels))))))
+
+;;;; ---- A deferred submission (SubmitPromptDelivery.DEFERRED) ----------
+
+(defun agent-repl-test-input--submit-deferred ()
+  "Submit one deferred prompt through the composer's ONE submit path."
+  (agent-repl--input-submit "ws-one" (list :content (list :blocks nil))
+                            :deferred-prompt "later" nil nil nil :deferred))
+
+(ert-deftest agent-repl-input-a-deferred-submission-asks-for-its-delivery ()
+  "The request carries `:delivery :deferred' for the codec to spell."
+  (agent-repl-test-input--with
+    ;; Act
+    (agent-repl-test-input--submit-deferred)
+    ;; Assert
+    (should (eq (plist-get (car agent-repl-test-input--submitted) :delivery) :deferred))))
+
+(ert-deftest agent-repl-input-an-ordinary-submission-names-no-delivery ()
+  "An ordinary submission leaves the field absent: absence is ordinary."
+  (agent-repl-test-input--with
+    ;; Act
+    (agent-repl--input-submit "ws-one" (list :content (list :blocks nil)) :user-sent "now")
+    ;; Assert
+    (should-not (plist-member (car agent-repl-test-input--submitted) :delivery))))
+
+(ert-deftest agent-repl-input-a-deferred-submission-is-held-through-a-standing-refusal ()
+  "A merge, a cold gate or a session coming up HOLD a deferral on disk.
+An ordinary prompt is refused by each; a deferred one already asked for
+later, so it goes to the ingress with its delivery and the daemon's retry
+holds it until the condition clears."
+  (dolist (arm '(:merging :cold-gate :no-session))
+    (agent-repl-test-input--with
+      ;; Arrange
+      (setq agent-repl-test-input--answer
+            `(:response (:arm :error :value (:reason (:arm ,arm :value nil)))))
+      ;; Act
+      (agent-repl-test-input--submit-deferred)
+      ;; Assert
+      (should (equal (length agent-repl-test-input--queued) 1))
+      (should (eq (car agent-repl-test-input--held-deliveries) :deferred)))))
+
+(ert-deftest agent-repl-input-a-deferred-hold-through-a-refusal-is-info ()
+  "Holding a deferral through a standing condition is an answer, never a warning."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (agent-repl-test-input--submit-deferred))
+      ;; Assert
+      (should-not warned))))
+
+(ert-deftest agent-repl-input-a-deferred-duplicate-is-not-held ()
+  "Only a standing condition holds a deferral: a duplicate is still the answer it is."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
+    ;; Act
+    (agent-repl-test-input--submit-deferred)
+    ;; Assert
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-a-deferred-transport-failure-is-held-deferred ()
+  "A deferral the daemon never answered is held on disk still deferred."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
+    ;; Act
+    (agent-repl-test-input--submit-deferred)
+    ;; Assert
+    (should (eq (car agent-repl-test-input--held-deliveries) :deferred))))
+
+(ert-deftest agent-repl-input-a-deferred-handover-refusal-is-held-deferred ()
+  "A deferral refused by a handover is held on disk still deferred."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :not-yet-adopted :value nil)))))
+    ;; Act
+    (agent-repl-test-input--submit-deferred)
+    ;; Assert
+    (should (eq (car agent-repl-test-input--held-deliveries) :deferred))))
 
 ;;; test-input.el ends here

@@ -111,8 +111,19 @@ mode line shows "N prompts waiting for the daemon", counted from the
 directory at composer birth, on each write and on each host push while the
 line stands. There is no outage queue and no link-up, promotion or reattach
 release edge; `test-prompt-queue.el` fails on any production source naming
-one. `prompt-queue.el` holds only the user's explicit deferral (`SPC j RET`),
-which was never submitted and is released on the roster's finish edge.
+one.
+
+The user's explicit deferral (`SPC j RET`, `prompt-queue.el`) is held by the
+DAEMON too, never by Emacs: it is submitted at once with
+`SubmitPromptRequest.delivery = SUBMIT_PROMPT_DELIVERY_DEFERRED` (the
+`:delivery :deferred` request key), and the daemon holds it in the held tray,
+never classifies or interjects it, and runs it as its own turn once the
+running one ends. Every hold path carries the delivery into the ingress
+entry, and a deferral refused by a merge, a cold gate or a session still
+coming up (`agent-repl--input-deferred-held-arms`) is held on disk rather
+than drawn as a refusal, because it already asked for "later". There is no
+in-memory deferral queue, finish-edge release or liveness gate; the same
+source scan fails on any of their names.
 
 ## A failed deploy reaches the minibuffer however it was started
 

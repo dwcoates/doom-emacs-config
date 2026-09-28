@@ -260,7 +260,8 @@ exposes the full pushed state as data, so this is nearly always possible:
 | panels + layout | `window-list` + `window-buffer` + `window-parameter` | `format-mode-line` |
 | daemon launch | `agent-repl--frontend-daemon-process`, `agent-repl-daemon-launch-failure`, `agent-repl-daemon-build-failure` | the `*claude-repld*` buffer text |
 | attention marker | `agent-repl-status--marker-on` | the `●` glyph |
-| held prompts | `agent-repl--prompt-queue` | the tray |
+| held prompts (Emacs side) | `agent-repl-held-ingress-waiting` (the on-disk ingress; Emacs holds no prompt in memory) | the tray, the composer's waiting line |
+| submissions (what left Emacs) | an observer on `agent-repl-rpc-submit-prompt` (text, `:origin`, `:delivery`, the answer arm) | the feed row |
 
 The sanctioned exception is a scenario whose subject IS the rendered string
 -- the modeline segment's own composition
@@ -724,9 +725,12 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     daemon-side session is still alive (cross-checked on the Go client).
 11. **CloseWithAHeldPromptDoesNotTearTheTabDown** --
     `agent-repl-queue-deferred-prompt` then `agent-repl-close-workspace` --
-    the tab survives and `agent-repl--prompt-queue` still holds the prompt.
-    Per `elisp.md`, the refusal manifests in the WEBAPP FOOTER, not an Emacs
-    dialog, so what Emacs owes is precisely to not act; undelivered user
+    the tab survives. Per `elisp.md`, the refusal manifests in the WEBAPP
+    FOOTER, not an Emacs dialog, so what Emacs owes is precisely to not act.
+    The held prompt is the DAEMON's (owner ruling 2026-09-28: Emacs holds no
+    prompt in memory): before the close, the deferral reached the RPC
+    boundary with `:delivery :deferred` and was answered `:success`, and
+    after it `agent-repl-held-ingress-waiting` is 0 -- undelivered user
     intent may never be silently discarded.
 12. **KillWorkspaceNeverBlocks** -- `agent-repl-kill-workspace` -- the name
     is gone from `agent-repl--ws-tabline-names`,
@@ -775,11 +779,13 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     on the correct side.
 23. **DiscardInputClearsTheComposer** -- `agent-repl-discard-input` -- the
     input buffer is empty and nothing was submitted.
-24. **DeferredPromptDrainsOnTheFinishEdge** --
-    `agent-repl-queue-deferred-prompt` during a running turn --
-    `agent-repl--prompt-queue` holds it, then empties when the roster row
-    transitions turn-running to idle. The finish edge is the trigger for all
-    four Emacs-local reactions.
+24. **DeferredPromptIsSubmittedDeferredAtOnce** --
+    `agent-repl-queue-deferred-prompt` during a running turn -- the composer
+    is cleared and the prompt reaches the RPC boundary before the command
+    returns, with origin `agent-repl--prompt-queue-drain-origin` and
+    `:delivery :deferred`. Emacs holds nothing (owner ruling 2026-09-28): the
+    daemon holds the deferral in its held tray and delivers it as its own
+    turn when the running one ends.
 25. **HistoryRecallRestoresTheLastPrompt** -- `agent-repl--history-prev` --
     the input buffer holds the previously submitted text.
 25a. **AttachedImageMarkerNeverRidesAsWords** --
@@ -836,8 +842,12 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     a prefix argument, mid-turn -- the roster arm settles `:interrupted` and
     the agent is NOT resumed. This is the interrupt path (see above).
 36. **GracefulRestartHoldsPromptsMeanwhile** --
-    `agent-repl-restart-workspace` without force, mid-turn -- prompts land in
-    `agent-repl--prompt-queue` rather than being refused, and drain after.
+    `agent-repl-queue-deferred-prompt` then `agent-repl-restart-workspace`
+    without force, mid-turn -- the deferral is submitted at once with
+    `:delivery :deferred`, the composer is cleared, and the daemon answers
+    `:success` (it holds the prompt; it is never refused); once the gate
+    lets the turn finish, the roster settles and
+    `agent-repl-held-ingress-waiting` is 0.
 37. **RestartDoesNotWedgeEmacs** -- forced restart with a live panel and
     webview binding -- heartbeat assertion, same family as 13.
 
@@ -863,8 +873,12 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 ### I. Host-side refusal messages (3) -- Emacs-only
 
 42. **SubmitWithNoDaemonIsRefusedLoudly** -- stop the daemon, then
-    `agent-repl-send` -- the failure is surfaced and the composer text is
-    PRESERVED, never silently dropped. Unary calls fail loudly by contract.
+    `agent-repl-send` -- the failure is surfaced and the words are never
+    silently dropped: `agent-repl-held-ingress-waiting` is 1 (the durable
+    on-disk ingress holds the prompt for the daemon) and the newest input
+    history entry is the draft. The composer itself is cleared
+    optimistically at dispatch by owner ruling, so it is not read. Unary
+    calls fail loudly by contract.
 43. **NoWorkspacesRegisteredRefusesThePicker** -- `agent-repl-close-workspace`
     with an empty registry -- `user-error` "No agent-repl workspaces
     registered" and no wire call made. Rendered-string assertion: the
