@@ -360,7 +360,9 @@ type recordingTopbar struct {
 	retracted []string
 }
 
-func (t *recordingTopbar) RaiseDaemonWarning(key, line string) { t.raised[key] = line }
+func (t *recordingTopbar) RaiseDaemonWarning(key string, w topbar.DaemonWarning) {
+	t.raised[key] = w.Line
+}
 
 func (t *recordingTopbar) RetractDaemonWarning(key string) { t.retracted = append(t.retracted, key) }
 

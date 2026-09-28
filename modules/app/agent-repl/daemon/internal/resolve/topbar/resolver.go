@@ -25,9 +25,9 @@ type resolver struct {
 	mu     sync.Mutex
 	states map[ids.WorkspaceID]*wsState
 	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]
-	// daemonRaised are the standing daemon-scoped warnings, key to line. A
+	// daemonRaised are the standing daemon-scoped warnings, by key. A
 	// workspace whose accumulation is made later takes them at once.
-	daemonRaised map[string]string
+	daemonRaised map[string]DaemonWarning
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -56,7 +56,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		states: map[ids.WorkspaceID]*wsState{},
 		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
 
-		daemonRaised: map[string]string{},
+		daemonRaised: map[string]DaemonWarning{},
 	}, nil
 }
 
@@ -84,8 +84,8 @@ func (r *resolver) stateLocked(ws ids.WorkspaceID) *wsState {
 		s = newWSState()
 		// A DAEMON-SCOPED WARNING STANDS ON EVERY STRIP, including one made
 		// after it was raised.
-		for key, line := range r.daemonRaised {
-			s.daemonRaised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
+		for key, warning := range r.daemonRaised {
+			s.daemonRaised[key] = &raisedRecord{line: warning.Line, deployFailed: warning.DeployFailed, seq: s.nextSeq()}
 		}
 		r.states[ws] = s
 	}
@@ -610,17 +610,18 @@ func (r *resolver) RaiseWarning(ws ids.WorkspaceID, key, line string) {
 }
 
 // RaiseDaemonWarning puts a daemon-scoped condition on every strip. A key
-// already raised keeps its place in each list and takes the new sentence.
-func (r *resolver) RaiseDaemonWarning(key, line string) {
+// already raised keeps its place in each list and takes the new sentence and
+// overlay.
+func (r *resolver) RaiseDaemonWarning(key string, warning DaemonWarning) {
 	r.eachStrip("daemon.topbar.raise_daemon_warning", "the topbar took a warning the daemon raised on every strip",
-		dlog.Context{"key": key, "line": line},
-		func() { r.daemonRaised[key] = line },
+		dlog.Context{"key": key, "line": warning.Line, "overlay": warning.DeployFailed != nil},
+		func() { r.daemonRaised[key] = warning },
 		func(s *wsState) {
 			if held, ok := s.daemonRaised[key]; ok {
-				held.line = line
+				held.line, held.deployFailed = warning.Line, warning.DeployFailed
 				return
 			}
-			s.daemonRaised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
+			s.daemonRaised[key] = &raisedRecord{line: warning.Line, deployFailed: warning.DeployFailed, seq: s.nextSeq()}
 		})
 }
 

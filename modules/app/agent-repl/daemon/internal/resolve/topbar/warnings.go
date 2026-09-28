@@ -268,19 +268,40 @@ func (r *resolver) raisedWarnings(s *wsState) []warning {
 		})
 	}
 	// THE DAEMON'S OWN CONDITIONS ride the same line: a daemon-scoped fault
-	// is drawn exactly as a raised warning is, on every strip.
+	// is drawn as a raised warning is, on every strip, and a failed deploy's
+	// row opens the overlay saying what failed.
 	for key, record := range s.daemonRaised {
 		record := record
 		out = append(out, warning{
 			kind: warnRaised, key: "daemon:" + key, seq: record.seq, line: record.line,
 			detail: func() *frontendv1.TopbarWarning {
-				return &frontendv1.TopbarWarning{
+				w := &frontendv1.TopbarWarning{
 					Line: &frontendv1.TopbarWarningLine{Text: truncate(record.line, DefaultLineWidth)},
 				}
+				if record.deployFailed != nil {
+					w.Detail = &frontendv1.TopbarWarning_DeployFailed{DeployFailed: deployFailedDetail(record.deployFailed)}
+				}
+				return w
 			},
 		})
 	}
 	return out
+}
+
+// deployFailedDetail is a failed deploy's overlay on the wire. The detail is
+// WHOLE, never truncated: the row's line already carries its last line, and
+// the overlay is where the rest is read.
+func deployFailedDetail(o *DeployFailedOverlay) *frontendv1.TopbarDeployFailedWarningDetail {
+	detail := &frontendv1.TopbarDeployFailedWarningDetail{
+		Step:      &frontendv1.TopbarWarningDetailLine{Text: o.Step},
+		Component: &frontendv1.TopbarWarningComponent{Text: o.Component},
+		Rollback:  &frontendv1.TopbarWarningDetailLine{Text: o.Rollback},
+		Detail:    &frontendv1.TopbarWarningDetailLine{Text: o.Detail},
+	}
+	if o.Log != "" {
+		detail.Log = &frontendv1.TopbarWarningDetailLine{Text: o.Log}
+	}
+	return detail
 }
 
 // applyDiagnostics folds one health push into the fault and window records.
