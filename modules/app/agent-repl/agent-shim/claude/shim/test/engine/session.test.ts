@@ -40,9 +40,8 @@ import { PersistenceError, type PersistEntry } from "../../src/store/persistence
 import type { SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
 import {
   NETWORK_RESUME_PROBE_INTERVAL_MS,
-  isNetworkResumePrompt,
-  resumePromptTargets,
 } from "../../src/engine/network-resume.js";
+import { isNetworkResumePrompt, resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
