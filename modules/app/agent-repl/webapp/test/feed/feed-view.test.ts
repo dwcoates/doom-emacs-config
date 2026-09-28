@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   FeedBreadcrumbSchema,
   FeedIdSchema,
@@ -48,6 +50,7 @@ import {
 } from "./harness.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { orderFor, withOrder, withoutOrder } from "../feed-order.js";
 import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
 
@@ -166,6 +169,7 @@ describe("isBubbleRow", () => {
   it("recognizes a detached shell head", () => {
     const row = create(FeedRowSchema, {
       id: feedId("s"),
+      order: orderFor("s"),
       row: { case: "shellHead", value: { command: { text: "npm run dev" } } },
     });
     expect(isBubbleRow(row)).toBe(true);
@@ -176,6 +180,7 @@ describe("isBubbleRow", () => {
     // the HEAD (shell_head) is the expandable bubble.
     const row = create(FeedRowSchema, {
       id: feedId("s"),
+      order: orderFor("s"),
       row: { case: "detachedShell", value: { shell: {} } },
     });
     expect(isBubbleRow(row)).toBe(false);
@@ -451,6 +456,7 @@ describe("createFeedController: the newest separation bounds the feed", () => {
 function removedRow(id: string): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: { case: "removed", value: create(FeedRowRemovedSchema, {}) },
   });
 }
@@ -682,7 +688,7 @@ describe("createFeedController: the walk", () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
-          result: { case: "success", value: page([responseRow("older")]) },
+          result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) },
         }),
     });
     const { controller, host } = fixture(h);
@@ -696,7 +702,7 @@ describe("createFeedController: the walk", () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
-          result: { case: "success", value: page([responseRow("older")]) },
+          result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) },
         }),
     });
     const { controller, host } = fixture(h);
@@ -795,6 +801,7 @@ describe("createFeedController: a malformed row", () => {
   function unreadableRow(): FeedRow {
     return create(FeedRowSchema, {
       id: feedId("bad"),
+      order: orderFor("bad"),
       row: { case: "activity", value: {} },
     });
   }
@@ -1105,7 +1112,7 @@ describe("createFeedController: following the tail", () => {
     const { controller, acts } = scrolled(true);
     controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
     acts.length = 0;
-    controller.applyPage(page([responseRow("older")]), "prepend");
+    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
     expect(acts).toContain("follow");
   });
 
@@ -1214,7 +1221,7 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
     acts.length = 0;
     // Act
-    controller.applyPage(page([userPromptRow("old", "hi", "t0", true)]), "prepend");
+    controller.applyPage(page([withOrder(userPromptRow("old", "hi", "t0", true), "a")]), "prepend");
     // Assert
     expect(acts).not.toContain("promptSent");
   });
@@ -1236,7 +1243,7 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
     layOutByIndex(host, "a");
     // Act
-    controller.applyPage(page([responseRow("older")]), "prepend");
+    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
     // Assert — the view moves down by exactly the 400px that grew above.
     expect(shifts).toEqual([400]);
   });
@@ -1246,7 +1253,7 @@ describe("createFeedController: following the tail", () => {
     const { controller, shifts } = scrolled(false);
     controller.applyPage(page([], { hasMore: true }), "replace");
     // Act
-    controller.applyPage(page([responseRow("older")]), "prepend");
+    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
     // Assert
     expect(shifts).toEqual([]);
   });
@@ -1259,12 +1266,75 @@ describe("createFeedController: following the tail", () => {
     const a = layOutByIndex(host, "a");
     controller.onChange(() => a.remove());
     // Act
-    controller.applyPage(page([responseRow("older")]), "prepend");
+    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
     // Assert
     const record = await forwardedRecord(capture, "feed.prepend-anchor-detached");
     expect({ level: record.level.case, context: record.context, shifts }).toEqual({
       level: "error",
       context: expect.objectContaining({ feed: "root", row: "a" }) as unknown,
+      shifts: [],
+    });
+  });
+
+  /**
+   * A LATE ROW LANDING ABOVE THE READER (owner ruling, 2026-09-27). A row whose
+   * key sorts between two held rows is inserted just above the later one; when
+   * that row started above the viewport, the view shifts by exactly how far it
+   * moved, through `prependCompensation` — the one cause every change above the
+   * reader already goes through.
+   */
+  function lateAbove(opts: { following: boolean; boxTop: number }) {
+    const fx = scrolled(opts.following);
+    fx.box.getBoundingClientRect = () => ({ top: opts.boxTop }) as DOMRect;
+    fx.controller.applyPage(
+      page([withOrder(responseRow("a"), "k10"), withOrder(responseRow("b"), "k30")]),
+      "replace",
+    );
+    layOutByIndex(fx.host, "b");
+    fx.acts.length = 0;
+    return fx;
+  }
+
+  it("keeps the reader's content in place when a late row lands above the viewport", () => {
+    // Arrange — `b` sits at 500px, above a viewport whose top is at 1000px.
+    const { controller, shifts } = lateAbove({ following: false, boxTop: 1000 });
+    // Act — a late row whose key sorts between `a` and `b`.
+    controller.upsert(withOrder(responseRow("late"), "k20"));
+    // Assert — `b` moved down one 400px row, and the view follows it.
+    expect(shifts).toEqual([400]);
+  });
+
+  it("moves nothing when a late row lands inside the viewport", () => {
+    // Arrange — `b` sits at 500px, below a viewport top at 0.
+    const { controller, shifts } = lateAbove({ following: false, boxTop: 0 });
+    // Act
+    controller.upsert(withOrder(responseRow("late"), "k20"));
+    // Assert
+    expect(shifts).toEqual([]);
+  });
+
+  it("keeps a following reader at the tail when a late row lands above", () => {
+    // Arrange
+    const { controller, acts } = lateAbove({ following: true, boxTop: 1000 });
+    // Act
+    controller.upsert(withOrder(responseRow("late"), "k20"));
+    // Assert — the follow keeps the tail after the row is drawn in its place.
+    expect(acts).toEqual(["follow"]);
+  });
+
+  it("records an error, and does not shift, when an insert detaches the measured row", async () => {
+    // Arrange — a listener that tears the measured row out mid-insert.
+    const capture = captureLogRecords();
+    const { controller, host, shifts } = lateAbove({ following: false, boxTop: 1000 });
+    const b = host.querySelector('[data-feed-row="b"]');
+    controller.onChange(() => b?.remove());
+    // Act
+    controller.upsert(withOrder(responseRow("late"), "k20"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.insert-anchor-detached");
+    expect({ level: record.level.case, context: record.context, shifts }).toEqual({
+      level: "error",
+      context: expect.objectContaining({ feed: "root", row: "b" }) as unknown,
       shifts: [],
     });
   });
@@ -1282,6 +1352,7 @@ describe("createFeedController: a landed thinking row collapsing", () => {
   function thinkingRow(id: string, landed: boolean, markdown = "weighing"): FeedRow {
     return create(FeedRowSchema, {
       id: feedId(id),
+      order: orderFor(id),
       row: {
         case: "activity",
         value: {
@@ -1766,11 +1837,11 @@ describe("createFeedController: lookups and disposal", () => {
 
 /** A row carrying ARM, built straight onto the generated schema. */
 function rowWith(id: string, arm: MessageInitShape<typeof FeedRowSchema>["row"]): FeedRow {
-  return create(FeedRowSchema, { id: feedId(id), row: arm });
+  return create(FeedRowSchema, { id: feedId(id), order: orderFor(id), row: arm });
 }
 
 function unknownArmRow(id: string): FeedRow {
-  const row = create(FeedRowSchema, { id: feedId(id) });
+  const row = create(FeedRowSchema, { id: feedId(id), order: orderFor(id) });
   // A wire arm no build knows, past the generated union.
   (row as { row: unknown }).row = { case: "surprise", value: {} };
   return row;
@@ -1780,6 +1851,7 @@ function unknownArmRow(id: string): FeedRow {
 function unitRow(id: string, unit: unknown): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: { case: "activity", value: { unit: unit as never } },
   });
 }
@@ -1910,7 +1982,7 @@ describe("createFeedController: every activity unit reaches its own renderer", (
   it("stamps no unit on an activity row whose unit is unset", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([create(FeedRowSchema, { id: feedId("x"), row: { case: "activity", value: {} } })]),
+      page([create(FeedRowSchema, { id: feedId("x"), order: orderFor("x"), row: { case: "activity", value: {} } })]),
       "replace",
     );
     expect(host.querySelector('[data-feed-row="x"]')?.hasAttribute("data-unit")).toBe(false);
@@ -1918,7 +1990,7 @@ describe("createFeedController: every activity unit reaches its own renderer", (
 
   it("stamps a row with no arm at all as malformed rather than dropping it", () => {
     const { controller, host } = fixture();
-    controller.upsert(create(FeedRowSchema, { id: feedId("x") }));
+    controller.upsert(create(FeedRowSchema, { id: feedId("x"), order: orderFor("x") }));
     expect(host.querySelector('[data-feed-row="x"]')?.getAttribute("data-row-kind")).toBe(
       "malformed",
     );
@@ -2322,5 +2394,303 @@ describe("createFeedController: folds across a page replace", () => {
     controller.applyPage(page([responseRow("a")]), "replace");
     // Assert
     expect(fold(host, "a", "bubble-scroll")?.classList.contains("expanded")).toBe(true);
+  });
+});
+
+/**
+ * EVERY ROW IS PLACED BY THE DAEMON'S KEY, NEVER BY ARRIVAL (owner ruling,
+ * 2026-09-27: a late row lands where it would have been had it not been late).
+ * `FeedRow.order` is opaque and compared as a string; these tests state every
+ * key they depend on rather than leaning on the fixtures' build order.
+ */
+describe("createFeedController: every row is placed by its order key", () => {
+  /** A page of rows keyed exactly as listed. */
+  function keyed(rows: ReadonlyArray<[FeedRow, string]>): FeedRow[] {
+    return rows.map(([row, key]) => withOrder(row, key));
+  }
+
+  /** The incident's feed: a prompt, a response, the answer and its turn end. */
+  function incidentPage(hasMore = false) {
+    return page(
+      keyed([
+        [userPromptRow("prompt", "why", "t1"), "k0100"],
+        [responseRow("early", "looking", undefined, "t1"), "k0200"],
+        [responseRow("answer", "because", undefined, "t1"), "k0500"],
+        [turnEndedRow("end", "t1", "concluded", "answer"), "k0600"],
+      ]),
+      { hasMore },
+    );
+  }
+
+  it("draws two late rows at their true place, not below the rows that arrived before them", () => {
+    // Arrange — the answer and its turn end are already drawn.
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act — two response rows whose keys sort between `early` and `answer`
+    // arrive AFTER everything else (the 14:36:58 push).
+    controller.upsert(withOrder(responseRow("late-1", "one", undefined, "t1"), "k0300"));
+    controller.upsert(withOrder(responseRow("late-2", "two", undefined, "t1"), "k0400"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt", "early", "late-1", "late-2", "answer", "end"]);
+  });
+
+  it("places a page's rows by their keys, not by the page's sequence", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    // Act
+    controller.applyPage(page(keyed([[responseRow("b"), "k2"], [responseRow("a"), "k1"]])), "replace");
+    // Assert
+    expect(drawnIds(host)).toEqual(["a", "b"]);
+  });
+
+  it("compares keys code unit by code unit, a prefix first", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page(keyed([[responseRow("ab"), "ab"], [responseRow("b"), "b"]])), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("a"), "a"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["a", "ab", "b"]);
+  });
+
+  it("appends a row whose key sorts after every held row at the tail", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(userPromptRow("next", "and then", "t2"), "k0700"));
+    // Assert
+    expect(drawnIds(host).at(-1)).toBe("next");
+  });
+
+  it("records an inserted row at INFO with its key and position", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("late-1"), "k0300"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-placed");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "info",
+      context: expect.objectContaining({ row: "late-1", key: "k0300", outcome: "inserted", position: 2 }) as unknown,
+    });
+  });
+
+  it("records a row appended at the tail at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("next"), "k0700"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-placed");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "info",
+      context: expect.objectContaining({ row: "next", key: "k0700", outcome: "appended", position: 4 }) as unknown,
+    });
+  });
+
+  it("records a placed page at INFO with its row count and key span", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    // Act
+    controller.applyPage(incidentPage(), "replace");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.page-placed");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "info",
+      context: expect.objectContaining({ rows: 4, first_key: "k0100", last_key: "k0600" }) as unknown,
+    });
+  });
+
+  it("does not draw a late row older than the loaded page while older pages remain", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(true), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("history"), "k0050"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt", "early", "answer", "end"]);
+  });
+
+  it("records a late row left to the walk at INFO as unloaded history", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(true), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("history"), "k0050"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-placed");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "info",
+      context: expect.objectContaining({ row: "history", key: "k0050", outcome: "unloadedHistory" }) as unknown,
+    });
+  });
+
+  it("draws the late row in its place once the walk brings its page", async () => {
+    // Arrange — the older page the daemon serves holds the late row in place.
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: {
+            case: "success",
+            value: page(keyed([[responseRow("oldest"), "k0010"], [responseRow("history"), "k0050"]])),
+          },
+        }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(incidentPage(true), "replace");
+    controller.upsert(withOrder(responseRow("history"), "k0050"));
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    // Assert
+    expect(drawnIds(host)).toEqual(["oldest", "history", "prompt", "early", "answer", "end"]);
+  });
+
+  it("inserts a late row older than every held row at the top when the feed is at its start", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(false), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("first"), "k0050"));
+    // Assert
+    expect(drawnIds(host)[0]).toBe("first");
+  });
+
+  it("never moves a held row when it is re-pushed", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act — the early response grows.
+    controller.upsert(withOrder(responseRow("early", "looking harder", undefined, "t1"), "k0200"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt", "early", "answer", "end"]);
+  });
+
+  it("keeps a held row where it was when a re-push changes its key", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act — the daemon breaks the fixed-key invariant.
+    controller.upsert(withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt", "early", "answer", "end"]);
+  });
+
+  it("records a re-push that changed a held row's key at ERROR, naming both keys", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-order-changed");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "error",
+      context: expect.objectContaining({ row: "early", placed_key: "k0200", pushed_key: "k0900" }) as unknown,
+    });
+  });
+
+  it("records a removal carrying another key than its row's at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(removedRow("early"), "k0900"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-order-changed");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("records a new row carrying another row's key at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    // Act
+    controller.upsert(withOrder(responseRow("twin"), "k0200"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-order-duplicate");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "error",
+      context: expect.objectContaining({ row: "twin", key: "k0200", holder: "early" }) as unknown,
+    });
+  });
+
+  it.each([
+    ["a pushed row with no order", () => withoutOrder(responseRow("x")), "FeedRow.order"],
+    ["a pushed row with an empty key", () => withOrder(responseRow("x"), ""), "FeedRow.order.key"],
+    ["a removal with no order", () => withoutOrder(removedRow("x")), "FeedRow.order"],
+  ])("refuses %s as a malformed view", (_name, build, path) => {
+    // Arrange
+    const { controller } = fixture();
+    let refused: unknown = null;
+    // Act
+    try {
+      controller.upsert(build());
+    } catch (err) {
+      refused = err;
+    }
+    // Assert
+    expect(refused instanceof MalformedView ? refused.path : refused).toBe(path);
+  });
+
+  it("refuses a page holding a row with no order and keeps the rows already drawn", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    let refused: unknown = null;
+    // Act
+    try {
+      controller.applyPage(page([responseRow("a"), withoutOrder(responseRow("b"))]), "replace");
+    } catch (err) {
+      refused = err;
+    }
+    // Assert
+    expect({ refused: refused instanceof MalformedView, drawn: drawnIds(host) }).toEqual({
+      refused: true,
+      drawn: ["prompt", "early", "answer", "end"],
+    });
+  });
+
+  it("files an older page holding a row with no order as frame_undecodable", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: { case: "success", value: page([withoutOrder(responseRow("older"))]) },
+        }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(incidentPage(true), "replace");
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    // Assert
+    expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+
+  it("never places a new row by arrival order (source scan)", () => {
+    // Arrange — feed-view.ts, comments stripped.
+    const source = readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    // Act — every insertion into the order, and every arrival-order index.
+    const insertions = [...source.matchAll(/\border\.splice\(([^,)]*),\s*0\b/g)].map((m) => m[1].trim());
+    const arrival = [
+      ...source.matchAll(/\border\.(?:push|unshift)\(/g),
+      ...source.matchAll(/\(\s*[^()]*order\.length[^()]*,\s*0\s*,/g),
+      ...source.matchAll(/(?:adopt|insertAt|adoptPageRow)\([^;]*order\.length/g),
+    ].map((m) => m[0]);
+    // Assert — one insertion, at the index the key's binary search found.
+    expect({ insertions, arrival }).toEqual({ insertions: ["index"], arrival: [] });
   });
 });
