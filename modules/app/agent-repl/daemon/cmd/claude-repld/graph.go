@@ -1368,7 +1368,7 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	f.mu.Lock()
 	f.onTopbar[line.ID] = true
 	f.mu.Unlock()
-	f.topbar.RaiseDaemonWarning(string(line.ID), line.Topbar)
+	f.topbar.RaiseDaemonWarning(string(line.ID), topbar.DaemonWarning{Line: line.Topbar})
 }
 
 // FaultClosed retracts it again, from the topbar too when it was raised
