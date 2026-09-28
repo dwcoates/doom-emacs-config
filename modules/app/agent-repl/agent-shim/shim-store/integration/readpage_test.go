@@ -98,7 +98,7 @@ func TestKnownButUnwrittenBookReadsEmptyAtFloor(t *testing.T) {
 	assertReadStalePointer(t, readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
 		Book:     agentID("unwritten"),
 		PageSize: 5,
-		After:    pointerInMain,
+		Position: &storev1.ReadAgentPageRequest_After{After: pointerInMain},
 	}))
 }
 

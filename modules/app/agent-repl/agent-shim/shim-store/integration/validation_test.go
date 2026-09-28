@@ -269,17 +269,17 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 	}{
 		{
 			name:      "missing book",
-			req:       &storev1.ReadAgentPageRequest{PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
 			name:      "empty book value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
 			name:      "zero page_size",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "page_size",
 		},
 		{
@@ -289,7 +289,7 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 		},
 		{
 			name:      "empty after pointer value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, After: &storev1.StoreItemPointer{Value: ""}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: ""}}},
 			wantField: "after",
 		},
 	}
