@@ -304,6 +304,67 @@ none of.
   one INFO `boot-rewind-summary` at the catch-up edge carries the two counts —
   rewound, and at-rest — beside the other summaries the walk owes.
 
+## A conversion change heals the store
+
+A fix to the conversion only ever reached bytes read after it: a re-read writes
+the NEW keys, and the rows the old conversion wrote under the old keys stood
+forever (owner ruling 2026-09-27: the 214 `prompt:` rows minted for task
+notifications, command envelopes, local-command output, bare `/compact` lines
+and interrupt markers). So every row and every cursor records the conversion
+that produced it, and a transcript whose rows predate the current conversion is
+RE-DERIVED (`heal.go`, `internal/convert/version.go`).
+
+- **ONE VERSION, `convert.ConversionVersion`.** Bump it whenever a record
+  converts differently — becomes a different row, stops becoming one, or changes
+  one's content — and never lower it. A bump re-reads every transcript whose
+  rows predate it, which on the owner's machine is the whole corpus once.
+- **EVERY ENTRY IS STAMPED AT THE ONE DOOR.** `storeWrite` sets
+  `StoreEntry.conversion_version` on every entry, and `writeBatch` states the
+  advance's `CursorConversion` on every cursor: `current`, or `healing` with the
+  offset the older conversion had read to while the re-read is short of it. The
+  store refuses a file-plane entry without a version and an advance without a
+  conversion. The version is also digested into every `write_id`, so a re-read
+  under a new conversion is a new write the store's ledger does not absorb as a
+  replay; a row whose content did not change is RESTAMPED by the store (new
+  write id and version, no `write_seq` bump, nothing published).
+- **WHO OWES A HEAL (`healOwed`).** A session or subagent transcript whose
+  stored cursor names an older version (or none: a cursor stored before
+  versions existed reads as 0) at an offset past 0. A spool and a journal are
+  never re-read: their cursors state the current version on their next batch. A
+  cursor from a NEWER version (a rollback) is resumed as it stands, stated once
+  at `conversion-heal`, and nothing is re-derived. A file never read owes
+  nothing.
+- **THE RE-READ STARTS AT 0 AND IS RESUMABLE.** A fresh heal restores the
+  tailer at offset 0 with no boot rewind; each batch commits `healing.through`
+  in the same transaction as its rows, so a restart resumes at the last
+  committed offset (rewound to its in-progress turn like any restart), and the
+  batch that reaches `through` states `current`. A file now shorter than
+  `through` (rewritten or truncated since) ends the heal at its end
+  (`healShort`) rather than waiting for bytes that no longer exist.
+- **WHAT IS RETIRED (`convert.RetiredKeys`).** For each re-read record, the keys
+  minted from that record's uuid ALONE — `prompt:<uuid>`, `peer:<uuid>`,
+  `session:api_error:<uuid>` — that its current conversion does not carry. A key
+  another record can also produce (a context cut) is never named. The handler
+  puts them on `Context.Retired`, the tailer carries them out on
+  `PollResult.Retired`, and only a batch that began below `through` sends them
+  (`EntryBatch.retirements`): bytes read for the first time produced no row to
+  retire. The store retires only a page line the FILE plane last wrote under a
+  LOWER version, so naming a still-valid or stream-owned row is a no-op there;
+  a retired row leaves every page and reaches every standing watch on the
+  `retired` arm, which the shim relays and the daemon's feed removes.
+- **A HEAL NEVER HOLDS A LIVE FILE BACK.** The poll pass skips a healing
+  watcher; `healStep` runs after it on half a poll slice (`healBudgetFraction`),
+  one file at a time, active conversations first, at least one bounded batch
+  per tick. A dormant transcript that owes a heal is admitted to the watched
+  set for it (`owesHeal`), is never drained while it is owed, and drops back to
+  dormant once it has finished and drained. The cycle's cursor index follows
+  every durable advance, so a file re-admitted later in the cycle does not
+  start a heal it already did.
+- **IT IS STATED PER FILE.** One INFO `conversion-heal` when a heal begins or
+  resumes, VERBOSE per batch, one INFO when it ends (batches, retirement
+  candidates named, legacy book-conflict skips). A heal-end write that fails is
+  the `store-write` ERROR every failed write is.
+
 ## The hold
 
 A record can be UNSETTLED at the end of a batch: its meaning depends on the
@@ -895,7 +956,9 @@ record MEANS.
   deliberately separate space so no path can collide with a uuid. A KEEP-ALIVE
   record has no key at all: nothing of one is stored (see "Keep-alive" below).
 - `write_id` is DETERMINISTIC: hex sha256 of
-  `"shim-claude-sidecar|" + file_id + "|" + offset + "|" + discriminator`, where
+  `"shim-claude-sidecar|v<N>|" + file_id + "|" + offset + "|" + discriminator`,
+  where `<N>` is the conversion version (see "A conversion change heals the
+  store"), and
   `file_id` is the file's `dev:inode` identity and the discriminator
   distinguishes multiple entries minted from one record. RANDOMNESS IS
   FORBIDDEN — replay absorption rests on this. IT DIGESTS THE FILE ID, NEVER THE
@@ -1376,14 +1439,14 @@ the suite rather than quietly shrinking what the feed can show.
 
 ### Keys and the write identity
 
-- `write_id` = hex sha256 of `"shim-claude-sidecar|" + file_id + "|" + offset +
-  "|" + discriminator`, where `file_id` is the tailed file's `dev:inode`
+- `write_id` = hex sha256 of `"shim-claude-sidecar|v<N>|" + file_id + "|" +
+  offset + "|" + discriminator`, `<N>` being `convert.ConversionVersion`, where `file_id` is the tailed file's `dev:inode`
   identity — the SAME identity the store's cursor row is keyed by (ruling R-S1).
   DETERMINISTIC: randomness is forbidden, because replay idempotence at the
   store rests entirely on the same bytes minting the same id. The discriminator
   separates the several entries one record mints (a block index, `settle:<id>`,
   `terminal`, `diag`). A RECORD WITH NO FILE POSITION gets a RUN-SCOPED
-  identity instead: `sha256("shim-claude-sidecar|run:<run>|" + discriminator)`,
+  identity instead: `sha256("shim-claude-sidecar|v<N>|run:<run>|" + discriminator)`,
   carrying no offset at all. Exactly one record is like that — a terminal
   concluded from the ABSENCE of a file (a run swept up at boot, a spool that was
   never readable) — and inventing offset 0 for it would claim a byte nobody saw.
