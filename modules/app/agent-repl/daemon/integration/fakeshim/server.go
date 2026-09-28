@@ -84,6 +84,9 @@ type agentFrame struct {
 	pointer string
 	// turn, when set, stamps the delivered entry — see Command.Turn.
 	turn string
+	// retired, when set, makes this a WatchAgentResponse.retired frame: the
+	// entry as last served, at its own pointer. It mints no pointer.
+	retired *conversationv1.HistoryEntryAt
 }
 
 // stamp is the entry's turn stamp, or nil for an unstamped entry.
@@ -695,6 +698,14 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				return connect.NewError(connect.CodeUnavailable, errors.New("fakeshim: agent stream dropped"))
 			}
 			if f.agent != "" && target != "" && f.agent != target {
+				continue
+			}
+			if f.retired != nil {
+				if err := stream.Send(&shimv1.WatchAgentResponse{
+					Frame: &shimv1.WatchAgentResponse_Retired{Retired: f.retired},
+				}); err != nil {
+					return err
+				}
 				continue
 			}
 			seq++
