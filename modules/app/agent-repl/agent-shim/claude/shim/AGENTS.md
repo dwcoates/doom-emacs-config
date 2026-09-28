@@ -1149,6 +1149,39 @@ through (`write`, `writeDurable`). Its invariants:
 - Batch timing is logged per batch (`logVerbose`, or `debug` while a backlog
   episode is open) with rows, bytes, attempts, `duration_ms` and the backlog.
 
+## Every row states its conversation place, and every entry serves it
+
+The daemon orders every feed row by `HistoryEntryAt.place` and keys a durable
+row by it across restarts, so the shim stamps a place on every row it writes and
+serves one on every entry it hands out.
+
+- **STAMPED ONCE, AT THE WRITER'S DOOR.** `store/writer.ts` places each row as
+  it is enqueued (`PlaceClock`): `at_ms` is the instant the shim first held the
+  fact (`PersistenceOptions.nowMs`, wall-clock milliseconds in production), and
+  `ordinal` counts the rows stamped within that millisecond. The place rides the
+  queued row (`PlacedEntry`), so a retried batch carries the ORIGINAL instant
+  and `toStoreEntry` never reads a clock. The clock never runs backwards: a
+  wall-clock step back holds the last instant and keeps counting ordinals. A
+  reading that is not a positive instant is refused as a writer defect, never
+  stamped. The store keeps a row's FIRST stated place, so a unit's later
+  upserts (every streamed delta) move nothing.
+- **SERVED BY ONE MAPPING.** `toHistoryEntryAt` (`store/reader.ts`) is the one
+  conversion every serving path uses — a WatchAgent page and its live and
+  retired frames, ReadHistory, StartTurn's page — and it passes the store's
+  `recorded_place` / `received_place` arm through unchanged. A line a store
+  served with no place (one that predates places) is served unplaced and
+  traced at debug; the proto defines that as "the serving side states no
+  places", which the consumer orders by its own receipt.
+- **`ReadHistory.through`** is validated (a positive `at_ms`,
+  `read_history.through`) and forwarded to the store's `ReadAgentPage.through`
+  through `Persistence.readPageThrough`. It never vouches for the book: any book
+  the store holds may be named, and one it never heard of is the typed
+  `unknown_agent` refusal.
+- The fake store (`test/fakes/store-server.ts`) reproduces the same contract:
+  first stated place kept, an unplaced row served at its receipt instant,
+  pages in descending place, `after` below the named line's current place,
+  `through` with its `unknown_agent` refusal, and catch-up by write order.
+
 ## Validation and errors
 
 - **One base validate function per request message** (`service/validate/

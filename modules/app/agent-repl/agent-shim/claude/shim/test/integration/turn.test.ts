@@ -22,6 +22,7 @@ import {
   promptAgent,
   readHistoryAfter,
   readHistoryFirst,
+  readHistoryThrough,
   startTurnRequest,
   stopAgent,
   turnId,
@@ -517,6 +518,24 @@ describe("WatchAgent", () => {
     watch.close();
   });
 
+  test("a tailed entry carries the place the shim observed it at", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    // Act.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    const first = watchAgentEntry(await watch.next());
+    watch.close();
+
+    // Assert.
+    expect([first.place.case, (first.place.value?.atMs ?? 0n) > 0n]).toEqual(["recordedPlace", true]);
+  });
+
   test("it opens with a page and then tails one POINTERED entry per write", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
@@ -931,6 +950,62 @@ describe("ReadHistory", () => {
     expect(rest.boundary.case).toBe("floor");
     // EXACTLY the remainder: the whole book, less the page already served.
     expect(rest.entries.length).toBe(whole.entries.length - firstPage.entries.length);
+  });
+
+  test("every entry it serves carries the place the shim observed it at", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await untilTerminal(watch);
+    watch.close();
+
+    // Act.
+    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })));
+
+    // Assert.
+    expect(new Set(page.entries.map((entry) => entry.place.case))).toEqual(new Set(["recordedPlace"]));
+  });
+
+  test("through reads the book as it stood at an instant", async () => {
+    // Arrange: the bound is the place of the book's oldest entry.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await untilTerminal(watch);
+    watch.close();
+    const whole = historyPage(await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })));
+    const oldest = whole.entries[whole.entries.length - 1];
+    const bound = oldest?.place.value?.atMs ?? 0n;
+
+    // Act.
+    const asItStood = historyPage(await shim.clients.h1.readHistory(readHistoryThrough(bound, { pageSize: 200 })));
+
+    // Assert.
+    const expected = whole.entries.filter((entry) => (entry.place.value?.atMs ?? 0n) <= bound);
+    expect(asItStood.entries.map((entry) => entry.at?.value)).toEqual(expected.map((entry) => entry.at?.value));
+  });
+
+  test("through a book the store never heard of is refused unknown_agent", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    // Act.
+    const response = await shim.clients.h1.readHistory(
+      readHistoryThrough(1_000n, { target: agentId("no-such-agent") }),
+    );
+
+    // Assert.
+    expect(readHistoryKind(response)).toBe("unknownAgent");
   });
 
   test("an unknown agent is refused unknown_agent", async () => {

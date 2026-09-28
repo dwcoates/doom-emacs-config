@@ -13,6 +13,7 @@ import (
 
 	connect "connectrpc.com/connect"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 )
 
@@ -269,27 +270,33 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 	}{
 		{
 			name:      "missing book",
-			req:       &storev1.ReadAgentPageRequest{PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
 			name:      "empty book value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
 			name:      "zero page_size",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, After: &storev1.StoreItemPointer{Value: "p"}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "page_size",
 		},
 		{
-			name:      "missing after pointer",
+			name:      "unset position",
 			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10},
-			wantField: "after",
+			wantField: "position",
+		},
+		{
+			name: "non-positive through bound",
+			req: &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10,
+				Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 0}}},
+			wantField: "through.at_ms",
 		},
 		{
 			name:      "empty after pointer value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, After: &storev1.StoreItemPointer{Value: ""}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: ""}}},
 			wantField: "after",
 		},
 	}

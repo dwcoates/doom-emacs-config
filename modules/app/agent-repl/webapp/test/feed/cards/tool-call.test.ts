@@ -37,6 +37,7 @@ import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { HAS_MORE_CLASS, TITLE_FOLD_CLASS } from "../../../src/feed/bubble-more.js";
 import { fireResize } from "../../resize-observer.js";
 import { measureTitle } from "../title-measure.js";
+import { orderFor } from "../../feed-order.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -57,7 +58,7 @@ function rowContext(ticker: Ticker = createTicker(1000)): RowContext {
       composerEnabled: false,
     }),
     feed: "root",
-    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }) }),
+    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
     revealRow: async () => true,
   };
 }

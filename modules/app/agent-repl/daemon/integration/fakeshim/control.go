@@ -67,6 +67,11 @@ type Command struct {
 	// open turn. Empty delivers it unstamped, which is how pre-contract data
 	// reaches the daemon.
 	Turn string `json:"turn,omitempty"`
+	// PlaceMs states push_agent_frame's entry's conversation place
+	// (HistoryEntryAt.recorded_place, ordinal 0), as the real shim states one
+	// for every entry it serves. Zero delivers it with no place, which is how
+	// a serving side that states none reaches the daemon.
+	PlaceMs int64 `json:"place_ms,omitempty"`
 	// Work addresses push_bash (a DetachedWorkId value).
 	Work string `json:"work,omitempty"`
 	// Stream names the stream family drop_stream severs.

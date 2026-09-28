@@ -1505,6 +1505,19 @@ the suite rather than quietly shrinking what the feed can show.
 - INSTANTS COME FROM THE FILE, never a clock here. Every `started_at` /
   `settled_at` is the record's own timestamp, so a re-read after a restart mints
   byte-identical frames under byte-identical write ids.
+- EVERY ENTRY STATES ITS CONVERSATION PLACE (`StoreEntry.place`), stamped once
+  per record at the converter's door (`Converter.Line` → `stampPlace`,
+  `internal/convert/place.go`), exactly as the turn is. `at_ms` is the timestamp
+  of the record that OPENED the entry's unit: the earliest
+  `AgentActivityStartedAt` the entry's frame states (a start arm, or a settle's
+  restated start), so a unit first written at its RESULT (a deferred spawn
+  announcement) is still placed at its call; otherwise the record's own
+  timestamp. `ordinal` is the entry's index among the entries the record
+  produced. Both come from the bytes, so a re-read mints the identical place. A
+  record with no parsable timestamp whose entry states no start leaves the place
+  UNSET, and so does every entry minted outside a transcript record (a spool's
+  bytes, an inferred terminal): the store orders those by receipt. The store
+  keeps a row's first stated place, so a settle never moves its unit.
 - PRESENCE, NEVER SENTINELS: an unreported figure stays UNSET. An absent effort
   is not "low"; an absent retry hint is not "retry now"; an absent sandbox report
   is not "sandboxed"; an absent subagent total is not zero.

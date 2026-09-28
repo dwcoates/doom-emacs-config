@@ -1,5 +1,6 @@
 import { beforeEach } from "vitest";
 import { resetPageState } from "./page-state.js";
+import { resetOrderKeys } from "./feed-order.js";
 import { installResizeObserver } from "./resize-observer.js";
 import { installIntersectionObserver } from "./intersection-observer.js";
 
@@ -27,3 +28,6 @@ installIntersectionObserver();
  * standing link verdict, no compaction line. See page-state.ts for each.
  */
 beforeEach(resetPageState);
+
+/** Every test mints its fixture rows' order keys afresh (feed-order.ts). */
+beforeEach(resetOrderKeys);

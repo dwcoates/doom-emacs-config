@@ -67,6 +67,53 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	}
 }
 
+// TestALateRowIsPushedAtItsTruePlace reproduces the 2026-09-27 incident end to
+// end: a response written early in the conversation reaches the daemon only
+// after later rows were drawn and a reader holds them. It is pushed carrying
+// the order key of where it belongs — between its neighbors — never one that
+// sorts it after the rows that merely arrived first.
+func TestALateRowIsPushedAtItsTruePlace(t *testing.T) {
+	t.Parallel()
+	// Arrange: two answers, placed at 13:30 and 14:36, are drawn and opened.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-late", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	for _, frame := range feedResponseFrames("resp-early", "early") {
+		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_130_000, frame)
+	}
+	for _, frame := range feedResponseFrames("resp-later", "later") {
+		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_436_000, frame)
+	}
+	page, token := f.openFeedOnceCarrying("both placed answers", func(p *frontendv1.FeedPage) bool {
+		return pagedKey(p, "early") != "" && pagedKey(p, "later") != ""
+	})
+	tail := f.d.WatchFeed(token)
+
+	// Act: the 13:44 answer arrives last.
+	for _, frame := range feedResponseFrames("resp-late", "late") {
+		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_144_000, frame)
+	}
+
+	// Assert.
+	got := awaitRow(t, f, tail, "the late answer's push", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "late"
+	})
+	key, early, later := got.GetOrder().GetKey(), pagedKey(page, "early"), pagedKey(page, "later")
+	if !(early < key && key < later) {
+		t.Fatalf("the late row was pushed at key %q, want it between %q and %q", key, early, later)
+	}
+}
+
+// pagedKey is the order key of the settled response a page carries with
+// MARKDOWN, or empty when it carries none.
+func pagedKey(page *frontendv1.FeedPage, markdown string) string {
+	for _, r := range page.GetSuccess().GetRows() {
+		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == markdown {
+			return r.GetOrder().GetKey()
+		}
+	}
+	return ""
+}
+
 // TestAFeedTextScaleFrameIsNotARowOnTheFeedTail pins that WatchFeed's THREE
 // arms stay distinguishable on the wire: the response carries `row`,
 // `selection` and `feed_text_scale` (endpoint_watch_feed.proto), and the zoom

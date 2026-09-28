@@ -158,12 +158,20 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 
 	// A TURN IS NAMED OR ABSENT, never present and empty: an empty identifier
 	// would read as a turn nobody opened, and the store keeps the first stamp a
-	// row is written with (carryStoredTurn), so a blank one would stick.
+	// row is written with (carryStoredStamps), so a blank one would stick.
 	if entry.Turn != nil && entry.GetTurn().GetValue() == "" {
 		return routed{}, invalidFieldf(entryField(index, "turn"), "entries[%d].turn is present with an empty value (write_id=%q) — absence is expressed by absence, never by an empty identifier", index, r.writeID)
 	}
 	if err := validateConversionVersion(entry, plane, index); err != nil {
 		return routed{}, err
+	}
+	// A PLACE IS STATED OR ABSENT, never present and empty: the store keeps a
+	// row's first stated place (carryStoredStamps), so a zero instant would
+	// stick and order the row before the whole conversation.
+	if entry.Place != nil && entry.GetPlace().GetAtMs() <= 0 {
+		return routed{}, invalidSitef(SitePlaceNotPositive, entryField(index, "place.at_ms"),
+			"entries[%d].place.at_ms is %d (write_id=%q) — a conversation place is a positive instant, and absence is expressed by leaving the place unset",
+			index, entry.GetPlace().GetAtMs(), r.writeID)
 	}
 
 	frame, err := proto.Marshal(entry)

@@ -1391,6 +1391,17 @@ export class TurnEngine {
         this.session.reportStoreReadable();
         return older;
       }
+      if (request.position.case === "through") {
+        // THE BOOK AS IT STOOD AT AN INSTANT, forwarded to the store's own
+        // `through` read. It never vouches for the book: any book the store
+        // holds may be named (a fork reads its parent's this way), and one the
+        // store never heard of is the typed unknown-agent refusal.
+        const asItStood = readHistoryPage(
+          await this.session.persistence.readPageThrough(target, request.pageSize, request.position.value),
+        );
+        this.session.reportStoreReadable();
+        return asItStood;
+      }
       // THE SAME PRODUCER VERDICT `WatchAgent` GIVES. An agent this shim
       // announced whose first row has not landed has an EMPTY past, not an
       // unknown one — a keep-alive-only session writes nothing to any book, and
