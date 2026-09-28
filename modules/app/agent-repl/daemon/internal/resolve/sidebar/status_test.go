@@ -12,6 +12,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/vocab"
 	"claude-repld/internal/wsm"
 )
 
@@ -303,8 +304,9 @@ func TestRowIsInterruptedWhenTheUserStoppedTheTurn(t *testing.T) {
 	}
 }
 
-func TestRowIsVendorBlockedWhenTheQueryDied(t *testing.T) {
-	// Arrange.
+func TestAQueryDeathDoesNotBlockTheRow(t *testing.T) {
+	// Arrange: a dead query is a FAILED TURN, not a block (owner ruling,
+	// 2026-09-28); the watcher closes the turn it cut as failed.
 	r := live(t, arrange(t))
 
 	// Act.
@@ -313,8 +315,8 @@ func TestRowIsVendorBlockedWhenTheQueryDied(t *testing.T) {
 			QueryDied: &conversationv1.SessionQueryDied{}}})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-		t.Fatalf("status = %q, want vendor_blocked", got)
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q, want ready", got)
 	}
 }
 
@@ -335,108 +337,102 @@ func TestRowIsVendorBlockedWhenTheVendorRejectedTheAllowance(t *testing.T) {
 	}
 }
 
-func TestRowIsVendorBlockedOnAnAccountLevelFailure(t *testing.T) {
-	// Arrange.
-	r := live(t, arrange(t))
-
-	// Act.
-	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_BlockingLimit{
-			BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-		t.Fatalf("status = %q, want vendor_blocked", got)
-	}
+// rejectedRateLimit is the vendor's rejected allowance verdict.
+func rejectedRateLimit() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_RateLimitStatus{
+			RateLimitStatus: &conversationv1.SessionRateLimitStatus{
+				Status: &conversationv1.SessionRateLimitStatus_Rejected{
+					Rejected: &conversationv1.SessionRateLimitRejected{}}}}}
 }
 
-// A turn that ended in failure cannot proceed until the user acts, which is
-// what the footer paints `blocked` and the roster paints vendor_blocked (blue).
-// The roster and the footer decide this through the SAME predicate
-// (footer.FailureBlocks), so a failure the footer blocks the roster blocks too —
-// the owner's 2026-09-14 ruling that the roster agrees with the footer.
-func TestRowIsVendorBlockedOnAnOrdinaryRunFailure(t *testing.T) {
-	// Arrange.
-	r := live(t, arrange(t))
-
-	// Act.
-	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ModelError{
-			ModelError: &conversationv1.AgentModelError{}}})
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-		t.Fatalf("status = %q, want vendor_blocked", got)
-	}
+// failedTurn runs one turn on a live row that the main agent's terminal ends
+// with failure, closed as the daemon closes it: failed.
+func failedTurn(r sidebarResolver, failure *conversationv1.AgentFailure) {
+	turn := ids.TurnID("turn-1")
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnAgentTerminal(theWS, agent("main"), &turn, nil, failure)
+	r.SetTurnEnded(theWS, wsm.CloseFailed)
 }
 
-func TestRowIsVendorBlockedOnAnAuthenticationFailure(t *testing.T) {
-	// Arrange.
-	r := live(t, arrange(t))
-
-	// Act: a logged-out account is exactly the "unusable" the footer paints
-	// blocked and the roster must paint vendor_blocked (blue), not fall through
-	// to done/ready (green).
-	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
-			ApiRequestFailed: &conversationv1.ApiRequestFailed{
-				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
-					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}})
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-		t.Fatalf("status = %q, want vendor_blocked", got)
+// TestEveryAgentFailureArmTakesItsClassifiedArmAndColor walks every
+// AgentFailure arm (owner ruling, 2026-09-28): vendor_blocked ONLY for the
+// vendor or the account, the turn's own `turn_failed` for every other failure
+// (any future arm included), and a green `done` for the two expected stops.
+// The colors are the real vocabulary's, on the shared assignment and on the
+// tab bar, which paints the same arm.
+func TestEveryAgentFailureArmTakesItsClassifiedArmAndColor(t *testing.T) {
+	colors, err := vocab.LoadRenderColors("../../../../proto/vocab")
+	if err != nil {
+		t.Fatalf("LoadRenderColors: %v", err)
 	}
-}
-
-// The four run terminals whose failure.proto evidence messages state that they
-// resolve the workspace PURPLE — landing 8.
-func TestRowIsVendorBlockedOnEachPurpleRunTerminal(t *testing.T) {
-	tests := []struct {
+	cases := []struct {
 		name    string
 		failure *conversationv1.AgentFailure
+		arm     string
+		color   string
 	}{
-		{"max_turns", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{
-			MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}},
-		{"budget_exhausted", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{
-			BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}},
-		{"execution_error", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{}}}},
-		{"structured_output_retry_exhausted", &conversationv1.AgentFailure{
-			Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{
-				StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}},
+		{name: "api_request_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}}, arm: "vendor_blocked", color: "blue"},
+		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, arm: "vendor_blocked", color: "blue"},
+		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, arm: "vendor_blocked", color: "blue"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "vendor_blocked", color: "blue"},
+		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "turn_failed", color: "blue"},
+		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "turn_failed", color: "blue"},
+		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "turn_failed", color: "blue"},
+		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, arm: "done", color: "green"},
+		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, arm: "turn_failed", color: "blue"},
+		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, arm: "done", color: "green"},
+		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, arm: "turn_failed", color: "blue"},
+		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, arm: "turn_failed", color: "blue"},
+		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, arm: "turn_failed", color: "blue"},
+		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, arm: "turn_failed", color: "blue"},
+		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, arm: "turn_failed", color: "blue"},
+		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, arm: "turn_failed", color: "blue"},
+		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, arm: "turn_failed", color: "blue"},
+		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, arm: "turn_failed", color: "blue"},
+		{name: "query_died", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, arm: "turn_failed", color: "blue"},
+		{name: "an arm this build does not know", failure: &conversationv1.AgentFailure{}, arm: "turn_failed", color: "blue"},
 	}
-	for _, tc := range tests {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			r := live(t, arrange(t))
 
 			// Act.
-			r.OnAgentTerminal(theWS, agent("a1"), nil, nil, tc.failure)
+			failedTurn(r, tc.failure)
 
 			// Assert.
-			if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-				t.Fatalf("status = %q, want vendor_blocked", got)
+			got := statusName(onlyRow(t, r))
+			if got != tc.arm {
+				t.Fatalf("status = %q, want %q", got, tc.arm)
+			}
+			for _, surface := range []string{"webapp", "emacs_tab_bar"} {
+				color, err := colors.RosterStatusColor(surface, got)
+				if err != nil {
+					t.Fatalf("RosterStatusColor(%s, %s): %v", surface, got, err)
+				}
+				if color != tc.color {
+					t.Fatalf("%s paints %q %q, want %q", surface, got, color, tc.color)
+				}
 			}
 		})
 	}
 }
 
-// A Stop hook ended the run short of its ask, so the turn cannot be treated as
-// complete: the footer paints it `blocked` and the roster agrees through the
-// shared predicate, so both read blue rather than the roster drifting to green.
-func TestRowIsVendorBlockedOnAStopHookPrevention(t *testing.T) {
-	// Arrange.
+func TestASubagentFailureDoesNotBlockTheRow(t *testing.T) {
+	// Arrange: only the turn's own terminal speaks for the workspace, which is
+	// all the footer has ever read.
 	r := live(t, arrange(t))
 
 	// Act.
-	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_StopHookPrevented{
-			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}})
+	r.OnAgentTerminal(theWS, agent("sub-1"), nil, nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_BlockingLimit{
+			BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
-		t.Fatalf("status = %q, want vendor_blocked", got)
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q, want ready", got)
 	}
 }
 
@@ -630,9 +626,7 @@ func TestVendorBlockedDominatesAnOpenPermission(t *testing.T) {
 	r.OnPermission(theWS, agent("a1"), permissionAsk("p1"))
 
 	// Act.
-	r.OnSessionUpdate(theWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{
-			QueryDied: &conversationv1.SessionQueryDied{}}})
+	r.OnSessionUpdate(theWS, rejectedRateLimit())
 
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {

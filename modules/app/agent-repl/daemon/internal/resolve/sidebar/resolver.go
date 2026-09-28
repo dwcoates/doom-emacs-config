@@ -12,6 +12,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -441,8 +442,15 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 	if turn != nil {
 		ctx["turn_id"] = string(*turn)
 	}
-	blocked := vendorBlocked(failure)
-	ctx["vendor_blocked"] = blocked
+	// ONLY THE TURN'S OWN TERMINAL SPEAKS FOR THE WORKSPACE. A subagent's
+	// failure ends the subagent, not the session, and the footer has only
+	// ever read the main thread's terminal: reading every agent's here let a
+	// failed subagent paint the whole row blocked beside a strip that was not.
+	class := ladder.NoFailure
+	if turn != nil {
+		class = ladder.ClassifyFailure(failure)
+	}
+	ctx["failure_class"] = class.String()
 	r.mutateWorkspace(ws, "daemon.sidebar.on_agent_terminal", "the roster took an agent terminal", ctx,
 		func(s *wsState) {
 			for key := range s.permissions {
@@ -450,7 +458,11 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 					delete(s.permissions, key)
 				}
 			}
-			if blocked {
+			if turn == nil {
+				return
+			}
+			s.lastFailure = class
+			if class == ladder.VendorBlocked {
 				s.vendorBlocked = true
 			}
 		})
@@ -472,14 +484,16 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsState)) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_QueryDied:
+		// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling,
+		// 2026-09-28): the watcher closes the turn it cut as failed, which
+		// the roster draws `turn_failed`, and nothing about the vendor or the
+		// account refuses the session.
 		return "query_died", func(s *wsState) {
-			s.vendorBlocked = true
 			s.turn = nil
 		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
-			_, rejected := u.RateLimitStatus.GetStatus().(*conversationv1.SessionRateLimitStatus_Rejected)
-			s.vendorBlocked = rejected
+			s.vendorBlocked = ladder.RateLimitBlocks(u.RateLimitStatus)
 		}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) { s.compacting = true }
@@ -549,22 +563,6 @@ func terminalOutcome(success *conversationv1.AgentSuccess, failure *conversation
 	default:
 		return "unset"
 	}
-}
-
-// vendorBlocked reports whether a failure leaves the session unusable, which is
-// what the roster's vendor_blocked dot says and what render-colors resolves
-// BLUE.
-//
-// IT IS NOT ITS OWN CLASSIFIER. The verdict is the footer's `footer.FailureBlocks`,
-// the ONE predicate the footer's `blocked` arm also consults, so the dot and the
-// strip cannot disagree about the same failure — the owner's 2026-09-14 ruling
-// that the roster agrees with the footer. The roster once kept a private
-// allowlist of run terminals here, which drifted from the footer: an
-// authentication_failed failure the footer painted `blocked` fell through this
-// list to `done`/`ready` (green) on the roster. Sharing the predicate is what
-// makes that drift unrepresentable rather than merely fixed.
-func vendorBlocked(failure *conversationv1.AgentFailure) bool {
-	return footer.FailureBlocks(failure)
 }
 
 // anyWindowOpen reports whether the diagnostics carry an open degraded window,

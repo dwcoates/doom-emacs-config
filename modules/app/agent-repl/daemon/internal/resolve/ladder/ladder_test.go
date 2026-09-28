@@ -193,20 +193,23 @@ func TestAwaitingBringUp(t *testing.T) {
 		name         string
 		linkSeen     bool
 		turnInFlight bool
+		announced    bool
 		want         bool
 	}{
 		{name: "a turn on a route never seen awaits the bring-up", turnInFlight: true, want: true},
+		{name: "an announced session on a route never seen awaits the bring-up", announced: true, want: true},
 		{name: "a turn on a seen route does not", linkSeen: true, turnInFlight: true},
-		{name: "no turn on a route never seen does not", turnInFlight: false},
+		{name: "an announced session on a seen route does not", linkSeen: true, announced: true},
+		{name: "nothing on a route never seen does not"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := AwaitingBringUp(tc.linkSeen, tc.turnInFlight)
+			got := AwaitingBringUp(tc.linkSeen, tc.turnInFlight, tc.announced)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("AwaitingBringUp(%v, %v) = %v, want %v", tc.linkSeen, tc.turnInFlight, got, tc.want)
+				t.Fatalf("AwaitingBringUp(%v, %v, %v) = %v, want %v", tc.linkSeen, tc.turnInFlight, tc.announced, got, tc.want)
 			}
 		})
 	}

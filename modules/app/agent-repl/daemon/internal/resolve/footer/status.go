@@ -142,11 +142,12 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 		if arm := r.disconnectedByFault(s, log); arm != nil {
 			return arm
 		}
-		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil) {
+		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted) {
 			return nil
 		}
-		// A TURN ACCEPTED ON A ROUTE NEVER SEEN awaits the bring-up, and the
-		// roster draws that window `init` (resolve/ladder).
+		// A TURN ACCEPTED, OR A SESSION ANNOUNCED, ON A ROUTE NEVER SEEN
+		// awaits the bring-up, and the roster draws that window `init`
+		// (resolve/ladder).
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
 		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Disconnected{
 			Disconnected: &frontendv1.FooterStatusDisconnected{
@@ -564,7 +565,10 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 // idle is the bottom of the tree: nothing in flight.
 func (r *resolver) idle(s *wsState) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusIdle{Activity: r.idleActivity(s)}
-	if s.turnEverRan {
+	if s.turnFailed {
+		// The same turn end the roster draws `turn_failed` (ladder.ClassifyFailure).
+		arm.Substatus = &frontendv1.FooterStatusIdle_TurnFailed{TurnFailed: &frontendv1.FooterSubStatusIdleTurnFailed{}}
+	} else if s.turnEverRan {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Done{Done: &frontendv1.FooterSubStatusIdleDone{}}
 	} else {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Ready{Ready: &frontendv1.FooterSubStatusIdleReady{}}
