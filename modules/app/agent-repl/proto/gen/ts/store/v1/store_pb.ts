@@ -29,6 +29,8 @@ import type { AgentFrame, AgentWorkflow } from "../../conversation/v1/agent_pb";
 import { file_conversation_v1_agent } from "../../conversation/v1/agent_pb";
 import type { AgentActivityId, AgentBash, AgentId } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
+import type { ConversationPlace } from "../../conversation/v1/history_pb";
+import { file_conversation_v1_history } from "../../conversation/v1/history_pb";
 import type { PeerMessage } from "../../conversation/v1/peer_pb";
 import { file_conversation_v1_peer } from "../../conversation/v1/peer_pb";
 import type { SessionUpdate } from "../../conversation/v1/session_pb";
@@ -41,7 +43,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/store.proto.
  */
 export const file_store_v1_store: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEitgIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBAUIHCgVlbnRyeUIHCgVfdHVybkIVChNfY29udmVyc2lvbl92ZXJzaW9uIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSLaAQoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnRCEQoPX2N1cnNvcl9hZHZhbmNlIk8KDEFnZW50TG9jYXRvchIWCg52ZW5kb3JfdGFza19pZBgBIAEoCRInCgVhZ2VudBgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIkEKD1N0b3JlUmV0aXJlbWVudBISCgp1cHNlcnRfa2V5GAEgASgJEhoKEmNvbnZlcnNpb25fdmVyc2lvbhgCIAEoDSKPAQoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDBIzCgpjb252ZXJzaW9uGAUgASgLMhouc3RvcmUudjEuQ3Vyc29yQ29udmVyc2lvbkgAiAEBQg0KC19jb252ZXJzaW9uIpgBChBDdXJzb3JDb252ZXJzaW9uEg8KB3ZlcnNpb24YASABKA0SNAoHY3VycmVudBgCIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25DdXJyZW50SAASNAoHaGVhbGluZxgDIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IZWFsaW5nSABCBwoFc3RhdGUiGQoXQ3Vyc29yQ29udmVyc2lvbkN1cnJlbnQiKgoXQ3Vyc29yQ29udmVyc2lvbkhlYWxpbmcSDwoHdGhyb3VnaBgBIAEoAyIhChBTdG9yZUl0ZW1Qb2ludGVyEg0KBXZhbHVlGAEgASgJIpEBCgtTdG9yZUxpbmVBdBImCgJhdBgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXISJQoEbGluZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmUSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBAUIHCgVfdHVybiJCChFSZWFkQWdlbnRQYWdlTW9yZRItCglsYXN0X2l0ZW0YASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyIhQKElJlYWRBZ2VudFBhZ2VGbG9vciIiChFBZ2VudFNlc3Npb25Ub2tlbhINCgV2YWx1ZRgBIAEoCSKgAQoQQWdlbnRTZXNzaW9uUGFnZRIkCgVsaW5lcxgBIAMoCzIVLnN0b3JlLnYxLlN0b3JlTGluZUF0EisKBG1vcmUYAiABKAsyGy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlTW9yZUgAEi0KBWZsb29yGAMgASgLMhwuc3RvcmUudjEuUmVhZEFnZW50UGFnZUZsb29ySABCCgoIYm91bmRhcnlCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi+AIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBARI2CgVwbGFjZRgIIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgDiAEBQgcKBWVudHJ5QgcKBV90dXJuQhUKE19jb252ZXJzaW9uX3ZlcnNpb25CCAoGX3BsYWNlIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSLaAQoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnRCEQoPX2N1cnNvcl9hZHZhbmNlIk8KDEFnZW50TG9jYXRvchIWCg52ZW5kb3JfdGFza19pZBgBIAEoCRInCgVhZ2VudBgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIkEKD1N0b3JlUmV0aXJlbWVudBISCgp1cHNlcnRfa2V5GAEgASgJEhoKEmNvbnZlcnNpb25fdmVyc2lvbhgCIAEoDSKPAQoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDBIzCgpjb252ZXJzaW9uGAUgASgLMhouc3RvcmUudjEuQ3Vyc29yQ29udmVyc2lvbkgAiAEBQg0KC19jb252ZXJzaW9uIpgBChBDdXJzb3JDb252ZXJzaW9uEg8KB3ZlcnNpb24YASABKA0SNAoHY3VycmVudBgCIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25DdXJyZW50SAASNAoHaGVhbGluZxgDIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IZWFsaW5nSABCBwoFc3RhdGUiGQoXQ3Vyc29yQ29udmVyc2lvbkN1cnJlbnQiKgoXQ3Vyc29yQ29udmVyc2lvbkhlYWxpbmcSDwoHdGhyb3VnaBgBIAEoAyIhChBTdG9yZUl0ZW1Qb2ludGVyEg0KBXZhbHVlGAEgASgJIpYCCgtTdG9yZUxpbmVBdBImCgJhdBgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXISJQoEbGluZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmUSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARI8Cg5yZWNvcmRlZF9wbGFjZRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAEjwKDnJlY2VpdmVkX3BsYWNlGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblBsYWNlSABCBwoFcGxhY2VCBwoFX3R1cm4iQgoRUmVhZEFnZW50UGFnZU1vcmUSLQoJbGFzdF9pdGVtGAEgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlciIUChJSZWFkQWdlbnRQYWdlRmxvb3IiIgoRQWdlbnRTZXNzaW9uVG9rZW4SDQoFdmFsdWUYASABKAkioAEKEEFnZW50U2Vzc2lvblBhZ2USJAoFbGluZXMYASADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdBIrCgRtb3JlGAIgASgLMhsuc3RvcmUudjEuUmVhZEFnZW50UGFnZU1vcmVIABItCgVmbG9vchgDIAEoCzIcLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGbG9vckgAQgoKCGJvdW5kYXJ5QiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_history, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * One write: a conversation.v1 fact inside the storage envelope.
@@ -140,6 +142,31 @@ export type StoreEntry = Message<"store.v1.StoreEntry"> & {
    * @generated from field: optional uint32 conversion_version = 7;
    */
   conversionVersion?: number | undefined;
+
+  /**
+   * WHERE THIS FACT SITS IN ITS CONVERSATION (conversation.v1
+   * ConversationPlace), stamped by the producer at the one place it builds this
+   * envelope, so every arm carries it and no arm can forget to. Served as
+   * conversation.v1 HistoryEntryAt.recorded_place.
+   *
+   * THE SIDECAR stamps the timestamp of the vendor record that opened the
+   * unit and the entry's index among that record's entries — both read from
+   * the bytes, so a re-read mints the identical place. THE SHIM stamps the
+   * instant it first observed the fact, at the moment it builds the entry, so a
+   * retried write carries the original instant.
+   *
+   * THE STORE KEEPS A ROW'S FIRST STATED PLACE, as it keeps its first turn: a
+   * write with no place, or with a different one, leaves the stored place
+   * standing, so no write moves a row within its book. A row stored with NO
+   * stated place takes the place the first later write states — the one way a
+   * row first written without one gains its recorded place. UNSET when the
+   * producer can state none (a terminal concluded from the absence of a file);
+   * the store then orders the row by its first-insert receipt instant and serves
+   * that as `received_place`. Present with a non-positive at_ms is refused.
+   *
+   * @generated from field: optional conversation.v1.ConversationPlace place = 8;
+   */
+  place?: ConversationPlace | undefined;
 };
 
 /**
@@ -858,9 +885,10 @@ export const CursorConversionHealingSchema: GenMessage<CursorConversionHealing> 
   messageDesc(file_store_v1_store, 19);
 
 /**
- * An opaque, store-minted position of one item in one book's order. Echoed
- * verbatim, never parsed or constructed by a caller; stable across upserts
- * because order is by the unit's FIRST insert, not its last write.
+ * An opaque, store-minted name of one item of one book. Echoed verbatim, never
+ * parsed, constructed or compared by a caller. It names the ITEM, not a place
+ * in any order: stable across upserts and across the item gaining a recorded
+ * place, so an echoed pointer never goes stale because its item was re-placed.
  *
  * @generated from message store.v1.StoreItemPointer
  */
@@ -879,14 +907,15 @@ export const StoreItemPointerSchema: GenMessage<StoreItemPointer> = /*@__PURE__*
   messageDesc(file_store_v1_store, 20);
 
 /**
- * One line, its position and its turn, so the caller always holds a reconnect
- * and paging pointer for the newest thing it has seen.
+ * One line, its pointer, its turn and its place, so the caller always holds a
+ * resumption pointer for the newest thing it has seen and can order what it
+ * holds by conversation place.
  *
  * @generated from message store.v1.StoreLineAt
  */
 export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
   /**
-   * This line's position in its book's order.
+   * This line's resumption pointer.
    *
    * @generated from field: store.v1.StoreItemPointer at = 1;
    */
@@ -906,6 +935,32 @@ export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
    * @generated from field: optional conversation.v1.TurnId turn = 3;
    */
   turn?: TurnId | undefined;
+
+  /**
+   * WHERE THE LINE SITS IN ITS CONVERSATION — the key this store orders every
+   * book by, served exactly as conversation.v1 HistoryEntryAt.place. Always set
+   * by this store. THE ARM IS WHO ESTABLISHED IT.
+   *
+   * @generated from oneof store.v1.StoreLineAt.place
+   */
+  place: {
+    /**
+     * The row's first stated place (StoreEntry.place).
+     *
+     * @generated from field: conversation.v1.ConversationPlace recorded_place = 4;
+     */
+    value: ConversationPlace;
+    case: "recordedPlace";
+  } | {
+    /**
+     * No write of the row stated a place: its first-insert receipt instant
+     * stands in, with ordinal 0.
+     *
+     * @generated from field: conversation.v1.ConversationPlace received_place = 5;
+     */
+    value: ConversationPlace;
+    case: "receivedPlace";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
