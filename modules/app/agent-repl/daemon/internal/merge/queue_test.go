@@ -20,7 +20,7 @@ func TestEnqueueRefusesAWorkspaceWithNoLayoutFacts(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -41,7 +41,7 @@ func TestEnqueueRefusesAnIncompleteLayout(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -63,7 +63,7 @@ func TestEnqueueRefusesADeletedSession(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -76,12 +76,12 @@ func TestEnqueueRefusesADeletedSession(t *testing.T) {
 func TestEnqueueRefusesASecondEnqueue(t *testing.T) {
 	// Arrange: an already-queued merge.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("the first enqueue failed: %v", err)
 	}
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -95,7 +95,7 @@ func TestEnqueueRefusesASecondEnqueue(t *testing.T) {
 func TestEnqueueRefusesAWorkspaceAlreadyMerging(t *testing.T) {
 	// Arrange: a queue entry already admitted.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("the first enqueue failed: %v", err)
 	}
 	if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
@@ -103,7 +103,7 @@ func TestEnqueueRefusesAWorkspaceAlreadyMerging(t *testing.T) {
 	}
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -122,7 +122,7 @@ func TestEnqueueLeavesNoStateWhenItRefuses(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	_ = h.o.Enqueue(context.Background(), theWorkspace)
+	_ = h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	if _, has := h.o.Facts(theWorkspace); has {
@@ -143,7 +143,7 @@ func TestEnqueueKeepsFifoOrder(t *testing.T) {
 	h.register("ws-2", "ws-two")
 	h.register("ws-3", "ws-three")
 	for _, ws := range order {
-		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+		if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 			t.Fatalf("enqueueing %s: %v", ws, err)
 		}
 	}
@@ -167,7 +167,7 @@ func TestEnqueueKeepsFifoOrder(t *testing.T) {
 func TestPauseStopsAdmission(t *testing.T) {
 	// Arrange: a queued merge on a paused queue.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	if err := h.o.Pause(context.Background(), nil); err != nil {
@@ -195,7 +195,7 @@ func TestUnpauseResumesAdmission(t *testing.T) {
 	h.landsCleanly("abc123def456")
 	h.gatePasses("daemon")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	if err := h.o.Pause(context.Background(), nil); err != nil {
@@ -219,7 +219,7 @@ func TestUnpauseResumesAdmission(t *testing.T) {
 func TestPauseRefusesAnAlreadyPausedQueue(t *testing.T) {
 	// Arrange: an already-paused queue.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	if err := h.o.Pause(context.Background(), nil); err != nil {
@@ -240,7 +240,7 @@ func TestPauseRefusesAnAlreadyPausedQueue(t *testing.T) {
 func TestUnpauseRefusesAQueueThatIsNotPaused(t *testing.T) {
 	// Arrange: a running queue.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestEvictRemovesAQueuedMerge(t *testing.T) {
 	h := newHarness(t)
 	h.register("ws-2", "ws-two")
 	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
-		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+		if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 			t.Fatalf("enqueueing %s: %v", ws, err)
 		}
 	}
@@ -284,7 +284,7 @@ func TestEvictRemovesAQueuedMerge(t *testing.T) {
 func TestEvictRecordsItsOwnCause(t *testing.T) {
 	// Arrange: a queued merge.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 
@@ -321,67 +321,74 @@ func TestEvictRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 // runs, the repository's lock is held so no second daemon admits from the same
 // queue.
 func TestAdmissionTakesTheRepositoryLock(t *testing.T) {
-	// Arrange: a merge that parks, so the run holds its lock when the assert
-	// happens.
+	// Arrange: a merge held inside its gate, so the run holds its slot when
+	// the assert happens.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}}
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
-		t.Fatalf("enqueueing: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
-	waitForParked(t, h)
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
 
 	// Act.
 	_, taken, err := acquireRepoLock(h.o.lockDir, string(h.repoKey()))
 
 	// Assert.
+	close(release)
+	<-done
 	if err != nil {
 		t.Fatalf("probing the repository lock errored: %v", err)
 	}
 	if taken {
 		t.Fatal("the repository's queue lock was free while a merge was running")
 	}
-	cancel()
-	<-done
 }
 
 // TestPumpAdmitsNothingWhileARunHoldsTheRepository covers the in-process half of
 // the same exclusivity.
 func TestPumpAdmitsNothingWhileARunHoldsTheRepository(t *testing.T) {
-	// Arrange: a parked run holding the repository.
+	// Arrange: a run held inside its gate, holding the repository.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.register("ws-2", "ws-two")
-	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}}
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
 	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
-		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+		if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 			t.Fatalf("enqueueing %s: %v", ws, err)
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
-	waitForParked(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
 
 	// Act.
 	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
 
 	// Assert.
+	close(release)
+	<-done
 	if err != nil {
 		t.Fatalf("the second pump errored: %v", err)
 	}
 	if ran {
 		t.Fatal("a second merge was admitted while the first held the repository")
 	}
-	cancel()
-	<-done
+}
+
+// holdTheGate holds the harness's next gate run until release is closed, and
+// signals inGate once it is held: the rendezvous a test needs to act while a
+// merge is in its long phase.
+func holdTheGate(h *harness) (inGate, release chan struct{}) {
+	inGate, release = make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		h.runner.mu.Lock()
+		h.runner.before = nil
+		h.runner.mu.Unlock()
+		close(inGate)
+		<-release
+	}
+	return inGate, release
 }
 
 // TestEnqueuePublishesTheQueuePosition covers the facts a waiting user reads:
@@ -391,7 +398,7 @@ func TestEnqueuePublishesTheQueuePosition(t *testing.T) {
 	h := newHarness(t)
 	h.register("ws-2", "ws-two")
 	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
-		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+		if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
 			t.Fatalf("enqueueing %s: %v", ws, err)
 		}
 	}
@@ -419,7 +426,7 @@ func TestEnqueueSurfacesAnUnexpectedStoreFailure(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), theWorkspace)
+	err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser)
 
 	// Assert.
 	if !errors.Is(err, boom) {
@@ -435,7 +442,7 @@ func TestEnqueueSurfacesAnUnexpectedStoreFailure(t *testing.T) {
 func TestPauseWithNoScopePausesEveryRepository(t *testing.T) {
 	// Arrange: two repositories with a queue each.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	other := wsm.RepoKey("/other/repo/.git")
@@ -466,7 +473,7 @@ func TestPauseWithNoScopePausesEveryRepository(t *testing.T) {
 func TestPauseWithAScopePausesOnlyThatRepository(t *testing.T) {
 	// Arrange: two repositories with a queue each, both registered.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	other := wsm.RepoKey("/other/repo/.git")
@@ -499,7 +506,7 @@ func TestPauseWithAScopePausesOnlyThatRepository(t *testing.T) {
 func TestUnpauseWithAScopeResumesOnlyThatRepository(t *testing.T) {
 	// Arrange: two paused repositories, both registered.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	other := wsm.RepoKey("/other/repo/.git")
@@ -537,7 +544,7 @@ func TestUnpauseWithAScopeResumesOnlyThatRepository(t *testing.T) {
 func TestAScopedPauseKeysTheQueueByTheRepositorysCommonDir(t *testing.T) {
 	// Arrange: one queue, registered by its worktree dir.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	h.registerRepo("repo-one", h.targetD)
@@ -562,7 +569,7 @@ func TestAScopedPauseKeysTheQueueByTheRepositorysCommonDir(t *testing.T) {
 func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	// Arrange: a registry holding one repository, and a ref naming another.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
@@ -584,7 +591,7 @@ func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	// Arrange: a paused queue and a registry holding one repository.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
@@ -610,7 +617,7 @@ func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 func TestEvictEndsTheQueuedBubbleWithTheAbandonedTerminal(t *testing.T) {
 	// Arrange: one queued merge, whose bubble is showing its queue tab.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 
@@ -631,7 +638,7 @@ func TestEvictEndsTheQueuedBubbleWithTheAbandonedTerminal(t *testing.T) {
 func TestEvictsAbandonedTerminalCarriesTheOperatorsCause(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 
@@ -651,7 +658,7 @@ func TestEvictsAbandonedTerminalCarriesTheOperatorsCause(t *testing.T) {
 func TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 
@@ -670,14 +677,10 @@ func TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding(t *testing.T) {
 // invariant: a run that ended on its own terminal has already reported itself,
 // so the next queued merge still gets admitted.
 func TestOneMergesFailureDoesNotStopTheQueueBehindIt(t *testing.T) {
-	// Arrange: a merge whose conclusion git refuses.
+	// Arrange: a merge git refuses to make.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{}}
-	h.git.commitErr = errors.New("nothing to commit")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
+	h.git.mergeErr = errors.New("refusing to merge unrelated histories")
 	enqueue(t, h)
 
 	// Act.

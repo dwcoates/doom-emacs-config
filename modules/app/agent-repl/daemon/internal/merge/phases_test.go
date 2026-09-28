@@ -258,15 +258,17 @@ func TestUnresolvedConflictParks(t *testing.T) {
 	<-done
 }
 
-// TestResolvedConflictConcludesTheCommit covers the other conflict outcome: a
-// clean index means the resolution is staged, and the daemon concludes the
-// commit the brief told the agent to leave alone.
-func TestResolvedConflictConcludesTheCommit(t *testing.T) {
-	// Arrange: a conflict the agent resolves.
+// TestAConflictTheAgentResolvesOnItsBranchLandsOnTheNextAttempt covers the
+// other conflict outcome. The agent brings its OWN branch up to date in its own
+// worktree, and the next attempt is the merge made again, which now lands.
+// (It replaces the daemon concluding a commit the agent staged in the target:
+// the queue never merges in the target any more.)
+func TestAConflictTheAgentResolvesOnItsBranchLandsOnTheNextAttempt(t *testing.T) {
+	// Arrange: a merge that conflicts, then lands once the agent's turn ended.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{}}
+	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	enqueue(t, h)
@@ -286,15 +288,15 @@ func TestResolvedConflictConcludesTheCommit(t *testing.T) {
 	}
 }
 
-// TestResolvedConflictCommitsThroughTheGitLeaf pins the seam: the conclusion
-// goes through gitclient.Git.Commit, not a local shell-out of the merge
-// package's own.
-func TestResolvedConflictCommitsThroughTheGitLeaf(t *testing.T) {
-	// Arrange: a conflict the agent resolves.
+// TestAResolvedConflictCommitsNothingOfTheDaemonsOwn pins who writes a
+// resolution: the agent, on its own branch. The daemon records no commit of its
+// own anywhere, so nothing it made can land on the target unreviewed.
+func TestAResolvedConflictCommitsNothingOfTheDaemonsOwn(t *testing.T) {
+	// Arrange: a conflict the agent resolves on its branch.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{}}
+	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	enqueue(t, h)
@@ -307,35 +309,31 @@ func TestResolvedConflictCommitsThroughTheGitLeaf(t *testing.T) {
 	// Assert.
 	h.git.mu.Lock()
 	defer h.git.mu.Unlock()
-	if len(h.git.commitMessages) != 1 {
-		t.Fatalf("the git leaf saw %d commits, want the resolution's one", len(h.git.commitMessages))
+	if len(h.git.commitMessages) != 0 {
+		t.Fatalf("the daemon made commits %v, want none of its own", h.git.commitMessages)
 	}
 }
 
-// TestAFailedConclusionSurfacesTheGitFailure covers the other half of the
-// seam: the leaf's failure is the merge's failure, never swallowed.
-func TestAFailedConclusionSurfacesTheGitFailure(t *testing.T) {
-	// Arrange: a resolved conflict the git leaf refuses to commit.
+// TestAMergeGitRefusesSurfacesTheGitFailure covers the seam: the leaf's
+// failure to make the merge at all is the merge's failure, never swallowed.
+func TestAMergeGitRefusesSurfacesTheGitFailure(t *testing.T) {
+	// Arrange: a merge git refuses outright.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.git.conflicted = [][]string{{}}
-	h.git.commitErr = errors.New("nothing to commit")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
+	h.git.mergeErr = errors.New("refusing to merge unrelated histories")
 	enqueue(t, h)
 
 	// Act.
 	_ = h.admit(context.Background())
 
 	// Assert: the failure is the MERGE's, stated on its own facts. The pump's
-	// return is no longer where it surfaces: one merge ending badly must not
-	// stop the queue behind it, so the run's terminal is the report.
+	// return is not where it surfaces: one merge ending badly must not stop
+	// the queue behind it, so the run's terminal is the report.
 	facts, _ := h.o.Facts(theWorkspace)
 	if facts.State != StateFailed {
-		t.Fatalf("the merge is %q after a refused conclusion, want it failed", facts.State)
+		t.Fatalf("the merge is %q after git refused it, want it failed", facts.State)
 	}
-	if !strings.Contains(facts.Detail, "nothing to commit") {
+	if !strings.Contains(facts.Detail, "unrelated histories") {
 		t.Fatalf("the merge's detail = %q, want git's own account of the refusal", facts.Detail)
 	}
 }
@@ -475,9 +473,10 @@ func TestGatePassesNoNarrowingForTheFullSet(t *testing.T) {
 	}
 }
 
-// TestGateRunsInTheTargetWorktree covers where the gate runs: on the tree the
-// merge commit produced, which is the target rather than the source.
-func TestGateRunsInTheTargetWorktree(t *testing.T) {
+// TestGateRunsInTheQueuesOwnTree covers where the gate runs: on the tree the
+// merge commit produced, which is the queue's own scratch tree, never the
+// target checkout.
+func TestGateRunsInTheQueuesOwnTree(t *testing.T) {
 	// Arrange: a landed merge.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -494,8 +493,10 @@ func TestGateRunsInTheTargetWorktree(t *testing.T) {
 	// Assert.
 	h.runner.mu.Lock()
 	defer h.runner.mu.Unlock()
-	if h.runner.dirs[0] != h.targetD {
-		t.Fatalf("the gate ran in %q, want the merge target %q", h.runner.dirs[0], h.targetD)
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if len(h.git.queueTrees) != 1 || h.runner.dirs[0] != h.git.queueTrees[0] {
+		t.Fatalf("the gate ran in %v, want the queue's tree %v", h.runner.dirs, h.git.queueTrees)
 	}
 }
 

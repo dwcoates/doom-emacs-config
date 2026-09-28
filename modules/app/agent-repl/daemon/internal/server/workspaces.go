@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -529,7 +530,7 @@ func (s *server) MergeWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Merge.Enqueue(ctx, subject.Record.ID); err != nil {
+	if err := s.deps.Merge.Enqueue(ctx, subject.Record.ID, merge.RequestedByUser); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
