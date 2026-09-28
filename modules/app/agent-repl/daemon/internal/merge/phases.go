@@ -642,7 +642,7 @@ func (r *run) parkUntilResumed(ctx context.Context, p parking) error {
 			if _, err := r.o.deps.AwaitTurnEnd(ctx, r.ws, g.turn); err != nil {
 				return err
 			}
-			r.o.log(ctx, r.ws).Info(op, "the guidance turn of a parked merge ended; the merge resumes", dlog.Context{
+			r.o.log(ctx, r.ws).Info("daemon.merge.guidance", "the guidance turn of a parked merge ended; the merge resumes", dlog.Context{
 				"workspace": string(r.ws), "turn": string(g.turn)})
 			return nil
 		case <-ctx.Done():
@@ -666,7 +666,7 @@ type guidance struct {
 // was delivered: a refused route leaves the run parked, still listening, and
 // its caller holds the refusal.
 func (r *run) deliverGuidance(ctx context.Context, g guidance) bool {
-	const op = "daemon.merge.park"
+	const op = "daemon.merge.guidance"
 	err := r.o.deps.ParkedRoute(ctx, r.ws, g.turn, g.said)
 	g.reply <- err
 	if err != nil {
