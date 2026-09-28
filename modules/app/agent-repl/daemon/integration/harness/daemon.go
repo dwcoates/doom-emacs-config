@@ -307,19 +307,29 @@ type Daemon struct {
 	// the harness's own tests can read a group whose leader is dead and whose
 	// members this harness has not yet signaled to die.
 	afterLeaderExit func()
-	// afterStraysFrozen, when set, runs inside ReapStrays once every stray is
-	// confirmed stopped and before any is killed: the instant at which the
-	// harness's own tests can kill one stray first, as a racing sweep would.
+	// afterStraysFrozen, when set, runs inside each ReapStrays round that lists
+	// a stray, once every listed stray is confirmed stopped and before any is
+	// killed: the instant at which the harness's own tests can kill one stray
+	// first, as a racing sweep would, or undo a stop, as exec does.
 	afterStraysFrozen func()
 	client            agentreplv1connect.AgentReplClient
 	http              *http.Client
 
-	mu       sync.Mutex
-	exited   bool
-	exitErr  error
-	waitOnce sync.Once
-	expected map[string]bool
-	shims    map[string]*ShimControl
+	mu     sync.Mutex
+	exited bool
+	// sigMu makes every signal to the daemon's pid or group, and the reap
+	// that frees them, ONE OWNER'S. The reap takes it once the process has
+	// exited and marks reapBegun before cmd.Wait; every signal takes it and
+	// checks reapBegun first. A reap still running on a goroutine an earlier
+	// bounded wait left behind (Stop giving up on SIGTERM and falling through
+	// to Kill) therefore can never free the pid under a signal, nor between
+	// Kill's leader SIGKILL and its group SIGKILL.
+	sigMu     sync.Mutex
+	reapBegun bool
+	exitErr   error
+	waitOnce  sync.Once
+	expected  map[string]bool
+	shims     map[string]*ShimControl
 }
 
 // installFakeGit copies the scripted `git` into the directory that leads the
@@ -975,7 +985,10 @@ func (d *Daemon) gracefulStopForCoverage() {
 	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
 		return
 	}
-	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	d.sigMu.Lock()
+	sent := !d.reapBegun && d.cmd.Process.Signal(syscall.SIGTERM) == nil
+	d.sigMu.Unlock()
+	if !sent {
 		return
 	}
 	d.awaitReapWithin(DefaultTimeout)
@@ -1050,42 +1063,7 @@ func (d *Daemon) Kill() {
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
-	// A REAPED PROCESS IS NEVER SIGNALED. cmd.Wait has returned, so the kernel
-	// has freed the pid and the group id that shares it: -pid names no group
-	// of ours any more, and signaling it can only reach whatever process the
-	// pid was recycled into. This is the ordinary state of every test that
-	// waits for its daemon to leave on its own (a refused second daemon, a
-	// joining daemon) before the cleanup kill runs. Until the reap below, the
-	// leader is ours and unreaped — a zombie at worst — so every signal names
-	// our process and our group exactly.
-	if d.reaped() {
-		return
-	}
-	pgid := d.cmd.Process.Pid
-	if !d.signalGroup(pgid, syscall.SIGSTOP) {
-		return
-	}
-	if d.afterGroupStopped != nil {
-		d.afterGroupStopped()
-	}
-	if !d.signalLeader(syscall.SIGKILL) {
-		return
-	}
-	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
-	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
-	// it, so the leader WILL exit; only its scheduling is left, and a leader
-	// that never exits after an accepted SIGKILL is a kernel fault the test
-	// binary's own -timeout reports with every stack. The event does not reap
-	// it, so the group id stays ours for the group kill below. A wait that
-	// fails is REPORTED and the kill still goes ahead: a group left running is
-	// worse than one whose leader might have seen a member go.
-	if err := WaitProcessExit(context.Background(), pgid); err != nil {
-		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
-	}
-	if d.afterLeaderExit != nil {
-		d.afterLeaderExit()
-	}
-	if !d.signalGroup(pgid, syscall.SIGKILL) {
+	if !d.killGroup() {
 		return
 	}
 	// THE REAP IS AWAITED ON THE REAP ITSELF, NOT RACED AGAINST A CLOCK. The
@@ -1101,13 +1079,64 @@ func (d *Daemon) Kill() {
 	}
 }
 
+// killGroup runs Kill's signals as sigMu's owner and reports whether the
+// group was killed and is left to reap.
+//
+// A REAPED PROCESS IS NEVER SIGNALED. Once the reap has begun, the kernel may
+// have freed the pid and the group id that shares it: -pid names no group of
+// ours any more, and signaling it can only reach whatever process the pid was
+// recycled into. This is the ordinary state of every test that waits for its
+// daemon to leave on its own (a refused second daemon, a joining daemon)
+// before the cleanup kill runs. While killGroup holds sigMu no reap can
+// begin, so the leader is ours and unreaped — a zombie at worst — and every
+// signal names our process and our group exactly.
+func (d *Daemon) killGroup() bool {
+	d.t.Helper()
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
+		return false
+	}
+	pgid := d.cmd.Process.Pid
+	if !d.signalGroup(pgid, syscall.SIGSTOP) {
+		return false
+	}
+	if d.afterGroupStopped != nil {
+		d.afterGroupStopped()
+	}
+	if !d.signalLeader(syscall.SIGKILL) {
+		return false
+	}
+	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
+	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
+	// it, so the leader WILL exit; only its scheduling is left, and a leader
+	// that never exits after an accepted SIGKILL is a kernel fault the test
+	// binary's own -timeout reports with every stack. The event does not reap
+	// it, so the group id stays ours for the group kill below. A wait that
+	// fails is REPORTED and the kill still goes ahead: a group left running is
+	// worse than one whose leader might have seen a member go.
+	if err := WaitProcessExit(context.Background(), pgid); err != nil {
+		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
+	}
+	if d.afterLeaderExit != nil {
+		d.afterLeaderExit()
+	}
+	return d.signalGroup(pgid, syscall.SIGKILL)
+}
+
 // Freeze stops the daemon's process group and waits for the kernel to confirm
 // the stop, leaving it to a later Kill. A frozen daemon reads nothing, so a
 // shim's frame pushed while it is frozen reaches no daemon at all: it is how a
 // test ends a turn while no daemon is watching, before the daemon dies.
 func (d *Daemon) Freeze() {
 	d.t.Helper()
-	if d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+	if d.cmd == nil || d.cmd.Process == nil {
+		d.t.Fatal("harness: Freeze needs a running daemon")
+		return
+	}
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
 		d.t.Fatal("harness: Freeze needs a running daemon")
 		return
 	}
@@ -1124,31 +1153,41 @@ func (d *Daemon) Freeze() {
 // signalGroup sends sig to the daemon's process group and reports whether the
 // kill should go on.
 //
-// ESRCH is the benign race: the group left on its own between the caller's
-// decision and this signal, and the reap that follows confirms it. EPERM is
-// the same race after a recycle — the pid now belongs to someone else — and is
-// accepted ONLY once the reap confirms our own process is in fact gone, which
-// ends the kill. Every other error is a real fault, reported, and ends it too.
+// The caller holds sigMu and found the reap not begun, so the group id is
+// still ours. ESRCH is the benign race: the group left on its own between the
+// caller's decision and this signal, and the reap that follows confirms it.
+//
+// EPERM IS DARWIN'S ANSWER FOR A GROUP LEFT WITH ONLY ZOMBIES: it finds our
+// own exited, unreaped leader, which it will not signal, and nothing else.
+// That is the ordinary state of the group kill once the leader's exit has
+// orphaned the group and the kernel's SIGHUP has ended its members. It is
+// accepted ONLY once the kernel's process table confirms every process in the
+// group has exited; an EPERM with a live member left, and every other error,
+// is a real fault, reported, and ends the kill.
 func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 	d.t.Helper()
 	err := syscall.Kill(-pgid, sig)
-	switch {
-	case err == nil, errors.Is(err, syscall.ESRCH):
+	if err == nil || errors.Is(err, syscall.ESRCH) {
 		return true
-	case errors.Is(err, syscall.EPERM):
-		if !d.awaitReapWithin(reapGrace) {
-			d.t.Errorf("harness: %v process group %d: %v, and it was still unreaped %s later", sig, pgid, err, reapGrace)
-		}
-		return false
-	default:
-		d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
-		return false
 	}
+	if errors.Is(err, syscall.EPERM) {
+		exited, readErr := groupExited(pgid)
+		if readErr != nil {
+			d.t.Errorf("harness: %v process group %d: %v, and its members could not be read: %v", sig, pgid, err, readErr)
+			return false
+		}
+		if exited {
+			return true
+		}
+	}
+	d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
+	return false
 }
 
 // signalLeader sends sig to the daemon's own process, and only to it, and
-// reports whether the kill should go on. Kill found the leader unreaped, so
-// its pid is still ours, exactly as the group id is for signalGroup: ESRCH is
+// reports whether the kill should go on. The caller holds sigMu and found the
+// reap not begun, so its pid is still ours, exactly as the group id is for
+// signalGroup: ESRCH is
 // a leader that already exited, which is what the caller awaits next. Every
 // other error is a real fault, reported, and ends the kill.
 func (d *Daemon) signalLeader(sig syscall.Signal) bool {
@@ -1189,6 +1228,11 @@ func (d *Daemon) awaitReapWithin(budget time.Duration) bool {
 
 func (d *Daemon) signal(sig syscall.Signal) {
 	d.t.Helper()
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun {
+		return
+	}
 	if err := d.cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		d.t.Fatalf("harness: signal %v: %v", sig, err)
 	}
@@ -1206,8 +1250,20 @@ func (d *Daemon) Wait() int {
 	return 0
 }
 
+// wait reaps the process, as sigMu's owner: it awaits the exit on the kernel's
+// exit event, which does not reap, then takes sigMu and marks the reap begun
+// before cmd.Wait frees the pid, so no signal is ever in flight across the
+// reap. A failed exit wait is kept in exitErr, where every reader of the exit
+// sees it, and the reap still goes ahead: cmd.Wait blocks on the exit itself.
 func (d *Daemon) wait() {
+	exitErr := WaitProcessExit(context.Background(), d.cmd.Process.Pid)
+	d.sigMu.Lock()
+	d.reapBegun = true
+	d.sigMu.Unlock()
 	err := d.cmd.Wait()
+	if exitErr != nil {
+		err = errors.Join(fmt.Errorf("harness: await the daemon's exit before the reap: %w", exitErr), err)
+	}
 	d.mu.Lock()
 	d.exited, d.exitErr = true, err
 	d.mu.Unlock()
@@ -1224,8 +1280,11 @@ func (d *Daemon) Exited() bool {
 	if already {
 		return true
 	}
-	// Signal 0 probes liveness without disturbing the process.
-	if d.cmd.Process.Signal(syscall.Signal(0)) != nil {
+	// Signal 0 probes liveness without disturbing the process, and like
+	// every signal it is sent only while no reap can free the pid.
+	d.sigMu.Lock()
+	defer d.sigMu.Unlock()
+	if d.reapBegun || d.cmd.Process.Signal(syscall.Signal(0)) != nil {
 		return true
 	}
 	// A ZOMBIE HAS EXITED. Signal 0 succeeds against a process that has run to
@@ -1392,10 +1451,18 @@ func SparedFromStrayReaping(pid int) bool {
 // as the machine is up.
 var ErrLeakedProcess = errors.New("harness: a process this test started outlived its teardown")
 
+// maxReapRounds bounds ReapStrays' rounds. Every round after the first needs
+// a stray to have escaped the previous round's stop inside execve (453 of
+// 3000 for a process stopped just after its fork; see Kill), so a sweep
+// still going after eight rounds is being fed by a spawner no listing names,
+// and more rounds would not end it.
+const maxReapRounds = 8
+
 // ReapStrays kills every process whose command line names this run's state
 // directory, whatever process group it is in — except a pid the test declared
-// its own through SpareFromStrayReaping — waits for each to exit, and then
-// fails the test with ErrLeakedProcess if any such process is still running.
+// its own through SpareFromStrayReaping — waits for each to exit, and repeats
+// until a listing names no live process; it then fails the test with
+// ErrLeakedProcess if any such process is still running.
 //
 // IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
 // its own process group and Kill ends that group, but every shim the daemon
@@ -1405,43 +1472,96 @@ var ErrLeakedProcess = errors.New("harness: a process this test started outlived
 // this run and appears in both the daemon's argv and every shim's `--listen`
 // path, so it is an exact key for "processes this test started".
 //
-// EVERY STRAY IS FROZEN BEFORE ANY IS KILLED, and the freeze runs to a fixed
-// point. A stray can be a LIVE DAEMON the harness never started: a layout
-// change's replacement (and a handover's successor) is spawned by the
-// incumbent into a session of its own, so no Kill ever reaches it. A
-// snapshot-then-kill sweep raced it: the replacement brought a pending
-// workspace's session up — or revived a shim the sweep had just killed — in
-// the instant between the `ps` snapshot and its own SIGKILL, and the new shim,
-// in no snapshot, outlived the test (2026-09-27: an orphaned fakeshim of
+// THE GUARANTEE RESTS ON EXITS, NOT ON STOPS. A stray can be a LIVE DAEMON the
+// harness never started: a layout change's replacement (and a handover's
+// successor) is spawned by the incumbent into a session of its own, so no Kill
+// ever reaches it. A snapshot-then-kill sweep raced it: the replacement
+// brought a pending workspace's session up — or revived a shim the sweep had
+// just killed — between the `ps` snapshot and its own SIGKILL, and the new
+// shim, in no snapshot, outlived the test (2026-09-27: an orphaned fakeshim of
 // TestALayoutChangeRestartsTheDaemonAndItsReplacementServes, reparented to
-// launchd). A stopped process runs no instruction and so forks nothing, and a
-// fork already under way shows up in the next listing under its parent's
-// argv, so the sweep re-lists until a listing names no process it has not
-// already stopped: at that point nothing naming the state directory can run.
+// launchd). Stopping every stray first narrows that, but a stop is revocable:
+// on Darwin a SIGSTOP that reaches a process inside execve is discarded when
+// the exec completes (see Kill), so a stray just spawned can run on through
+// the freeze and spawn again. So the sweep runs in ROUNDS, each one a freeze
+// of every listed stray (containment: a stray the stop holds forks nothing
+// and observes no other's death), a SIGKILL of each, and the kernel's exit
+// event for each, and it ends only on a listing that names no live process.
+// An exit cannot be undone, so every process a round lists is gone before
+// the next listing, and whatever that listing names was spawned by a process
+// that ran after its round's stop: a stray that escaped it.
+//
+// TERMINATION: every round kills everything it lists, so a round after the
+// first exists only because a stray escaped the previous round's stop and
+// spawned before its SIGKILL landed, which needs it to have been inside
+// execve at that stop; a spawner the stops always hold ends in two rounds.
+// The rounds are COUNTED, not timed: maxReapRounds ends a sweep that a source
+// of strays never listed (a spawner whose argv does not name the state
+// directory) would otherwise feed forever, and the leak check then names what
+// it left running.
 func (d *Daemon) ReapStrays() {
 	d.t.Helper()
-	killed, err := d.freezeStrays()
-	if err != nil {
-		d.t.Errorf("harness: freeze the strays before the kill: %v", err)
-	}
-	for _, pid := range killed {
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
+	for round, again := 0, true; again && round < maxReapRounds; round++ {
+		killed, err := d.freezeStrays()
+		// A freeze that failed (a listing that could not be read, a stop the
+		// kernel refused) still has what it stopped killed, and ends the
+		// rounds: repeating it would only repeat the report, and the leak
+		// check below still names whatever is left.
+		if err != nil {
+			d.t.Errorf("harness: freeze the strays before the kill: %v", err)
+			again = false
 		}
-	}
-	// A SIGKILL cannot be caught, so each exit is decided; the bound covers
-	// only a starved host scheduling it, and a stray still running after it is
-	// reported below as the leak it then is.
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-	defer cancel()
-	for _, pid := range killed {
-		if err := WaitProcessExit(ctx, pid); err != nil {
-			d.t.Errorf("harness: the SIGKILLed stray %d did not exit: %v", pid, err)
+		live := d.liveOf(killed)
+		if len(live) == 0 {
+			break
+		}
+		var killedNow []int
+		for _, pid := range live {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
+				continue
+			}
+			killedNow = append(killedNow, pid)
+		}
+		// EACH EXIT IS AWAITED ON THE EXIT ITSELF, NOT RACED AGAINST A CLOCK,
+		// as in Kill: SIGKILL cannot be caught, blocked or ignored, and kill(2)
+		// accepted it, so the exit is decided and only its scheduling is left.
+		// Under 16 CPU loads a clock bound here failed 2 of 10000 sweeps on
+		// strays that had done exactly what they were told. A stray that never
+		// exits after an accepted SIGKILL is a kernel fault the test binary's
+		// own -timeout reports with every stack.
+		began := time.Now()
+		for _, pid := range killedNow {
+			if err := WaitProcessExit(context.Background(), pid); err != nil {
+				d.t.Errorf("harness: await the SIGKILLed stray %d's exit: %v", pid, err)
+			}
+		}
+		if took := time.Since(began); took > reapGrace {
+			d.t.Logf("harness: the SIGKILLed strays took %s to exit; the host was starving them", took)
 		}
 	}
 	if err := d.leakedStrays(); err != nil {
 		d.t.Error(err)
 	}
+}
+
+// liveOf answers the pids that have not exited. One whose state cannot be
+// read is kept, so the kill and the leak check still see it, and reported.
+func (d *Daemon) liveOf(pids []int) []int {
+	d.t.Helper()
+	var live []int
+	for _, pid := range pids {
+		state, err := readProcessState(pid)
+		if err != nil {
+			d.t.Errorf("harness: read the state of stray %d: %v", pid, err)
+			live = append(live, pid)
+			continue
+		}
+		if !state.exited {
+			live = append(live, pid)
+		}
+	}
+	return live
 }
 
 // freezeStrays SIGSTOPs every stray, re-listing until a listing names none it
@@ -1467,7 +1587,7 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 			for _, s := range strays {
 				listed[s.pid] = true
 			}
-			if d.afterStraysFrozen != nil {
+			if d.afterStraysFrozen != nil && len(strays) > 0 {
 				d.afterStraysFrozen()
 			}
 			return d.settleFrozen(stopped, listed), nil
