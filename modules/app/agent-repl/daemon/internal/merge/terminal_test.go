@@ -1145,3 +1145,283 @@ func TestNoAdmissionStepBeginsOnceTheDrainHasBegun(t *testing.T) {
 		t.Fatalf("pumpOnce after the drain = (%v, %v) with %d store reads, want nothing admitted and nothing read", ran, err, after-before)
 	}
 }
+
+// --- dequeue, evict, workspace close and resume each release everything ---
+//
+// Before this a dequeue of a RUNNING merge only dropped a queue row that the
+// run then held on to: the lease (parked), the queue entry and the repository
+// lock all outlived it (2026-09-28, lease c8a3a664006f46c1).
+
+// resolution is one way a running merge is ended from outside, or resumed.
+type resolution struct {
+	name    string
+	resolve func(t *testing.T, h *harness, ctx context.Context)
+}
+
+// resolutions are the ends every release test runs.
+var resolutions = []resolution{
+	{name: "evicted", resolve: func(t *testing.T, h *harness, ctx context.Context) {
+		if err := h.o.Evict(ctx, theWorkspace); err != nil {
+			t.Errorf("Evict: %v", err)
+		}
+	}},
+	{name: "dequeued", resolve: func(t *testing.T, h *harness, ctx context.Context) {
+		h.o.OnInterrupt(ctx, theWorkspace)
+		if err := h.o.AnswerDequeue(ctx, theWorkspace, false); err != nil {
+			t.Errorf("AnswerDequeue: %v", err)
+		}
+	}},
+	{name: "its workspace closed", resolve: func(t *testing.T, h *harness, ctx context.Context) {
+		h.o.OnWorkspaceClosed(ctx, theWorkspace)
+	}},
+}
+
+// ended runs one resolution against a merge in one of its running phases: a
+// PARKED merge (on a broken gate), a RUNNING one (held inside its gate), or a
+// parked one RESUMED to its landing.
+func ended(t *testing.T, phase string, res resolution) *harness {
+	t.Helper()
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	switch phase {
+	case phaseParked:
+		parkOnABrokenGate(t, h, ctx, 1)
+		res.resolve(t, h, ctx)
+	case phaseRunning:
+		h.emacsRepo()
+		h.landsCleanly("abc123def4567")
+		h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+		inGate, release := holdTheGate(h)
+		enqueue(t, h)
+		done := admitAsync(h, ctx)
+		<-inGate
+		r, running := h.o.runFor(theWorkspace)
+		if !running {
+			t.Fatal("no run is held inside its gate")
+		}
+		// The resolution blocks until the run has ended, which it cannot
+		// while its gate is held; the gate is released only once the
+		// resolution has reached the run (its context carries the cause).
+		resolved := make(chan struct{})
+		go func() {
+			defer close(resolved)
+			res.resolve(t, h, context.Background())
+		}()
+		select {
+		case <-r.ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("the resolution never reached the running merge")
+		}
+		close(release)
+		<-resolved
+		<-done
+	case "resumed":
+		parkOnABrokenGate(t, h, ctx, 1)
+		h.gatePasses("daemon")
+		if err := route(h, ctx, "g-1", "go again"); err != nil {
+			t.Fatalf("the guidance: %v", err)
+		}
+		resume(t, h, ctx)
+	}
+	return h
+}
+
+// releaseCases are every (phase, resolution) pair, plus the resume.
+func releaseCases() []struct {
+	name  string
+	phase string
+	res   resolution
+} {
+	var cases []struct {
+		name  string
+		phase string
+		res   resolution
+	}
+	for _, phase := range []string{phaseParked, phaseRunning} {
+		for _, res := range resolutions {
+			cases = append(cases, struct {
+				name  string
+				phase string
+				res   resolution
+			}{name: phase + " and " + res.name, phase: phase, res: res})
+		}
+	}
+	cases = append(cases, struct {
+		name  string
+		phase string
+		res   resolution
+	}{name: "parked, resumed and landed", phase: "resumed"})
+	return cases
+}
+
+func TestEveryEndOfARunningMergeReleasesItsLease(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, tc.res)
+
+			// Assert.
+			if h.leaseHeld() {
+				t.Fatal("the merge's lease outlived it")
+			}
+		})
+	}
+}
+
+func TestEveryEndOfARunningMergeTakesItOffTheQueue(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, tc.res)
+
+			// Assert.
+			if entries := h.queuedEntries(); len(entries) != 0 {
+				t.Fatalf("the queue still holds %v", entries)
+			}
+		})
+	}
+}
+
+func TestEveryEndOfARunningMergeClosesItsLedger(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, tc.res)
+
+			// Assert.
+			if open := h.openIntervals(); len(open) != 0 {
+				t.Fatalf("the ledger still has open intervals %v", open)
+			}
+		})
+	}
+}
+
+func TestEveryEndOfARunningMergeReleasesTheRepositoryLock(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, tc.res)
+
+			// Assert.
+			if !h.lockFree(t) {
+				t.Fatal("the repository's queue lock outlived the merge")
+			}
+		})
+	}
+}
+
+func TestEveryEndOfARunningMergeLeavesNoRunBehind(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, tc.res)
+
+			// Assert.
+			if _, running := h.o.runFor(theWorkspace); running {
+				t.Fatal("the orchestrator still holds the run")
+			}
+		})
+	}
+}
+
+// TestAnAbandonedRunningMergeNeverLands covers the landing's guard: a merge
+// taken out while its gate ran never moves the target, even though the gate
+// then passed.
+func TestAnAbandonedRunningMergeNeverLands(t *testing.T) {
+	// Arrange and Act: evicted while held inside a gate that then passes.
+	h := ended(t, phaseRunning, resolutions[0])
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if len(h.git.fastForwards) != 0 {
+		t.Fatalf("an abandoned merge fast-forwarded the target: %v", h.git.fastForwards)
+	}
+}
+
+// TestAnAbandonedRunningMergeEndsOnTheAbandonedTerminal covers the bubble: the
+// merge ends as abandoned, never as failed and never mid-tab.
+func TestAnAbandonedRunningMergeEndsOnTheAbandonedTerminal(t *testing.T) {
+	for _, phase := range []string{phaseParked, phaseRunning} {
+		t.Run(phase, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, phase, resolutions[1])
+
+			// Assert.
+			if arm := h.feed.lastMergeErrorArm(); arm != "abandoned" {
+				t.Fatalf("the bubble ended on %q, want abandoned", arm)
+			}
+		})
+	}
+}
+
+// TestAnAbandonedMergesSummarySaysWhatItWasDoing covers "summaries must be
+// true": a merge that ran is never described as one that waited.
+func TestAnAbandonedMergesSummarySaysWhatItWasDoing(t *testing.T) {
+	tests := []struct {
+		phase string
+		want  string
+	}{
+		{phase: phaseParked, want: "the user took this merge out of the queue while it was parked for input"},
+		{phase: phaseRunning, want: "the user took this merge out of the queue while it was running"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.phase, func(t *testing.T) {
+			// Arrange and Act.
+			h := ended(t, tc.phase, resolutions[1])
+
+			// Assert.
+			if got := h.feed.lastAbandonedSummary(); got != tc.want {
+				t.Fatalf("the abandoned summary is %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnAbandonedRunningMergeIsNeverLoggedAsNotHavingRun pins the record that
+// was false: "a merge left the queue without running".
+func TestAnAbandonedRunningMergeIsNeverLoggedAsNotHavingRun(t *testing.T) {
+	// Arrange and Act.
+	h := ended(t, phaseParked, resolutions[0])
+
+	// Assert.
+	for _, record := range h.logs.Records() {
+		if record.Message == "a merge left the queue without running" {
+			t.Fatalf("a merge that ran was logged as leaving the queue without running: %+v", record)
+		}
+	}
+}
+
+// TestEveryAbandonCauseOfARunningMergeResolvesItsOwnSentence pins the cause
+// vocabulary for a merge taken out after it was admitted.
+func TestEveryAbandonCauseOfARunningMergeResolvesItsOwnSentence(t *testing.T) {
+	for _, phase := range []string{phaseRunning, phaseParked} {
+		for _, cause := range []AbandonCause{CauseUserDrop, CauseUserDequeue, CauseWorkspaceClosed} {
+			t.Run(phase+"/"+string(cause), func(t *testing.T) {
+				// Act.
+				sentence, declared := cause.summaryWhile(phase)
+
+				// Assert.
+				if !declared || !strings.Contains(sentence, "while") {
+					t.Fatalf("the %s cause while %s resolves %q (declared %v)", cause, phase, sentence, declared)
+				}
+			})
+		}
+	}
+}
+
+// TestRouteParkedAnswersNoRunOnceTheRunEnded covers a prompt racing an
+// abandon: it is answered, never left waiting on a run that is gone.
+func TestRouteParkedAnswersNoRunOnceTheRunEnded(t *testing.T) {
+	// Arrange: a parked merge that was evicted.
+	h := ended(t, phaseParked, resolutions[0])
+
+	// Act.
+	err := h.o.RouteParked(context.Background(), theWorkspace, "g-late", saidText("too late"))
+
+	// Assert.
+	if err != errNoRun {
+		t.Fatalf("RouteParked after the run ended = %v, want the no-run answer", err)
+	}
+}
