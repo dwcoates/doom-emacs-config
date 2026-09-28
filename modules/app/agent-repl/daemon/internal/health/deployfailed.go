@@ -113,6 +113,11 @@ func DeployFailedDetail(f wsm.Fault) string {
 	if d.Step != DeployStepBuild {
 		subject = strings.ToLower(strings.TrimPrefix(d.Component.String(), "DEPLOY_COMPONENT_"))
 	}
+	if subject == d.Step {
+		// A builder that is one step (the operator's override) names the
+		// step the build itself; it is said once.
+		subject = ""
+	}
 	head := strings.TrimSpace(strings.ReplaceAll(d.Step, "_", " ") + " " + subject)
 	tail := lastLine(d.Detail)
 	if tail == "" {

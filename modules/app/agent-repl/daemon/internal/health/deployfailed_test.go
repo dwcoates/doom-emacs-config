@@ -64,6 +64,11 @@ func TestDeployFailedDetailNamesTheStepAndTheLastLine(t *testing.T) {
 			want:    "restart services store: exit 5",
 		},
 		{
+			name:    "a build whose one step is the build itself says it once",
+			failure: DeployFailure{Step: DeployStepBuild, BuildStep: "build", Detail: "refused"},
+			want:    "build: refused",
+		},
+		{
 			name:    "a failure with no account is its step alone",
 			failure: DeployFailure{Step: DeployStepBuild, BuildStep: "daemon"},
 			want:    "build daemon",
