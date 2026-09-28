@@ -750,6 +750,46 @@ one runs is covered by ONE follow-up deploy. Every decision is a record under
 daemon must exist before it can deploy anything). `agent-shim/wire` is
 DELETED: nothing in the rebuilt daemon imports it.
 
+## The merge queue owns its target, and a park stays alive until it is resolved
+
+Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
+`../docs/investigations/2026-09-28-merge-queue-plan.md`).
+
+- **THE TARGET IS NEVER A WORKING TREE FOR A MERGE.** Each attempt makes a
+  detached scratch tree of the queue's own (`<state>/merge-trees/<lease>-<n>`,
+  `gitclient.AddDetachedWorktree`) at the target's tip, merges and gates
+  there, and moves the target only by `gitclient.FastForward` to the commit
+  the gate passed. A target that moved meanwhile is merged onto again. Repairs
+  are the workspace agent's commits on ITS OWN branch; the next attempt merges
+  the branch afresh. The daemon commits nothing of its own.
+- **ONE SLOT PER REPOSITORY, ONE GRANTOR** (`slot.go`). The admission pump
+  grants the slot to a queue front or to a parked run waiting for it back;
+  the repository's kernel lock travels with it. A PARKED run yields its slot:
+  a parked merge does not block its repository's queue.
+- **A PARK LISTENS UNTIL IT IS RESOLVED** (`parkUntilResumed`). Every
+  submission while parked is delivered to the workspace's own session and
+  answered; the run resumes on the guidance turn's end. An abandon or the
+  daemon's exit ends the run's context instead.
+- **EVERY END GOES THROUGH THE ONE TEARDOWN.** Evict, the dequeue answer and a
+  workspace close ABANDON a running or parked merge (`abandonRunning`, the run
+  context cancelled with the cause); nothing ever just drops the queue row of
+  a merge that is running. The teardown releases the lease, the queue entry,
+  the open ledger intervals, the scratch tree and the slot.
+- **ONLY THE USER'S OWN ASK DISPLACES THE TURN IN FLIGHT** (`merge.Requester`).
+  A command-file merge is an agent's, from inside its own turn, and waits for
+  the workspace to fall free; nothing is marked for resubmission.
+- **A GATE THAT FAILED TO RUN IS NOT A TEST FAILURE.** A missing script, an
+  unstartable runner, exit 127 or 126: parked at once, no repair round.
+- **A REPAIR NEVER CHANGES THE MERGE MACHINERY** (`daemon/internal/merge/`,
+  `bin/test-all.sh`): the briefs say so, and a repair whose branch adds such a
+  change is refused and parks.
+- **THE RESOLVING SHIM IS THE WORKSPACE AGENT'S OWN.** A run holds one session
+  address, its own workspace; `TestEveryMergeDeliveryReachesTheWorkspacesOwnSession`
+  holds it.
+- The integration fake: a branch with no commits is already on its target, so
+  a test that exercises a merge's phases commits work first
+  (`harness.CommitWork`), and a scripted conflict stands until its branch moves.
+
 ## A lease dies with the process that took it
 
 A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)
