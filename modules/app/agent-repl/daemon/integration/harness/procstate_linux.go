@@ -13,7 +13,7 @@ import (
 func readProcessState(pid int) (processState, error) {
 	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if errors.Is(err, fs.ErrNotExist) {
-		return processState{frozen: true, name: "gone"}, nil
+		return processState{frozen: true, exited: true, name: "gone"}, nil
 	}
 	if err != nil {
 		return processState{}, err
@@ -30,7 +30,7 @@ func readProcessState(pid int) (processState, error) {
 	case "T", "t":
 		return processState{frozen: true, name: "stopped"}, nil
 	case "Z", "X", "x":
-		return processState{frozen: true, name: "dead"}, nil
+		return processState{frozen: true, exited: true, name: "dead"}, nil
 	default:
 		return processState{name: "in state " + letter}, nil
 	}

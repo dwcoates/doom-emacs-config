@@ -26,11 +26,13 @@ func TestReadProcessState(t *testing.T) {
 		// prepare puts the process into the state under test.
 		prepare    func(t *testing.T, cmd *exec.Cmd)
 		wantFrozen bool
+		wantExited bool
 	}{
 		{
 			name:       "a running process is not frozen",
 			prepare:    func(*testing.T, *exec.Cmd) {},
 			wantFrozen: false,
+			wantExited: false,
 		},
 		{
 			name: "a stopped process is frozen",
@@ -46,6 +48,22 @@ func TestReadProcessState(t *testing.T) {
 				}
 			},
 			wantFrozen: true,
+			wantExited: false,
+		},
+		{
+			name: "an exited, unreaped process is frozen and exited",
+			prepare: func(t *testing.T, cmd *exec.Cmd) {
+				if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
+					t.Fatalf("SIGKILL: %v", err)
+				}
+				// The kernel posts the exit event before the state reads as
+				// a zombie, so the zombie state itself is awaited.
+				if err := awaitFrozen(cmd.Process.Pid, DefaultTimeout); err != nil {
+					t.Fatalf("await the exit: %v", err)
+				}
+			},
+			wantFrozen: true,
+			wantExited: true,
 		},
 	}
 	for _, tc := range cases {
@@ -63,6 +81,9 @@ func TestReadProcessState(t *testing.T) {
 			}
 			if state.frozen != tc.wantFrozen {
 				t.Fatalf("readProcessState frozen = %v (%s), want %v", state.frozen, state.name, tc.wantFrozen)
+			}
+			if state.exited != tc.wantExited {
+				t.Fatalf("readProcessState exited = %v (%s), want %v", state.exited, state.name, tc.wantExited)
 			}
 		})
 	}

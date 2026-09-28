@@ -11,6 +11,10 @@ type processState struct {
 	// frozen is true when the process is stopped, a zombie, or gone: in none of
 	// those can it observe anything or write a record.
 	frozen bool
+	// exited is true when the process is a zombie or gone: it has ended, and
+	// only its reaping (or nothing at all) is left. A stopped process is
+	// frozen but has NOT exited -- it is still a live process a test owns.
+	exited bool
 	// name is the kernel's state, for the report when it is not frozen.
 	name string
 }
