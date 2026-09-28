@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -478,5 +479,120 @@ func TestReadRecordsACancelledCallerWithoutAnError(t *testing.T) {
 				t.Fatalf("no record for the read: %v", log.Records())
 			}
 		})
+	}
+}
+
+// ---- endTx: the one way a transaction ends without a Commit ----
+
+var errWriteRefused = errors.New("the write's own refusal")
+
+// commitBehindTheTx ends the transaction with its own COMMIT, behind
+// database/sql's back, so the rollback that follows reaches SQLite and fails
+// there with "no transaction is active".
+func commitBehindTheTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	return errWriteRefused
+}
+
+func rollbackFailures(log *dlog.TestLogger) []dlog.Record {
+	var out []dlog.Record
+	for _, record := range log.Records() {
+		if strings.Contains(record.Message, "could not roll the transaction back") {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+func TestAWriteWhoseRollbackFailsRecordsItAtError(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_ = s.write(context.Background(), "daemon.wsm.test", dlog.Context{"workspace": "ws-1"}, commitBehindTheTx)
+
+	// Assert
+	failures := rollbackFailures(log)
+	if len(failures) != 1 || failures[0].Level != "error" || failures[0].Operation != "daemon.wsm.test" {
+		t.Fatalf("rollback failure records = %+v, want one ERROR at the write's operation", failures)
+	}
+	if failures[0].Context["workspace"] != "ws-1" || !strings.Contains(failures[0].Context["error"].(string), "no transaction is active") {
+		t.Fatalf("context = %v, want the write's fields and SQLite's cause", failures[0].Context)
+	}
+}
+
+func TestAWriteWhoseRollbackFailsStillReturnsItsOwnCause(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.write(context.Background(), "daemon.wsm.test", dlog.Context{}, commitBehindTheTx)
+
+	// Assert
+	if !errors.Is(err, errWriteRefused) {
+		t.Fatalf("write = %v, want the write's own refusal, not the rollback's", err)
+	}
+}
+
+func TestARefusedWriteWhoseRollbackSucceedsRecordsNoRollbackFailure(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_ = s.write(context.Background(), "daemon.wsm.test", dlog.Context{}, func(context.Context, *sql.Tx) error { return errWriteRefused })
+
+	// Assert
+	if failures := rollbackFailures(log); len(failures) != 0 {
+		t.Fatalf("rollback failure records = %+v, want none", failures)
+	}
+}
+
+func TestEndTxAfterACommitRecordsNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	tx, err := s.db().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Act
+	s.endTx(tx, "daemon.wsm.test", dlog.Context{})
+
+	// Assert
+	if failures := rollbackFailures(log); len(failures) != 0 {
+		t.Fatalf("rollback failure records = %+v, want none after a Commit", failures)
+	}
+}
+
+// Every rollback in this package goes through endTx, so no site can quietly
+// drop a failed one again.
+func TestEveryRollbackGoesThroughEndTx(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	rollbacks := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+
+		// Act
+		rollbacks += strings.Count(string(body), ".Rollback()")
+	}
+
+	// Assert
+	if rollbacks != 1 {
+		t.Fatalf("production source calls Rollback %d times; only endTx may", rollbacks)
 	}
 }

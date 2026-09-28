@@ -246,7 +246,7 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 	if err != nil {
 		return fmt.Errorf("wsm: begin migration to layout %d on %q: %w", m.To, s.path, err)
 	}
-	defer tx.Rollback()
+	defer s.endTx(tx, "daemon.wsm.open", dlog.Context{"path": s.path, "step_layout": m.To, "migration": m.Name})
 	if _, err := tx.ExecContext(ctx, m.DDL); err != nil {
 		return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
 	}
