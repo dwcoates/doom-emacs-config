@@ -90,8 +90,8 @@ message FooterStrip {
   // legal, so an illegal pairing is unrepresentable.
   // The turn clock. The client ticks from the carried instant.
   FooterClock clock = 4;
-  // The tokens CELL: the in-flight turn's growth of the MAIN agent's context
-  // window plus two glyphs, and the click target that opens
+  // The tokens CELL: the in-flight turn's FRESH INPUT for the MAIN agent,
+  // colored by its size, plus two glyphs, and the click target that opens
   // FooterExpandedTokens. The full breakdown lives in that panel, never here.
   FooterTokensCell tokens = 5;
   // The live-work chips, right-aligned. Each chip is a click target opening
@@ -1203,33 +1203,45 @@ message FooterClock {
 
 // ---- 5. Tokens cell -------------------------------------------------------
 
-// The strip's tokens cell. Deliberately ONE figure: how many tokens the
-// in-flight turn has ADDED TO THE MAIN AGENT'S CONTEXT WINDOW — with the alarm
-// and accounting verdict reduced to glyphs. Everything else (the per-agent
-// spend, subagents and detached agents included, the cache figures,
-// first-token latency, alarm detail, verdict evidence) is
-// FooterExpandedTokens' content, reached by clicking this cell. The figure
-// moves while the turn runs; a new turn re-takes its baseline.
+// The strip's tokens cell. Deliberately ONE figure: the in-flight turn's
+// FRESH INPUT for the MAIN AGENT — with its heat, the alarm and the accounting
+// verdict reduced to glyphs. Everything else (the per-agent spend, subagents
+// and detached agents included, the cache figures, first-token latency, alarm
+// detail, verdict evidence) is FooterExpandedTokens' content, reached by
+// clicking this cell. The figure moves while the turn runs; a new turn starts
+// it again from zero.
 //
-// THE FIGURE IS THE TOPBAR'S CONTEXT CHIP'S GROWTH. It is
-// `SessionContextUsage.total_tokens` — the ONE fact the topbar's context chip
-// resolves from — now, minus the same fact as it stood when the turn opened,
-// so the chip and this cell can never disagree about the context window.
-// Subagent and detached-agent spend is NOT in it: their tokens never enter
-// the main agent's window.
+// FRESH INPUT is every input token that was NOT a cache hit: the vendor's
+// `input_tokens` plus `cache_creation_input_tokens`, i.e. the
+// `conversation.v1.TokenCacheMisses` of each API response (written plus
+// unwritten), summed over the main agent's API responses of the turn. Cache
+// READS are excluded: they are cheap context reuse. Cache WRITES are
+// included: they are the expensive part of a turn, so a cold cache that
+// re-writes the whole prefix shows up here as a large figure — which is the
+// point of the cell. Output tokens are excluded: a response's output is sent
+// back as input on the next request, where it is counted once as fresh.
 //
-// A CONTEXT CUT RE-TAKES THE BASELINE. The context held only shrinks by a cut
-// (a compaction, a clear), so a reading below the baseline IS one, and the
-// baseline becomes that post-cut reading: the figure is the growth since the
-// cut, and the panel's context-growth line says so.
+// THE MAIN AGENT ONLY. Subagent and detached-agent spend is NOT in it; each
+// subagent's own fresh input is its bubble's figure (FeedSubagentTokens).
+//
+// IT IS THE SUM OF THE TURN'S RESPONSE-BUBBLE STAMPS. Each intermediate
+// response bubble freezes the fresh input added since the previous one landed
+// (FeedResponseUsageStamp), so the bubbles of a turn partition this figure,
+// and the turn's final-answer bubble carries this figure's final value.
+//
+// NOT THE CONTEXT WINDOW. The topbar's context chip is the window's size;
+// this cell is spend. With a warm cache the cell stays below the chip; a
+// cold cache can push it above, because re-written context counts as fresh
+// without growing the window.
 //
 // WITH NO TURN IN FLIGHT the figure is `--`, stated by the daemon, and the
 // cell stays a click target: the panel still opens, on the most recent
 // turn's breakdown. The glyphs keep their own lifetimes (below).
 message FooterTokensCell {
-  // The figure, daemon-formatted ("18.2k in") from the growth described
-  // above, or "--" with no turn in flight. The client draws it verbatim — no
-  // arithmetic, no unit rounding, no idle inference of its own.
+  // The figure, daemon-formatted ("18.2k in") from the fresh input described
+  // above, or "--" with no turn in flight, with its heat. The client draws the
+  // text verbatim — no arithmetic, no unit rounding, no idle inference of its
+  // own.
   FooterTokensCellInput input = 1;
   // The expensive-turn alarm glyph (⚠). PRESENT iff the alarm tripped this
   // turn; presence IS the glyph, and the composed sentence is the panel's
@@ -1249,6 +1261,24 @@ message FooterTokensCellInput {
   // The formatted figure, exactly as drawn ("18.2k in", or "--" with no turn
   // in flight).
   string text = 1;
+  // How hot the figure is, which colors it. UNSET with no turn in flight
+  // (the `--` figure is drawn uncolored).
+  optional FooterTokensCellInputHeat heat = 2;
+}
+
+// The figure's color, as a position on ONE continuous gradient running green
+// → yellow → orange → red. The DAEMON owns the thresholds: it maps the fresh
+// input to the position piecewise-linearly, with green at 0 tokens, yellow at
+// 30k, orange at 50k and red at 100k, and every larger figure held at red.
+// The four colors sit evenly spaced along the gradient (positions 0, 1/3, 2/3
+// and 1), so 30k is exactly 1/3 and 50k exactly 2/3. The CLIENT owns only the
+// four colors, so the theme picks the palette while the daemon picks where on
+// it a figure falls; the client interpolates between the two colors bracketing
+// the position and never re-derives a threshold.
+message FooterTokensCellInputHeat {
+  // The position along the gradient, in [0, 1]: 0 is green, 1 is red. Never
+  // outside that range; the daemon clamps.
+  double position = 1;
 }
 
 // The tripped-alarm glyph. Empty on purpose: being set is the whole fact —
