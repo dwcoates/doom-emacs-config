@@ -1070,11 +1070,18 @@ what the user has SEEN; the colour says what the workspace is DOING.
 **THE DAEMON IS THE SINGLE SOURCE OF THIS MODE.** A roster row carrying
 `RosterRowViewed` is **partial**; a row without it is **full**. Both the Emacs
 tab-bar and the webapp sidebar RENDER the mode from that marker and nothing
-else, so they cannot disagree. The daemon raises the marker on
-`MarkWorkspaceViewed` and clears it on ANY status change, from any origin (a
-user's prompt, a shim frame, a merge, a session that died). A first sighting is
-not a change, and a push restating the same arm is not a change, or nothing
-could ever stay partial.
+else, so they cannot disagree.
+
+**THE MARKER IS DERIVED FROM A READ FACT** (owner ruling, 2026-09-27). A turn
+that completes or is interrupted leaves its result UNREAD;
+`MarkWorkspaceViewed` on the row while it shows that turn-end arm (`done` or
+`interrupted`) READS it; the next turn resets it. The daemon draws the marker
+exactly when the row stands on a turn-end arm and the result is read, resolved
+in the same render as the status. An UNREAD turn end outranks `idle_async`, so
+a turn that finishes while detached work runs shows its green `done` (or
+`interrupted`) until the user has viewed it; once viewed the row shows
+`idle_async`, full; when the work ends the row returns to its turn-end arm
+PARTIAL, never a fresh full one claiming an unread result.
 
 **Emacs DETECTS and REPORTS; it does not decide.** The 5-second dwell is
 measured in Emacs, because only Emacs knows what the user is standing in front
@@ -1087,9 +1094,9 @@ visible latency is ruled acceptable.
 
 | | applies PARTIAL | restores FULL |
 |---|---|---|
-| daemon (the source) | `sidebar.Resolver.SetViewed` | `wsState.noteArm` (daemon/internal/resolve/sidebar/state.go) |
+| daemon (the source) | `sidebar.Resolver.SetViewed` reads the result | `wsState.viewedOn` derives the marker; `startTurn`/`SetTurnEnded` reset the fact (daemon/internal/resolve/sidebar/state.go, resolver.go) |
 | Emacs (renders the marker) | reports via `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` re-arms the dwell (status.el) |
-| webapp (renders the marker) | `ViewedRegistry.modeFor` (webapp/src/sidebar/viewed.ts) | the same function, on the arm change |
+| webapp (renders the marker) | `viewedMode` (webapp/src/sidebar/viewed.ts) | the same function, from the wire alone |
 
 Emacs's restore reports NOTHING: the daemon originated the clear. It hangs off
 ONE hook, `agent-repl-roster-viewed-cleared-functions` (roster.el), which fires
