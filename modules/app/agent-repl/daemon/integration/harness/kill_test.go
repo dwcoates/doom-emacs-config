@@ -172,37 +172,36 @@ func groupUnderKill(t *testing.T, script string) (*Daemon, int) {
 	return d, member
 }
 
-// TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt pins the ordering the
-// daemon's teardown depends on: at the instant before the SIGKILL, the leader
-// and its member are BOTH stopped and neither is dead, so no member can die
-// while the leader can still run.
-func TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt(t *testing.T) {
+// TestKillEndsTheLeaderBeforeSignalingAnyMember pins the ordering the
+// daemon's teardown depends on: at the instant the group is signaled to die,
+// the leader has already exited, so no member can die while the leader can
+// still run. It reads the leader alone, because exiting is irrevocable and a
+// stop is not: a member inside execve when the group is stopped runs again
+// once its exec completes, and the leader's exit orphans the group, which
+// continues its stopped members.
+func TestKillEndsTheLeaderBeforeSignalingAnyMember(t *testing.T) {
 	// Arrange
-	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
-	var leaderState, memberState processState
-	var leaderErr, memberErr error
-	d.afterFreeze = func() {
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	var leaderState processState
+	var leaderErr error
+	d.afterLeaderExit = func() {
 		leaderState, leaderErr = readProcessState(d.cmd.Process.Pid)
-		memberState, memberErr = readProcessState(member)
 	}
 
 	// Act
 	d.Kill()
 
 	// Assert
-	if leaderErr != nil || memberErr != nil {
-		t.Fatalf("reading the frozen group: leader %v, member %v", leaderErr, memberErr)
+	if leaderErr != nil {
+		t.Fatalf("reading the leader before the group kill: %v", leaderErr)
 	}
-	if leaderState.name != "stopped" {
-		t.Fatalf("the leader was %s when the kill was sent, want stopped", leaderState.name)
-	}
-	if memberState.name != "stopped" {
-		t.Fatalf("the member was %s when the kill was sent, want stopped", memberState.name)
+	if !leaderState.exited {
+		t.Fatalf("the leader was %s when the group kill was sent, want exited", leaderState.name)
 	}
 }
 
-// TestKillEndsEveryMemberOfTheGroup pins that freezing first still kills the
-// whole group, not only its leader.
+// TestKillEndsEveryMemberOfTheGroup pins that ending the leader first still
+// kills the whole group, not only its leader.
 func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
 	// Arrange
 	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
@@ -224,7 +223,7 @@ func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
 // TestKillLeavesTheLeaderNoInstantToObserveAMemberDying is the defect as the
 // daemon lived it: a leader that records the death of its member (the daemon
 // logging "git was killed by a signal") must never get to, because the member
-// only dies once the leader can no longer run.
+// only dies once the leader has exited.
 func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 	// Arrange: the leader writes the marker the moment its member dies.
 	marker := filepath.Join(t.TempDir(), "observed")
@@ -235,7 +234,33 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 
 	// Assert
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the leader recorded its member's death (stat %v), want it frozen before the member died", err)
+		t.Fatalf("the leader recorded its member's death (stat %v), want it dead before the member died", err)
+	}
+}
+
+// TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold is the
+// flake's condition made certain: a stop the kernel discards, as it does for
+// a member inside execve, must not give the leader an instant to record its
+// member's death. The whole group is continued after the stop, so neither
+// leader nor member is held by it.
+func TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold(t *testing.T) {
+	// Arrange: the leader writes the marker the moment its member dies.
+	marker := filepath.Join(t.TempDir(), "observed")
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait $!; : > "+marker)
+	var contErr error
+	d.afterGroupStopped = func() {
+		contErr = syscall.Kill(-d.cmd.Process.Pid, syscall.SIGCONT)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if contErr != nil {
+		t.Fatalf("continuing the stopped group: %v", contErr)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the leader recorded its member's death (stat %v), want it dead before the member died", err)
 	}
 }
 
