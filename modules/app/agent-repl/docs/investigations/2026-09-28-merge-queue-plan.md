@@ -129,3 +129,14 @@ Order: 1–5 first (the queue must be trustworthy before everything depends on i
 - The untracked `.agent-repl-merge-escalation` is in the master checkout. Ask before deleting
   it.
 - The owner's two prompts to `prompt-bubble-height` are held locally in Emacs as `:outage`.
+
+## Further owner rulings (2026-09-28)
+
+- A repair agent must NOT change the merge machinery (gate or daemon) in the middle of a merge. Fixes to the gate go through their own branch and deploy.
+- The shim that runs merge resolution (fixes, conflict resolution, guidance) must be the SAME shim the workspace's agent owns, never a separate one.
+  - In the prompt-bubble-height run it was: the repair prompts went to agent `31d5a53d…`, the workspace's own session.
+  - Keep that as a stated, tested invariant.
+- Held prompts must survive outages AND restarts: Emacs, daemon and shim. This drives the design for prompts held during an outage (the daemon-owned durable ingress).
+- On a failed deploy:
+  - roll back;
+  - surface the error in the topbar's error section and in every workspace's footer.
