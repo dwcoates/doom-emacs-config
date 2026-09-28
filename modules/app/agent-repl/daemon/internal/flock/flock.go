@@ -1,6 +1,6 @@
 // Package flock is the daemon's one NON-BLOCKING EXCLUSIVE kernel lock that is
-// HELD for the length of some work: the merge queue's per-repository lock and
-// the landed-worktree reaper's sweep lock.
+// HELD for the length of some work: the merge queue's per-repository lock, the
+// landed-worktree reaper's sweep lock and the held-prompt ingress's sweep lock.
 //
 // The kernel arbitrates, so the guarantee survives a holder that died without
 // cleaning up: an flock is released when the process holding it goes away,
