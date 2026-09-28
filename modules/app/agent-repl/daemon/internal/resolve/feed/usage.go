@@ -7,8 +7,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/figures"
 	"claude-repld/internal/freshinput"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // THE FEED'S TOKEN FIGURES ARE FRESH INPUT, ONE AGENT AT A TIME.
@@ -159,16 +157,14 @@ func (r *resolver) restampResponseRow(s *wsState, fold *proseState, unit, stamp 
 	if !ok || row.GetActivity().GetResponse() == nil {
 		return
 	}
-	restamped, ok := proto.Clone(row).(*frontendv1.FeedRow)
-	if !ok {
-		r.logger(s.id).Error("daemon.feed.row_not_clonable",
-			"a response bubble could not be snapshotted to re-stamp its fresh input",
-			dlog.Context{"feed": f.key, "row": fold.row.GetValue(), "unit": unit})
-		return
-	}
-	bubble := restamped.GetActivity().GetResponse()
-	bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: stamp, AtMs: bubble.GetUsage().GetAtMs()}
-	r.upsert(s, placement{feed: fold.feed}, restamped, true)
+	r.restateRow(s, placement{feed: fold.feed}, row, true, unclonable{
+		operation: "daemon.feed.row_not_clonable",
+		message:   "a response bubble could not be snapshotted to re-stamp its fresh input",
+		context:   dlog.Context{"feed": f.key, "row": fold.row.GetValue(), "unit": unit},
+	}, func(restamped *frontendv1.FeedRow) {
+		bubble := restamped.GetActivity().GetResponse()
+		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: stamp, AtMs: bubble.GetUsage().GetAtMs()}
+	})
 }
 
 // subagentFigure formats a subagent's lifetime fresh input for its card, nil
@@ -202,19 +198,17 @@ func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId
 		if !ok {
 			continue
 		}
-		restamped, ok := proto.Clone(row).(*frontendv1.FeedRow)
-		if !ok {
-			r.logger(s.id).Error("daemon.feed.row_not_clonable",
-				"a subagent card could not be snapshotted to re-stamp its fresh input",
-				dlog.Context{"feed": f.key, "row": state.row.GetValue(), "unit": unit})
-			continue
-		}
-		switch arm := restamped.GetRow().(type) {
-		case *frontendv1.FeedRow_DetachedSubagent:
-			arm.DetachedSubagent.GetSubagent().Tokens = figure
-		case *frontendv1.FeedRow_Activity:
-			arm.Activity.GetSubagent().Tokens = figure
-		}
-		r.upsert(s, state.feed, restamped, true)
+		r.restateRow(s, state.feed, row, true, unclonable{
+			operation: "daemon.feed.row_not_clonable",
+			message:   "a subagent card could not be snapshotted to re-stamp its fresh input",
+			context:   dlog.Context{"feed": f.key, "row": state.row.GetValue(), "unit": unit},
+		}, func(restamped *frontendv1.FeedRow) {
+			switch arm := restamped.GetRow().(type) {
+			case *frontendv1.FeedRow_DetachedSubagent:
+				arm.DetachedSubagent.GetSubagent().Tokens = figure
+			case *frontendv1.FeedRow_Activity:
+				arm.Activity.GetSubagent().Tokens = figure
+			}
+		})
 	}
 }
