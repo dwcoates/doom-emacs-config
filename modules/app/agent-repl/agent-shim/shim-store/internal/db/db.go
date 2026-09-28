@@ -47,7 +47,7 @@ import (
 // would nuke the owner's database to add a lookup structure SQLite can build
 // in place; the lineage indexes (lineageIndexes) are applied to a matching
 // database by ensureIndexes instead.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // THE PAGE CACHE AND THE MAP. SQLite's default cache is 2 MB per connection,
 // against an events.db of 1.1 GB on the owner's box, so an upsert's B-tree
@@ -682,6 +682,21 @@ CREATE TABLE detached_work (
 CREATE INDEX detached_work_origin ON detached_work(origin_unit);
 CREATE INDEX detached_work_live   ON detached_work(ended_at_ms);
 
+-- vendor_task pairs a subagent's VENDOR TASK LOCATOR (the <id> of
+-- agent-<id>.jsonl, and the stream's task_id) with the agent it names (the
+-- spawning call's tool_use_id, the cross-plane minting rule). The sidecar
+-- writes it with the agent's rows (EntryBatch.agent_locators); the shim reads
+-- it through GetAgentByVendorTask when a resume names the call that woke the
+-- agent rather than the spawn. One row per (locator, agent), so a re-stated
+-- pairing is absorbed and a locator paired with two agents stays visible to
+-- the lookup, which refuses it rather than choosing.
+CREATE TABLE vendor_task (
+  vendor_task_id TEXT    NOT NULL,
+  agent_id       TEXT    NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (vendor_task_id, agent_id)
+);
+
 CREATE TABLE cursor (
   file_id       TEXT PRIMARY KEY,
   path          TEXT    NOT NULL,
@@ -789,7 +804,7 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "residue_shapes", "schema_meta", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "residue_shapes", "schema_meta", "vendor_task", "workflow", "write_ledger"}
 
 // supersededVersion reports whether an on-disk stamp names a schema THIS
 // binary superseded: any version below its own, and not the 0 of a database
