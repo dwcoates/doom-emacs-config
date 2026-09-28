@@ -360,6 +360,39 @@ func TestForwardConcludesUnresolvableWhenDirAbsentFromDeliveredRoster(t *testing
 	}
 }
 
+// A roster stream whose FIRST frame is the daemon's planned ending delivered
+// no roster at all: the daemon is standing down. That says nothing about the
+// dir, so it is the restart transient, never an unresolvable workspace.
+func TestForwardTreatsAPlannedEndingBeforeAnyRosterAsTheDaemonLeaving(t *testing.T) {
+	// Arrange: the roster handler's first and last frame is the planned ending.
+	recordDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize the record's workspace: %v", err)
+	}
+	client, clientLogReached := startFakeDaemon(t, func(_ context.Context, stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+		return stream.Send(&agentreplv1.WatchWorkspaceRosterResponse{
+			Push: &agentreplv1.WatchWorkspaceRosterResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+		})
+	})
+
+	// Act.
+	_, err = client.Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: recordDir, WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("a planned ending before any roster = %v, want it OFF the unresolvable path", err)
+	}
+	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("a planned ending before any roster = %v, want the daemon-leaving transient", err)
+	}
+	if *clientLogReached {
+		t.Fatal("ClientLog was reached with no roster delivered, want it never attempted")
+	}
+}
+
 // A roster stream that ERRORS before delivering any snapshot is a TRANSPORT
 // failure, not an unresolvable workspace: the daemon could be booting or gone,
 // and the pid/boot sentinels -- not the unresolvable one -- must classify it.
@@ -394,13 +427,13 @@ func TestForwardTakesTransportPathWhenRosterStreamErrors(t *testing.T) {
 }
 
 func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
-	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
 			}}},
 		}}},
-	}}
+	}}}
 }
 
 func TestAddressLineTakesTheFirstLineOfTheAdvertisement(t *testing.T) {
@@ -916,11 +949,11 @@ func rosterResponseFor(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorks
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
 		})
 	}
-	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Rows: &frontendv1.RosterRows{Rows: rows},
 		}}},
-	}}
+	}}}
 }
 
 // tempWorkspaceDir is a directory spelled the way the roster spells it, so a

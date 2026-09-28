@@ -179,11 +179,11 @@ func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRos
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: ref},
 		})
 	}
-	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Rows: &frontendv1.RosterRows{Rows: rows},
 		}}},
-	}}
+	}}}
 }
 
 func (f *fakeClientLog) handle(
