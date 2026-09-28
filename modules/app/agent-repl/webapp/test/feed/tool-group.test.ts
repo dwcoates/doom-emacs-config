@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import stylesheet from "../../src/styles.css?raw";
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { orderFor } from "../feed-order.js";
 import {
   FEED_GROUP_CLASS,
   GROUP_TAB_MEMBER_ATTRIBUTE,
@@ -25,6 +26,7 @@ import {
 function activityRow(id: string, unit: string): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: { case: "activity", value: { unit: { case: unit, value: {} } } } as never,
   });
 }
@@ -33,6 +35,7 @@ function activityRow(id: string, unit: string): FeedRow {
 function rowArm(id: string, arm: string): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    order: orderFor(id),
     row: { case: arm, value: {} } as never,
   });
 }
