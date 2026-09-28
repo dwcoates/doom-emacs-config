@@ -720,7 +720,7 @@ func TestADaemonWarningStandsOnEveryStrip(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			tc.setup(t, h, func() { h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc") })
+			tc.setup(t, h, func() { h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed: build webapp: tsc"}) })
 
 			// Assert
 			for _, ws := range []ids.WorkspaceID{testWS, otherWS} {
@@ -738,7 +738,7 @@ func TestADaemonWarningIsItsLineAlone(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed: build webapp: tsc"})
 
 	// Assert
 	got := warnings(t, h)
@@ -751,10 +751,10 @@ func TestRaisingADaemonWarningAgainRestatesItsLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.RaiseDaemonWarning("fault-1", "first")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "first"})
 
 	// Act
-	h.r.RaiseDaemonWarning("fault-1", "second")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "second"})
 
 	// Assert
 	if got := lines(t, h, testWS); len(got) != 1 || got[0] != "second" {
@@ -767,7 +767,7 @@ func TestARetractedDaemonWarningLeavesEveryStrip(t *testing.T) {
 	h := newHarness(t)
 	h.ready(t)
 	readyOther(t, h)
-	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed: build webapp: tsc"})
 
 	// Act
 	h.r.RetractDaemonWarning("fault-1")
@@ -784,7 +784,7 @@ func TestARetractedDaemonWarningIsNotDrawnOnALaterStrip(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.RaiseDaemonWarning("fault-1", "deploy failed: build webapp: tsc")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed: build webapp: tsc"})
 	h.r.RetractDaemonWarning("fault-1")
 
 	// Act
@@ -802,7 +802,7 @@ func TestADaemonWarningIsRecordedOnTheRunLog(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.RaiseDaemonWarning("fault-1", "deploy failed")
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed"})
 
 	// Assert
 	for _, r := range h.log.Records() {
@@ -811,4 +811,117 @@ func TestADaemonWarningIsRecordedOnTheRunLog(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the raise at INFO naming the one strip", h.log.Records())
+}
+
+// deployOverlay is a failed deploy's overlay, as the fault sink hands it on.
+func deployOverlay(log string) *DeployFailedOverlay {
+	return &DeployFailedOverlay{
+		Step: "install", Component: "store", Rollback: "it was rolled back to the previous build",
+		Detail: "rename store: permission denied\nsecond line", Log: log,
+	}
+}
+
+// daemonOverlay answers the newest warning's deploy_failed overlay on a
+// strip: the daemon's, which sorts above a standing session-less line.
+func daemonOverlay(t *testing.T, h *harness, ws ids.WorkspaceID) *frontendv1.TopbarDeployFailedWarningDetail {
+	t.Helper()
+	view, ok := h.r.Topic(ws).Latest()
+	if !ok {
+		t.Fatalf("no topbar published for %s", ws)
+	}
+	got := view.GetWarnings().GetWarnings()
+	if len(got) == 0 {
+		t.Fatalf("%s warnings = none, want the daemon warning first", ws)
+	}
+	return got[0].GetDeployFailed()
+}
+
+func TestADaemonWarningWithAnOverlayOpensItOnEveryStrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, h *harness, raise func())
+	}{
+		{"a strip that stood before it was raised", func(t *testing.T, h *harness, raise func()) {
+			readyOther(t, h)
+			raise()
+		}},
+		{"a strip made after it was raised", func(t *testing.T, h *harness, raise func()) {
+			raise()
+			readyOther(t, h)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			tc.setup(t, h, func() {
+				h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed: install store, rolled back: second line", DeployFailed: deployOverlay("")})
+			})
+
+			// Assert
+			got := daemonOverlay(t, h, otherWS)
+			if got.GetStep().GetText() != "install" || got.GetComponent().GetText() != "store" ||
+				got.GetRollback().GetText() != "it was rolled back to the previous build" {
+				t.Fatalf("overlay = %v, want the step, the component and the rollback", got)
+			}
+		})
+	}
+}
+
+func TestADeployOverlayCarriesTheWholeDetail(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed", DeployFailed: deployOverlay("")})
+
+	// Assert
+	if got := daemonOverlay(t, h, testWS).GetDetail().GetText(); got != "rename store: permission denied\nsecond line" {
+		t.Fatalf("overlay detail = %q, want the failure's whole account", got)
+	}
+}
+
+func TestADeployOverlayLog(t *testing.T) {
+	tests := []struct {
+		name    string
+		log     string
+		present bool
+	}{
+		{"a build that archived its output names the log", "/state/deploy/build.log", true},
+		{"a failure with no archived output carries no log", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "deploy failed", DeployFailed: deployOverlay(tc.log)})
+
+			// Assert
+			got := daemonOverlay(t, h, testWS)
+			if (got.GetLog() != nil) != tc.present || got.GetLog().GetText() != tc.log {
+				t.Fatalf("overlay log = %v, want present=%v %q", got.GetLog(), tc.present, tc.log)
+			}
+		})
+	}
+}
+
+func TestRaisingADaemonWarningAgainRestatesItsOverlay(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "first", DeployFailed: deployOverlay("")})
+
+	// Act
+	h.r.RaiseDaemonWarning("fault-1", DaemonWarning{Line: "second"})
+
+	// Assert
+	if got := daemonOverlay(t, h, testWS); got != nil {
+		t.Fatalf("overlay = %v, want the restated warning's (none)", got)
+	}
 }
