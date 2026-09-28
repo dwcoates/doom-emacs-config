@@ -734,13 +734,38 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
    bounce registry (`rollout.CheckStaleness`), and each workspace whose webview
    reported an older `webapp_build` gets `reload_webapp`.
 
+A FAILED DEPLOY ROLLS BACK (owner ruling, 2026-09-28; `rollback.go`). Before
+the install replaces a live path it keeps what stood there (under the
+staging directory's `.previous`): the daemon, the shim bundle and its stamps,
+the webapp dist, and the cache-bin store, sidecar and lock binaries with
+their stamps. Any failure after the install began (the install itself, a
+service restart, a refused handover or restart, an unreadable fresh layout,
+an unlistable workspace set) restores every kept path newest first (the shim
+bundle under `Bundle.Replace`), removes what stood nowhere before, leaves a
+path already holding the previous bytes untouched, and restarts every service
+the deploy restarted or tried to (`RestartStore` restarts both) onto the
+restored build. The daemon never handed over, so it keeps serving. Elisp is
+loaded from the checkout and has no installed artifact or stamp to keep.
+Records go under `daemon.deploy.rollback`.
+
 A build, install or service restart that fails also opens the daemon-scoped
 `deploy_failed` fault (`DaemonFaultDeployFailed`, whose `step` arm carries the
 rpc's own refusal) through the observed state client, superseding that step's
-earlier fault; a step a later deploy gets through closes every fault of that
-step, and a non-joining daemon closes the ones an earlier daemon left at boot
+earlier fault; its evidence, prose and footer line say what became of the
+install (`rolled back`, `rollback failed`, or nothing installed). A rollback
+that did not restore the previous build opens its OWN `deploy_failed` fault
+under the `rollback` step (`DeployRollbackFailed`: the first component that
+failed and every failure), which only a deploy that gets all the way through
+closes. A step a later deploy gets through closes every fault of that step,
+and a non-joining daemon closes the ones an earlier daemon left at boot
 (`Deployer.CloseEarlierFailures`), since no strip of the new process draws
 them. Records go under `daemon.deploy.fault`.
+
+A daemon-scoped `deploy_failed` fault stands on the TOPBAR's warning strip as
+well as on every footer (owner ruling, 2026-09-28): `health.FaultTopbarLine`
+names it (`deploy failed: <footer line>`), and the graph's fault sink
+(`faultSurfaces`) raises it through `topbar.RaiseDaemonWarning` on every
+strip, present and future, and retracts it when the fault closes.
 
 One deploy runs at a time (`already_deploying`); a landing that arrives while
 one runs is covered by ONE follow-up deploy. Every decision is a record under
