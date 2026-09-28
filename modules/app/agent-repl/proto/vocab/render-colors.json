@@ -69,14 +69,16 @@
     "same way, but the turn did not produce what it was asked for, so it is",
     "drawn in the color that says something is wrong rather than green.",
     "",
-    "TWO MERGE ARMS SPEND A COLOR AS WELL AS A GLYPH (owner ruling,",
+    "THREE MERGE ARMS SPEND A COLOR AS WELL AS A GLYPH (owner ruling,",
     "2026-09-28), declared in 'colored_merge_arms'. 'merge_failed' is BLUE:",
     "'blue status in general is used to signal something is wrong with the",
     "current workspace'. 'merge_conflict' (a PARKED merge included) is GREEN:",
     "a merge conflict 'is totally expected state... it belongs as green",
     "status (to denote that it's ready for human response)'. Blue is",
     "reserved for unexpected or incorrect states, so a conflict is never",
-    "blue. Both keep their glyphs."
+    "blue. 'merged' is GREEN: a merge that landed successfully is a settled",
+    "success, while a merge in progress stays purple on the tab bar. All",
+    "three keep their glyphs."
   ],
   "roster_status": {
     "none": "none",
@@ -102,7 +104,7 @@
     "merge_queued": "none",
     "merge_conflict": "green",
     "merge_failed": "blue",
-    "merged": "none"
+    "merged": "green"
   },
   "_colored_merge_arms_comment": [
     "The merge arms that spend a lifecycle color beside their glyph. Every",
@@ -111,7 +113,8 @@
   ],
   "colored_merge_arms": [
     "merge_conflict",
-    "merge_failed"
+    "merge_failed",
+    "merged"
   ],
   "_merge_glyphs_comment": [
     "GLYPH NAMES, not characters. The merge arms take no color, so the glyph",
@@ -153,8 +156,9 @@
     "'merging' is purple and means a merge is IN FLIGHT. A merge stopped",
     "awaiting the user is 'merge_conflict', GREEN: an expected state, ready",
     "for a human response. A failed merge is 'merge_failed', BLUE: something",
-    "is wrong with the workspace. A landed merge is 'merged', which keeps the",
-    "purple the footer drew it with while it was a 'merging' step. Each of",
+    "is wrong with the workspace. A landed merge is 'merged', GREEN (owner",
+    "ruling, 2026-09-28): a merge in progress is purple, a successful one",
+    "green. Each of",
     "the three is the same coarse claim as the roster arm of the same name."
   ],
   "footer_status": {
@@ -170,7 +174,7 @@
     "loading": "red",
     "merge_conflict": "green",
     "merge_failed": "blue",
-    "merged": "purple"
+    "merged": "green"
   },
   "_footer_allowance_comment": [
     "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",
@@ -230,9 +234,8 @@
     "The three are the merge arms with no verdict yet: merge_enqueuing,",
     "merge_queued and merging. merge_conflict, merge_failed and merged are",
     "deliberately NOT overridden — a conflict wants the user, and the other",
-    "two are terminal, so none of them is 'in flight'. The first two already",
-    "take their shared colors here (green and blue), and merged keeps its",
-    "glyph alone.",
+    "two are terminal, so none of them is 'in flight'. All three already",
+    "take their shared colors here (green, blue and green).",
     "",
     "vendor_blocked TAKES NO OVERRIDE ANY MORE. It once needed one because it",
     "was purple in the shared table and the glyph-less tab bar could not tell",

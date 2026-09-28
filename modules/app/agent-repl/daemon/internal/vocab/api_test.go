@@ -169,6 +169,32 @@ func TestLoadRenderColorsPaintsAMergeConflictGreen(t *testing.T) {
 	}
 }
 
+func TestLoadRenderColorsPaintsMergedGreen(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.RosterStatus["merged"]
+
+	// Assert.
+	if got != "green" {
+		t.Fatalf("roster_status[merged] = %q, want green (owner ruling, 2026-09-28)", got)
+	}
+}
+
+func TestLoadRenderColorsPaintsAMergedFooterGreen(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.FooterStatus["merged"]
+
+	// Assert.
+	if got != "green" {
+		t.Fatalf("footer_status[merged] = %q, want green (owner ruling, 2026-09-28)", got)
+	}
+}
+
 func TestLoadRenderColorsFailsWhenADeclaredColoredMergeArmTakesNoColor(t *testing.T) {
 	// Arrange.
 	dir := writeColors(t, func(m map[string]any) {
