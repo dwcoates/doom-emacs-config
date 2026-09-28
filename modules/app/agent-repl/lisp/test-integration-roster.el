@@ -45,8 +45,6 @@
 (declare-function agent-repl--tab-badge-str "status" (name arm))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host--on-workspace-activated "host" (&rest _))
-(declare-function agent-repl--prompt-queue-enqueue "prompt-queue" (ws kind said origin raw))
-(declare-function agent-repl--prompt-queue-on-finish "prompt-queue" (ws))
 (declare-function agent-repl-roster-notify-finished "roster" (ws))
 (declare-function agent-repl-roster-echo-finished "roster" (ws))
 (declare-function agent-repl-roster-refresh-magit "roster" (ws))
@@ -939,9 +937,8 @@ never a silently-empty view."
 
 (ert-deftest agent-repl-itest-roster-running-to-settled-fires-the-finish-edge ()
   "thinking → done is THE FINISH EDGE, and it fires once.
-All four Emacs-local reactions ride this transition: the unfocused
-banner, the cross-workspace echo, the magit refresh and the deferred
-drain."
+All three Emacs-local reactions ride this transition: the unfocused
+banner, the cross-workspace echo and the magit refresh."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1238,40 +1235,6 @@ stale or global one."
           (agent-repl-itest--wait-until (lambda () refreshed) nil "the magit refresh")
           (should (member (agent-repl-itest--fixture-dir "roster-itest-fin-magit") refreshed)))))))
 
-(ert-deftest agent-repl-itest-roster-finish-edge-drains-a-deferred-prompt ()
-  "Reaction (4): a held deferred prompt drains as a SubmitPrompt on the finish edge.
-Fanout §8: \"deferred-prompt drain (prompt-queue.el registers this one)\"
-— `agent-repl--prompt-queue-on-finish' rides
-`agent-repl-roster-finish-functions'; a prompt typed mid-turn must go out
-the instant the turn settles, carrying PROMPT_ORIGIN_DEFERRED_PROMPT."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      ;; The fixture blanks the finish hook; the drain IS this scenario's
-      ;; subject, so prompt-queue.el's own consumer goes back on alone.
-      (let ((agent-repl-link--primary conn)
-            (agent-repl-roster-finish-functions
-             (list #'agent-repl--prompt-queue-on-finish)))
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer" "itest-defer" 'thinking))))
-        (agent-repl-itest--wait-until
-         (lambda () (agent-repl-host-ref "itest-defer"))
-         nil "the tab's host ref to attach")
-        (agent-repl--prompt-queue-enqueue
-         "itest-defer" :deferred
-         (agent-repl--input-said "run the tests" nil)
-         :deferred-prompt "run the tests")
-        ;; Act.
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer" "itest-defer" 'done))))
-        ;; Assert.
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        (should (equal (agent-repl-itest--body-field
-                        (car (agent-repl-itest--call-bodies daemon "SubmitPrompt")) 'origin)
-                       "PROMPT_ORIGIN_DEFERRED_PROMPT"))))))
-
 ;;;; ---- Paint: badges and glyphs through the render path ----
 
 (ert-deftest agent-repl-itest-roster-priority-badge-draws-before-the-name ()
@@ -1361,7 +1324,6 @@ rather than a lifecycle color."
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster")
 (declare-function agent-repl--emacs-focused-p "notifications")
 (declare-function agent-repl--ws-get "workspace")
-(declare-function agent-repl--prompt-queue-on-finish "prompt-queue")
 
 ;; audit-2 #17
 (ert-deftest agent-repl-itest-roster-row-that-left-the-roster-is-torn-down ()
@@ -1428,17 +1390,18 @@ skips, and host.el is handed no ref to hold."
 
 ;; audit-2 #19
 (ert-deftest agent-repl-itest-roster-finish-reactions-are-globally-registered ()
-  "The four finish-edge reactions are registered at LOAD time, globally.
+  "The three finish-edge reactions are registered at LOAD time, globally.
 Every other finish-edge test binds `agent-repl-roster-finish-functions'
 to exactly the consumer it exercises, so a production that dropped its
 `add-hook' would pass all of them.  The GLOBAL value is the only place
-the wiring itself is observable."
+the wiring itself is observable.  A deferred prompt is NOT a fourth: the
+daemon holds it and runs it as its own turn (owner ruling, 2026-09-28),
+so nothing on this edge releases one (test-prompt-queue.el pins that)."
   ;; Arrange / Act / Assert.
   (let ((registered (default-value 'agent-repl-roster-finish-functions)))
     (should (memq #'agent-repl-roster-notify-finished registered))
     (should (memq #'agent-repl-roster-echo-finished registered))
-    (should (memq #'agent-repl-roster-refresh-magit registered))
-    (should (memq #'agent-repl--prompt-queue-on-finish registered))))
+    (should (memq #'agent-repl-roster-refresh-magit registered))))
 
 ;; audit-2 #19
 (ert-deftest agent-repl-itest-roster-attention-sync-is-globally-registered ()
@@ -1626,7 +1589,6 @@ into the user's face."
 
 (declare-function agent-repl-host-composer-gate "host" (ws))
 (declare-function agent-repl--live-ws-names "workspace" ())
-(declare-function agent-repl-prompt-queue-pending "prompt-queue" (ws &optional kind))
 (declare-function agent-repl-roster-row-for-ws "roster" (ws))
 
 (defun agent-repl-itest-roster--host-live (composer)
@@ -1985,83 +1947,6 @@ sidebar.proto:60 marks `task' non-optional; audit-1 #49 pinned
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (agent-repl-itest-roster--push-invalid-carries-raw
                daemon "ws-no-task-marker")))))
-
-;; audit-3 #40
-(ert-deftest agent-repl-itest-roster-finish-edge-drain-carries-the-said-text-and-the-workspace-id ()
-  "The drained SubmitPrompt carries the held TEXT and the row's workspace id.
-fanout §8 \"deferred-prompt drain\": only `origin' is pinned elsewhere; a
-drain that resolved the wrong ref id or dropped the text on the way out
-would still pass that one assertion alone."
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      (let ((agent-repl-link--primary conn)
-            (agent-repl-roster-finish-functions
-             (list #'agent-repl--prompt-queue-on-finish)))
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer-body" "itest-defer-body" 'thinking))))
-        (agent-repl-itest--wait-until
-         (lambda () (agent-repl-host-ref "itest-defer-body"))
-         nil "the tab's host ref to attach")
-        (agent-repl--prompt-queue-enqueue
-         "itest-defer-body" :deferred
-         (agent-repl--input-said "run the deferred tests" nil)
-         :deferred-prompt "run the deferred tests")
-        ;; Act.
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer-body" "itest-defer-body" 'done))))
-        ;; Assert.
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        (let ((body (car (agent-repl-itest--call-bodies daemon "SubmitPrompt"))))
-          (should (equal (agent-repl-itest--body-field body 'workspace 'id) "itest-defer-body"))
-          (should (equal (agent-repl-itest--body-field
-                          (car (agent-repl-itest--body-field body 'said 'content 'blocks))
-                          'text 'text)
-                         "run the deferred tests")))))))
-
-;; audit-3 #40
-(ert-deftest agent-repl-itest-roster-finish-edge-deferred-drain-stays-queued-behind-a-merging-gate ()
-  "A merging composer gate defers the drain instead of sending; INFO, not silence.
-fanout §8 reaction (4); fanout §10 the liveness gate: a drain into
-`merging' would be refused by the daemon and lose the prompt's place for
-nothing, so it stays queued and the finish edge logs
-`elisp.prompt-queue.finish-edge-deferred' rather than sending anything —
-the gated case fanout §10 names but nothing in this suite exercised."
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      (let ((agent-repl-link--primary conn)
-            (agent-repl-roster-finish-functions
-             (list #'agent-repl--prompt-queue-on-finish)))
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer-gated" "itest-defer-gated" 'thinking))))
-        (agent-repl-itest--wait-until
-         (lambda () (agent-repl-host-ref "itest-defer-gated"))
-         nil "the tab's host ref to attach")
-        ;; THE REF IS THE CLIENT'S FACT, THE SUBSCRIBER IS THE DAEMON'S: the
-        ;; ref attaches strictly before the WatchHostWorkspace subscription
-        ;; behind it is registered, and a push in that window reaches nobody.
-        (agent-repl-itest--await-subscriber daemon "host" "itest-defer-gated")
-        (agent-repl-itest--push
-         daemon "host"
-         `((host . ,(agent-repl-itest-roster--host-live 'merging)))
-         "itest-defer-gated")
-        (agent-repl-itest--wait-until
-         (lambda () (eq (agent-repl-host-composer-gate "itest-defer-gated") :merging))
-         nil "the merging composer gate")
-        (agent-repl--prompt-queue-enqueue
-         "itest-defer-gated" :deferred
-         (agent-repl--input-said "run the tests once merging clears" nil)
-         :deferred-prompt "run the tests once merging clears")
-        ;; Act.
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row "itest-defer-gated" "itest-defer-gated" 'done))))
-        ;; Assert.
-        (agent-repl-itest--await-log daemon "elisp.prompt-queue.finish-edge-deferred" "info")
-        (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
-        (should (agent-repl-prompt-queue-pending "itest-defer-gated" :deferred))))))
 
 ;; audit-3 #41
 (ert-deftest agent-repl-itest-roster-finish-edge-banner-names-the-workspace-and-activates ()
