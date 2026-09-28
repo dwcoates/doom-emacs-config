@@ -295,7 +295,7 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	// before the transaction ended would let the next writer begin against a
 	// lock this one still holds, which is the contention the gate removes.
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, base)
 	began := d.mono()
 
 	nextSeq, err := d.currentWriteSeq(ctx, tx)

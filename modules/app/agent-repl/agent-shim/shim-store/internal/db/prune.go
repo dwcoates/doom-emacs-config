@@ -247,7 +247,7 @@ func (d *DB) pruneLedgerBatch(ctx context.Context, after string, transaction int
 		return sweptPage{}, d.refuse(base, storagef(err, "begin ledger sweep transaction"))
 	}
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, base)
 
 	if err := tx.QueryRowContext(ctx, ledgerSweepPageSQL, after, ledgerSweepCursorsPerBatch).Scan(&page.files, &page.last); err != nil {
 		return sweptPage{}, d.refuse(base, storagef(err, "reading the ledger sweep's cursor page"))

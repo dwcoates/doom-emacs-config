@@ -49,8 +49,20 @@ type OpenedPage struct {
 // until it ends, so `OpenPage`'s watch pin is read from the same view of the
 // database as the lines it answers with — which is the property that comment
 // asks for, and it never needed the write lock to get it.
+//
+// THE SNAPSHOT ENDS BEFORE THE READ RETURNS, AND THE TRANSACTION'S CONTEXT IS
+// WHAT GUARANTEES IT. A transaction begun on a cancellable context is rolled
+// back by database/sql's own goroutine the moment that context ends, and the
+// caller's deferred Rollback then returns ErrTxDone at once, without waiting
+// for that rollback to finish. So a cancelled read returned while its snapshot
+// was still held, and nothing bounded how long it stayed held. The
+// transaction is therefore begun on context.WithoutCancel(ctx): its end is
+// always the caller's own deferred rollback, on the caller's goroutine. The
+// statements inside it still run on the caller's ctx, so a cancellation still
+// interrupts the read at once. A deferred BEGIN takes no lock and reads
+// nothing, so the uncancellable part never waits on anything.
 func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
-	return d.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	return d.read.BeginTx(context.WithoutCancel(ctx), &sql.TxOptions{ReadOnly: true})
 }
 
 // OpenPage answers one agent's opening page.
@@ -77,7 +89,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	if err != nil {
 		return OpenedPage{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}
-	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+	defer d.endTx(tx, base)
 
 	// THE REGISTER IS ASKED FIRST, before the pointer. A known_through against
 	// a book that does not exist is stale only as a consequence of the book not
@@ -144,7 +156,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "begin read transaction"))
 	}
-	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+	defer d.endTx(tx, base)
 
 	if err := d.pointerInBook(ctx, tx, agentID, position, "after", after.GetValue()); err != nil {
 		fields := base

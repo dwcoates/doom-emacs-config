@@ -238,6 +238,12 @@ type Client interface {
 	// Connectivity yields every link state change: dialing, connected,
 	// redialing, dead. Redial is forever while the process lives.
 	Connectivity() <-chan LinkState
+	// Connections counts the links established so far. It is advanced BEFORE
+	// the LinkConnected that announces each one is published, so a consumer
+	// that recorded the count when it opened its streams can tell, at the
+	// moment those streams break, whether the link has already come back
+	// since -- which a LinkConnected it consumed earlier cannot tell it.
+	Connections() uint64
 	// PID is the supervised process's pid.
 	PID() int
 }

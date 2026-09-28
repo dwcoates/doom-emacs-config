@@ -993,7 +993,7 @@ func (d *DB) createSchema(ctx context.Context) error {
 		return storagef(err, "begin schema creation")
 	}
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, logging.Fields{Operation: "store.db.schema", DatabasePath: d.path, Table: "sqlite_master"})
 
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
 		return storagef(err, "creating the schema")
@@ -1057,7 +1057,7 @@ func (d *DB) ensureIndexes(ctx context.Context, path string) error {
 		return fail(storagef(err, "begin the lineage index build"))
 	}
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, fields)
 	for _, index := range lineageIndexes {
 		if !contains(missing, index.name) {
 			continue
@@ -1104,7 +1104,7 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 		return fail(storagef(err, "begin the in-place table build"))
 	}
 	defer release()
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	defer d.endTx(tx, fields)
 	for _, table := range inPlaceTables {
 		if !contains(missing, table.name) {
 			continue

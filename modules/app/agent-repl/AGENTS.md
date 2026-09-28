@@ -121,6 +121,26 @@ Two standing rules follow from the same measurement:
   wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
   to init and burning CPU for the rest of the run.
 
+### Every Go module pins a shared third-party dependency at one version
+
+The store, daemon and e2e modules once each pinned `modernc.org/sqlite`
+independently, and one driver bug (a statement leaked on context cancel,
+pinning the SQLite WAL) sat in two systems at once. `bin/check-go-deps.sh`
+reads every `go.mod` under this module (direct and `// indirect` requires, block
+and single-line forms) and fails, naming the dependency, each version and the
+go.mod files pinning it, whenever a third-party module path is required at more
+than one version.
+
+- Our own modules replaced by a local path (`replace ... => ./` or `../`, such as
+  `agentrepl/proto` and `agentrepl/logging`) are exempt, detected from each
+  go.mod's own `replace` directives.
+- `go.mod` files under `node_modules`, `testdata`, `fixture` and `fixtures` are
+  skipped.
+- `bin/test-check-go-deps.sh` (the `go-deps-harness` suite) covers the check on
+  fixture trees and runs it against the real tree as the gate.
+- An upgrade of a shared dependency lands in EVERY module that requires it, in
+  the same commit, followed by each affected module's tests.
+
 ### Test wait/timeout bounds are measured, not guessed
 
 Every synchronization wait in `test-integration-*.el` funnels through
@@ -810,6 +830,19 @@ because afterwards nobody can say it happened, in what order, or why.
 
 The fix is to emit the missing record at the site that performs the action, once,
 naming the action and the subject it acted on.
+
+IF YOU CANNOT SEE IT IN THE LOGS, THE FIX IS ALWAYS THE LOGS. This covers every
+diagnosis, not only tests, and it covers STATES as well as actions. A condition
+that persists (a pinned WAL, a stuck queue, a held lock, a slow edge) is a
+defect in the logs if nothing above verbose says it is happening. Probing a
+live process, reading raw SQLite files, or running a one-off experiment may
+show where the record belongs. None of them is the answer. The investigation
+is finished when the record that would have shown the fault has landed, with
+enough structured context to diagnose that fault from the log alone, and has a
+test. On 2026-09-28 the store's checkpoints copied nothing for four hours while
+the WAL passed 137 MB, and the only record of it was verbose. Finding it took
+reading the `-shm` read marks by hand. The fix was the driver bug and ALSO the
+`store.db.wal-pin` warning that would have named it.
 
 CHATTINESS IS NOT A REASON TO STAY SILENT; IT IS A REASON TO PICK THE RIGHT
 LEVEL. Do not skip a record because the log would get noisy, and do not promote

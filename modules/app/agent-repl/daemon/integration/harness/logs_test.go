@@ -295,3 +295,75 @@ func TestAwaitLogRecordReturnsTheFirstRecordThePredicateAccepts(t *testing.T) {
 		t.Fatalf("record = %+v, want the successor's", got)
 	}
 }
+
+func TestLogTailOfAnEmptyLogSaysSo(t *testing.T) {
+	// Act
+	got := logTail(nil, 3)
+
+	// Assert
+	if got != "the log held no records" {
+		t.Fatalf("logTail(nil) = %q", got)
+	}
+}
+
+func TestLogTailKeepsOnlyTheLastRecordsOldestFirst(t *testing.T) {
+	// Arrange
+	records := []LogRecord{
+		{Timestamp: "t1", Level: "info", Operation: "op.a", Message: "first"},
+		{Timestamp: "t2", Level: "warn", Operation: "op.b", Message: "second"},
+		{Timestamp: "t3", Level: "error", Operation: "op.c", Message: "third"},
+	}
+
+	// Act
+	got := logTail(records, 2)
+
+	// Assert
+	want := "last 2 of 3 records at info or above (0 debug records not shown):\n  t2 warn op.b: second\n  t3 error op.c: third"
+	if got != want {
+		t.Fatalf("logTail = %q, want %q", got, want)
+	}
+}
+
+func TestLogTailShorterThanItsBoundPrintsEveryRecord(t *testing.T) {
+	// Arrange
+	records := []LogRecord{{Timestamp: "t1", Level: "info", Operation: "op.a", Message: "only"}}
+
+	// Act
+	got := logTail(records, 40)
+
+	// Assert
+	if got != "last 1 of 1 records at info or above (0 debug records not shown):\n  t1 info op.a: only" {
+		t.Fatalf("logTail = %q", got)
+	}
+}
+
+func TestLogTailCarriesEachRecordsContext(t *testing.T) {
+	// Arrange
+	records := []LogRecord{{Timestamp: "t1", Level: "info", Operation: "op.a", Message: "linked", Context: map[string]any{"state": "connected"}}}
+
+	// Act
+	got := logTail(records, 40)
+
+	// Assert
+	if got != `last 1 of 1 records at info or above (0 debug records not shown):
+  t1 info op.a: linked {"state":"connected"}` {
+		t.Fatalf("logTail = %q", got)
+	}
+}
+
+func TestLogTailPassesOverDebugRecordsAndCountsThem(t *testing.T) {
+	// Arrange
+	records := []LogRecord{
+		{Timestamp: "t1", Level: "info", Operation: "op.a", Message: "decided"},
+		{Timestamp: "t2", Level: "debug", Operation: "op.poll", Message: "read"},
+		{Timestamp: "t3", Level: "debug", Operation: "op.poll", Message: "read"},
+	}
+
+	// Act
+	got := logTail(records, 40)
+
+	// Assert
+	if got != "last 1 of 1 records at info or above (2 debug records not shown):\n  t1 info op.a: decided" {
+		t.Fatalf("logTail = %q", got)
+	}
+}

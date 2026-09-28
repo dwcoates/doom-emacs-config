@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -605,5 +606,61 @@ func TestTheWindowIsEmittedOnlyWhenItWasMeasured(t *testing.T) {
 				t.Fatalf("over-budget keys present = (%v, %v), want %v: %s", gotRecent, gotWindow, test.wantWindow, file.String())
 			}
 		})
+	}
+}
+
+func TestLogMarshalsAPinnedWALsState(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	log.Log(Fields{Operation: "store.db.wal-pin", WAL: &WALState{
+		Frames: 47506, Backfilled: 0, ReadMarks: []uint32{0, 47481, 0xffffffff},
+		PinnedFor: 90 * time.Second, ReadPoolOpen: 2, ReadPoolInUse: 0, ReadPoolIdle: 2,
+	}}, "pinned")
+
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
+	}
+	want := map[string]any{
+		"wal_frames": float64(47506), "wal_backfilled": float64(0),
+		"wal_read_marks":    []any{float64(0), float64(47481), float64(0xffffffff)},
+		"wal_pinned_for_ms": float64(90000), "read_pool_open": float64(2),
+		"read_pool_in_use": float64(0), "read_pool_idle": float64(2),
+	}
+	for key, value := range want {
+		if !reflect.DeepEqual(got.Context[key], value) {
+			t.Fatalf("context[%s] = %#v, want %#v; record %s", key, got.Context[key], value, file.String())
+		}
+	}
+}
+
+func TestLogOmitsWALStateWhenNoneIsGiven(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	log.Log(Fields{Operation: "store.db.wal-checkpoint"}, "checkpointed")
+
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
+	}
+	if _, ok := got.Context["wal_frames"]; ok {
+		t.Fatalf("a record without WAL state carries wal_frames: %s", file.String())
+	}
+}
+
+func TestWithKeepsABoundWALStateWhenARecordAddsNone(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false).With(Fields{WAL: &WALState{Frames: 7}})
+
+	log.Log(Fields{Operation: "store.db.wal-pin"}, "pinned")
+
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
+	}
+	if got.Context["wal_frames"] != float64(7) {
+		t.Fatalf("wal_frames = %#v, want the bound 7", got.Context["wal_frames"])
 	}
 }

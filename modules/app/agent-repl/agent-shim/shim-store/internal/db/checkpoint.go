@@ -74,6 +74,14 @@ const DefaultCheckpointPages = 1000
 // after its last write.
 const DefaultCheckpointIdle = 2 * time.Second
 
+// DefaultPinWarnAfter is how long checkpoints may go on copying nothing while
+// frames wait before the store says a reader is pinning its WAL. A read holds
+// its snapshot only for the statements of one call; the slowest read seen on
+// the owner's store, with the machine at a load average of 151, took 1.4s. A
+// snapshot still held a minute on is no read in progress: it is a leak, and
+// until it ends the WAL grows without bound and every read over it slows.
+const DefaultPinWarnAfter = time.Minute
+
 // CheckpointTrigger names why a checkpoint ran.
 type CheckpointTrigger string
 
@@ -85,10 +93,12 @@ const (
 	TriggerIdle CheckpointTrigger = "idle"
 )
 
-// CheckpointPolicy is the job's two triggers. Zero values take the defaults.
+// CheckpointPolicy is the job's two triggers, and how long a pin may last
+// before it is reported. Zero values take the defaults.
 type CheckpointPolicy struct {
-	Pages int64
-	Idle  time.Duration
+	Pages        int64
+	Idle         time.Duration
+	PinWarnAfter time.Duration
 }
 
 func (p CheckpointPolicy) resolve() CheckpointPolicy {
@@ -97,6 +107,9 @@ func (p CheckpointPolicy) resolve() CheckpointPolicy {
 	}
 	if p.Idle <= 0 {
 		p.Idle = DefaultCheckpointIdle
+	}
+	if p.PinWarnAfter <= 0 {
+		p.PinWarnAfter = DefaultPinWarnAfter
 	}
 	return p
 }
@@ -109,15 +122,25 @@ type CheckpointResult struct {
 	// checkpointed than held means a reader still pins the rest.
 	WALFrames    int64
 	Checkpointed int64
+	// Copied is how many frames THIS run moved. Zero with frames still waiting
+	// means a reader's snapshot pins every one of them.
+	Copied int64
+	// ReadMarks are the WAL-index's reader marks as this run left them, read
+	// only when it copied nothing: they say which snapshot the pinning reader
+	// holds (mark 0 is a reader of the database file alone, opened while the
+	// WAL was fully checkpointed).
+	ReadMarks []uint32
 	// Skipped is true when there was nothing to copy, so no checkpoint ran.
 	Skipped bool
 }
 
 // walIndex is the part of the WAL-index header the job reads: how many frames
-// the log holds, and how many of them a checkpoint has already copied.
+// the log holds, how many of them a checkpoint has already copied, and the
+// frame each reader slot's snapshot ends at.
 type walIndex struct {
 	frames     uint32
 	backfilled uint32
+	readMarks  [walReadMarks]uint32
 }
 
 // pending is how many frames are waiting to be checkpointed.
@@ -130,11 +153,13 @@ func (w walIndex) pending() int64 { return int64(w.frames) - int64(w.backfilled)
 // that processes of different SQLite versions can share one WAL.
 const (
 	walIndexHeaderSize   = 48
-	walIndexReadSize     = 2*walIndexHeaderSize + 4
+	walReadMarks         = 5
+	walIndexReadSize     = 2*walIndexHeaderSize + 4 + 4*walReadMarks
 	walIndexVersion      = 3007000
 	walIndexIsInitOffset = 12
 	walIndexMxFrame      = 16
 	walIndexBackfill     = 2 * walIndexHeaderSize
+	walIndexReadMark     = walIndexBackfill + 4
 )
 
 // readWALIndex reads the WAL-index header from the -shm file.
@@ -160,10 +185,15 @@ func readWALIndex(f *os.File) (walIndex, error) {
 	if first[walIndexIsInitOffset] != 1 {
 		return walIndex{}, errors.New("the WAL-index header is not initialized")
 	}
-	return walIndex{
+	index := walIndex{
 		frames:     order.Uint32(first[walIndexMxFrame : walIndexMxFrame+4]),
 		backfilled: order.Uint32(buf[walIndexBackfill : walIndexBackfill+4]),
-	}, nil
+	}
+	for i := range index.readMarks {
+		at := walIndexReadMark + 4*i
+		index.readMarks[i] = order.Uint32(buf[at : at+4])
+	}
+	return index, nil
 }
 
 // walWatch is the hand-off from every writer's release to the checkpoint job.
@@ -289,6 +319,7 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	// was read only if a checkpoint ran in between, and none can: this one
 	// holds the writer.
 	copied := result.Checkpointed - int64(before.backfilled)
+	result.Copied = copied
 	fields := base
 	fields.Statement = StatementWALCheckpoint
 	fields.LockWait = lockWait
@@ -300,8 +331,16 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	args := []any{trigger, result.WALFrames, result.Checkpointed, copied, busy,
 		fields.Duration.Milliseconds(), lockWait.Milliseconds(), fields.Exec.Milliseconds()}
 	if copied <= 0 {
-		// A reader pinned every waiting frame, so nothing moved: narration,
-		// not an event. The next trigger tries again.
+		// A reader pinned every waiting frame, so nothing moved. One such run
+		// is narration, not an event: the next trigger tries again. The read
+		// marks are taken now, still under the writer, so that if the pin
+		// outlasts DefaultPinWarnAfter the job's record can say which snapshot
+		// holds it (RunCheckpoints, walPinWatch).
+		after, err := d.readWAL()
+		if err != nil {
+			return result, d.refuse(base, storagef(err, "reading the WAL-index after the %s-triggered checkpoint", trigger))
+		}
+		result.ReadMarks = after.readMarks[:]
 		d.log.LogVerbose(fields, message, args...)
 		return result, nil
 	}
@@ -366,8 +405,12 @@ func (d *DB) RunCheckpoints(ctx context.Context, policy CheckpointPolicy) {
 	defer disarm()
 
 	var mark uint32
+	var pin walPinWatch
 	run := func(trigger CheckpointTrigger) {
 		result, err := d.Checkpoint(ctx, trigger)
+		if err == nil {
+			d.reportWALPin(&pin, result, policy.PinWarnAfter)
+		}
 		if d.checkpointDone != nil {
 			d.checkpointDone(result, err)
 		}
@@ -420,4 +463,97 @@ func (d *DB) RunCheckpoints(ctx context.Context, policy CheckpointPolicy) {
 			run(TriggerIdle)
 		}
 	}
+}
+
+// WALPinOperation is the operation of the records that open and close a pin.
+const WALPinOperation = "store.db.wal-pin"
+
+// walPinWatch follows one PIN: an unbroken run of checkpoints that each copied
+// nothing while frames waited, which only a reader's snapshot can cause. It
+// opens at the first such checkpoint and closes at the first one that copies
+// anything, or finds nothing waiting.
+//
+// A PIN IS ONLY REPORTED ONCE IT OUTLASTS ANY READ. A checkpoint that meets a
+// read in progress copies nothing and is followed, a moment later, by one
+// that copies it all; that is SQLite working as designed. The owner's store
+// instead ran four hours of checkpoints that each copied 0 of up to 47,506
+// frames, and said so only at verbose level, so the WAL passed 137 MB and every
+// read over it slowed with nothing in the log to say why.
+type walPinWatch struct {
+	open     bool
+	since    time.Time
+	reported bool
+}
+
+type walPinEvent int
+
+const (
+	walPinQuiet walPinEvent = iota
+	// walPinOutlasted is the one report of a pin that has outlasted the policy.
+	walPinOutlasted
+	// walPinReleased closes a pin that was reported.
+	walPinReleased
+)
+
+// observe folds one successful checkpoint into the watch and says whether it
+// opened a report or closed one, with how long the pin had been held by then.
+// The pin is measured from the first checkpoint that saw it, so the duration
+// is a lower bound on how long the snapshot has been held.
+func (w *walPinWatch) observe(result CheckpointResult, now time.Time, warnAfter time.Duration) (walPinEvent, time.Duration) {
+	pinned := !result.Skipped && result.Copied <= 0 && result.Checkpointed < result.WALFrames
+	if !pinned {
+		if !w.open {
+			return walPinQuiet, 0
+		}
+		held, reported := now.Sub(w.since), w.reported
+		*w = walPinWatch{}
+		if reported {
+			return walPinReleased, held
+		}
+		return walPinQuiet, held
+	}
+	if !w.open {
+		w.open, w.since = true, now
+	}
+	held := now.Sub(w.since)
+	if !w.reported && held >= warnAfter {
+		w.reported = true
+		return walPinOutlasted, held
+	}
+	return walPinQuiet, held
+}
+
+// reportWALPin writes the pin's two records: a warning once it has outlasted
+// warnAfter, since the WAL now grows until somebody finds the reader, and an
+// info record when it ends. Both carry the WAL's state and the read pool's, so
+// the log alone says how far behind the database file is, which snapshot is
+// held, and whether the pool thinks any connection is still in use.
+func (d *DB) reportWALPin(pin *walPinWatch, result CheckpointResult, warnAfter time.Duration) {
+	event, held := pin.observe(result, d.mono(), warnAfter)
+	if event == walPinQuiet {
+		return
+	}
+	stats := d.read.Stats()
+	fields := logging.Fields{
+		Operation:    WALPinOperation,
+		DatabasePath: d.path,
+		WAL: &logging.WALState{
+			Frames:        result.WALFrames,
+			Backfilled:    result.Checkpointed,
+			ReadMarks:     result.ReadMarks,
+			PinnedFor:     held,
+			ReadPoolOpen:  stats.OpenConnections,
+			ReadPoolInUse: stats.InUse,
+			ReadPoolIdle:  stats.Idle,
+		},
+	}
+	if event == walPinOutlasted {
+		fields.Level = "warn"
+		d.log.Log(fields, "a reader has pinned the WAL for at least %s: every checkpoint copies nothing while %d frames wait, so the WAL grows until that snapshot ends wal_frames=%d backfilled=%d read_marks=%v read_pool_in_use=%d",
+			held.Round(time.Second), result.WALFrames-result.Checkpointed, result.WALFrames, result.Checkpointed, result.ReadMarks, stats.InUse)
+		return
+	}
+	fields.Level = "info"
+	d.log.Log(fields, "the WAL pin ended after at least %s wal_frames=%d backfilled=%d",
+		held.Round(time.Second), result.WALFrames, result.Checkpointed)
 }

@@ -143,6 +143,24 @@ type Fields struct {
 	// zero.
 	OverBudget   int
 	BudgetWindow int
+
+	// WAL is the state of a WAL a reader keeps a checkpoint from folding, on
+	// the records that open and close a pin (store.db.wal-pin).
+	WAL *WALState
+}
+
+// WALState is a pinned WAL as the checkpoint job last saw it.
+type WALState struct {
+	Frames     int64
+	Backfilled int64
+	// ReadMarks are the WAL-index's reader slots: the frame each slot's
+	// snapshot ends at.
+	ReadMarks []uint32
+	PinnedFor time.Duration
+
+	ReadPoolOpen  int
+	ReadPoolInUse int
+	ReadPoolIdle  int
 }
 
 type record struct {
@@ -329,6 +347,15 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 			context["over_budget_window"] = merged.BudgetWindow
 		}
 	}
+	if wal := merged.WAL; wal != nil {
+		context["wal_frames"] = wal.Frames
+		context["wal_backfilled"] = wal.Backfilled
+		context["wal_read_marks"] = wal.ReadMarks
+		context["wal_pinned_for_ms"] = wal.PinnedFor.Milliseconds()
+		context["read_pool_open"] = wal.ReadPoolOpen
+		context["read_pool_in_use"] = wal.ReadPoolInUse
+		context["read_pool_idle"] = wal.ReadPoolIdle
+	}
 	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
 	if merged.Delivered != 0 || terminal {
 		context["delivered"] = merged.Delivered
@@ -478,6 +505,9 @@ func merge(base, extra Fields) Fields {
 	if extra.BudgetWindow != 0 {
 		base.OverBudget = extra.OverBudget
 		base.BudgetWindow = extra.BudgetWindow
+	}
+	if extra.WAL != nil {
+		base.WAL = extra.WAL
 	}
 	return base
 }
