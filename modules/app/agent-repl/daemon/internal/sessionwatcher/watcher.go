@@ -1080,6 +1080,27 @@ func (w *watcher) runLink() {
 			w.mu.Unlock()
 			return
 		}
+		// A CONNECTED EDGE THAT ANNOUNCES NO NEW CONNECTION CANNOT MEND A
+		// BROKEN FLEET. The feed replays the bring-up's own `connected` to a
+		// watcher born on that link, and nothing orders that replay against
+		// a standing stream's end, which arrives on the stream's goroutine.
+		// When the end is heard first the fleet is degraded, and taking the
+		// replay for a reconnect re-opened every watch on a link the client
+		// had not re-established -- and painted it connected while its
+		// streams were down, which invariant 11 forbids. MEASURED, the unit
+		// suite 2026-09-28: TestAReplayedBringUpConnectedIsNotAReconnect
+		// failed 6 runs in 40. The client's connection count decides it, as
+		// it does in severedLocked: a reconnect has advanced it past the one
+		// the broken fleet was opened on, before its edge was published.
+		if state == shimclient.LinkConnected && w.degraded {
+			if now := w.client.Connections(); now <= w.fleetConnections {
+				w.log.Debug("daemon.sessionwatcher.link_not_a_reconnect", "a connected edge named no connection newer than the broken fleet's; the fleet stays down until the link is re-established", dlog.Context{
+					"held": int(w.link), "fleet_connections": w.fleetConnections, "client_connections": now,
+				})
+				w.mu.Unlock()
+				continue
+			}
+		}
 		previous := w.link
 		degraded := w.degraded
 		w.setLinkLocked(state)
