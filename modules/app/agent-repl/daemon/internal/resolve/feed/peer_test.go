@@ -20,7 +20,7 @@ func (h *harness) peerMessage(id, sender, body string) {
 		Sender: sender,
 		Body:   body,
 		Id:     id,
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 }
 
 func TestPeerMessageDrawsAPeerRow(t *testing.T) {
@@ -175,7 +175,7 @@ func TestReplayedAndLivePeerMessageResolveToOneRow(t *testing.T) {
 func (h *harness) peerMessageOf(id, sender string, peer *conversationv1.PeerMessage) {
 	h.t.Helper()
 	peer.Agent, peer.Sender, peer.Body, peer.Id = mainAgent(), sender, "the whole report", id
-	h.resolver.OnPeerMessage(testWorkspace, peer, nil, noAddress())
+	h.resolver.OnPeerMessage(testWorkspace, peer, nil, nil, noAddress())
 }
 
 func handbackPeer() *conversationv1.PeerMessage {

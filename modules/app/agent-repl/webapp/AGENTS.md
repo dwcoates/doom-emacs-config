@@ -193,6 +193,30 @@ hand any more:
   while leaving it in place. A surface that looks wrong is reported to the
   daemon and fixed there. When a view needs a fact it does not have, the fact
   gets PUBLISHED; it is never inferred locally.
+- **A ROW IS PLACED BY ITS KEY, NEVER BY ARRIVAL** (owner ruling,
+  2026-09-27: a late row lands where it would have been had it not been late;
+  plan `docs/investigations/2026-09-27-feed-row-order-plan.md`). Every
+  `FeedRow` a page or a push carries holds `order` (`FeedRowOrder.key`), the
+  daemon's opaque place for it. `feed-view.ts` inserts every NEW row, page or
+  push, at the index a binary search over the held rows' keys finds
+  (`positionOf`; keys compare as JS strings, code unit by code unit, and are
+  never parsed); `order.splice(index, 0, id)` in `insertAt` is the one place a
+  row enters the order, and a source scan in `test/feed/feed-view.test.ts`
+  fails any arrival-order index. A pushed row whose key sorts before every held
+  row while the walk's edge is `has_more` is unloaded history: it is not drawn,
+  and load-more brings it in place; at `at_start` it goes on top. A re-push
+  never moves a held row: a changed key is ERROR `feed.row-order-changed` and
+  the row stays put, and a key another row holds is ERROR
+  `feed.row-order-duplicate`. A row (a removal included) with no `order` or an
+  empty key is a `MalformedView`, and a page holding one is refused whole
+  before any row changes. Every pushed placement is INFO `feed.row-placed`
+  (`key`, `outcome` `inserted` | `appended` | `unloadedHistory`, `position`);
+  a page is one INFO `feed.page-placed` (row count and key span) with each row
+  at DEBUG `feed.page-row-placed`. A new row landing above the viewport keeps
+  the reader still through `prependCompensation` (`feed.insert-kept-place`),
+  and a following reader stays at the tail. Every fixture row carries a key
+  (`test/feed-order.ts`: minted per id on first build, reset before each test;
+  a test about order states its keys with `withOrder`).
 - **THE ONE EXCEPTION TO IT: THE CLIENT'S LINK VERDICT** (owner ruling,
   2026-09-13, `docs/REALTEST-JUDGEMENT-CALLS.md`, "webapp-side failures reach
   the footer"). When a call to the daemon fails at THIS end, no daemon can push

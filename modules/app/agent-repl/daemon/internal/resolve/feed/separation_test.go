@@ -167,7 +167,7 @@ func (h *harness) separationRow() *frontendv1.FeedRow {
 func (h *harness) cutAt(at string, cut *conversationv1.ContextCut) {
 	h.t.Helper()
 	h.resolver.OnContextCut(testWorkspace, mainAgent(), cut,
-		&conversationv1.HistoryPointer{Value: at}, nil, noAddress())
+		&conversationv1.HistoryPointer{Value: at}, nil, nil, noAddress())
 }
 
 // cut sends one context cut at a position of its own.
@@ -673,7 +673,7 @@ func TestACutWithNoPositionStillDrawsAndIsReported(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.resolver.OnContextCut(testWorkspace, mainAgent(), compactedCut("the summary"), nil, nil, noAddress())
+	h.resolver.OnContextCut(testWorkspace, mainAgent(), compactedCut("the summary"), nil, nil, nil, noAddress())
 
 	// Assert
 	if got := len(h.separationRows()); got != 1 {

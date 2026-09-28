@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"sort"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -31,7 +32,7 @@ func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		start = 0
 	}
 	page := r.composePage(s, f, durable, start)
-	s.readers[reader] = &walk{feedKey: f.key, oldest: start, standing: true}
+	s.readers[reader] = &walk{feedKey: f.key, oldest: servedFrom(f, durable, start), standing: true}
 	token := r.mintToken(ws, f)
 
 	log.Debug("daemon.feed.open_page",
@@ -63,18 +64,14 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	}
 
 	durable, bounded := r.deliverable(s, f, "next_page")
-	if w.oldest > len(durable) {
-		// THE BOUND MOVED UNDER THE WALK. A separation drawn between this
-		// reader's last page and this one shortened the delivered order, and a
-		// walk index taken against the longer one now points past its end. The
-		// reader is at the start of what is delivered, which is what the bound
-		// says it should see.
-		log.Info("daemon.feed.walk_clamped_to_bound",
-			"a walk stood past the delivered order after a separation moved the feed's start, so it was clamped to it",
-			dlog.Context{"feed": f.key, "reader": string(reader), "stood_at": w.oldest, "rows": len(durable)})
-		w.oldest = len(durable)
-	}
-	if w.oldest <= 0 {
+	// THE WALK STANDS AT A KEY, NOT AN INDEX. Everything keyed before the
+	// oldest row this reader was served is older than what it holds — a row
+	// that arrived late and sorts there included, which is how a late row the
+	// reader skipped as unloaded history reaches it in its place — and a
+	// separation that moved the delivery bound since simply leaves fewer rows
+	// before it.
+	end := olderThan(f, durable, w.oldest)
+	if end <= 0 {
 		if f.historyMore != nil && !bounded {
 			// The walk reached the oldest row the replay delivered, and the
 			// record says older history exists: what is on screen has a HOLE
@@ -98,19 +95,38 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		return r.composePage(s, f, durable, 0), nil
 	}
 
-	end := w.oldest
 	start := end - r.deps.PageSize
 	if start < 0 {
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
 		start = 0
 	}
 	page := r.composePageRange(s, f, durable, start, end)
-	w.oldest = start
+	w.oldest = servedFrom(f, durable, start)
 
 	log.Debug("daemon.feed.next_page",
 		"a reader was served the next older page",
 		dlog.Context{"feed": f.key, "reader": string(reader), "rows": end - start, "at_start": start == 0})
 	return page, nil
+}
+
+// servedFrom is the walk position after serving ORDER from START: the order
+// key of the oldest row served, or none when nothing was.
+func servedFrom(f *feedState, order []string, start int) *string {
+	if start >= len(order) {
+		return nil
+	}
+	key := f.rank[order[start]].key
+	return &key
+}
+
+// olderThan is how many rows of ORDER sort before the walk position OLDEST:
+// the end of the next older page. A walk that was served nothing stands at the
+// feed's start.
+func olderThan(f *feedState, order []string, oldest *string) int {
+	if oldest == nil {
+		return 0
+	}
+	return sort.Search(len(order), func(i int) bool { return f.rank[order[i]].key >= *oldest })
 }
 
 // CloseReader drops a reader's walk when its connection ends.
@@ -149,15 +165,11 @@ func (r *resolver) CloseReader(ws ids.WorkspaceID, reader ReaderID) {
 // routes: the NEWEST bounding separation is a fact about the row order, and
 // reading it off the order cannot disagree with the order.
 //
-// WHAT THE BOUND HIDES IS NOT SIMPLY "EVERYTHING ABOVE IT IN THE ORDER." A cut
-// arrives on the LIVE plane while the rows it does and does not bound were drawn
-// on the HISTORY plane, and plane order alone reads every history row as older
-// than a live cut. That blanks the feed on a reconnect: the compaction's
-// POST-cut conversation is replayed in the history plane BEFORE the cut lands
-// live, so by plane order it sorted above the cut and every last row of it was
-// withheld — the feed went empty but for the divider though the whole
-// conversation was on screen a moment before. `boundHides` reads the seam the
-// plane order misses; see it for the rule.
+// WHAT THE BOUND HIDES IS CONVERSATION ORDER, NOT ARRIVAL. A cut can arrive
+// on the live plane after a reconnect replayed the conversation that FOLLOWED
+// it, and a pre-cut row can be forwarded after the cut: the rows' order keys
+// are their conversation places (order.go), so both land on the right side of
+// the cut whatever their arrival. `boundHides` states the rule.
 func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]string, bool) {
 	durable := durableOrder(f)
 	at := boundIndex(f, durable)
@@ -186,35 +198,23 @@ func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]strin
 }
 
 // boundHides reports whether a row is the conversation BEFORE the cut, and so is
-// withheld by it. Draw order — (plane, seq) — is the proxy for conversation
-// order, and it is exact WITHIN a plane: a row in the cut's own plane drawn
-// before it is pre-cut. ACROSS planes the proxy fails, because a cut lands on
-// the live plane while the rows around it were drawn on the history plane, so
-// every history row reads as older than the cut. The publication seq — ONE
-// monotonic counter across every plane, fixed at a row's first draw — resolves
-// what the plane cannot: an earlier-plane row drawn AFTER the cut arrived is a
-// late-forwarded pre-cut row (the "/clear dumped all previous history" case) and
-// is hidden; one drawn BEFORE the cut arrived is content the reader already had
-// on screen (a reconnect's replayed post-cut conversation) and is kept, so the
-// bound move never blanks the feed. A later-plane row is unambiguously after the
-// cut and is always kept.
+// withheld by it. THE ORDER KEY IS CONVERSATION ORDER (order.go): a row keyed
+// before the cut is pre-cut — however late it arrived, which is the "/clear
+// dumped all previous history" case of a file-plane row forwarded after the
+// cut — and a row keyed after it is post-cut, however early it was drawn,
+// which is a reconnect's replayed post-cut conversation, kept so the bound
+// never blanks the feed. The past a fork inherited sorts before every cut the
+// fork makes by its class, so the fork's cut hides it.
 //
-// THE PAST A FORK INHERITED PRECEDES EVERY CUT THE FORK MAKES. A ported or
-// inherited row is the parent's conversation, older than anything the fork
-// produced by construction (lineage.go), so a cut in any of the fork's own
-// planes hides it however late it was drawn: there is no reconnect ambiguity
-// to resolve, because conversation order is known.
+// THE ONE EXCEPTION: a fork's PORTED conversation is never hidden by a cut in
+// its INHERITED past. The ported prompts are drawn once, above the store's copy
+// of the parent's conversation, and a cut inside that copy is a statement
+// about the copy.
 func boundHides(row, bound rowRank) bool {
-	if row.plane == bound.plane {
-		return row.seq < bound.seq
-	}
-	if row.plane > bound.plane {
+	if row.plane == planePorted && bound.plane == planeInherited {
 		return false
 	}
-	if row.plane.inheritedPast() && !bound.plane.inheritedPast() {
-		return true
-	}
-	return row.seq > bound.seq
+	return row.before(bound)
 }
 
 // boundIndex is the index in ORDER of the newest separation delivery begins

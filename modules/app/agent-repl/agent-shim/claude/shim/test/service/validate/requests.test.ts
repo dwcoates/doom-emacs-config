@@ -340,6 +340,28 @@ describe("validateReadHistoryRequest", () => {
     // Act, Assert.
     expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
   });
+
+  it("accepts a read of the book as it stood at an instant", () => {
+    // Arrange.
+    const request = create(shimv1.ReadHistoryRequestSchema, {
+      pageSize: 5,
+      position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 1_000n }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
+  });
+
+  it("refuses a read through a bound that names no instant", () => {
+    // Arrange.
+    const request = create(shimv1.ReadHistoryRequestSchema, {
+      pageSize: 5,
+      position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 0n }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
+  });
 });
 
 describe("validateStartSessionRequest cold remediation", () => {

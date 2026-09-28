@@ -212,7 +212,7 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			act: func(h *harness) {
 				h.send(settledThinking("think-root", "weighing options"))
 				h.resolver.OnActivity(testWorkspace, created,
-					responseSuccessActivity("prose-sub", "what I found"), nil, noAddress())
+					responseSuccessActivity("prose-sub", "what I found"), nil, nil, noAddress())
 			},
 			feed: rootFeed(),
 			unit: "think-root",
@@ -222,7 +222,7 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			name: "the root feed's prose does not supersede a subagent's thinking",
 			act: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, created,
-					settledThinking("think-sub", "looking around"), nil, noAddress())
+					settledThinking("think-sub", "looking around"), nil, nil, noAddress())
 				h.send(responseSuccessActivity("prose-root", "an interim note"))
 			},
 			feed: sub,
@@ -233,9 +233,9 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			name: "a subagent's prose supersedes its own earlier thinking",
 			act: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, created,
-					settledThinking("think-sub", "looking around"), nil, noAddress())
+					settledThinking("think-sub", "looking around"), nil, nil, noAddress())
 				h.resolver.OnActivity(testWorkspace, created,
-					responseSuccessActivity("prose-sub", "what I found"), nil, noAddress())
+					responseSuccessActivity("prose-sub", "what I found"), nil, nil, noAddress())
 			},
 			feed: sub,
 			unit: "think-sub",
@@ -361,17 +361,17 @@ func TestAHistoryPageLandingAboveLiveRows(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: a live thinking row already stands.
 			h := newHarness(t)
-			h.deliverPrompt("turn-2", "the newer turn")
-			h.send(settledThinking("think-live", "current reasoning"))
+			h.deliverPromptAt("turn-2", "the newer turn", 300)
+			h.sendAt(settledThinking("think-live", "current reasoning"), 400)
 
 			// Act: older history lands ABOVE it.
-			h.replay(historyPage(&conversationv1.HistoryFloor{},
-				frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+			h.replay(placedPage(&conversationv1.HistoryFloor{},
+				pagedEntry{atMs: 200, entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{
 					Update: &conversationv1.AgentUpdate_Activity{
 						Activity: settledThinking("think-old", "older reasoning"),
 					},
-				}),
-				promptEntry("turn-1", "the older turn"),
+				})},
+				pagedEntry{atMs: 100, entry: promptEntry("turn-1", "the older turn")},
 			))
 
 			// Assert.

@@ -32,7 +32,11 @@ import (
 //     slash-command envelopes, local-command output, interrupt markers, bare
 //     /compact lines, task notifications and non-human origins become residue
 //     or the spawn's settle. Rows stored before versioning read as version 0.
-const ConversionVersion uint32 = 1
+//   - 2: every entry a transcript record converts to states its conversation
+//     place (place.go): the timestamp of the record that opened its unit and
+//     its index among the record's entries. The re-read is what gives every
+//     row stored without a place its recorded one.
+const ConversionVersion uint32 = 2
 
 // RetiredKeys answers the upsert keys a record could own that the entries it
 // converted to now do not carry: the rows a re-read of an older conversion's

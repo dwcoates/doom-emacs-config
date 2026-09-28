@@ -26,6 +26,7 @@ import {
 } from "../../../src/feed/asks/permission.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
+import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedPermissionSchema>["state"];
 
@@ -531,7 +532,7 @@ function unalteredPermission(answer: AnswerPermissionResponse): {
         composerEnabled: false,
       }),
       feed: "root",
-      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }), order: orderFor(ROW_ID) }),
       revealRow: async () => false,
     },
   };

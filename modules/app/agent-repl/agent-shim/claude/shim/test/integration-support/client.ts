@@ -429,6 +429,18 @@ export function readHistoryAfter(
   });
 }
 
+/** `ReadHistory{through}`: the book as it stood at an instant. */
+export function readHistoryThrough(
+  atMs: bigint,
+  init: { readonly target?: conversationv1.AgentId; readonly pageSize?: number } = {},
+): shimv1.ReadHistoryRequest {
+  return create(shimv1.ReadHistoryRequestSchema, {
+    ...(init.target === undefined ? {} : { target: init.target }),
+    pageSize: init.pageSize ?? 50,
+    position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs }) },
+  });
+}
+
 /** `UpdateAgent{stop}`. */
 export function stopAgent(target?: conversationv1.AgentId): shimv1.UpdateAgentRequest {
   return create(shimv1.UpdateAgentRequestSchema, {

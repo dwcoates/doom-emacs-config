@@ -97,7 +97,7 @@ func (h *harness) proseForTurn(turn string) *frontendv1.FeedResponse {
 // main sends one activity under the main agent.
 func (h *harness) main(act *conversationv1.AgentActivity) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, nil, noAddress())
 }
 
 // settledProse is a settled prose frame carrying no usage of its own.
@@ -227,7 +227,7 @@ func TestTheFinalAnswerCarriesTheTurnsWholeFreshInput(t *testing.T) {
 
 	// Act: the turn concludes on the second bubble.
 	turn := ids.TurnID("turn-1")
-	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-prose-2"), nil, noAddress())
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-prose-2"), nil, nil, noAddress())
 
 	// Assert: the green bubble carries the turn's 1.4k; the earlier one keeps
 	// its delta.
@@ -262,7 +262,7 @@ func TestASubagentsUsageNeverReachesTheMainBubbles(t *testing.T) {
 	h.main(responseFrame("unit-prose-1", &conversationv1.AgentResponseStart{}, nil))
 
 	// Act: the subagent spends 5k.
-	h.resolver.OnActivity(testWorkspace, created, thinkingFrame("sub-think-1", misses(5_000, 0)), nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, created, thinkingFrame("sub-think-1", misses(5_000, 0)), nil, nil, noAddress())
 
 	// Assert: the main bubble counts only the main agent's fresh input.
 	h.wantStamps("1k")
@@ -275,7 +275,7 @@ func TestASubFeedsBubblesPartitionTheirSubagentsFreshInput(t *testing.T) {
 	created := &conversationv1.AgentId{Value: "agent-explore"}
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
 	sub := func(act *conversationv1.AgentActivity) {
-		h.resolver.OnActivity(testWorkspace, created, act, nil, noAddress())
+		h.resolver.OnActivity(testWorkspace, created, act, nil, nil, noAddress())
 	}
 
 	// Act: two of its API responses land two bubbles in its sub-feed.

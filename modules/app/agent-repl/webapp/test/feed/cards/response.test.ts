@@ -47,6 +47,7 @@ import {
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { orderFor } from "../../feed-order.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -64,7 +65,7 @@ function rowContext(previous?: HTMLElement): RowContext {
       composerEnabled: false,
     }),
     feed: "root",
-    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }) }),
+    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
     revealRow: async () => true,
     previous,
   };

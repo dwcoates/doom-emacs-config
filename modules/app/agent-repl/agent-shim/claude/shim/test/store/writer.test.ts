@@ -19,7 +19,12 @@ import {
   type PersistenceBatchPolicy,
   type PersistEntry,
 } from "../../src/store/persistence.js";
-import { createPersistence, toStoreEntry, toWriteBatchRequest } from "../../src/store/writer.js";
+import {
+  createPersistence,
+  PlaceClock,
+  toStoreEntry as toPlacedStoreEntry,
+  toWriteBatchRequest as toPlacedWriteBatchRequest,
+} from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import {
   agent,
@@ -33,6 +38,20 @@ import {
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
+
+/** The place the routing tests envelope a row at: routing does not read it. */
+const ROUTING_PLACE = create(conversationv1.ConversationPlaceSchema, { atMs: 1_000n, ordinal: 0 });
+
+/** One entry enveloped at {@link ROUTING_PLACE}. */
+const toStoreEntry = (producer: string, entry: PersistEntry): storev1.StoreEntry =>
+  toPlacedStoreEntry(producer, { entry, place: ROUTING_PLACE });
+
+/** A batch of entries enveloped at {@link ROUTING_PLACE}. */
+const toWriteBatchRequest = (producer: string, entries: readonly PersistEntry[]): storev1.WriteBatchRequest =>
+  toPlacedWriteBatchRequest(
+    producer,
+    entries.map((entry) => ({ entry, place: ROUTING_PLACE })),
+  );
 
 let store: FakeStore | undefined;
 
@@ -1556,7 +1575,8 @@ describe("bounded batches", () => {
 
   it("halves the next batch's row bound after a batch that overran its time budget", async () => {
     // Arrange. Every WriteBatch takes a second on this clock; the budget is 500ms.
-    let now = 0;
+    // A positive instant: the writer also stamps each row's place from this clock.
+    let now = 1_000;
     const plane = boundedPlane(
       stubClient({
         writeBatch: () => {
@@ -1580,7 +1600,8 @@ describe("bounded batches", () => {
 
   it("raises the row bound back after a batch well inside its time budget", async () => {
     // Arrange. The first WriteBatch is slow, every later one instant.
-    let now = 0;
+    // A positive instant: the writer also stamps each row's place from this clock.
+    let now = 1_000;
     let calls = 0;
     const requests: storev1.WriteBatchRequest[] = [];
     const plane = boundedPlane(
@@ -1957,5 +1978,109 @@ describe("a held batch past the retry schedule", () => {
         (entry) => entry.level === "debug" && String(entry.message).includes("still failing"),
       ),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The conversation place
+// ---------------------------------------------------------------------------
+
+describe("the conversation place a row is stamped with", () => {
+  it("envelopes a row at the place its door stamped", () => {
+    // Arrange.
+    const place = create(conversationv1.ConversationPlaceSchema, { atMs: 5_000n, ordinal: 3 });
+
+    // Act.
+    const entry = toPlacedStoreEntry(PRODUCER, { entry: readEntry(BOOK, "unit-1", "/tmp/a"), place });
+
+    // Assert.
+    expect([entry.place?.atMs, entry.place?.ordinal]).toEqual([5_000n, 3]);
+  });
+
+  it("places the first row at the clock's instant, ordinal 0", () => {
+    // Arrange.
+    const clock = new PlaceClock(() => 7_000);
+
+    // Act.
+    const place = clock.next();
+
+    // Assert.
+    expect([place.atMs, place.ordinal]).toEqual([7_000n, 0]);
+  });
+
+  it("counts the rows stamped within one millisecond", () => {
+    // Arrange.
+    const clock = new PlaceClock(() => 7_000);
+    clock.next();
+
+    // Act.
+    const place = clock.next();
+
+    // Assert.
+    expect([place.atMs, place.ordinal]).toEqual([7_000n, 1]);
+  });
+
+  it("restarts the count when the clock moves on", () => {
+    // Arrange.
+    let now = 7_000;
+    const clock = new PlaceClock(() => now);
+    clock.next();
+    now = 7_001;
+
+    // Act.
+    const place = clock.next();
+
+    // Assert.
+    expect([place.atMs, place.ordinal]).toEqual([7_001n, 0]);
+  });
+
+  it("never places a row before one it already placed when the clock steps back", () => {
+    // Arrange.
+    let now = 7_000;
+    const clock = new PlaceClock(() => now);
+    clock.next();
+    now = 6_000;
+
+    // Act.
+    const place = clock.next();
+
+    // Assert.
+    expect([place.atMs, place.ordinal]).toEqual([7_000n, 1]);
+  });
+
+  it("refuses a clock reading that names no instant", () => {
+    // Arrange.
+    const clock = new PlaceClock(() => 0);
+
+    // Act, Assert.
+    expect(() => clock.next()).toThrow(/names no instant/);
+  });
+
+  it("carries a held row's ORIGINAL place through every retry", async () => {
+    // Arrange: the clock moves on between the failed attempt and the one that lands.
+    const fake = await startFakeStore(socketPathForTest("place-retry"));
+    store = fake;
+    const backoff = schedule();
+    let now = 1_000;
+    const plane = createPersistence({
+      client: createStoreClient(fake.socketPath),
+      producer: PRODUCER,
+      nowMs: () => now,
+      sleep: backoff.sleep,
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+    });
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Act.
+    now = 9_000;
+    fake.failWrites(null);
+    backoff.release();
+    await plane.flush();
+
+    // Assert.
+    const places = fake.writes().map((request) => request.batch?.entries[0]?.place?.atMs);
+    expect(new Set(places)).toEqual(new Set([1_000n]));
   });
 });

@@ -287,6 +287,9 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// THE TURN IS ASKED ONCE PER RECORD, after the conversion that may have
 	// opened one, and stamped on every entry the record produced (turn.go).
 	stampTurn(entries, c.turnScope.resolve(facts, c.openedTurn))
+	// THE PLACE IS STATED ONCE PER RECORD TOO, over the whole set the record
+	// produced, so each entry's ordinal is its index in that set (place.go).
+	stampPlace(entries, parseInstant(str(record["timestamp"])))
 	if !keepalive {
 		return entries
 	}

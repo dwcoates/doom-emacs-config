@@ -43,6 +43,9 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// above the rows this workspace draws live, whichever arrived first.
 	entries := page.GetEntries()
 	s.plane = planeHistory
+	// A REPLAY'S OWN ROWS FOLLOW WHAT THE REPLAY DREW, never what an earlier
+	// replay or the live plane left behind (order.go).
+	clear(s.replayTail)
 	// THE PAGE STANDS IN NO TURN UNTIL IT DRAWS A PROMPT: see wsState.replayTurn.
 	s.replayTurn = nil
 	s.replayPromptDrawn = false
@@ -148,6 +151,7 @@ func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
 	}
 	s.portedDrawn = true
 	s.plane = planePorted
+	clear(s.replayTail)
 	for _, prompt := range ported {
 		r.drawPortedPrompt(s, prompt)
 	}
@@ -173,6 +177,7 @@ func (r *resolver) replayStamped(s *wsState, agent *conversationv1.AgentId, at *
 		s.replayUnstamped++
 	}
 	defer s.drawingEntry(at.GetTurn())()
+	defer s.placingEntry(sessionwatcher.PlaceOf(at))()
 	r.replayEntry(s, agent, entry, at.GetAt())
 }
 

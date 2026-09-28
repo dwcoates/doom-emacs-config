@@ -127,6 +127,11 @@ message FeedRow {
   // its SubmitPromptSuccess.turn against to find its own prompt. Unset for a
   // row that belongs to no turn (a separation divider).
   optional conversation.v1.TurnId turn = 3;
+  // WHERE THIS ROW BELONGS IN ITS FEED — never when it arrived. REQUIRED on
+  // every row a page or a push carries, a removal included (it carries the key
+  // of the row it removes). A row without it is a malformed view: refused and
+  // reported, never defaulted to its arrival position. See FeedRowOrder.
+  FeedRowOrder order = 21;
   // What the row is. Each kind is a daemon-resolved element family.
   oneof row {
     // What a person typed — or, on a subagent's feed, the commission or a
@@ -193,7 +198,7 @@ message FeedRow {
     // A ROW REMOVAL — the DUAL of an upsert, delivered on the live tail so an
     // already-open feed drops a row the daemon retired (a foreground Bash that
     // detached, its running tool card retired in favor of the shell bubble).
-    // The row carries ONLY its `id`; the client removes the row that id keys
+    // The row carries its `id` and `order`; the client removes the row that id keys
     // and draws nothing. A fresh page never carries this arm — a removed row
     // is simply omitted from the page — so it exists solely as a tail event.
     FeedRowRemoved removed = 18;
@@ -215,6 +220,33 @@ message FeedRow {
 // The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
 // and the arm's presence is the whole instruction — remove that row.
 message FeedRowRemoved {}
+
+// A ROW'S PLACE IN ITS FEED: an opaque key the daemon mints at the row's first
+// draw. The daemon owns the order; a client draws a feed's rows in ascending
+// key order, verbatim, and never decides a position by arrival.
+//
+// OPAQUE. A client compares two keys and does nothing else with them: it never
+// parses one, derives a time or a count from one, or mints one. Keys compare as
+// strings, code unit by code unit (the daemon mints printable ASCII only, so
+// byte order and code-unit order agree); a shorter key that is a prefix of a
+// longer one sorts first. No two rows of one feed share a key.
+//
+// FIXED FOR THE ROW'S LIFE. Every later push of the same row id carries the
+// same key, so an update never moves a row. A changed key is a daemon invariant
+// violation.
+//
+// STABLE ACROSS DAEMON RESTARTS for a row drawn from a stored conversation
+// entry: the key is minted from where that entry sits in its conversation, so
+// a restarted daemon mints the identical key for it. A row the daemon makes
+// itself (a turn's end it composes, a mirrored prompt, a divider) takes the
+// place of the row it follows, just after it.
+//
+// A ROW WHOSE KEY SORTS BEFORE EVERY LOADED ROW belongs to history the client
+// has not loaded when older pages remain; the page walk serves it in place.
+message FeedRowOrder {
+  // The key. Never empty.
+  string key = 1;
+}
 
 // A message another Claude session sent into this conversation: an
 // inter-session peer message. The client

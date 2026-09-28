@@ -23,7 +23,7 @@ func (h *harness) pose(askID string, result any) {
 	case *conversationv1.AgentQuestionFailure:
 		q.Result = &conversationv1.AgentQuestion_Failure{Failure: r}
 	}
-	h.resolver.OnQuestion(testWorkspace, mainAgent(), q, nil, noAddress())
+	h.resolver.OnQuestion(testWorkspace, mainAgent(), q, nil, nil, noAddress())
 }
 
 // questionCard finds the choice card on the root feed.
@@ -282,7 +282,7 @@ func TestAQuestionFrameWithNoAskIdentityIsRefusedLoudly(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnQuestion(testWorkspace, mainAgent(), &conversationv1.AgentQuestion{
 		Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{}},
-	}, nil, noAddress())
+	}, nil, nil, noAddress())
 
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.question_without_identity") {

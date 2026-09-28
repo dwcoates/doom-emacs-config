@@ -30,6 +30,7 @@ import {
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { TailFollow } from "../../src/scroll.js";
 import { captureLogRecords } from "../log-capture.js";
+import { orderFor } from "../feed-order.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -583,7 +584,7 @@ describe("mountBubble: a row with no arm at all", () => {
   it("still opens its sub-feed by the row's own id", async () => {
     // Arrange: the id is all a bubble needs; the arm is the head's business.
     const h = harness();
-    const bare = create(FeedRowSchema, { id: create(FeedIdSchema, { value: "b1" }) });
+    const bare = create(FeedRowSchema, { id: create(FeedIdSchema, { value: "b1" }), order: orderFor("b1") });
     const { bubble } = mount(bare, h);
     // Act
     await bubble.expand();

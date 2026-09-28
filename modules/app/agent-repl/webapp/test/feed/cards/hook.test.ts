@@ -29,6 +29,7 @@ import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { fireResize } from "../../resize-observer.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { measureTitle } from "../title-measure.js";
+import { orderFor } from "../../feed-order.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -54,7 +55,7 @@ function harness(reached = true): Harness {
         composerEnabled: false,
       }),
       feed: "root",
-      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }) }),
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
       revealRow: async (id) => {
         revealed.push(id);
         return reached;

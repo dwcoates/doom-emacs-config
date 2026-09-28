@@ -20,6 +20,7 @@ import {
   validateAgentModel,
   validateAgentPermissionMode,
   validateDetachedWorkId,
+  validateConversationThrough,
   validateHistoryPointer,
   validatePageSize,
   validatePromptOrigin,
@@ -236,6 +237,9 @@ export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): 
         return;
       case "after":
         validateHistoryPointer(request.position.value, "read_history.after");
+        return;
+      case "through":
+        validateConversationThrough(request.position.value, "read_history.through");
         return;
       default:
         throw unsetOneof("read_history.position");
