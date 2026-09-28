@@ -549,7 +549,9 @@ func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
 }
 
 // endingSink records what endStandingStream sent.
-type endingSink struct{ sent []*agentreplv1.WatchDaemonResponse }
+type endingSink struct {
+	sent []*agentreplv1.WatchDaemonResponse
+}
 
 func (s *endingSink) Send(r *agentreplv1.WatchDaemonResponse) error {
 	s.sent = append(s.sent, r)
