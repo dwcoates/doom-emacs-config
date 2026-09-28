@@ -26,58 +26,112 @@
  * The unit run is un-isolated: this file installs no fake clock, unstubs every
  * global it stubs, and leaves the page empty.
  */
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
-/** Every mount, in the order the boot called it. */
-let order: string[] = [];
-/** Whether the mocked `ClientLog` rejects every record. */
-let clientLogFails = false;
-/** The `ClientLog` calls the installed logger forwarded. */
-let clientLogs: { record: { message: string; context?: Record<string, unknown> } }[] = [];
-/** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
-let rethrown: (() => void)[] = [];
+/** One `ClientLog` call the installed logger forwarded. */
+type ClientLogCall = { record: { message: string; context?: Record<string, unknown> } };
+
+/**
+ * EVERYTHING ONE BOOT RECORDS, AND ONLY THAT BOOT.
+ *
+ * A boot is not cancellable -- `main.ts` ends in `void boot()` -- and its
+ * import can outlive the test that started it (a timed-out test's import keeps
+ * running). So nothing a boot writes may land in state another test reads:
+ * `bootMain` captures the record current when it starts, every substitution
+ * it registers writes into THAT record, and every spy lives on it rather than
+ * at file level. A straggler records into its own dead test's record and can
+ * never reach the next one's `clientLogs` -- which is how a timed-out boot's
+ * "the webapp booted" once failed the log-level test that ran after it.
+ */
+interface BootRecord {
+  /** Every mount, in the order the boot called it. */
+  order: string[];
+  /** Whether the mocked `ClientLog` rejects every record. */
+  clientLogFails: boolean;
+  /** The `ClientLog` calls the installed logger forwarded. */
+  clientLogs: ClientLogCall[];
+  /** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
+  rethrown: (() => void)[];
+  /** What `adoptAtBoot` does when the boot reaches it. */
+  adopt: () => Promise<void>;
+  /** The composer gate the boot built, so the footer's status can be read off it. */
+  gateSet: Mock;
+  /** The footer's status subscriber, captured so a test can drive it. */
+  onFooterStatus: ((statusCase: string) => void) | null;
+  /** The dev-mode composer's panel callback, captured the same way. */
+  onComposerPanel: ((panel: SubmitPromptCommandPanel) => void) | null;
+  /** The topbar's `openLogin`, and the login handle's `open` it must reach. */
+  openLogin: ((control: HTMLElement) => void) | null;
+  loginOpen: Mock;
+  /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
+  footerSelectDetachedWork: ((id: unknown) => void) | null;
+  feedSelectDetachedWork: Mock;
+  /** The tray's `promptHeld`, and the feed handle's it must reach. */
+  trayPromptHeld: ((turn: string) => void) | null;
+  feedPromptHeld: Mock;
+  /** The last `mountFeed` deps, for the composer-factory contract. */
+  feedDeps: { composerFactory?: unknown } | null;
+  /** The context the boot built, so its stream's fate can be read off it. */
+  bootedContext: import("../src/rpc/context.js").AppContext | null;
+  /** The element `drawCommandPanel` hands back. */
+  drawnPanel: HTMLElement | null;
+  /** Each component's mount, recorded. */
+  mounts: {
+    sidebar: Mock;
+    topbar: Mock;
+    feed: Mock;
+    holdTray: Mock;
+    footer: Mock;
+    composer: Mock;
+    login: Mock;
+  };
+}
+
+function freshRecord(): BootRecord {
+  return {
+    order: [],
+    clientLogFails: false,
+    clientLogs: [],
+    rethrown: [],
+    adopt: async () => {},
+    gateSet: vi.fn(),
+    onFooterStatus: null,
+    onComposerPanel: null,
+    openLogin: null,
+    loginOpen: vi.fn(),
+    footerSelectDetachedWork: null,
+    feedSelectDetachedWork: vi.fn(),
+    trayPromptHeld: null,
+    feedPromptHeld: vi.fn(),
+    feedDeps: null,
+    bootedContext: null,
+    drawnPanel: null,
+    mounts: {
+      sidebar: vi.fn(),
+      topbar: vi.fn(),
+      feed: vi.fn(),
+      holdTray: vi.fn(),
+      footer: vi.fn(),
+      composer: vi.fn(),
+      login: vi.fn(),
+    },
+  };
+}
+
+/** The current test's record: arranged by the test, written by its boot. */
+let page: BootRecord = freshRecord();
 /** `console.error`, for the documented pre-logger emergency path. */
 let consoleError: ReturnType<typeof vi.spyOn>;
-
-/** What `adoptAtBoot` does when the boot reaches it. */
-let adopt: () => Promise<void> = async () => {};
-/** The composer gate the boot built, so the footer's status can be read off it. */
-const gateSet = vi.fn();
-/** The footer's status subscriber, captured so a test can drive it. */
-let onFooterStatus: ((statusCase: string) => void) | null = null;
-/** The dev-mode composer's panel callback, captured the same way. */
-let onComposerPanel: ((panel: SubmitPromptCommandPanel) => void) | null = null;
-/** The topbar's `openLogin`, and the login handle's `open` it must reach. */
-let openLogin: ((control: HTMLElement) => void) | null = null;
-const loginOpen = vi.fn();
-/** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
-let footerSelectDetachedWork: ((id: unknown) => void) | null = null;
-const feedSelectDetachedWork = vi.fn();
-/** The tray's `promptHeld`, and the feed handle's it must reach. */
-let trayPromptHeld: ((turn: string) => void) | null = null;
-const feedPromptHeld = vi.fn();
-/** The last `mountFeed` deps, for the composer-factory contract. */
-let feedDeps: { composerFactory?: unknown } | null = null;
-/** The context the boot built, so its stream's fate can be read off it. */
-let bootedContext: import("../src/rpc/context.js").AppContext | null = null;
-/** `log` out of the freshly-imported graph -- the instance main.ts installs into. */
-let freshLog: typeof import("../src/log.js").log;
-/** The element `drawCommandPanel` hands back. */
-let drawnPanel: HTMLElement | null = null;
-
-const mounts = {
-  sidebar: vi.fn(),
-  topbar: vi.fn(),
-  feed: vi.fn(),
-  holdTray: vi.fn(),
-  footer: vi.fn(),
-  composer: vi.fn(),
-  login: vi.fn(),
-};
+/**
+ * The boot the current test started, until it has finished booting (or
+ * failing). `afterEach` awaits it, so no boot outlives its own test into the
+ * next one's globals (`queueMicrotask`, `crypto`, the page, the address).
+ */
+let inFlight: Promise<void> | null = null;
 
 /** The real index.html body, so the shell resolved here is the shipped one. */
 function installShell(): void {
@@ -94,14 +148,25 @@ function addressPage(search: string): void {
   window.history.replaceState({}, "", `/${search}`);
 }
 
-/** Register every substitution, then run the boot by importing the entry. */
-async function bootMain(): Promise<void> {
+/**
+ * Register every substitution, then run the boot by importing the entry.
+ *
+ * The boot is recorded in `inFlight` BEFORE it is awaited, so a test that
+ * times out while awaiting it still leaves `afterEach` a handle to wait on.
+ */
+function bootMain(): Promise<void> {
+  const boot = runBoot(page);
+  inFlight = boot;
+  return boot;
+}
+
+async function runBoot(rec: BootRecord): Promise<void> {
   vi.resetModules();
   // The SAME log module instance main.ts is about to configure: the static
   // import in this file belongs to the pre-reset registry and would never see
   // the logger the boot installs.
   const logging = await import("../src/log.js");
-  freshLog = logging.log;
+  const freshLog = logging.log;
   // test/setup.ts installed a logger into the PRE-RESET module instance, and
   // the canonical `log` methods throw without one -- the fresh graph gets the same quiet default
   // so the boot's own first `shell.resolve` record has somewhere to go. The
@@ -121,8 +186,8 @@ async function bootMain(): Promise<void> {
     return {
       ...actual,
       createAppContext: (init: Parameters<typeof actual.createAppContext>[0]) => {
-        bootedContext = actual.createAppContext(init);
-        return bootedContext;
+        rec.bootedContext = actual.createAppContext(init);
+        return rec.bootedContext;
       },
     };
   });
@@ -131,12 +196,12 @@ async function bootMain(): Promise<void> {
   }));
   vi.doMock("../src/rpc/client.js", () => ({
     createAgentReplClient: vi.fn(() => ({
-      clientLog: (request: { record: { message: string; context?: Record<string, unknown> } }) => {
-        clientLogs.push(request);
+      clientLog: (request: ClientLogCall) => {
+        rec.clientLogs.push(request);
         // A SINK THAT REJECTS is how the daemon being unreachable reaches the
         // logger, and `clientLogSink` is the one place that failure becomes
         // something the footer can draw.
-        return clientLogFails
+        return rec.clientLogFails
           ? Promise.reject(new Error("no route to the daemon"))
           : Promise.resolve({});
       },
@@ -149,17 +214,17 @@ async function bootMain(): Promise<void> {
   }));
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
     adoptAtBoot: vi.fn(async () => {
-      order.push("adopt");
-      await adopt();
+      rec.order.push("adopt");
+      await rec.adopt();
     }),
     startLifecycle: vi.fn(() => {
-      order.push("lifecycle");
+      rec.order.push("lifecycle");
       return { dispose: vi.fn() };
     }),
   }));
   vi.doMock("../src/sidebar/sidebar.js", () => ({
-    mountSidebar: mounts.sidebar.mockImplementation((host: HTMLElement) => {
-      order.push("sidebar");
+    mountSidebar: rec.mounts.sidebar.mockImplementation((host: HTMLElement) => {
+      rec.order.push("sidebar");
       // The logger must already be forwarding by the first mount: a component
       // that logs during its own mount is the case this proves.
       freshLog.error("the sidebar mounted", { operation: "main.test.sidebar-mounted" });
@@ -175,15 +240,15 @@ async function bootMain(): Promise<void> {
     );
     return {
       ...actual,
-      mountTopbar: mounts.topbar.mockImplementation(
+      mountTopbar: rec.mounts.topbar.mockImplementation(
         (host: HTMLElement, deps: Parameters<typeof actual.mountTopbar>[1]) => {
-          order.push("topbar-mount");
+          rec.order.push("topbar-mount");
           const handle = actual.mountTopbar(host, deps);
           return {
             ...handle,
             watch: (_ctx: unknown, watchDeps: { openLogin: (control: HTMLElement) => void }) => {
-              order.push("topbar");
-              openLogin = watchDeps.openLogin;
+              rec.order.push("topbar");
+              rec.openLogin = watchDeps.openLogin;
             },
           };
         },
@@ -191,59 +256,65 @@ async function bootMain(): Promise<void> {
     };
   });
   vi.doMock("../src/feed/feed.js", () => ({
-    mountFeed: mounts.feed.mockImplementation((_host: HTMLElement, _ctx, deps: typeof feedDeps) => {
-      order.push("feed");
-      feedDeps = deps;
-      return { dispose: vi.fn(), selectDetachedWork: feedSelectDetachedWork, promptHeld: feedPromptHeld };
-    }),
+    mountFeed: rec.mounts.feed.mockImplementation(
+      (_host: HTMLElement, _ctx, deps: BootRecord["feedDeps"]) => {
+        rec.order.push("feed");
+        rec.feedDeps = deps;
+        return {
+          dispose: vi.fn(),
+          selectDetachedWork: rec.feedSelectDetachedWork,
+          promptHeld: rec.feedPromptHeld,
+        };
+      },
+    ),
   }));
   vi.doMock("../src/feed/renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
   }));
   vi.doMock("../src/tray/tray.js", () => ({
-    mountHoldTray: mounts.holdTray.mockImplementation(
+    mountHoldTray: rec.mounts.holdTray.mockImplementation(
       (_host: HTMLElement, _ctx, deps: { promptHeld: (turn: string) => void }) => {
-        order.push("holdTray");
-        trayPromptHeld = deps.promptHeld;
+        rec.order.push("holdTray");
+        rec.trayPromptHeld = deps.promptHeld;
         return { dispose: vi.fn() };
       },
     ),
   }));
   vi.doMock("../src/footer/footer.js", () => ({
-    mountFooter: mounts.footer.mockImplementation(
+    mountFooter: rec.mounts.footer.mockImplementation(
       (_host: HTMLElement, _ctx, deps: { selectDetachedWork: (id: unknown) => void }) => {
-        order.push("footer");
-        footerSelectDetachedWork = deps.selectDetachedWork;
+        rec.order.push("footer");
+        rec.footerSelectDetachedWork = deps.selectDetachedWork;
         return {
           dispose: vi.fn(),
           onStatus: (fn: (statusCase: string) => void) => {
-            onFooterStatus = fn;
+            rec.onFooterStatus = fn;
           },
         };
       },
     ),
   }));
   vi.doMock("../src/composer/composer.js", () => ({
-    createComposerGate: vi.fn(() => ({ set: gateSet, state: () => "open" })),
-    mountComposer: mounts.composer.mockImplementation(
+    createComposerGate: vi.fn(() => ({ set: rec.gateSet, state: () => "open" })),
+    mountComposer: rec.mounts.composer.mockImplementation(
       (_host: HTMLElement, _ctx, opts: { onPanel?: (panel: SubmitPromptCommandPanel) => void }) => {
-        order.push("composer");
-        if (opts.onPanel !== undefined) onComposerPanel = opts.onPanel;
+        rec.order.push("composer");
+        if (opts.onPanel !== undefined) rec.onComposerPanel = opts.onPanel;
         return { dispose: vi.fn() };
       },
     ),
   }));
   vi.doMock("../src/login/login.js", () => ({
-    mountLoginOverlay: mounts.login.mockImplementation(() => {
-      order.push("login");
-      return { dispose: vi.fn(), open: loginOpen };
+    mountLoginOverlay: rec.mounts.login.mockImplementation(() => {
+      rec.order.push("login");
+      return { dispose: vi.fn(), open: rec.loginOpen };
     }),
   }));
   vi.doMock("../src/panels/panels.js", () => ({
     drawCommandPanel: vi.fn(() => {
       const el = document.createElement("div");
       el.setAttribute("data-panel", "drawn");
-      drawnPanel = el;
+      rec.drawnPanel = el;
       return el;
     }),
   }));
@@ -256,71 +327,106 @@ async function bootMain(): Promise<void> {
   await new Promise<void>((r) => setTimeout(r, 0));
 }
 
-beforeEach(() => {
-  order = [];
-  bootedContext = null;
-  clientLogs = [];
-  clientLogFails = false;
-  rethrown = [];
-  adopt = async () => {};
-  onFooterStatus = null;
-  openLogin = null;
-  footerSelectDetachedWork = null;
-  trayPromptHeld = null;
-  loginOpen.mockClear();
-  feedSelectDetachedWork.mockClear();
-  feedPromptHeld.mockClear();
-  onComposerPanel = null;
-  feedDeps = null;
-  drawnPanel = null;
-  gateSet.mockClear();
-  for (const fn of Object.values(mounts)) fn.mockClear();
+/** Arrange a fresh page: a fresh record, the shipped shell, a workspace address. */
+function arrangePage(): void {
+  page = freshRecord();
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   // CAPTURED, NOT RUN. `main.ts` re-raises a boot rejection out of a
   // microtask so the browser reports it uncaught; under vitest that would
   // fail the file rather than be asserted on, so the callback is held and the
-  // test invokes it to prove the throw is still the same one.
+  // test invokes it to prove the throw is still the same one. Bound to THIS
+  // record: a straggling boot could only ever re-raise into its own.
+  const rec = page;
   vi.stubGlobal("queueMicrotask", (fn: () => void) => {
-    rethrown.push(fn);
+    rec.rethrown.push(fn);
   });
   installShell();
   addressPage("?workspace=ws-1&dir=/tmp/ws-1");
-});
+}
 
-afterEach(() => {
-  // A successful boot owns one standing page stream. Stop it at the same
-  // boundary production uses so no retry or iterator survives into the next
-  // fresh module graph.
-  bootedContext?.quiesce();
-  consoleError.mockRestore();
-  vi.unstubAllGlobals();
-  vi.resetModules();
-  document.body.replaceChildren();
-  addressPage("");
-});
+/**
+ * Wait out the test's boot, then take the page down.
+ *
+ * AWAITED FIRST, because a test that timed out left its boot running: its
+ * context, its mounts and its re-raise would otherwise land after the globals
+ * below were restored, in whatever test came next. Only once no boot is in
+ * flight is the one it opened stopped.
+ */
+async function teardownPage(): Promise<void> {
+  const boot = inFlight;
+  inFlight = null;
+  try {
+    await boot;
+  } finally {
+    // A successful boot owns one standing page stream. Stop it at the same
+    // boundary production uses so no retry or iterator survives into the next
+    // fresh module graph.
+    page.bootedContext?.quiesce();
+    consoleError.mockRestore();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    document.body.replaceChildren();
+    addressPage("");
+  }
+}
 
-// These full-graph boot cases repeatedly reached 1.5s under the isolated
-// Istanbul coverage workers while completing normally. Their five-second
-// local bound keeps the 850ms unit-test default intact and still detects a
-// boot that stops making progress.
-const coverageBootTimeoutMS = 5_000;
+/**
+ * THE FILE'S COLD BOOT IS PAID ONCE, IN A `beforeAll`, UNDER ITS OWN BOUND.
+ *
+ * The first `import("../src/main.js")` in a worker is the first time the
+ * composition root's graph is fetched and compiled: vite-node pulls each module
+ * over an rpc to the main vitest process, one `await` per import, and V8
+ * compiles each on first evaluation. PROFILED (a `--cpu-prof` of both
+ * processes): the boot itself settles in ~2ms and neither awaits anything
+ * serially nor arms a real timer; the cold cost is the worker IDLE on those
+ * module-fetch round trips, plus protobuf-es decoding the generated
+ * descriptors and jsdom parsing the imported stylesheet. Every later import in
+ * the file re-evaluates the same graph from vite-node's transform cache. So
+ * the cold import is ~10x a warm one, and at load it is the round trips that
+ * stretch: MEASURED, cold 0.65-1.3s idle, up to 3.15s over 20 runs at a load
+ * average of ~112 (`yes` x16 plus two looping unit suites), and 5.59s once on
+ * the contended host; warm 55-250ms idle, up to 536ms at ~112 and 1.45s on
+ * that same contended run.
+ *
+ * It used to land on whichever test ran first, and at a load average of ~110
+ * it crossed that test's bound. 15s is ~2.7x the slowest cold import seen.
+ */
+const COLD_BOOT_TIMEOUT_MS = 15_000;
 
-describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
+/**
+ * ONE WARM BOOT: a fresh evaluation of the whole mocked graph plus its settle.
+ * ~3x the 1.45s slowest warm test measured above. It is a per-site bound
+ * rather than a raised global because nothing else in the unit suite imports
+ * its subject at run time; the 850ms global stays sized for what it covers.
+ */
+const BOOT_TIMEOUT_MS = 4_500;
+beforeAll(async () => {
+  arrangePage();
+  try {
+    await bootMain();
+  } finally {
+    await teardownPage();
+  }
+}, COLD_BOOT_TIMEOUT_MS);
+
+beforeEach(arrangePage);
+afterEach(teardownPage, BOOT_TIMEOUT_MS);
+describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 
-    expect(mounts.sidebar.mock.calls[0]?.[0]).toBe(document.getElementById("ws-sidebar"));
-    expect(mounts.topbar.mock.calls[0]?.[0]).toBe(document.getElementById("topbar"));
-    expect(mounts.feed.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
-    expect(mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
-    expect(mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
-    expect(mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
+    expect(page.mounts.sidebar.mock.calls[0]?.[0]).toBe(document.getElementById("ws-sidebar"));
+    expect(page.mounts.topbar.mock.calls[0]?.[0]).toBe(document.getElementById("topbar"));
+    expect(page.mounts.feed.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
+    expect(page.mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
+    expect(page.mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
+    expect(page.mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
   });
 
   test("has the ClientLog-forwarding logger installed before the first mount", async () => {
     await bootMain();
 
-    expect(clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
+    expect(page.clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
   });
 
   test("configures the logger from the page-delivered log level", async () => {
@@ -328,44 +434,44 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
 
     await bootMain();
 
-    expect(clientLogs.map((call) => call.record.message)).not.toContain("the webapp booted");
-    expect(clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
+    expect(page.clientLogs.map((call) => call.record.message)).not.toContain("the webapp booted");
+    expect(page.clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
   });
 
   test("adopts the workspace before it starts the lifecycle", async () => {
     await bootMain();
 
-    expect(order.indexOf("adopt")).toBeLessThan(order.indexOf("lifecycle"));
+    expect(page.order.indexOf("adopt")).toBeLessThan(page.order.indexOf("lifecycle"));
   });
 
   test("starts the lifecycle before it mounts any view", async () => {
     await bootMain();
 
-    expect(order.indexOf("lifecycle")).toBeLessThan(order.indexOf("sidebar"));
+    expect(page.order.indexOf("lifecycle")).toBeLessThan(page.order.indexOf("sidebar"));
   });
 
   test("mounts the login overlay before the topbar that opens it starts watching", async () => {
     await bootMain();
 
-    expect(order.indexOf("login")).toBeLessThan(order.indexOf("topbar"));
+    expect(page.order.indexOf("login")).toBeLessThan(page.order.indexOf("topbar"));
   });
 
   test("mounts the topbar before adoption, so its warning chip can show a failed boot", async () => {
     await bootMain();
 
-    expect(order.indexOf("topbar-mount")).toBeLessThan(order.indexOf("adopt"));
+    expect(page.order.indexOf("topbar-mount")).toBeLessThan(page.order.indexOf("adopt"));
   });
 
   test("starts the topbar's stream only after adoption", async () => {
     await bootMain();
 
-    expect(order.indexOf("adopt")).toBeLessThan(order.indexOf("topbar"));
+    expect(page.order.indexOf("adopt")).toBeLessThan(page.order.indexOf("topbar"));
   });
 
   test("mounts the feed before the footer whose jump rows reveal its rows", async () => {
     await bootMain();
 
-    expect(order.indexOf("feed")).toBeLessThan(order.indexOf("footer"));
+    expect(page.order.indexOf("feed")).toBeLessThan(page.order.indexOf("footer"));
   });
 
   test("reveals and mounts the composer when the address asks for one", async () => {
@@ -374,14 +480,14 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     await bootMain();
 
     expect(document.getElementById("composer")?.hidden).toBe(false);
-    expect(mounts.composer.mock.calls[0]?.[0]).toBe(document.getElementById("composer"));
+    expect(page.mounts.composer.mock.calls[0]?.[0]).toBe(document.getElementById("composer"));
   });
 
   test("leaves the composer hidden and unmounted in production", async () => {
     await bootMain();
 
     expect(document.getElementById("composer")?.hidden).toBe(true);
-    expect(mounts.composer).not.toHaveBeenCalled();
+    expect(page.mounts.composer).not.toHaveBeenCalled();
   });
 
   test("gives the feed a per-bubble composer factory only in dev mode", async () => {
@@ -389,32 +495,32 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
 
     await bootMain();
 
-    expect(feedDeps?.composerFactory).toBeTypeOf("function");
+    expect(page.feedDeps?.composerFactory).toBeTypeOf("function");
   });
 
   test("routes the topbar's account control to the login overlay it mounted", async () => {
     await bootMain();
     const control = document.createElement("button");
 
-    openLogin?.(control);
+    page.openLogin?.(control);
 
-    expect(loginOpen).toHaveBeenCalledWith(control);
+    expect(page.loginOpen).toHaveBeenCalledWith(control);
   });
 
   test("routes the footer's jump row to the feed it mounted", async () => {
     await bootMain();
 
-    footerSelectDetachedWork?.({ value: "row-1" });
+    page.footerSelectDetachedWork?.({ value: "row-1" });
 
-    expect(feedSelectDetachedWork).toHaveBeenCalledWith({ value: "row-1" });
+    expect(page.feedSelectDetachedWork).toHaveBeenCalledWith({ value: "row-1" });
   });
 
   test("routes the hold tray's first-drawn held prompt to the feed it mounted", async () => {
     await bootMain();
 
-    trayPromptHeld?.("turn-1");
+    page.trayPromptHeld?.("turn-1");
 
-    expect(feedPromptHeld).toHaveBeenCalledWith("turn-1");
+    expect(page.feedPromptHeld).toHaveBeenCalledWith("turn-1");
   });
 
   test("mints a page identity without crypto.randomUUID", async () => {
@@ -425,7 +531,7 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
 
     await bootMain();
 
-    const booted = clientLogs.find((call) => call.record.message === "the webapp booted");
+    const booted = page.clientLogs.find((call) => call.record.message === "the webapp booted");
     expect(booted?.record.context?.connection_id).toMatch(/^web-/);
   });
 
@@ -434,25 +540,25 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     await bootMain();
     const bubbleHost = document.createElement("div");
 
-    (feedDeps?.composerFactory as (host: HTMLElement, feed: unknown) => unknown)(bubbleHost, {
+    (page.feedDeps?.composerFactory as (host: HTMLElement, feed: unknown) => unknown)(bubbleHost, {
       value: "row-1",
     });
 
-    expect(mounts.composer).toHaveBeenCalledWith(bubbleHost, expect.anything(), expect.anything());
+    expect(page.mounts.composer).toHaveBeenCalledWith(bubbleHost, expect.anything(), expect.anything());
   });
 
   test("gives the feed no per-bubble composer factory in production", async () => {
     await bootMain();
 
-    expect(feedDeps?.composerFactory).toBeUndefined();
+    expect(page.feedDeps?.composerFactory).toBeUndefined();
   });
 
   test("closes the gate in the footer's own word when the workspace is merging", async () => {
     await bootMain();
 
-    onFooterStatus?.("merging");
+    page.onFooterStatus?.("merging");
 
-    expect(gateSet).toHaveBeenCalledWith("closed", "merging");
+    expect(page.gateSet).toHaveBeenCalledWith("closed", "merging");
   });
 
   // A STOPPED MERGE NO LONGER HOLDS THE SESSION (owner ruling, 2026-09-28): a
@@ -463,27 +569,27 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     async (arm) => {
       await bootMain();
 
-      onFooterStatus?.(arm);
+      page.onFooterStatus?.(arm);
 
-      expect(gateSet).toHaveBeenCalledWith("open", undefined);
+      expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
     },
   );
 
   test("opens the gate when the footer reports a status that is not one of the three", async () => {
     await bootMain();
 
-    onFooterStatus?.("running");
+    page.onFooterStatus?.("running");
 
-    expect(gateSet).toHaveBeenCalledWith("open", undefined);
+    expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
   });
 
   test("draws a dev-mode command panel beside the composer that asked for it", async () => {
     addressPage("?workspace=ws-1&dir=/tmp/ws-1&composer=1");
     await bootMain();
 
-    onComposerPanel?.({} as SubmitPromptCommandPanel);
+    page.onComposerPanel?.({} as SubmitPromptCommandPanel);
 
-    expect(drawnPanel?.parentElement).toBe(document.getElementById("composer"));
+    expect(page.drawnPanel?.parentElement).toBe(document.getElementById("composer"));
   });
 
   test("replaces a stale panel rather than stacking a second one", async () => {
@@ -493,7 +599,7 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     stale.setAttribute("data-panel", "stale");
     document.getElementById("composer")?.append(stale);
 
-    onComposerPanel?.({} as SubmitPromptCommandPanel);
+    page.onComposerPanel?.({} as SubmitPromptCommandPanel);
 
     expect(stale.parentElement).toBeNull();
     expect(document.querySelectorAll("#composer > [data-panel]")).toHaveLength(1);
@@ -511,9 +617,9 @@ function chipEvidence(arm: string): string[] {
   );
 }
 
-describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
+describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("files boot_failed in the topbar's warning chip when adoption never completes", async () => {
-    adopt = () => Promise.reject(new Error("adoption refused"));
+    page.adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
@@ -521,7 +627,7 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
   });
 
   test("draws no failure overlay for a failed boot", async () => {
-    adopt = () => Promise.reject(new Error("adoption refused"));
+    page.adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
@@ -529,12 +635,12 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
   });
 
   test("re-raises the adoption failure after it has been drawn", async () => {
-    adopt = () => Promise.reject(new Error("adoption refused"));
+    page.adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
-    expect(rethrown).toHaveLength(1);
-    expect(() => rethrown[0]?.()).toThrow("adoption refused");
+    expect(page.rethrown).toHaveLength(1);
+    expect(() => page.rethrown[0]?.()).toThrow("adoption refused");
   });
 
   test("stops the page's one stream when the boot fails", async () => {
@@ -543,11 +649,11 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
     // a daemon the page had already given up on — a dead page still holding a
     // connection, burying its own `boot_failed` card under a reopen loop's
     // error records. Caught as a timeout in the isolated coverage run.
-    adopt = () => Promise.reject(new Error("adoption refused"));
+    page.adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
-    expect(bootedContext?.isQuiesced()).toBe(true);
+    expect(page.bootedContext?.isQuiesced()).toBe(true);
   });
 
   test("leaves the page's one stream running when the boot succeeds", async () => {
@@ -555,11 +661,11 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
     // page that stopped dialing would draw nothing ever again.
     await bootMain();
 
-    expect(bootedContext?.isQuiesced()).toBe(false);
+    expect(page.bootedContext?.isQuiesced()).toBe(false);
   });
 
   test("words a non-Error rejection in the chip as the value itself", async () => {
-    adopt = () => Promise.reject("the daemon hung up");
+    page.adopt = () => Promise.reject("the daemon hung up");
 
     await bootMain();
 
@@ -571,7 +677,7 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
 
     await bootMain();
 
-    expect(() => rethrown[0]?.()).toThrow("the page shell is missing #footer");
+    expect(() => page.rethrown[0]?.()).toThrow("the page shell is missing #footer");
   });
 
   test("reports an address failure through the pre-overlay emergency path", async () => {
@@ -596,7 +702,7 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
 describe("the ClientLog sink and the client's link verdict", () => {
   test("reports a ClientLog that could not be forwarded", async () => {
     // ARRANGE: the daemon refuses every record this page tries to file.
-    clientLogFails = true;
+    page.clientLogFails = true;
 
     // ACT
     await bootMain();
@@ -617,5 +723,37 @@ describe("the ClientLog sink and the client's link verdict", () => {
 
     const link = await import("../src/rpc/link.js");
     expect(link.standingClientFailure()).toBeNull();
+  });
+});
+
+describe("the harness", { timeout: BOOT_TIMEOUT_MS }, () => {
+  test("a boot that outlives its test records into its own record, not the next test's", async () => {
+    // ARRANGE: a boot held at adoption, the way a timed-out test's boot is
+    // still running when the next test arranges its page.
+    const straggler = page;
+    let reachedAdoption: () => void = () => {};
+    const atAdoption = new Promise<void>((resolve) => {
+      reachedAdoption = resolve;
+    });
+    let releaseAdoption: () => void = () => {};
+    straggler.adopt = () => {
+      reachedAdoption();
+      return new Promise<void>((resolve) => {
+        releaseAdoption = resolve;
+      });
+    };
+    const boot = bootMain();
+    await atAdoption;
+    page = freshRecord();
+
+    // ACT: the straggler resumes and mounts everything after adoption.
+    releaseAdoption();
+    await boot;
+    straggler.bootedContext?.quiesce();
+
+    // ASSERT
+    expect(straggler.clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
+    expect(page.clientLogs).toEqual([]);
+    expect(page.order).toEqual([]);
   });
 });

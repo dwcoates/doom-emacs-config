@@ -591,6 +591,8 @@ duration actually observed, never left at a tool default. Measured against
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
 | `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
+| `COLD_BOOT_TIMEOUT_MS` (`beforeAll`, `test/main.test.ts`) | 5000ms (the file's test bound, paid by its first test) | 15000ms | 3.15s over 20 runs at a load average of ~112; 5.59s once on the contended host | the first `import("../src/main.js")` in a worker fetches and compiles the whole graph, ~10x a warm import; paid once before any test |
+| `BOOT_TIMEOUT_MS` (`test/main.test.ts`, each test and its `afterEach`) | 5000ms | 4500ms | 536ms at ~112; 1.45s on the contended host | each test re-evaluates the whole mocked graph (`vi.resetModules`), because `main.ts` boots at import time; `afterEach` awaits a boot still in flight so none outlives its test |
 | webkit `hookTimeout` (`vitest.webkit.config.ts`) | 10000ms (default) | 90000ms | 29.4s (bundle, launch and the 120-step pass, all in `beforeAll`) | a real browser pass; the tests only read its result, so `testTimeout` stays 850ms |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
@@ -601,7 +603,7 @@ each file. The helper pays it in a `beforeAll` under its own measured bound
 (above); `harness.self.test.ts` fails any file that calls `startHarness`
 without it.
 
-Apart from that cold boot, no per-site exception was needed: nothing in either suite (xterm/login
+Apart from those cold boots and `test/main.test.ts`'s per-test boots, no per-site exception was needed: nothing in either suite (xterm/login
 terminal included) took long enough to need its own raised `timeout`. If a
 future test genuinely needs more than these globals, give it its own
 `{ timeout: ... }` with a one-line comment naming why, rather than raising
