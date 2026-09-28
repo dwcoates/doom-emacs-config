@@ -78,6 +78,8 @@ const (
 	StatementReadPage    = "read_page"
 	StatementLinesSince  = "lines_since"
 	StatementLiveWork    = "live_work"
+	// StatementAgentByVendorTask is the lineage-scoped locator lookup.
+	StatementAgentByVendorTask = "agent_by_vendor_task"
 	StatementListCursors = "list_cursors"
 	StatementBashRun     = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.

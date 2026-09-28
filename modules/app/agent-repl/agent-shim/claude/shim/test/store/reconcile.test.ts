@@ -21,6 +21,8 @@ import {
   findBashStart,
   findUnit,
   reconciledCoordinate,
+  resumedAgentAnnouncement,
+  resumedRecipient,
   stoppedBashTerminal,
 } from "../../src/store/reconcile.js";
 import { createPersistence } from "../../src/store/writer.js";
@@ -69,6 +71,7 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     getWorkflow: refuse,
     getSidecarCursors: refuse,
     getLiveWork: refuse,
+    getAgentByVendorTask: refuse,
     writeBatch: refuse,
     ...overrides,
   };
@@ -361,6 +364,7 @@ describe("liveWork", () => {
             value: create(storev1.GetLiveWorkFailureSchema, { detail: "the disk is full" }),
           },
         }),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -415,6 +419,7 @@ describe("liveWork", () => {
           },
         });
       },
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -449,6 +454,7 @@ describe("liveWork", () => {
         throw new Error("unused");
       },
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -1139,6 +1145,7 @@ describe("liveWork against a store that cannot be reached", () => {
       getWorkflow: refuse,
       getSidecarCursors: refuse,
       getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: refuse,
     };
 
@@ -1147,5 +1154,105 @@ describe("liveWork against a store that cannot be reached", () => {
       kind: "store_unavailable",
       message: "connect ECONNREFUSED",
     });
+  });
+});
+
+describe("the restore of a subagent resumed by a send", () => {
+  const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" });
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+  const OWNER = create(conversationv1.AgentIdSchema, { value: "main" });
+
+  function unit(at: string, id: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: at }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: id }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  function send(result: conversationv1.AgentSendMessage["result"]): conversationv1.HistoryEntryAt {
+    return unit("2", "toolu_send", {
+      case: "sendMessage",
+      value: create(conversationv1.AgentSendMessageSchema, { result }),
+    });
+  }
+
+  function spawn(created: string): conversationv1.HistoryEntryAt {
+    return unit("1", "toolu_spawn", {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: create(conversationv1.AgentIdSchema, { value: created }),
+          }),
+        },
+      }),
+    });
+  }
+
+  const reached = (locator: string): conversationv1.AgentSendMessage["result"] => ({
+    case: "success",
+    value: create(conversationv1.AgentSendMessageSuccessSchema, {
+      recipientAgentId: create(conversationv1.AgentIdSchema, { value: locator }),
+    }),
+  });
+
+  it("reads the locator a settled send reached", () => {
+    expect(resumedRecipient([send(reached("a5583"))], HANDLE)).toEqual({ kind: "locator", vendorTaskId: "a5583" });
+  });
+
+  it("says a send that has not settled names no recipient", () => {
+    expect(
+      resumedRecipient([send({ case: "start", value: create(conversationv1.AgentSendMessageStartSchema, {}) })], HANDLE),
+    ).toEqual({ kind: "no_recipient" });
+  });
+
+  it("says a settled send with an empty recipient names none", () => {
+    expect(resumedRecipient([send(reached(""))], HANDLE)).toEqual({ kind: "no_recipient" });
+  });
+
+  it("hands back a handle whose unit is not a send", () => {
+    expect(resumedRecipient([spawn("toolu_spawn")], create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" }))).toEqual({
+      kind: "not_a_send",
+    });
+  });
+
+  it("announces the resumed agent created, described by its spawn, under the send's handle", () => {
+    // Act.
+    const announcement = resumedAgentAnnouncement([send(reached("a5583")), spawn("toolu_spawn")], HANDLE, OWNER, SPAWN);
+
+    // Assert.
+    expect([
+      announcement?.work?.value,
+      announcement?.owner?.value,
+      announcement?.kind?.kind.case === "subagent" ? announcement.kind.kind.value.agentId?.value : "",
+      announcement?.origin.case,
+    ]).toEqual(["toolu_send", "main", "toolu_spawn", "created"]);
+  });
+
+  it("announces nothing when the book holds no spawn of the agent", () => {
+    expect(resumedAgentAnnouncement([send(reached("a5583"))], HANDLE, OWNER, SPAWN)).toBeUndefined();
+  });
+
+  it("announces nothing when the spawn created a different agent", () => {
+    expect(resumedAgentAnnouncement([spawn("toolu_other")], HANDLE, OWNER, SPAWN)).toBeUndefined();
   });
 });

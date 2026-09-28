@@ -168,6 +168,11 @@ var errNotAPageLine = errors.New("entry row indexed as a page line carries no se
 // frame carries none — a corruption of this store's own invariant.
 var errNotABashRow = errors.New("entry row indexed as a bash row carries no bash frame")
 
+// errAmbiguousLocator is the cause of a locator lookup that found one vendor
+// task paired with more than one agent of a lineage — a break in the pairing's
+// own invariant, which the store refuses rather than choosing between.
+var errAmbiguousLocator = errors.New("one vendor task locator is paired with more than one agent of the lineage")
+
 // isContextError reports the caller's own cancellation or deadline, which is
 // nobody's fault and never a storage failure.
 func isContextError(err error) bool {
