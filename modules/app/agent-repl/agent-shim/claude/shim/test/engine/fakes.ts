@@ -29,6 +29,7 @@ import type {
   Persistence,
 } from "../../src/store/persistence.js";
 import { PersistenceError } from "../../src/store/persistence.js";
+import type { VendorTaskAnswer } from "../../src/store/locator.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
 
@@ -466,6 +467,17 @@ export class RecordingPersistence implements Persistence {
     this.liveWorkSessions.push(session.value);
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
     return Promise.resolve(this.live);
+  }
+  /**
+   * The store's answer per vendor task locator; an unlisted locator answers
+   * `not_found`, which is what a store that never heard of it says.
+   */
+  readonly vendorTasks = new Map<string, VendorTaskAnswer>();
+  /** Every locator lookup, as `<session>/<locator>`, in order. */
+  readonly vendorTaskLookups: string[] = [];
+  agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
+    this.vendorTaskLookups.push(`${session.value}/${vendorTaskId}`);
+    return Promise.resolve(this.vendorTasks.get(vendorTaskId) ?? { kind: "not_found" });
   }
   /**
    * The durable writes and shell-run opens, in the order they were made — so a

@@ -69,6 +69,7 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     getWorkflow: refuse,
     getSidecarCursors: refuse,
     getLiveWork: refuse,
+    getAgentByVendorTask: refuse,
     writeBatch: refuse,
     ...overrides,
   };
@@ -361,6 +362,7 @@ describe("liveWork", () => {
             value: create(storev1.GetLiveWorkFailureSchema, { detail: "the disk is full" }),
           },
         }),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -415,6 +417,7 @@ describe("liveWork", () => {
           },
         });
       },
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -449,6 +452,7 @@ describe("liveWork", () => {
         throw new Error("unused");
       },
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -1139,6 +1143,7 @@ describe("liveWork against a store that cannot be reached", () => {
       getWorkflow: refuse,
       getSidecarCursors: refuse,
       getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
+      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       writeBatch: refuse,
     };
 
@@ -1149,3 +1154,4 @@ describe("liveWork against a store that cannot be reached", () => {
     });
   });
 });
+
