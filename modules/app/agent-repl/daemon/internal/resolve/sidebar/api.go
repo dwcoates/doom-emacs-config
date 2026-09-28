@@ -73,8 +73,8 @@ type Resolver interface {
 	SetSelected(ws ids.WorkspaceID)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
-	// only on a turn-end row (done or interrupted); a report on any other arm
-	// is dropped. A read result draws the row PARTIAL whenever it stands on
+	// only on a turn-end row (done, interrupted or turn_failed); a report on
+	// any other arm is dropped. A read result draws the row PARTIAL whenever it stands on
 	// its turn-end arm, and lets an unread-held row yield to idle_async while
 	// detached work runs. There is no lowering setter: the next turn is what
 	// makes a new result unread.
@@ -95,7 +95,7 @@ type Resolver interface {
 	// which names a window that is over.
 	AckTurn(ws ids.WorkspaceID)
 	// SetTurnEnded installs how the last turn ended, which is what tells
-	// `interrupted` from `done`. No agent terminal states it: a user interrupt
+	// `done`, `interrupted` and `turn_failed` apart. No agent terminal states it: a user interrupt
 	// is a DAEMON fact, so the roster is told directly.
 	SetTurnEnded(ws ids.WorkspaceID, how TurnClose)
 	// SetSummary installs the row detail's summary line — the workspace's last

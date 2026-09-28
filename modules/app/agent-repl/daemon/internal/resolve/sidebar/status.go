@@ -30,9 +30,10 @@ import (
 //  8. compacting      …either kind.
 //  9. submitting      the turn is accepted and the shim has not acked it.
 //  10. thinking        the turn is producing activity.
-//  11. turn end, unread  done or interrupted, whichever the last turn's close
-//     resolves to, while its result is UNREAD: the turn
-//     completed or was interrupted and the user has not viewed
+//  11. turn end, unread  done, interrupted or turn_failed, whichever the last
+//     turn's close resolves to (closeArm), while its result is
+//     UNREAD: the turn completed, was interrupted or failed
+//     (failed, orphaned or agent-died) and the user has not viewed
 //     the row since. It outranks idle_async below: a result is
 //     waiting, and detached work still running must not hide
 //     that. It holds until the editor reports the row viewed
@@ -41,11 +42,12 @@ import (
 //     outranks the turn terminals below because work
 //     happening NOW outranks how the last turn ended — once
 //     that turn's result has been read.
-//  13. interrupted     the last turn was stopped by the user.
-//  14. done            the last turn finished.
-//     Both 13 and 14 are drawn PARTIAL (viewed) once their
+//  13. turn_failed     the last turn failed. BLUE.
+//  14. interrupted     the last turn was stopped by the user.
+//  15. done            the last turn finished.
+//     13, 14 and 15 are drawn PARTIAL (viewed) once their
 //     result is read, FULL while it is not.
-//  15. ready           live, proven usable and idle.
+//  16. ready          live, proven usable and idle.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Logger) string {
 	if !s.live(session) && rec.Closed {
 		return "inactive"
@@ -259,6 +261,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "interrupted":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"interrupted\""})
 		row.Status = &frontendv1.RosterRow_Interrupted{Interrupted: &frontendv1.RosterRowStatusInterrupted{}}
+	case "turn_failed":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"turn_failed\""})
+		row.Status = &frontendv1.RosterRow_TurnFailed{TurnFailed: &frontendv1.RosterRowStatusTurnFailed{}}
 	case "ready":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"ready\""})
 		row.Status = &frontendv1.RosterRow_Ready{Ready: &frontendv1.RosterRowStatusReady{}}

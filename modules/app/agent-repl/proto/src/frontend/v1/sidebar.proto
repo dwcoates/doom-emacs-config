@@ -94,7 +94,7 @@ message RosterRowAttention {}
 // recedes to the muted colour while the marker stands.
 //
 // TURN-END-ONLY. The marker is PRESENT only on a row whose `status` is a turn
-// end, `done` or `interrupted`, never on any other arm, however long the user
+// end, `done`, `interrupted` or `turn_failed`, never on any other arm, however long the user
 // has looked at it: every other arm is live work (thinking, a permission ask,
 // detached work, a merge running) or an exceptional state (severed, dead,
 // vendor_blocked, a merge conflict), and neither may ever be drawn
@@ -106,7 +106,7 @@ message RosterRowAttention {}
 // THE MARKER IS DERIVED FROM A READ FACT, and the daemon resolves it in the
 // same render as the row's `status`, so every push states the two in
 // agreement and a client draws the marker as it arrives, with no rule of its
-// own. A turn that completes or is interrupted leaves its result UNREAD; a
+// own. A turn that completes, is interrupted or fails leaves its result UNREAD; a
 // dwell on the turn-end row READS it; the next turn resets it. While the
 // result is unread the row holds its turn-end arm even over live detached
 // work (see the `status` oneof's `idle_async`), FULL. Once read, the marker stands
@@ -299,6 +299,14 @@ message RosterRow {
     RosterRowStatusDone done = 8;
     // The turn was interrupted by the user. The same read rule as `done`.
     RosterRowStatusInterrupted interrupted = 9;
+    // The last turn ended by FAILING: an agent-side failure, a turn the
+    // daemon closed as orphaned on reconcile, or a turn the agent process cut
+    // by dying under it. It is a TURN END like `done` and `interrupted`, with
+    // the same read rule: while its result is UNREAD it outranks
+    // `idle_async`; once read it is drawn with `viewed` (see
+    // RosterRowViewed). BLUE, where the other two turn ends are green: the
+    // turn did not produce the result it was asked for.
+    RosterRowStatusTurnFailed turn_failed = 36;
     // Live, proven usable, and idle. BOTH the idle and ready render states
     // resolve here — the sidebar draws them identically.
     RosterRowStatusReady ready = 10;
@@ -478,6 +486,8 @@ message RosterRowStatusPermission {}
 message RosterRowStatusDone {}
 
 message RosterRowStatusInterrupted {}
+
+message RosterRowStatusTurnFailed {}
 
 message RosterRowStatusReady {}
 

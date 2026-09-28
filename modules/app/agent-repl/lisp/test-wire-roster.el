@@ -127,9 +127,9 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-three ()
-  "The status vocabulary is the 23 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 23)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-four ()
+  "The status vocabulary is the 24 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 24)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."
