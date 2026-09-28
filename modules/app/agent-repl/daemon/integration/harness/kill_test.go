@@ -268,8 +268,9 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold(t *testin
 // started (a layout change's replacement): a process naming stateDir that
 // spawns a child naming it too, and spawns another the moment that child
 // dies, the way a daemon revives a shim that died on its own. It answers the
-// respawner and its first child's pid.
-func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
+// respawner, its first child's pid, and a read that blocks until the
+// respawner reports its next child and answers that child's pid.
+func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int, func() int) {
 	t.Helper()
 	script := `while :; do /bin/sh -c 'while :; do /bin/sleep 1; done' "$0/child" & echo $!; wait $!; done`
 	cmd := exec.Command("/bin/sh", "-c", script, stateDir)
@@ -284,16 +285,21 @@ func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	})
-	line, err := bufio.NewReader(out).ReadString('\n')
-	if err != nil {
-		t.Fatalf("read the child's pid: %v", err)
+	pids := bufio.NewReader(out)
+	next := func() int {
+		t.Helper()
+		line, err := pids.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read the child's pid: %v", err)
+		}
+		child, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			t.Fatalf("the child's pid %q: %v", line, err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+		return child
 	}
-	child, err := strconv.Atoi(strings.TrimSpace(line))
-	if err != nil {
-		t.Fatalf("the child's pid %q: %v", line, err)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
-	return cmd, child
+	return cmd, next(), next
 }
 
 // TestReapStraysFreezesEveryStrayBeforeKillingAny pins the ordering that
@@ -303,7 +309,7 @@ func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int) {
 func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
-	respawner, child := respawningStray(t, stateDir)
+	respawner, child, _ := respawningStray(t, stateDir)
 	d := &Daemon{t: t, StateDir: stateDir}
 	var respawnerState processState
 	var stateErr, exitErr error
@@ -338,7 +344,7 @@ func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
-	_, child := respawningStray(t, stateDir)
+	_, child, _ := respawningStray(t, stateDir)
 	d := &Daemon{t: t, StateDir: stateDir}
 	d.afterStraysFrozen = func() { _ = syscall.Kill(child, syscall.SIGKILL) }
 
@@ -346,6 +352,47 @@ func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
 	d.ReapStrays()
 
 	// Assert
+	if err := d.leakedStrays(); err != nil {
+		t.Fatalf("leakedStrays after the reap = %v, want none", err)
+	}
+}
+
+// TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop is the hole a
+// freeze alone left: a stray whose stop the kernel discards, as it does for a
+// process inside execve, runs on through the sweep and spawns a replacement
+// no listing so far has named. The respawner is continued once it is stopped
+// and its child killed, and the sweep begins its kills only once the
+// replacement exists, so the replacement is certain, not raced for.
+func TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop(t *testing.T) {
+	// Arrange
+	stateDir := t.TempDir()
+	respawner, child, next := respawningStray(t, stateDir)
+	d := &Daemon{t: t, StateDir: stateDir}
+	escaped := false
+	var escapeErr error
+	d.afterStraysFrozen = func() {
+		if escaped {
+			return
+		}
+		escaped = true
+		if err := syscall.Kill(respawner.Process.Pid, syscall.SIGCONT); err != nil {
+			escapeErr = err
+			return
+		}
+		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+			escapeErr = err
+			return
+		}
+		next()
+	}
+
+	// Act
+	d.ReapStrays()
+
+	// Assert
+	if escapeErr != nil {
+		t.Fatalf("letting the respawner escape its stop: %v", escapeErr)
+	}
 	if err := d.leakedStrays(); err != nil {
 		t.Fatalf("leakedStrays after the reap = %v, want none", err)
 	}
