@@ -9,7 +9,6 @@
  */
 import type { AppContext } from "../rpc/context.js";
 import type { AttentionRegistry } from "./attention.js";
-import type { ViewedRegistry } from "./viewed.js";
 
 /** The two resolved groupings; which one is drawn is local preference. */
 export type Grouping = "repository" | "task";
@@ -55,8 +54,6 @@ export interface SidebarContext {
   prefs: SidebarPrefs;
   /** The blink registry the attention markers are driven from. */
   attention: AttentionRegistry;
-  /** The registry that decides each row's FULL/PARTIAL display mode. */
-  viewed: ViewedRegistry;
   /**
    * The tasks the assign menu offers, refreshed from the task view at the top
    * of every draw. A live array rather than a snapshot: a menu opened later
