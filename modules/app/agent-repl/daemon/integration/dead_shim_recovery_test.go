@@ -210,6 +210,35 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	awaitFooter(t, f, footer, "the footer idle with no fault", footerSettled)
 }
 
+// TestAShimThatDiesMidTurnLeavesTheRevivedRowOnAnUnreadTurnFailed covers
+// RosterRowStatusTurnFailed: a turn the agent process cut by dying is a FAILED
+// turn end (owner ruling, 2026-09-28), so once the revived session is up the
+// row reports that failure, blue, rather than a green done.
+func TestAShimThatDiesMidTurnLeavesTheRevivedRowOnAnUnreadTurnFailed(t *testing.T) {
+	t.Parallel()
+	// Arrange: a turn running when the shim dies.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings(deadShimRecords...)
+	f.shim.ExpectStartSession()
+	f.submit("the turn the death cuts", "k-dead-shim-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
+	roster := f.d.WatchRoster()
+
+	// Act
+	killShim(t, f, f.shim)
+	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "turn_failed once the revived session is up", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetTurnFailed() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetViewed() != nil {
+		t.Fatal("the turn_failed row carries the viewed marker, want its result unread")
+	}
+}
+
 func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: the first death was brought back, and nothing has run since.

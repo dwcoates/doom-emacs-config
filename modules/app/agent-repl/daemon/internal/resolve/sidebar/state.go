@@ -84,7 +84,8 @@ type wsState struct {
 	// marker is DERIVED from it (`viewedOn`), so a read result can never be
 	// drawn as unread and an unread one never as read.
 	//
-	// SET to unread when a turn COMPLETES or is INTERRUPTED (SetTurnEnded),
+	// SET to unread when a turn COMPLETES, is INTERRUPTED or FAILS
+	// (SetTurnEnded),
 	// set to read when the editor reports the user has seen the row on its
 	// turn-end arm (SetViewed), and reset to none by a new turn (startTurn) —
 	// a new prompt is the user moving on.
@@ -112,11 +113,11 @@ type resultState int
 
 const (
 	// resultNone: no result stands whose read state the roster tracks — no
-	// turn has ended since the last prompt, or the last close was neither a
-	// completion nor an interruption and nobody has reported seeing it yet.
+	// turn has ended since the last prompt, or the last close was one this
+	// build does not know.
 	resultNone resultState = iota
-	// resultUnread: the last turn COMPLETED or was INTERRUPTED and the user
-	// has not seen it. An unread result holds the row on its turn-end arm,
+	// resultUnread: the last turn COMPLETED, was INTERRUPTED or FAILED and
+	// the user has not seen it. An unread result holds the row on its turn-end arm,
 	// outranking `idle_async`.
 	resultUnread
 	// resultRead: the user has seen the turn-end row since the last turn
@@ -168,24 +169,51 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.result = resultNone
 }
 
-// The two TURN-END arms: how the last turn ended, once nothing more urgent
+// The three TURN-END arms: how the last turn ended, once nothing more urgent
 // stands. They are the only arms that report a RESULT, so they are the only
 // arms a result can be unread or read on, and the only arms the viewed marker
-// may stand on. `isTurnEndArm` is the one predicate every site asks.
+// may stand on. `closeArm` is the one table from a close to its arm, and
+// `isTurnEndArm` is the one predicate every site asks, so a completion, an
+// interruption and a failure can never drift apart on the read rule.
 const (
 	armDone        = "done"
 	armInterrupted = "interrupted"
+	armTurnFailed  = "turn_failed"
 )
 
-// isTurnEndArm reports whether arm is one of the two turn-end arms.
-func isTurnEndArm(arm string) bool {
-	return arm == armDone || arm == armInterrupted
+// closeArm names the turn-end arm a close resolves to, and reports false for
+// a close this build does not know.
+//
+// A FAILURE IS A TURN END (owner ruling, 2026-09-28). The turn failing on its
+// own, a turn the daemon closed as orphaned on reconcile, and a turn the agent
+// process cut by dying under it all leave a result the user has not read,
+// exactly as a completion or an interruption does. They draw `turn_failed`,
+// which is blue, rather than a green `done` that claims a result was produced.
+func closeArm(how TurnClose) (string, bool) {
+	switch how {
+	case wsm.CloseCompleted:
+		return armDone, true
+	case wsm.CloseKilled:
+		return armInterrupted, true
+	case wsm.CloseFailed, wsm.CloseOrphaned, wsm.CloseAgentDied:
+		return armTurnFailed, true
+	default:
+		return "", false
+	}
 }
 
-// turnEndArm names the turn-end arm the last close resolves to.
+// isTurnEndArm reports whether arm is one of the three turn-end arms.
+func isTurnEndArm(arm string) bool {
+	return arm == armDone || arm == armInterrupted || arm == armTurnFailed
+}
+
+// turnEndArm names the turn-end arm the last close resolves to. A close this
+// build does not know was refused loudly when it was installed
+// (SetTurnEnded), so it is never unread; it keeps the row on `done`, the arm
+// it has always drawn.
 func (s *wsState) turnEndArm() string {
-	if s.lastClose == wsm.CloseKilled {
-		return armInterrupted
+	if arm, ok := closeArm(s.lastClose); ok {
+		return arm
 	}
 	return armDone
 }
