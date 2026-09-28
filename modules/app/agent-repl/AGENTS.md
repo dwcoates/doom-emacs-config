@@ -121,6 +121,26 @@ Two standing rules follow from the same measurement:
   wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
   to init and burning CPU for the rest of the run.
 
+### Every Go module pins a shared third-party dependency at one version
+
+The store, daemon and e2e modules once each pinned `modernc.org/sqlite`
+independently, and one driver bug (a statement leaked on context cancel,
+pinning the SQLite WAL) sat in two systems at once. `bin/check-go-deps.sh`
+reads every `go.mod` under this module (direct and `// indirect` requires, block
+and single-line forms) and fails, naming the dependency, each version and the
+go.mod files pinning it, whenever a third-party module path is required at more
+than one version.
+
+- Our own modules replaced by a local path (`replace ... => ./` or `../`, such as
+  `agentrepl/proto` and `agentrepl/logging`) are exempt, detected from each
+  go.mod's own `replace` directives.
+- `go.mod` files under `node_modules`, `testdata`, `fixture` and `fixtures` are
+  skipped.
+- `bin/test-check-go-deps.sh` (the `go-deps-harness` suite) covers the check on
+  fixture trees and runs it against the real tree as the gate.
+- An upgrade of a shared dependency lands in EVERY module that requires it, in
+  the same commit, followed by each affected module's tests.
+
 ### Test wait/timeout bounds are measured, not guessed
 
 Every synchronization wait in `test-integration-*.el` funnels through

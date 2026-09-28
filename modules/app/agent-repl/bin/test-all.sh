@@ -70,6 +70,7 @@ ALL_SUITES=(
     store-reset-harness
     readiness-harness
     logs-harness
+    go-deps-harness
     doctor-harness
     precommit-harness
     ert
@@ -373,6 +374,7 @@ require_executable "$THIS_DIR/test-suite-slot.sh"
 require_executable "$THIS_DIR/test-background.sh"
 require_executable "$THIS_DIR/test-store-reset.sh"
 require_executable "$THIS_DIR/test-readiness-report.sh"
+require_executable "$THIS_DIR/test-check-go-deps.sh"
 require_executable "$THIS_DIR/test-e2e.sh"
 require_executable "$THIS_DIR/test-e2e-emacs.sh"
 require_executable "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
@@ -401,6 +403,7 @@ run_timed background-harness "$THIS_DIR/test-background.sh"
 run_timed store-reset-harness "$THIS_DIR/test-store-reset.sh"
 run_timed readiness-harness "$THIS_DIR/test-readiness-report.sh"
 run_timed logs-harness "$THIS_DIR/test-logs.sh"
+run_timed go-deps-harness "$THIS_DIR/test-check-go-deps.sh"
 run_timed doctor-harness "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 run_timed precommit-harness "$REPO_ROOT/.githooks/test-pre-commit.sh"
 run_timed ert "$REPO_ROOT/.claude/safe-test-run.sh"
