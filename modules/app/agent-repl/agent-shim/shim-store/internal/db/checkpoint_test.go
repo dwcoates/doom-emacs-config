@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"agentrepl/shim-store/internal/logging"
 )
 
 // ---- harness ----
@@ -652,5 +654,280 @@ func TestCheckpointPolicyTakesTheDefaultsForZeroValues(t *testing.T) {
 	// Assert
 	if resolved.Pages != DefaultCheckpointPages || resolved.Idle != DefaultCheckpointIdle {
 		t.Fatalf("resolved = %+v, want the shipped defaults", resolved)
+	}
+}
+
+// ---- the WAL pin ----
+
+func TestReadWALIndexReadsEveryReaderMark(t *testing.T) {
+	// Arrange
+	content := walIndexBytes(walIndexVersion, 1, 1200, 700)
+	for i, mark := range []uint32{0, 47481, 900, 0xffffffff, 12} {
+		binary.NativeEndian.PutUint32(content[walIndexReadMark+4*i:], mark)
+	}
+	f := openBytes(t, content)
+
+	// Act
+	index, err := readWALIndex(f)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("readWALIndex: %v", err)
+	}
+	if index.readMarks != [walReadMarks]uint32{0, 47481, 900, 0xffffffff, 12} {
+		t.Fatalf("readMarks = %v", index.readMarks)
+	}
+}
+
+// holdReadSnapshot opens a read transaction and reads through it, so its
+// snapshot is held until the returned function ends it.
+func holdReadSnapshot(t *testing.T, d *DB) func() {
+	t.Helper()
+	tx, err := d.beginRead(ctx())
+	if err != nil {
+		t.Fatalf("beginRead: %v", err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx(), `SELECT COUNT(*) FROM entry`).Scan(&n); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	var once sync.Once
+	end := func() { once.Do(func() { d.endTx(tx, logging.Fields{Operation: "store.db.test"}) }) }
+	t.Cleanup(end)
+	return end
+}
+
+// pinnedStore is a store whose WAL holds frames a reader's snapshot pins: the
+// WAL was folded, a reader took its snapshot, and one more write followed.
+func pinnedStore(t *testing.T, clock *fakeClock) (*DB, *sink, func()) {
+	t.Helper()
+	s, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	writeOne(t, d, "a")
+	if _, err := d.Checkpoint(ctx(), TriggerIdle); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	end := holdReadSnapshot(t, d)
+	writeOne(t, d, "b")
+	return d, s, end
+}
+
+func TestACheckpointAReaderPinsCopiesNothingAndReportsTheReadMarks(t *testing.T) {
+	// Arrange
+	d, _, _ := pinnedStore(t, &fakeClock{})
+
+	// Act
+	result, err := d.Checkpoint(ctx(), TriggerIdle)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if result.Copied != 0 || result.Checkpointed >= result.WALFrames {
+		t.Fatalf("result = %+v, want nothing copied with frames waiting", result)
+	}
+	if len(result.ReadMarks) != walReadMarks {
+		t.Fatalf("ReadMarks = %v, want all %d reader slots", result.ReadMarks, walReadMarks)
+	}
+}
+
+func TestACheckpointThatCopiesReportsWhatItCopied(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOne(t, d, "a")
+
+	// Act
+	result, err := d.Checkpoint(ctx(), TriggerIdle)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if result.Copied == 0 || result.Copied != result.Checkpointed || result.ReadMarks != nil {
+		t.Fatalf("result = %+v, want every frame copied and no read marks taken", result)
+	}
+}
+
+func TestTheWALPinWatch(t *testing.T) {
+	pinned := CheckpointResult{WALFrames: 100, Checkpointed: 40, Copied: 0}
+	copied := CheckpointResult{WALFrames: 100, Checkpointed: 100, Copied: 60}
+	shortPass := CheckpointResult{WALFrames: 100, Checkpointed: 70, Copied: 30}
+	skipped := CheckpointResult{WALFrames: 100, Checkpointed: 100, Skipped: true}
+	start := time.Unix(1_700_000_000, 0)
+	type step struct {
+		result CheckpointResult
+		at     time.Duration
+		want   walPinEvent
+		held   time.Duration
+	}
+	tests := []struct {
+		name  string
+		steps []step
+	}{
+		{"a checkpoint that copies is quiet", []step{{copied, 0, walPinQuiet, 0}}},
+		{"the first pinned checkpoint opens a pin silently", []step{{pinned, 0, walPinQuiet, 0}}},
+		{"a pin is reported once it outlasts the policy", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute, walPinOutlasted, time.Minute}}},
+		{"a pin short of the policy is not reported", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute - time.Second, walPinQuiet, time.Minute - time.Second}}},
+		{"a reported pin is reported only once", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute, walPinOutlasted, time.Minute}, {pinned, 2 * time.Minute, walPinQuiet, 2 * time.Minute}}},
+		{"a reported pin that copies again is released", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute, walPinOutlasted, time.Minute}, {copied, 90 * time.Second, walPinReleased, 90 * time.Second}}},
+		{"a partial copy ends the pin", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute, walPinOutlasted, time.Minute}, {shortPass, 2 * time.Minute, walPinReleased, 2 * time.Minute}}},
+		{"nothing left to copy ends the pin", []step{
+			{pinned, 0, walPinQuiet, 0}, {pinned, time.Minute, walPinOutlasted, time.Minute}, {skipped, 2 * time.Minute, walPinReleased, 2 * time.Minute}}},
+		{"an unreported pin ends silently", []step{
+			{pinned, 0, walPinQuiet, 0}, {copied, time.Second, walPinQuiet, time.Second}}},
+		{"a released pin starts over", []step{
+			{pinned, 0, walPinQuiet, 0}, {copied, time.Second, walPinQuiet, time.Second},
+			{pinned, time.Hour, walPinQuiet, 0}, {pinned, time.Hour + time.Minute, walPinOutlasted, time.Minute}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			var watch walPinWatch
+			for i, s := range test.steps {
+				// Act
+				event, held := watch.observe(s.result, start.Add(s.at), time.Minute)
+
+				// Assert
+				if event != s.want || held != s.held {
+					t.Fatalf("step %d: observe = (%v, %v), want (%v, %v)", i, event, held, s.want, s.held)
+				}
+			}
+		})
+	}
+}
+
+func walPinRecords(t *testing.T, s *sink) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, record := range s.records(t) {
+		if record["operation"] == WALPinOperation {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+// runPinnedJob starts the job on a pinned store and runs its first idle
+// checkpoint, which opens the pin. The store's pending write kicked the job
+// before it started, so the job arms twice: at start, then for that kick.
+func runPinnedJob(t *testing.T, clock *fakeClock) (*DB, *sink, func(), *fakeTimers, <-chan checkpointRun) {
+	t.Helper()
+	d, s, end := pinnedStore(t, clock)
+	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1 << 30, PinWarnAfter: time.Minute})
+	<-timers.made
+	(<-timers.made).fire()
+	if run := <-runs; run.err != nil || run.result.Copied != 0 {
+		t.Fatalf("first run = %+v, want a pinned checkpoint", run)
+	}
+	return d, s, end, timers, runs
+}
+
+func TestTheJobWarnsOnceAPinOutlastsThePolicy(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{}
+	_, s, _, timers, runs := runPinnedJob(t, clock)
+	clock.advance(time.Minute)
+
+	// Act
+	(<-timers.made).fire()
+	<-runs
+
+	// Assert
+	records := walPinRecords(t, s)
+	if len(records) != 1 || records[0]["level"] != "warn" {
+		t.Fatalf("pin records = %v, want one warning; log was:\n%s", records, s.file.String())
+	}
+	s.assertLogged(t, "warn", "a reader has pinned the WAL for at least 1m0s")
+}
+
+func TestTheJobsPinWarningCarriesTheWALAndReadPoolState(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{}
+	_, s, _, timers, runs := runPinnedJob(t, clock)
+	clock.advance(time.Minute)
+
+	// Act
+	(<-timers.made).fire()
+	<-runs
+
+	// Assert
+	records := walPinRecords(t, s)
+	if len(records) != 1 {
+		t.Fatalf("pin records = %v, want one", records)
+	}
+	context, _ := records[0]["context"].(map[string]any)
+	for _, key := range []string{"wal_frames", "wal_backfilled", "wal_read_marks", "read_pool_open", "read_pool_in_use", "read_pool_idle", "db"} {
+		if _, ok := context[key]; !ok {
+			t.Fatalf("pin warning has no %s: %v", key, context)
+		}
+	}
+	if context["wal_pinned_for_ms"] != float64(time.Minute.Milliseconds()) {
+		t.Fatalf("wal_pinned_for_ms = %v, want %d", context["wal_pinned_for_ms"], time.Minute.Milliseconds())
+	}
+	if context["read_pool_in_use"] != float64(1) {
+		t.Fatalf("read_pool_in_use = %v, want the one connection the held read occupies", context["read_pool_in_use"])
+	}
+}
+
+func TestTheJobRecordsTheEndOfAReportedPin(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{}
+	_, s, end, timers, runs := runPinnedJob(t, clock)
+	clock.advance(time.Minute)
+	(<-timers.made).fire()
+	<-runs
+	end()
+	clock.advance(time.Second)
+
+	// Act
+	(<-timers.made).fire()
+	<-runs
+
+	// Assert
+	records := walPinRecords(t, s)
+	if len(records) != 2 || records[1]["level"] != "info" {
+		t.Fatalf("pin records = %v, want the warning then an info release; log was:\n%s", records, s.file.String())
+	}
+	s.assertLogged(t, "info", "the WAL pin ended after at least 1m1s")
+}
+
+func TestTheJobIsSilentAboutAPinThatEndsInsideThePolicy(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{}
+	_, s, end, timers, runs := runPinnedJob(t, clock)
+	end()
+	clock.advance(time.Second)
+
+	// Act
+	(<-timers.made).fire()
+	<-runs
+
+	// Assert
+	if records := walPinRecords(t, s); len(records) != 0 {
+		t.Fatalf("pin records = %v, want none for a pin shorter than the policy", records)
+	}
+}
+
+func TestTheWALPinWatchTracksAPinOpenedAtTheClocksZeroInstant(t *testing.T) {
+	// Arrange
+	var watch walPinWatch
+	pinned := CheckpointResult{WALFrames: 100, Checkpointed: 40}
+	watch.observe(pinned, time.Time{}, time.Minute)
+
+	// Act
+	event, held := watch.observe(pinned, time.Time{}.Add(time.Minute), time.Minute)
+
+	// Assert
+	if event != walPinOutlasted || held != time.Minute {
+		t.Fatalf("observe = (%v, %v), want the pin reported after 1m", event, held)
 	}
 }
