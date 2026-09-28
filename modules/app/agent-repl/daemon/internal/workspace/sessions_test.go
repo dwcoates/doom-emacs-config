@@ -1623,6 +1623,94 @@ func TestAStartedSessionRetractsTheRefusedStartFault(t *testing.T) {
 	}
 }
 
+// EVERY STANDING FAULT WHOSE LIFETIME ENDS AT A HEALTHY ATTACH OR A STARTED
+// SESSION IS CLOSED BY A START (health/lifetime.go), not only a hand-listed
+// few: `bounce_unknown` stood on a strip for over 30 minutes on 2026-09-27
+// because no closer listed it.
+func TestAStartClosesEveryFaultWhoseLifetimeEndsThere(t *testing.T) {
+	tests := []struct {
+		name  string
+		kind  string
+		stand bool
+	}{
+		{"a dead shim ends at the healthy attach", health.KindShimDied, false},
+		{"a severed link ends at the healthy attach", health.KindLinkSevered, false},
+		{"a start that failed ends at the healthy attach", health.KindShimStartFailed, false},
+		{"a refused watch open ends at the healthy attach", health.KindWatchOpenRefused, false},
+		{"an undetermined bounce ends at the healthy attach", health.KindBounceUnknown, false},
+		{"an expired adoption window ends at the healthy attach", health.KindAdoptionWindowExpired, false},
+		{"a failed cold-gate re-open ends at the started session", health.KindColdGateReopenFailed, false},
+		{"a legacy relaunch refusal ends at the started session", health.KindRelaunchResumeFailed, false},
+		{"an abandoned conversation waits for the next turn", health.KindConversationAbandoned, true},
+		{"an unresolved final answer waits for the next turn", health.KindFinalAnswerUnresolved, true},
+		{"a shim-reported fault waits for the next verdict", health.KindShimReported, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			workspace := ws.ID
+			if _, err := f.db.OpenFault(context.Background(), wsm.Fault{Workspace: &workspace, Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			got := faultKinds(f.db.dbFaults)
+			if stands := len(got) == 1 && got[0] == tt.kind; stands != tt.stand {
+				t.Fatalf("faults after the start = %v, want %s standing = %v", got, tt.kind, tt.stand)
+			}
+		})
+	}
+}
+
+// A REFUSED START IS STILL A HEALTHY ATTACH, and only the attach's faults
+// close: the session-start ones wait for a session the shim serves.
+func TestARefusedStartClosesOnlyTheHealthyAttachsFaults(t *testing.T) {
+	tests := []struct {
+		name  string
+		kind  string
+		stand bool
+	}{
+		{"an undetermined bounce ends at the healthy attach", health.KindBounceUnknown, false},
+		{"a failed cold-gate re-open waits for a started session", health.KindColdGateReopenFailed, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			workspace := ws.ID
+			if _, err := f.db.OpenFault(context.Background(), wsm.Fault{Workspace: &workspace, Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+			f.client.response = &shimv1.StartSessionResponse{
+				Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+					Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+					Detail: "the vendor binary is missing",
+				}},
+			}
+
+			// Act.
+			_ = f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			stands := false
+			for _, kind := range faultKinds(f.db.dbFaults) {
+				stands = stands || kind == tt.kind
+			}
+			if stands != tt.stand {
+				t.Fatalf("faults after the refused start = %v, want %s standing = %v", faultKinds(f.db.dbFaults), tt.kind, tt.stand)
+			}
+		})
+	}
+}
+
 func TestStartIsIdempotentForALiveSession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
