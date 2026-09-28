@@ -43,6 +43,23 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
+
+	// ANOTHER TURN ALREADY RUNS. A vendor-started turn adopted on the same
+	// flush (OnTurnAdopted is told before any end), or a turn delivered in the
+	// instant between the watcher clearing this one and this call, is now the
+	// session's turn: the roster's thinking is ITS, and a prompt popped here
+	// would be started into it and refused. This turn's row still closes
+	// through the door; what is held waits for the running turn's own end.
+	if watcher, ok := q.deps.Watcher(ws); ok {
+		if running := watcher.TurnInFlight(); running != nil && *running != turn {
+			_ = q.closeTurn(ctx, ws, turn, how, log)
+			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
+				"turn_in_flight": string(*running),
+			})
+			return
+		}
+	}
+
 	// The roster's turn fact is the daemon's own, so its close is too.
 	q.deps.Sidebar.SetTurnEnded(ws, how)
 
