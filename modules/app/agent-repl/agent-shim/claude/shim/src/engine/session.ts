@@ -118,13 +118,14 @@ import {
   KeepaliveCadence,
   KeepaliveRewind,
   KeepaliveScope,
-  isTopLevelReply,
   keepalivePromptText,
   REAL_SCHEDULER,
   type KeepaliveAttribution,
   type KeepaliveScheduler,
+  type RecordTurn,
   type RewindObligation,
 } from "./keepalive.js";
+import { SendLedger, type AbsorbedTurn, type Send, type SendVerdict, type VendorTurn } from "./sends.js";
 import {
   DEFAULT_PERMISSION_MODE,
   fromVendorPermissionMode,
@@ -555,6 +556,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * message carries (engine/keepalive.ts).
    */
   const keepaliveScope = new KeepaliveScope();
+  /**
+   * WHICH SEND EACH VENDOR TURN ANSWERS (engine/sends.ts, ruled 2026-09-28).
+   * Every send is registered here under the client uuid it carries before it
+   * is pushed, and every vendor message is attributed by the vendor's echo of
+   * that uuid, once, in {@link onSdkMessage}. Arrival order attributes nothing.
+   */
+  const sends = new SendLedger();
+  /** The minter of every send's client uuid, which the vendor echoes back. */
   const newUuid = deps.newUuid ?? randomUUID;
   /**
    * THE ONE NETWORK-RESUME STATE of this process, and its one probe loop
@@ -587,20 +596,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
   let prompts: PromptQueue | undefined;
-  /** The one turn that may be open. Written ONLY through {@link setOpen}. */
+  /**
+   * THE SEND SLOT: the one turn whose send the shim has pushed or is pushing —
+   * a daemon's StartTurn, the network-resume prompt, or the shim's own
+   * keep-alive. Written ONLY through {@link setOpen}.
+   */
   let open: OpenTurn | undefined;
   /**
-   * A turn the vendor started on its own WHILE THE KEEP-ALIVE HOLDS THE SLOT.
+   * THE TURN THE VENDOR STARTED ON ITS OWN, adopted beside the send slot.
    *
-   * The keep-alive's send waits in the vendor behind a turn the vendor runs
-   * first (a hand-back that arrived before the beat), so for that turn's length
-   * two turns are in play: the keep-alive, which nobody outside this process
-   * may see, and the vendor's own, which everyone must. The vendor's turn is
-   * adopted here rather than into the slot so the keep-alive's machinery (the
-   * StartTurn waiting behind it, its rewind watch) is untouched; it closes on
-   * its own result, which the vendor always delivers before the keep-alive's.
+   * A hand-back or a task notification makes the vendor run a turn no send
+   * asked for, and the send ledger says so by its first reply naming no send.
+   * It is NOT the send slot's: a send may be open beside it — the shim's
+   * keep-alive, or a daemon's StartTurn that landed in the vendor's queue the
+   * instant before the vendor started its own turn — and each turn's frames
+   * are told apart by the vendor's echo, never by which one is "open". So a
+   * StartTurn is never refused because of it: the prompt is delivered, and the
+   * vendor either runs it after this turn or folds it in (engine/sends.ts).
+   * It closes on its own result, or when a send it folded in absorbs it.
    */
-  let besideKeepalive: OpenTurn | undefined;
+  let adopted: OpenTurn | undefined;
   /**
    * HOW the person commanded the last stop issued on the main thread, held for
    * the stopped turn's terminal (`KillTurnRequest.commanded_by`; `command` is
@@ -616,13 +631,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     | { readonly turn: conversationv1.TurnId; readonly command: conversationv1.AgentInterruptedByUser | undefined }
     | undefined;
   /**
-   * Settled the moment the keep-alive now open leaves the turn slot.
+   * Settled the moment the shim's own turn now in the send slot — its
+   * keep-alive, or the network-resume prompt — leaves it.
    *
    * Minted lazily by the first `StartTurn` that has to wait behind it, and
-   * one per keep-alive however many ask, so an expired wait leaves nothing
+   * one per such turn however many ask, so an expired wait leaves nothing
    * behind to grow.
    */
-  let keepaliveEnd: { readonly promise: Promise<void>; readonly resolve: () => void } | undefined;
+  let shimTurnEnd: { readonly promise: Promise<void>; readonly resolve: () => void } | undefined;
   let effectiveModel = "";
   /**
    * The mode in force. `auto` IS THE UNSTATED MODE (owner ruling 2026-09-14):
@@ -699,8 +715,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         readonly said: conversationv1.UserSaid;
         /** True when the rewind was performed to precede a keep-alive, not a real prompt. */
         readonly keepalive: boolean;
-        /** The keep-alive send's client uuid, which a re-delivery must carry too. */
-        readonly clientUuid: string | undefined;
+        /** The send's client uuid, which a re-delivery must carry too: it is the same send. */
+        readonly clientUuid: string;
       }
     | undefined;
   /**
@@ -883,13 +899,47 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * and otherwise to no turn -- which a vendor turn's own frames never meet,
    * because {@link adoptVendorTurn} opens one for them first.
    */
-  function turnFor(keepalive: boolean): conversationv1.TurnId | undefined {
-    if (open !== undefined && (!open.keepalive || keepalive)) return open.id;
-    if (keepalive) return undefined;
-    if (besideKeepalive !== undefined) return besideKeepalive.id;
-    // THE STOPPED TURN'S TAIL. A kill clears the slot before the vendor's stop
-    // result arrives (engine/turn.ts), and everything the stopped turn still
-    // emits up to that result is its own -- its terminal above all.
+  function turnFor(
+    keepalive: boolean,
+    running: VendorTurn = sends.current(),
+  ): conversationv1.TurnId | undefined {
+    if (keepalive) return open?.keepalive === true ? open.id : undefined;
+    switch (running.kind) {
+      case "send":
+        // THE SEND THE VENDOR ECHOED. The keep-alive's own frames were taken
+        // above; a frame inside the keep-alive's vendor turn that the keep-alive
+        // did not produce (a backgrounded subagent's) is charged as a frame
+        // outside any stamped turn.
+        if (running.send.keepalive) return unstatedTurn();
+        return open?.id.value === running.send.turnId
+          ? open.id
+          : create(conversationv1.TurnIdSchema, { value: running.send.turnId });
+      case "vendor":
+        // THE STOPPED TURN'S TAIL, when the vendor turn is no adopted one: a
+        // kill clears the slot before the vendor's stop result arrives
+        // (engine/turn.ts), and a stop result that names no send is the
+        // stopped turn's own terminal (adoptVendorTurn declines to adopt it).
+        return adopted?.id ?? stopCommand?.turn;
+      case "unknown":
+        // NEVER A GUESS: the echo named no send of ours (recorded at ERROR by
+        // the ledger), so the frame belongs to no turn of ours.
+        return undefined;
+      case "unstated":
+        return unstatedTurn();
+    }
+  }
+
+  /**
+   * The turn a frame OUTSIDE ANY STAMPED VENDOR TURN is charged to: a vendor
+   * turn's preamble (init, a UserPromptSubmit hook, a status line) and detached
+   * work arriving between turns carry no echo, so no id speaks to them. They
+   * stay with the real turn in the send slot, else the adopted turn, else a
+   * stopped turn still owed its stop result. This is not a reply's
+   * attribution: every reply is attributed by its echo above.
+   */
+  function unstatedTurn(): conversationv1.TurnId | undefined {
+    if (open !== undefined && !open.keepalive) return open.id;
+    if (adopted !== undefined) return adopted.id;
     return stopCommand?.turn;
   }
 
@@ -908,8 +958,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * turn — otherwise a vendor turn nobody asked for would write served rows
    * keyed to a turn id that must never reach the wire.
    */
-  function foldContext(attribution: KeepaliveAttribution): FoldContext {
-    const turn = turnFor(attribution.keepalive);
+  function foldContext(attribution: KeepaliveAttribution, running?: VendorTurn): FoldContext {
+    const turn = turnFor(attribution.keepalive, running);
     return {
       mainAgentId: requireIdentity().agentId,
       ...(turn === undefined ? {} : { turnId: turn }),
@@ -1427,17 +1477,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * queued and not yet started, another response asks for nothing more, since
    * the queued probe will read the later state anyway.
    */
-  function noteMainApiResponse(message: SdkMessage): void {
+  function noteMainApiResponse(message: SdkMessage, attribution: KeepaliveAttribution, running: VendorTurn): void {
     if (message.type !== "assistant") return;
     if (message.parent_tool_use_id !== null) return;
     if ((message.message as { usage?: unknown } | undefined)?.usage === undefined) return;
-    if (open === undefined || open.keepalive) return;
+    if (attribution.keepalive) return;
+    // THE TURN THE RESPONSE BELONGS TO, BY ITS ECHO: a vendor-started turn's
+    // response moves the window as much as a StartTurn's does.
+    const turn = turnFor(false, running);
+    if (turn === undefined) return;
     if (contextRefreshQueued) {
       LOGGER.logVerbose({}, "a context refresh is already queued; this response rides it");
       return;
     }
     contextRefreshQueued = true;
-    const turnId = open.id.value;
+    const turnId = turn.value;
     LOGGER.debug({ turn_id: turnId }, "a main-agent API response landed; refreshing the context reading");
     void enqueueContextProbe(() => {
       contextRefreshQueued = false;
@@ -1774,28 +1828,36 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // prompt alive. A recovered message is consumed: the query it arrived on is
     // already closed and the prompt already re-delivered on its replacement.
     if (await noteRewindOutcome(message)) return;
+    // THE SEND IT ANSWERS, BY ITS ECHO, TAKEN ONCE (engine/sends.ts). Every
+    // turn attribution below reads this one verdict, never what is "open".
+    const verdict = sends.attribute(message);
     // THE TAG, TAKEN ONCE. Everything below reads this one answer: the fold
     // writes it into every row (the writer stores nothing tagged), and the push
     // plane drops every tagged session fact.
-    const attribution = keepaliveScope.attribute(message);
-    adoptVendorTurn(message, attribution);
+    const attribution = keepaliveScope.attribute(message, verdict);
+    // A TURN THE VENDOR ABSORBED ENDS BEFORE THE SEND THAT ABSORBED IT GOES ON,
+    // so its terminal is its last row and the send's rows follow it.
+    // Awaited ONLY when there is something to conclude or adopt, so an
+    // ordinary message reaches the fold in the same step it always did.
+    if (verdict.absorbed.length > 0) await concludeAbsorbedTurns(verdict);
+    if (verdict.openedVendorTurn) await adoptVendorTurn(message, verdict);
     noteRewindBoundary(message);
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
-    noteMainApiResponse(message);
+    noteMainApiResponse(message, attribution, verdict.turn);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
-    noteDetachedWork(message);
+    noteDetachedWork(message, attribution, verdict.turn);
     networkResume.observe(message);
     // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
     // before the fold, which cannot await: the pairing of its vendor task
     // locator with its agent is the sidecar's, on record since the agent first
     // ran. Awaited HERE, inside the one serial message loop, so no later
     // message can be folded ahead of this one.
-    const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution));
+    const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
     if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
     converterDefectThisMessage = false;
-    const output = deps.fold.onSdkMessage(message, foldContext(attribution));
+    const output = deps.fold.onSdkMessage(message, foldContext(attribution, verdict.turn));
     if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
     if (converterDefectThisMessage) {
       LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
@@ -1808,7 +1870,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
     // rewind itself refuses everything that is not an assistant record of the
     // open real turn (see engine/keepalive.ts).
-    rewind.noteRecord(message, recordTurn(attribution));
+    rewind.noteRecord(message, recordTurn(attribution, verdict.turn));
     if (output.turnEnded === undefined) return;
     // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
     // WHOLE length: the messages that follow the refused one are the same
@@ -1818,27 +1880,55 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the window closes only at the end of a turn that refused nothing.
     if (!converterDefectThisTurn) noteConverterHealthy();
     converterDefectThisTurn = false;
-    // A VENDOR TURN ENDING IS NOT THE KEEP-ALIVE ENDING. Only the result that
-    // answers the keep-alive's own send closes it; a turn the vendor ran on its
-    // own while the keep-alive waited leaves it open.
-    if (open?.keepalive === true && !attribution.endsKeepalive) {
-      if (!attribution.keepalive) closeBesideKeepalive();
-      return;
+    await endVendorTurn(verdict.turn);
+  }
+
+  /**
+   * A vendor turn's result: close the shim turn it answered, BY THE SEND ITS
+   * ECHO NAMED. A result that answers the keep-alive closes the keep-alive; one
+   * that answers a daemon or network-resume send closes that send's turn; one
+   * that ends a vendor-started turn closes the adopted turn. Nothing else is
+   * closed: a vendor turn the keep-alive or a StartTurn waited behind leaves
+   * the send slot open for the answer still to come.
+   */
+  async function endVendorTurn(running: VendorTurn): Promise<void> {
+    switch (running.kind) {
+      case "send":
+        if (open?.id.value === running.send.turnId) {
+          await closeTurn(open);
+          return;
+        }
+        break;
+      case "vendor":
+        if (adopted !== undefined) {
+          await closeTurn(adopted);
+          return;
+        }
+        break;
+      case "unknown":
+      case "unstated":
+        break;
     }
-    await closeTurn();
+    // THE REQUEST ID DIES WITH ITS VENDOR TURN even when no shim turn closes
+    // (a killed turn's stop result, a turn answering nothing of ours): carrying
+    // it past the end would attribute idle records to an answered request.
+    clearRequestId();
+    LOGGER.debug(
+      { vendor_turn: running.kind, send_turn: running.kind === "send" ? running.send.turnId : "" },
+      "a vendor turn ended that closes no open turn",
+    );
   }
 
   /**
    * The turn a vendor record arrived under, as the rewind anchor needs it: the
-   * open turn, or the vendor turn adopted beside the keep-alive for a record
-   * the keep-alive did not produce. That turn is real conversation, so its
-   * assistant records ARE anchors, and a rewind past the keep-alive keeps them.
+   * turn its echo attributes it to. A vendor-started turn is real
+   * conversation, so its assistant records ARE anchors, and a rewind past the
+   * keep-alive keeps them.
    */
-  function recordTurn(attribution: KeepaliveAttribution): { turnId: string; keepalive: boolean } | undefined {
-    if (open?.keepalive === true && !attribution.keepalive && besideKeepalive !== undefined) {
-      return { turnId: besideKeepalive.id.value, keepalive: false };
-    }
-    return open === undefined ? undefined : { turnId: open.id.value, keepalive: open.keepalive };
+  function recordTurn(attribution: KeepaliveAttribution, running: VendorTurn): RecordTurn | undefined {
+    if (attribution.keepalive) return open?.keepalive === true ? { turnId: open.id.value, keepalive: true } : undefined;
+    const turn = turnFor(false, running);
+    return turn === undefined ? undefined : { turnId: turn.value, keepalive: false };
   }
 
   /**
@@ -1867,35 +1957,47 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * run between turns without starting one. A top-level reply or a result is
    * only ever emitted inside a vendor turn, so only those adopt.
    */
-  function adoptVendorTurn(message: SdkMessage, attribution: KeepaliveAttribution): void {
-    if (attribution.keepalive) return;
-    if (message.type !== "result" && !isTopLevelReply(message)) return;
-    if (turnFor(false) !== undefined) return;
-    adoptTurn("the vendor started a turn with no StartTurn pending", messageKind(message));
+  async function adoptVendorTurn(message: SdkMessage, verdict: SendVerdict): Promise<void> {
+    if (!verdict.openedVendorTurn) return;
+    // THE STOPPED TURN'S TAIL IS NOT A NEW TURN. A kill clears the slot before
+    // the vendor's stop result arrives, and a stop result that names no send is
+    // that turn's own terminal (turnFor charges it to the stopped turn).
+    if (stopCommand !== undefined && message.type === "result") return;
+    if (adopted !== undefined) {
+      // The ledger opens a vendor-started turn only once the last vendor turn
+      // ended, and that end closed the adopted turn: one still standing is an
+      // invariant break. Its end is written rather than lost.
+      LOGGER.error(
+        { turn_id: adopted.id.value, detail: "a vendor-started turn opened while the last adopted turn still stood" },
+        "an adopted turn was still open when the vendor started another; it is concluded before the next is adopted",
+      );
+      await concludeAbsorbed(adopted);
+    }
+    const turn = mintAdoptedTurn();
+    adopted = turn;
+    cadence?.pause();
+    writeAdoptedPrompt(turn, "the vendor started a turn with no send of the shim's answering", messageKind(message));
+  }
+
+  /** A shim-minted id for a turn no StartTurn stands behind. */
+  function mintAdoptedTurn(): OpenTurn {
+    // NOT `newUuid`: that minter names SENDS, whose uuids the vendor echoes
+    // back, and a turn id must never shift which uuid a send carries.
+    const turn = create(conversationv1.TurnIdSchema, { value: `adopted-${randomUUID()}` });
+    return { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs() };
   }
 
   /**
-   * Open an ADOPTED turn: a shim-minted id and a `PromptOrigin.VENDOR_STARTED`
-   * prompt row as its first row. The one opening shared by a turn the vendor
-   * started on its own ({@link adoptVendorTurn}) and the turn the shim itself
-   * asks of the main agent to resume a network-killed subagent
-   * ({@link deliverNetworkResume}), so the two cannot open a turn differently.
+   * The `PromptOrigin.VENDOR_STARTED` prompt row that opens an ADOPTED turn,
+   * written as the turn's first row. Shared by a turn the vendor started on its
+   * own ({@link adoptVendorTurn}) and the turn the shim itself asks of the main
+   * agent to resume a network-killed subagent ({@link deliverNetworkResume}),
+   * so the two cannot announce a turn differently.
    */
-  function adoptTurn(cause: string, firstMessage: string): OpenTurn {
+  function writeAdoptedPrompt(turn: OpenTurn, cause: string, firstMessage: string): void {
     const agentId = requireIdentity().agentId;
-    // NOT `newUuid`: that minter names keep-alive SENDS, which the vendor echoes
-    // back, and an adoption must never shift which uuid a send carries.
-    const turn = create(conversationv1.TurnIdSchema, { value: `adopted-${randomUUID()}` });
-    const adopted: OpenTurn = { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs() };
-    const besideTheKeepalive = open?.keepalive === true;
-    if (besideTheKeepalive) {
-      besideKeepalive = adopted;
-    } else {
-      setOpen(adopted);
-      cadence?.pause();
-    }
     const prompt = buildPrompt(
-      turn,
+      turn.id,
       agentId,
       create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, {}) }),
       conversationv1.PromptOrigin.VENDOR_STARTED,
@@ -1903,26 +2005,53 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.persistence.write([promptEntry(prompt, agentId, false)]);
     LOGGER.info(
       {
-        turn_id: turn.value,
+        turn_id: turn.id.value,
         cause,
         first_message: firstMessage,
         vendor_session_id: identity?.vendorSessionId ?? "",
-        beside_keepalive: besideTheKeepalive,
+        send_slot: open === undefined ? "" : open.keepalive ? "keepalive" : open.id.value,
       },
       "adopted a turn the vendor started on its own; it runs as a real turn under a shim-minted id",
     );
-    return adopted;
   }
 
-  /** The vendor turn adopted beside the keep-alive ended on its own result. */
-  function closeBesideKeepalive(): void {
-    const ended = besideKeepalive;
-    if (ended === undefined) return;
-    besideKeepalive = undefined;
-    LOGGER.info(
-      { turn_id: ended.id.value, keepalive: false, adopted: true, beside_keepalive: true },
-      "closed a turn",
-    );
+  /**
+   * THE TURNS THE VENDOR ABSORBED INTO ANOTHER (engine/sends.ts): a
+   * vendor-started turn that folded one of the shim's sends in, or a send the
+   * vendor consumed into another send's turn. Its own result will never come,
+   * so each is concluded here, before the absorbing send's rows.
+   */
+  async function concludeAbsorbedTurns(verdict: SendVerdict): Promise<void> {
+    for (const absorbed of verdict.absorbed) {
+      const turn = absorbedShimTurn(absorbed);
+      if (turn === undefined) {
+        LOGGER.debug(
+          { absorbed: absorbed.kind, send_turn: absorbed.kind === "send" ? absorbed.send.turnId : "" },
+          "the vendor absorbed a turn this shim no longer holds open; nothing to conclude",
+        );
+        continue;
+      }
+      await concludeAbsorbed(turn);
+    }
+  }
+
+  /** The shim turn an absorbed vendor turn is, when the shim still holds it. */
+  function absorbedShimTurn(absorbed: AbsorbedTurn): OpenTurn | undefined {
+    if (absorbed.kind === "vendor") return adopted;
+    return open?.id.value === absorbed.send.turnId ? open : undefined;
+  }
+
+  /** Write an absorbed turn's terminal and close it like any ended turn. */
+  async function concludeAbsorbed(turn: OpenTurn): Promise<void> {
+    if (identity !== undefined) {
+      const context: FoldContext = {
+        ...foldContext({ keepalive: turn.keepalive, endsKeepalive: false }),
+        turnId: turn.id,
+      };
+      const output = deps.fold.concludeAbsorbedTurn(context, `absorbed-${turn.id.value}`);
+      if (output.entries.length > 0) deps.persistence.write([...output.entries]);
+    }
+    await closeTurn(turn);
   }
 
   /**
@@ -2332,7 +2461,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
-  function noteDetachedWork(message: SdkMessage): void {
+  function noteDetachedWork(message: SdkMessage, attribution: KeepaliveAttribution, running: VendorTurn): void {
     if (message.type === "user") {
       // A TOOL RESULT CAN STATE THE MOVE: a `Bash` result naming a
       // `backgroundTaskId` says its foreground task left the turn, which is
@@ -2343,7 +2472,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (message.type !== "system") return;
     switch (message.subtype) {
       case "task_started":
-        live.onTaskStarted(message, open?.id.value);
+        // THE SPAWNING TURN IS THE ONE THE MESSAGE IS ATTRIBUTED TO, so a
+        // forced kill of that turn stops exactly the work it started.
+        live.onTaskStarted(message, turnFor(attribution.keepalive, running)?.value);
         break;
       case "task_updated":
         live.onTaskUpdated(message);
@@ -2362,30 +2493,49 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * THE ONE WRITER OF {@link open}.
    *
-   * A keep-alive leaving the slot — by its own result, an abandoned beat, the
-   * query's death, a teardown or a kill — is the moment a `StartTurn` waiting
-   * behind it may go (engine/turn.ts), so every way out goes through here and
-   * the release cannot be forgotten on any of them.
+   * The shim's own turn leaving the send slot — a keep-alive or the
+   * network-resume prompt, by its own result, an abandoned beat, the query's
+   * death, a teardown or a kill — is the moment a `StartTurn` waiting behind it
+   * may go (engine/turn.ts), so every way out goes through here and the release
+   * cannot be forgotten on any of them.
    */
   function setOpen(turn: OpenTurn | undefined): void {
     const left = open;
     open = turn;
-    if (left?.keepalive !== true || left === turn) return;
+    if (left === undefined || left === turn || !isShimTurn(left)) return;
     // THE KEEP-ALIVE'S REWIND WATCH ENDS WITH IT. The watch holds the send to
     // re-deliver if the vendor refuses the anchor; once the keep-alive has left
     // the slot a refusal can no longer be about it, and a watch left standing
     // would re-deliver the KEEP-ALIVE — client uuid and all — under the real
     // turn that opens next.
-    if (rewindWatch?.keepalive === true) {
+    if (left.keepalive && rewindWatch?.keepalive === true) {
       LOGGER.debug(
         { keepalive_turn: left.id.value, resume_session_at: rewindWatch.anchorUuid },
         "the keep-alive left the turn slot; its rewind watch ends with it",
       );
       rewindWatch = undefined;
     }
-    const end = keepaliveEnd;
-    keepaliveEnd = undefined;
+    const end = shimTurnEnd;
+    shimTurnEnd = undefined;
     end?.resolve();
+  }
+
+  /**
+   * Take `turn` out of whichever slot holds it — the send slot or the adopted
+   * turn's — and retire its send, if the ledger still holds it open, so a late
+   * echo of it (a killed turn's stop result) is still recognized as ours. The
+   * keep-alive cadence beats again once neither slot holds a turn.
+   */
+  function releaseTurn(turn: OpenTurn): void {
+    if (open === turn) setOpen(undefined);
+    else if (adopted === turn) adopted = undefined;
+    sends.forget(turn.id.value, "its turn left the slot");
+    if (open === undefined && adopted === undefined) cadence?.resume();
+  }
+
+  /** A turn in the send slot the shim sent on its own: its keep-alive, or the network-resume prompt. */
+  function isShimTurn(turn: OpenTurn): boolean {
+    return turn.keepalive || turn.adopted === true;
   }
 
   /** Drop the held stop command, if one is held, saying why. */
@@ -2399,50 +2549,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
   }
 
-  /** The promise a waiting `StartTurn` holds; absence when no keep-alive holds the slot. */
-  function keepaliveEnded(): Promise<void> | undefined {
-    if (open?.keepalive !== true) return undefined;
-    if (keepaliveEnd === undefined) {
+  /**
+   * The promise a waiting `StartTurn` holds; absence when the send slot holds
+   * no turn of the shim's own (a keep-alive, or the network-resume prompt).
+   */
+  function shimTurnEnded(): Promise<void> | undefined {
+    if (open === undefined || !isShimTurn(open)) return undefined;
+    if (shimTurnEnd === undefined) {
       let resolve = (): void => {};
       const promise = new Promise<void>((settle) => {
         resolve = settle;
       });
-      keepaliveEnd = { promise, resolve };
+      shimTurnEnd = { promise, resolve };
     }
-    return keepaliveEnd.promise;
+    return shimTurnEnd.promise;
   }
 
-  async function closeTurn(): Promise<void> {
-    const ended = open;
-    // THE VENDOR ANSWERS ITS TURNS IN ORDER, so a turn it ran ahead of the
-    // keep-alive has always ended by the time the keep-alive does. One still
-    // standing means that order broke: it takes the slot, synchronously and
-    // before anything waiting behind the keep-alive can run, rather than
-    // losing its end -- and the break is said.
-    const promoted = ended?.keepalive === true ? besideKeepalive : undefined;
-    besideKeepalive = promoted === undefined ? besideKeepalive : undefined;
-    setOpen(promoted);
-    if (promoted !== undefined) {
-      LOGGER.error(
-        {
-          keepalive_turn: ended?.id.value ?? "",
-          turn_id: promoted.id.value,
-          detail: "the vendor answered the keep-alive before the turn it ran ahead of it",
-        },
-        "the keep-alive ended before the vendor turn adopted beside it; that turn takes the slot",
-      );
-    }
+  /**
+   * Close `ended`, whichever slot holds it: the send slot's turn, or the
+   * adopted vendor-started turn. The slot is released synchronously, before
+   * anything here awaits, so a `StartTurn` waiting behind a shim turn runs
+   * ahead of any beat that could take the slot again.
+   */
+  async function closeTurn(ended: OpenTurn): Promise<void> {
+    releaseTurn(ended);
     // THE REQUEST ID DIES WITH ITS TURN. It named the vendor call this turn ran
     // under; carrying it past the end would attribute idle records and the next
     // turn to a request that is already answered.
     clearRequestId();
-    if (ended === undefined) return;
     // THE KEEP-ALIVE'S DEBT IS COUNTED BEFORE ANYTHING AWAITS. A `StartTurn`
     // waiting behind it runs the moment this function first yields, and its
     // yield obligation must already see the keep-alive it has to rewind past;
     // counted after an await, that prompt would build on keep-alive context.
     if (ended.keepalive) rewind.noteKeepaliveTurn();
-    if (promoted === undefined) cadence?.resume();
     await applyPendingModel();
     if (identity !== undefined) {
       backupTranscript({
@@ -2620,36 +2759,68 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   // -- submission -----------------------------------------------------------
 
-  async function submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
+  /**
+   * Deliver `said` as the send of `turn`, the turn now in the send slot.
+   *
+   * EVERY SEND IS STAMPED (ruled 2026-09-28). Its client uuid is minted here —
+   * the keep-alive's was minted when its scope opened — and registered in the
+   * send ledger before the push, so the vendor's echo of it is what attributes
+   * the reply, never the order the reply arrives in.
+   */
+  async function submit(said: conversationv1.UserSaid, turn: OpenTurn): Promise<void> {
     const text = saidText(said);
+    const uuid = turn.keepalive ? pendingKeepaliveUuid(turn) : newUuid();
     // THE ROLLBACK PRECEDES A KEEP-ALIVE TOO, not only a real prompt. The anchor
     // never advances past the last real record, so the same obligation a real
     // prompt owes is owed by the next keep-alive beat, and discharging it here
     // keeps at most one keep-alive in the transcript (engine/keepalive.ts). The
     // real-prompt path is byte-for-byte the same rollback; nothing about it
     // changes.
-    await yieldObligation(said, keepalive);
+    await yieldObligation(said, turn.keepalive, uuid);
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     cadence?.pause();
-    queue.push(userMessage(text, keepalive ? keepaliveScope.pendingUuid() : undefined));
-    LOGGER.debug({ keepalive, characters: text.length }, "submitted a prompt to the vendor");
+    pushSend(queue, text, { uuid, turnId: turn.id.value, keepalive: turn.keepalive });
+    LOGGER.debug(
+      { keepalive: turn.keepalive, turn_id: turn.id.value, client_uuid: uuid, characters: text.length },
+      "submitted a prompt to the vendor",
+    );
+  }
+
+  /** The keep-alive send's client uuid, minted when its scope opened. */
+  function pendingKeepaliveUuid(turn: OpenTurn): string {
+    const uuid = keepaliveScope.pendingUuid();
+    if (uuid === undefined) {
+      throw new Error(`shim session: keep-alive ${turn.id.value} is being submitted with no scope open`);
+    }
+    return uuid;
   }
 
   /**
-   * One streaming-input send.
-   *
-   * A KEEP-ALIVE SEND CARRIES ITS CLIENT UUID, and it is the only send that
-   * does: the vendor echoes it on every reply to that send, which is how the
-   * keep-alive turn scope knows its own answer from a turn the vendor ran on
-   * its own (engine/keepalive.ts).
+   * Register a send and push it: THE ONE PATH a new send reaches the vendor by.
+   * A push the queue refuses retires the send it had just registered, so the
+   * ledger never holds open a send the vendor never received.
    */
-  function userMessage(text: string, clientUuid: string | undefined): SdkUserMessage {
+  function pushSend(queue: PromptQueue, text: string, send: Send): void {
+    sends.sent(send);
+    try {
+      queue.push(userMessage(text, send.uuid));
+    } catch (err) {
+      sends.forget(send.turnId, `the push was refused: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+  }
+
+  /**
+   * One streaming-input send, carrying the client uuid the vendor echoes on
+   * every reply to it (engine/sends.ts).
+   */
+  function userMessage(text: string, clientUuid: string): SdkUserMessage {
     return {
       type: "user",
       message: { role: "user", content: text },
       parent_tool_use_id: null,
-      ...(clientUuid === undefined ? {} : { uuid: clientUuid as SdkUserMessage["uuid"] }),
+      uuid: clientUuid as SdkUserMessage["uuid"],
     };
   }
 
@@ -2695,7 +2866,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * resumes only THROUGH that record (`resumeSessionAt`), via the shared
    * {@link collapseToAnchor}.
    */
-  async function yieldObligation(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
+  async function yieldObligation(said: conversationv1.UserSaid, keepalive: boolean, clientUuid: string): Promise<void> {
     const owed = rewind.obligation();
     if (owed === undefined) return;
     const current = identity;
@@ -2737,7 +2908,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       anchorTurnId: owed.anchorTurnId,
       said,
       keepalive,
-      clientUuid: keepalive ? keepaliveScope.pendingUuid() : undefined,
+      clientUuid,
     };
   }
 
@@ -2911,8 +3082,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return false;
     }
-    // THE SAME SEND, uuid and all: a re-delivered keep-alive is still the
-    // keep-alive, and its answer must still be recognized as such.
+    // THE SAME SEND, uuid and all: a re-delivered send is still that send,
+    // still open in the ledger, and its answer must still be matched to it.
     queue.push(userMessage(saidText(watch.said), watch.clientUuid));
     LOGGER.info(
       { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
@@ -3710,12 +3881,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * turns has no turn to conclude.
    */
   function writeQueryDeathTerminal(died: conversationv1.SessionQueryDied, detail: string): void {
-    // THE VENDOR TURN ADOPTED BESIDE THE KEEP-ALIVE IS OWED ONE TOO: it is a
-    // real turn a consumer is watching, and it ends with the query.
-    for (const ended of [open, besideKeepalive]) {
-      if (ended !== undefined) writeQueryDeathTerminalFor(ended, died, detail);
+    // THE ADOPTED VENDOR-STARTED TURN IS OWED ONE TOO: it is a real turn a
+    // consumer is watching, and it ends with the query.
+    for (const ended of [open, adopted]) {
+      if (ended === undefined) continue;
+      writeQueryDeathTerminalFor(ended, died, detail);
+      sends.forget(ended.id.value, `the vendor query died: ${detail}`);
     }
-    besideKeepalive = undefined;
+    adopted = undefined;
   }
 
   function writeQueryDeathTerminalFor(ended: OpenTurn, died: conversationv1.SessionQueryDied, detail: string): void {
@@ -3770,12 +3943,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * decision tells the user they stopped something they never touched.
    */
   function writeHostShutdownTerminal(reason: string): void {
-    // THE VENDOR TURN ADOPTED BESIDE THE KEEP-ALIVE IS OWED ONE TOO: it is a
-    // real turn a consumer is watching, and it ends with the query.
-    for (const ended of [open, besideKeepalive]) {
-      if (ended !== undefined) writeHostShutdownTerminalFor(ended, reason);
+    // THE ADOPTED VENDOR-STARTED TURN IS OWED ONE TOO: it is a real turn a
+    // consumer is watching, and it ends with the query.
+    for (const ended of [open, adopted]) {
+      if (ended === undefined) continue;
+      writeHostShutdownTerminalFor(ended, reason);
+      sends.forget(ended.id.value, `the session is being torn down: ${reason}`);
     }
-    besideKeepalive = undefined;
+    adopted = undefined;
   }
 
   function writeHostShutdownTerminalFor(ended: OpenTurn, reason: string): void {
@@ -4204,6 +4379,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function keepaliveBeat(): Promise<void> {
     if (open !== undefined || query === undefined || identity === undefined) return;
+    // A VENDOR TURN IS RUNNING: the cache is warm, and a keep-alive pushed now
+    // would be queued or folded into a real turn.
+    if (adopted !== undefined) {
+      LOGGER.logVerbose({ outcome: "skipped_adopted_turn" }, "keep-alive beat skipped: an adopted turn is running");
+      return;
+    }
     // A REAL START IN FLIGHT OWNS THE SLOT IT IS ABOUT TO OPEN, even before
     // `open` says so: it is still writing its prompt row or reading its page.
     if (turns.startInFlight()) {
@@ -4219,7 +4400,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
     keepaliveCount += 1;
     const said = textSaid(keepalivePromptText(keepaliveCount));
-    setOpen({ id: turn, keepalive: true, startedAtMs: deps.nowMs() });
+    const beat: OpenTurn = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
+    setOpen(beat);
     // THE SCOPE OPENS BEFORE THE SEND, so the vendor cannot answer a send the
     // shim does not yet recognize as its own.
     keepaliveScope.begin(newUuid(), turn.value);
@@ -4231,14 +4413,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         conversationv1.PromptOrigin.UNSPECIFIED,
       );
       deps.persistence.write([promptEntry(prompt, identity.agentId, true)]);
-      await submit(said, true);
+      await submit(said, beat);
       LOGGER.debug(
         { turn: turn.value, outcome: "keepalive_submitted" },
         "submitted one of the shim's own keep-alive prompts; nothing of its turn is stored or served",
       );
       pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
     } catch (err) {
-      setOpen(undefined);
+      if (open === beat) setOpen(undefined);
+      sends.forget(turn.value, "the keep-alive could not be submitted");
       keepaliveScope.abandon(`the keep-alive could not be submitted: ${err instanceof Error ? err.message : String(err)}`);
       pushes.fault(
         sessionFault(
@@ -4253,20 +4436,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * Deliver the network-resume prompt as the main agent's next turn.
    *
-   * ONLY ON AN IDLE MAIN AGENT: an open turn (a keep-alive's included) or a
-   * `StartTurn` being processed answers `busy`, and the loop asks again on its
-   * next beat.
+   * ONLY ON AN IDLE MAIN AGENT: a turn in either slot (a keep-alive's
+   * included) or a `StartTurn` being processed answers `busy`, and the loop
+   * asks again on its next beat.
    *
-   * THE TURN IS ADOPTED BEFORE THE PROMPT IS PUSHED ({@link adoptTurn}), as a
-   * turn the vendor starts on its own is: a shim-minted id and a
+   * THE TURN IS ANNOUNCED AS ADOPTED ({@link writeAdoptedPrompt}), as a turn
+   * the vendor starts on its own is: a shim-minted id and a
    * `PromptOrigin.VENDOR_STARTED` row, because a turn id is the daemon's to
-   * mint and this turn has no daemon behind it. Adopting it FIRST, in the same
-   * synchronous step as the push, is what keeps a `StartTurn` arriving before
-   * the vendor's first reply out of it: that start finds the slot taken and is
-   * refused `turnAlreadyOpen`, so the daemon holds the prompt behind this turn
-   * rather than riding the resume's reply. What the turn DOES (the
-   * `SendMessage` per agent, the resumed agents' own work) is folded and
-   * served as any adopted turn's work is.
+   * mint and this turn has no daemon behind it. But it is the SHIM'S OWN SEND,
+   * so it takes the send slot and carries a client uuid like every send
+   * (ruled 2026-09-28): its reply is matched by the vendor's echo of that
+   * uuid, never by arriving next. A `StartTurn` arriving while it holds the
+   * slot waits for it inside the shim, exactly as one behind the keep-alive
+   * does (engine/turn.ts), rather than being refused.
    *
    * THE KEEP-ALIVE ROLLBACK IS OWED FIRST, as it is before any real prompt:
    * the resume must not build on keep-alive context.
@@ -4278,7 +4460,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const busy = mainAgentBusy();
     if (busy !== undefined) return { kind: "busy", detail: busy };
-    await yieldObligation(textSaid(text), false);
+    const uuid = newUuid();
+    await yieldObligation(textSaid(text), false, uuid);
     // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
     // turn; the resume waits for the next beat rather than riding into it.
     const busyAfter = mainAgentBusy();
@@ -4287,22 +4470,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (queue === undefined) {
       return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
     }
-    const adopted = adoptTurn("the shim asked the main agent to resume network-killed agents", "network_resume");
+    const resume = mintAdoptedTurn();
+    setOpen(resume);
+    cadence?.pause();
+    writeAdoptedPrompt(resume, "the shim asked the main agent to resume network-killed agents", "network_resume");
     try {
-      queue.push(userMessage(text, undefined));
+      pushSend(queue, text, { uuid, turnId: resume.id.value, keepalive: false });
     } catch (err) {
-      // THE ADOPTED TURN LEAVES THE SLOT WITH THE PUSH THAT FAILED: nothing
-      // will ever end it, and a slot held by it would refuse every StartTurn.
-      if (open === adopted) setOpen(undefined);
-      cadence?.resume();
+      // THE TURN LEAVES THE SLOT WITH THE PUSH THAT FAILED: nothing will ever
+      // end it, and a slot held by it would hold every StartTurn behind it.
+      releaseTurn(resume);
       LOGGER.error(
-        { turn_id: adopted.id.value, cause: err instanceof Error ? err.message : String(err) },
+        { turn_id: resume.id.value, cause: err instanceof Error ? err.message : String(err) },
         "the vendor refused the network-resume prompt; the adopted turn is released",
       );
       throw err;
     }
     LOGGER.info(
-      { turn_id: adopted.id.value, characters: text.length },
+      { turn_id: resume.id.value, client_uuid: uuid, characters: text.length },
       "submitted the network-resume prompt; the main agent continues the cut-off agents in an adopted turn",
     );
     return { kind: "delivered" };
@@ -4311,6 +4496,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** Why the main agent cannot take a prompt now, or absence when it is idle. */
   function mainAgentBusy(): string | undefined {
     if (open !== undefined) return open.keepalive ? "a keep-alive turn is open" : `turn ${open.id.value} is open`;
+    if (adopted !== undefined) return `the vendor-started turn ${adopted.id.value} is running`;
     if (turns.startInFlight()) return "a StartTurn is being processed";
     return undefined;
   }
@@ -4326,15 +4512,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     query: () => query,
     nowMs: deps.nowMs,
     openTurn: () => open,
-    keepaliveEnded,
+    adoptedTurn: () => adopted,
+    shimTurnEnded,
     keepaliveYieldBudgetMs: deps.keepaliveYieldBudgetMs ?? KEEPALIVE_YIELD_BUDGET_MS,
     submit,
     setOpenTurn: (turn) => {
-      if (turn !== undefined && !turn.keepalive) retireStopCommand("a real turn opened");
+      if (!turn.keepalive) retireStopCommand("a real turn opened");
       setOpen(turn);
-      if (turn === undefined) cadence?.resume();
-      else cadence?.pause();
+      cadence?.pause();
     },
+    releaseTurn,
     noteStopCommand: (turn, command) => {
       stopCommand = { turn, command };
       LOGGER.debug(
@@ -4430,7 +4617,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         `switching to ${model.name} discards a ${facts.contextTokens}-token warm cache`,
       );
     }
-    if (open !== undefined) {
+    const running = open ?? adopted;
+    if (running !== undefined) {
       // ONE MODEL PER TURN, a deliberate departure from the SDK's mid-turn
       // setModel: a turn that changed model halfway would have two models'
       // pricing and two models' behavior in one answer.
@@ -4440,7 +4628,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // answering on the old one -- so the next turn-end's own
       // `context_usage.model` would contradict the ack it already had. The
       // response waits for the boundary that makes it true.
-      LOGGER.debug({ model: model.name, turn_id: open.id.value }, "model change accepted; it resolves at the turn boundary");
+      LOGGER.debug({ model: model.name, turn_id: running.id.value }, "model change accepted; it resolves at the turn boundary");
       return new Promise<shimv1.SetSessionModelResponse>((resolve) => {
         // A second SetSessionModel during one turn REPLACES the first, and the
         // first caller is told so rather than left holding a promise nothing
@@ -4712,8 +4900,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function servedOpenTurn(): OpenTurn | undefined {
     // An adopted turn IS served: the daemon learns it from its prompt row and
-    // tracks it like any other, and a re-attaching daemon learns it here.
-    return open === undefined || open.keepalive ? besideKeepalive : open;
+    // tracks it like any other, and a re-attaching daemon learns it here. It is
+    // the vendor turn RUNNING, so it is served ahead of a daemon turn whose
+    // send waits in the vendor's queue behind it -- the one field states one
+    // turn, and the daemon stands the waiting one behind it on its own.
+    return adopted ?? (open === undefined || open.keepalive ? undefined : open);
   }
 
   function servedTurnInFlight(): { turnInFlight?: conversationv1.TurnId } {
