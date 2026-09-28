@@ -414,6 +414,10 @@ type wsState struct {
 	webStream  bool
 	// degraded reports an open degraded window on the last diagnostics push.
 	degraded bool
+	// stateUnreported reports a shim this daemon took back after a failed
+	// handover that has not re-reported its session state. It stands from
+	// the take-back's bounded wait running out until the next session start.
+	stateUnreported bool
 
 	// turn is the accepted turn in flight, nil when the main thread is idle.
 	turn *TurnStarted

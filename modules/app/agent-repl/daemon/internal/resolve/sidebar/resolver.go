@@ -380,7 +380,16 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.started = true
 			s.vendorBlocked = false
+			s.stateUnreported = false
 		})
+}
+
+// SetStateUnreported installs, or lifts, the fact that a shim taken back after
+// a failed handover has not re-reported its session state. A session start
+// lifts it too (OnSessionStarted), which is the re-report it waits for.
+func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_state_unreported", "the roster took whether the shim's session state is unreported",
+		dlog.Context{"unreported": unreported}, func(s *wsState) { s.stateUnreported = unreported })
 }
 
 // OnActivity moves the row to thinking.
@@ -520,7 +529,7 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 	}
 }
 
-// OnLink drives the init, severed, degraded, dead and start_failed arms.
+// OnLink drives the init, severed, dead and start_failed arms.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutateWorkspace(ws, "daemon.sidebar.on_link", "the roster took a link state",
 		dlog.Context{"link": linkName(link)}, func(s *wsState) {

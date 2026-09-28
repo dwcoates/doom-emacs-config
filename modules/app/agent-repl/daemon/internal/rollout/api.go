@@ -239,6 +239,12 @@ type Deps struct {
 	LockProbe LockProbeFunc
 	// PublishViews republishes a workspace's whole views once it is owned.
 	PublishViews PublishViewsFunc
+	// StateUnreported tells every status surface whether a shim taken back
+	// after a failed handover has re-reported its session state (unreported
+	// true) — the degraded rung, turquoise and usable (owner ruling,
+	// 2026-09-28). A session start lifts it on the surfaces themselves. Nil
+	// in tests that do not observe it.
+	StateUnreported StateUnreportedFunc
 	// WriteDaemonAddr writes daemon.addr. A joining daemon calls it ONLY once
 	// every workspace is adopted, and otherwise never writes it.
 	WriteDaemonAddr WriteDaemonAddrFunc
@@ -431,6 +437,10 @@ type DrainIntakeFunc func(ctx context.Context, ws ids.WorkspaceID) error
 // PublishViewsFunc republishes one workspace's whole views after adoption, so
 // the re-attaching clients land on fresh state rather than on nothing.
 type PublishViewsFunc func(ctx context.Context, ws ids.WorkspaceID) error
+
+// StateUnreportedFunc states whether a taken-back shim's session state is
+// still unreported.
+type StateUnreportedFunc func(ws ids.WorkspaceID, unreported bool)
 
 // WriteDaemonAddrFunc writes daemon.addr. It exists as a hook because a
 // JOINING daemon must not write it until it owns every workspace.
