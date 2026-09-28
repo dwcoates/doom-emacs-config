@@ -400,10 +400,13 @@ type fakePrompts struct {
 	outcome  prompthandler.Outcome
 	err      error
 	lastSaid *conversationv1.UserSaid
+	// lastDelivery is the delivery the last submission was handed with.
+	lastDelivery wsm.Delivery
 }
 
-func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, _ conversationv1.PromptOrigin, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, _ conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.lastSaid = said
+	f.lastDelivery = delivery
 	return f.outcome, f.err
 }
 

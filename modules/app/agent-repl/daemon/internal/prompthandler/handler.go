@@ -59,12 +59,12 @@ func newHandler(deps Deps) (*handler, error) {
 // is checked before anything is minted or mirrored, the addressed feed is
 // checked against the workspace, recognition forks the answer, and only an
 // ordinary prompt reaches the queue.
-func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, target *feedid.Ref) (Outcome, error) {
+func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
 	log, err := h.logger(ctx, ws)
 	if err != nil {
 		return Outcome{}, err
 	}
-	log = log.With(dlog.Context{"origin": origin.String(), "idempotency_key": idempotencyKey})
+	log = log.With(dlog.Context{"origin": origin.String(), "idempotency_key": idempotencyKey, "delivery": delivery.String()})
 
 	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		log.Warn(opSubmit, "the submission carries no origin", nil)
@@ -98,7 +98,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	defer c.done()
 	turn := c.turn
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target,
+		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target, Delivery: delivery,
 	})
 	if err != nil {
 		return Outcome{}, err

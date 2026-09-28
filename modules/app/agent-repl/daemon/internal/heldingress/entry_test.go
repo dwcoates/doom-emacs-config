@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/wsm"
 )
 
 const validSaid = `{"content":{"blocks":[{"text":{"text":"hello"}}]}}`
@@ -83,6 +85,8 @@ func TestParseRefusesAnEntryItCouldOnlyActOnByGuessing(t *testing.T) {
 		{name: "an unknown field", body: entryJSON(map[string]string{"priority": `"high"`}), wantCause: "unknown field"},
 		{name: "trailing data", body: entryJSON(nil) + `{}`, wantCause: "trailing data"},
 		{name: "a truncated document", body: entryJSON(nil)[:20], wantCause: "decode the entry"},
+		{name: "an unknown delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_NOPE"`}), wantCause: "not a delivery"},
+		{name: "the unspecified delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED"`}), wantCause: "not a delivery"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +96,35 @@ func TestParseRefusesAnEntryItCouldOnlyActOnByGuessing(t *testing.T) {
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tc.wantCause) {
 				t.Fatalf("parse(%s) = %v, want a refusal naming %q", tc.body, err, tc.wantCause)
+			}
+		})
+	}
+}
+
+func TestParseReadsTheEntrysDelivery(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		want  wsm.Delivery
+	}{
+		{name: "an absent delivery is ordinary", field: "", want: wsm.DeliveryOrdinary},
+		{name: "a deferred delivery", field: `"SUBMIT_PROMPT_DELIVERY_DEFERRED"`, want: wsm.DeliveryDeferred},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			overrides := map[string]string{}
+			if tc.field != "" {
+				overrides["delivery"] = tc.field
+			}
+			data := []byte(entryJSON(overrides))
+
+			// Act
+			got, err := parse(data)
+
+			// Assert
+			if err != nil || got.delivery != tc.want {
+				t.Fatalf("parse = (%v, %v), want delivery %s", got.delivery, err, tc.want)
 			}
 		})
 	}

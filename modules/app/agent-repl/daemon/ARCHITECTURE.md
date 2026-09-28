@@ -841,13 +841,18 @@ from the names alone:
   "idempotency_key": "the key of the SubmitPrompt attempt it re-drives",
   "origin": "PROMPT_ORIGIN_USER_SENT",
   "said": { "content": { "blocks": [ { "text": { "text": "..." } } ] } },
-  "queued_at": "2026-09-28T12:00:00.000000000Z"
+  "queued_at": "2026-09-28T12:00:00.000000000Z",
+  "delivery": "SUBMIT_PROMPT_DELIVERY_DEFERRED"
 }
 ```
 
 `said` is the request's `UserSaid` in protojson and `origin` the
-`PromptOrigin` value name. Unknown fields, another version, a relative
-directory, a missing key or an unspecified origin make the file malformed.
+`PromptOrigin` value name. `delivery` is optional and mirrors
+`SubmitPromptRequest.delivery`: absent is the ordinary delivery, and a deferred
+prompt (`SPC j RET`) names `SUBMIT_PROMPT_DELIVERY_DEFERRED`, so the queue holds
+it for the running turn's end unjudged, exactly as the rpc would. Unknown
+fields, another version, a relative directory, a missing key, an unspecified
+origin or a delivery this reader does not honor make the file malformed.
 
 The daemon sweeps the directory at start and every 250ms, in name order, and
 hands each entry to `prompthandler.Handler.Submit` — the rpc's own body — under

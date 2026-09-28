@@ -85,8 +85,14 @@ func (s *server) SubmitPrompt(
 		consumedReference = true
 	}
 
+	// VALIDATED ABOVE, so a failure here is the two readings of one field
+	// disagreeing -- a defect, surfaced as one.
+	delivery, err := deliveryOf(req.Msg)
+	if err != nil {
+		return nil, fail(subject.Log, rpc, err)
+	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
-		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
+		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), delivery, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(refused)))))
@@ -353,4 +359,20 @@ func bubbleRefused(r refusal) refusal {
 	fields["kind"] = nestedArm(kind)
 	r.Fields = fields
 	return r
+}
+
+// deliveryOf maps a VALIDATED SubmitPromptRequest.delivery onto the queue's
+// delivery: an absent field is the ordinary one. validateSubmitPromptRequest
+// refuses every other value, so reaching the default is the two readings of
+// one field disagreeing -- a defect, surfaced as an error.
+func deliveryOf(req *agentreplv1.SubmitPromptRequest) (wsm.Delivery, error) {
+	if req.Delivery == nil {
+		return wsm.DeliveryOrdinary, nil
+	}
+	switch req.GetDelivery() {
+	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED:
+		return wsm.DeliveryDeferred, nil
+	default:
+		return 0, fmt.Errorf("delivery %s passed validation but has no mapping", req.GetDelivery())
+	}
 }
