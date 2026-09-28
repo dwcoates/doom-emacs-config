@@ -30,6 +30,7 @@ import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../src/clock.js";
 import { tick } from "../../src/feed/ticking.js";
 import type { RowRenderers } from "../../src/feed/renderers.js";
+import { orderFor } from "../feed-order.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -165,6 +166,7 @@ describe("arrangeSubfeedRows", () => {
     // Arrange: no id at all, so the warning's row name falls back to "unset".
     const host = document.createElement("div");
     const orphan = create(FeedRowSchema, {
+      order: orderFor("orphan"),
       parent: { row: feedId("missing") },
       row: {
         case: "activity",

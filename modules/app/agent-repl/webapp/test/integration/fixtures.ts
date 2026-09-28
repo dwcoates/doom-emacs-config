@@ -88,6 +88,7 @@ import {
   SubmitPromptCommandPanelSchema,
   type SubmitPromptCommandPanel,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { orderFor } from "../feed-order.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -172,9 +173,18 @@ export const CARD_ACTION_ORIGIN = PromptOrigin.WEBAPP_CARD_ACTION;
 // Feed rows
 // ---------------------------------------------------------------------------
 
-/** A FeedRow wrapping `row`, with id and turn defaulted and overridable. */
+/**
+ * A FeedRow wrapping `row`, with id and turn defaulted and overridable. Its
+ * `order` key is the fixture registry's for its id (test/feed-order.ts) unless
+ * the overrides state one — `order: undefined` included, which is how a suite
+ * builds the malformed row the daemon never sends.
+ */
 export function feedRow(row: RowArm, overrides?: Partial<RowInit>): FeedRow {
-  return make(FeedRowSchema, { id: feedId("row-1"), turn: turnId(), row }, overrides);
+  const built = make(FeedRowSchema, { id: feedId("row-1"), turn: turnId(), row }, overrides);
+  if (overrides === undefined || !("order" in overrides)) {
+    built.order = orderFor(built.id?.value ?? "");
+  }
+  return built;
 }
 
 /** An activity row: the FeedTurnActivity wrapper around one unit. */
