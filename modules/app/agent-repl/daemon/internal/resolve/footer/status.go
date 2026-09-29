@@ -520,7 +520,7 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 		return nil
 	}
 	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
-	arm.QuietStretchEnding = quietStretchEnding(s, workingOutranksQuietLine(arm.Activity))
+	arm.QuietStretchEnding = quietStretchEnding(s, arm.Activity != nil)
 	switch {
 	case s.turn == nil:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
@@ -561,7 +561,7 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 		Status: &frontendv1.FooterStatus_Background{
 			Background: &frontendv1.FooterStatusBackground{
 				Activity:           activity,
-				QuietStretchEnding: quietStretchEnding(s, backgroundOutranksQuietLine(activity)),
+				QuietStretchEnding: quietStretchEnding(s, activity != nil),
 			}}}
 }
 
