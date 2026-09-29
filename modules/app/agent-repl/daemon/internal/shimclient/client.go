@@ -266,6 +266,12 @@ func (c *client) Reaped() (ExitInfo, bool) {
 // earlier and recorded at info on the line above.
 var ErrStandDownOrdered = errors.New("the shim was stood down by this daemon")
 
+// standDownOrdered wraps a shim call's failure as one that ended in a
+// stand-down this daemon ordered, keeping the transport error in the chain.
+func standDownOrdered(err error) error {
+	return fmt.Errorf("%w: %w", ErrStandDownOrdered, err)
+}
+
 // StandingDown answers the stand-down latch. It is the shim's own record that
 // THIS DAEMON asked it to end its session, and it is read by every consumer
 // that must tell a teardown it ordered from one that happened to it.
@@ -1507,7 +1513,7 @@ func unary[Req any, Resp any](
 		}
 		if c.StandingDown() {
 			c.log.Info(operation, "the shim call ended in a stand-down this daemon ordered", fields)
-			return nil, fmt.Errorf("%w: %w", ErrStandDownOrdered, err)
+			return nil, standDownOrdered(err)
 		}
 		c.log.Error(operation, "shim call failed", fields)
 		return nil, err
@@ -1522,7 +1528,7 @@ func unary[Req any, Resp any](
 type quietOpenKey struct{}
 
 // refusedOpen records a refused stream open at the level the refusal calls
-// for.
+// for, and answers the error the open returns.
 //
 // A SEMANTIC REFUSAL IS AN ANSWER, NOT A FAULT. not_found and
 // failed_precondition are a serving shim saying it holds no such handle (yet):
@@ -1532,10 +1538,24 @@ type quietOpenKey struct{}
 // nothing announced), so recording the same refusal at ERROR here reported an
 // ordinary branch as a failure. It is recorded at INFO, and the error is still
 // returned whole. Every other code is a failed open and stays at ERROR.
-func (c *client) refusedOpen(ctx context.Context, operation string, err error, fields dlog.Context) {
+func (c *client) refusedOpen(ctx context.Context, verb string, err error) error {
+	operation := "daemon.shimclient." + verb
+	fields := dlog.Context{"workspace_id": string(c.ws), "error": err.Error()}
+	refused := &StreamOpenError{Procedure: verb, Err: err}
 	if quiet, _ := ctx.Value(quietOpenKey{}).(bool); quiet {
 		c.log.Debug(operation, "shim stream refused", fields)
-		return
+		return refused
+	}
+	// AN OPEN INSIDE A STAND-DOWN THIS DAEMON ORDERED IS NOT A REFUSAL. The
+	// shim was asked to end, so it is closing every stream it serves and an
+	// open that raced its exit comes back EOF: the same ordinary end a unary
+	// call's failure is ruled to be (see unary), wrapped the same way.
+	// MEASURED, deploy 2026-09-29T17:15:29: six WatchAgent opens on shims the
+	// successor's bounce had stood down were recorded here at ERROR.
+	if c.StandingDown() {
+		c.log.Info(operation, "the stream open ended in a stand-down this daemon ordered", c.standDownFields(fields))
+		refused.Err = standDownOrdered(err)
+		return refused
 	}
 	// AN OPEN ITS OWN CALLER ABANDONED IS NOT A REFUSAL. When the caller's
 	// context ended first (the watcher closing, the daemon tearing down), the
@@ -1544,14 +1564,15 @@ func (c *client) refusedOpen(ctx context.Context, operation string, err error, f
 	if ctx.Err() != nil {
 		fields["cause"] = ctx.Err().Error()
 		c.log.Info(operation, "the stream open was abandoned: its caller's context ended before the shim answered", fields)
-		return
+		return refused
 	}
 	switch connect.CodeOf(err) {
 	case connect.CodeNotFound, connect.CodeFailedPrecondition:
 		c.log.Info(operation, "the shim refused the stream open: it holds no such handle; the caller rules on whether that was expected", fields)
-		return
+		return refused
 	}
 	c.log.Error(operation, "shim stream refused", fields)
+	return refused
 }
 
 // openStream is every watch verb's body. A Connect error on the OPEN is
@@ -1579,10 +1600,7 @@ func openStream[Req any, W any, T any](
 	stream, err := open(streamCtx, connect.NewRequest(req))
 	if err != nil {
 		cancel()
-		c.refusedOpen(ctx, operation, err, dlog.Context{
-			"workspace_id": string(c.ws), "error": err.Error(),
-		})
-		return nil, &StreamOpenError{Procedure: verb, Err: err}
+		return nil, c.refusedOpen(ctx, verb, err)
 	}
 	// Connect defers the open to the first Receive, so the refusal is only
 	// visible once a frame is asked for: take the first frame here, so a
@@ -1594,10 +1612,7 @@ func openStream[Req any, W any, T any](
 		if err == nil {
 			err = io.EOF
 		}
-		c.refusedOpen(ctx, operation, err, dlog.Context{
-			"workspace_id": string(c.ws), "error": err.Error(),
-		})
-		return nil, &StreamOpenError{Procedure: verb, Err: err}
+		return nil, c.refusedOpen(ctx, verb, err)
 	}
 	first, err := project(stream.Msg())
 	if err != nil {

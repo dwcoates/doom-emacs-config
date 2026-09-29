@@ -1563,6 +1563,68 @@ func TestAStreamOpenItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
+// TestAStreamOpenInsideAnOrderedStandDownIsNotARefusal pins that a stream open
+// failing on a shim this daemon asked to stand down is ruled exactly as a
+// unary call's failure is: recorded at INFO with both stand-down latches, never
+// at ERROR, and returned as a *StreamOpenError wrapping ErrStandDownOrdered
+// with the transport's error still in the chain. An open nobody stood down
+// stays an ERROR refusal.
+//
+// MEASURED, deploy 2026-09-29T17:15:29: WatchAgent opens on six shims the
+// successor's bounce had stood down came back "incomplete envelope:
+// unexpected EOF" and were recorded here at ERROR.
+func TestAStreamOpenInsideAnOrderedStandDownIsNotARefusal(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown bool
+		wantLevel string
+		wrongLvl  string
+		wantWrap  bool
+	}{
+		{name: "the daemon stood the shim down", standDown: true, wantLevel: "info", wrongLvl: "error", wantWrap: true},
+		{name: "nobody asked the shim to stand down", standDown: false, wantLevel: "error", wrongLvl: "info", wantWrap: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f, uds := startFakeShim(t, shortDir(t))
+			refusal := connect.NewError(connect.CodeInternal, errors.New("unexpected EOF"))
+			f.watchBashRefusal = refusal
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+			if tt.standDown {
+				c.standDown.Store(true)
+			}
+
+			// Act.
+			_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+			// Assert.
+			var opened *StreamOpenError
+			if !errors.As(err, &opened) {
+				t.Fatalf("WatchBash() error = %v, want a *StreamOpenError", err)
+			}
+			if got := errors.Is(err, ErrStandDownOrdered); got != tt.wantWrap {
+				t.Fatalf("errors.Is(err, ErrStandDownOrdered) = %v, want %v: %v", got, tt.wantWrap, err)
+			}
+			if connect.CodeOf(err) != connect.CodeInternal {
+				t.Fatalf("connect.CodeOf(err) = %v, want the transport's code kept in the chain", connect.CodeOf(err))
+			}
+			if !hasRecordAt(log, tt.wantLevel, "daemon.shimclient.watch_bash") {
+				t.Fatalf("no %q record for the failed open: %+v", tt.wantLevel, log.Records())
+			}
+			if hasRecordAt(log, tt.wrongLvl, "daemon.shimclient.watch_bash") {
+				t.Fatalf("the failed open was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
+			}
+			if tt.standDown {
+				if got := recordFields(t, log, "daemon.shimclient.watch_bash")["stand_down_asked"]; got != true {
+					t.Fatalf("stand_down_asked = %v, want true", got)
+				}
+			}
+		})
+	}
+}
+
 func TestABroughtUpClientCountsOneConnection(t *testing.T) {
 	// Arrange
 	dir := shortDir(t)
