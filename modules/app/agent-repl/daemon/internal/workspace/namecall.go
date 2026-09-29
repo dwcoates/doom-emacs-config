@@ -146,9 +146,7 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 			log.Debug(opNaming, "the naming answer did not validate", dlog.Context{
 				"answer": answer, "reason": err.Error(), "attempt": attempt,
 			})
-			correction = fmt.Sprintf(
-				"Your previous answer was %q, which is not acceptable: %s. Answer with the bare name alone.",
-				answer, err.Error())
+			correction = namingCorrection(answer, err)
 			continue
 		}
 
@@ -165,6 +163,20 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 	})
 	failure := last
 	return "", &failure
+}
+
+// namingCorrection is the retry's correction: the rejected answer quoted
+// back, why it was rejected, the word count it had, and the word limit, both
+// read off ValidateSlug's own rule (SlugWordCount, SlugWordLimit) so the
+// sentence can never state a limit the validator does not enforce.
+// MEASURED 2026-09-28: a four-word answer ("agent-repl-input-shorter") drew a
+// correction that never said how many words were allowed, and the retry
+// failed the same way.
+func namingCorrection(answer string, reason error) string {
+	return fmt.Sprintf(
+		"Your previous answer was %q, which is not acceptable: %s. It has %d words; "+
+			"the name must be AT MOST %d words. Answer with the bare name alone.",
+		answer, reason.Error(), SlugWordCount(answer), SlugWordLimit)
 }
 
 // freeName disambiguates a MINTED name against what already exists: an

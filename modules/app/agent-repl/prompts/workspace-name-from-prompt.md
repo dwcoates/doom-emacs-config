@@ -5,9 +5,14 @@ Answer with the NAME AND NOTHING ELSE. No sentence around it, no quotes, no
 backticks, no explanation, no trailing punctuation. The whole of your reply is
 the name.
 
+THE NAME IS AT MOST 3 WORDS. Count the words before you answer: one, two or
+three words joined by hyphens, never four or more. "flaky-login-test" is three
+words and is fine; "agent-repl-input-shorter" is four words and is REFUSED.
+Drop words until three or fewer remain.
+
 The name must be:
 
-- at most THREE words;
+- AT MOST 3 WORDS (one, two or three; four or more is refused);
 - lowercase;
 - hyphen-separated, with no leading or trailing hyphen;
 - made only of the letters a-z, the digits 0-9 and those hyphens;
