@@ -520,3 +520,82 @@ func TestReadFilePrefixRefusesAMissingFile(t *testing.T) {
 		t.Fatal("a missing spool was read without error")
 	}
 }
+
+// operationLevels answers every captured record's operation and level.
+func operationLevels(t *testing.T, sink *bytes.Buffer) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Operation string `json:"operation"`
+			Level     string `json:"level"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("log line is not JSON: %v\n%s", err, line)
+		}
+		if rec.Level == "error" {
+			out[rec.Operation] = rec.Level
+		}
+	}
+	return out
+}
+
+// seamTerminals are the three seam-minted terminals, each through RunOutput.
+var seamTerminals = []struct {
+	name      string
+	operation string
+	mint      func(r *RunOutput, run string) int
+}{
+	{"cancelled", "cancel-terminal", func(r *RunOutput, run string) int { return len(r.Cancelled("b1", run, "agent-1", 1700)) }},
+	{"notified", "notified-terminal", func(r *RunOutput, run string) int {
+		return len(r.Notified("b1", run, "agent-1", "completed", 1700))
+	}},
+	{"lost", "lost-terminal", func(r *RunOutput, run string) int {
+		return len(r.Lost("b1", run, "agent-1", "went_silent", false))
+	}},
+}
+
+func TestEverySeamTerminalRefusesARunWithNoSpawningCall(t *testing.T) {
+	for _, tc := range seamTerminals {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			sink, log := capturingLogger()
+			r := NewRunOutput(log)
+
+			// Act.
+			got := tc.mint(r, "")
+
+			// Assert.
+			if got != 0 {
+				t.Fatalf("entries = %d, want none for a run naming no unit", got)
+			}
+			if level := operationLevels(t, sink)[tc.operation]; level != "error" {
+				t.Fatalf("the refusal under %q was not recorded at error: %s", tc.operation, sink.String())
+			}
+		})
+	}
+}
+
+func TestEverySeamTerminalMintsOneTerminalForItsRun(t *testing.T) {
+	for _, tc := range seamTerminals {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			sink, log := capturingLogger()
+			r := NewRunOutput(log)
+
+			// Act.
+			got := tc.mint(r, "toolu_run")
+
+			// Assert.
+			if got != 1 {
+				t.Fatalf("entries = %d, want exactly one terminal", got)
+			}
+			if errs := operationLevels(t, sink); len(errs) != 0 {
+				t.Fatalf("error records = %v, want none", errs)
+			}
+		})
+	}
+}
