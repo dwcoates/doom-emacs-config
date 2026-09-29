@@ -2426,7 +2426,7 @@ func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: a pure attach carrying the adoption's snapshot.
-			h := startHarness(t, Session{OpenAtAttach: tt.openAtAttach}, nil)
+			h := startHarness(t, Session{OpenAtAttach: openRows(tt.openAtAttach...)}, nil)
 			h.session = h.client.nextSessionOpen(t)
 
 			// Act.
@@ -2454,7 +2454,7 @@ func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
 // turn end is told for it and nothing is delivered on its account.
 func TestAnAdoptionTellsNoTurnEndForATurnThatEndedUnobserved(t *testing.T) {
 	// Arrange.
-	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h := startHarness(t, Session{OpenAtAttach: openRows("turn-1")}, nil)
 	h.session = h.client.nextSessionOpen(t)
 
 	// Act.
@@ -2473,7 +2473,7 @@ func TestAnAdoptionTellsNoTurnEndForATurnThatEndedUnobserved(t *testing.T) {
 // session watch) compares nothing again.
 func TestAnAdoptionReconcilesItsOpenTurnsOnce(t *testing.T) {
 	// Arrange: the first re-announcement has already been reconciled.
-	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h := startHarness(t, Session{OpenAtAttach: openRows("turn-1")}, nil)
 	h.session = h.client.nextSessionOpen(t)
 	h.sendSessionStarted(t, sessionStarted(""))
 	h.sendSessionUpdate(t, compactingUpdate())
@@ -2495,7 +2495,7 @@ func TestAnAdoptionReconcilesItsOpenTurnsOnce(t *testing.T) {
 // Start returns.
 func TestFactsHandedToStartReconcileTheOpenTurnsAtOnce(t *testing.T) {
 	// Arrange, Act.
-	h := startHarness(t, Session{Started: sessionStarted(""), OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h := startHarness(t, Session{Started: sessionStarted(""), OpenAtAttach: openRows("turn-1")}, nil)
 
 	// Assert.
 	if got := unobservedTurns(h.rec.drain()); !sameTurns(got, []ids.TurnID{"turn-1"}) {
@@ -2507,7 +2507,7 @@ func TestFactsHandedToStartReconcileTheOpenTurnsAtOnce(t *testing.T) {
 // is an ordinary reconciliation, so it is stated at INFO and never warned.
 func TestATurnThatEndedUnobservedIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
-	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h := startHarness(t, Session{OpenAtAttach: openRows("turn-1")}, nil)
 	h.session = h.client.nextSessionOpen(t)
 
 	// Act.
@@ -2525,7 +2525,7 @@ func TestATurnThatEndedUnobservedIsRecordedAtInfo(t *testing.T) {
 // kept turn is said to be kept, so "why is it still open" has an answer.
 func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
-	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h := startHarness(t, Session{OpenAtAttach: openRows("turn-1")}, nil)
 	h.session = h.client.nextSessionOpen(t)
 
 	// Act.
@@ -3285,5 +3285,80 @@ func TestAnOpenInFlightWhenTheStandDownIsAskedEndsWithTheTeardown(t *testing.T) 
 				t.Fatal("an open that failed inside an ordered teardown severed the link")
 			}
 		})
+	}
+}
+
+// openRows is the adoption's snapshot of open turn rows, each started at the
+// fixed attachStart.
+func openRows(turns ...ids.TurnID) []OpenTurn {
+	rows := make([]OpenTurn, 0, len(turns))
+	for _, turn := range turns {
+		rows = append(rows, OpenTurn{ID: turn, StartedAt: attachStart})
+	}
+	return rows
+}
+
+// attachStart is when every snapshot row in these tests was opened.
+var attachStart = time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+
+// TestARunningTurnFoundAtAttachStandsOnTheViews pins that the turn an adopted
+// shim is running is told to the footer and the roster, with its row's own
+// start when the daemon holds one. Without it a daemon that took a busy
+// workspace over drew it idle until the turn ended (owner report, 2026-09-29).
+func TestARunningTurnFoundAtAttachStandsOnTheViews(t *testing.T) {
+	tests := []struct {
+		name         string
+		openAtAttach []ids.TurnID
+		inFlight     string
+		want         string
+	}{
+		{name: "a running turn with a row stands from the row's start", openAtAttach: []ids.TurnID{"turn-1"}, inFlight: "turn-1", want: "turn-1|2026-09-29T12:00:00Z"},
+		{name: "a running turn with no row stands with no known start", inFlight: "turn-3", want: "turn-3|start-unknown"},
+		{name: "an idle shim stands nothing", openAtAttach: []ids.TurnID{"turn-1"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := startHarness(t, Session{OpenAtAttach: openRows(tt.openAtAttach...)}, nil)
+			h.session = h.client.nextSessionOpen(t)
+
+			// Act.
+			h.sendSessionStarted(t, sessionStartedWaiting(tt.inFlight))
+			h.sendSessionUpdate(t, compactingUpdate())
+			seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+			// Assert.
+			for _, sink := range []string{"footer", "sidebar"} {
+				got := ""
+				for _, ev := range seen {
+					if ev.sink == sink && ev.method == "OnTurnRunningAtAttach" {
+						got = ev.detail
+					}
+				}
+				if got != tt.want {
+					t.Fatalf("%s running-at-attach = %q, want %q", sink, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestATurnThisWatcherOpenedIsNotStoodAsFoundAtAttach pins that the facts
+// naming a turn this watcher's own delivery opened tell the views nothing new:
+// the queue already stood it.
+func TestATurnThisWatcherOpenedIsNotStoodAsFoundAtAttach(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+	h.w.OnTurnOpening("ws-1", "turn-7")
+
+	// Act.
+	h.sendSessionStarted(t, sessionStartedWaiting("turn-7"))
+	h.sendSessionUpdate(t, compactingUpdate())
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if hasEvent(seen, "footer.OnTurnRunningAtAttach") || hasEvent(seen, "sidebar.OnTurnRunningAtAttach") {
+		t.Fatalf("events = %v, want no running-at-attach for the watcher's own turn", names(seen))
 	}
 }

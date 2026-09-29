@@ -444,7 +444,7 @@ type fleetFixture struct {
 	// openings is every Opening a watcher was started with, in order.
 	openings []sessionwatcher.Opening
 	// openAtAttach is every watcher start's Session.OpenAtAttach, in order.
-	openAtAttach [][]ids.TurnID
+	openAtAttach [][]sessionwatcher.OpenTurn
 	// watchErr, when set, is what starting a watcher answers.
 	watchErr error
 }

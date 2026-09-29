@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"time"
+
 	"fmt"
 	"sync"
 
@@ -319,6 +321,29 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 					"a new prompt started a turn, so the last turn's unread result no longer holds the row", nil)
 			}
 			s.startTurn(turn)
+		})
+}
+
+// OnTurnRunningAtAttach stands the turn an adopted shim was already running
+// when its watcher attached (sessionwatcher.SidebarSink), so a daemon that took
+// a busy workspace over draws it `thinking` rather than the idle rung. A turn
+// that already stands is this daemon's own and stays as it is. The turn is
+// running, so it is acknowledged; the roster draws no clock, so the start is
+// kept only when it is known.
+func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_turn_running_at_attach", "the roster took a turn the adopted shim is running",
+		dlog.Context{"turn_id": string(turn), "row_known": startedAt != nil}, func(s *wsState, log dlog.Logger) {
+			if s.turn != nil {
+				log.Debug("daemon.sidebar.on_turn_running_at_attach",
+					"a turn already stands; the adopted one is this daemon's own", dlog.Context{"turn_id": string(turn)})
+				return
+			}
+			started := &footer.TurnStarted{Act: footer.ActPrompt}
+			if startedAt != nil {
+				started.At = *startedAt
+			}
+			s.startTurn(started)
+			s.sawActivity = true
 		})
 }
 

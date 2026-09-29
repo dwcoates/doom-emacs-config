@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"time"
+
 	"fmt"
 	"sync"
 
@@ -346,6 +348,29 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 // applyTurnStarted installs (or clears) the in-flight turn on an accumulation.
 // It is shared by the daemon-fact setter and the watcher's turn-open edge so
 // the two can never drift.
+// OnTurnRunningAtAttach stands the turn an adopted shim was already running
+// when its watcher attached. See sessionwatcher.FooterSink. A turn that already
+// stands is this daemon's own and stays as it is. The turn is running, so it is
+// past its submission and delivered; its clock counts from its row's start, or
+// from now when the daemon holds no row for it.
+func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
+	r.mutate(ws, "daemon.footer.on_turn_running_at_attach", "the footer took a turn the adopted shim is running",
+		dlog.Context{"turn_id": string(turn), "row_known": startedAt != nil}, func(s *wsState) {
+			if s.turn != nil {
+				r.logOf(ws, s).Debug("daemon.footer.on_turn_running_at_attach",
+					"a turn already stands; the adopted one is this daemon's own", dlog.Context{"turn_id": string(turn)})
+				return
+			}
+			at := r.opts.clock.Now()
+			if startedAt != nil {
+				at = *startedAt
+			}
+			r.applyTurnStarted(s, &TurnStarted{At: at, Act: ActPrompt})
+			s.sawActivity = true
+			r.deliverTurn(ws, s)
+		})
+}
+
 func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	s.turn = turn
 	if turn == nil {

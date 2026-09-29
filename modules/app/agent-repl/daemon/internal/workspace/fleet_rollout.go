@@ -358,7 +358,7 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// set with the shim's own turn_in_flight once its facts arrive. Read
 	// before the map write, no turn this daemon delivers to the new client can
 	// be in it, and a read that fails leaves the fleet as it was.
-	openAtAttach, err := f.openTurnIDs(ctx, ws)
+	openAtAttach, err := f.openTurns(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("workspace: install a shim for %q: %w", ws, err)
 	}
@@ -432,14 +432,14 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 }
 
 // openTurnIDs names the workspace's turn rows that have no terminal.
-func (f *Fleet) openTurnIDs(ctx context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+func (f *Fleet) openTurns(ctx context.Context, ws ids.WorkspaceID) ([]sessionwatcher.OpenTurn, error) {
 	open, err := f.deps.DB.OpenTurns(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("read the turns open at attach: %w", err)
 	}
-	turns := make([]ids.TurnID, 0, len(open))
+	turns := make([]sessionwatcher.OpenTurn, 0, len(open))
 	for _, t := range open {
-		turns = append(turns, t.ID)
+		turns = append(turns, sessionwatcher.OpenTurn{ID: t.ID, StartedAt: t.StartedAt})
 	}
 	return turns, nil
 }
@@ -526,7 +526,7 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 // for ONE decision only — whether there is a conversation here at all — because
 // a workspace with no session record has nothing to watch. Every FACT about the
 // session comes from the shim's re-announcement on the watch itself.
-func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client, openAtAttach []ids.TurnID) error {
+func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client, openAtAttach []sessionwatcher.OpenTurn) error {
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("workspace: install a shim for %q: %w", ws, err)

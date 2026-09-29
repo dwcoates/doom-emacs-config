@@ -193,6 +193,14 @@ type FeedSink interface {
 // FooterSink receives what the footer's status tree, live-work chips and
 // tokens cell resolve from.
 type FooterSink interface {
+	// OnTurnRunningAtAttach stands a turn the adopted shim was already running
+	// when this watcher attached. No turn-open edge will come for it (that
+	// passed under the daemon before this one), and no delivery of this
+	// daemon's opened it. It is told under the watcher's lock BEFORE the main
+	// agent's watch opens, so the running turn's frames land on a turn that
+	// already stands. startedAt is the turn row's start, nil when the daemon
+	// holds no row for it (the vendor started it while no daemon watched).
+	OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time)
 	// OnTurnOpened is the TURN-OPEN EDGE: the prompt queue's accepted turn,
 	// handed over by the watcher. Nothing on the shim's streams states it —
 	// the first frame of a turn is an activity, by which time `submitting` is
@@ -290,6 +298,9 @@ type TopbarSink interface {
 
 // SidebarSink receives what a roster row's status arm resolves from.
 type SidebarSink interface {
+	// OnTurnRunningAtAttach stands a turn the adopted shim was already
+	// running when this watcher attached, as FooterSink's does.
+	OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time)
 	// OnSessionStarted marks the row live.
 	OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted)
 	// OnAgentTerminal retires the row's thinking state.
@@ -615,7 +626,17 @@ type Session struct {
 	// while no daemon was watching, and is handed to
 	// LifecycleSink.OnTurnsEndedUnobserved. A turn delivered after the snapshot
 	// is never in it, so a turn this daemon opens is never closed this way.
-	OpenAtAttach []ids.TurnID
+	// The one the shim names as its turn in flight is still running: the
+	// views are told it stands (OnTurnRunningAtAttach), from its row's own
+	// start.
+	OpenAtAttach []OpenTurn
+}
+
+// OpenTurn is one turn row open when a watcher attached.
+type OpenTurn struct {
+	ID ids.TurnID
+	// StartedAt is when the turn row was opened.
+	StartedAt time.Time
 }
 
 // Start builds and starts one workspace's watcher against its shim client.

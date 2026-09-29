@@ -918,3 +918,52 @@ func TestTheFirstFrameDeliversATurnWhoseOpenEdgeCameFirst(t *testing.T) {
 		t.Fatalf("quiet_stretch_without_line errors = %d, want none", got)
 	}
 }
+
+func TestARunningTurnFoundAtAttachIsWorkingFromItsRowsStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		startedAt *time.Time
+		wantClock time.Time
+	}{
+		{name: "with its row's start", startedAt: func() *time.Time { at := instant.Add(-3 * time.Minute); return &at }(), wantClock: instant.Add(-3 * time.Minute)},
+		{name: "with no row the clock counts from the attach", startedAt: nil, wantClock: instant},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a daemon that took a busy workspace over.
+			h := newHarness(t)
+			connected(h)
+			h.r.OnMainAgent(testWS, mainAgent)
+
+			// Act.
+			h.r.OnTurnRunningAtAttach(testWS, testTurnID, tc.startedAt)
+
+			// Assert.
+			if got := stepName(working(t, h)); got == "submitting" || got == "" {
+				t.Fatalf("step = %q, want a running step: the turn is past its submission", got)
+			}
+			clock := h.view(t).GetStrip().GetClock()
+			if clock.TurnStartedAtMs == nil || *clock.TurnStartedAtMs != tc.wantClock.UnixMilli() {
+				t.Fatalf("clock = %v, want the turn's start %v", clock, tc.wantClock)
+			}
+			if quietLine(t, h) == "" {
+				t.Fatal("no quiet-stretch line: a delivered turn with nothing surfacing stands one")
+			}
+		})
+	}
+}
+
+func TestARunningTurnFoundAtAttachLeavesAStandingTurn(t *testing.T) {
+	// Arrange: this daemon's own turn stands.
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "bash")
+
+	// Act.
+	h.r.OnTurnRunningAtAttach(testWS, testTurnID, nil)
+
+	// Assert.
+	if got := stepName(working(t, h)); got != "executing" {
+		t.Fatalf("step = %q, want the standing turn's executing step untouched", got)
+	}
+}
