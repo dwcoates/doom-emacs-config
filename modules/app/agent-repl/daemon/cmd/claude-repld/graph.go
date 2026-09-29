@@ -442,7 +442,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
 
-	sidebarResolver, err := sidebar.New(colors, p.Surfaces)
+	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
+	// workspace's turn end draws its row as it stood, not `ready`.
+	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
+		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
 	}
