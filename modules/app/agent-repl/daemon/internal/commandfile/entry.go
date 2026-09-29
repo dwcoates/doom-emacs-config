@@ -3,6 +3,8 @@ package commandfile
 import (
 	"encoding/json"
 	"fmt"
+
+	"claude-repld/internal/dirpath"
 )
 
 // The entry types the ingress accepts. They are the shapes the managed
@@ -172,6 +174,51 @@ func parse(data []byte) ([]Entry, error) {
 		if err := entry.Validate(); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
+	}
+	return entries, nil
+}
+
+// withAbsolutePaths answers the entry with every directory field it carries
+// made absolute through dirpath.Absolute: a leading `~` expanded to home, and a
+// path still relative afterwards refused. The skill's contract says a leading
+// `~` is expanded downstream, and the daemon's working directory is no base to
+// resolve anything else against.
+func (e Entry) withAbsolutePaths(home string) (Entry, error) {
+	fields := []struct {
+		name  string
+		value *string
+	}{
+		{name: "git_root", value: &e.GitRoot},
+		{name: "project_dir", value: &e.ProjectDir},
+		{name: "dir", value: &e.Dir},
+	}
+	for _, field := range fields {
+		if *field.value == "" {
+			continue
+		}
+		abs, err := dirpath.Absolute(*field.value, home)
+		if err != nil {
+			return Entry{}, fmt.Errorf("%s: %s: %w", e.Type, field.name, err)
+		}
+		*field.value = abs
+	}
+	return e, nil
+}
+
+// decode parses one command file and resolves every entry's directories,
+// all-or-nothing: an entry whose directory cannot be resolved refuses the
+// whole array, exactly as an entry that does not validate does.
+func decode(data []byte, home string) ([]Entry, error) {
+	entries, err := parse(data)
+	if err != nil {
+		return nil, err
+	}
+	for i, entry := range entries {
+		resolved, err := entry.withAbsolutePaths(home)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+		entries[i] = resolved
 	}
 	return entries, nil
 }

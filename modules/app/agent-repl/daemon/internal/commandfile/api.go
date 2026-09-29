@@ -52,6 +52,9 @@ type Deps struct {
 	Prompts prompthandler.Handler
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
+	// Home is the absolute home directory a leading `~` in an entry's
+	// directory expands to (dirpath.Absolute).
+	Home string
 	// Serves reports whether THIS daemon takes the intake now:
 	// rollout.Controller.ServesIntake. A sweep while it answers false takes
 	// nothing. See internal/intakegate.
@@ -98,6 +101,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("commandfile: log surfaces are required")
 	case deps.Serves == nil:
 		return nil, fmt.Errorf("commandfile: the serving answer is required")
+	case !filepath.IsAbs(deps.Home):
+		return nil, fmt.Errorf("commandfile: an absolute home directory is required, got %q", deps.Home)
 	}
 	if deps.Glob == "" {
 		deps.Glob = DefaultGlob

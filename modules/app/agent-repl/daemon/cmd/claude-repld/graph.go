@@ -857,6 +857,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:      p.DB,
 		Merge:   mergeOrchestrator,
 		Prompts: handler,
+		Home:    paths.Home,
 		// ONLY THE DAEMON THAT SERVES TAKES INTAKE (internal/intakegate): not
 		// a successor still joining, not an incumbent handing over.
 		Serves: rolloutController.ServesIntake,
@@ -1005,6 +1006,10 @@ type paths struct {
 	// writes beside the daemon binary: the version the health and status
 	// surfaces show.
 	BuiltSHA string
+	// Home is the user's home directory, which a producer's leading `~`
+	// expands to (dirpath.Absolute). A daemon that cannot name it does not
+	// boot.
+	Home string
 }
 
 // envSelfRepo overrides the daemon's own-checkout identity for tests. The flag
@@ -1028,6 +1033,10 @@ func resolvePaths(opts options) (paths, error) {
 	if err != nil {
 		return paths{}, err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return paths{}, fmt.Errorf("claude-repld: resolve the home directory a producer's `~` expands to: %w", err)
+	}
 	out := paths{
 		Checkout:   root,
 		ShimMain:   firstNonEmpty(opts.shim, checkout.ShimMain(root)),
@@ -1036,6 +1045,7 @@ func resolvePaths(opts options) (paths, error) {
 		VocabDir:   checkout.VocabDir(root),
 		SelfRepo:   selfRepo,
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
+		Home:       home,
 	}
 	return out, nil
 }

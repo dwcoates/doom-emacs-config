@@ -241,6 +241,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	ingress, err := New(Deps{
 		Dir: f.dir, Verbs: f.verbs, DB: f.db, Merge: f.merge, Prompts: f.prompts, Log: f.log,
+		Home:     fixtureHome,
 		Serves:   func() bool { return f.serves },
 		Interval: 10 * time.Millisecond,
 		Now:      func() time.Time { return f.now },
@@ -251,6 +252,9 @@ func newFixture(t *testing.T) *fixture {
 	f.ingress = ingress
 	return f
 }
+
+// fixtureHome is the home directory every fixture's ingress expands `~` to.
+const fixtureHome = "/Users/fixture"
 
 // workspace records one workspace both fakes can resolve.
 func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
