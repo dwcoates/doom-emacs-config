@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
 )
 
@@ -59,12 +60,14 @@ func (s State) String() string {
 }
 
 // ResolveRunDir answers the absolute run directory: RunDirEnv when it is set,
-// otherwise RunDir with the home directory substituted for the tilde.
+// otherwise RunDir with the home directory substituted for the tilde. Both go
+// through dirpath.Absolute, so a relative override is refused rather than
+// resolved against the daemon's working directory.
 func ResolveRunDir() (string, error) {
 	if v := os.Getenv(RunDirEnv); v != "" {
-		abs, err := filepath.Abs(v)
+		abs, err := dirpath.Absolute(v, "")
 		if err != nil {
-			return "", fmt.Errorf("sessionlock: resolve %s=%q: %w", RunDirEnv, v, err)
+			return "", fmt.Errorf("sessionlock: resolve %s: %w", RunDirEnv, err)
 		}
 		return abs, nil
 	}
@@ -72,7 +75,11 @@ func ResolveRunDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("sessionlock: resolve run dir: %w", err)
 	}
-	return filepath.Join(home, ".cache", "agent-repl", "run"), nil
+	abs, err := dirpath.Absolute(RunDir, home)
+	if err != nil {
+		return "", fmt.Errorf("sessionlock: resolve run dir: %w", err)
+	}
+	return abs, nil
 }
 
 // WorkspaceLockPath derives a workspace's lock path:
