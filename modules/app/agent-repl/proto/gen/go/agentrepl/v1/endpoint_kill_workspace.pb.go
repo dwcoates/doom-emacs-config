@@ -31,8 +31,19 @@ const (
 )
 
 type KillWorkspaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// A CLIENT-MINTED OPERATION ID, as CreateWorkspaceRequest.op_id is: PRESENCE
+	// IS OPT-IN TO THE IMMEDIATE ACK (owner ruling, 2026-09-29: the tab closes
+	// the moment the daemon acks, never after the teardown). A request that
+	// carries one is answered `accepted` as soon as the daemon has refused
+	// nothing and marked the workspace CLOSED (so the roster says so
+	// everywhere); the teardown then KILLS THE SESSION in the background, detached from
+	// this request's context, and its end rides WatchDaemon's
+	// `mutation_progress` keyed on this id (WorkspaceMutationProgress.kill).
+	// UNSET = the synchronous form: the rpc answers `success` once the teardown
+	// is done. The ownership refusals are answered on `error` in both forms.
+	OpId          *string `protobuf:"bytes,2,opt,name=op_id,json=opId,proto3,oneof" json:"op_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -74,6 +85,13 @@ func (x *KillWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *KillWorkspaceRequest) GetOpId() string {
+	if x != nil && x.OpId != nil {
+		return *x.OpId
+	}
+	return ""
+}
+
 // THE ARM IS THE OUTCOME.
 type KillWorkspaceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -81,6 +99,7 @@ type KillWorkspaceResponse struct {
 	//
 	//	*KillWorkspaceResponse_Success
 	//	*KillWorkspaceResponse_Error
+	//	*KillWorkspaceResponse_Accepted
 	Result        isKillWorkspaceResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -141,6 +160,15 @@ func (x *KillWorkspaceResponse) GetError() *KillWorkspaceError {
 	return nil
 }
 
+func (x *KillWorkspaceResponse) GetAccepted() *KillWorkspaceAccepted {
+	if x != nil {
+		if x, ok := x.Result.(*KillWorkspaceResponse_Accepted); ok {
+			return x.Accepted
+		}
+	}
+	return nil
+}
+
 type isKillWorkspaceResponse_Result interface {
 	isKillWorkspaceResponse_Result()
 }
@@ -155,9 +183,64 @@ type KillWorkspaceResponse_Error struct {
 	Error *KillWorkspaceError `protobuf:"bytes,2,opt,name=error,proto3,oneof"`
 }
 
+type KillWorkspaceResponse_Accepted struct {
+	// THE IMMEDIATE ACK. Answered, instead of `success`, precisely when the
+	// request carried an `op_id`: the workspace is closed and its teardown is
+	// running; its end arrives on `mutation_progress` under the same id.
+	Accepted *KillWorkspaceAccepted `protobuf:"bytes,3,opt,name=accepted,proto3,oneof"`
+}
+
 func (*KillWorkspaceResponse_Success) isKillWorkspaceResponse_Result() {}
 
 func (*KillWorkspaceResponse_Error) isKillWorkspaceResponse_Result() {}
+
+func (*KillWorkspaceResponse_Accepted) isKillWorkspaceResponse_Result() {}
+
+// The immediate ack: the workspace is closed and its teardown detached.
+type KillWorkspaceAccepted struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The op_id the request supplied, echoed back.
+	OpId          string `protobuf:"bytes,1,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorkspaceAccepted) Reset() {
+	*x = KillWorkspaceAccepted{}
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorkspaceAccepted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorkspaceAccepted) ProtoMessage() {}
+
+func (x *KillWorkspaceAccepted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorkspaceAccepted.ProtoReflect.Descriptor instead.
+func (*KillWorkspaceAccepted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *KillWorkspaceAccepted) GetOpId() string {
+	if x != nil {
+		return x.OpId
+	}
+	return ""
+}
 
 type KillWorkspaceSuccess struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -167,7 +250,7 @@ type KillWorkspaceSuccess struct {
 
 func (x *KillWorkspaceSuccess) Reset() {
 	*x = KillWorkspaceSuccess{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +262,7 @@ func (x *KillWorkspaceSuccess) String() string {
 func (*KillWorkspaceSuccess) ProtoMessage() {}
 
 func (x *KillWorkspaceSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +275,7 @@ func (x *KillWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{3}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -212,7 +295,7 @@ type KillWorkspaceError struct {
 
 func (x *KillWorkspaceError) Reset() {
 	*x = KillWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -224,7 +307,7 @@ func (x *KillWorkspaceError) String() string {
 func (*KillWorkspaceError) ProtoMessage() {}
 
 func (x *KillWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -237,7 +320,7 @@ func (x *KillWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorkspaceError.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *KillWorkspaceError) GetCause() isKillWorkspaceError_Cause {
@@ -323,7 +406,7 @@ type KillWorkspaceUnknownWorkspace struct {
 
 func (x *KillWorkspaceUnknownWorkspace) Reset() {
 	*x = KillWorkspaceUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -335,7 +418,7 @@ func (x *KillWorkspaceUnknownWorkspace) String() string {
 func (*KillWorkspaceUnknownWorkspace) ProtoMessage() {}
 
 func (x *KillWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -348,7 +431,7 @@ func (x *KillWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{5}
 }
 
 type KillWorkspaceWorkspaceRefMismatch struct {
@@ -361,7 +444,7 @@ type KillWorkspaceWorkspaceRefMismatch struct {
 
 func (x *KillWorkspaceWorkspaceRefMismatch) Reset() {
 	*x = KillWorkspaceWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +456,7 @@ func (x *KillWorkspaceWorkspaceRefMismatch) String() string {
 func (*KillWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *KillWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,7 +469,7 @@ func (x *KillWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use KillWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *KillWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
@@ -406,7 +489,7 @@ type KillWorkspaceTransferringAway struct {
 
 func (x *KillWorkspaceTransferringAway) Reset() {
 	*x = KillWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +501,7 @@ func (x *KillWorkspaceTransferringAway) String() string {
 func (*KillWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *KillWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +514,7 @@ func (x *KillWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *KillWorkspaceTransferringAway) GetAddress() string {
@@ -449,7 +532,7 @@ type KillWorkspaceNotYetAdopted struct {
 
 func (x *KillWorkspaceNotYetAdopted) Reset() {
 	*x = KillWorkspaceNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -461,7 +544,7 @@ func (x *KillWorkspaceNotYetAdopted) String() string {
 func (*KillWorkspaceNotYetAdopted) ProtoMessage() {}
 
 func (x *KillWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -474,20 +557,25 @@ func (x *KillWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*KillWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 var File_agentrepl_v1_endpoint_kill_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_kill_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"P\n" +
+	"*agentrepl/v1/endpoint_kill_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"t\n" +
 	"\x14KillWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9b\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x18\n" +
+	"\x05op_id\x18\x02 \x01(\tH\x00R\x04opId\x88\x01\x01B\b\n" +
+	"\x06_op_id\"\xde\x01\n" +
 	"\x15KillWorkspaceResponse\x12>\n" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.KillWorkspaceSuccessH\x00R\asuccess\x128\n" +
-	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.KillWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x16\n" +
+	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.KillWorkspaceErrorH\x00R\x05error\x12A\n" +
+	"\baccepted\x18\x03 \x01(\v2#.agentrepl.v1.KillWorkspaceAcceptedH\x00R\bacceptedB\b\n" +
+	"\x06result\",\n" +
+	"\x15KillWorkspaceAccepted\x12\x13\n" +
+	"\x05op_id\x18\x01 \x01(\tR\x04opId\"\x16\n" +
 	"\x14KillWorkspaceSuccess\"\x92\x03\n" +
 	"\x12KillWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.KillWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
@@ -514,31 +602,33 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_kill_workspace_proto_goTypes = []any{
 	(*KillWorkspaceRequest)(nil),              // 0: agentrepl.v1.KillWorkspaceRequest
 	(*KillWorkspaceResponse)(nil),             // 1: agentrepl.v1.KillWorkspaceResponse
-	(*KillWorkspaceSuccess)(nil),              // 2: agentrepl.v1.KillWorkspaceSuccess
-	(*KillWorkspaceError)(nil),                // 3: agentrepl.v1.KillWorkspaceError
-	(*KillWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.KillWorkspaceUnknownWorkspace
-	(*KillWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
-	(*KillWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.KillWorkspaceTransferringAway
-	(*KillWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.KillWorkspaceNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                   // 8: workspace.v1.WorkspaceRef
+	(*KillWorkspaceAccepted)(nil),             // 2: agentrepl.v1.KillWorkspaceAccepted
+	(*KillWorkspaceSuccess)(nil),              // 3: agentrepl.v1.KillWorkspaceSuccess
+	(*KillWorkspaceError)(nil),                // 4: agentrepl.v1.KillWorkspaceError
+	(*KillWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.KillWorkspaceUnknownWorkspace
+	(*KillWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+	(*KillWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.KillWorkspaceTransferringAway
+	(*KillWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.KillWorkspaceNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                   // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_kill_workspace_proto_depIdxs = []int32{
-	8, // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.KillWorkspaceResponse.success:type_name -> agentrepl.v1.KillWorkspaceSuccess
-	3, // 2: agentrepl.v1.KillWorkspaceResponse.error:type_name -> agentrepl.v1.KillWorkspaceError
-	4, // 3: agentrepl.v1.KillWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.KillWorkspaceUnknownWorkspace
-	5, // 4: agentrepl.v1.KillWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
-	6, // 5: agentrepl.v1.KillWorkspaceError.transferring_away:type_name -> agentrepl.v1.KillWorkspaceTransferringAway
-	7, // 6: agentrepl.v1.KillWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.KillWorkspaceNotYetAdopted
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	9, // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	3, // 1: agentrepl.v1.KillWorkspaceResponse.success:type_name -> agentrepl.v1.KillWorkspaceSuccess
+	4, // 2: agentrepl.v1.KillWorkspaceResponse.error:type_name -> agentrepl.v1.KillWorkspaceError
+	2, // 3: agentrepl.v1.KillWorkspaceResponse.accepted:type_name -> agentrepl.v1.KillWorkspaceAccepted
+	5, // 4: agentrepl.v1.KillWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.KillWorkspaceUnknownWorkspace
+	6, // 5: agentrepl.v1.KillWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+	7, // 6: agentrepl.v1.KillWorkspaceError.transferring_away:type_name -> agentrepl.v1.KillWorkspaceTransferringAway
+	8, // 7: agentrepl.v1.KillWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.KillWorkspaceNotYetAdopted
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_kill_workspace_proto_init() }
@@ -546,11 +636,13 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_kill_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*KillWorkspaceResponse_Success)(nil),
 		(*KillWorkspaceResponse_Error)(nil),
+		(*KillWorkspaceResponse_Accepted)(nil),
 	}
-	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4].OneofWrappers = []any{
 		(*KillWorkspaceError_UnknownWorkspace)(nil),
 		(*KillWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*KillWorkspaceError_TransferringAway)(nil),
@@ -562,7 +654,7 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
