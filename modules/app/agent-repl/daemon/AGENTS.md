@@ -385,6 +385,7 @@ ending row, live and on replay.
 | `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
+| `AGENT_REPL_NOTIFIER_CMD` | operator/test | the desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `alerter` (macOS) or `notify-send` (Linux) on PATH, and a missing one is ERROR at boot and on every banner. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary every one of the daemon's OWN calls execs: the login pty, and `internal/headless`'s runs (the classifier's routing question and the workspace naming call). A fake script in tests. Naming it EXPLICITLY is also what makes those spawns legal under `AGENT_REPL_FORBID_VENDOR_CALLS`: the guard refuses only the bare default `claude`, since an explicit path is by definition not a call to the real CLI |
 | `AGENT_REPL_DEPLOY_BUILDER` | test only | ONE executable a deploy runs as `<exe> --out <staging>` in place of the real build (`make -C proto all`, then `bin/build-frontend.sh --out <staging> <target>` per target). The integration harness's fake stages what runs, a stale component, or a failure (`integration/harness/deploybuild.go`) |
 | `AGENT_REPL_LAUNCHCTL` | operator/test | the launchctl a deploy's store/sidecar restart drives (default: `launchctl` on PATH); the harness points it at a recorder so no test reaches launchd |
@@ -393,6 +394,33 @@ ending row, live and on replay.
 | `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |
 | `SHIM_BUILD_SHA` | operator/test | the shim build stated for a checkout with NO bundle on disk. In production every spawn is stamped with the CONTENT HASH (sha256) of the installed bundle it runs, held from the hash to the shim's answer so an install cannot swap the bytes between them (`buildid.ShimBundle`); this variable answers only while no bundle exists at `--shim-main`. With neither, the SPAWN refuses (`spawn_failed`), naming both — an unstamped shim cannot be judged for staleness. It has no flag |
 | `AGENT_REPL_CHECKOUT` | operator | the agent-repl module root (`modules/app/agent-repl`) the binary was deployed from. It is resolved without this: the executable's own ancestors are walked first, and the path this daemon's source was COMPILED from answers when the binary was built outside the tree (`go build -o <tmp>`, which every test harness does). `--shim-main`, `--webapp-dist` and `--prompts-dir` default beneath it; `proto/vocab/` (the render colors and paint classes) and `daemon/bin/.built-sha` are read from it and have NO flag |
+
+## The daemon posts every desktop banner (`internal/desktopnotify`)
+
+Emacs owns two facts and nothing else: whether it is focused (stated on its
+WatchDaemon request and moved by `ReportEditorFocus`), and the tab selection a
+click asks for (the host stream's `notification_clicked`). The rule is
+Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
+
+- **The focus lives and dies with Emacs's WatchDaemon stream**
+  (`desktopnotify.Focus`): attached from the request, released when the stream
+  ends (Emacs then reads as unfocused), and a later stream supersedes an
+  earlier one by generation. A report with no stream standing is refused
+  (`no_emacs_stream`), never dropped.
+- **A turn end's banner rides the live turn end** (`promptqueue.OnTurnEnded` →
+  `desktopnotify.TurnBanners`), after the door has drawn the ending the banner
+  is composed from (`feed.Resolver.TakeTurnEnding`, filed on the LIVE plane
+  only, so a replay raises nothing). How the end reads is
+  `ladder.ResolveTurnEnd`, the table the roster's arm comes from: `done` and
+  `interrupted` raise ✅ over a Sonnet summary of the final answer, `turn_failed`
+  raises ❌ over the errored ending's line.
+- **Agent notifications** (a permission ask, a question, an agent push) raise
+  the workspace's banner from `workspace.verbs.Notify`, beside the attention
+  marker it already set.
+- **Every banner runs on its own goroutine** (the program blocks until a click,
+  a dismissal or its 60s timeout); focus is read before composing and again
+  after, and `Notifier.Close` cancels and joins them before the state client
+  closes.
 
 ## The `-fake` classifier (deterministic)
 
