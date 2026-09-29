@@ -130,7 +130,7 @@ func TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	}
 }
 
-func TestADeployOverARunningTurnWaitsItOutAndEndsNothing(t *testing.T) {
+func TestADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace whose turn is parked on a foreground shell that
 	// concludes on nothing but an interrupt — a turn that is RUNNING for as
@@ -170,49 +170,46 @@ func TestADeployOverARunningTurnWaitsItOutAndEndsNothing(t *testing.T) {
 	// Act: deploy a daemon build WHILE the turn runs.
 	resp, err := w.Client().Deploy(w.Ctx(), dpUnforced())
 
-	// Assert: the daemon is handed over, and it says the workspace is what
-	// it waits on.
+	// Assert: the daemon is handed over, counting the running turn's
+	// workspace as busy.
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
 	if handover := dpHandingOver(t, resp); handover.GetBusy() != 1 || handover.GetForced() {
 		t.Fatalf("handing_over = %v, want busy = 1 and unforced", handover)
 	}
-	dpAwaitAnnounced(t, w, daemonStream)
-
-	// Assert: THE HANDOVER IS PARKED ON THE RUNNING TURN. A second deploy is
-	// refused naming exactly this workspace as the holdout, which can only be
-	// true while the first has announced and not transferred it.
-	again, err := w.Client().Deploy(w.Ctx(), dpUnforced())
-	if err != nil {
-		t.Fatalf("second Deploy: %v", err)
-	}
-	waiting := again.Msg.GetError().GetAlreadyRollingOut().GetWaitingOn()
-	if len(waiting) != 1 || waiting[0] != ws.GetId() {
-		t.Fatalf("second Deploy = %v, want error.already_rolling_out waiting on %q", again.Msg, ws.GetId())
+	addr := dpAwaitAnnounced(t, w, daemonStream).GetAddress()
+	if addr == "" {
+		t.Fatal("shutdown_announced.address is unset, want the successor's address")
 	}
 
-	// Act: the turn ends the way its USER ends it — the deploy never did.
-	stop, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+	// Assert: A HANDOVER NEVER WAITS ON WORK (owner ruling, 2026-09-27). The
+	// busy workspace transfers mid-turn, its shim detached and left running,
+	// and the incumbent exits in an orderly way while the turn still runs.
+	if code := w.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the mid-turn handover", code)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, addr)
+	successor := adDial(addr)
+
+	// Act: the turn ends the way its USER ends it, on the daemon that now
+	// serves it — the deploy never did.
+	stop, err := successor.Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: ws,
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
 	}))
 	if err != nil {
-		t.Fatalf("Interrupt(turn): %v", err)
+		t.Fatalf("Interrupt(turn) on the successor: %v", err)
 	}
 
 	// Assert: THE TURN WAS STILL THERE TO INTERRUPT. Had the deploy ended it,
-	// the interrupt would have found nothing running.
+	// the successor would have found nothing running.
 	if stop.Msg.GetSuccess().GetInterruptedTurn() == nil {
-		t.Fatalf("Interrupt(turn) = %v, want success.interrupted_turn: the deploy must have left the turn running", stop.Msg)
+		t.Fatalf("Interrupt(turn) on the successor = %v, want success.interrupted_turn: the handover must have carried the running turn", stop.Msg)
 	}
-	if ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded(); ended.GetInterrupted() == nil {
+	ended := awaitFeedRowOn(t, w, successor, ws, "turn "+turn.GetValue()+" to end on the successor", endsTurn(turn)).GetTurnEnded()
+	if ended.GetInterrupted() == nil {
 		t.Fatalf("turn ended = %v, want the user's own interrupt as its only ending", ended)
-	}
-
-	// Assert: with the workspace free, the handover completes.
-	if code := w.AwaitExit(); code != 0 {
-		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 once the turn had ended", code)
 	}
 }
 
