@@ -1105,8 +1105,8 @@ func TestAMidTurnApiErrorRidesTheTerminalsHeadlineAsEvidence(t *testing.T) {
 	if len(h.rows(rootFeed())) != 2 {
 		t.Fatalf("rows = %d, want the prompt and the terminal alone", len(h.rows(rootFeed())))
 	}
-	if !h.hasRecord("warn", "daemon.feed.api_error") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.api_error", h.records())
+	if !h.hasRecord("debug", "daemon.feed.api_error") || h.hasRecord("warn", "daemon.feed.api_error") {
+		t.Fatalf("records = %+v, want the feed's evidence record at DEBUG and no WARN: the session watcher owns the failure's WARN", h.records())
 	}
 }
 
