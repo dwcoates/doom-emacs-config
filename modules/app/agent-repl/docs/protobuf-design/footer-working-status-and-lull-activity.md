@@ -68,6 +68,25 @@ substatus that stands for the whole turn. The owner wants the status called
   landing replaces the notification (the notification's documented lifetime,
   "shown until the next activity replaces it").
 
+## Implementation notes
+
+- **The step and the line are the footer resolver's**
+  (`daemon/internal/resolve/footer/quietstretch.go`). Every AgentActivity item
+  arm is read through one table (`feedKinds`: label, step, whether the feed
+  draws it) and every item oneof arm through another (`itemPhases`); unit
+  tests pin that both cover the whole contract.
+- **Only the main agent's items count while a turn runs**, so the watcher names
+  the main agent to the footer as it does to the feed
+  (`sessionwatcher.FooterSink.OnMainAgent`).
+- **A prompt's delivery is a landing**: the turn-open edge stands
+  "✅ Prompt delivered — awaiting response..." until the first item surfaces.
+- **Detached work leaves the turn**: a detached announcement lands its unit
+  ("✅ Moved to background — continuing..."), a monitor hands off at its
+  first frame, and later frames of either are never a step.
+- **Background lines** stand from a detached run's own terminal
+  ("✅ Subagent finished", "❌ Bash failed") and from any item landing with no
+  turn in flight; they are dropped when no detached work remains.
+
 ## THE PLAN (owner-approved 2026-09-29; read this whole file after any compaction)
 
 ### What changes — exactly this, nothing else
