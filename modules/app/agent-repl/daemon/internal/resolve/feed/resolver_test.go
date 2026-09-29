@@ -138,6 +138,8 @@ type harness struct {
 	warnings *fakeWarnings
 	// placed are the entry placements Deps.EntryPlaced was told, in order.
 	placed []placedEntry
+	// drawn are the rows Deps.ItemDrawn was told, in order.
+	drawn []placedEntry
 }
 
 // fakeWarnings records every warning the resolver raised on the topbar.
@@ -220,6 +222,9 @@ func newHarness(t *testing.T) *harness {
 		PageSize:  3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
+		},
+		ItemDrawn: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
+			h.drawn = append(h.drawn, placedEntry{unit: unit, row: row.GetValue()})
 		},
 	})
 	if err != nil {

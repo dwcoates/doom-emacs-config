@@ -310,6 +310,16 @@ type Deps struct {
 	// into this resolver. nil tells nobody, which is what a test that is not
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	// ItemDrawn is told the FeedId of EVERY activity row the moment the feed
+	// first draws it for its unit, and again whenever that FeedId changes. It
+	// is how the footer ends a quiet stretch on the row that ended it
+	// (frontend.v1.FooterStatusQuietStretchEnding): the client holds the
+	// ended line until it has painted that row.
+	//
+	// CALLED WITH THE RESOLVER'S LOCK HELD, as EntryPlaced is, and before the
+	// footer takes the same frame (the watcher routes every frame to the feed
+	// first). nil tells nobody.
+	ItemDrawn func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
 	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
 	PageSize int
 	// TailRetention is how many published rows a feed retains for a tail's

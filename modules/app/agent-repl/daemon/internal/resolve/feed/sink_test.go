@@ -372,3 +372,61 @@ func TestARowOwedByADeadTurnKeepsThatTurnsStamp(t *testing.T) {
 	}
 	t.Fatalf("rows = %+v, want the denied ask's row", h.rows(rootFeed()))
 }
+
+// TestEveryDrawnActivityRowIsAnnouncedToTheFooterOnce pins Deps.ItemDrawn: the
+// footer ends a quiet stretch on the row that ended it, so every activity row
+// is announced at its first draw, a redraw at the same address announces
+// nothing, and a kind that draws no row announces nothing.
+func TestEveryDrawnActivityRowIsAnnouncedToTheFooterOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		// frames are sent in order as the main agent's.
+		frames []*conversationv1.AgentActivity
+		want   []placedEntry
+	}{
+		{
+			name:   "a first draw is announced at its row",
+			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test")},
+			want:   []placedEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")}},
+		},
+		{
+			name:   "a redraw at the same address announces nothing more",
+			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test"), bashCall("toolu_bash", "npm test")},
+			want:   []placedEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")}},
+		},
+		{
+			name:   "each unit is announced at its own row",
+			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test"), settledRead("toolu_read")},
+			want: []placedEntry{
+				{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")},
+				{unit: "toolu_read", row: activityRowID(rootFeed(), "toolu_read")},
+			},
+		},
+		{
+			name:   "a kind that draws no row announces nothing",
+			frames: []*conversationv1.AgentActivity{wakeupActivity("wakeup-1")},
+			want:   nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			for _, frame := range tc.frames {
+				h.send(frame)
+			}
+
+			// Assert.
+			if len(h.drawn) != len(tc.want) {
+				t.Fatalf("drawn = %+v, want %+v", h.drawn, tc.want)
+			}
+			for i := range tc.want {
+				if h.drawn[i] != tc.want[i] {
+					t.Fatalf("drawn[%d] = %+v, want %+v", i, h.drawn[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
