@@ -451,6 +451,20 @@ func TestUnknownToolsResultSettlesAsUnmodeledSuccess(t *testing.T) {
 type recordingObserver struct {
 	stopped   *[]string
 	concluded *[]string
+	shells    *[]shellConclusion
+}
+
+// shellConclusion is one ShellConcluded report.
+type shellConclusion struct {
+	taskID string
+	status string
+	atMs   int64
+}
+
+func (o recordingObserver) ShellConcluded(taskID, status string, atMs int64) {
+	if o.shells != nil {
+		*o.shells = append(*o.shells, shellConclusion{taskID, status, atMs})
+	}
 }
 
 func (o recordingObserver) TaskSpawned(string, string, string, string, bool) {}

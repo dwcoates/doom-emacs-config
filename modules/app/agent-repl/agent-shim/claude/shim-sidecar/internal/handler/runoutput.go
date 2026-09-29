@@ -306,6 +306,24 @@ func (r *RunOutput) Cancelled(taskID, run, ownerAgentID string, settledAtMs int6
 	return []*storev1.StoreEntry{r.conv.BashCancelled(at, run, output, omitted, settledAtMs, r.read)}
 }
 
+// Notified spells the vendor's task notification as the run's terminal,
+// carrying the output this handler has accumulated off the run's file.
+//
+// IT IS THE SAME SEAM AS Cancelled: the reader learns the fact from another
+// file's records, and only this side holds the run's bytes. A handler that
+// read no byte of the spool — or a fresh one, for a run whose spool never
+// existed — states the output `not_observed`.
+func (r *RunOutput) Notified(taskID, run, ownerAgentID, status string, settledAtMs int64) []*storev1.StoreEntry {
+	if run == "" {
+		r.log.With(logging.Context{Operation: "notified-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
+			Log("no terminal minted for a notified run: no spawning-call activity id was supplied, so the frame would name no unit (status=%s)", status)
+		return nil
+	}
+	at := r.TerminalAttribution(taskID, ownerAgentID, run)
+	output, omitted := r.Seen()
+	return []*storev1.StoreEntry{r.conv.BashNotified(at, run, output, omitted, status, settledAtMs, r.read)}
+}
+
 // Lost spells the reader's LOST conclusion as the detached run's terminal.
 //
 // LOST IS ITS OWN WORD — "we stopped seeing it", not "known failed" — and the
