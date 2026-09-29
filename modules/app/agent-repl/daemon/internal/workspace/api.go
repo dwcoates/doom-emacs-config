@@ -240,11 +240,18 @@ type Verbs interface {
 	// manifests in the footer, not only in the answer.
 	Close(ctx context.Context, ws ids.WorkspaceID) error
 	// Kill is the big red button: forced session death, never blocks, data
-	// survives.
+	// survives. It is BeginKill and its Teardown, run in one call.
 	Kill(ctx context.Context, ws ids.WorkspaceID) error
+	// BeginKill is a kill's fast half: every refusal, the queued merge
+	// dropped, the workspace marked closed. Its Teardown kills the session, and
+	// a caller that answered its client in between runs it detached.
+	BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, error)
 	// Nuke destroys data: kill if live, then delete the worktree and the
-	// branch, then forget the record. A nuked workspace LEAVES the roster.
+	// branch, then forget the record. A nuked workspace LEAVES the roster. It
+	// is BeginNuke and its Teardown, run in one call.
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
+	// BeginNuke is a nuke's fast half, as BeginKill is a kill's.
+	BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, error)
 	// Forget removes a CLOSED workspace's registry record, and its repository
 	// record when no other workspace references that repository. It destroys
 	// no files: the directory survives and re-registering it mints a fresh

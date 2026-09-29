@@ -10,6 +10,12 @@ import (
 	"claude-repld/internal/wsm"
 )
 
+// Teardown is the SLOW HALF of a kill or a nuke: the session's death, and for
+// a nuke the worktree and the branch. It runs after the fast half
+// (BeginKill, BeginNuke) has already marked the workspace closed, so a caller
+// can answer its client between the two and run this detached.
+type Teardown func(ctx context.Context) error
+
 // Kill is the big red button: FORCED session death. It never blocks on what is
 // running, and it destroys no data — the worktree, the branch and every durable
 // record survive, and the terminal it writes is REHYDRATABLE, so the
@@ -19,16 +25,46 @@ import (
 // writes its own terminals, and only then is the process stopped. Everything
 // still without a terminal is closed in ONE transaction.
 func (v *verbs) Kill(ctx context.Context, ws ids.WorkspaceID) error {
-	_, log, err := v.owned(ctx, "KillWorkspace", ws)
+	teardown, err := v.BeginKill(ctx, ws)
 	if err != nil {
 		return err
+	}
+	return teardown(ctx)
+}
+
+// BeginKill is Kill's fast half. It answers every refusal a kill can have (the
+// workspace is not this daemon's to kill), drops a queued merge, and marks the
+// workspace CLOSED, so the roster says so everywhere before the session has
+// begun to die; the Teardown it answers kills the session.
+func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, error) {
+	_, log, err := v.owned(ctx, "KillWorkspace", ws)
+	if err != nil {
+		return nil, err
 	}
 	// A WAITING MERGE ENDS WITH THE WORKSPACE. Close refuses outright while a
 	// merge is queued, but Kill never blocks on what is running, so this is the
 	// one door a queued merge's workspace can leave through — and a merge left
 	// on the queue behind it would wait forever on a workspace that is gone.
 	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
-	return v.kill(ctx, log, ws)
+	if err := v.markClosedFirst(ctx, log, opKill, ws); err != nil {
+		return nil, fmt.Errorf("kill %q: %w", ws, err)
+	}
+	return func(ctx context.Context) error { return v.kill(ctx, log, ws) }, nil
+}
+
+// markClosedFirst marks a workspace closed and republishes the roster BEFORE
+// its teardown runs: the tab goes the moment the verb is accepted, and a
+// roster push arriving while the session dies must already say closed, or it
+// would stand the tab again. A shim dying under the teardown is not revived
+// either, since a closed workspace's session is never brought back.
+func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID) error {
+	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {
+		log.Error(op, "could not record the close ahead of the teardown", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("record closed: %w", err)
+	}
+	log.Info(op, "marked the workspace closed; its teardown follows", nil)
+	v.republishRegistry(ctx, log, op)
+	return nil
 }
 
 // kill is Kill's body, shared with Nuke, which kills before it destroys.
@@ -105,15 +141,36 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 // worktree AND the branch, and forgets the record. A nuked workspace LEAVES the
 // roster entirely — it is the only verb in this package with no undo.
 func (v *verbs) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
-	record, log, err := v.owned(ctx, "NukeWorkspace", ws)
+	teardown, err := v.BeginNuke(ctx, ws)
 	if err != nil {
 		return err
+	}
+	return teardown(ctx)
+}
+
+// BeginNuke is Nuke's fast half, as BeginKill is Kill's: every ownership
+// refusal, the queued merge dropped, the workspace marked closed. The Teardown
+// it answers kills the session and destroys the worktree and the branch; a git
+// failure there is the typed `git_failed` refusal, and leaves the workspace
+// closed but recorded.
+func (v *verbs) BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, error) {
+	record, log, err := v.owned(ctx, "NukeWorkspace", ws)
+	if err != nil {
+		return nil, err
 	}
 
 	// The waiting merge goes first, for the same reason Kill drops it: the
 	// nuke destroys the very worktree the merge would have run against.
 	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
+	if err := v.markClosedFirst(ctx, log, opNuke, ws); err != nil {
+		return nil, fmt.Errorf("nuke %q: %w", ws, err)
+	}
+	return func(ctx context.Context) error { return v.nuke(ctx, log, record) }, nil
+}
 
+// nuke is Nuke's slow half.
+func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	ws := record.ID
 	if v.deps.Sessions.Live(ws) {
 		if err := v.kill(ctx, log, ws); err != nil {
 			return fmt.Errorf("nuke %q: %w", ws, err)
