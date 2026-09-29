@@ -133,8 +133,9 @@ const adTookSessionFactsMessage = "took the session facts from the shim's re-ann
 
 // adIgnoredReannouncementMessage is reannouncedLocked's DEBUG message when a
 // watcher that ALREADY holds the facts sees a later re-announcement on the
-// SAME watch (an ordinary re-open after a link break, not a new watcher).
-const adIgnoredReannouncementMessage = "ignored a re-announced SessionStarted; the facts are already held"
+// SAME watch (an ordinary re-open after a link break, not a new watcher): it
+// ignores the facts and reconciles only the live membership.
+const adIgnoredReannouncementMessage = "ignored a re-announced SessionStarted's facts; they are already held"
 
 // adCountLogMessage counts a workspace's daemon-log records matching an exact
 // operation and a message substring, ACROSS EVERY DAEMON RUNTIME that wrote
