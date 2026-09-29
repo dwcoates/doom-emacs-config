@@ -104,6 +104,42 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 	return built
 }
 
+// transcriptFact describes one fact only a TRANSCRIPT converter reports to the
+// reader, for plumbTranscriptFact: what it is called in the log, which method
+// adopts it, and what goes wrong downstream when a transcript converter does not.
+type transcriptFact struct {
+	// operation is the plumbing record's operation.
+	operation string
+	// noun names the fact, plural ("task stops").
+	noun string
+	// onlyWhy says why only a transcript carries it.
+	onlyWhy string
+	// method is the Set*Observer method a converter adopts it by.
+	method string
+	// consequence is what a transcript converter's silence costs.
+	consequence string
+}
+
+// plumbTranscriptFact hands a converter one of the reader's transcript-fact
+// callbacks through ADOPT, which answers whether the converter took it.
+//
+// ONLY A TRANSCRIPT CARRIES THESE FACTS, so a spool's or a journal's converter
+// declining one is ordinary and recorded at verbose, and a TRANSCRIPT converter
+// declining one is a defect stated at error with what it costs.
+func (s *sidecar) plumbTranscriptFact(kind tail.Kind, fact transcriptFact, adopt func() bool, log *logging.Bound) {
+	if !adopt() {
+		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
+			log.With(logging.Context{Operation: fact.operation}).LogVerbose(
+				"the %s converter reports no %s; %s", kind, fact.noun, fact.onlyWhy)
+			return
+		}
+		log.With(logging.Context{Operation: fact.operation, Level: "error"}).Log(
+			"the %s converter reports no %s (it implements no %s): %s", kind, fact.noun, fact.method, fact.consequence)
+		return
+	}
+	log.With(logging.Context{Operation: fact.operation}).LogVerbose("%s plumbed for kind=%s", fact.noun, kind)
+}
+
 // plumbTaskStops hands the converter the reader's task-stop callback.
 //
 // ONLY A TRANSCRIPT CARRIES A TaskStop RESULT, for the same reason only a
@@ -112,19 +148,19 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 // which is the one thing the carve-out exists to prevent — so its silence is a
 // defect, and a spool's is not.
 func (s *sidecar) plumbTaskStops(kind tail.Kind, built tail.Handler, log *logging.Bound) {
-	sink, ok := built.(taskStopSink)
-	if !ok {
-		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
-			log.With(logging.Context{Operation: "plumb-task-stop"}).LogVerbose(
-				"the %s converter reports no task stops; only a transcript carries the tool results a stop is stated in", kind)
-			return
+	s.plumbTranscriptFact(kind, transcriptFact{
+		operation:   "plumb-task-stop",
+		noun:        "task stops",
+		onlyWhy:     "only a transcript carries the tool results a stop is stated in",
+		method:      "SetTaskStopObserver",
+		consequence: "a run a person stopped will be concluded LOST instead of cancelled",
+	}, func() bool {
+		sink, ok := built.(taskStopSink)
+		if ok {
+			sink.SetTaskStopObserver(s.TaskStopped)
 		}
-		log.With(logging.Context{Operation: "plumb-task-stop", Level: "error"}).Log(
-			"the %s converter reports no task stops (it implements no SetTaskStopObserver): a run a person stopped will be concluded LOST instead of cancelled", kind)
-		return
-	}
-	sink.SetTaskStopObserver(s.TaskStopped)
-	log.With(logging.Context{Operation: "plumb-task-stop"}).LogVerbose("task stops plumbed for kind=%s", kind)
+		return ok
+	}, log)
 }
 
 // plumbTaskConclusions hands the converter the reader's run-concluded callback.
@@ -132,19 +168,19 @@ func (s *sidecar) plumbTaskStops(kind tail.Kind, built tail.Handler, log *loggin
 // ONLY A TRANSCRIPT SETTLES A BACKGROUNDED AGENT RUN, so a transcript converter
 // that reports none leaves every notified run to be overwritten LOST — a defect.
 func (s *sidecar) plumbTaskConclusions(kind tail.Kind, built tail.Handler, log *logging.Bound) {
-	sink, ok := built.(taskConclusionSink)
-	if !ok {
-		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
-			log.With(logging.Context{Operation: "plumb-task-conclusion"}).LogVerbose(
-				"the %s converter reports no run conclusions; only a transcript settles a backgrounded agent run", kind)
-			return
+	s.plumbTranscriptFact(kind, transcriptFact{
+		operation:   "plumb-task-conclusion",
+		noun:        "run conclusions",
+		onlyWhy:     "only a transcript settles a backgrounded agent run",
+		method:      "SetTaskConclusionObserver",
+		consequence: "a notified agent run can later be concluded LOST over its terminal",
+	}, func() bool {
+		sink, ok := built.(taskConclusionSink)
+		if ok {
+			sink.SetTaskConclusionObserver(s.TaskConcluded)
 		}
-		log.With(logging.Context{Operation: "plumb-task-conclusion", Level: "error"}).Log(
-			"the %s converter reports no run conclusions (it implements no SetTaskConclusionObserver): a notified agent run can later be concluded LOST over its terminal", kind)
-		return
-	}
-	sink.SetTaskConclusionObserver(s.TaskConcluded)
-	log.With(logging.Context{Operation: "plumb-task-conclusion"}).LogVerbose("run conclusions plumbed for kind=%s", kind)
+		return ok
+	}, log)
 }
 
 // plumbTerminals hands the converter the reader's terminal-read callback.

@@ -289,3 +289,115 @@ func TestLostForAConcludedRunIsRefusedLoudly(t *testing.T) {
 		t.Fatalf("task_id = %q, want the concluded run", got)
 	}
 }
+
+// stopCapable is a transcript converter that reports task stops.
+type stopCapable struct{ stopped func(taskID string) }
+
+func (s *stopCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
+func (s *stopCapable) SetTaskStopObserver(fn func(taskID string))               { s.stopped = fn }
+
+// conclusionCapable is a transcript converter that reports run conclusions.
+type conclusionCapable struct{ concluded func(taskID string) }
+
+func (c *conclusionCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
+func (c *conclusionCapable) SetTaskConclusionObserver(fn func(taskID string))         { c.concluded = fn }
+
+// TestPlumbTranscriptFactStatesEachOutcome pins the one helper every
+// transcript-fact plumbing goes through: an adopted fact is recorded verbose, a
+// spool declining one is ordinary (verbose), and a transcript declining one is
+// a defect stated once at error.
+func TestPlumbTranscriptFactStatesEachOutcome(t *testing.T) {
+	fact := transcriptFact{
+		operation: "plumb-test-fact", noun: "test facts", onlyWhy: "only a transcript carries them",
+		method: "SetTestObserver", consequence: "nothing downstream learns them",
+	}
+	cases := []struct {
+		name      string
+		kind      tail.Kind
+		adopted   bool
+		wantLevel string
+		verbose   bool
+	}{
+		{"a transcript that adopts it", tail.KindSessionTranscript, true, "", true},
+		{"a transcript that declines it", tail.KindAgentTranscript, false, "error", false},
+		{"a spool that declines it", tail.KindShellSpool, false, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+
+			// Act.
+			h.sc.plumbTranscriptFact(tc.kind, fact, func() bool { return tc.adopted }, h.sc.log)
+
+			// Assert.
+			got := h.ops(t, fact.operation)
+			if len(got) != 1 {
+				t.Fatalf("records for %q = %d, want exactly one", fact.operation, len(got))
+			}
+			if tc.wantLevel != "" && got[0].Level != tc.wantLevel {
+				t.Fatalf("level = %q, want %q", got[0].Level, tc.wantLevel)
+			}
+			if tc.verbose != (got[0].Verbosity == "verbose") {
+				t.Fatalf("verbosity = %q, want verbose=%t", got[0].Verbosity, tc.verbose)
+			}
+		})
+	}
+}
+
+// TestTranscriptFactPlumbingSharesOneShape runs every transcript-fact plumbing
+// through the same three checks, so a caller hand-rolling its own divergent
+// plumbing fails here: each adopts its fact on a capable converter, and each
+// states a transcript converter lacking the method once at error under its own
+// operation.
+func TestTranscriptFactPlumbingSharesOneShape(t *testing.T) {
+	cases := []struct {
+		name      string
+		operation string
+		plumb     func(s *sidecar, kind tail.Kind, built tail.Handler)
+		capable   func() (tail.Handler, func() bool)
+	}{
+		{
+			"task stops", "plumb-task-stop",
+			func(s *sidecar, kind tail.Kind, built tail.Handler) { s.plumbTaskStops(kind, built, s.log) },
+			func() (tail.Handler, func() bool) {
+				c := &stopCapable{}
+				return c, func() bool { return c.stopped != nil }
+			},
+		},
+		{
+			"run conclusions", "plumb-task-conclusion",
+			func(s *sidecar, kind tail.Kind, built tail.Handler) { s.plumbTaskConclusions(kind, built, s.log) },
+			func() (tail.Handler, func() bool) {
+				c := &conclusionCapable{}
+				return c, func() bool { return c.concluded != nil }
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+" adopted", func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+			built, adopted := tc.capable()
+
+			// Act.
+			tc.plumb(h.sc, tail.KindSessionTranscript, built)
+
+			// Assert.
+			if !adopted() {
+				t.Fatal("the converter was never handed the reader's callback")
+			}
+			h.requireNone(t, tc.operation, "error")
+		})
+		t.Run(tc.name+" missing on a transcript", func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+
+			// Act.
+			tc.plumb(h.sc, tail.KindSessionTranscript, &lostCapable{})
+
+			// Assert.
+			h.requireOnce(t, tc.operation, "error")
+		})
+	}
+}
