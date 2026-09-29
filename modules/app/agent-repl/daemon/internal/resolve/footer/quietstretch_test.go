@@ -896,3 +896,25 @@ func TestASubFeedDrawingEndsTheStretchWithNoEnding(t *testing.T) {
 		t.Fatalf("background = %v, want the line ended with no hold: the client cannot promise to paint a sub-feed row", background)
 	}
 }
+
+func TestTheFirstFrameDeliversATurnWhoseOpenEdgeCameFirst(t *testing.T) {
+	// Arrange: the turn-open edge was consumed before the turn was set, so it
+	// delivered nothing.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnMainAgent(testWS, mainAgent)
+	h.r.OnTurnOpened(testWS, testTurnID)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act: a non-feed item surfaces and lands.
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "schedule_wakeup", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "schedule_wakeup", "success"))
+
+	// Assert
+	if got := quietLine(t, h); got != "✅ Prompt delivered — awaiting response..." {
+		t.Fatalf("line = %q, want the delivered line stood by the first frame", got)
+	}
+	if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.quiet_stretch_without_line"); got != 0 {
+		t.Fatalf("quiet_stretch_without_line errors = %d, want none", got)
+	}
+}
