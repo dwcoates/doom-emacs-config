@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,46 @@ func TestValidateSlugRefusesWhatTheRuleForbids(t *testing.T) {
 				t.Fatalf("ValidateSlug(%q) = nil, want a refusal: there is no repair path", tt.slug)
 			}
 		})
+	}
+}
+
+func TestSlugWordCountCountsAlphanumericRuns(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer string
+		want   int
+	}{
+		{name: "a well-shaped slug", answer: "agent-repl-input-shorter", want: 4},
+		{name: "one word", answer: "login", want: 1},
+		{name: "a sentence", answer: "The name is flaky-login-test.", want: 6},
+		{name: "empty", answer: "", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := SlugWordCount(tt.answer)
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("SlugWordCount(%q) = %d, want %d", tt.answer, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateSlugNamesAnOverLongAnswersWordCount pins that a well-shaped
+// answer with too many words is refused with its count and the limit, which is
+// what the naming call's correction carries back to the model.
+func TestValidateSlugNamesAnOverLongAnswersWordCount(t *testing.T) {
+	// Arrange.
+	answer := "agent-repl-input-shorter"
+
+	// Act.
+	err := ValidateSlug(answer)
+
+	// Assert.
+	want := fmt.Sprintf("the answer is 4 words, over the %d-word limit", SlugWordLimit)
+	if err == nil || err.Error() != want {
+		t.Fatalf("ValidateSlug(%q) = %v, want %q", answer, err, want)
 	}
 }
 
