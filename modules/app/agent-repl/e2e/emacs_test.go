@@ -2527,7 +2527,45 @@ func (e *Emacs) BindingForIn(buffer, keys string) string {
 // the press the same way a scenario stubs it for a command.
 func (e *Emacs) Keys(keys string) {
 	e.t.Helper()
-	e.Eval(fmt.Sprintf(`(progn %s (execute-kbd-macro (kbd %s)) t)`, evilNormalForm, elispString(keys)))
+	e.Eval(keysForm(keys))
+}
+
+// keysForm is the form that presses one key sequence in normal state.
+func keysForm(keys string) string {
+	return fmt.Sprintf(`(progn %s (execute-kbd-macro (kbd %s)) t)`, evilNormalForm, elispString(keys))
+}
+
+// answeringYes wraps FORM so that, for its duration, a `y-or-n-p' whose
+// prompt matches the regexp PROMPT is answered yes.
+//
+// IT ANSWERS ONE QUESTION, NOT ALL OF THEM. Any other prompt still reaches
+// the harness's refusal (`agent-repl-e2e--refuse-prompt'), so a scenario
+// that confirms a kill cannot also wave through a question nobody expected.
+// The stub is a `cl-letf', which wins over the refusing advice for exactly
+// the form's extent, as the settings file's commentary describes.
+func answeringYes(prompt, form string) string {
+	return fmt.Sprintf(`(cl-letf (((symbol-function 'y-or-n-p)
+            (lambda (question &rest args)
+              (if (string-match-p %s (format "%%s" question))
+                  t
+                (apply #'agent-repl-e2e--refuse-prompt question args)))))
+  %s)`, elispString(prompt), form)
+}
+
+// killConfirmPrompt matches the question `agent-repl-kill-workspace' asks
+// before it kills (lisp/verbs.el, "Kill workspace NAME? ").
+const killConfirmPrompt = "\\`Kill workspace "
+
+// LeaderAnsweringYes presses a leader sequence whose command asks a
+// `y-or-n-p' matching PROMPT, and answers it yes (answeringYes).
+func (e *Emacs) LeaderAnsweringYes(prompt, keys string) {
+	e.t.Helper()
+	e.Eval(answeringYes(prompt, keysForm("SPC "+keys)))
+}
+
+// killWorkspaceForm kills the workspace NAME, confirming the kill.
+func killWorkspaceForm(name string) string {
+	return answeringYes(killConfirmPrompt, `(progn (agent-repl-kill-workspace `+elispString(name)+`) t)`)
 }
 
 // KeysIn presses one key sequence in a named buffer, selecting its window
