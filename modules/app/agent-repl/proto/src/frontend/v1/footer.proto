@@ -466,6 +466,10 @@ message FooterStatusActivityQuietStretch {
 //   - A client whose feed is not showing the live tail (the user has scrolled
 //     back through history) will not paint the row where the user is looking,
 //     and draws `activity` at once.
+//   - It is stated only for a row on the ROOT feed, the one feed the client
+//     always shows. An item drawn on a sub-feed (a subagent's own items) is
+//     painted only if the reader has that bubble open, so its drawing ends
+//     the stretch with no ending, and the line clears at once.
 //   - The daemon sets it only while nothing that OUTRANKS the quiet-stretch
 //     line stands (a fault, a deploy's update, a notification, a compaction, a
 //     running hook, a retry): an activity that outranks the line is drawn at

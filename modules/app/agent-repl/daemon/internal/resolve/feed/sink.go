@@ -221,22 +221,22 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		"an activity row was upserted",
 		dlog.Context{"unit": unit, "agent": agent.GetValue(), "row": row.GetId().GetValue()})
 	r.upsert(s, at, row, true)
-	r.announceDrawn(s, unit, row.GetId())
+	r.announceDrawn(s, unit, row.GetId(), at.feed.Root)
 	r.recordCarrier(s, unit, agent, at)
 	r.applyHeldDetachment(s, unit)
 }
 
 // announceDrawn tells Deps.ItemDrawn where UNIT's row is drawn, when that is
 // news: the first draw, or a FeedId that changed.
-func (r *resolver) announceDrawn(s *wsState, unit string, row *frontendv1.FeedId) {
+func (r *resolver) announceDrawn(s *wsState, unit string, row *frontendv1.FeedId, onRoot bool) {
 	if r.deps.ItemDrawn == nil || s.drawnRows[unit] == row.GetValue() {
 		return
 	}
 	s.drawnRows[unit] = row.GetValue()
 	r.logger(s.id).Debug("daemon.feed.item_drawn",
 		"an activity row was drawn at a new address; its address was handed to the footer",
-		dlog.Context{"unit": unit, "row": row.GetValue()})
-	r.deps.ItemDrawn(s.id, unit, row)
+		dlog.Context{"unit": unit, "row": row.GetValue(), "on_root": onRoot})
+	r.deps.ItemDrawn(s.id, unit, row, onRoot)
 }
 
 // recordCarrier remembers, at a unit's first drawn row, WHOSE call it is and
