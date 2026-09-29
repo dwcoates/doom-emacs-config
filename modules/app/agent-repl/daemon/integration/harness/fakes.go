@@ -185,6 +185,14 @@ func NewFakeBrowser(t *testing.T, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "browser")
 }
 
+// NewFakeNotifier writes the desktop banner program the daemon posts through
+// (AGENT_REPL_NOTIFIER_CMD). It records the platform argv and prints nothing,
+// which every platform reads as a dismissal; SetStdout scripts a click.
+func NewFakeNotifier(t *testing.T, dir string) *Recorder {
+	t.Helper()
+	return NewRecorderExecutable(t, dir, "notifier")
+}
+
 // FakeDeployBuildRefusal is what the fake deploy builder prints before it
 // fails: a harness NEVER builds, so every deploy it drives is a build failure
 // that deploys nothing.

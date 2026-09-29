@@ -127,7 +127,7 @@ func TestADeployPushesTheElispReloadToAStaleEmacsAlone(t *testing.T) {
 	ctx, cancel := context.WithCancel(d.Ctx())
 	defer cancel()
 	stream, err := d.Client().WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{
-		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "older-elisp"}},
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "older-elisp", Focus: harness.UnfocusedEditor()}},
 	}))
 	if err != nil {
 		t.Fatalf("WatchDaemon: %v", err)

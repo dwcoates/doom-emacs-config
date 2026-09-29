@@ -38,6 +38,7 @@
 //	AGENT_REPL_SELF_REPO_DIR              the daemon's own-checkout identity for the merge split
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
+//	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)
 //	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
 //	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's stages what runs)
 //

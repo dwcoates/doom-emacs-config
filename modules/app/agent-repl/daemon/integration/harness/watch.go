@@ -332,9 +332,31 @@ func (d *Daemon) WatchDaemonStreamOn(client interface {
 	WatchDaemon(context.Context, *connect.Request[agentreplv1.WatchDaemonRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error)
 }) *Stream[*agentreplv1.WatchDaemonResponse] {
 	d.t.Helper()
+	return d.watchEmacsDaemonStream(client, UnfocusedEditor())
+}
+
+// WatchEmacsDaemonStream opens an Emacs daemon stream connecting with focus,
+// and waits until the daemon has attached that focus, so a banner decided
+// after it returns is decided on it.
+func (d *Daemon) WatchEmacsDaemonStream(focus *agentreplv1.EditorFocus) *Stream[*agentreplv1.WatchDaemonResponse] {
+	d.t.Helper()
+	stream := d.watchEmacsDaemonStream(d.Client(), focus)
+	want := focus.GetFocused() != nil
+	d.AwaitLogRecord(d.RunLogPath(), "the Emacs stream's focus attached", func(r LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.focus" && r.Message == "an Emacs stream attached its focus" &&
+			r.Context["focused"] == want
+	})
+	return stream
+}
+
+// watchEmacsDaemonStream opens an Emacs daemon stream on client.
+func (d *Daemon) watchEmacsDaemonStream(client interface {
+	WatchDaemon(context.Context, *connect.Request[agentreplv1.WatchDaemonRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error)
+}, focus *agentreplv1.EditorFocus) *Stream[*agentreplv1.WatchDaemonResponse] {
+	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
-			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: PinnedElispBuild}}}))
+			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: PinnedElispBuild, Focus: focus}}}))
 		},
 		func(r *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return r })
 }
@@ -389,4 +411,15 @@ func AwaitProcessGone(t *testing.T, ctx context.Context, pid int) {
 			t.Fatalf("process %d did not exit: %v", pid, ctx.Err())
 		}
 	}
+}
+
+// UnfocusedEditor is the focus a harness Emacs stream connects with: the
+// harness is never the focused application, so the daemon posts banners.
+func UnfocusedEditor() *agentreplv1.EditorFocus {
+	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Unfocused{Unfocused: &agentreplv1.EditorFocusUnfocused{}}}
+}
+
+// FocusedEditor is the focus a focused Emacs connects with or reports.
+func FocusedEditor() *agentreplv1.EditorFocus {
+	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Focused{Focused: &agentreplv1.EditorFocusFocused{}}}
 }
