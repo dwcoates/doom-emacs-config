@@ -503,6 +503,10 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// harness.FakeClaudeMintedName, so a scenario may assert on the name a
 	// nameless create produced.
 	fakeClaude := harness.NewFakeClaude(t, filepath.Join(root, "fakebin"))
+	// THE DESKTOP BANNER PROGRAM the daemon posts through is a recorder too:
+	// no scenario may raise a real banner, and the container carries no
+	// banner program, which a daemon records at ERROR on its boot.
+	fakeNotifier := harness.NewFakeNotifier(t, filepath.Join(root, "fakebin"))
 	prewarmTrampolines(t, box)
 	staged := time.Now()
 	e.stageEmacsDir()
@@ -538,6 +542,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
+		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
 		// A tty frame needs a terminal that can position the cursor, and
 		// `dumb` by definition cannot: it has no `cup` capability, so Emacs
