@@ -92,10 +92,8 @@ func (i *ingress) repositoryOf(ctx context.Context, dir string) (wsm.Repository,
 	if err != nil {
 		return wsm.Repository{}, false, fmt.Errorf("read the repository registry: %w", err)
 	}
-	for _, repo := range repositories {
-		if repo.Dir == canonical {
-			return repo, true, nil
-		}
+	if repo, found := wsm.RepositoryAt(repositories, canonical); found {
+		return repo, true, nil
 	}
 	ws, err := i.deps.DB.WorkspaceByDir(ctx, dir)
 	if errors.Is(err, wsm.ErrNotFound) {
@@ -104,10 +102,8 @@ func (i *ingress) repositoryOf(ctx context.Context, dir string) (wsm.Repository,
 	if err != nil {
 		return wsm.Repository{}, false, fmt.Errorf("git_root: look up the workspace at %q: %w", dir, err)
 	}
-	for _, repo := range repositories {
-		if repo.ID == ws.Repo {
-			return repo, true, nil
-		}
+	if repo, found := wsm.RepositoryWithID(repositories, ws.Repo); found {
+		return repo, true, nil
 	}
 	return wsm.Repository{}, false, fmt.Errorf("git_root: workspace %q at %q names repository %q, which the registry does not hold", ws.ID, dir, ws.Repo)
 }
