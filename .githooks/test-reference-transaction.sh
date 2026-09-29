@@ -144,6 +144,23 @@ test_enforced_master_commit_is_refused() {
   fi
 }
 
+test_enforced_refusal_names_each_skill_form() {
+  local repo
+  repo="$(mkrepo)"
+  enforce "$repo" true
+  commit_on_master "$repo"
+
+  if [ "$RUN_RC" -ne 0 ] &&
+    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue own" &&
+    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue workspace <worktree-dir>" &&
+    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue branch <branch-name>" &&
+    printf '%s\n' "$RUN_OUT" | grep -q "never set AGENT_REPL_OWNER_OVERRIDE"; then
+    pass "enforcement on: the refusal names every skill form and forbids the override to agents"
+  else
+    fail "enforcement on: the refusal names every skill form and forbids the override to agents" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
 test_enforced_master_fast_forward_is_refused() {
   local repo before
   repo="$(mkrepo)"
@@ -250,6 +267,7 @@ test_unreadable_switch_is_refused() {
 test_enforcement_off_is_a_silent_no_op
 test_enforcement_false_is_a_silent_no_op
 test_enforced_master_commit_is_refused
+test_enforced_refusal_names_each_skill_form
 test_enforced_master_fast_forward_is_refused
 test_enforced_master_merge_commit_is_refused
 test_enforced_queue_fast_forward_lands
