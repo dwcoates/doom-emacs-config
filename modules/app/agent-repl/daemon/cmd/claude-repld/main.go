@@ -17,13 +17,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/stateroot"
@@ -141,7 +142,7 @@ const envStoreSocket = "AGENT_REPL_STORE_SOCKET"
 
 // defaultStoreSocket is the store's socket when neither the flag nor the
 // environment names one.
-const defaultStoreSocket = ".cache/agent-repl/sock/store.sock"
+const defaultStoreSocket = "~/.cache/agent-repl/sock/store.sock"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
@@ -232,7 +233,11 @@ func parseFlags(program string, args []string) (options, error) {
 	if opts.replacing && opts.joining != "" {
 		return options{}, fmt.Errorf("%s: -%s and -joining are exclusive: a replacement boots as the incumbent, a successor joins one", program, rollout.ReplacingFlagName)
 	}
-	opts.storeSocket = resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket))
+	storeSocket, err := resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket), os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.storeSocket = storeSocket
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
 	if err != nil {
 		return options{}, err
@@ -295,17 +300,24 @@ func resolveFeedTailRetention(flagValue int, envValue string) (int, error) {
 }
 
 // resolveStoreSocket applies the store socket's precedence: the flag beats the
-// environment, which beats the default under the home directory.
-func resolveStoreSocket(flagValue, envValue string) string {
-	if flagValue != "" {
-		return flagValue
+// environment, which beats the default under the home directory. Whichever
+// wins goes through dirpath.Absolute, so a `~` is expanded and a relative
+// socket is refused. The home directory is asked for only when the winner
+// needs it, and a daemon that cannot name it then does not boot: it used to
+// fall back to the bare relative default, a socket nobody listens on.
+func resolveStoreSocket(flagValue, envValue string, userHome func() (string, error)) (string, error) {
+	chosen := firstNonEmpty(flagValue, envValue, defaultStoreSocket)
+	home := ""
+	if strings.HasPrefix(chosen, "~") {
+		h, err := userHome()
+		if err != nil {
+			return "", fmt.Errorf("claude-repld: resolve the home directory the store socket %q is under: %w", chosen, err)
+		}
+		home = h
 	}
-	if envValue != "" {
-		return envValue
-	}
-	home, err := os.UserHomeDir()
+	socket, err := dirpath.Absolute(chosen, home)
 	if err != nil {
-		return defaultStoreSocket
+		return "", fmt.Errorf("claude-repld: resolve the store socket: %w", err)
 	}
-	return filepath.Join(home, defaultStoreSocket)
+	return socket, nil
 }
