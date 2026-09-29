@@ -1279,12 +1279,17 @@ arm this codec does not know is refused as an unknown field."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-kill-workspace-request (request)
-  "Encode KillWorkspaceRequest from plist REQUEST (:workspace REF)."
+  "Encode KillWorkspaceRequest from plist REQUEST (:workspace REF :op-id ID).
+THE OP ID OPTS INTO THE IMMEDIATE ACK: present, the daemon answers
+`accepted' once the workspace is closed and pushes the teardown\='s end on
+WatchDaemon keyed on it; absent, the rpc answers once the teardown is done."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-kill-workspace-request")
-  (list (cons 'workspace
-              (agent-repl-wire-encode-kill-workspace-request-workspace
-               (agent-repl-wire-verbs--require "KillWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))))
+  (agent-repl-wire-verbs--append-op-id
+   (list (cons 'workspace
+               (agent-repl-wire-encode-kill-workspace-request-workspace
+                (agent-repl-wire-verbs--require "KillWorkspaceRequest" "workspace"
+                                                 (plist-get request :workspace)))))
+   request))
 
 (defun agent-repl-wire-decode-kill-workspace-success (json)
   "Decode KillWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
@@ -1355,12 +1360,24 @@ arm this codec does not know is refused as an unknown field."
   "Decode KillWorkspaceResponse's `error' arm from JSON."
   (agent-repl-wire-decode-kill-workspace-error json))
 
+(defun agent-repl-wire-decode-kill-workspace-accepted (json)
+  "Decode KillWorkspaceAccepted from JSON into (:op-id ID).
+The immediate ack: the workspace is closed and its teardown detached; the
+teardown\='s end arrives on the WatchDaemon progress channel."
+  (list :op-id
+        (agent-repl-wire-verbs--decode-string "KillWorkspaceAccepted" 'opId json)))
+
+(defun agent-repl-wire-decode-kill-workspace-response-accepted (json)
+  "Decode KillWorkspaceResponse's `accepted' arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-accepted json))
+
 (defun agent-repl-wire-decode-kill-workspace-response (json)
   "Decode KillWorkspaceResponse from JSON into (:arm ARM :value V)."
-  (agent-repl-wire-verbs--decode-result
+  (agent-repl-wire-verbs--decode-accepting-result
    "KillWorkspaceResponse" json
    #'agent-repl-wire-decode-kill-workspace-response-success
-   #'agent-repl-wire-decode-kill-workspace-response-error))
+   #'agent-repl-wire-decode-kill-workspace-response-error
+   #'agent-repl-wire-decode-kill-workspace-response-accepted))
 
 
 ;;;; ---- NukeWorkspace --------------------------------------------------
@@ -1370,12 +1387,17 @@ arm this codec does not know is refused as an unknown field."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-nuke-workspace-request (request)
-  "Encode NukeWorkspaceRequest from plist REQUEST (:workspace REF)."
+  "Encode NukeWorkspaceRequest from plist REQUEST (:workspace REF :op-id ID).
+THE OP ID OPTS INTO THE IMMEDIATE ACK: present, the daemon answers
+`accepted' once the workspace is closed and pushes the teardown\='s end on
+WatchDaemon keyed on it; absent, the rpc answers once the teardown is done."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-nuke-workspace-request")
-  (list (cons 'workspace
-              (agent-repl-wire-encode-nuke-workspace-request-workspace
-               (agent-repl-wire-verbs--require "NukeWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))))
+  (agent-repl-wire-verbs--append-op-id
+   (list (cons 'workspace
+               (agent-repl-wire-encode-nuke-workspace-request-workspace
+                (agent-repl-wire-verbs--require "NukeWorkspaceRequest" "workspace"
+                                                 (plist-get request :workspace)))))
+   request))
 
 (defun agent-repl-wire-decode-nuke-workspace-success (json)
   "Decode NukeWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
@@ -1459,12 +1481,24 @@ arm this codec does not know is refused as an unknown field."
   "Decode NukeWorkspaceResponse's `error' arm from JSON."
   (agent-repl-wire-decode-nuke-workspace-error json))
 
+(defun agent-repl-wire-decode-nuke-workspace-accepted (json)
+  "Decode NukeWorkspaceAccepted from JSON into (:op-id ID).
+The immediate ack: the workspace is closed and its teardown detached; the
+teardown\='s end arrives on the WatchDaemon progress channel."
+  (list :op-id
+        (agent-repl-wire-verbs--decode-string "NukeWorkspaceAccepted" 'opId json)))
+
+(defun agent-repl-wire-decode-nuke-workspace-response-accepted (json)
+  "Decode NukeWorkspaceResponse's `accepted' arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-accepted json))
+
 (defun agent-repl-wire-decode-nuke-workspace-response (json)
   "Decode NukeWorkspaceResponse from JSON into (:arm ARM :value V)."
-  (agent-repl-wire-verbs--decode-result
+  (agent-repl-wire-verbs--decode-accepting-result
    "NukeWorkspaceResponse" json
    #'agent-repl-wire-decode-nuke-workspace-response-success
-   #'agent-repl-wire-decode-nuke-workspace-response-error))
+   #'agent-repl-wire-decode-nuke-workspace-response-error
+   #'agent-repl-wire-decode-nuke-workspace-response-accepted))
 
 
 ;;;; ---- MergeWorkspace -------------------------------------------------

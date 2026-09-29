@@ -1289,6 +1289,39 @@ replaces it."
                                            :value (:arm :internal
                                                    :value "materialize worktree: boom"))))))))
 
+(ert-deftest agent-repl-test-wire-host-mutation-progress-kill-ends ()
+  "An accepted kill's end decodes: succeeded, or failed with its sentence."
+  (dolist (case '(("{\"succeeded\":{}}" (:arm :succeeded :value nil))
+                  ("{\"failed\":{\"internal\":\"could not stop\"}}"
+                   (:arm :failed :value (:internal "could not stop")))))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-watch-daemon-response
+                    (concat "{\"mutationProgress\":{\"opId\":\"op-k\",\"kill\":"
+                            (car case) "}}"))
+                   (list :arm :mutation-progress
+                         :value (list :op-id "op-k"
+                                      :event (list :arm :kill :value (cadr case))))))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-nuke-ends ()
+  "An accepted nuke's end decodes, its git refusal as the typed arm."
+  (let* ((decoded (agent-repl-test-wire-host--decode
+                   #'agent-repl-wire-decode-watch-daemon-response
+                   (concat "{\"mutationProgress\":{\"opId\":\"op-n\",\"nuke\":"
+                           "{\"failed\":{\"refusal\":{\"gitFailed\":{\"detail\":\"locked\"}}}}}}")))
+         (step (plist-get (plist-get (plist-get decoded :value) :event) :value))
+         (cause (plist-get step :value)))
+    (should (eq (plist-get step :arm) :failed))
+    (should (eq (plist-get cause :arm) :refusal))
+    (should (eq (plist-get (plist-get (plist-get cause :value) :cause) :arm) :git-failed))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-nuke-succeeded ()
+  "An accepted nuke's success decodes to the empty succeeded arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"mutationProgress\":{\"opId\":\"op-n\",\"nuke\":{\"succeeded\":{}}}}")
+                 '(:arm :mutation-progress
+                   :value (:op-id "op-n" :event (:arm :nuke :value (:arm :succeeded :value nil)))))))
+
 (ert-deftest agent-repl-test-wire-host-mutation-progress-failed-refusal ()
   "A failed push with a typed refusal decodes to the CreateWorkspaceError arm."
   (let* ((decoded (agent-repl-test-wire-host--decode
