@@ -116,7 +116,9 @@ message FooterStrip {
 //   activity cell always absorbs the free width.
 // - STATUS AND SUBSTATUS TEXT is rendered lowercase ASCII with spaces,
 //   NEVER underscores — the arm name is a schema spelling, not the label.
-// - ACTIVITY is the rich cell: colorized, formatted, ideally one line. A
+// - ACTIVITY is the rich cell: colorized, formatted, and ALWAYS EXACTLY ONE
+//   LINE, truncated with an ellipsis when it would overflow; it never grows
+//   the strip's height. The status and substatus cells may wrap. A
 //   STATICALLY TYPED datum in an activity message (a count, an instant, a
 //   sha) is a strong indicator that datum deserves color in the rendered
 //   line.
@@ -213,8 +215,8 @@ message FooterStatus {
   oneof status {
     // Nothing in flight; the session serves on demand.
     FooterStatusIdle idle = 1;
-    // A turn is in flight.
-    FooterStatusThinking thinking = 2;
+    // A turn is in flight. Its step names what the main agent is doing now.
+    FooterStatusWorking working = 2;
     // The session is parked on something — a self-scheduled wakeup, a
     // consent card, or a question batch.
     FooterStatusWaiting waiting = 3;
@@ -359,25 +361,41 @@ message FooterSubStatusDegradedObservation {}
 message FooterSubStatusDegradedStateUnreported {}
 
 // A turn is in flight.
-message FooterStatusThinking {
-  // The finer turn step. UNSET when the daemon knows no finer step.
+message FooterStatusWorking {
+  // WHAT THE MAIN AGENT IS DOING NOW, one step at a time and SYNC ONLY: work
+  // that has left the turn (a detached shell, a detached subagent) is never a
+  // step. UNSET when the daemon knows no finer step.
   oneof substatus {
     // The prompt is being delivered.
-    FooterSubStatusThinkingSubmitting submitting = 1;
-    // The model is reasoning.
-    FooterSubStatusThinkingThinking thinking = 2;
+    FooterSubStatusWorkingSubmitting submitting = 1;
+    // An inference call is running and no tool call of the main agent is: the
+    // model is reasoning or writing its response.
+    FooterSubStatusWorkingThinking thinking = 2;
     // A /clear is being applied.
-    FooterSubStatusThinkingClearing clearing = 3;
+    FooterSubStatusWorkingClearing clearing = 3;
     // A compaction is running.
-    FooterSubStatusThinkingCompacting compacting = 4;
+    FooterSubStatusWorkingCompacting compacting = 4;
+    // A tool call runs that has no step of its own: a shell command, an MCP
+    // server's tool, a skill, and every other tool not named below.
+    FooterSubStatusWorkingExecuting executing = 6;
+    // A file is being read.
+    FooterSubStatusWorkingReading reading = 7;
+    // A file is being written or edited.
+    FooterSubStatusWorkingWriting writing = 8;
+    // A search runs: file contents (grep), file paths (glob), or the web.
+    FooterSubStatusWorkingSearching searching = 9;
+    // A URL's content is being fetched.
+    FooterSubStatusWorkingFetching fetching = 10;
+    // A subagent runs that the main agent waits on.
+    FooterSubStatusWorkingDelegating delegating = 11;
   }
-  // OPTIONAL BY EVIDENCE: most of a turn passes with no finer fact standing
-  // (no hook running, no retry, no notification); absence is the ordinary
-  // state.
-  optional FooterStatusThinkingActivity activity = 5;
+  // OPTIONAL BY EVIDENCE, but never absent in a QUIET STRETCH: from the moment
+  // a feed item has fully landed until the next one first surfaces, the
+  // quiet-stretch line stands unless a line that outranks it does.
+  optional FooterStatusWorkingActivity activity = 5;
 }
 // The activity kinds legal while a turn runs.
-message FooterStatusThinkingActivity {
+message FooterStatusWorkingActivity {
   // When this activity began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one standing line.
@@ -409,11 +427,25 @@ message FooterStatusThinkingActivity {
     // A COMPACTION'S OWN PROGRESS, phase by phase. Both compactions speak
     // through it — the vendor's auto-compaction and the cold gate's
     // `compact and resume` remediation — so the two read the same under the
-    // same `thinking · compacting` step (owner ruling, 2026-09-14). It
+    // same `working · compacting` step (owner ruling, 2026-09-14). It
     // outranks nothing: it is simply the line a compaction has and the
     // other activities are absent during one.
     FooterStatusActivityCompaction compaction = 9;
+    // THE QUIET-STRETCH LINE: what just landed in the feed and what the turn
+    // does next, standing from the moment a feed item has fully landed until
+    // the next feed item first surfaces. A fault, a deploy's update, a
+    // compaction, a running hook and a retry outrank it. A notification
+    // outranks it too, until the next feed item to land replaces the
+    // notification with this line.
+    FooterStatusActivityQuietStretch quiet_stretch = 11;
   }
+}
+// The quiet-stretch line, composed by the daemon out of the feed item that
+// landed last ("✅ Bash finished — handling result...", "❌ Read failed —
+// handling failure..."). Drawn verbatim; a client words nothing.
+message FooterStatusActivityQuietStretch {
+  // The composed line, drawn verbatim.
+  string text = 1;
 }
 // The compaction's progress line, composed by the daemon out of the phase
 // the producer last stated ("summarizing the conversation…", "compacted and
@@ -423,13 +455,25 @@ message FooterStatusActivityCompaction {
   string text = 1;
 }
 // The prompt is being delivered.
-message FooterSubStatusThinkingSubmitting {}
-// The model is reasoning.
-message FooterSubStatusThinkingThinking {}
+message FooterSubStatusWorkingSubmitting {}
+// An inference call is running and no tool call of the main agent is.
+message FooterSubStatusWorkingThinking {}
 // A /clear is being applied.
-message FooterSubStatusThinkingClearing {}
+message FooterSubStatusWorkingClearing {}
 // A compaction is running.
-message FooterSubStatusThinkingCompacting {}
+message FooterSubStatusWorkingCompacting {}
+// A tool call with no step of its own is running.
+message FooterSubStatusWorkingExecuting {}
+// A file is being read.
+message FooterSubStatusWorkingReading {}
+// A file is being written or edited.
+message FooterSubStatusWorkingWriting {}
+// A search is running.
+message FooterSubStatusWorkingSearching {}
+// A URL's content is being fetched.
+message FooterSubStatusWorkingFetching {}
+// A subagent the main agent waits on is running.
+message FooterSubStatusWorkingDelegating {}
 
 // Parked on a wakeup, a consent card, or a question batch.
 message FooterStatusWaiting {
@@ -707,8 +751,8 @@ message FooterStatusMergingActivity {
 message FooterStatusBackground {
   // No substatus: the chips and expanded panels carry the detail, so the
   // substatus cell merges into the status cell.
-  // OPTIONAL BY EVIDENCE: nothing finer stands unless a notification or a
-  // newsworthy rate-limit report does.
+  // OPTIONAL BY EVIDENCE: nothing finer stands unless a notification, a
+  // quiet-stretch line or a newsworthy rate-limit report does.
   optional FooterStatusBackgroundActivity activity = 1;
 }
 // The activity kinds legal while background.
@@ -736,6 +780,12 @@ message FooterStatusBackgroundActivity {
     // session is doing. It ranks directly BELOW a fault and ABOVE every other
     // kind. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 6;
+    // THE QUIET-STRETCH LINE: the detached work's feed item that landed last
+    // ("✅ Subagent finished"), standing until the next feed item first
+    // surfaces. A fault and a deploy's update outrank it. A notification
+    // outranks it too, until the next feed item to land replaces the
+    // notification with this line.
+    FooterStatusActivityQuietStretch quiet_stretch = 7;
   }
 }
 
