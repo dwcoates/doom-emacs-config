@@ -176,7 +176,7 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 		log.Error(opApply, "could not read the claimed command file", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("read %q: %w", claimed, err)
 	}
-	entries, err := parse(data)
+	entries, err := decode(data, i.deps.Home)
 	if err != nil {
 		log.Warn(opQuarantine, "quarantining a malformed command file", dlog.Context{"cause": err.Error()})
 		if qErr := i.quarantine(claimed); qErr != nil {

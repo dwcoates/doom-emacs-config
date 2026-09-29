@@ -148,3 +148,96 @@ func TestParseRefusesTheWholeArrayForOneInvalidEntry(t *testing.T) {
 		t.Fatalf("error = %v, want it to name the offending entry", err)
 	}
 }
+
+func TestWithAbsolutePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		entry   Entry
+		want    Entry
+		wantErr string
+	}{
+		{
+			name:  "a create's tilde git_root is expanded",
+			entry: Entry{Type: TypeCreate, Name: "n", GitRoot: "~/.config/doom"},
+			want:  Entry{Type: TypeCreate, Name: "n", GitRoot: "/Users/me/.config/doom"},
+		},
+		{
+			name:  "a tilde project_dir is expanded",
+			entry: Entry{Type: TypeMerge, ProjectDir: "~/tree/w1"},
+			want:  Entry{Type: TypeMerge, ProjectDir: "/Users/me/tree/w1"},
+		},
+		{
+			name:  "a tilde dir is expanded",
+			entry: Entry{Type: TypeClose, Dir: "~/tree/w1"},
+			want:  Entry{Type: TypeClose, Dir: "/Users/me/tree/w1"},
+		},
+		{
+			name:  "an absolute path is kept, cleaned",
+			entry: Entry{Type: TypeMerge, ProjectDir: "/tree/w1/"},
+			want:  Entry{Type: TypeMerge, ProjectDir: "/tree/w1"},
+		},
+		{
+			name:  "an entry with no directory is unchanged",
+			entry: Entry{Type: TypeMerge, Workspace: "w1"},
+			want:  Entry{Type: TypeMerge, Workspace: "w1"},
+		},
+		{
+			name:    "a relative git_root is refused, naming the field",
+			entry:   Entry{Type: TypeCreate, Name: "n", GitRoot: "doom"},
+			wantErr: "create: git_root: ",
+		},
+		{
+			name:    "a relative project_dir is refused, naming the field",
+			entry:   Entry{Type: TypeMerge, ProjectDir: "tree/w1"},
+			wantErr: "merge: project_dir: ",
+		},
+		{
+			name:    "another user's home in dir is refused, naming the field",
+			entry:   Entry{Type: TypeClose, Dir: "~bob/w1"},
+			wantErr: "close: dir: ",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: tt.entry, and the home it expands against.
+			const home = "/Users/me"
+
+			// Act.
+			got, err := tt.entry.withAbsolutePaths(home)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("withAbsolutePaths() = (%+v, %v), want an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("withAbsolutePaths() = (%+v, %v), want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeRefusesTheWholeArrayForOneUnresolvableDirectory(t *testing.T) {
+	// Arrange: a valid first entry and a second whose project_dir is relative.
+	body := `[{"type":"merge","project_dir":"/tree/w1"},{"type":"merge","project_dir":"tree/w2"}]`
+
+	// Act.
+	entries, err := decode([]byte(body), "/Users/me")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "entry 1: merge: project_dir: ") {
+		t.Fatalf("decode() = (%+v, %v), want entry 1's project_dir refused", entries, err)
+	}
+}
+
+func TestDecodeRefusesWhatParseRefuses(t *testing.T) {
+	// Arrange / Act.
+	_, err := decode([]byte(`[]`), "/Users/me")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("decode([]) = nil error, want parse's refusal")
+	}
+}
