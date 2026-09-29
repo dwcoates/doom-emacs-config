@@ -3,6 +3,7 @@ package footer
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -870,5 +871,23 @@ func TestOnlyActivitiesAboveTheQuietLineOutrankIt(t *testing.T) {
 				t.Fatalf("backgroundOutranksQuietLine = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTheEndingCarriesWhenTheEndedLineBeganStanding(t *testing.T) {
+	// Arrange: the line stands at instant+2s, and is ended 5s later.
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "bash")
+	h.clock.Advance(2 * time.Second)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+	h.clock.Advance(5 * time.Second)
+
+	// Act
+	surface(t, h, mainAgent, "u-2", "response")
+
+	// Assert
+	if got, want := endingOf(t, h).GetAt().GetAtMs(), instant.Add(2*time.Second).UnixMilli(); got != want {
+		t.Fatalf("ending at = %d, want %d: the line's own standing instant", got, want)
 	}
 }

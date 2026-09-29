@@ -477,6 +477,9 @@ message FooterStatusQuietStretchEnding {
   // The feed row whose drawing ended the stretch, exactly as the feed served
   // it. Echoed, never parsed.
   FeedId until_painted = 2;
+  // When the ended line began standing, so the held line ticks the same age
+  // it ticked while it was the activity.
+  FooterStatusActivityAt at = 3;
 }
 
 // The compaction's progress line, composed by the daemon out of the phase
