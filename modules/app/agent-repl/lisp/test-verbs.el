@@ -2487,6 +2487,35 @@ persp-mode perspective such as \"main\" appears in the registry."
         (should (equal (should-error (agent-repl-close-workspace) :type 'user-error)
                        '(user-error "agent-repl: workspace ws-one has no daemon identity yet")))))))
 
+(ert-deftest agent-repl-verbs-a-closed-workspace-is-addressed-by-its-roster-ref ()
+  "A closed workspace has no tab and no host entry; its roster row's ref serves."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (let ((agent-repl-roster-view
+             (list :repository
+                   (list :sections
+                         (list (list :rows
+                                     (list :rows
+                                           (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
+                                                       :name '(:text "ws-one")
+                                                       :closed '(:closed t))))))))))
+        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+          (should (equal (agent-repl-verbs--ref "ws-one") '(:id "id-1" :dir "/tmp/ws-one"))))))))
+
+(ert-deftest agent-repl-verbs-a-roster-row-of-another-directory-is-no-ref ()
+  "A row is matched by directory, never by a colliding name."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (let ((agent-repl-roster-view
+             (list :repository
+                   (list :sections
+                         (list (list :rows
+                                     (list :rows
+                                           (list (list :workspace (list :workspace '(:id "id-2" :dir "/other/ws-one"))
+                                                       :name '(:text "ws-one")
+                                                       :closed '(:closed t))))))))))
+        (should-not (agent-repl-verbs--roster-ref "ws-one"))))))
+
 (ert-deftest agent-repl-verbs-kill-with-an-empty-registry-refuses ()
   "The kill verb defaults to the current perspective too, and refuses alike."
   (agent-repl-test-verbs--with nil
