@@ -172,8 +172,8 @@ func sfRateLimited(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRat
 	switch {
 	case status.GetIdle() != nil:
 		return status.GetIdle().GetActivity().GetRateLimited()
-	case status.GetThinking() != nil:
-		return status.GetThinking().GetActivity().GetRateLimited()
+	case status.GetWorking() != nil:
+		return status.GetWorking().GetActivity().GetRateLimited()
 	case status.GetWaiting() != nil:
 		return status.GetWaiting().GetActivity().GetRateLimited()
 	case status.GetInterrupted() != nil:

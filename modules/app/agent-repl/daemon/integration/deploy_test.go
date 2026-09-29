@@ -164,8 +164,8 @@ func footerUpdatePhase(v *frontendv1.FooterView) string {
 	switch arm := v.GetStrip().GetStatus().GetStatus().(type) {
 	case *frontendv1.FooterStatus_Idle:
 		update = arm.Idle.GetActivity().GetUpdate()
-	case *frontendv1.FooterStatus_Thinking:
-		update = arm.Thinking.GetActivity().GetUpdate()
+	case *frontendv1.FooterStatus_Working:
+		update = arm.Working.GetActivity().GetUpdate()
 	}
 	switch update.GetPhase().(type) {
 	case *frontendv1.FooterStatusActivityUpdate_Building:
@@ -232,7 +232,7 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	waiting := awaitFooter(t, f, footer, "the waiting line", func(v *frontendv1.FooterView) bool {
 		return footerUpdatePhase(v) == "waiting"
 	})
-	counts := waiting.GetStrip().GetStatus().GetThinking().GetActivity().GetUpdate().GetWaiting()
+	counts := waiting.GetStrip().GetStatus().GetWorking().GetActivity().GetUpdate().GetWaiting()
 	if counts.GetTurns() != 1 || counts.GetBackground() != 0 {
 		t.Fatalf("waiting = %+v, want the one turn in flight", counts)
 	}

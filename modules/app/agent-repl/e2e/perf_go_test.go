@@ -380,8 +380,8 @@ func perfFooterArm(v *frontendv1.FooterView) string {
 		return ""
 	case s.GetIdle() != nil:
 		return "idle"
-	case s.GetThinking() != nil:
-		return "thinking"
+	case s.GetWorking() != nil:
+		return "working"
 	case s.GetWaiting() != nil:
 		return "waiting"
 	case s.GetInterrupted() != nil:
