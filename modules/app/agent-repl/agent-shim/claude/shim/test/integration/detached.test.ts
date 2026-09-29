@@ -62,6 +62,7 @@ import {
   sidecarProducer,
   writeEntries,
   writtenKeys,
+  entriesKeyed,
 } from "../integration-support/store.js";
 import {
   awaitSpoolExit,
@@ -722,14 +723,14 @@ describe("what the PRODUCER states about a shell run", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A SHELL THE SIDECAR NEVER TAILS (2026-09-27, task bfa5s1wjd): the shim is the
-// author of a detached run's lifecycle, so the run still opens, still ends, and
-// still leaves the live set. No sidecar runs in this harness, which is exactly
-// the incident's condition; the sidecar's rows, where a test needs them, are
-// seeded.
+// A DETACHED SHELL'S LIFECYCLE (owner ruling, 2026-09-29): the shim writes the
+// run's START (a shell the sidecar never tailed, task bfa5s1wjd, still opens)
+// and retires it from its live set at the vendor's notification; the run's
+// TERMINAL is the sidecar's alone, from the spool. No sidecar runs in this
+// harness, so the sidecar's terminal, where a test needs one, is seeded.
 // ---------------------------------------------------------------------------
 
-describe("a detached shell's lifecycle, as the shim writes it", () => {
+describe("a detached shell's lifecycle: the shim writes its start, the sidecar its end", () => {
   /** A detach gate: a path the mock vendor's detached work parks on until it exists. */
   function detachGate(): { readonly path: string; release(): void; dispose(): void } {
     const dir = mkdtempSync(join(tmpdir(), "shim-detach-gate-"));
@@ -752,37 +753,84 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     return started.liveWork.map((item) => item.work?.value ?? "");
   }
 
-  /** Announce a `!bash-detach` run and follow it to its end on WatchBash. */
-  async function concludedRun(
-    shim: Awaited<ReturnType<typeof spawnShim>>,
-  ): Promise<{ readonly run: string; readonly frames: conversationv1.AgentBash[] }> {
+  /**
+   * Resolves once the shim has processed RUN's task notification: the
+   * notification restates the run's `detached:` row under a write identity of
+   * its own, after the announcement's.
+   */
+  async function concluded(shim: Awaited<ReturnType<typeof spawnShim>>, run: string): Promise<void> {
+    const key = `detached:${run}`;
+    const announced = await shim.store?.entryLanded((entry) => entry.upsertKey === key);
+    await shim.store?.entryLanded((entry) => entry.upsertKey === key && entry.writeId !== announced?.writeId);
+  }
+
+  /** Announce a `!bash-detach` run and wait for the shim to conclude it. */
+  async function concludedRun(shim: Awaited<ReturnType<typeof spawnShim>>): Promise<string> {
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
     const run = (await awaitAnnouncement(stream)).work?.value ?? "";
     stream.close();
-    const bash = openStream((options) =>
-      shim.clients.h1.watchBash(create(shimv1.WatchBashRequestSchema, { work: workId(run) }), options),
-    );
-    const frames = (await bash.drain()).map(bashFrame);
-    return { run, frames };
+    await concluded(shim, run);
+    return run;
   }
 
-  test("a run no sidecar row was ever written for replays its start, then its terminal, and ends", async () => {
+  /** Every terminal row the SHIM wrote for RUN. */
+  function shimTerminals(shim: Awaited<ReturnType<typeof spawnShim>>, run: string): storev1.StoreEntry[] {
+    return entriesKeyed(shim.store?.writes() ?? [], `bash:${run}:terminal`);
+  }
+
+  /** The sidecar's terminal for RUN, read off the spool's `EXIT=0`, seeded. */
+  async function sidecarEnds(
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    vendorSessionId: string,
+    run: string,
+  ): Promise<void> {
+    await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(vendorSessionId), [
+      bashRowEntry({
+        run,
+        frame: bashCompleted("echo done", 0, "done\n"),
+        writeId: `${run}-sidecar-terminal`,
+        upsertKey: `bash:${run}:terminal`,
+        topLevel: vendorSessionId,
+      }),
+    ]);
+  }
+
+  test("a concluded run the sidecar never tailed still has its start", async () => {
     // THE INCIDENT: nothing but the shim ever wrote a row for this run.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    const run = await concludedRun(shim);
 
-    const { frames } = await concludedRun(shim);
+    // Act.
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(create(shimv1.WatchBashRequestSchema, { work: workId(run) }), options),
+    );
+    const first = bashFrame(await bash.next());
+    bash.close();
 
-    expect(frames.map((frame) => frame.result.case)).toEqual(["start", "success"]);
+    // Assert.
+    expect(first.result.case).toBe("start");
   });
 
-  test("the conclusion ENDS a WatchBash opened while the run was live", async () => {
+  test("the shim writes NO terminal for a concluded run: its end is the sidecar's", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    // Act.
+    const run = await concludedRun(shim);
+
+    // Assert.
+    expect(shimTerminals(shim, run)).toEqual([]);
+  });
+
+  test("the sidecar's terminal ENDS a WatchBash opened while the run was live", async () => {
     // Arrange: the run parks on its gate, so the watch is opened on a LIVE run.
     const gate = detachGate();
     try {
       const shim = await spawnShim({ env: { AGENT_REPL_FAKE_DETACH_GATE: gate.path } });
-      await shim.clients.h1.startSession(freshSession());
+      const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
       const stream = await openAgentStream(shim);
       await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
       const run = (await awaitAnnouncement(stream)).work?.value ?? "";
@@ -790,9 +838,11 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
         shim.clients.h1.watchBash(create(shimv1.WatchBashRequestSchema, { work: workId(run) }), options),
       );
       await bash.next();
-
-      // Act: the run concludes.
       gate.release();
+      await concluded(shim, run);
+
+      // Act.
+      await sidecarEnds(shim, started.vendorSessionId, run);
       const frames = await bash.drain();
 
       // Assert.
@@ -803,11 +853,25 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     }
   });
 
-  test("a concluded run is no longer re-announced as live work", async () => {
-    // Arrange.
+  test("a concluded run stays live work until the sidecar writes its end", async () => {
+    // Arrange: the vendor notified, and no sidecar has read the spool yet.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const { run } = await concludedRun(shim);
+    const run = await concludedRun(shim);
+
+    // Act.
+    const live = await reannouncedLiveWork(shim);
+
+    // Assert.
+    expect(live).toContain(run);
+  });
+
+  test("a run the sidecar ended is no longer re-announced as live work", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const run = await concludedRun(shim);
+    await sidecarEnds(shim, started.vendorSessionId, run);
 
     // Act.
     const live = await reannouncedLiveWork(shim);
@@ -816,11 +880,12 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     expect(live).not.toContain(run);
   });
 
-  test("a sidecar row landing AFTER the shim's terminal does not reopen the run", async () => {
-    // Arrange: the run is concluded, then the sidecar's tail lands late.
+  test("a sidecar row landing AFTER the run's terminal does not reopen the run", async () => {
+    // Arrange: the run is ended, then the sidecar's tail lands late.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const { run } = await concludedRun(shim);
+    const run = await concludedRun(shim);
+    await sidecarEnds(shim, started.vendorSessionId, run);
     await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
       bashRowEntry({
         run,
@@ -838,20 +903,12 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     expect(live).not.toContain(run);
   });
 
-  test("a sidecar terminal landing AFTER the shim's settles on the run's ONE terminal row", async () => {
+  test("the run's stream is its start, then the sidecar's ONE terminal", async () => {
     // Arrange.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const { run } = await concludedRun(shim);
-    await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
-      bashRowEntry({
-        run,
-        frame: bashCompleted("echo done", 0, "done\n"),
-        writeId: `${run}-sidecar-terminal`,
-        upsertKey: `bash:${run}:terminal`,
-        topLevel: started.vendorSessionId,
-      }),
-    ]);
+    const run = await concludedRun(shim);
+    await sidecarEnds(shim, started.vendorSessionId, run);
 
     // Act.
     const bash = openStream((options) =>
@@ -863,20 +920,12 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     expect(arms).toEqual(["start", "success"]);
   });
 
-  test("the sidecar's later terminal carries the spool's evidence onto that row", async () => {
+  test("the sidecar's terminal carries the spool's evidence", async () => {
     // Arrange.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const { run } = await concludedRun(shim);
-    await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
-      bashRowEntry({
-        run,
-        frame: bashCompleted("echo done", 0, "done\n"),
-        writeId: `${run}-sidecar-terminal`,
-        upsertKey: `bash:${run}:terminal`,
-        topLevel: started.vendorSessionId,
-      }),
-    ]);
+    const run = await concludedRun(shim);
+    await sidecarEnds(shim, started.vendorSessionId, run);
 
     // Act.
     const bash = openStream((options) =>
@@ -887,45 +936,6 @@ describe("a detached shell's lifecycle, as the shim writes it", () => {
     // Assert.
     const outcome = terminal?.result.case === "success" ? terminal.result.value.outcome : undefined;
     expect(outcome?.case === "completed" ? outcome.value.termination?.how.case : undefined).toBe("exited");
-  });
-
-  test("a sidecar terminal landing BEFORE the shim's leaves the run ONE terminal row", async () => {
-    // Arrange: the run is parked live, and the sidecar concludes it first.
-    const gate = detachGate();
-    try {
-      const shim = await spawnShim({ env: { AGENT_REPL_FAKE_DETACH_GATE: gate.path } });
-      const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-      const stream = await openAgentStream(shim);
-      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
-      const run = (await awaitAnnouncement(stream)).work?.value ?? "";
-      await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
-        bashRowEntry({
-          run,
-          frame: bashCompleted("echo done", 0, "done\n"),
-          writeId: `${run}-sidecar-terminal`,
-          upsertKey: `bash:${run}:terminal`,
-          topLevel: started.vendorSessionId,
-        }),
-      ]);
-      // The shim's own conclusion lands afterwards, on the same row.
-      gate.release();
-      await shim.store?.entryLanded(
-        (entry) =>
-          entry.upsertKey === `bash:${run}:terminal` && entry.plane?.plane.case === "stream",
-      );
-
-      // Act.
-      const bash = openStream((options) =>
-        shim.clients.h1.watchBash(create(shimv1.WatchBashRequestSchema, { work: workId(run) }), options),
-      );
-      const arms = (await bash.drain()).map((frame) => bashFrame(frame).result.case);
-
-      // Assert.
-      expect(arms).toEqual(["start", "success"]);
-      stream.close();
-    } finally {
-      gate.dispose();
-    }
   });
 });
 
