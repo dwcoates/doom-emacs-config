@@ -362,7 +362,12 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		return
 	}
 	r.addEvidence(s, apiErrorEvidence(failed.GetMessage()))
-	r.logger(ws).Warn("daemon.feed.api_error",
+	// DEBUG, NOT WARN: the failure is OWNED by the session watcher, which
+	// states it once at WARN as it routes it here (daemon.sessionwatcher.
+	// api_error). This record is the feed's own branch outcome — the line it
+	// added to the turn's evidence — and a second WARN would count one vendor
+	// failure twice.
+	r.logger(ws).Debug("daemon.feed.api_error",
 		"a mid-turn vendor request failure was recorded as the turn's evidence",
 		dlog.Context{"agent": agent.GetValue(), "message": failed.GetMessage()})
 }
