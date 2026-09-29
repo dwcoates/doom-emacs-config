@@ -33,7 +33,6 @@ import {
   patchBackgrounds,
   resultBackgroundTaskId,
   shellRunStartEntry,
-  shellRunTerminalEntry,
   startedInForeground,
   taskAgentKnowledge,
   taskAwaitingAgent,
@@ -1960,18 +1959,6 @@ describe("the shell run's lifecycle rows", () => {
     return entry.item.frame;
   }
 
-  /** The settled arm of a terminal row. */
-  function successOf(entry: PersistEntry | undefined): conversationv1.AgentBashSuccess {
-    const frame = bashOf(entry);
-    if (frame.result.case !== "success") throw new Error("expected the success arm");
-    return frame.result.value;
-  }
-
-  /** The cause arm of a settled outcome, or the outcome's own arm when it is not interrupted. */
-  function causeOf(settled: conversationv1.AgentBashSuccess): string | undefined {
-    return settled.outcome.case === "interrupted" ? settled.outcome.value.cause.case : settled.outcome.case;
-  }
-
   const BY_HAND = { subtype: "task_updated", task_id: "t1", tool_use_id: SHELL, patch: { is_backgrounded: true } };
   const CONCLUDED = {
     subtype: "task_notification",
@@ -2028,101 +2015,6 @@ describe("the shell run's lifecycle rows", () => {
     expect(again?.source).toEqual(first?.source);
   });
 
-  it("keys the terminal as the run's cross-plane terminal row", () => {
-    // Arrange, Act.
-    const entry = shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined);
-
-    // Assert.
-    expect(entry.upsertKey).toBe(`bash:${SHELL}:terminal`);
-  });
-
-  it("settles a COMPLETED run as completed, with output not observed and no termination stated", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
-    );
-
-    // Assert.
-    if (settled.outcome.case !== "completed") throw new Error("expected the completed outcome");
-    expect({
-      form: settled.outcome.value.output?.form.case,
-      termination: settled.outcome.value.termination,
-    }).toEqual({ form: "notObserved", termination: undefined });
-  });
-
-  it("settles a FAILED run as completed too, since a non-zero exit is the command's own verdict", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "failed", undefined),
-    );
-
-    // Assert.
-    expect(settled.outcome.case).toBe("completed");
-  });
-
-  it("settles a STOPPED run as interrupted by the user", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "stopped", undefined),
-    );
-
-    // Assert.
-    expect(causeOf(settled)).toBe("byUser");
-  });
-
-  it("states NO cause for a run the vendor found orphaned by a worker restart", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "stopped", "worker_restart"),
-    );
-
-    // Assert.
-    expect(causeOf(settled)).toBeUndefined();
-  });
-
-  it("states NO cause for a status this shim does not know", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "vanished", undefined),
-    );
-
-    // Assert.
-    expect(causeOf(settled)).toBeUndefined();
-  });
-
-  it("restates the spawning call's command on the terminal", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
-    );
-
-    // Assert.
-    expect(settled.command?.line).toBe("sleep 3");
-  });
-
-  it("leaves the command UNSET when this fold never saw the spawning call", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext(), MAIN_AGENT, SHELL, undefined, "completed", undefined),
-    );
-
-    // Assert.
-    expect(settled.command).toBeUndefined();
-  });
-
-  it("settles at the fold's clock, restating the run's start instant", () => {
-    // Arrange, Act.
-    const settled = successOf(
-      shellRunTerminalEntry(foldContext({ nowMs: 9_000 }), MAIN_AGENT, SHELL, shellCall(), "completed", undefined),
-    );
-
-    // Assert.
-    expect({ at: settled.settledAt?.atMs, started: settled.settledAt?.startedAt?.atMs }).toEqual({
-      at: 9_000n,
-      started: 7n,
-    });
-  });
-
   it("puts a by-hand backgrounded shell's START ahead of its announcement", () => {
     // Arrange, Act: the incident's path, a shell a person backgrounded, announced here.
     const entries = convert(BY_HAND, {}, shellTask(), holdingShell());
@@ -2143,7 +2035,7 @@ describe("the shell run's lifecycle rows", () => {
     expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
   });
 
-  it("ends a concluded shell with its start restated, then its terminal", () => {
+  it("ends a concluded shell with its start restated and NO terminal: the sidecar writes the run's end", () => {
     // Arrange: the call was seen open while the run was announced.
     const registry = shellTask();
     drain(convert(BY_HAND, {}, registry, holdingShell()));
@@ -2152,11 +2044,7 @@ describe("the shell run's lifecycle rows", () => {
     const entries = convert(CONCLUDED, {}, registry, createCallRegistry());
 
     // Assert.
-    expect(entries.map((entry) => entry.upsertKey)).toEqual([
-      `detached:${SHELL}`,
-      `bash:${SHELL}:start`,
-      `bash:${SHELL}:terminal`,
-    ]);
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([`detached:${SHELL}`, `bash:${SHELL}:start`]);
   });
 
   it("restates the start at the conclusion under the SAME write coordinate the announcement's start used", () => {
@@ -2173,12 +2061,12 @@ describe("the shell run's lifecycle rows", () => {
     expect(startOf(concluded)?.source).toEqual(startOf(announced)?.source);
   });
 
-  it("still writes the terminal of a concluded shell whose call this fold never saw", () => {
+  it("writes no terminal for a concluded shell whose call this fold never saw", () => {
     // Arrange, Act: a run adopted from before this process, concluding now.
     const entries = convert(CONCLUDED, {}, shellTask(), createCallRegistry());
 
     // Assert.
-    expect(entries.map((entry) => entry.upsertKey)).toEqual([`detached:${SHELL}`, `bash:${SHELL}:terminal`]);
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([`detached:${SHELL}`]);
   });
 
   it("writes no shell terminal when an AGENT task concludes", () => {
