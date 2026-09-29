@@ -361,6 +361,29 @@ func TestRouteApiError(t *testing.T) {
 	}
 }
 
+// TestRouteApiErrorIsWarnedOnceByTheWatcher covers the failure's ONE owner: the
+// watcher states it at WARN, with the agent and the vendor's message, as it
+// routes it; the sinks it routes to record their own outcomes below WARN.
+func TestRouteApiErrorIsWarnedOnceByTheWatcher(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", apiErrorUpdate("529 overloaded"))))
+
+	// Assert.
+	var warned []map[string]any
+	for _, r := range h.log.Records() {
+		if r.Level == "warn" && r.Operation == "daemon.sessionwatcher.api_error" {
+			warned = append(warned, r.Context)
+		}
+	}
+	if len(warned) != 1 || warned[0]["agent_id"] != "main-1" || warned[0]["message"] != "529 overloaded" {
+		t.Fatalf("api_error WARN records = %v, want exactly one naming main-1 and the vendor's message", warned)
+	}
+}
+
 // TestRouteHistoryPage covers a watch's opening frame: the page goes to the
 // feed AND the footer whole, and its entries are NOT replayed as live frames.
 // The footer is on the list because a resumed conversation's prior turns reach
