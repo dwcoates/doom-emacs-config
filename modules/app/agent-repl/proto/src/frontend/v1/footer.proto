@@ -393,6 +393,10 @@ message FooterStatusWorking {
   // a feed item has fully landed until the next one first surfaces, the
   // quiet-stretch line stands unless a line that outranks it does.
   optional FooterStatusWorkingActivity activity = 5;
+  // The quiet-stretch line the next feed item just ended, which the client
+  // keeps drawing until it has PAINTED that item. See
+  // FooterStatusQuietStretchEnding.
+  optional FooterStatusQuietStretchEnding quiet_stretch_ending = 12;
 }
 // The activity kinds legal while a turn runs.
 message FooterStatusWorkingActivity {
@@ -447,6 +451,34 @@ message FooterStatusActivityQuietStretch {
   // The composed line, drawn verbatim.
   string text = 1;
 }
+// THE END OF A QUIET STRETCH, held until the user can SEE what ended it
+// (owner ruling, 2026-09-29). The daemon ends a quiet stretch the moment the
+// next feed item is drawn, but the client paints that item later; clearing the
+// line on the daemon's edge left a visible gap with neither the line nor the
+// item on screen. So the daemon states the line that just ended and the row
+// that ended it, and the CLIENT decides when the line goes:
+//
+//   - While this is set, the client draws `text` in the activity cell, in
+//     place of the status's `activity`, until it has painted the row
+//     `until_painted` names (the row is in the page and a frame has been
+//     painted with it), and then for 500ms more. After that it draws
+//     `activity`, and a later frame naming the same row does not hold again.
+//   - A client whose feed is not showing the live tail (the user has scrolled
+//     back through history) will not paint the row where the user is looking,
+//     and draws `activity` at once.
+//   - The daemon sets it only while nothing that OUTRANKS the quiet-stretch
+//     line stands (a fault, a deploy's update, a notification, a compaction, a
+//     running hook, a retry): an activity that outranks the line is drawn at
+//     once. It is cleared when the next quiet-stretch line stands and when
+//     the status changes.
+message FooterStatusQuietStretchEnding {
+  // The line that just ended, drawn verbatim.
+  string text = 1;
+  // The feed row whose drawing ended the stretch, exactly as the feed served
+  // it. Echoed, never parsed.
+  FeedId until_painted = 2;
+}
+
 // The compaction's progress line, composed by the daemon out of the phase
 // the producer last stated ("summarizing the conversation…", "compacted and
 // resumed (101.6k → 12.4k)"). Drawn verbatim; a client words nothing.
@@ -754,6 +786,10 @@ message FooterStatusBackground {
   // OPTIONAL BY EVIDENCE: nothing finer stands unless a notification, a
   // quiet-stretch line or a newsworthy rate-limit report does.
   optional FooterStatusBackgroundActivity activity = 1;
+  // The quiet-stretch line the next feed item just ended, which the client
+  // keeps drawing until it has PAINTED that item. See
+  // FooterStatusQuietStretchEnding.
+  optional FooterStatusQuietStretchEnding quiet_stretch_ending = 2;
 }
 // The activity kinds legal while background.
 message FooterStatusBackgroundActivity {
