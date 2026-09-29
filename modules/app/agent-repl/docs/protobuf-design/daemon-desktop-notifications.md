@@ -148,3 +148,22 @@ Accepted as proposed, no amendments:
     the banner backends in `lisp/notifications.el`, and the roster-diff
     turn-end banner (`agent-repl--maybe-notify-finished` on
     `agent-repl-roster-finish-functions`).
+
+## Implementation notes
+
+- **The turn-end trigger is the prompt queue's live turn end**
+  (`promptqueue.OnTurnEnded` → `queue.endTurn`), after the door
+  (`closeTurn`) has installed the roster's close and drawn the feed's ending.
+  The ending's content (final-answer markdown, errored line, failure class) is
+  filed by the feed on the LIVE plane only (`feed.TakeTurnEnding`), so a history
+  replay raises no banner. Orphaned turns closed at boot raise none.
+- **The banner kind reads the roster's own table.** The sidebar's `closeArm`
+  and its expected-stop override were extracted into `ladder.ResolveTurnEnd`
+  (behavior-preserving, own commit); the banner calls the same function, so the
+  tab colour and the banner cannot disagree.
+- **Emacs serializes its focus reports** (one call in flight; a change during
+  it is owed and sends the focus held when it is answered) and re-reports on
+  link-up and promotion, closing the gap between building the WatchDaemon
+  request and its acceptance.
+- **Agent notifications keep Emacs's former banner shape** (workspace name over
+  the notification's line); only the turn-end banner has the new ✅/❌ title.
