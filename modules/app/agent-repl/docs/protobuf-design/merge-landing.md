@@ -45,6 +45,14 @@ branch into the target as a non-fast-forward merge.
   identifier spelling and never an internal mechanism (webapp `AGENTS.md`,
   "FOOTER TEXT IS FOR A HUMAN USER").
 
+- **Each failure mode is its own turquoise status; the substatus is the
+  area (owner, 2026-09-29).** Something that went wrong while the workspace
+  stays usable gets a bespoke status naming the failure ("merge failed",
+  "turn failed"), and its substatus names where it failed ("conflicts",
+  "tests"). There is no catch-all "needs attention" status.
+  - Does not claim: what "turn failed"'s substatuses are. The owner left that
+    separation open, and it is outside this change.
+
 ## Context (step 1)
 
 - **The daemon does not verify a PR-merged assertion (owner ruling, 2026-09-29).**
@@ -110,9 +118,15 @@ branch into the target as a non-fast-forward merge.
 - **A failed merge leaves the queue and hands the workspace back (owner,
   2026-09-29).** When conflict resolution or test repair fails, the merge is
   removed from the queue at once, which unblocks the merges behind it and
-  ends the merging status. The workspace's status becomes "idle", with the
-  substatus "conflicts failed" or "tests failed": the workspace is idle and
-  the user decides what happens next.
+  ends the merging status. The workspace's status becomes "merge failed",
+  with the substatus "conflicts" or "tests": the workspace is usable and the
+  user decides what happens next.
+  - SUPERSEDED the same day: this entry first read status "idle" with
+    substatus "conflicts failed" or "tests failed". Idle is green (ready),
+    and a failed merge is something that went wrong while the workspace stays
+    usable, which is turquoise; the existing turquoise "merge failed" status
+    already means exactly that, so it is kept and the failure's area moves to
+    its substatus (owner, 2026-09-29).
   - Reopens: the 2026-09-28 ruling that made a stopped merge the
     `merge_conflict` status (with its `parked` step, whose composer delivered
     what the user typed to the merge's agent) and a failed merge the
