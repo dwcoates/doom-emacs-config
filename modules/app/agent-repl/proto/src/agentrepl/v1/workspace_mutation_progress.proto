@@ -17,6 +17,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -28,12 +29,53 @@ message WorkspaceMutationProgress {
   // does not recognize.
   string op_id = 1;
 
-  // THE ARM IS THE MUTATION. Each mutation kind owns its own progress shape;
-  // create is the first. Open, close and kill extend this oneof with their
-  // own arms, so a new mutation's stages never disturb create's.
+  // THE ARM IS THE MUTATION. Each mutation kind owns its own progress shape,
+  // so a new mutation's stages never disturb another's.
   oneof event {
     WorkspaceCreateProgress create = 2;
     WorkspaceOpenProgress open = 3;
+    WorkspaceKillProgress kill = 4;
+    WorkspaceNukeProgress nuke = 5;
+  }
+}
+
+// The END of a KillWorkspace answered `accepted`. The workspace was already
+// closed at the ack, so this carries only whether its session's teardown
+// finished. EXACTLY ONE is pushed per accepted kill.
+message WorkspaceKillProgress {
+  oneof step {
+    // The session is dead and its terminal recorded.
+    WorkspaceKillSucceeded succeeded = 1;
+    // The teardown failed. The workspace stays closed.
+    WorkspaceKillFailed failed = 2;
+  }
+}
+message WorkspaceKillSucceeded {}
+message WorkspaceKillFailed {
+  // The human sentence a client shows. A kill has no typed refusal after
+  // its ack: every refusal it has is answered on the rpc.
+  string internal = 1;
+}
+
+// The END of a NukeWorkspace answered `accepted`, as WorkspaceKillProgress is
+// a kill's. EXACTLY ONE is pushed per accepted nuke.
+message WorkspaceNukeProgress {
+  oneof step {
+    // The session is dead, the worktree and branch are deleted, and the
+    // record is forgotten; the row leaves the roster.
+    WorkspaceNukeSucceeded succeeded = 1;
+    // The destruction failed. The workspace stays closed and recorded.
+    WorkspaceNukeFailed failed = 2;
+  }
+}
+message WorkspaceNukeSucceeded {}
+message WorkspaceNukeFailed {
+  oneof cause {
+    // A typed refusal the synchronous form answers on `error`: after the
+    // ack, only `git_failed` can arrive here.
+    NukeWorkspaceError refusal = 1;
+    // An internal failure; this is the human sentence a client shows.
+    string internal = 2;
   }
 }
 

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_kill_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_kill_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRLaWxsV29ya3NwYWNlU3VjY2VzcyLJAgoSS2lsbFdvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIh8KHUtpbGxXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIUtpbGxXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodS2lsbFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpLaWxsV29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVLaWxsV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUS2lsbFdvcmtzcGFjZVN1Y2Nlc3MiyQIKEktpbGxXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIfCh1LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFLaWxsV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHUtpbGxXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceRequest
@@ -30,6 +30,22 @@ export type KillWorkspaceRequest = Message<"agentrepl.v1.KillWorkspaceRequest"> 
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * A CLIENT-MINTED OPERATION ID, as CreateWorkspaceRequest.op_id is: PRESENCE
+   * IS OPT-IN TO THE IMMEDIATE ACK (owner ruling, 2026-09-29: the tab closes
+   * the moment the daemon acks, never after the teardown). A request that
+   * carries one is answered `accepted` as soon as the daemon has refused
+   * nothing and marked the workspace CLOSED (so the roster says so
+   * everywhere); the teardown then KILLS THE SESSION in the background, detached from
+   * this request's context, and its end rides WatchDaemon's
+   * `mutation_progress` keyed on this id (WorkspaceMutationProgress.kill).
+   * UNSET = the synchronous form: the rpc answers `success` once the teardown
+   * is done. The ownership refusals are answered on `error` in both forms.
+   *
+   * @generated from field: optional string op_id = 2;
+   */
+  opId?: string | undefined;
 };
 
 /**
@@ -63,6 +79,16 @@ export type KillWorkspaceResponse = Message<"agentrepl.v1.KillWorkspaceResponse"
      */
     value: KillWorkspaceError;
     case: "error";
+  } | {
+    /**
+     * THE IMMEDIATE ACK. Answered, instead of `success`, precisely when the
+     * request carried an `op_id`: the workspace is closed and its teardown is
+     * running; its end arrives on `mutation_progress` under the same id.
+     *
+     * @generated from field: agentrepl.v1.KillWorkspaceAccepted accepted = 3;
+     */
+    value: KillWorkspaceAccepted;
+    case: "accepted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -72,6 +98,27 @@ export type KillWorkspaceResponse = Message<"agentrepl.v1.KillWorkspaceResponse"
  */
 export const KillWorkspaceResponseSchema: GenMessage<KillWorkspaceResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 1);
+
+/**
+ * The immediate ack: the workspace is closed and its teardown detached.
+ *
+ * @generated from message agentrepl.v1.KillWorkspaceAccepted
+ */
+export type KillWorkspaceAccepted = Message<"agentrepl.v1.KillWorkspaceAccepted"> & {
+  /**
+   * The op_id the request supplied, echoed back.
+   *
+   * @generated from field: string op_id = 1;
+   */
+  opId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.KillWorkspaceAccepted.
+ * Use `create(KillWorkspaceAcceptedSchema)` to create a new message.
+ */
+export const KillWorkspaceAcceptedSchema: GenMessage<KillWorkspaceAccepted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 2);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceSuccess
@@ -84,7 +131,7 @@ export type KillWorkspaceSuccess = Message<"agentrepl.v1.KillWorkspaceSuccess"> 
  * Use `create(KillWorkspaceSuccessSchema)` to create a new message.
  */
 export const KillWorkspaceSuccessSchema: GenMessage<KillWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 2);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 3);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -136,7 +183,7 @@ export type KillWorkspaceError = Message<"agentrepl.v1.KillWorkspaceError"> & {
  * Use `create(KillWorkspaceErrorSchema)` to create a new message.
  */
 export const KillWorkspaceErrorSchema: GenMessage<KillWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 4);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceUnknownWorkspace
@@ -149,7 +196,7 @@ export type KillWorkspaceUnknownWorkspace = Message<"agentrepl.v1.KillWorkspaceU
  * Use `create(KillWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const KillWorkspaceUnknownWorkspaceSchema: GenMessage<KillWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
@@ -168,7 +215,7 @@ export type KillWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.KillWorksp
  * Use `create(KillWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const KillWorkspaceWorkspaceRefMismatchSchema: GenMessage<KillWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceTransferringAway
@@ -187,7 +234,7 @@ export type KillWorkspaceTransferringAway = Message<"agentrepl.v1.KillWorkspaceT
  * Use `create(KillWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const KillWorkspaceTransferringAwaySchema: GenMessage<KillWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceNotYetAdopted
@@ -200,5 +247,5 @@ export type KillWorkspaceNotYetAdopted = Message<"agentrepl.v1.KillWorkspaceNotY
  * Use `create(KillWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const KillWorkspaceNotYetAdoptedSchema: GenMessage<KillWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 8);
 
