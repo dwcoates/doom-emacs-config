@@ -89,3 +89,62 @@ Accepted as proposed, no amendments:
 4. Shapes — one endpoint at a time, each landed on agreement.
 
 ## Landed changes
+
+### 1. Emacs reports its focus: `agentrepl.v1.EditorFocus`, `WatchDaemonEmacs.focus`, `ReportEditorFocus`
+
+- **What.** New shared `editor_focus.proto` declaring `EditorFocus` (a oneof
+  of focused / unfocused). `WatchDaemonEmacs` gains a REQUIRED `focus`
+  (field 2). New unary rpc `ReportEditorFocus` in the HOST section, with one
+  refusal arm, `no_emacs_stream`.
+- **Why.** The owner chose option B: Emacs is the one process that can see
+  its own focus on macOS, X11 and Wayland alike. Prefer augmenting existing
+  rpcs: the connect-time focus rides the existing WatchDaemon request; a
+  server stream's request is sent once, so later changes need their own rpc,
+  and `SelectWorkspace` (tab selection) is a different fact.
+- **Consequences.**
+  - The focus is scoped to Emacs's WatchDaemon stream: known from the stream's
+    first instant (no window where a banner is decided on an unreported
+    focus), forgotten when it ends, after which the daemon treats Emacs as
+    unfocused. A report with no Emacs stream standing is refused
+    (`no_emacs_stream`), never silently dropped.
+  - Emacs must compute its focus before opening WatchDaemon and call
+    `ReportEditorFocus` from `after-focus-change-function`.
+  - The daemon holds one focus value (Emacs opens exactly one WatchDaemon).
+- **Alternatives rejected.** The daemon asking the OS for the frontmost app:
+  impossible under Wayland. A focus field on `SelectWorkspace`: conflates tab
+  selection with desktop focus and misnames the rpc.
+
+### 2. The banner click reaches Emacs: `WatchHostWorkspaceResponse.notification_clicked`
+
+- **What.** New event arm `notification_clicked = 7` carrying the empty
+  `HostWorkspaceNotificationClicked`.
+- **Why.** The daemon posts the banner and reads the click back itself;
+  selecting the workspace's tab is the one thing only Emacs can do. The
+  per-workspace host stream is the natural home (the click is about one
+  workspace, and the stream already follows handover).
+- **Consequences.** An event, never replayed to a late subscriber. Emacs
+  raises its frame and selects the tab on it.
+
+### 3. Retired: `WatchHostWorkspaceResponse.notification`
+
+- **What.** Arm 2 is removed and reserved (number and name), together with
+  `HostWorkspaceNotification`, `HostNotificationKind`,
+  `HostNotificationAgentAddressed`, `HostNotificationPermissionRequested` and
+  `HostNotificationQuestionAsked`. Nothing else in `proto/src` referenced them
+  (grep).
+- **Why.** Its only consumer was Emacs's presentation policy
+  (`agent-repl-host--notify`, `lisp/host.el`): banner or tab blink. The daemon
+  now posts banners, and the tab blink is already drawn from the roster's
+  attention marker (`agent-repl-status-sync-attention`,
+  `lisp/status.el:1145`), so the host-stream blink was a second trigger for
+  the same blink.
+- **Consequences.**
+  - The daemon's internal `sessionwatcher.HostNotification` stops being a
+    wire relay and becomes the input of the daemon's own banner poster; its
+    attention-marker side (`workspace.verbs.Notify`) is untouched.
+  - Permission, question and agent-push notifications move to the daemon's
+    banner too, under the same focus rule.
+  - Elisp removed: `agent-repl-host--notify` and its notification decoding,
+    the banner backends in `lisp/notifications.el`, and the roster-diff
+    turn-end banner (`agent-repl--maybe-notify-finished` on
+    `agent-repl-roster-finish-functions`).

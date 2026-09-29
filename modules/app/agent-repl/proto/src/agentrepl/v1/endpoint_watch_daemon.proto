@@ -14,6 +14,7 @@ package agentrepl.v1;
 import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/drain_reason.proto";
+import "agentrepl/v1/editor_focus.proto";
 import "agentrepl/v1/workspace_mutation_progress.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -46,6 +47,13 @@ message WatchDaemonEmacs {
   // file is absent contributes no line. `proto/vocab/elisp-build.json` holds
   // both implementations to one answer.
   string elisp_build = 1;
+  // WHETHER THIS EMACS IS FOCUSED as it connects. REQUIRED — a watch without
+  // it is refused. It rides the request so that the daemon holds a focus from
+  // the first instant it holds an Emacs stream: there is no window in which a
+  // desktop banner is decided on a focus nobody reported. Later changes arrive
+  // by ReportEditorFocus, and the daemon forgets the focus when this stream
+  // ends (see EditorFocus).
+  EditorFocus focus = 2;
 }
 
 // A webview is connecting. Presence is the fact: a webview reports its build

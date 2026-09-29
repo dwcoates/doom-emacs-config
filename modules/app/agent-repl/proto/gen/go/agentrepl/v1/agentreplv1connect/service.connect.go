@@ -159,6 +159,9 @@ const (
 	// AgentReplMarkWorkspaceViewedProcedure is the fully-qualified name of the AgentRepl's
 	// MarkWorkspaceViewed RPC.
 	AgentReplMarkWorkspaceViewedProcedure = "/agentrepl.v1.AgentRepl/MarkWorkspaceViewed"
+	// AgentReplReportEditorFocusProcedure is the fully-qualified name of the AgentRepl's
+	// ReportEditorFocus RPC.
+	AgentReplReportEditorFocusProcedure = "/agentrepl.v1.AgentRepl/ReportEditorFocus"
 	// AgentReplWatchHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchHostWorkspace RPC.
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
@@ -244,6 +247,7 @@ var (
 	agentReplRegisterWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
+	agentReplReportEditorFocusMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
 	agentReplWatchHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplAdoptHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
@@ -395,6 +399,9 @@ type AgentReplClient interface {
 	// The user has now SEEN this workspace: its row goes PARTIAL until its
 	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
 	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
+	// Emacs gained or lost desktop focus; the daemon decides every desktop
+	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
+	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error)
@@ -719,6 +726,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportEditorFocus: connect.NewClient[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](
+			httpClient,
+			baseURL+AgentReplReportEditorFocusProcedure,
+			connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchHostWorkspace: connect.NewClient[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchHostWorkspaceProcedure,
@@ -853,6 +866,7 @@ type agentReplClient struct {
 	registerWorkspace        *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace          *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed      *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
+	reportEditorFocus        *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
 	watchHostWorkspace       *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon              *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	adoptHostWorkspace       *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
@@ -1094,6 +1108,11 @@ func (c *agentReplClient) MarkWorkspaceViewed(ctx context.Context, req *connect.
 	return c.markWorkspaceViewed.CallUnary(ctx, req)
 }
 
+// ReportEditorFocus calls agentrepl.v1.AgentRepl.ReportEditorFocus.
+func (c *agentReplClient) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
+	return c.reportEditorFocus.CallUnary(ctx, req)
+}
+
 // WatchHostWorkspace calls agentrepl.v1.AgentRepl.WatchHostWorkspace.
 func (c *agentReplClient) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error) {
 	return c.watchHostWorkspace.CallServerStream(ctx, req)
@@ -1299,6 +1318,9 @@ type AgentReplHandler interface {
 	// The user has now SEEN this workspace: its row goes PARTIAL until its
 	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
 	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
+	// Emacs gained or lost desktop focus; the daemon decides every desktop
+	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
+	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error
@@ -1619,6 +1641,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportEditorFocusHandler := connect.NewUnaryHandler(
+		AgentReplReportEditorFocusProcedure,
+		svc.ReportEditorFocus,
+		connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchHostWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchHostWorkspaceProcedure,
 		svc.WatchHostWorkspace,
@@ -1795,6 +1823,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplMarkWorkspaceViewedProcedure:
 			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
+		case AgentReplReportEditorFocusProcedure:
+			agentReplReportEditorFocusHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonProcedure:
@@ -2010,6 +2040,10 @@ func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MarkWorkspaceViewed is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportEditorFocus is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {

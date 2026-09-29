@@ -62,6 +62,7 @@ import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
 import "agentrepl/v1/endpoint_mark_workspace_viewed.proto";
+import "agentrepl/v1/endpoint_report_editor_focus.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
@@ -256,6 +257,10 @@ service AgentRepl {
   // The user has now SEEN this workspace: its row goes PARTIAL until its
   // status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
   rpc MarkWorkspaceViewed(MarkWorkspaceViewedRequest) returns (MarkWorkspaceViewedResponse);
+
+  // Emacs gained or lost desktop focus; the daemon decides every desktop
+  // banner on it. Idempotent. See endpoint_report_editor_focus.proto.
+  rpc ReportEditorFocus(ReportEditorFocusRequest) returns (ReportEditorFocusResponse);
 
   // The host-facing view of one workspace, per-workspace subscription. See
   // endpoint_watch_host_workspace.proto.
