@@ -31,7 +31,6 @@
  * is missing. It does not send a partial batch and it does not silently drop the
  * question — either would answer for the user.
  */
-import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
 import {
   AnswerQuestionResponseSchema,
@@ -47,7 +46,7 @@ import type {
   FeedQuestionOption,
   FeedQuestionText,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import {
   clearRefusals,
@@ -58,7 +57,7 @@ import {
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick, tickWhileShown } from "../ticking.js";
+import { stampedAge } from "./stamped-age.js";
 import { buildAnswerQuestionRequest, type QuestionAnswer } from "./requests.js";
 
 const PATH = "FeedQuestion";
@@ -477,7 +476,7 @@ export function drawFeedQuestionAnswered(
   u.answers.forEach((answer, index) => {
     el.append(drawFeedQuestionGivenAnswer(answer, `${path}.answers[${index}]`));
   });
-  el.append(stampedAge(u.atMs, `${path}.at_ms`, rc));
+  el.append(stampedAge(u.atMs, `${path}.at_ms`, rc, "q-when"));
   return el;
 }
 
@@ -528,7 +527,7 @@ export function drawFeedQuestionExpired(
   const word = document.createElement("span");
   word.className = "badge muted";
   word.textContent = EXPIRED_TEXT;
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc));
+  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "q-when"));
   return el;
 }
 
@@ -644,13 +643,3 @@ function drawAnswerOutcome(
   }
 }
 
-/** A settled instant as a ticking relative age ("3m ago"). */
-function stampedAge(atMs: bigint, path: string, rc: RowContext): HTMLElement {
-  const at = msOf(atMs, path);
-  const el = document.createElement("span");
-  el.className = "q-when";
-  tickWhileShown(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `${formatTickedAge(nowMs - at)} ago`;
-  });
-  return el;
-}

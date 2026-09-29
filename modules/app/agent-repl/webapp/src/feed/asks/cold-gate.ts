@@ -71,6 +71,7 @@ import { callFailure, refusalOf, type SentenceTable } from "../../rpc/refuse.js"
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
+import { stampedAge } from "./stamped-age.js";
 import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
 
 const PATH = "FeedColdGate";
@@ -278,13 +279,7 @@ export function drawFeedColdGateResolved(
       return unreachableArm(`${path}.choice`, armName(choice));
   }
 
-  const when = document.createElement("span");
-  when.className = "cold-gate-when";
-  const at = msOf(u.atMs, `${path}.at_ms`);
-  tickWhileShown(when, rc.ctx.ticker, (nowMs) => {
-    when.textContent = `${formatTickedAge(nowMs - at)} ago`;
-  });
-  el.append(word, when);
+  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "cold-gate-when"));
   return el;
 }
 
