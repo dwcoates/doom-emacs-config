@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"claude-repld/internal/dirpath"
@@ -46,15 +45,26 @@ func Prefix() string {
 	return os.Getenv(LegacyPrefixEnv)
 }
 
-// slugPattern is the whole naming rule, as the daemon enforces it on the
-// model's answer: at most SlugWordLimit hyphen-separated lowercase
-// alphanumeric words, with no leading or trailing hyphen, no slash and no path
-// component.
+// slugShape is the naming rule's SHAPE, as the daemon enforces it on the
+// model's answer: hyphen-separated lowercase alphanumeric words, with no
+// leading or trailing hyphen, no slash and no path component. The word COUNT
+// is checked apart from the shape, against SlugWordLimit, so a refusal can
+// name the count an over-long answer had.
 //
 // THERE IS NO REPAIR PATH. An answer that does not match is refused and the
 // call is made again; word truncation — the old `Slug` — is deleted, because
 // a truncated name is a name nobody chose.
-var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+){0,` + strconv.Itoa(SlugWordLimit-1) + `}$`)
+var slugShape = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// SlugWordCount counts the words in a naming answer: its runs of ASCII letters
+// and digits. On a well-shaped slug that is its hyphen-separated words; on any
+// other answer ("Fix the login bug") it is still the count a person would
+// read, which is what the naming call's correction reports back.
+func SlugWordCount(answer string) int {
+	return len(strings.FieldsFunc(answer, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+	}))
+}
 
 // ValidateSlug reports whether a naming answer is a legal slug, naming what is
 // wrong with it when it is not.
@@ -62,11 +72,14 @@ func ValidateSlug(slug string) error {
 	if slug == "" {
 		return fmt.Errorf("the answer is empty")
 	}
+	if !slugShape.MatchString(slug) {
+		return fmt.Errorf("the answer is not at most %d lowercase hyphen-separated alphanumeric words", SlugWordLimit)
+	}
+	if words := SlugWordCount(slug); words > SlugWordLimit {
+		return fmt.Errorf("the answer is %d words, over the %d-word limit", words, SlugWordLimit)
+	}
 	if len(slug) > SlugMaxLen {
 		return fmt.Errorf("the answer is %d characters, over the %d-character bound", len(slug), SlugMaxLen)
-	}
-	if !slugPattern.MatchString(slug) {
-		return fmt.Errorf("the answer is not at most %d lowercase hyphen-separated alphanumeric words", SlugWordLimit)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -200,6 +201,57 @@ func TestCreateTellsTheModelWhatWasWrongWithItsFirstAnswer(t *testing.T) {
 	// Assert.
 	if !strings.Contains(f.headless.calls[1].Prompt, "The name is flaky-login-test.") {
 		t.Fatalf("retry prompt = %q, want the rejected answer quoted back", f.headless.calls[1].Prompt)
+	}
+}
+
+// TestNamingCorrectionStatesTheLimitAndTheCount pins that the retry after a
+// four-word answer tells the model the concrete limit (read off the
+// validator's own constant) and how many words its rejected answer had.
+func TestNamingCorrectionStatesTheLimitAndTheCount(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{name: "the word limit", want: fmt.Sprintf("the name must be AT MOST %d words", SlugWordLimit)},
+		{name: "the previous answer's word count", want: "It has 4 words"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			script(f,
+				headlessAnswer{text: "agent-repl-input-shorter"},
+				headlessAnswer{text: "input-shorter"})
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if !strings.Contains(f.headless.calls[1].Prompt, tt.want) {
+				t.Fatalf("retry prompt = %q, want %q stated", f.headless.calls[1].Prompt, tt.want)
+			}
+		})
+	}
+}
+
+// TestTheShippedNamingBriefStatesTheWordLimit pins the brief's stated limit to
+// the validator's constant, so the two can never disagree.
+func TestTheShippedNamingBriefStatesTheWordLimit(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceName)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Act.
+	got, err := brief.Splice(map[string]string{"prompt": "p", "conversation": "", "correction": ""})
+
+	// Assert.
+	want := fmt.Sprintf("THE NAME IS AT MOST %d WORDS", SlugWordLimit)
+	if err != nil || !strings.Contains(got, want) {
+		t.Fatalf("Splice = %q, %v; want the limit %q stated", got, err, want)
 	}
 }
 
