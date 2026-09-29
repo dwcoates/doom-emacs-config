@@ -26,7 +26,11 @@
 # Store health has NO verb: store.v1 deliberately defines none, so there is no
 # one-shot client to invoke. The doctor instead probes the store's real Connect
 # endpoints directly over its UNIX domain socket with curl -- GetLiveWork and
-# GetSidecarCursors, both pure reads that mutate nothing. A healthy store
+# GetSidecarCursors, both pure reads that mutate nothing. GetLiveWork is asked
+# about a sentinel session that owns nothing, so a healthy store answers it an
+# empty success: an UNSCOPED request would be refused, and the store rightly
+# records every refusal at WARN, so provoking one would put a warning in the
+# store's log on every health check. A healthy store
 # answers HTTP 200 with a JSON body whose single top-level key is `success`
 # (an empty success serializes as {"success":{}}). A `failure` key, a non-200
 # status, a refused connection, a missing socket, a timeout and a malformed
@@ -54,6 +58,11 @@ STORE_DB="$STATE_ROOT/store/events.db"
 
 STORE_SOCK="$SOCK_DIR/store.sock"
 FRONTEND_SOCK="$SOCK_DIR/daemon-frontend.sock"
+# GetLiveWork's probe request: a sentinel main-agent id no session ever owns, so
+# the store's scoped read answers an empty success. The id names the doctor, so
+# a store record of the read says who asked.
+LIVE_WORK_PROBE_REQUEST='{"session":{"value":"agent-shim-doctor-probe"}}'
+
 # Per-probe deadline in whole seconds, handed to curl --max-time.
 STORE_PROBE_TIMEOUT="${AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT:-2}"
 
@@ -191,23 +200,16 @@ print(field)
 PY
 }
 
-# check_store_connect_rpc RPC CHECK_SUFFIX [EXPECTED_REFUSAL_FIELD] — probe one
-# store.v1.ShimStore endpoint over the store's UDS. STRICTLY READ-ONLY: both
-# probed rpcs are pure reads and the request body is the empty message, so the
-# probe can never mutate store state.
-#
-# EXPECTED_REFUSAL_FIELD, when non-empty, names a field whose invalid_request
-# failure arm is the HEALTHY answer for an intentionally-unscoped probe (e.g.
-# GetLiveWork always refuses an empty request with invalid_request naming
-# "session" — see shim-store/AGENTS.md, "GetLiveWork IS SCOPED TO ONE
-# SESSION"). That exact refusal PASSes: it proves the store is serving and
-# enforcing its contract. Any OTHER failure — a different field, a different
-# kind (storage_failure), a transport error, a non-200, a malformed body —
-# still FAILs; this never weakens detection of a genuinely unhealthy store.
+# check_store_connect_rpc RPC CHECK_SUFFIX REQUEST_JSON — probe one
+# store.v1.ShimStore endpoint over the store's UDS with REQUEST_JSON as the
+# Connect JSON request body. STRICTLY READ-ONLY: both probed rpcs are pure
+# reads, so the probe can never mutate store state. ONLY the success arm
+# passes: every request the doctor sends is one a healthy store answers, so any
+# refusal is a finding, never an expected answer.
 check_store_connect_rpc() {
   local rpc="$1"
   local name="store-connect-$2"
-  local expected_refusal_field="${3:-}"
+  local request_json="$3"
   local procedure="store.v1.ShimStore/$rpc"
   local request_id url body err out rc http_status latency_ms
   local failure_class reason hint key detail kind field instr http_status_json
@@ -252,7 +254,7 @@ check_store_connect_rpc() {
     --unix-socket "$STORE_SOCK" \
     -H 'Content-Type: application/json' \
     -H "X-Agent-Repl-Request-Id: $request_id" \
-    -X POST "$url" -d '{}' \
+    -X POST "$url" -d "$request_json" \
     -o "$body" -w '%{http_code} %{time_total}' 2>"$err")"
   rc=$?
   set -e
@@ -335,19 +337,11 @@ check_store_connect_rpc() {
       ;;
     failure)
       [ -n "$detail" ] || detail="the store returned the failure arm with no detail"
-      if [ -n "$expected_refusal_field" ] && [ "$kind" = "invalid_request" ] && [ "$field" = "$expected_refusal_field" ]; then
-        record "$name" "PASS" \
-          "$procedure answered the expected scoped refusal (request_id=$request_id; latency_ms=$latency_ms; field=$field; detail=$detail)" \
-          "" \
-          "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" true "" "store correctly refused an unscoped request naming $field" "$http_status_json")" \
-          "$instr"
-      else
-        record "$name" "FAIL" \
-          "$procedure answered the failure arm (request_id=$request_id; latency_ms=$latency_ms; kind=$kind; field=$field; detail=$detail)" \
-          "the store is serving but REFUSED this read; its detail names the cause — inspect $LOG_DIR/shim-store.log for the matching refusal record" \
-          "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "failure_arm" "$detail" "$http_status_json")" \
-          "$instr"
-      fi
+      record "$name" "FAIL" \
+        "$procedure answered the failure arm (request_id=$request_id; latency_ms=$latency_ms; kind=$kind; field=$field; detail=$detail)" \
+        "the store is serving but REFUSED this read; its detail names the cause — inspect $LOG_DIR/shim-store.log for the matching refusal record" \
+        "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "failure_arm" "$detail" "$http_status_json")" \
+        "$instr"
       ;;
     *)
       record "$name" "FAIL" \
@@ -553,8 +547,8 @@ done
 # --- Run ----------------------------------------------------------------
 
 check_store_socket_present
-check_store_connect_rpc GetLiveWork get-live-work session
-check_store_connect_rpc GetSidecarCursors get-sidecar-cursors
+check_store_connect_rpc GetLiveWork get-live-work "$LIVE_WORK_PROBE_REQUEST"
+check_store_connect_rpc GetSidecarCursors get-sidecar-cursors '{}'
 check_launchd_service "$STORE_LABEL"
 check_launchd_service "$SIDECAR_LABEL"
 check_frontend_socket_present
