@@ -122,9 +122,7 @@ func TestARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 
 	// Assert: the pre-stop turn is on the page the relaunched daemon serves.
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn, rehydrated after the relaunch",
-		func(row *frontendv1.FeedRow) bool {
-			return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-		})
+		endsTurn(turn))
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn's prompt bubble, rehydrated after the relaunch",
 		func(row *frontendv1.FeedRow) bool {
 			return row.GetTurn().GetValue() == turn.GetValue() && row.GetUserPrompt() != nil
