@@ -56,7 +56,23 @@ var migrations = []migration{
 	{To: 10, Name: "feed_text_scale", DDL: feedTextScaleDDL},
 	{To: 11, Name: "idempotency_keys_accepted_at", DDL: acceptedAtDDL},
 	{To: 12, Name: "held_prompts_delivery", DDL: heldPromptsDeliveryDDL},
+	{To: 13, Name: "workspaces_turn_result", DDL: turnResultDDL},
 }
+
+// turnResultDDL adds the roster's last TURN RESULT: the turn-end arm the last
+// turn resolved to and whether the user has seen it. The roster held both only
+// in memory, so every daemon that did not see a workspace's turn end -- a
+// successor after a deploy's handover, a restart -- drew every row `ready`,
+// FULL, whatever it had been (owner report, 2026-09-29). Every existing row is
+// NULL and unread, which reads as "no result stands": the row is drawn from
+// its live state until its next turn ends.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the columns inline in schema.go.
+const turnResultDDL = `
+ALTER TABLE workspaces ADD COLUMN result_end TEXT;
+ALTER TABLE workspaces ADD COLUMN result_read INTEGER NOT NULL DEFAULT 0;
+`
 
 // heldPromptsDeliveryDDL adds how a held prompt asked to be delivered
 // (agentrepl.v1 SubmitPromptDelivery, as wsm.Delivery: 0 ordinary, 1
