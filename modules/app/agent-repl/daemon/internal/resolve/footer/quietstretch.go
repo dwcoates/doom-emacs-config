@@ -353,8 +353,17 @@ func (r *resolver) trackFeed(ws ids.WorkspaceID, s *wsState, agent *conversation
 // trackTurnItem is one main-agent frame while a turn runs.
 func (r *resolver) trackTurnItem(ws ids.WorkspaceID, s *wsState, unit string, kind feedKind, phase itemPhase) {
 	m := &s.motion
-	// ANY FRAME OF THE MAIN AGENT'S says the prompt was delivered.
-	m.delivered = true
+	// ANY FRAME OF THE MAIN AGENT'S says the prompt was delivered, and it
+	// delivers the turn exactly as the turn-open edge does -- the delivered
+	// line included. The two arrive on different streams, so the edge can be
+	// consumed before the turn is set (deliverTurn then has no turn to
+	// deliver); flipping the flag alone left a delivered turn with no line,
+	// and a non-feed item landing next (a wakeup) recorded the quiet stretch
+	// with no line at ERROR (e2e TestScheduleWakeupScheduleAndStop under load,
+	// 2026-09-29).
+	if !m.delivered {
+		r.deliverTurn(ws, s)
+	}
 	if phase == phaseRunning {
 		if _, running := m.open[unit]; running {
 			return
