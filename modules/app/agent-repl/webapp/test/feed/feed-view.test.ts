@@ -96,6 +96,7 @@ function fixture(
     feed?: FeedId;
     renderers?: Partial<Parameters<typeof stubRenderers>[0]>;
     overscan?: Overscan;
+    onPainted?: (ids: readonly string[], at: number) => void;
   } = {},
 ): Fixture {
   const host = document.createElement("div");
@@ -121,6 +122,7 @@ function fixture(
       ...overrides,
     },
     overscan: opts.overscan,
+    onPainted: opts.onPainted,
   });
   return { h, host, controller, bubbles };
 }
@@ -2713,5 +2715,86 @@ describe("createFeedController: every row is placed by its order key", () => {
     ].map((m) => m[0]);
     // Assert — one insertion, at the index the key's binary search found.
     expect({ insertions, arrival }).toEqual({ insertions: ["index"], arrival: [] });
+  });
+});
+
+describe("createFeedController: when a row was painted", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "Date"] });
+    vi.setSystemTime(1_000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run one animation frame's callbacks. */
+  function frame(): void {
+    vi.advanceTimersToNextFrame();
+  }
+
+  it("reports a pushed row only after the frame drawn with it was painted", () => {
+    const painted: [readonly string[], number][] = [];
+    const { controller } = fixture(harness(), {}, { onPainted: (ids, at) => painted.push([ids, at]) });
+
+    controller.upsert(responseRow("r1"));
+    frame();
+    expect(painted).toEqual([]);
+    expect(controller.paintedAt("r1")).toBeNull();
+    frame();
+
+    expect(painted.map(([ids]) => ids)).toEqual([["r1"]]);
+    expect(controller.paintedAt("r1")).toBe(painted[0]?.[1]);
+  });
+
+  it("reports every row a page placed, once", () => {
+    const painted: string[] = [];
+    const { controller } = fixture(harness(), {}, { onPainted: (ids) => painted.push(...ids) });
+
+    controller.applyPage(page([userPromptRow("a", "1"), responseRow("b")]), "replace");
+    frame();
+    frame();
+    controller.upsert(responseRow("c"));
+    frame();
+    frame();
+
+    expect(painted).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not report a re-push of a row already painted", () => {
+    const painted: string[] = [];
+    const { controller } = fixture(harness(), {}, { onPainted: (ids) => painted.push(...ids) });
+    controller.upsert(responseRow("r1"));
+    frame();
+    frame();
+
+    controller.upsert(responseRow("r1", "changed"));
+    frame();
+    frame();
+
+    expect(painted).toEqual(["r1"]);
+  });
+
+  it("answers null for a row it does not hold", () => {
+    const { controller } = fixture(harness(), {}, { onPainted: () => {} });
+    expect(controller.paintedAt("absent")).toBeNull();
+  });
+
+  it("keeps no paint time for a feed nobody asked to report paints", () => {
+    const { controller } = fixture();
+    controller.upsert(responseRow("r1"));
+    frame();
+    frame();
+    expect(controller.paintedAt("r1")).toBeNull();
+  });
+
+  it("records the paint at debug with the rows it painted", async () => {
+    const capture = captureLogRecords("debug");
+    const { controller } = fixture(harness(), {}, { onPainted: () => {} });
+    controller.upsert(responseRow("r1"));
+    frame();
+    frame();
+
+    const record = await forwardedRecord(capture, "feed.rows-painted");
+    expect(record.level.case).toBe("debug");
   });
 });
