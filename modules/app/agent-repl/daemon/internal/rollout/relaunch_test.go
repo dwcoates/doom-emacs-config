@@ -1030,37 +1030,54 @@ func TestAShimBounceAsksToReplaceTheShim(t *testing.T) {
 	}
 }
 
-func TestAnUnregisteredShimBounceIsAnOutcomeNotAFailure(t *testing.T) {
-	// Arrange: a bounce registered behind work, whose shim then departs with
-	// nothing left to replace.
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	h.freeness.SetFree(ws, false)
-	done := make(chan error, 1)
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
-		t.Fatalf("BounceShim: %v", err)
+// TestAShimBounceEndedUnrunIsAnOutcomeNotAFailure pins the Done outcomes that
+// are not failures: the bounce was unregistered (nothing is left to replace),
+// or it was handed across to the daemon a move took the workspace to. Each is
+// recorded at INFO, never WARN or ERROR, and handed on to the caller whole.
+//
+// MEASURED, deploy 2026-09-29T17:15:28: the hand-across was recorded as "the
+// shim bounce failed" at ERROR for every busy workspace the deploy handed over.
+func TestAShimBounceEndedUnrunIsAnOutcomeNotAFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		why  error
+		// word is what the INFO record's message must name.
+		word string
+	}{
+		{name: "the shim it would replace departed", why: bounce.ErrUnregistered, word: "unregistered"},
+		{name: "a move carried it to the successor", why: bounce.ErrHandedAcross, word: "handed across"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a bounce registered behind work.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.freeness.SetFree(ws, false)
+			done := make(chan error, 1)
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
+				t.Fatalf("BounceShim: %v", err)
+			}
 
-	// Act
-	h.registry.unregister(ws)
+			// Act
+			h.registry.endUnrun(ws, tt.why)
 
-	// Assert
-	if err := <-done; !errors.Is(err, bounce.ErrUnregistered) {
-		t.Fatalf("done = %v, want ErrUnregistered handed on to the caller", err)
-	}
-	for _, rec := range records(h.log, opBounce) {
-		if rec.Level == dlog.LevelError || rec.Level == dlog.LevelWarn {
-			t.Fatalf("an unregistered bounce was recorded at %s: %q", rec.Level, rec.Message)
-		}
-	}
-	found := false
-	for _, rec := range records(h.log, opBounce) {
-		if rec.Level == dlog.LevelInfo && strings.Contains(rec.Message, "unregistered") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("records = %+v, want the unregistration at INFO", h.log.Records())
+			// Assert
+			if err := <-done; !errors.Is(err, tt.why) {
+				t.Fatalf("done = %v, want %v handed on to the caller", err, tt.why)
+			}
+			found := false
+			for _, rec := range records(h.log, opBounce) {
+				if rec.Level == dlog.LevelError || rec.Level == dlog.LevelWarn {
+					t.Fatalf("the bounce's outcome was recorded at %s: %q", rec.Level, rec.Message)
+				}
+				if rec.Level == dlog.LevelInfo && strings.Contains(rec.Message, tt.word) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("records = %+v, want the outcome at INFO naming %q", h.log.Records(), tt.word)
+			}
+		})
 	}
 }
 
