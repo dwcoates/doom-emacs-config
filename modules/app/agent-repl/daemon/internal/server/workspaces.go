@@ -446,6 +446,11 @@ func (s *server) CloseWorkspace(
 }
 
 // KillWorkspace is the big red button: forced session death, never blocking.
+//
+// A REQUEST CARRYING AN op_id IS ACKED AT ONCE (owner ruling, 2026-09-29):
+// the fast half refuses what it must and marks the workspace closed, the rpc
+// answers `accepted`, and the session's death runs detached, its end pushed
+// on mutation_progress. Without one the rpc answers once the session is dead.
 func (s *server) KillWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.KillWorkspaceRequest],
@@ -456,12 +461,28 @@ func (s *server) KillWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Kill(ctx, subject.Record.ID); err != nil {
+	ws := subject.Record.ID
+	teardown, err := s.deps.Verbs.BeginKill(ctx, ws)
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	s.PublishHostWorkspace(ctx, ws)
+	if opID := req.Msg.GetOpId(); opID != "" {
+		s.runDetachedTeardown(ctx, subject.Log, rpc, opID, teardown, func(err error) {
+			s.PublishHostWorkspace(context.Background(), ws)
+			s.publishKillEnd(subject.Log, opID, err)
+		})
+		resp.Result = &agentreplv1.KillWorkspaceResponse_Accepted{
+			Accepted: &agentreplv1.KillWorkspaceAccepted{OpId: opID},
+		}
+		return connect.NewResponse(resp), nil
+	}
+	if err := teardown(ctx); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
-	s.PublishHostWorkspace(ctx, subject.Record.ID)
+	s.PublishHostWorkspace(ctx, ws)
 	resp.Result = &agentreplv1.KillWorkspaceResponse_Success{
 		Success: &agentreplv1.KillWorkspaceSuccess{},
 	}
@@ -469,7 +490,8 @@ func (s *server) KillWorkspace(
 }
 
 // NukeWorkspace destroys data: kill if live, then delete the worktree and the
-// branch, then forget the record.
+// branch, then forget the record. An op_id acks at once, as KillWorkspace's
+// does, and a git failure after the ack is pushed as the typed `git_failed`.
 func (s *server) NukeWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.NukeWorkspaceRequest],
@@ -480,7 +502,20 @@ func (s *server) NukeWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Nuke(ctx, subject.Record.ID); err != nil {
+	teardown, err := s.deps.Verbs.BeginNuke(ctx, subject.Record.ID)
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	if opID := req.Msg.GetOpId(); opID != "" {
+		s.runDetachedTeardown(ctx, subject.Log, rpc, opID, teardown, func(err error) {
+			s.publishNukeEnd(subject.Log, rpc, opID, err)
+		})
+		resp.Result = &agentreplv1.NukeWorkspaceResponse_Accepted{
+			Accepted: &agentreplv1.NukeWorkspaceAccepted{OpId: opID},
+		}
+		return connect.NewResponse(resp), nil
+	}
+	if err := teardown(ctx); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.NukeWorkspaceResponse_Success{
@@ -488,6 +523,72 @@ func (s *server) NukeWorkspace(
 	}
 	return connect.NewResponse(resp), nil
 }
+
+// runDetachedTeardown runs an accepted verb's teardown to completion in its
+// own goroutine, under a context detached from the accepting request (a client
+// that hangs up must never cut a session kill or a `git worktree remove`
+// short), and hands its outcome to END.
+func (s *server) runDetachedTeardown(ctx context.Context, log dlog.Logger, rpc, opID string, teardown workspace.Teardown, end func(error)) {
+	bgCtx, cancel := s.backgroundContext(ctx)
+	log.Info(opServerTeardown, "accepted the verb and detached its teardown", dlog.Context{"rpc": rpc, "op_id": opID})
+	go func() {
+		// The goroutine OWNS the cancel, as runBackgroundCreate's does.
+		defer cancel()
+		end(teardown(bgCtx))
+	}()
+}
+
+// publishKillEnd pushes an accepted kill's one terminal event. A failure is
+// recorded at ERROR here: after the ack there is no rpc left to carry it.
+func (s *server) publishKillEnd(log dlog.Logger, opID string, err error) {
+	progress := &agentreplv1.WorkspaceKillProgress{}
+	if err != nil {
+		log.Error(opServerTeardown, "an accepted kill's teardown failed; the workspace stays closed", dlog.Context{
+			"rpc": "KillWorkspace", "op_id": opID, "cause": err.Error(),
+		})
+		progress.Step = &agentreplv1.WorkspaceKillProgress_Failed{Failed: &agentreplv1.WorkspaceKillFailed{Internal: err.Error()}}
+	} else {
+		log.Info(opServerTeardown, "an accepted kill's teardown finished", dlog.Context{"rpc": "KillWorkspace", "op_id": opID})
+		progress.Step = &agentreplv1.WorkspaceKillProgress_Succeeded{Succeeded: &agentreplv1.WorkspaceKillSucceeded{}}
+	}
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId:  opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Kill{Kill: progress},
+	})
+}
+
+// publishNukeEnd pushes an accepted nuke's one terminal event: a typed refusal
+// the synchronous form would have answered on `error`, or an internal failure.
+func (s *server) publishNukeEnd(log dlog.Logger, rpc, opID string, err error) {
+	progress := &agentreplv1.WorkspaceNukeProgress{}
+	switch {
+	case err == nil:
+		log.Info(opServerTeardown, "an accepted nuke's teardown finished", dlog.Context{"rpc": rpc, "op_id": opID})
+		progress.Step = &agentreplv1.WorkspaceNukeProgress_Succeeded{Succeeded: &agentreplv1.WorkspaceNukeSucceeded{}}
+	default:
+		failed := &agentreplv1.WorkspaceNukeFailed{}
+		if refused, ok := s.asRefusal(err); ok {
+			resp := &agentreplv1.NukeWorkspaceResponse{}
+			if s.refuse(log, rpc, resp, refused) == nil {
+				failed.Cause = &agentreplv1.WorkspaceNukeFailed_Refusal{Refusal: resp.GetError()}
+			}
+		}
+		if failed.Cause == nil {
+			log.Error(opServerTeardown, "an accepted nuke's teardown failed; the workspace stays closed", dlog.Context{
+				"rpc": rpc, "op_id": opID, "cause": err.Error(),
+			})
+			failed.Cause = &agentreplv1.WorkspaceNukeFailed_Internal{Internal: err.Error()}
+		}
+		progress.Step = &agentreplv1.WorkspaceNukeProgress_Failed{Failed: failed}
+	}
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId:  opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Nuke{Nuke: progress},
+	})
+}
+
+// opServerTeardown records the detached teardown of an accepted kill or nuke.
+const opServerTeardown = "daemon.server.workspace_teardown"
 
 // ForgetWorkspace removes a CLOSED workspace's registry record and touches no
 // file. It is the undo for a registration, and the verb it delegates to owns
