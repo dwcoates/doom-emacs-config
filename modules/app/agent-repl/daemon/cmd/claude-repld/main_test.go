@@ -18,6 +18,7 @@ import (
 // is what every session is told.
 func TestTheStoreSocketPrecedence(t *testing.T) {
 	// Arrange.
+	home := func() (string, error) { return "/home/tester", nil }
 	tests := []struct {
 		name      string
 		flagValue string
@@ -26,33 +27,61 @@ func TestTheStoreSocketPrecedence(t *testing.T) {
 	}{
 		{name: "the flag beats the environment", flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
 		{name: "the environment beats the default", flagValue: "", envValue: "/run/env.sock", want: "/run/env.sock"},
+		{name: "the default is under the home directory", want: "/home/tester/.cache/agent-repl/sock/store.sock"},
+		{name: "a tilde override is expanded", envValue: "~/s/store.sock", want: "/home/tester/s/store.sock"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Act.
-			got := resolveStoreSocket(test.flagValue, test.envValue)
+			got, err := resolveStoreSocket(test.flagValue, test.envValue, home)
 
 			// Assert.
-			if got != test.want {
-				t.Fatalf("resolveStoreSocket(%q, %q) = %q, want %q", test.flagValue, test.envValue, got, test.want)
+			if err != nil || got != test.want {
+				t.Fatalf("resolveStoreSocket(%q, %q) = (%q, %v), want %q", test.flagValue, test.envValue, got, err, test.want)
 			}
 		})
 	}
 }
 
-// TestTheStoreSocketFallsBackToTheHomeDefault pins the last step of the same
-// precedence: with neither a flag nor an environment value the daemon names the
-// store's default socket rather than passing nothing.
-func TestTheStoreSocketFallsBackToTheHomeDefault(t *testing.T) {
+// TestTheStoreSocketRefusals pins that the socket is never guessed: a relative
+// one is refused, and so is a default whose home directory cannot be named,
+// which used to fall back to the bare relative default.
+func TestTheStoreSocketRefusals(t *testing.T) {
+	tests := []struct {
+		name      string
+		flagValue string
+		home      func() (string, error)
+		wantErr   string
+	}{
+		{name: "a relative flag is refused", flagValue: "run/store.sock", home: func() (string, error) { return "/home/tester", nil }, wantErr: "not an absolute path"},
+		{name: "an unnamed home refuses the default", home: func() (string, error) { return "", errors.New("$HOME is not defined") }, wantErr: "$HOME is not defined"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got, err := resolveStoreSocket(test.flagValue, "", test.home)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("resolveStoreSocket() = (%q, %v), want an error containing %q", got, err, test.wantErr)
+			}
+		})
+	}
+}
+
+// TestAnAbsoluteStoreSocketNeverAsksForHome pins that the home directory is
+// asked for only when the winning socket needs it.
+func TestAnAbsoluteStoreSocketNeverAsksForHome(t *testing.T) {
 	// Arrange.
-	t.Setenv("HOME", "/home/tester")
+	asked := false
+	home := func() (string, error) { asked = true; return "", errors.New("unreachable") }
 
 	// Act.
-	got := resolveStoreSocket("", "")
+	got, err := resolveStoreSocket("/run/flag.sock", "", home)
 
 	// Assert.
-	if want := filepath.Join("/home/tester", defaultStoreSocket); got != want {
-		t.Fatalf("resolveStoreSocket(\"\", \"\") = %q, want %q", got, want)
+	if err != nil || got != "/run/flag.sock" || asked {
+		t.Fatalf("resolveStoreSocket() = (%q, %v), asked for home = %v, want the flag and no home lookup", got, err, asked)
 	}
 }
 
