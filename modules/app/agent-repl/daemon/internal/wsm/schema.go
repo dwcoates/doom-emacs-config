@@ -71,7 +71,12 @@ CREATE TABLE workspaces (
   -- SECOND shim onto one session socket. See spawnedShimPidDDL and
   -- boot.sequence's starting-survivor wait.
   spawned_shim_pid INTEGER,
-  created_at       INTEGER NOT NULL
+  created_at       INTEGER NOT NULL,
+  -- The roster's last turn result: the turn-end arm the last turn resolved
+  -- to (NULL when none stands) and whether the user has seen it. See
+  -- turnResultDDL.
+  result_end       TEXT,
+  result_read      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX workspaces_one_current ON workspaces(is_current) WHERE is_current = 1;

@@ -29,7 +29,7 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -44,9 +44,18 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		merged   sql.NullInt64
 		spawned  sql.NullInt64
 		created  int64
+		end      sql.NullString
+		read     bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read); err != nil {
 		return Workspace{}, err
+	}
+	if end.Valid {
+		result := TurnResultEnd(end.String)
+		if !result.valid() {
+			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "result_end", Err: fmt.Errorf("unknown turn-end arm %q", end.String)}
+		}
+		ws.Result = &TurnResult{End: result, Read: read}
 	}
 	if spawned.Valid {
 		// A NON-POSITIVE RECORDED PID IS A CORRUPT ROW, never a silently
@@ -418,6 +427,34 @@ func (s *store) SetSpawnedShimPID(ctx context.Context, id WorkspaceID, pid *int)
 // SetAttention sets or clears the roster's attention marker.
 func (s *store) SetAttention(ctx context.Context, id WorkspaceID, on bool) error {
 	return s.setWorkspaceField(ctx, "daemon.wsm.set_attention", "attention", id, on, dlog.Context{"attention": on})
+}
+
+// SetResult records, or clears with nil, the roster's last turn result. An
+// undeclared turn-end arm is refused rather than stored for a later read to
+// trip over.
+func (s *store) SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error {
+	const op = "daemon.wsm.set_result"
+	fields := dlog.Context{"workspace": string(id)}
+	var (
+		end  any
+		read bool
+	)
+	if result != nil {
+		if !result.End.valid() {
+			err := fmt.Errorf("wsm: unknown turn-end arm %q", result.End)
+			s.log.Error(op, "refused an undeclared turn-end arm", withError(fields, err))
+			return err
+		}
+		end, read = string(result.End), result.Read
+		fields["end"], fields["read"] = string(result.End), result.Read
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET result_end = ?, result_read = ? WHERE id = ?`, end, read, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+	})
 }
 
 // SetMergedAt records that the workspace's merge landed.
