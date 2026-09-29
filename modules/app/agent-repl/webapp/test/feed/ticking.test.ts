@@ -9,6 +9,7 @@ import {
   stopClocks,
   stopTicking,
   tick,
+  tickWhileShown,
 } from "../../src/feed/ticking.js";
 
 beforeEach(() => {
@@ -311,5 +312,108 @@ describe("stopClocks", () => {
 
     // Assert
     expect(ran).toBe(1);
+  });
+});
+
+describe("tickWhileShown", () => {
+  it("runs once immediately, so the element never paints blank", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const seen: number[] = [];
+
+    // Act
+    tickWhileShown(el, createTicker(1000), (nowMs) => seen.push(nowMs));
+
+    // Assert
+    expect(seen).toHaveLength(1);
+  });
+
+  it("marks the element, so whoever discards it can find the subscription", () => {
+    // Arrange
+    const el = document.createElement("span");
+
+    // Act
+    tickWhileShown(el, createTicker(1000), () => {});
+
+    // Assert
+    expect(el.hasAttribute(TICKING_ATTRIBUTE)).toBe(true);
+  });
+
+  it("keeps counting through a clock stop, since an age stays true after the work ends", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const ago = document.createElement("span");
+    row.append(ago);
+    let ticks = 0;
+    tickWhileShown(ago, createTicker(1000), () => (ticks += 1));
+
+    // Act
+    stopClocks(row);
+    vi.advanceTimersByTime(2000);
+
+    // Assert
+    expect(ticks).toBe(3);
+  });
+
+  it("is not counted by a clock stop, so the backstop does not report it", () => {
+    // Arrange
+    const el = document.createElement("span");
+    tickWhileShown(el, createTicker(1000), () => {});
+
+    // Act
+    const stopped = stopClocks(el);
+
+    // Assert
+    expect(stopped).toBe(0);
+  });
+
+  it("stops on a discard", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const ago = document.createElement("span");
+    row.append(ago);
+    let ticks = 0;
+    tickWhileShown(ago, createTicker(1000), () => (ticks += 1));
+
+    // Act
+    stopTicking(row);
+    vi.advanceTimersByTime(2000);
+
+    // Assert
+    expect(ticks).toBe(1);
+    expect(ago.hasAttribute(TICKING_ATTRIBUTE)).toBe(false);
+  });
+});
+
+describe("stopClocks: an element holding both kinds", () => {
+  it("stops the work clock and leaves the present clock counting", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const ticker = createTicker(1000);
+    let work = 0;
+    let present = 0;
+    tick(el, ticker, () => (work += 1));
+    tickWhileShown(el, ticker, () => (present += 1));
+
+    // Act
+    stopClocks(el);
+    vi.advanceTimersByTime(1000);
+
+    // Assert
+    expect([work, present]).toEqual([1, 2]);
+  });
+
+  it("keeps the marker while the present clock is live, so a discard still finds it", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const ticker = createTicker(1000);
+    tick(el, ticker, () => {});
+    tickWhileShown(el, ticker, () => {});
+
+    // Act
+    stopClocks(el);
+
+    // Assert
+    expect(el.hasAttribute(TICKING_ATTRIBUTE)).toBe(true);
   });
 });
