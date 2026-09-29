@@ -229,46 +229,16 @@ type viewFixture struct {
 	sidebarRows <-chan *frontendv1.WorkspaceRoster
 }
 
-// testColors is a fully painted render-colors table: every resolver here
-// refuses to serve an unpainted state, which is the guarantee they exist to
-// keep.
-func testColors() vocab.RenderColors {
-	status := map[string]string{}
-	for _, arm := range []string{
-		"submitting", "thinking", "clearing", "compacting", "permission", "done",
-		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
-		"start_failed", "degraded", "dead", "merge_enqueuing", "merging",
-		"merge_queued", "merge_conflict", "merge_failed", "merged", "none",
-		"inactive",
-	} {
-		status[arm] = "grey"
+// testColors is the repository's own render-colors table: every resolver
+// here refuses to serve an unpainted state, and reading the real file (as the
+// sidebar's tests do) keeps this fixture from drifting when an arm is renamed.
+func testColors(t *testing.T) vocab.RenderColors {
+	t.Helper()
+	colors, err := vocab.LoadRenderColors("../../../proto/vocab")
+	if err != nil {
+		t.Fatalf("load render colors: %v", err)
 	}
-	glyphs := map[string]string{}
-	for _, arm := range []string{
-		"merge_enqueuing", "merging", "merge_queued", "merge_conflict",
-		"merge_failed", "merged",
-	} {
-		glyphs[arm] = "recycle"
-	}
-	return vocab.RenderColors{
-		RosterStatus: status,
-		MergeGlyphs:  glyphs,
-		TopbarConnectivity: map[string]string{
-			"connected": "green", "connecting": "blue", "severed": "blue",
-			"dead": "blue", "no_session": "none",
-		},
-		TopbarTones: []string{"none", "blue", "purple", "red", "yellow", "green"},
-		FooterStatus: map[string]string{
-			"disconnected": "grey", "closing": "grey", "interrupted": "grey",
-			"loading": "grey", "blocked": "grey", "merging": "grey",
-			"waiting": "grey", "thinking": "grey", "background": "grey",
-			"idle": "grey", "merge_conflict": "grey", "merge_failed": "grey",
-			"merged": "grey", "turn_failed": "grey", "degraded": "grey",
-		},
-		FooterAllowance: map[string]string{
-			"allowed": "grey", "allowed_warning": "grey", "rejected": "grey",
-		},
-	}
+	return colors
 }
 
 // waitDeadline bounds every wait below. It is a FAILURE deadline, never a
@@ -283,11 +253,11 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	log := dlog.NewTestSurfaces()
 	dir := t.TempDir()
 
-	top, err := topbar.New(testColors(), log)
+	top, err := topbar.New(testColors(t), log)
 	if err != nil {
 		t.Fatalf("topbar.New: %v", err)
 	}
-	foot, err := footer.New(testColors(), log)
+	foot, err := footer.New(testColors(t), log)
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
@@ -295,7 +265,7 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	if err != nil {
 		t.Fatalf("holds.New: %v", err)
 	}
-	roster, err := sidebar.New(testColors(), log)
+	roster, err := sidebar.New(testColors(t), log)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
@@ -398,11 +368,11 @@ func TestPublishViewsSkipsAViewNothingHasPublished(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	surfaces := dlog.NewTestSurfaces()
-	top, err := topbar.New(testColors(), surfaces)
+	top, err := topbar.New(testColors(t), surfaces)
 	if err != nil {
 		t.Fatalf("topbar.New: %v", err)
 	}
-	foot, err := footer.New(testColors(), surfaces)
+	foot, err := footer.New(testColors(t), surfaces)
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
@@ -410,7 +380,7 @@ func TestPublishViewsSkipsAViewNothingHasPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("holds.New: %v", err)
 	}
-	roster, err := sidebar.New(testColors(), surfaces)
+	roster, err := sidebar.New(testColors(t), surfaces)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
