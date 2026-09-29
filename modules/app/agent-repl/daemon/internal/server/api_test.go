@@ -10,8 +10,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
-
-	"claude-repld/internal/sessionwatcher"
 )
 
 // TestNewRefusesAMissingDependency pins that a surface never starts half-wired:
@@ -62,7 +60,7 @@ func TestNewRefusesAMissingWebappDist(t *testing.T) {
 		Drain: h.Drain, Rollout: h.Rollout, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		Holds: h.Holds, LoudFaults: &h.LoudFaults, Log: h.Surfaces,
+		Holds: h.Holds, LoudFaults: &h.LoudFaults, Focus: h.Focus, Log: h.Surfaces,
 	}
 
 	// Act.
@@ -178,32 +176,6 @@ func TestConnectRoutesTakePrecedenceOverAssets(t *testing.T) {
 	}
 }
 
-// TestRelayNotifyPushesTheTypedKind pins that a notification's kind name is
-// rendered as the typed arm rather than guessed at.
-func TestRelayNotifyPushesTheTypedKind(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
-
-	// Act.
-	h.Server.Relay().Notify(testWorkspaceID, sessionwatcher.HostNotification{
-		Text: "consent needed", Kind: sessionwatcher.NotificationPermissionRequested, ToolName: "Bash",
-	})
-	push := receiveHostEvent(t, stream)
-
-	// Assert.
-	got := push.GetNotification().GetKind().GetPermissionRequested()
-	if got == nil || got.GetToolName() != "Bash" {
-		t.Fatalf("notification kind = %v, want permission_requested{Bash}", push.GetNotification().GetKind())
-	}
-}
-
 // TestPushTransferredReachesTheWebStreamWithTheAddress pins that the web arm
 // carries the successor's address: a webview has no daemon-level stream to have
 // learned it from.
@@ -316,35 +288,5 @@ func TestTransportClosedUsesNotFoundForAnUnknownID(t *testing.T) {
 	// Assert.
 	if cerr.Code() != connect.CodeNotFound {
 		t.Fatalf("code = %v, want CodeNotFound", cerr.Code())
-	}
-}
-
-// TestAQuestionNotificationCarriesTheQuestionsOwnHeader pins that the
-// question_asked arm's `header` comes from the QUESTION's header and not from
-// a permission ask's tool name: the two are different fields of the same
-// notification and the relay must not conflate them.
-func TestAQuestionNotificationCarriesTheQuestionsOwnHeader(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
-
-	// Act.
-	h.Server.Relay().Notify(testWorkspaceID, sessionwatcher.HostNotification{
-		Text:   "Which auth method?",
-		Kind:   sessionwatcher.NotificationQuestionAsked,
-		Header: "Auth method",
-	})
-	push := receiveHostEvent(t, stream)
-
-	// Assert.
-	got := push.GetNotification().GetKind().GetQuestionAsked()
-	if got == nil || got.GetHeader() != "Auth method" {
-		t.Fatalf("notification kind = %v, want question_asked{Auth method}", push.GetNotification().GetKind())
 	}
 }

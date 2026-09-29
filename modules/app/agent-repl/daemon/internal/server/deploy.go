@@ -258,6 +258,9 @@ func validateWatchDaemonRequest(req *agentreplv1.WatchDaemonRequest) *connect.Er
 		if client.Emacs.GetElispBuild() == "" {
 			return invalid("client.emacs.elisp_build", "the elisp build this Emacs loaded is required")
 		}
+		if client.Emacs.GetFocus().GetFocus() == nil {
+			return invalid("client.emacs.focus", "whether this Emacs is focused is required")
+		}
 		return nil
 	case *agentreplv1.WatchDaemonRequest_Webview:
 		return nil

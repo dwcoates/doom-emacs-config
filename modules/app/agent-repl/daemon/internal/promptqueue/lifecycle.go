@@ -24,7 +24,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// THE TURN STILL CLOSES. A workspace this queue cannot resolve is
 		// recorded by q.logger at ERROR; its turn is closed and its ending
 		// drawn all the same, and nothing is delivered.
-		_ = q.closeTurn(ctx, ws, turn, how, q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}))
+		q.endTurn(ctx, ws, turn, how, q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}))
 		return
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "close": closeName(how)})
@@ -55,7 +55,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// through the door; what is held waits for the running turn's own end.
 	if watcher, ok := q.deps.Watcher(ws); ok {
 		if running := watcher.TurnInFlight(); running != nil && *running != turn {
-			_ = q.closeTurn(ctx, ws, turn, how, log)
+			q.endTurn(ctx, ws, turn, how, log)
 			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
 				"turn_in_flight": string(*running),
 			})
@@ -68,7 +68,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 
 	// THE DOOR: the row closes and the feed draws the ending together. A
 	// failed write is recorded there, and the queue goes on to deliver.
-	_ = q.closeTurn(ctx, ws, turn, how, log)
+	q.endTurn(ctx, ws, turn, how, log)
 
 	// THE BOUNCE REGISTRY IS CHECKED FIRST, before anything queued is
 	// dispatched. A shim registered for a bounce that this turn end leaves
@@ -95,6 +95,15 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// from "the queue was told and had nothing to do".
 		log.Info(opTurnEnded, "the turn ended; nothing is waiting to be delivered", nil)
 	}
+}
+
+// endTurn is a LIVE turn end's close: the turn closes through the door, whose
+// feed half draws (and files) its ending, and then the turn's desktop banner
+// is raised from that ending. Every branch of OnTurnEnded ends its turn here,
+// so no live turn end closes without its banner.
+func (q *queue) endTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose, log dlog.Logger) {
+	_ = q.closeTurn(ctx, ws, turn, how, log)
+	q.deps.TurnBanners.OnTurnEnded(ws, turn, how)
 }
 
 // OnTurnAdopted is the LifecycleSink's vendor-started turn: a turn the vendor

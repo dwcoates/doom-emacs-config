@@ -332,7 +332,7 @@ func openDaemonWatch(t *testing.T, h *harness, req *agentreplv1.WatchDaemonReque
 }
 
 func emacsWatch(build string) *agentreplv1.WatchDaemonRequest {
-	return &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: build}}}
+	return &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: build}}}
 }
 
 func webviewWatch() *agentreplv1.WatchDaemonRequest {

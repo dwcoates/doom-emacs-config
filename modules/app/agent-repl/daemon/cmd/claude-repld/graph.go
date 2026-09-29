@@ -18,6 +18,7 @@ import (
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/commandfile"
+	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/envc"
@@ -120,6 +121,11 @@ type graph struct {
 	// read that client, and a turn end still being handled when the store
 	// closes under it is a refused read on a path that owes no error.
 	CloseWatchers func()
+	// CloseBanners cancels every desktop banner still awaiting its click and
+	// joins them. `run` calls it AFTER the watchers close (no turn end can
+	// raise another banner then) and BEFORE the state client closes: a banner
+	// reads that client for the workspace's name.
+	CloseBanners func()
 	// DrainQueue is the BOUNDED wait for the prompt queue's own background
 	// goroutines — the asynchronous classification verdicts and the background
 	// revivals. `run` calls it BEFORE the state client closes, for the reason
@@ -464,10 +470,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// synthesized title into the topbar, and its cheap headless call bills the
 	// workspace's own account via the daemon's one workspace-dir lookup.
 	digestRef := &digestForwarder{}
+	// ONE ACCOUNT RESOLUTION FOR THE DAEMON'S OWN HEADLESS CALLS: the title
+	// and the turn summary bill the workspace's own account the same way.
+	configDirs := titleConfigDirs{workspaceDir: workspaceDir, accounts: accounts, log: log}
 	titleSynth := titlesynth.New(titlesynth.Deps{
 		Digester:   digestRef,
 		Headless:   headlessClient,
-		ConfigDirs: titleConfigDirs{workspaceDir: workspaceDir, accounts: accounts, log: log},
+		ConfigDirs: configDirs,
 		Titles:     topbarResolver,
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
@@ -509,10 +518,33 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// it exists.
 	digestRef.bind(fleet)
 
+	// ---- the desktop notifier ----
+
+	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
+	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
+	// relayed to the host stream through the server, bound late.
+	focus := desktopnotify.NewFocus(log)
+	backend, backendErr := resolveBannerBackend(log)
+	clicks := &clickForwarder{}
+	notifier := desktopnotify.New(desktopnotify.Deps{
+		Focus: focus, Backend: backend, BackendErr: backendErr,
+		Clicks: clicks, Names: workspaceNames{db: p.DB}, Log: log,
+	})
+	turnBanners := desktopnotify.NewTurnBanners(desktopnotify.TurnDeps{
+		Endings: feedResolver,
+		Poster:  notifier,
+		Summaries: desktopnotify.Summarizer{
+			Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
+		},
+		Now: time.Now,
+		Log: log,
+	})
+
 	// ---- the prompt queue ----
 
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
+		TurnBanners:    turnBanners,
 		StripSentinels: stripSentinels,
 		ResolveImage:   resolveImage,
 		DB:             p.DB,
@@ -773,6 +805,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Sidebar:      sidebarResolver,
 		Holds:        holdsResolver,
 		Host:         relay,
+		Banners:      notifier,
 		Sessions:     fleet,
 		Headless:     headlessClient,
 		Browser:      browser,
@@ -875,6 +908,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:          sidebarResolver,
 			Holds:            holdsResolver,
 			LoudFaults:       loudFaults.Topic(),
+			Focus:            focus,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -921,6 +955,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
 			relay.bind(srv.Relay())
+			clicks.bind(srv)
 			clients.bind(srv)
 		},
 		Background: []backgroundLoop{
@@ -934,6 +969,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "lock_watchdog", Run: stalls.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
+		CloseBanners:  notifier.Close,
 		DrainQueue:    queue.Drain,
 		DrainStarts:   fleet.DrainStarts,
 		DrainMerges:   mergeOrchestrator.Drain,

@@ -24,6 +24,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/deploy"
+	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/feedid"
@@ -822,6 +823,8 @@ type harness struct {
 	Holds     *fakeHolds
 	// LoudFaults is the standing loud faults every Emacs stream is told.
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
+	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
+	Focus      *desktopnotify.Focus
 	Surfaces   *fakeSurfaces
 	WebappDist string
 }
@@ -863,6 +866,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:    &fakeSidebar{},
 		Holds:      &fakeHolds{},
 		Surfaces:   &fakeSurfaces{},
+		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
 	}
 
@@ -886,6 +890,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:          h.Sidebar,
 		Holds:            h.Holds,
 		LoudFaults:       &h.LoudFaults,
+		Focus:            h.Focus,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,

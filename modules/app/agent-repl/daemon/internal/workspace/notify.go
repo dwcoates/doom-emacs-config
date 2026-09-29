@@ -18,8 +18,8 @@ const opAsksSettled = "daemon.workspace.asks_settled"
 // Notify raises one host notification. It is the LifecycleSink's notification
 // hook, wired by the server, and it does exactly two things:
 //
-//   - relays the TYPED notification onto the workspace's host stream, so Emacs's
-//     own focus policy can act on it;
+//   - raises the workspace's DESKTOP BANNER, which the notifier posts only
+//     while Emacs is not focused;
 //   - sets the roster's ATTENTION MARKER, which SelectWorkspace and
 //     AsksSettled clear.
 //
@@ -35,7 +35,7 @@ func (v *verbs) Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatc
 			"a notification must name its kind", false)
 	}
 
-	v.deps.Host.Notify(ws, note)
+	v.deps.Banners.Raise(ws, string(note.Kind), note.Text)
 
 	if err := v.deps.DB.SetAttention(ctx, ws, true); err != nil {
 		log.Error(opNotify, "could not set the attention marker", dlog.Context{"cause": err.Error()})
