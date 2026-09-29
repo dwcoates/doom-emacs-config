@@ -1848,8 +1848,9 @@ func (x *FooterStatusActivityQuietStretch) GetText() string {
 //   - While this is set, the client draws `text` in the activity cell, in
 //     place of the status's `activity`, until it has painted the row
 //     `until_painted` names (the row is in the page and a frame has been
-//     painted with it), and then for 500ms more. After that it draws
-//     `activity`, and a later frame naming the same row does not hold again.
+//     painted with it), and clears it on that paint. A row already painted
+//     when the ending arrives holds nothing, and a later frame naming the
+//     same row does not hold again.
 //   - A client whose feed is not showing the live tail (the user has scrolled
 //     back through history) will not paint the row where the user is looking,
 //     and draws `activity` at once.

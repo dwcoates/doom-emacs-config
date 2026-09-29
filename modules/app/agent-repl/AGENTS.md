@@ -1250,8 +1250,8 @@ and what happens next (`✅ Bash finished — handling result...`,
 `❌ Read failed — handling failure...`; never the word "agent"). The stretch
 ENDS THE MOMENT THE FEED DRAWS THE NEXT ITEM: a streaming response ends it at
 its first fragment, not when it finishes. The line itself stays on screen until
-the webapp has PAINTED that item, then 500ms more (owner ruling, 2026-09-29), so
-it never clears before its successor is visible.
+the webapp has PAINTED that item, and clears on that paint (owner ruling,
+2026-09-29), so it never clears before its successor is visible.
 
 - **Where it is legal.** Under the `working` status and under `background`.
   While a turn is in flight the status is `working` even if detached work runs,

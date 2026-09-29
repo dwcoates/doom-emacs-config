@@ -110,11 +110,6 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   const hold = createQuietHold({
     paints: deps.paints,
     followingTail: deps.followingTail,
-    now: () => Date.now(),
-    setTimer: (fn, ms) => window.setTimeout(fn, ms),
-    clearTimer: (handle) => {
-      window.clearTimeout(handle);
-    },
     redraw: () => {
       draw();
     },

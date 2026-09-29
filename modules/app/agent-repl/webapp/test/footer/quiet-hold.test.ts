@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FooterStatusQuietStretchEndingSchema,
@@ -8,7 +8,6 @@ import {
   type FooterStatusQuietStretchEnding,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
-  QUIET_HOLD_DWELL_MS,
   createQuietHold,
   quietStretchEndingOf,
   withHeldLine,
@@ -53,60 +52,31 @@ function setup(opts: { following?: boolean } = {}) {
   const deps: QuietHoldDeps = {
     paints: paints.watch,
     followingTail: () => opts.following ?? true,
-    now: () => Date.now(),
-    setTimer: (fn, ms) => window.setTimeout(fn, ms),
-    clearTimer: (handle) => {
-      window.clearTimeout(handle);
-    },
     redraw,
   };
   return { hold: createQuietHold(deps), paints, redraw };
 }
 
 describe("createQuietHold", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(10_000);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("holds the ended line until its row is painted, then the dwell", () => {
+  it("holds the ended line until its row is painted, and clears it on that paint", () => {
     const { hold, paints, redraw } = setup();
     hold.observe(ending("row-2"));
-    vi.advanceTimersByTime(5_000);
     expect(hold.held()?.text).toBe("✅ Bash finished — handling result...");
 
-    paints.paint("row-2", Date.now());
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS - 1);
-    expect(hold.held()).not.toBeNull();
-    vi.advanceTimersByTime(1);
+    paints.paint("row-2", 1);
 
     expect(hold.held()).toBeNull();
     expect(redraw).toHaveBeenCalledTimes(1);
   });
 
-  it("counts the dwell from a paint that landed before the ending", () => {
-    const { hold, paints } = setup();
-    paints.paint("row-2", Date.now() - 200);
+  it("holds nothing for a row already painted when the ending arrives", () => {
+    const { hold, paints, redraw } = setup();
+    paints.paint("row-2", 1);
 
     hold.observe(ending("row-2"));
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS - 201);
-    expect(hold.held()).not.toBeNull();
-    vi.advanceTimersByTime(1);
 
     expect(hold.held()).toBeNull();
-  });
-
-  it("releases at once for a row painted longer ago than the dwell", () => {
-    const { hold, paints } = setup();
-    paints.paint("row-2", Date.now() - 2 * QUIET_HOLD_DWELL_MS);
-
-    hold.observe(ending("row-2"));
-    vi.advanceTimersByTime(0);
-
-    expect(hold.held()).toBeNull();
+    expect(redraw).not.toHaveBeenCalled();
   });
 
   it("holds nothing for a reader not following the live tail", () => {
@@ -141,8 +111,7 @@ describe("createQuietHold", () => {
   it("never holds a row again once its hold was released", () => {
     const { hold, paints } = setup();
     hold.observe(ending("row-2"));
-    paints.paint("row-2", Date.now());
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS);
+    paints.paint("row-2", 1);
 
     hold.observe(ending("row-2"));
 
@@ -150,14 +119,14 @@ describe("createQuietHold", () => {
   });
 
   it("keeps one hold across repeated pushes of the same ending", () => {
-    const { hold, paints } = setup();
+    const { hold, paints, redraw } = setup();
     hold.observe(ending("row-2"));
     hold.observe(ending("row-2"));
-    paints.paint("row-2", Date.now());
 
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS);
+    paints.paint("row-2", 1);
 
     expect(hold.held()).toBeNull();
+    expect(redraw).toHaveBeenCalledTimes(1);
     expect(paints.listeners.size).toBe(0);
   });
 
@@ -165,19 +134,17 @@ describe("createQuietHold", () => {
     const { hold, paints } = setup();
     hold.observe(ending("row-2"));
 
-    paints.paint("row-9", Date.now());
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS * 4);
+    paints.paint("row-9", 1);
 
     expect(hold.held()?.untilPainted?.value).toBe("row-2");
   });
 
-  it("is released by dispose, and its timer never fires", () => {
+  it("is released by dispose, and a later paint redraws nothing", () => {
     const { hold, paints, redraw } = setup();
     hold.observe(ending("row-2"));
-    paints.paint("row-2", Date.now());
 
     hold.dispose();
-    vi.advanceTimersByTime(QUIET_HOLD_DWELL_MS);
+    paints.paint("row-2", 1);
 
     expect(hold.held()).toBeNull();
     expect(redraw).not.toHaveBeenCalled();

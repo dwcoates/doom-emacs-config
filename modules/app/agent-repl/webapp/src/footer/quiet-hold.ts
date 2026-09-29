@@ -8,7 +8,9 @@
  * (`FooterStatusQuietStretchEnding`), and this page decides when it goes:
  *
  * - It draws the ended line, in place of the status's activity, until it has
- *   PAINTED that row (`feed/painted.ts`), and for `QUIET_HOLD_DWELL_MS` more.
+ *   PAINTED that row (`feed/painted.ts`), and clears it on that paint (owner
+ *   ruling, 2026-09-29: no dwell after it). A row already painted when the
+ *   ending arrives holds nothing.
  * - A reader not following the live tail is not looking where the row paints,
  *   so the hold is released at once.
  * - A push that states no ending, or another row's, releases the hold: the
@@ -29,16 +31,10 @@ import type { PaintWatch } from "../feed/painted.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 
-/** How long the ended line stays after its successor was painted. */
-export const QUIET_HOLD_DWELL_MS = 500;
-
 export interface QuietHoldDeps {
   readonly paints: PaintWatch;
   /** Whether the reader is following the feed's live tail. */
   readonly followingTail: () => boolean;
-  readonly now: () => number;
-  readonly setTimer: (fn: () => void, ms: number) => number;
-  readonly clearTimer: (handle: number) => void;
   /** The hold was released: redraw without it. */
   readonly redraw: () => void;
 }
@@ -95,7 +91,6 @@ export function withHeldLine(strip: FooterStrip, ending: FooterStatusQuietStretc
 export function createQuietHold(deps: QuietHoldDeps): QuietHold {
   let current: FooterStatusQuietStretchEnding | null = null;
   let released: string | null = null;
-  let timer: number | null = null;
   let unsubscribe: (() => void) | null = null;
 
   return {
@@ -120,13 +115,12 @@ export function createQuietHold(deps: QuietHoldDeps): QuietHold {
         operation: "footer.quiet-hold",
         context: { row, text: ending.text },
       });
-      const painted = deps.paints.paintedAt(row);
-      if (painted !== null) {
-        dwellFrom(painted);
+      if (deps.paints.paintedAt(row) !== null) {
+        release("its successor was already painted", false);
         return;
       }
-      unsubscribe = deps.paints.onPainted((id, at) => {
-        if (id === row) dwellFrom(at);
+      unsubscribe = deps.paints.onPainted((id) => {
+        if (id === row) release("its successor was painted", true);
       });
     },
     held: () => current,
@@ -134,17 +128,6 @@ export function createQuietHold(deps: QuietHoldDeps): QuietHold {
       release("the footer was disposed", false);
     },
   };
-
-  /** Release the hold QUIET_HOLD_DWELL_MS after the row painted at AT. */
-  function dwellFrom(at: number): void {
-    unsubscribe?.();
-    unsubscribe = null;
-    const wait = Math.max(0, at + QUIET_HOLD_DWELL_MS - deps.now());
-    timer = deps.setTimer(() => {
-      timer = null;
-      release("its successor was painted and the dwell ran out", true);
-    }, wait);
-  }
 
   /** Drop the hold, redrawing when REDRAW (a push draws on its own). */
   function release(reason: string, redraw: boolean): void {
@@ -158,8 +141,6 @@ export function createQuietHold(deps: QuietHoldDeps): QuietHold {
     current = null;
     unsubscribe?.();
     unsubscribe = null;
-    if (timer !== null) deps.clearTimer(timer);
-    timer = null;
     if (redraw) deps.redraw();
   }
 }
