@@ -1588,10 +1588,18 @@ func (e *Emacs) stop() {
 		// stop. A refusal that every daemon-less teardown produces is noise
 		// covering the refusals that mean something, so the question is asked
 		// only where there is something to answer it.
-		if e.holdsDaemonLink() {
+		switch e.daemonLinkState() {
+		case daemonLinkHeld:
 			e.askDaemonToStop()
 			stopAsked = true
-		} else {
+		case daemonStopping:
+			// THE SCENARIO STOPPED ITS OWN DAEMON, and that daemon's shutdown
+			// grace does not end until this Emacs -- its streams' client -- is
+			// gone. It is on its way out exactly as designed, so its exit is
+			// awaited as a teardown-issued stop's is.
+			e.noteTeardownStep("the scenario had already stopped its daemon, so its exit was awaited")
+			stopAsked = true
+		default:
 			e.noteTeardownStep("no daemon link was held, so no daemon stop was asked")
 		}
 
@@ -1613,14 +1621,29 @@ func (e *Emacs) stop() {
 	e.awaitDaemonExit(stopAsked)
 }
 
-// holdsDaemonLink answers whether this Emacs has a daemon to be asked to
-// stop -- the same link `agent-repl-frontend-daemon-stop` refuses without.
+// daemonLink is what the teardown's daemon-link question answered.
+type daemonLink int
+
+const (
+	// daemonLinkNone: no daemon link, and no daemon this Emacs stopped is
+	// still on its way out.
+	daemonLinkNone daemonLink = iota
+	// daemonLinkHeld: a daemon link stands, so the daemon is asked to stop.
+	daemonLinkHeld
+	// daemonStopping: no link, but a daemon this Emacs asked to stop has not
+	// yet been recorded as exited (`agent-repl-daemon--exit-requested').
+	daemonStopping
+)
+
+// daemonLinkState answers whether this Emacs has a daemon to be asked to
+// stop -- the same link `agent-repl-frontend-daemon-stop` refuses without --
+// or one it already stopped that has not yet exited.
 //
 // AN UNANSWERED QUESTION IS A YES. An Emacs that could not answer may still
 // hold a live daemon, and skipping the stop on an unanswered question would
 // strand exactly the tree the stop exists to take down; the failure is
 // reported and the stop is asked anyway.
-func (e *Emacs) holdsDaemonLink() bool {
+func (e *Emacs) daemonLinkState() daemonLink {
 	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
@@ -1630,24 +1653,26 @@ func (e *Emacs) holdsDaemonLink() bool {
 			"--eval", settleDaemonLinkForm)
 		if err != nil {
 			e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
-			return true
+			return daemonLinkHeld
 		}
 		switch answer := strings.Trim(strings.TrimSpace(out), `"`); answer {
 		case "link":
-			return true
+			return daemonLinkHeld
+		case "stopping":
+			return daemonStopping
 		case "none":
-			return false
+			return daemonLinkNone
 		case "pending":
 			e.noteTeardownStep("a daemon spawn or link acceptance was in flight, so its outcome was awaited")
 		default:
 			e.t.Logf("emacs answered the teardown's daemon-link question with %q", answer)
-			return true
+			return daemonLinkHeld
 		}
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
 			e.t.Logf("a daemon spawn in flight did not settle within %s", teardownStopBound)
-			return true
+			return daemonLinkHeld
 		}
 	}
 }
@@ -1661,7 +1686,9 @@ func (e *Emacs) holdsDaemonLink() bool {
 // asking "is there a link?" then answered no, no stop was asked, and the
 // daemon outlived the scenario as a stray. So while an ensure, or a link
 // acceptance, is in flight the answer is "pending" and the teardown waits for
-// its outcome. Once neither is, the SAME form disarms every trigger that could
+// its outcome. A daemon this Emacs already asked to stop, whose exit is not yet
+// recorded, answers "stopping": it outlives the link by its shutdown grace.
+// Once neither is in flight, the SAME form disarms every trigger that could
 // begin a new ensure -- the reconnect poll, the no-daemon hook, the cold-start
 // idle timer -- so none can start between this answer and Emacs's exit:
 // Emacs runs one form at a time, so the answer and the disarm are one act.
@@ -1676,7 +1703,9 @@ const settleDaemonLinkForm = `(cond
      (remove-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure))
    (when (timerp (bound-and-true-p agent-repl-daemon--startup-timer))
      (cancel-timer agent-repl-daemon--startup-timer))
-   (if (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)) "link" "none")))`
+   (cond ((and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)) "link")
+         ((bound-and-true-p agent-repl-daemon--exit-requested) "stopping")
+         (t "none"))))`
 
 // askDaemonToStop asks the daemon to exit through Emacs's own command and
 // reports what came back.
