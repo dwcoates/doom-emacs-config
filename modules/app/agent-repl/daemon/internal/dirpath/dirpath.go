@@ -25,6 +25,12 @@ import (
 // Canonical returns the one spelling of dir: absolute, cleaned, symlinks
 // resolved, and every EXISTING component in the case the volume stores it.
 //
+// dir MUST ALREADY BE ABSOLUTE. A relative one is refused rather than
+// resolved against the daemon's working directory, which is wherever launchd
+// started it: that guess turned a producer's `~/.config/doom` into
+// `/Users/me/~/.config/doom` (2026-09-28). A producer's path is made absolute
+// at its boundary, by Absolute.
+//
 // A path that does not exist cannot have its symlinks resolved or its case
 // read; the deepest existing ancestor is canonicalized instead and the
 // remainder appended as given, so a directory under a symlinked or case-folded
@@ -51,11 +57,10 @@ func (r resolver) canonical(dir string) (string, error) {
 	if dir == "" {
 		return "", errors.New("dirpath: empty directory")
 	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", fmt.Errorf("dirpath: absolutize %q: %w", dir, err)
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("dirpath: %q is not an absolute directory, and a relative one names nothing a daemon can resolve", dir)
 	}
-	abs = filepath.Clean(abs)
+	abs := filepath.Clean(dir)
 	// Walk up to the deepest existing ancestor, resolve that, and re-join the
 	// tail so the answer is stable once the leaf is created.
 	rest := ""
