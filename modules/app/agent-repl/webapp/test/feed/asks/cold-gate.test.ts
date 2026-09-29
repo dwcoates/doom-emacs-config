@@ -33,6 +33,7 @@ import {
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { orderFor } from "../../feed-order.js";
+import { stopClocks } from "../../../src/feed/ticking.js";
 
 type InitState = MessageInitShape<typeof FeedColdGateSchema>["state"];
 
@@ -166,6 +167,14 @@ describe("the standing gate", () => {
   it("keeps ticking the lapse as the gate stands", async () => {
     const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
     document.body.append(el);
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 1m 5s ago");
+  });
+
+  it("keeps ticking the lapse after its turn's clocks are stopped", async () => {
+    const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
+    document.body.append(el);
+    stopClocks(el);
     await vi.advanceTimersByTimeAsync(65_000);
     expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 1m 5s ago");
   });
@@ -676,6 +685,18 @@ describe("the resolved trace", () => {
       askHarness().rc,
     );
     expect(el.querySelector(".cold-gate-when")?.textContent).toBe("1m ago");
+  });
+
+  it("keeps ticking the resolution's age after its turn's clocks are stopped", async () => {
+    vi.setSystemTime(0);
+    const el = drawFeedColdGate(
+      gate({ case: "resolved", value: { atMs: 0n, choice: { case: "pay", value: {} } } }),
+      askHarness().rc,
+    );
+    document.body.append(el);
+    stopClocks(el);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(el.querySelector(".cold-gate-when")?.textContent).toBe("5s ago");
   });
 
   it("reads the resolution's nearest second when a tick samples just short of one", () => {
