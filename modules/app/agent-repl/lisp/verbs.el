@@ -133,9 +133,26 @@ the roster; there is no spelling of it Emacs could construct from a path,
 so a workspace without one cannot be addressed at all."
   (agent-repl--ws-require-known ws "verb workspace resolution")
   (or (agent-repl-host-ref ws)
+      ;; A CLOSED WORKSPACE HAS NO TAB, and so no host entry, but it is still
+      ;; a roster row carrying the daemon's ref -- and killing or nuking it is
+      ;; an ordinary act (a close leaves the session running).
+      (agent-repl-verbs--roster-ref ws)
       (progn
         (agent-repl--warn ws "elisp.verbs.no-ref ws=%s" ws)
         (user-error "agent-repl: workspace %s has no daemon identity yet" ws))))
+
+(defun agent-repl-verbs--roster-ref (ws)
+  "Return the ref of the roster row whose directory is WS\='s, or nil.
+Matched by DIRECTORY, never by name: names collide across repositories."
+  (let ((dir (agent-repl--ws-get ws :project-dir)))
+    (when dir
+      (let ((canonical (agent-repl--path-canonical dir)))
+        (cl-some (lambda (row)
+                   (let ((ref (agent-repl-verbs--row-ref row)))
+                     (and (plist-get ref :dir)
+                          (string= canonical (agent-repl--path-canonical (plist-get ref :dir)))
+                          ref)))
+                 (agent-repl-verbs--all-rows))))))
 
 (defun agent-repl-verbs--registered-ws-names ()
   "Return the live registry entries that are really agent-repl workspaces.
