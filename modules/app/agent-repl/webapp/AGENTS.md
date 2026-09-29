@@ -193,6 +193,15 @@ hand any more:
   while leaving it in place. A surface that looks wrong is reported to the
   daemon and fixed there. When a view needs a fact it does not have, the fact
   gets PUBLISHED; it is never inferred locally.
+- **FOOTER TEXT IS FOR A HUMAN USER, NOT A DEVELOPER** (owner ruling,
+  2026-09-29). Every status, substatus and activity line the footer draws is
+  short, plain words a person reads: "enqueued 3/5", "conflict resolution",
+  never `merge_conflict`, `awaitingTurnEnd` or any other camelCase,
+  snake_case or identifier spelling. It carries only what matters to a user
+  who is not an agent-repl developer, never debug detail or an internal
+  mechanism (what gates a surface, which component holds what). The code
+  underneath may spell things however suits it; what reaches the footer
+  follows this rule.
 - **A ROW IS PLACED BY ITS KEY, NEVER BY ARRIVAL** (owner ruling,
   2026-09-27: a late row lands where it would have been had it not been late;
   plan `docs/investigations/2026-09-27-feed-row-order-plan.md`). Every
