@@ -31,6 +31,21 @@ func TestResolveRunDirHonorsEnvOverride(t *testing.T) {
 	}
 }
 
+// TestResolveRunDirRefusesARelativeOverride asserts a relative override is
+// refused rather than resolved against the working directory.
+func TestResolveRunDirRefusesARelativeOverride(t *testing.T) {
+	// Arrange.
+	t.Setenv(RunDirEnv, "relative/run")
+
+	// Act.
+	got, err := ResolveRunDir()
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), RunDirEnv) || !strings.Contains(err.Error(), "not an absolute path") {
+		t.Fatalf("ResolveRunDir() = (%q, %v), want a refusal naming %s", got, err, RunDirEnv)
+	}
+}
+
 // TestResolveRunDirDefaultsUnderHome asserts the tilde in RunDir is the home
 // directory and nothing else.
 func TestResolveRunDirDefaultsUnderHome(t *testing.T) {
