@@ -307,10 +307,10 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
-	// Notify raises one host notification: it relays the TYPED notification
-	// onto the workspace's host stream and sets the roster's attention marker,
-	// which SelectWorkspace and AsksSettled clear. It is the session watcher's
-	// LifecycleSink notification hook, wired by the server.
+	// Notify raises one host notification: it raises the workspace's desktop
+	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
+	// attention marker, which SelectWorkspace and AsksSettled clear. It is the
+	// session watcher's LifecycleSink notification hook, wired by the server.
 	Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatcher.HostNotification) error
 	// AsksSettled clears the roster's attention marker when the last ask that
 	// raised it settles. It is the session watcher's LifecycleSink
@@ -343,10 +343,6 @@ type HostRelay interface {
 	OpenInEditor(ws ids.WorkspaceID, path string, line *uint32)
 	// ReloadWebapp pushes the reload_webapp arm.
 	ReloadWebapp(ws ids.WorkspaceID)
-	// Notify pushes a host notification. THE WHOLE NOTIFICATION TRAVELS: a
-	// per-kind evidence field spread over positional strings is a field the
-	// next kind's arm silently loses.
-	Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification)
 	// PublishHostWorkspace recomposes and republishes the workspace's host
 	// STATE. Every edge that can move it calls this: the edges the server
 	// cannot see for itself -- a shim attaching or dying, a lease taken,
@@ -354,6 +350,13 @@ type HostRelay interface {
 	// orchestrator. The topic dedupes, so a caller never has to decide
 	// whether its edge actually changed the view.
 	PublishHostWorkspace(ws ids.WorkspaceID)
+}
+
+// Banners raises a workspace's desktop banner (desktopnotify.Notifier.Raise):
+// titled by the workspace's name, TEXT below it, posted only while Emacs is
+// not focused.
+type Banners interface {
+	Raise(ws ids.WorkspaceID, kind, text string)
 }
 
 // Deps are the verbs' collaborators.
@@ -377,6 +380,8 @@ type Deps struct {
 	Sidebar  sidebar.Resolver
 	Holds    holds.Resolver
 	Host     HostRelay
+	// Banners raises the desktop banner an agent notification earns.
+	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own
 	// the shim fleet.
 	Sessions Sessions
@@ -660,6 +665,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a holds resolver")
 	case deps.Host == nil:
 		return nil, missing("a host relay")
+	case deps.Banners == nil:
+		return nil, missing("a desktop notifier")
 	case deps.Sessions == nil:
 		return nil, missing("a session fleet")
 	case deps.Shim == nil:

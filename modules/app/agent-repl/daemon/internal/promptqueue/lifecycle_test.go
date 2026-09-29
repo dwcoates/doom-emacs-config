@@ -571,3 +571,59 @@ func TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow(t *testing.T) {
 		t.Fatalf("close = (%s, closed %v), want completed", closeName(got), closed)
 	}
 }
+
+// THE TURN'S BANNER: every live turn end raises it, after the door has drawn
+// the ending it is composed from.
+
+func TestOnTurnEndedRaisesTheTurnsBanner(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseFailed)
+	// Assert
+	want := bannerEnd{WS: theWorkspace, Turn: "running-turn", How: wsm.CloseFailed}
+	if got := h.banners.raised(); len(got) != 1 || got[0] != want {
+		t.Fatalf("banners = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestOnTurnEndedWhileAnotherTurnRunsStillRaisesItsBanner(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "earlier-turn", "the earlier work")
+	h.watcher.running("vendor-turn")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "earlier-turn" {
+		t.Fatalf("banners = %+v, want the earlier turn's", got)
+	}
+}
+
+func TestOnTurnEndedForAnUnresolvableWorkspaceStillRaisesItsBanner(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.OnTurnEnded("nowhere", "lost-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "lost-turn" {
+		t.Fatalf("banners = %+v, want the turn's banner", got)
+	}
+}
+
+func TestOnTurnEndedRaisesTheBannerAfterTheDoorClosedTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	closedFirst := false
+	h.banners.onEnded = func() { _, closedFirst = h.db.closedTurns["running-turn"] }
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if !closedFirst {
+		t.Fatal("the banner was raised before the door closed the turn")
+	}
+}

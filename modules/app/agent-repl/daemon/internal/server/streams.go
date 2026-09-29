@@ -563,6 +563,12 @@ func (s *server) watchDaemon(
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
+		// EMACS'S FOCUS LIVES AND DIES WITH THIS STREAM: attached from the
+		// request, so the daemon knows it from the stream's first instant,
+		// and released when the stream ends, after which Emacs reads as
+		// unfocused.
+		release := s.deps.Focus.Attach(isFocused(emacs.GetFocus()))
+		defer release()
 	}
 	// The reported build is read into the record BEFORE the watcher is
 	// shared: once registered, a deploy's reload may move it under s.mu.

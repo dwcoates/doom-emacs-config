@@ -362,6 +362,11 @@ type Deps struct {
 	// PublishHost republishes a workspace's host view, which carries the
 	// standing edit the editor fills its input from. REQUIRED.
 	PublishHost func(ws ids.WorkspaceID)
+	// TurnBanners raises the desktop banner a turn end earns. It is told on
+	// THIS edge — the one that installs the turn's close on the roster and
+	// draws its ending in the feed — so a banner is raised for exactly the
+	// turns whose end the clients are shown. REQUIRED.
+	TurnBanners TurnBanners
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 	// Stalls is the lock stall watchdog. OPTIONAL: nil leaves the queue's
@@ -370,6 +375,12 @@ type Deps struct {
 	// mutex and then the workspace's delivery lock, so a hold past Emacs's
 	// unary timeout on either is a SubmitPrompt that never answers.
 	Stalls lockwatch.Registry
+}
+
+// TurnBanners raises a turn end's desktop banner
+// (desktopnotify.TurnBanners.OnTurnEnded).
+type TurnBanners interface {
+	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose)
 }
 
 // ColdGateRefusal is ErrColdGate carrying the GATE'S OWN sentence, which is
