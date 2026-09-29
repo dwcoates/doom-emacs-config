@@ -72,10 +72,15 @@ if [ "${!OWNER_OVERRIDE:-}" = "1" ]; then
 fi
 
 cat >&2 <<EOF
-[merge-queue] Refused: master moves only through the agent-repl merge queue.
-[merge-queue] Enqueue the branch with the merge-queue skill ($SKILL), which
-[merge-queue] merges, gates and fast-forwards master for you.
+[merge-queue] REFUSED: master moves only through the agent-repl merge queue.
+[merge-queue] master did not move. Land the work with the merge-queue skill
+[merge-queue] ($SKILL), which merges, runs the test gate and fast-forwards master:
+[merge-queue]   - this workspace's own branch:  /merge-queue own   (then END YOUR TURN; the merge starts when it ends)
+[merge-queue]   - another workspace:            /merge-queue workspace <worktree-dir>
+[merge-queue]   - a subagent's branch:          /merge-queue branch <branch-name>
+[merge-queue] Committed on master by mistake? Put a branch at the commit
+[merge-queue] (\`git branch <name>\`) and land that branch through the skill.
 [merge-queue] A refused fast-forward leaves its tree checked out; \`git reset --merge\` puts the checkout back.
-[merge-queue] Owner only: $OWNER_OVERRIDE=1 lets this one through.
+[merge-queue] Agents: never set $OWNER_OVERRIDE. It is the owner's alone; a park or a failure is reported, never bypassed.
 EOF
 exit 1
