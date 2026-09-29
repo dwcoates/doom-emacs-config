@@ -41,8 +41,8 @@ func TestWorkspaceFleetTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 		{
 			name: "an answered cold gate retires", state: "cold_gate_standing", before: true, after: false,
 			act: func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
-				f.fleet.coldGates[ws] = ServedColdGate{}
-				f.fleet.ClearColdGate(ws)
+				f.fleet.coldGates[ws] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
+				f.fleet.TakeColdGate(ws, "vendor-1")
 			},
 		},
 		{

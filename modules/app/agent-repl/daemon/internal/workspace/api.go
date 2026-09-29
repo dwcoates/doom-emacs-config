@@ -538,10 +538,18 @@ type Cards interface {
 	// ColdGate answers the standing cold gate's served menu, false when no
 	// gate stands.
 	ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool)
-	// ClearColdGate retires a gate that has been answered, so a second answer
-	// against the same id finds nothing standing. A gate left behind would
-	// re-open the session again on every replayed click.
-	ClearColdGate(ws ids.WorkspaceID)
+	// TakeColdGate spends the gate standing for the conversation
+	// VENDORSESSIONID, answering whether this caller took it. The check and
+	// the removal are one step, so of two answers racing for one gate exactly
+	// one spends it; a gate left behind would re-open the session again on
+	// every replayed click.
+	TakeColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
+	// EndColdGate retires a TAKEN gate once its remediation brought the
+	// session back, so a prompt is no longer refused by the gate's name.
+	EndColdGate(ws ids.WorkspaceID, vendorSessionID string)
+	// ReraiseColdGate stands the gate for VENDORSESSIONID again from the cold
+	// facts it was first raised with, answering false when those are gone.
+	ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	// PermissionModes answers EXACTLY the switchable set the topbar's picker
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.
@@ -613,6 +621,11 @@ type Sessions interface {
 	// the shim call left the workspace with no watcher at all, so the very
 	// next prompt was refused `no_session`.
 	ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error
+	// ResumeColdDetached is ResumeCold OFF the caller's goroutine, reporting
+	// the outcome to `done` with the context it ran under. It is what an
+	// answered cold gate uses: the answer is acknowledged at once and the
+	// remediation it starts runs after (see Fleet.ResumeColdDetached).
+	ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done func(context.Context, error))
 }
 
 // New builds the verbs. Every collaborator a verb reaches is required: a verb

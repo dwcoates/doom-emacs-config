@@ -6198,7 +6198,10 @@ export type FeedColdGate = Message<"frontend.v1.FeedColdGate"> & {
     case: "standing";
   } | {
     /**
-     * Chosen; drawn as the one-line trace of what was done.
+     * NO LONGER EMITTED (owner ruling, 2026-09-29): the gate DISAPPEARS the
+     * moment the daemon takes the user's choice -- its row is retired
+     * (FeedRow.removed) as AnswerColdGate answers -- so no trace of the choice
+     * is drawn. Kept so an older frame still decodes.
      *
      * @generated from field: frontend.v1.FeedColdGateResolved resolved = 2;
      */

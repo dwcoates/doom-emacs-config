@@ -171,12 +171,24 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 	return nil
 }
 
-// AnswerColdGate resolves a standing cold gate by RE-OPENING the session with
-// the chosen remediation. A cold context is refused with its cost named, never
-// silently paid, and this is where the user's choice is spent.
+// AnswerColdGate takes the user's choice on a standing cold gate, retires the
+// gate AT ONCE, and starts the remediation it chose.
 //
-// The remediation is echoed against the SERVED MENU: a compaction naming a
-// model or a scope the menu did not offer is refused rather than sent.
+// THE GATE DISAPPEARS THE MOMENT THE DAEMON HAS THE CHOICE (owner ruling,
+// 2026-09-29). The answer is validated against the SERVED MENU -- a compaction
+// naming a model or a scope the menu did not offer is refused rather than sent
+// -- then the gate is spent and its row retired from the feed, and the verb
+// answers. The re-open it chose runs AFTER the answer, off this goroutine
+// (Sessions.ResumeColdDetached): a compaction can run for a minute, and for that
+// minute the gate stood as an inert card and then turned into a trace that a
+// compaction's own context cut could hide.
+//
+// THE ACT IS THE FOOTER'S FROM THE CLICK TO THE OUTCOME (owner ruling,
+// 2026-09-14). The request line is published before anything is dialed and
+// refined by every phase the shim relays, and it is cleared on every way out.
+// A re-open that FAILS opens the `cold_gate_reopen_failed` fault and stands the
+// gate again from the facts it was first raised with: the session is still
+// parked, so the choice is the user's again.
 func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *frontendv1.FeedColdGateResolved, scope conversationv1.SessionCompactScope) error {
 	_, log, err := v.owned(ctx, "AnswerColdGate", ws)
 	if err != nil {
@@ -190,42 +202,27 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return refuse(log, "AnswerColdGate", ArmNoColdGate,
 			fmt.Sprintf("no cold gate is standing on workspace %q", ws), false)
 	}
-
 	remediation, err := coldRemediation(log, served, answer, scope)
 	if err != nil {
 		return err
 	}
+	// THE GATE IS SPENT, in one step with the check that it still stands: of
+	// two answers racing for one gate, the second finds nothing to spend.
+	if !v.deps.Cards.TakeColdGate(ws, served.VendorSessionID) {
+		return refuse(log, "AnswerColdGate", ArmNoColdGate,
+			fmt.Sprintf("the cold gate on workspace %q was already answered", ws), false)
+	}
+	v.deps.Feed.RetireRow(ws, rootFeed(), coldGateRowID(ws, served.VendorSessionID))
 
-	// THE ANSWER IS A FOOTER ACT FROM THE CLICK TO THE OUTCOME (owner ruling,
-	// 2026-09-14). The request is published BEFORE the shim is dialed — the
-	// click is acknowledged first, then the phases refine it — because the act
-	// it starts can run for a minute, and for that minute the only thing the
-	// owner had was a card whose buttons had gone inert.
-	//
-	// IT IS CLEARED ON EVERY WAY OUT, success and failure alike: a progress
-	// sentence outliving the act it narrates is the same defect as no sentence
-	// at all. On the way out of a SUCCESS the session is up, so the ordinary
-	// session state takes the strip back; on the way out of a FAILURE the gate
-	// is still standing and the strip says so again, under the `reopen_failed`
-	// fault this verb opens.
 	choice := coldChoiceName(answer)
 	v.spendingColdGate(ws, choice, footer.CompactionRequestLine(choice, served.Detail))
-	defer v.deps.Footer.SetColdGateAnswer(ws, nil)
-
-	// THE RECORD IS WRITTEN AT THE START AS WELL AS THE END. The one at the
-	// end is the outcome; this one is the ACT, and without it the daemon's own
-	// log could not say a minute-long compaction had even been asked for.
 	log.Info(opColdGate, "answering the cold gate: "+choice, dlog.Context{"choice": choice})
 
 	// THE RE-OPEN IS A SESSION BRING-UP, not a bare shim call, so it goes
 	// through the fleet's one start path: the remediated resume must leave the
 	// workspace with its session facts recorded, its session watcher installed
-	// and its host view live, exactly as a cold start does. Sent straight at
-	// the shim it did none of those, and the next SubmitPrompt was refused
-	// `no_session` on a session the shim had re-opened perfectly well. The
-	// no-live-session refusal is the fleet's own, raised under this verb's
-	// ArmNoSession from the client the park left serving.
-	if err := v.deps.Sessions.ResumeCold(ctx, ws, ColdResume{
+	// and its host view live, exactly as a cold start does.
+	v.deps.Sessions.ResumeColdDetached(ws, ColdResume{
 		VendorSessionID: served.VendorSessionID,
 		Remediation:     remediation,
 		// EVERY PHASE THE SHIM RELAYS BECOMES THIS ACT'S LINE. The daemon
@@ -234,42 +231,45 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		OnPhase: func(progress *conversationv1.SessionCompactionProgress) {
 			v.spendingColdGate(ws, choice, footer.CompactionLine(progress))
 		},
-	}); err != nil {
-		// A TYPED REFUSAL IS ALREADY RECORDED, by `refuse` itself and under the
-		// arm it names, and it is returned UNWRAPPED so the server still reads
-		// the arm off it. Re-logging it here as an error would record one
-		// contract answer twice and file a stated arm — no_session — as a
-		// daemon fault.
-		var refusal *Refusal
-		if errors.As(err, &refusal) {
-			return err
-		}
-		// THE RE-OPEN FAILED, AND THAT IS AN ANSWER. It reaches the caller as
-		// AnswerColdGate's own `reopen_failed` arm and the user as a footer
-		// line, through the `cold_gate_reopen_failed` fault opened here — the
-		// two read the same sentence, because they are given the same one.
-		log.Error(opColdGate, "the re-open with the remediation failed", dlog.Context{"cause": err.Error()})
-		v.noteColdGateReopenFailed(ctx, log, ws, err)
-		return refuseWith(log, "AnswerColdGate", ArmReopenFailed,
-			fmt.Sprintf("the re-open of workspace %q with the answered remediation failed: %v", ws, err),
-			false, map[string]any{"detail": err.Error()})
-	}
-
-	// THE GATE IS SPENT. A second answer against the same id must find nothing
-	// standing rather than re-opening the session again.
-	v.deps.Cards.ClearColdGate(ws)
-
-	// The gate row becomes its resolved state and the footer stops saying the
-	// session is parked, both in the same beat as the re-open.
-	v.deps.Feed.UpsertSynthesized(ws, rootFeed(), coldGateRow(ws, served.VendorSessionID, answer))
-	v.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: false})
-	// AND THE STRIP STOPS SAYING IT TOO. The re-open starts a session, so the
-	// topbar's own session facts arrive on its heels and the full view
-	// returns; retiring the gate here is what lets them.
-	v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
-
-	log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
+	}, func(runCtx context.Context, err error) {
+		v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
+	})
 	return nil
+}
+
+// coldGateSettled is an answered gate's outcome, once its re-open settles.
+//
+// On SUCCESS the session is up, so the footer's and the strip's parked state
+// retire and the session's own facts take them back. A context ending is this
+// daemon standing down, not a fault. Any other failure -- a typed refusal
+// (already recorded where it was raised) or a bring-up that broke -- opens the
+// `cold_gate_reopen_failed` fault, which is the footer's line for it, and
+// stands the gate again so the user can choose again.
+func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, err error) {
+	v.deps.Footer.SetColdGateAnswer(ws, nil)
+	switch {
+	case err == nil:
+		v.deps.Cards.EndColdGate(ws, vendorSessionID)
+		v.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: false})
+		// AND THE STRIP STOPS SAYING IT TOO. The re-open starts a session, so
+		// the topbar's own session facts arrive on its heels and the full view
+		// returns; retiring the gate here is what lets them.
+		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
+		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
+	case canceled(err):
+		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
+			dlog.Context{"choice": choice, "cause": err.Error()})
+	default:
+		var refusal *Refusal
+		if !errors.As(err, &refusal) {
+			log.Error(opColdGate, "the re-open with the remediation failed", dlog.Context{"cause": err.Error()})
+		}
+		v.noteColdGateReopenFailed(ctx, log, ws, err)
+		if !v.deps.Cards.ReraiseColdGate(ws, vendorSessionID) {
+			log.Error(opColdGate, "the failed re-open's gate could not stand again: its cold facts are gone",
+				dlog.Context{"choice": choice})
+		}
+	}
 }
 
 // spendingColdGate publishes one line of the act a gate's answer is spending.

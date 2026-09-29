@@ -180,23 +180,15 @@ func daemonSubmission(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.
 // daemon-synthesized row this package produces lands.
 func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }
 
-// coldGateRow renders the answered gate as its resolved row. The row's id comes
-// from the gate's own address, so the answer UPSERTS the standing row rather
-// than adding a second one beneath it.
-func coldGateRow(ws ids.WorkspaceID, vendorSessionID string, answer *frontendv1.FeedColdGateResolved) *frontendv1.FeedRow {
-	ref := feedid.Ref{
+// coldGateRowID is the cold gate row's identity: the gate's own address, one
+// per parked conversation. The raise upserts under it and the answer retires
+// it, so the two can never name different rows.
+func coldGateRowID(ws ids.WorkspaceID, vendorSessionID string) *frontendv1.FeedId {
+	return feedid.Encode(feedid.Ref{
 		WS:   ws,
 		Feed: rootFeed(),
 		Row:  feedid.RowKey{Kind: feedid.KindColdGate, ID: vendorSessionID},
-	}
-	return &frontendv1.FeedRow{
-		Id: feedid.Encode(ref),
-		Row: &frontendv1.FeedRow_ColdGate{
-			ColdGate: &frontendv1.FeedColdGate{
-				State: &frontendv1.FeedColdGate_Resolved{Resolved: answer},
-			},
-		},
-	}
+	})
 }
 
 // canceled reports whether err is a context ending -- this daemon's own exit,

@@ -456,19 +456,21 @@ func answerColdGate(t *testing.T, g *coldGate, choice any) {
 	}
 }
 
-// awaitResolvedGate waits for the gate row to be replaced by its resolved
-// trace and answers it (feed.proto: "Chosen; drawn as the one-line trace of
-// what was done").
-func awaitResolvedGate(t *testing.T, g *coldGate) *frontendv1.FeedColdGateResolved {
+// assertGateRetiredByTheAnswer proves the gate DISAPPEARED as the daemon took
+// the answer (owner ruling, 2026-09-29): the daemon retires the gate row before
+// AnswerColdGate replies, so a page opened after the reply must not carry it --
+// nothing is waited for, because the retirement is ordered before the ack.
+func assertGateRetiredByTheAnswer(t *testing.T, g *coldGate) {
 	t.Helper()
-	row := awaitFeedRow(t, g.w, g.ws, "the resolved cold-gate trace", func(r *frontendv1.FeedRow) bool {
-		return r.GetColdGate().GetResolved() != nil
-	})
-	resolved := row.GetColdGate().GetResolved()
-	if resolved.GetAtMs() == 0 {
-		t.Error("resolved cold gate at_ms = 0, want when the choice landed")
+	opened, err := g.w.Client().OpenFeed(g.w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: g.ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
 	}
-	return resolved
+	for _, row := range opened.Msg.GetSuccess().GetPage().GetSuccess().GetRows() {
+		if row.GetId().GetValue() == g.row.GetId().GetValue() || row.GetColdGate() != nil {
+			t.Fatalf("the feed still carries the cold gate after the answer was taken: %v", row)
+		}
+	}
 }
 
 // assertSessionProceeds proves the answered gate actually re-opened a working
@@ -518,9 +520,7 @@ func TestColdGate(t *testing.T) {
 		answerColdGate(t, g, &agentreplv1.AnswerColdGatePay{})
 
 		// Assert
-		if resolved := awaitResolvedGate(t, g); resolved.GetPay() == nil {
-			t.Errorf("resolved cold gate = %v, want the pay trace", resolved)
-		}
+		assertGateRetiredByTheAnswer(t, g)
 		assertSessionProceeds(t, g)
 	})
 
@@ -533,9 +533,7 @@ func TestColdGate(t *testing.T) {
 		answerColdGate(t, g, &agentreplv1.AnswerColdGateClear{})
 
 		// Assert
-		if resolved := awaitResolvedGate(t, g); resolved.GetClear() == nil {
-			t.Errorf("resolved cold gate = %v, want the clear trace", resolved)
-		}
+		assertGateRetiredByTheAnswer(t, g)
 		assertSessionProceeds(t, g)
 	})
 
@@ -556,18 +554,8 @@ func TestColdGate(t *testing.T) {
 			Scope: wantScope,
 		})
 
-		// Assert: the trace echoes the choice back exactly.
-		resolved := awaitResolvedGate(t, g)
-		compact := resolved.GetCompact()
-		if compact == nil {
-			t.Fatalf("resolved cold gate = %v, want the compact trace", resolved)
-		}
-		if got := compact.GetModel().GetModel().GetName(); got != wantModel.GetName() {
-			t.Errorf("resolved compact.model = %q, want the served %q", got, wantModel.GetName())
-		}
-		if compact.GetScope() != wantScope {
-			t.Errorf("resolved compact.scope = %v, want the served %v", compact.GetScope(), wantScope)
-		}
+		// Assert
+		assertGateRetiredByTheAnswer(t, g)
 		assertSessionProceeds(t, g)
 	})
 }

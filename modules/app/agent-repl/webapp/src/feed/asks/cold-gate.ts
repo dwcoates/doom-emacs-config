@@ -564,7 +564,7 @@ const OWN_CAUSES = {
       : `the session did not come back from the re-open: ${v.detail}`,
 } as unknown as SentenceTable;
 
-/** Nothing on success (the gate re-pushes resolved); the refusal on error. */
+/** Nothing on success (the daemon retires the gate row as it answers); the refusal on error. */
 function drawAnswerOutcome(
   response: AnswerColdGateResponse,
   actions: HTMLElement,
