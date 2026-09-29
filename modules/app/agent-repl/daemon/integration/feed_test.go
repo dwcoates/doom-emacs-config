@@ -3166,9 +3166,9 @@ func TestApiRequestFailedTerminalDoesNotRestateItsOwnMidTurnRecord(t *testing.T)
 	// Arrange
 	const message = "Authentication failed."
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; these records are the vendor failure the
-	// test feeds, stated once by each producer.
-	f.d.ExpectWarnings("daemon.feed.api_error", "daemon.sessionwatcher.api_error")
+	// The sweep covers every test; this record is the vendor failure the
+	// test feeds, stated once by its owner.
+	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
 	f.submit("go", "k-401-twice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -3202,7 +3202,7 @@ func TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.feed.api_error", "daemon.sessionwatcher.api_error")
+	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
 	f.submit("go", "k-429-then-500", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
