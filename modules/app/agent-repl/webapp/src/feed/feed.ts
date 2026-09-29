@@ -21,6 +21,8 @@ import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { expandedSectionAt, installClickExpand } from "../expand.js";
 import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
+import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
+import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
@@ -167,12 +169,19 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // The same hook runs when the page's AutoCollapse owner (expand.ts) closes an
   // open section the reader scrolled away from or left, since that close goes
   // through the one collapse a click uses.
+  //
+  // AN EXPANDED BUBBLE IS CENTERED (owner ruling, 2026-09-29): opening a
+  // bubble to its expanded view always centers that bubble in the feed
+  // (`bubbleExpanded`, one of the closed set of scroll causes). It is centered
+  // AFTER the class lands, so the geometry read is the expanded layout.
   const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
     refreshHasMore(section);
     // A card's title fold follows the card's fold (title-fold.ts), so a toggle
     // re-measures the titles it owns as well as the section itself.
     refreshTitleFolds(section);
-    if (expanded) intentScroll?.arm(section);
+    if (!expanded) return;
+    intentScroll?.arm(section);
+    if (section.classList.contains(BUBBLE_SCROLL_CLASS)) centerExpandedBubble(section);
   });
 
   const root: FeedController = createFeedController({
@@ -535,6 +544,29 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       if (element.contains(bubble.element)) return bubble;
     }
     return null;
+  }
+
+  /**
+   * Center the bubble whose scroll box SECTION the reader just expanded. A
+   * bubble's scroll box hangs directly in its bubble (bubble-scroll.ts), so a
+   * box with no bubble above it is a drawing fault, reported and thrown. A
+   * fixture feed with no scroll box has nothing to move.
+   */
+  function centerExpandedBubble(section: HTMLElement): void {
+    const bubble = section.parentElement;
+    if (bubble === null || !bubble.classList.contains(BUBBLE_CLASS)) {
+      log.error("an expanded bubble scroll box hangs in no bubble", {
+        operation: "feed.center-expanded-bubble",
+        context: { parent: bubble?.className ?? "none" },
+      });
+      throw new Error("feed: an expanded bubble scroll box hangs in no bubble");
+    }
+    if (scrollBox === null || tail === null) return;
+    log.debug(`centering an expanded ${bubble.dataset.role ?? "unset"} bubble`, {
+      operation: "feed.center-expanded-bubble",
+      context: { role: bubble.dataset.role ?? "unset" },
+    });
+    tail.bubbleExpanded(revealGeometry(scrollBox, bubble));
   }
 
   /** Mark the row, briefly, as the one meant; scroll to it when SCROLL says so. */
