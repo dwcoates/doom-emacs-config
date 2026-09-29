@@ -57,9 +57,19 @@ func (c *cards) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 	return c.fleet.ColdGate(ws)
 }
 
-// ClearColdGate retires an answered gate where it lives, in the fleet.
-func (c *cards) ClearColdGate(ws ids.WorkspaceID) {
-	c.fleet.ClearColdGate(ws)
+// TakeColdGate spends an answered gate where it lives, in the fleet.
+func (c *cards) TakeColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
+	return c.fleet.TakeColdGate(ws, vendorSessionID)
+}
+
+// EndColdGate retires a remediated gate where it lives, in the fleet.
+func (c *cards) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
+	c.fleet.EndColdGate(ws, vendorSessionID)
+}
+
+// ReraiseColdGate stands a failed answer's gate again, in the fleet.
+func (c *cards) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
+	return c.fleet.ReraiseColdGate(ws, vendorSessionID)
 }
 
 // Models answers exactly the model catalog the topbar's selector served.

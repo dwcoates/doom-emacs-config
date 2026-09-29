@@ -481,8 +481,8 @@ func TestAnswerColdGateRetiresTheStandingGate(t *testing.T) {
 	if f.footer.coldGates["w1"].Standing {
 		t.Fatal("the footer still reports a standing cold gate")
 	}
-	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetResolved() == nil {
-		t.Fatalf("synthesized rows = %v, want one resolved gate row", f.feed.synthesized)
+	if len(f.feed.synthesized) != 0 {
+		t.Fatalf("synthesized rows = %v, want none: an answered gate leaves no trace row", f.feed.synthesized)
 	}
 }
 
@@ -641,12 +641,11 @@ func TestASecondAnswerOfTheSameColdGateIsRefused(t *testing.T) {
 	asRefusal(t, err, ArmNoColdGate)
 }
 
-// A FAILED RE-OPEN IS AN ANSWER. The two incidents of 2026-09-13
-// (docs/FOOTER-TOPOLOGY-AUDIT.md section 4) took this branch: the shim's
-// StartSession errored, the daemon logged it four times and returned a bare
-// Connect internal, the webapp read "the daemon could not be reached" about a
-// daemon that had answered, and the gate stood on.
-func TestAnswerColdGateAnswersAFailedReopenWithItsOwnArm(t *testing.T) {
+// A FAILED RE-OPEN IS STILL AN ACCEPTED ANSWER (owner ruling, 2026-09-29):
+// the gate disappears the moment the daemon has the choice, so the answer is
+// acknowledged before the re-open runs, and its failure reaches the user
+// through the footer fault and a gate stood again, never through the reply.
+func TestAnswerColdGateAcceptsAnAnswerWhoseReopenFails(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -661,9 +660,8 @@ func TestAnswerColdGateAnswersAFailedReopenWithItsOwnArm(t *testing.T) {
 		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
 
 	// Assert.
-	refusal := asRefusal(t, err, ArmReopenFailed)
-	if got := refusal.Fields["detail"]; got != "the producer has already written rows" {
-		t.Fatalf("refusal detail = %v, want the failure's own account", got)
+	if err != nil {
+		t.Fatalf("AnswerColdGate = %v, want the answer accepted", err)
 	}
 }
 
@@ -697,7 +695,7 @@ func TestAnswerColdGateOpensTheFaultThatPutsTheFailureOnTheFooter(t *testing.T) 
 	}
 }
 
-func TestAnswerColdGateLeavesTheGateStandingWhenTheReopenFailed(t *testing.T) {
+func TestAnswerColdGateStandsTheGateAgainWhenTheReopenFailed(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -712,8 +710,87 @@ func TestAnswerColdGateLeavesTheGateStandingWhenTheReopenFailed(t *testing.T) {
 		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
 
 	// Assert.
-	if f.cards.coldGate == nil {
-		t.Fatalf("the gate was retired by an answer whose re-open failed")
+	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
+		t.Fatalf("gates stood again = %v, want the answered one, vendor-1", f.cards.reraised)
+	}
+}
+
+func TestAnswerColdGateRetiresTheGateRowAtOnce(t *testing.T) {
+	// Arrange: the re-open is held, so the answer's own effects are read
+	// before it runs.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeHold = make(chan struct{})
+	f.fleet.resumeSettled = make(chan struct{})
+	pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert: answered, row retired, and the re-open not yet run.
+	retired, resumes := len(f.feed.retired), len(f.fleet.resumes)
+	close(f.fleet.resumeHold)
+	<-f.fleet.resumeSettled
+	if err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+	want := coldGateRowID("w1", "vendor-1").GetValue()
+	if retired != 1 || f.feed.retired[0].GetValue() != want {
+		t.Fatalf("retired rows = %v, want the gate row %q retired as the answer returned", f.feed.retired, want)
+	}
+	if resumes != 0 {
+		t.Fatalf("re-opens run before the answer returned = %d, want 0: the answer does not wait on it", resumes)
+	}
+}
+
+func TestAnswerColdGateStatesAGateThatCouldNotStandAgain(t *testing.T) {
+	// Arrange: the re-open fails and the gate's cold facts are gone.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = errors.New("the producer has already written rows")
+	f.cards.reraiseRefused = true
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
+	}
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	for _, record := range f.log.logger.Records() {
+		if record.Level == "error" && record.Operation == opColdGate &&
+			record.Message == "the failed re-open's gate could not stand again: its cold facts are gone" {
+			if record.Context["choice"] != "clear" {
+				t.Fatalf("record context = %v, want the answered choice", record.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no error record says the gate could not stand again; records = %+v", f.log.logger.Records())
+}
+
+func TestAnswerColdGateFilesNoFaultWhenTheDaemonStandsDown(t *testing.T) {
+	// Arrange: the re-open is abandoned by this daemon's own exit.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = context.Canceled
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
+	}
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	if len(f.health.opened) != 0 || len(f.cards.reraised) != 0 {
+		t.Fatalf("faults = %v, gates stood again = %v, want neither for a daemon standing down",
+			f.health.opened, f.cards.reraised)
 	}
 }
 
@@ -844,7 +921,9 @@ func TestAnswerColdGateClearsTheActWhenTheReopenFails(t *testing.T) {
 		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
 
 	// Assert.
-	asRefusal(t, err, ArmReopenFailed)
+	if err != nil {
+		t.Fatalf("AnswerColdGate = %v, want the answer accepted before its re-open ran", err)
+	}
 	if last := f.footer.coldAnswers[len(f.footer.coldAnswers)-1]; last != nil {
 		t.Fatalf("last cold-gate answer = %+v, want the act cleared on the failure too", last)
 	}
@@ -865,5 +944,35 @@ func TestAnswerColdGateNamesTheRemediationInTheAct(t *testing.T) {
 	// Assert.
 	if got := f.footer.coldAnswers[0].Choice; got != footer.ChoiceCompact {
 		t.Fatalf("act choice = %q, want %q", got, footer.ChoiceCompact)
+	}
+}
+
+func TestAnswerColdGateEndsTheGateOnlyWhenTheReopenSucceeds(t *testing.T) {
+	tests := []struct {
+		name      string
+		resumeErr error
+		wantEnded []string
+	}{
+		{"a re-open that brings the session back ends the gate", nil, []string{"vendor-1"}},
+		{"a re-open that fails leaves it to be stood again", errors.New("the shim died"), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			standingGate(f)
+			f.fleet.resumeErr = tt.resumeErr
+			pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
+
+			// Act.
+			_ = f.verbs.AnswerColdGate(context.Background(), "w1", pay,
+				conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+			// Assert.
+			if len(f.cards.ended) != len(tt.wantEnded) || (len(tt.wantEnded) == 1 && f.cards.ended[0] != tt.wantEnded[0]) {
+				t.Fatalf("gates ended = %v, want %v", f.cards.ended, tt.wantEnded)
+			}
+		})
 	}
 }

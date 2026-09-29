@@ -3663,3 +3663,185 @@ func TestABringUpSurfacesAFailedTerminalRetirement(t *testing.T) {
 }
 
 func (c *fakeClient) Detach() { c.detached++ }
+
+// ---- an answered cold gate: taken once, stood again on failure ----
+
+func TestTakeColdGateSpendsOnlyTheGateItNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		standing  *ServedColdGate
+		take      string
+		wantTaken bool
+		wantLeft  bool
+	}{
+		{"the standing gate for the named conversation is taken", &ServedColdGate{VendorSessionID: "vendor-1"}, "vendor-1", true, false},
+		{"a gate standing for another conversation is left", &ServedColdGate{VendorSessionID: "vendor-2"}, "vendor-1", false, true},
+		{"nothing standing is nothing taken", nil, "vendor-1", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-take")
+			if tt.standing != nil {
+				f.fleet.coldGates[ws.ID] = coldGate{served: *tt.standing}
+			}
+
+			// Act.
+			taken := f.fleet.TakeColdGate(ws.ID, tt.take)
+
+			// Assert.
+			_, left := f.fleet.ColdGate(ws.ID)
+			if taken != tt.wantTaken || left != tt.wantLeft {
+				t.Fatalf("taken = %t, left standing = %t; want %t, %t", taken, left, tt.wantTaken, tt.wantLeft)
+			}
+		})
+	}
+}
+
+func TestASecondTakeOfOneColdGateFindsNothing(t *testing.T) {
+	// Arrange: two answers racing for one gate.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-race")
+	f.fleet.coldGates[ws.ID] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
+
+	// Act.
+	first := f.fleet.TakeColdGate(ws.ID, "vendor-1")
+	second := f.fleet.TakeColdGate(ws.ID, "vendor-1")
+
+	// Assert.
+	if !first || second {
+		t.Fatalf("takes = %t, %t; want exactly the first to spend the gate", first, second)
+	}
+}
+
+func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
+	// Arrange: the gate was raised, answered, and spent.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-reraise")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+	f.fleet.TakeColdGate(ws.ID, "vendor-1")
+	f.feed.synthesized = nil
+
+	// Act.
+	raised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
+
+	// Assert.
+	if _, standing := f.fleet.ColdGate(ws.ID); !raised || !standing {
+		t.Fatalf("raised = %t, standing = %t; want the gate stood again", raised, standing)
+	}
+	want := coldGateRowID(ws.ID, "vendor-1").GetValue()
+	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetId().GetValue() != want ||
+		f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
+		t.Fatalf("synthesized rows = %v, want the standing gate row %q", f.feed.synthesized, want)
+	}
+}
+
+func TestReraiseColdGateAnswersFalseWithoutItsFacts(t *testing.T) {
+	// Arrange: no gate was ever raised, so no cold facts were kept.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-no-facts")
+
+	// Act.
+	raised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
+
+	// Assert.
+	if raised || len(f.feed.synthesized) != 0 {
+		t.Fatalf("raised = %t, rows = %v; want nothing stood without cold facts", raised, f.feed.synthesized)
+	}
+}
+
+// TestDetachedFleetWorkSharesOneDrain holds every kind of detached session work
+// to the one runner: whichever verb started it, DrainStarts ends and joins it,
+// so a hand-rolled goroutine that escaped the drain fails here.
+func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error)
+	}{
+		{"a detached start", func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error) {
+			f.fleet.StartDetached(ws, func(err error) { settled <- err })
+		}},
+		{"a detached cold re-open", func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error) {
+			f.fleet.remember(ws, &live{client: f.client})
+			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: &conversationv1.SessionColdRemediation{
+				Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+			}}, func(_ context.Context, err error) { settled <- err })
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace(ids.WorkspaceID("ws-drain-" + strings.ReplaceAll(tt.name, " ", "-")))
+			entered := make(chan struct{})
+			f.client.entered = entered
+			f.client.startHold = make(chan struct{}) // never closed: only the drain ends it.
+			settled := make(chan error, 1)
+			tt.start(f, ws.ID, settled)
+			<-entered
+
+			// Act.
+			left := f.fleet.DrainStarts(time.Minute)
+
+			// Assert.
+			if !left {
+				t.Fatal("DrainStarts = false, want the in-flight work ended and joined")
+			}
+			if err := <-settled; !errors.Is(err, context.Canceled) {
+				t.Fatalf("the drained work = %v, want a cancellation", err)
+			}
+		})
+	}
+}
+
+func TestATakenColdGateStillRefusesPromptsByItsName(t *testing.T) {
+	// Arrange: the answer is taken and its remediation has not settled.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-answering")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+	f.fleet.TakeColdGate(ws.ID, "vendor-1")
+
+	// Act.
+	_, menu := f.fleet.ColdGate(ws.ID)
+	detail, refused := f.fleet.ColdGateDetail(ws.ID)
+	_, carried := f.fleet.ColdGateStanding(ws.ID)
+
+	// Assert.
+	if menu || !refused || detail == "" || !carried {
+		t.Fatalf("menu offered = %t, prompts refused = %t (%q), carried by a handover = %t; want no menu, a refusal, and a carry",
+			menu, refused, detail, carried)
+	}
+}
+
+func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		take      bool
+		end       string
+		wantGated bool
+	}{
+		{"the taken gate for the named conversation is retired", true, "vendor-1", false},
+		{"a gate still standing is left", false, "vendor-1", true},
+		{"a taken gate for another conversation is left", true, "vendor-2", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-end")
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+			if tt.take {
+				f.fleet.TakeColdGate(ws.ID, "vendor-1")
+			}
+
+			// Act.
+			f.fleet.EndColdGate(ws.ID, tt.end)
+
+			// Assert.
+			if _, gated := f.fleet.ColdGateDetail(ws.ID); gated != tt.wantGated {
+				t.Fatalf("prompts refused by the gate = %t, want %t", gated, tt.wantGated)
+			}
+		})
+	}
+}

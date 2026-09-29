@@ -13135,7 +13135,10 @@ type FeedColdGate_Standing struct {
 }
 
 type FeedColdGate_Resolved struct {
-	// Chosen; drawn as the one-line trace of what was done.
+	// NO LONGER EMITTED (owner ruling, 2026-09-29): the gate DISAPPEARS the
+	// moment the daemon takes the user's choice -- its row is retired
+	// (FeedRow.removed) as AnswerColdGate answers -- so no trace of the choice
+	// is drawn. Kept so an older frame still decodes.
 	Resolved *FeedColdGateResolved `protobuf:"bytes,2,opt,name=resolved,proto3,oneof"`
 }
 
