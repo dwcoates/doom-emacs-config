@@ -29,7 +29,7 @@ import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js"
 import { SELECTED_ENTRY_CLASS, SELECTED_RESPONSE_ATTRIBUTE } from "../../src/feed/selected-entry.js";
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
-import { onDiscard } from "../../src/feed/ticking.js";
+import { onDiscard, tickWhileShown } from "../../src/feed/ticking.js";
 import {
   agentPromptRow,
   countingTicker,
@@ -2312,6 +2312,27 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     // Assert: the clock stopped, and the hook did not run.
     expect(ticker.live()).toBe(0);
     expect(disposed).toBe(0);
+  });
+
+  it("leaves a present clock counting when its turn ends, since an age stays true", () => {
+    // Arrange: a settled card whose only clock is an "ago" reading.
+    const ticker = countingTicker();
+    const { controller } = fixture(harness({ ticker }), {}, {
+      renderers: {
+        simpleToolCall: (_u, rc) => {
+          const el = document.createElement("span");
+          tickWhileShown(el, rc.ctx.ticker, () => {});
+          return el;
+        },
+      },
+    });
+    controller.applyPage(page([toolCallRow("t", "returned", { turn: "turn-1" })]), "replace");
+
+    // Act
+    controller.upsert(turnEndedRow("e", "turn-1"));
+
+    // Assert: the age is still counting.
+    expect(ticker.live()).toBe(1);
   });
 
   it("leaves a turnless row's clocks running, since no turn ended under it", () => {
