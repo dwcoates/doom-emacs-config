@@ -926,12 +926,19 @@ type fakeFeed struct {
 	feed.Resolver
 
 	synthesized []*frontendv1.FeedRow
+	// retired is every row retired, in order.
+	retired []*frontendv1.FeedId
 	// resets is every workspace whose feed was emptied, in order.
 	resets []ids.WorkspaceID
 	// onReset runs AT the reset, which is how a test reads the swap's own
 	// progress as it stood when the feed was emptied — the ordering assertion
 	// with nothing to wait on.
 	onReset func()
+}
+
+// RetireRow records the retirement.
+func (f *fakeFeed) RetireRow(_ ids.WorkspaceID, _ feedid.Feed, id *frontendv1.FeedId) {
+	f.retired = append(f.retired, id)
 }
 
 // ResetWorkspace records the emptying and lets a test observe the moment.
@@ -1165,6 +1172,12 @@ type fakeSessions struct {
 	startMu      sync.Mutex
 	startCalls   []ids.WorkspaceID
 
+	// resumeHold, when set, holds a detached cold re-open until it is closed,
+	// for the tests whose subject is that the answer does NOT wait on it;
+	// resumeSettled is closed once that held re-open's outcome has been
+	// reported. A nil resumeHold runs the re-open inline.
+	resumeHold    chan struct{}
+	resumeSettled chan struct{}
 	// rebound is every workspace whose start was asked for as a REBIND — the
 	// start that follows a bind, and the only one that tells the shim to adopt
 	// the resumed conversation as the workspace's book.
@@ -1271,6 +1284,30 @@ func (s *fakeSessions) ResumeCold(_ context.Context, ws ids.WorkspaceID, resume 
 	}
 	s.live[ws] = true
 	return nil
+}
+
+// ResumeColdDetached runs the re-open INLINE and reports its outcome, for the
+// reason StartDetached does; a test that set resumeHold drives the detachment
+// itself and learns the outcome was reported from resumeSettled.
+func (s *fakeSessions) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done func(context.Context, error)) {
+	run := func() {
+		err := s.ResumeCold(context.Background(), ws, resume)
+		if done != nil {
+			done(context.Background(), err)
+		}
+	}
+	if s.resumeHold == nil {
+		run()
+		return
+	}
+	hold, settled := s.resumeHold, s.resumeSettled
+	go func() {
+		<-hold
+		run()
+		if settled != nil {
+			close(settled)
+		}
+	}()
 }
 
 // fakeShim is the narrow Shim surface.
@@ -1422,6 +1459,12 @@ type fakeCards struct {
 	permissions map[string]ServedPermission
 	questions   map[string]ServedQuestion
 	coldGate    *ServedColdGate
+	// ended is every remediated gate retired; reraised every gate stood again
+	// after a failed re-open, and reraiseRefused makes ReraiseColdGate answer
+	// that the facts are gone.
+	ended          []string
+	reraised       []string
+	reraiseRefused bool
 	// coldGatesCleared counts the retirements the resolve path made.
 	coldGatesCleared int
 	modes            []string
@@ -1454,9 +1497,27 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 	return *c.coldGate, true
 }
 
-func (c *fakeCards) ClearColdGate(ids.WorkspaceID) {
+// EndColdGate records the remediated gate retired.
+func (c *fakeCards) EndColdGate(_ ids.WorkspaceID, vendorSessionID string) {
+	c.ended = append(c.ended, vendorSessionID)
+}
+
+// ReraiseColdGate records the gate stood again.
+func (c *fakeCards) ReraiseColdGate(_ ids.WorkspaceID, vendorSessionID string) bool {
+	if c.reraiseRefused {
+		return false
+	}
+	c.reraised = append(c.reraised, vendorSessionID)
+	return true
+}
+
+func (c *fakeCards) TakeColdGate(_ ids.WorkspaceID, vendorSessionID string) bool {
+	if c.coldGate == nil || c.coldGate.VendorSessionID != vendorSessionID {
+		return false
+	}
 	c.coldGate = nil
 	c.coldGatesCleared++
+	return true
 }
 
 func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {

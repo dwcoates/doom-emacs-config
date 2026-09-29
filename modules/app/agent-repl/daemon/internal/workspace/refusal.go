@@ -131,13 +131,6 @@ const (
 	// ArmUnservedRemediation is a cold-gate remediation naming a model or
 	// scope outside the served menu.
 	ArmUnservedRemediation = "unserved_remediation"
-	// ArmReopenFailed is a cold-gate answer whose re-open failed: the gate
-	// stood, the remediation was served, the daemon carried it out, and the
-	// session did not come back. It is a REFUSAL, not a transport failure —
-	// before the arm existed the whole branch answered a bare Connect
-	// internal, which the webapp words as "the daemon could not be reached"
-	// about a daemon that answered.
-	ArmReopenFailed = "reopen_failed"
 	// ArmNoSession is a verb needing a live session on a workspace with none.
 	ArmNoSession = "no_session"
 	// ArmModeNotServed is a permission mode outside what the topbar's picker

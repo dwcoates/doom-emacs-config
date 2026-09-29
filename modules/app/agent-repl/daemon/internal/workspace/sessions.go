@@ -226,7 +226,7 @@ type Fleet struct {
 
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
-	coldGates map[ids.WorkspaceID]ServedColdGate
+	coldGates map[ids.WorkspaceID]coldGate
 	// lastCold is the shim's own cold facts for a parked workspace, kept whole
 	// so the relaunch engine's cold arm carries what the shim stated rather
 	// than a reconstruction of it.
@@ -283,12 +283,37 @@ type Fleet struct {
 // fleet's own is ended by DrainStarts at the exit, so an in-flight start is
 // ended and joined rather than left writing into a closing state client.
 func (f *Fleet) StartDetached(ws ids.WorkspaceID, done func(error)) {
+	f.runDetached(func(ctx context.Context) error { return f.Start(ctx, ws) },
+		func(_ context.Context, err error) {
+			if done != nil {
+				done(err)
+			}
+		})
+}
+
+// ResumeColdDetached re-opens a parked session with the answered remediation
+// OFF the caller's goroutine, reporting the outcome to `done` with the
+// fleet's own context when it settles. An answered cold gate is ACKNOWLEDGED
+// the moment the answer is taken (owner ruling, 2026-09-29: the gate
+// disappears as soon as the daemon has the choice), and the remediation it
+// starts -- a compaction can run for a minute -- is occasioned by that answer
+// rather than contained in it.
+func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done func(context.Context, error)) {
+	f.runDetached(func(ctx context.Context) error { return f.ResumeCold(ctx, ws, resume) }, done)
+}
+
+// runDetached is THE ONE WAY session work runs off a caller's goroutine: under
+// the fleet's own context and counted by `detached`, so DrainStarts ends and
+// joins every piece of it at the exit rather than leaving any writing into a
+// closing state client. `done`, when given, receives the outcome and the
+// context the work ran under.
+func (f *Fleet) runDetached(run func(context.Context) error, done func(context.Context, error)) {
 	f.detached.Add(1)
 	go func() {
 		defer f.detached.Done()
-		err := f.Start(f.detachedCtx, ws)
+		err := run(f.detachedCtx)
 		if done != nil {
-			done(err)
+			done(f.detachedCtx, err)
 		}
 	}()
 }
@@ -389,7 +414,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 
 		socketGoneBound: shimclient.GracefulKillBound,
 		sessions:        map[ids.WorkspaceID]*live{},
-		coldGates:       map[ids.WorkspaceID]ServedColdGate{},
+		coldGates:       map[ids.WorkspaceID]coldGate{},
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		generation:      map[ids.WorkspaceID]int{},
 		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
@@ -467,26 +492,84 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 	return true, session.watcher.Connected()
 }
 
-// ColdGate answers the menu a standing cold gate served, which is what the
-// cold-gate answer is echoed against.
+// coldGate is one workspace's gate as the fleet holds it: the menu it served,
+// and whether an answer has already TAKEN it and its remediation is running.
+//
+// AN ANSWERED GATE IS NOT YET GONE. Its row leaves the feed the moment the
+// answer is taken (owner ruling, 2026-09-29), but until the remediation it
+// chose settles the session is still parked: a prompt is still refused by the
+// gate's own name (ColdGateDetail), and a handover still carries it
+// (ColdGateStanding). Only the menu stops being offered, so a second answer
+// finds nothing to spend.
+type coldGate struct {
+	served    ServedColdGate
+	answering bool
+}
+
+// ColdGate answers the menu a STANDING cold gate served, which is what the
+// cold-gate answer is echoed against. A gate an answer has taken offers no
+// menu.
 func (f *Fleet) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	gate, ok := f.coldGates[ws]
-	return gate, ok
+	held, ok := f.coldGates[ws]
+	if !ok || held.answering {
+		return ServedColdGate{}, false
+	}
+	return held.served, true
 }
 
-// ClearColdGate retires an answered gate. It is the resolve path's own step:
-// Stop clears the gate along with the session, but a gate that was ANSWERED
-// leaves no session behind to clear it.
-func (f *Fleet) ClearColdGate(ws ids.WorkspaceID) {
+// TakeColdGate spends the standing gate for the conversation VENDORSESSIONID,
+// answering whether this caller took it. Taking is ONE step under the fleet's
+// lock -- the check and the removal cannot be split -- so of two answers racing
+// for one gate exactly one spends it and the other finds nothing standing. A
+// gate standing for a different conversation is not taken.
+func (f *Fleet) TakeColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
 	f.mu.Lock()
-	_, stood := f.coldGates[ws]
-	delete(f.coldGates, ws)
-	f.mu.Unlock()
-	if stood {
-		f.logTransition(ws, "cold_gate_standing", true, false, nil)
+	held, stood := f.coldGates[ws]
+	taken := stood && !held.answering && held.served.VendorSessionID == vendorSessionID
+	if taken {
+		held.answering = true
+		f.coldGates[ws] = held
 	}
+	f.mu.Unlock()
+	if taken {
+		f.logTransition(ws, "cold_gate_standing", true, false, dlog.Context{"reason": "answered"})
+	}
+	return taken
+}
+
+// EndColdGate retires a TAKEN gate for VENDORSESSIONID once its remediation
+// brought the session back: nothing is parked any more, so a prompt is no
+// longer refused by the gate's name. A gate that was raised again or replaced
+// since is left alone.
+func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
+	f.mu.Lock()
+	held, ok := f.coldGates[ws]
+	ended := ok && held.answering && held.served.VendorSessionID == vendorSessionID
+	if ended {
+		delete(f.coldGates, ws)
+	}
+	f.mu.Unlock()
+	if ended {
+		f.logTransition(ws, "cold_gate_answering", true, false, dlog.Context{"reason": "remediated"})
+	}
+}
+
+// ReraiseColdGate stands the gate for VENDORSESSIONID again from the cold facts
+// the shim stated when it was first raised, answering false when those facts
+// are gone (the session was stopped or reaped since). It is how an answered
+// gate whose remediation FAILED comes back: the session is still parked, so
+// the choice is the user's again.
+func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
+	f.mu.RLock()
+	cold := f.lastCold[ws]
+	f.mu.RUnlock()
+	if cold == nil {
+		return false
+	}
+	f.raiseColdGate(ws, vendorSessionID, cold)
+	return true
 }
 
 // source is the decided way a session comes up: fresh, or a resume of one named
@@ -1787,21 +1870,17 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	detail := coldGateDetail(cold)
 
 	f.mu.Lock()
-	_, stood := f.coldGates[ws]
-	f.coldGates[ws] = ServedColdGate{
-		VendorSessionID: vendorSessionID, Models: models, Scopes: scopes, Detail: detail}
+	held, stood := f.coldGates[ws]
+	stood = stood && !held.answering
+	f.coldGates[ws] = coldGate{served: ServedColdGate{
+		VendorSessionID: vendorSessionID, Models: models, Scopes: scopes, Detail: detail}}
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
 		dlog.Context{"vendor_session_id": vendorSessionID})
 
-	ref := feedid.Ref{
-		WS:   ws,
-		Feed: feedid.Feed{Root: true},
-		Row:  feedid.RowKey{Kind: feedid.KindColdGate, ID: vendorSessionID},
-	}
 	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
-		Id: feedid.Encode(ref),
+		Id: coldGateRowID(ws, vendorSessionID),
 		Row: &frontendv1.FeedRow_ColdGate{ColdGate: &frontendv1.FeedColdGate{
 			State: &frontendv1.FeedColdGate_Standing{Standing: &frontendv1.FeedColdGateStanding{
 				ContextTokens: &frontendv1.FeedColdGateContextTokens{Tokens: int64(cold.GetContextTokens())},
@@ -1834,11 +1913,11 @@ func coldGateDetail(cold *conversationv1.SessionCold) string {
 func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	gate, ok := f.coldGates[ws]
+	held, ok := f.coldGates[ws]
 	if !ok {
 		return "", false
 	}
-	return gate.Detail, true
+	return held.served.Detail, true
 }
 
 // recordFacts persists the session facts that outlive one shim process: the
