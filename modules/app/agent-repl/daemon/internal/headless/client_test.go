@@ -2,6 +2,7 @@ package headless
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -223,35 +224,103 @@ func TestRunReportsAnExpiredDeadlineAsATimeout(t *testing.T) {
 	}
 }
 
-func TestRunPutsTheModelOnTheArgv(t *testing.T) {
-	// Arrange.
-	c, seen := scripted(t, permissiveGuard(t), "fake-claude", `{"result":"x"}`, nil)
+// wantPinned is the pinned tail spelled out literally, so a change to the one
+// definition in client.go is a visible change here too.
+const wantPinned = `--settings {"alwaysThinkingEnabled":false} --strict-mcp-config --safe-mode`
 
-	// Act.
-	if _, err := c.Run(context.Background(), Request{
-		Site: "workspace_naming", Model: ModelHaiku, Format: FormatJSON, Prompt: "q",
-	}); err != nil {
-		t.Fatalf("Run() error = %v, want nil", err)
+func TestRunComposesTheExactArgv(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		out  string
+		want string
+	}{
+		{
+			name: "a json run with a model",
+			req:  Request{Site: "workspace_naming", Model: ModelHaiku, Format: FormatJSON, Prompt: "q"},
+			out:  `{"result":"x"}`,
+			want: "-p --output-format json --model " + ModelHaiku + " " + wantPinned,
+		},
+		{
+			name: "a text run with no model omits the model flag",
+			req:  Request{Site: "classifier", Prompt: "q"},
+			out:  "ok",
+			want: "-p --output-format text " + wantPinned,
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c, seen := scripted(t, permissiveGuard(t), "fake-claude", tt.out, nil)
 
-	// Assert.
-	if got, want := strings.Join(seen.Args, " "), "-p --output-format json --model "+ModelHaiku; got != want {
-		t.Fatalf("argv = %q, want %q", got, want)
+			// Act.
+			if _, err := c.Run(context.Background(), tt.req); err != nil {
+				t.Fatalf("Run() error = %v, want nil", err)
+			}
+
+			// Assert.
+			if got := strings.Join(seen.Args, " "); got != tt.want {
+				t.Fatalf("argv = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestRunOmitsTheModelFlagWhenNoModelIsAsked(t *testing.T) {
-	// Arrange.
-	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+// TestRunPinsItsSettingsWhateverTheRequestSays pins that no Request field can
+// drop or alter the call-owned settings: the user's interactive config never
+// reaches a headless call's behavior.
+func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+	}{
+		{name: "the bare minimum", req: Request{Site: "classifier", Prompt: "q"}},
+		{name: "a model and a text format", req: Request{Site: "classifier", Model: "sonnet", Format: FormatText, Prompt: "q"}},
+		{name: "a config dir", req: Request{Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
+		{name: "a timeout", req: Request{Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
 
-	// Act.
-	if _, err := c.Run(context.Background(), Request{Site: "classifier", Prompt: "q"}); err != nil {
-		t.Fatalf("Run() error = %v, want nil", err)
+			// Act.
+			if _, err := c.Run(context.Background(), tt.req); err != nil {
+				t.Fatalf("Run() error = %v, want nil", err)
+			}
+
+			// Assert.
+			if got := strings.Join(seen.Args, " "); !strings.HasSuffix(got, " "+wantPinned) {
+				t.Fatalf("argv = %q, want it to end with the pinned %q", got, wantPinned)
+			}
+		})
+	}
+}
+
+// TestPinnedSettingsTurnThinkingOff decodes the `--settings` value rather than
+// matching its spelling, so the assertion is on what the CLI will read.
+func TestPinnedSettingsTurnThinkingOff(t *testing.T) {
+	// Arrange.
+	var raw string
+	for i, arg := range pinnedArgs {
+		if arg == "--settings" && i+1 < len(pinnedArgs) {
+			raw = pinnedArgs[i+1]
+		}
+	}
+	if raw == "" {
+		t.Fatalf("pinnedArgs = %v, want a --settings value", pinnedArgs)
 	}
 
+	// Act.
+	var got map[string]any
+	err := json.Unmarshal([]byte(raw), &got)
+
 	// Assert.
-	if got, want := strings.Join(seen.Args, " "), "-p --output-format text"; got != want {
-		t.Fatalf("argv = %q, want %q", got, want)
+	if err != nil {
+		t.Fatalf("the pinned settings %q did not decode: %v", raw, err)
+	}
+	if thinking, ok := got["alwaysThinkingEnabled"].(bool); !ok || thinking {
+		t.Fatalf("alwaysThinkingEnabled = %v, want an explicit false", got["alwaysThinkingEnabled"])
 	}
 }
 

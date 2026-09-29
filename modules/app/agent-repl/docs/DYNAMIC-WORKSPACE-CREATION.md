@@ -174,6 +174,11 @@ headless.Run(ctx, Request{
 ```
 
 - argv: `<bin> -p --model haiku --output-format json`.
+- every headless run also carries the call-owned pin `headless.pinnedArgs`:
+  `--settings '{"alwaysThinkingEnabled":false}' --strict-mcp-config
+  --safe-mode`, so the user's interactive settings (extended thinking, MCP
+  connectors, plugins, hooks) never change a daemon question's behavior.
+  `--bare` is unusable because it refuses OAuth.
 - stdin carries the prompt, exactly as the classifier does, so a process
   listing never shows the user's words.
 - env: `os.Environ()` plus `CLAUDE_CONFIG_DIR=<config dir>`, the same shape
