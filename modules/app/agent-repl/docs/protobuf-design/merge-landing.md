@@ -98,8 +98,8 @@ branch into the target as a non-fast-forward merge.
     when "testing" begins and closes, returning to whatever other sections
     stand, when it ends. Its shape follows the existing expanded-footer
     practice (the owner leaves that design to the orchestrator).
-  - "fixing": the agent is repairing failed suites; the merge returns to
-    "testing" afterwards. Activity: which suites are being fixed.
+  - "fixing attempt x/y": the agent is repairing failed suites; the merge
+    returns to "testing" afterwards. Activity: which suites are being fixed.
   - "committing": the non-fast-forward merge commit into the target.
     Activity: that merge commit's first line.
   - "updating main": a PR-merged merge pulling the default branch in the
@@ -118,5 +118,15 @@ branch into the target as a non-fast-forward merge.
     what the user typed to the merge's agent) and a failed merge the
     `merge_failed` status. Neither state survives: nothing is parked, and the
     user's next prompt is an ordinary turn of the workspace.
+  - The substatus stands like every other substatus: until the next one
+    replaces it (owner, 2026-09-29).
+  - A failed conflict resolution LEAVES THE REBASE IN PROGRESS, exactly
+    where it stopped (owner, 2026-09-29). The point of handing the workspace
+    back is for the user to help move the rebase along, so the daemon never
+    aborts it.
+- **"fixing attempt x/y" (owner, 2026-09-29).** The fixing substatus names
+  its attempt: x is the current attempt and y the maximum number of fix
+  attempts, a structural invariant of the merge (the same bound that decides
+  when fixing has failed), never a guess.
 
 ## Landed changes
