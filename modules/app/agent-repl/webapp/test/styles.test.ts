@@ -33,6 +33,7 @@ import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
+import { cascadedValue, installStylesheet } from "./stylesheet.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -3175,5 +3176,38 @@ describe("the footer's one-line activity section", () => {
     // Assert
     expect(rule).toMatch(/overflow:\s*hidden\s*;/);
     expect(rule).toMatch(/text-overflow:\s*ellipsis\s*;/);
+  });
+});
+
+/**
+ * THE FOOTER'S STATUS WORD AND SUBSTATUS ARE ONE SIZE (owner ruling,
+ * 2026-09-29): both read `--footer-status-font-size`, the substatus's size.
+ */
+describe("the footer's status and substatus size", () => {
+  it("sets the status word and the substatus from the one size", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const strip = document.createElement("div");
+    strip.className = "pfooter";
+    const status = document.createElement("div");
+    status.className = "pfooter-cell pfooter-phase footer-status";
+    const substatus = document.createElement("div");
+    substatus.className = "pfooter-cell footer-substatus";
+    strip.append(status, substatus);
+    document.body.replaceChildren(strip);
+
+    // Act
+    const statusSize = cascadedValue(status, "font-size");
+    const substatusSize = cascadedValue(substatus, "font-size");
+
+    // Assert
+    expect(statusSize).toBe("var(--footer-status-font-size)");
+    expect(substatusSize).toBe(statusSize);
+    teardown();
+  });
+
+  it("gives that size the substatus's own value", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(/\.pfooter \{ --footer-status-font-size: 0\.74rem; \}/);
   });
 });

@@ -3564,8 +3564,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    so the waving word occupies exactly the width its resting letters do.
    `display: inline-block` is what makes a transform apply at all.
 
-   SCALE 1.18, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
-   at the default root), so the bulge peaks at 14.73px — a shade more prominent
+   SCALE 1.18, AND NO LAYER PROMOTION. The status word is set at
+   `--footer-status-font-size` (0.74rem, 11.84px at the default root), so the
+   bulge peaks at 13.97px — a shade more prominent
    than the 1.15 it grew from (owner ruling, 2026-09-14: nudge the bulge up a
    little, not a lot), visible at a glance and still unmistakably the same word.
    There is deliberately no `will-change`, no
@@ -5202,10 +5203,18 @@ bubble-body.bubble-body { display: block; }
    shared vocabulary is the one table now — so the phase cell keeps its weight
    and padding and spends no color of its own. */
 
+/* THE STATUS WORD AND ITS SUBSTATUS ARE ONE SIZE (owner ruling, 2026-09-29:
+   the substatus size is right, the status word was too big). Both cells read
+   the one custom property, so the two can never drift apart again; the status
+   word keeps its heavier weight and its tone, and the substatus its muted
+   register. */
+.pfooter { --footer-status-font-size: 0.74rem; }
+.footer-status,
+.footer-substatus { font-size: var(--footer-status-font-size); }
+
 /* The substatus cell: the step within the status, set a notch quieter than the
    status word it qualifies, exactly as the old interrupt chip was. */
 .footer-substatus {
-  font-size: 0.74rem;
   font-weight: 600;
   color: var(--muted);
 }
