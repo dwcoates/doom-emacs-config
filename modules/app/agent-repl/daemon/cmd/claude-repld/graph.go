@@ -514,6 +514,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		NodeBin:      p.Opts.node,
 		MainJS:       paths.ShimMain,
 		ShimBundle:   shimBundle,
+		LockDir:      paths.RunDir,
 		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		StartBound:   startBound,
@@ -885,7 +886,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// THE LANDED-WORKTREE REAPER reads the registry and the fleet's live set
 	// and takes no lock any interactive path takes: it is background work.
-	reaper, err := buildWorktreeReaper(git, p.DB, fleet.Workspaces, log)
+	reaper, err := buildWorktreeReaper(git, p.DB, fleet.Workspaces, paths.RunDir, log)
 	if err != nil {
 		return nil, err
 	}
@@ -930,7 +931,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Queue:          queue,
 			Merge:          mergeOrchestrator,
 			Rollout:        rolloutController,
-			RunDir:         lockDir(),
+			RunDir:         paths.RunDir,
 			JoiningAddress: p.Opts.joining,
 			Adopted:        fleet.Install,
 			StartSession:   fleet.Start,
@@ -1010,6 +1011,10 @@ type paths struct {
 	// expands to (dirpath.Absolute). A daemon that cannot name it does not
 	// boot.
 	Home string
+	// RunDir is the absolute directory the shim-held kernel locks live in
+	// (sessionlock.ResolveRunDir), resolved once for the fleet, the boot
+	// sequence and the reaper alike.
+	RunDir string
 }
 
 // envSelfRepo overrides the daemon's own-checkout identity for tests. The flag
@@ -1037,6 +1042,10 @@ func resolvePaths(opts options) (paths, error) {
 	if err != nil {
 		return paths{}, fmt.Errorf("claude-repld: resolve the home directory a producer's `~` expands to: %w", err)
 	}
+	runDir, err := sessionlock.ResolveRunDir()
+	if err != nil {
+		return paths{}, fmt.Errorf("claude-repld: resolve the kernel-lock directory: %w", err)
+	}
 	out := paths{
 		Checkout:   root,
 		ShimMain:   firstNonEmpty(opts.shim, checkout.ShimMain(root)),
@@ -1046,6 +1055,7 @@ func resolvePaths(opts options) (paths, error) {
 		SelfRepo:   selfRepo,
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
 		Home:       home,
+		RunDir:     runDir,
 	}
 	return out, nil
 }
@@ -1087,18 +1097,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// lockDir answers where the shim-held kernel locks live: the test override,
-// then the default under the home directory. The daemon only ever PROBES them.
-func lockDir() string {
-	if fromEnv := os.Getenv(workspace.LockDirEnv); fromEnv != "" {
-		return fromEnv
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "agent-repl", "run")
-	}
-	return workspace.DefaultLockDir
 }
 
 // hostSessionFacts adapts the session fleet to server.SessionFacts. The
