@@ -78,7 +78,6 @@
 (declare-function agent-repl--panels-open-on-arrival "panels" (ws id))
 (declare-function agent-repl--panels-arm-arrivals "panels" ())
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
-(declare-function agent-repl-host-unsubscribe "host" (ws))
 (declare-function agent-repl-host-rename "host" (old new))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-last-selected-id)
@@ -461,10 +460,14 @@ as nil, so the caller applies the rename or leaves it alone entire."
      nil)))
 
 (defun agent-repl-roster--tear-down-tab (name)
-  "Tear NAME's tab down: cancel its host stream, kill the persp, tombstone it.
+  "Tear NAME's tab down: kill the persp, tombstone it.
 IDEMPOTENT, because CloseWorkspace's own success tears the tab down too
 and the roster push that follows must not care which of the two got
 there first.
+
+THE HOST STREAM IS NOT CANCELLED HERE.  The tombstone
+\(`agent-repl--ws-del') runs `agent-repl-ws-del-hook', and host.el forgets
+the workspace there, stream and all, whichever teardown tombstoned it.
 
 The persp kill runs against a LIVE FRAME -- windows, dedications, buffers
 with processes -- so it is the one step here that can signal on something
@@ -490,8 +493,6 @@ a teardown of some OTHER tab does not move the user.
 A refused kill or a failed landing signals out of that function and is
 contained here for the same reason a failing kill is: an escape would
 abort the reconcile walk mid-list."
-  (when (fboundp 'agent-repl-host-unsubscribe)
-    (agent-repl-host-unsubscribe name))
   (condition-case err
       (agent-repl--ws-land-then-kill name)
     (error

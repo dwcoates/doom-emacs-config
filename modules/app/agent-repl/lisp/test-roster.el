@@ -439,15 +439,17 @@ start's reconcile on its first row and drew no tabs at all."
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
                                     (agent-repl-test-roster--row "b" "second" :ready))))))
-    (cl-letf (((symbol-function 'agent-repl--ws-del)
-               (lambda (ws)
-                 (when (equal ws "first") (error "registry write failed"))
-                 (agent-repl--ws-put ws :killed-at (current-time))))
-              ((symbol-function 'agent-repl--error) #'ignore))
-      ;; Act
-      (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
-    ;; Assert: the walk still reached the second row's unsubscribe.
-    (should (member "second" agent-repl-test-roster--unsubscribed))))
+    (let (tombstoned)
+      (cl-letf (((symbol-function 'agent-repl--ws-del)
+                 (lambda (ws)
+                   (when (equal ws "first") (error "registry write failed"))
+                   (push ws tombstoned)
+                   (agent-repl--ws-put ws :killed-at (current-time))))
+                ((symbol-function 'agent-repl--error) #'ignore))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
+      ;; Assert: the walk still reached the second row's tombstone.
+      (should (member "second" tombstoned)))))
 
 (ert-deftest agent-repl-test-roster-a-signalling-persp-kill-does-not-abort-the-walk ()
   "A persp kill that signals leaves the REST of the teardown walk to run.
