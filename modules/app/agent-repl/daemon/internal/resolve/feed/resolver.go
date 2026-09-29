@@ -307,6 +307,11 @@ type wsState struct {
 	// silent empty prefix.
 	answerMarkdown map[string]string
 
+	// liveEndings files each turn that ended LIVE with what its end said, for
+	// the desktop banner (liveending.go). The prompt queue's turn end takes
+	// each entry once.
+	liveEndings map[ids.TurnID]TurnEnding
+
 	// THE FRESH-INPUT ACCOUNTS (usage.go). unitAccount files each
 	// usage-carrying unit in its agent's account — the main agent's turn or a
 	// subagent's lifetime — and unitFresh is that unit's fresh input, replaced
@@ -623,6 +628,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		finalAnswerSeen:      map[string]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
+		liveEndings:          map[ids.TurnID]TurnEnding{},
 		stalls:               map[string]*stallState{},
 		replayTail:           map[string]string{},
 

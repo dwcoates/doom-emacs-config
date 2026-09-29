@@ -72,6 +72,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 		"a turn closed with no terminal of its own; its ending row was drawn from its recorded close",
 		dlog.Context{"turn": string(turn), "close": closeWord(close.How), "outcome": terminalArm(ended), "plane": s.plane.String()})
 	r.upsert(s, at, row, true)
+	r.fileLiveEnding(s, turn, ended, nil)
 	r.settleTurnPrompts(s, turn)
 
 	delete(s.turnEvidence, string(turn))
