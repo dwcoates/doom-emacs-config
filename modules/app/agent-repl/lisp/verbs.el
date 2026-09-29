@@ -372,6 +372,34 @@ a failure over work that is still running and will succeed."
                      (when on-transport-failure (funcall on-transport-failure detail))
                      (message "agent-repl: %s failed -- the daemon did not answer" op)))))))))
 
+(cl-defun agent-repl-verbs--send-op (op-id rpc conn request
+                                       &rest keys
+                                       &key on-success on-error on-transport-failure
+                                       &allow-other-keys)
+  "`agent-repl-verbs--send' for a verb that registered the progress op OP-ID.
+EVERY ANSWER THAT ENDS THE OP ON THIS RPC FORGETS IT FIRST: a success, a
+refusal and no answer at all each mean no further push will ever arrive
+for OP-ID, so the registration is retired before ON-SUCCESS, ON-ERROR or
+ON-TRANSPORT-FAILURE runs (an ON-ERROR still claims its arm by answering
+non-nil).  Only an `accepted' ack keeps it: that op\='s end is still on its
+way.  RPC, CONN, REQUEST and the remaining KEYS pass through unchanged."
+  (let ((forget (lambda () (agent-repl-mutation-progress-forget op-id)))
+        (passed (cl-loop for (key value) on keys by #'cddr
+                         unless (memq key '(:on-success :on-error :on-transport-failure))
+                         append (list key value))))
+    (apply #'agent-repl-verbs--send rpc conn request
+           :on-success (lambda (value)
+                         (funcall forget)
+                         (when on-success (funcall on-success value)))
+           :on-error (lambda (value)
+                       (funcall forget)
+                       (and on-error (funcall on-error value)))
+           :on-transport-failure (lambda (detail)
+                                   (funcall forget)
+                                   (when on-transport-failure
+                                     (funcall on-transport-failure detail)))
+           passed)))
+
 ;;;; ---- Editor-state updates ---------------------------------------------
 
 (defun agent-repl-verbs--teardown-tab (ws op)
@@ -527,18 +555,13 @@ progress push forgets it."
                           op ws op-id arm value)
        (message "agent-repl: %s of %s FAILED after its tab closed: %s"
                 op ws (agent-repl-verbs--teardown-failure-sentence arm value))))
-    (agent-repl-verbs--send
-     rpc (agent-repl-verbs--conn ws)
+    (agent-repl-verbs--send-op
+     op-id rpc (agent-repl-verbs--conn ws)
      (list :workspace ref :op-id op-id)
      :ws ws :op op
      :on-accepted (lambda (_) (agent-repl-verbs--teardown-tab ws op))
-     :on-success (lambda (_)
-                   (agent-repl-mutation-progress-forget op-id)
-                   (agent-repl-verbs--teardown-tab ws op))
-     :on-error (lambda (value)
-                 (agent-repl-mutation-progress-forget op-id)
-                 (and on-error (funcall on-error value)))
-     :on-transport-failure (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
+     :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws op))
+     :on-error on-error)))
 
 (defun agent-repl-verbs--teardown-failure-sentence (arm value)
   "Word a teardown failure ARM with VALUE for the echo area.
@@ -598,30 +621,20 @@ nothing on the stream would ever retire the registration."
      op-id
      :on-stage (lambda (stage) (agent-repl-workspace-progress-report :open stage)))
     (agent-repl-workspace-progress-report :open :requested name)
-    (agent-repl-verbs--send
-     #'agent-repl-rpc-open-workspace (agent-repl-verbs--conn)
+    ;; No ON-ERROR: the arm is NOT claimed, so the daemon-authored refusal is
+    ;; worded by the shared dispatcher, and the op is retired by
+    ;; `agent-repl-verbs--send-op' on every path, an unanswered open's included.
+    (agent-repl-verbs--send-op
+     op-id #'agent-repl-rpc-open-workspace (agent-repl-verbs--conn)
      (list :workspace ref :op-id op-id)
      :op "open"
      :on-success (lambda (_)
-                   (agent-repl-mutation-progress-forget op-id)
                    ;; The tab arrives on the roster push, and when it does it
                    ;; opens its panels as a re-open (owner ruling,
                    ;; 2026-09-13, item 6).
                    (agent-repl--panels-note-arrival-reason
                     (plist-get ref :id) "reopened")
-                   (agent-repl-workspace-progress-report :open :completed name))
-     :on-error
-     ;; The arm is NOT claimed (nil): the daemon-authored refusal is still
-     ;; worded by the shared dispatcher, which names the arm and its fields.
-     ;; All this does is retire an op no further stage will ever arrive for.
-     (lambda (_value)
-       (agent-repl-mutation-progress-forget op-id)
-       nil)
-     ;; A daemon that never answered will never push a stage either, so the
-     ;; op is retired here too: otherwise every unanswered open would leave a
-     ;; registration behind for the life of the session.
-     :on-transport-failure
-     (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
+                   (agent-repl-workspace-progress-report :open :completed name)))))
 
 (defun agent-repl-verb-merge (ws)
   "Enqueue WS's merge.  Success means ENQUEUED and nothing more.
@@ -832,8 +845,8 @@ and the new workspace\'s tab arrives through the roster push."
     ;; the command runs, not when the slow work finishes -- the owner's rule
     ;; that phases are messages, not only a mode line.
     (agent-repl-workspace-progress-report :create :requested)
-    (agent-repl-verbs--send
-     #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
+    (agent-repl-verbs--send-op
+     op-id #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
      (list :repository repository
            :form (agent-repl-verbs--create-form
                   form :initial-prompt initial-prompt :base-ref base-ref :name name
@@ -860,7 +873,6 @@ and the new workspace\'s tab arrives through the roster push."
      ;; Its completion is said exactly as the stream's is; the answer carries
      ;; the minted ref and no name, so the line names the minted directory.
      (lambda (success)
-       (agent-repl-mutation-progress-forget op-id)
        (agent-repl-workspace-progress-report
         :create :completed (plist-get (plist-get success :workspace) :dir))
        (agent-repl--panels-note-arrival-reason
@@ -869,16 +881,10 @@ and the new workspace\'s tab arrives through the roster push."
          (agent-repl-verbs--select-created success)))
      :on-error
      ;; A SYNCHRONOUS refusal (validation, an unknown repository) is answered
-     ;; on the rpc before the work detaches, so no progress will follow: forget
-     ;; the op and word the refusal, falling through for arms it does not claim.
-     (lambda (value)
-       (agent-repl-mutation-progress-forget op-id)
-       (agent-repl-verbs--create-refusal value))
-     ;; A daemon that never answered will never push progress either, so the
-     ;; op is retired on that path too rather than left registered for the
-     ;; life of the session.
-     :on-transport-failure
-     (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
+     ;; on the rpc before the work detaches, so no progress will follow: the
+     ;; op is retired (`agent-repl-verbs--send-op') and the refusal worded,
+     ;; falling through for arms it does not claim.
+     #'agent-repl-verbs--create-refusal)))
 
 (defun agent-repl-verbs--create-stage-message (stage)
   "Echo the minibuffer line for a create STAGE keyword.

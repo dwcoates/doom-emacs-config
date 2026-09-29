@@ -45,6 +45,7 @@
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl-verbs--ref "verbs" (ws))
 (declare-function agent-repl-verbs--conn "verbs" (&optional ws))
+(declare-function agent-repl-verbs--send-op "verbs" (op-id rpc conn request &rest keys))
 (declare-function agent-repl-verbs--send "verbs" (rpc conn request &rest keys))
 (declare-function agent-repl-rpc-list-workspace-transcripts-sync "rpc" (conn request &optional timeout))
 (declare-function agent-repl-rpc-bind-workspace-session "rpc" (conn request &rest keys))
@@ -221,14 +222,13 @@ channel, so nothing on the stream would ever retire the registration."
     ;; workspace through `symbol-name' signalled `wrong-type-argument symbolp'
     ;; on the very first stage, before the rpc was ever sent.
     (agent-repl-workspace-progress-report :bind :requested ws)
-    (agent-repl-verbs--send
-     #'agent-repl-rpc-bind-workspace-session (agent-repl-verbs--conn ws)
+    (agent-repl-verbs--send-op
+     op-id #'agent-repl-rpc-bind-workspace-session (agent-repl-verbs--conn ws)
      (list :workspace ref :vendor-session-id vendor-session-id :op-id op-id)
      :ws ws :op "bind-conversation"
      :timeout agent-repl-conversations-bind-timeout-seconds
      :on-success
      (lambda (_)
-       (agent-repl-mutation-progress-forget op-id)
        (agent-repl-workspace-progress-report :bind :completed ws))
      ;; THE ARM IS CLAIMED, because a bind's refusals are the ones a person
      ;; standing at the chooser has to act on -- and the dispatcher's generic
@@ -239,12 +239,9 @@ channel, so nothing on the stream would ever retire the registration."
      ;; scrolled past under it.
      :on-error
      (lambda (value)
-       (agent-repl-mutation-progress-forget op-id)
        (agent-repl-workspace-progress-report
         :bind :failed ws (agent-repl-conversations--refusal-sentence value))
-       t)
-     :on-transport-failure
-     (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
+       t))))
 
 ;;;###autoload
 (defun agent-repl-bind-conversation ()

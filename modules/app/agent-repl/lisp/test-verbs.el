@@ -2916,3 +2916,61 @@ A refusal the daemon adds later must reach the user the day it ships."
       (agent-repl-verbs--register-repository-read-path))
     ;; Assert.
     (should (equal prompted-default "/tmp/repo/a/"))))
+
+;;;; ---- agent-repl-verbs--send-op: the op dies with the rpc's own end ----
+
+(defmacro agent-repl-test-verbs--send-op-with (answer &rest body)
+  "Run BODY with `agent-repl-verbs--send' answering ANSWER to its caller.
+ANSWER is (KEY . VALUE): the callback KEY the fake dispatcher invokes."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-verbs--send)
+              (lambda (_rpc _conn _request &rest keys)
+                (let ((fn (plist-get keys (car ,answer))))
+                  (when fn (funcall fn (cdr ,answer)))))))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-send-op-forgets-the-op-on-every-end-of-the-rpc ()
+  "A success, a refusal and no answer each retire the op before the callback."
+  (dolist (end '(:on-success :on-error :on-transport-failure))
+    (clrhash agent-repl-mutation-progress--pending)
+    (agent-repl-mutation-progress-register "op-e" :on-stage #'ignore)
+    (let (seen-registered)
+      (agent-repl-test-verbs--send-op-with (cons end 'value)
+        (apply #'agent-repl-verbs--send-op "op-e" #'ignore nil nil
+               (list end (lambda (_) (setq seen-registered
+                                           (gethash "op-e" agent-repl-mutation-progress--pending))))))
+      (should-not (gethash "op-e" agent-repl-mutation-progress--pending))
+      (should-not seen-registered))))
+
+(ert-deftest agent-repl-verbs-send-op-keeps-an-accepted-op ()
+  "An accepted ack keeps the op: its end is still on the progress channel."
+  (clrhash agent-repl-mutation-progress--pending)
+  (agent-repl-mutation-progress-register "op-a" :on-stage #'ignore)
+  (agent-repl-test-verbs--send-op-with (cons :on-accepted 'value)
+    (agent-repl-verbs--send-op "op-a" #'ignore nil nil :on-accepted #'ignore))
+  (should (gethash "op-a" agent-repl-mutation-progress--pending)))
+
+(ert-deftest agent-repl-verbs-send-op-lets-on-error-claim-the-arm ()
+  "ON-ERROR's answer is what the dispatcher reads as the claim."
+  (let (claimed)
+    (cl-letf (((symbol-function 'agent-repl-verbs--send)
+               (lambda (_rpc _conn _request &rest keys)
+                 (setq claimed (funcall (plist-get keys :on-error) 'value)))))
+      (agent-repl-verbs--send-op "op-c" #'ignore nil nil :on-error (lambda (_) 'mine)))
+    (should (eq claimed 'mine))))
+
+(ert-deftest agent-repl-verbs-no-verb-forgets-its-op-by-hand ()
+  "Every verb that registers an op sends through `agent-repl-verbs--send-op'.
+A verb that forgets its op by hand is the one that misses a path."
+  (dolist (expected '(("verbs.el" . 1) ("conversations.el" . 0)))
+    (let ((source (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name (car expected)
+                                       (file-name-directory
+                                        (symbol-file 'agent-repl-verbs--send-op 'defun))))
+                    (buffer-string)))
+          (count 0) (start 0))
+      (while (setq start (string-search "(agent-repl-mutation-progress-forget op-id)" source start))
+        (setq count (1+ count) start (1+ start)))
+      ;; The one occurrence in verbs.el is `agent-repl-verbs--send-op' itself.
+      (should (equal (cons (car expected) count) expected)))))
