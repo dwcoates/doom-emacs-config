@@ -44,6 +44,30 @@ substatus that stands for the whole turn. The owner wants the status called
 
 ## Landed changes
 
+### 1. `FooterStatus.working` (was `thinking`), its steps, and `quiet_stretch`
+
+- **What.**
+  - `FooterStatus.thinking = 2` is renamed `working = 2`, and its messages
+    `FooterStatusThinking*` / `FooterSubStatusThinking*` become
+    `FooterStatusWorking*` / `FooterSubStatusWorking*`. The tag numbers are
+    unchanged; `render-colors.json`'s `footer_status` key follows the arm name
+    (still red). The roster's `thinking` arm is untouched.
+  - New `FooterStatusWorking.substatus` arms: `executing = 6`, `reading = 7`,
+    `writing = 8`, `searching = 9`, `fetching = 10`, `delegating = 11`
+    (`activity` already holds tag 5).
+  - New activity kind `FooterStatusActivityQuietStretch { string text }` on
+    `FooterStatusWorkingActivity.quiet_stretch = 11` and
+    `FooterStatusBackgroundActivity.quiet_stretch = 7`.
+  - The rendering rules state the activity cell is always exactly one line,
+    truncated with an ellipsis.
+- **Why.** Items 1–3 of the plan below. One composed `text`, like the
+  compaction line: the daemon words the line, the client draws it verbatim.
+- **Precedence.** Fault, update, notification, compaction, hook, retry, then
+  the quiet-stretch line, then the injected item, rate limit and budget. A
+  notification outranks the line only until the next feed item lands: that
+  landing replaces the notification (the notification's documented lifetime,
+  "shown until the next activity replaces it").
+
 ## THE PLAN (owner-approved 2026-09-29; read this whole file after any compaction)
 
 ### What changes — exactly this, nothing else
