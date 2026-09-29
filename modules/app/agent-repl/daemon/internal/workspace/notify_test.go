@@ -7,7 +7,7 @@ import (
 	"claude-repld/internal/sessionwatcher"
 )
 
-func TestNotifyRelaysOntoTheHostStream(t *testing.T) {
+func TestNotifyRaisesADesktopBanner(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -21,8 +21,9 @@ func TestNotifyRelaysOntoTheHostStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	if len(f.host.notes) != 1 || f.host.notes[0].Kind != "agent_addressed" {
-		t.Fatalf("relayed notifications = %+v, want one agent_addressed", f.host.notes)
+	want := raisedBanner{WS: "w1", Kind: "agent_addressed", Text: "the agent is waiting on you"}
+	if len(f.banners.raised) != 1 || f.banners.raised[0] != want {
+		t.Fatalf("raised banners = %+v, want [%+v]", f.banners.raised, want)
 	}
 }
 
@@ -44,24 +45,6 @@ func TestNotifySetsTheAttentionMarker(t *testing.T) {
 	}
 }
 
-func TestNotifyCarriesTheNamedTool(t *testing.T) {
-	// Arrange: a permission notification names the tool it gates.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-
-	// Act.
-	if err := f.verbs.Notify(context.Background(), "w1", sessionwatcher.HostNotification{
-		Kind: "permission_requested", ToolName: "Bash",
-	}); err != nil {
-		t.Fatalf("Notify: %v", err)
-	}
-
-	// Assert.
-	if f.host.notes[0].Tool != "Bash" {
-		t.Fatalf("relayed tool = %q, want Bash", f.host.notes[0].Tool)
-	}
-}
-
 func TestNotifyRefusesAnUntypedNotification(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -72,6 +55,9 @@ func TestNotifyRefusesAnUntypedNotification(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnservedAnswer)
+	if len(f.banners.raised) != 0 {
+		t.Fatalf("a refused notification raised %d banners", len(f.banners.raised))
+	}
 }
 
 func TestNotifyRefusesAnUnknownWorkspace(t *testing.T) {
@@ -83,6 +69,9 @@ func TestNotifyRefusesAnUnknownWorkspace(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.banners.raised) != 0 {
+		t.Fatalf("a refused notification raised %d banners", len(f.banners.raised))
+	}
 }
 
 func TestAsksSettledClearsTheAttentionMarker(t *testing.T) {

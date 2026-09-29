@@ -24,6 +24,7 @@ import (
 
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/deploy"
+	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/feedid"
@@ -41,7 +42,6 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -115,6 +115,9 @@ type Deps struct {
 	// state every Emacs WatchDaemon stream subscribes to (a webview's never
 	// does: its topbar and footer views carry the same faults).
 	LoudFaults *publish.Topic[*agentreplv1.DaemonFaultsStanding]
+	// Focus is Emacs's desktop focus: an Emacs WatchDaemon stream attaches it
+	// for the stream's lifetime, and ReportEditorFocus moves it.
+	Focus *desktopnotify.Focus
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -152,6 +155,10 @@ type Server interface {
 	// OpenInEditor(ws, path, line) and the OpenInEditor RPC handler cannot both
 	// be methods of one type; the relay wraps the same push topics.
 	Relay() workspace.HostRelay
+
+	// NotificationClicked pushes notification_clicked onto a workspace's host
+	// stream. It is the desktop notifier's ClickSink.
+	NotificationClicked(ws ids.WorkspaceID)
 
 	// PublishHostWorkspace recomposes and publishes one workspace's host view.
 	// It is exported because the SESSION EDGES that move the view — a shim
@@ -357,6 +364,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a holds resolver")
 	case deps.LoudFaults == nil:
 		return nil, missing("the standing loud faults")
+	case deps.Focus == nil:
+		return nil, missing("Emacs's focus")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:
@@ -480,16 +489,11 @@ func (r hostRelay) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 // ReloadWebapp pushes the reload_webapp arm onto the workspace's host stream.
 func (r hostRelay) ReloadWebapp(ws ids.WorkspaceID) { r.s.ReloadWebapp(ws) }
 
-// Notify pushes a host notification onto the workspace's host stream.
 // PublishHostWorkspace republishes the workspace's host state. The lifetime is
 // the SERVER's, not any caller's: the edges that call it are async (a shim
 // dying, a lease released) and carry no request context of their own.
 func (r hostRelay) PublishHostWorkspace(ws ids.WorkspaceID) {
 	r.s.PublishHostWorkspace(r.s.life, ws)
-}
-
-func (r hostRelay) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
-	r.s.notify(ws, note)
 }
 
 // pushOpenInEditor publishes the open_in_editor arm.
@@ -517,50 +521,17 @@ func (s *server) ReloadWebapp(ws ids.WorkspaceID) {
 // PushReloadWebapp is the rollout's spelling of ReloadWebapp.
 func (s *server) PushReloadWebapp(ws ids.WorkspaceID) { s.ReloadWebapp(ws) }
 
-// notify publishes a host notification.
-func (s *server) notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
-	s.log.Debug("daemon.server.notify", "relayed a host notification",
-		dlog.Context{"workspace": string(ws), "kind": string(note.Kind)})
+// NotificationClicked pushes notification_clicked onto the workspace's host
+// stream: the user clicked the workspace's desktop banner, and Emacs raises its
+// frame and selects the tab. It is the desktop notifier's ClickSink.
+func (s *server) NotificationClicked(ws ids.WorkspaceID) {
+	s.log.Info("daemon.server.notification_clicked", "relayed a desktop banner click to the host stream",
+		dlog.Context{"workspace": string(ws)})
 	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_Notification{
-			Notification: &agentreplv1.HostWorkspaceNotification{
-				Text: note.Text,
-				Kind: s.notificationKind(note),
-			},
+		Push: &agentreplv1.WatchHostWorkspaceResponse_NotificationClicked{
+			NotificationClicked: &agentreplv1.HostWorkspaceNotificationClicked{},
 		},
 	})
-}
-
-// notificationKind renders the verbs' notification kind name as the typed arm.
-// An unrecognized name is never guessed at silently: it raises agent_addressed
-// and is logged at ERROR, because a dropped notification is a lost one.
-func (s *server) notificationKind(note sessionwatcher.HostNotification) *agentreplv1.HostNotificationKind {
-	switch note.Kind {
-	case sessionwatcher.NotificationPermissionRequested:
-		return &agentreplv1.HostNotificationKind{
-			Kind: &agentreplv1.HostNotificationKind_PermissionRequested{
-				PermissionRequested: &agentreplv1.HostNotificationPermissionRequested{ToolName: note.ToolName},
-			},
-		}
-	case sessionwatcher.NotificationQuestionAsked:
-		// The chip label is the QUESTION's own header, which is why the
-		// notification carries a Header field distinct from a permission
-		// ask's ToolName.
-		return &agentreplv1.HostNotificationKind{
-			Kind: &agentreplv1.HostNotificationKind_QuestionAsked{
-				QuestionAsked: &agentreplv1.HostNotificationQuestionAsked{Header: note.Header},
-			},
-		}
-	case sessionwatcher.NotificationAgentAddressed:
-	default:
-		s.log.Error("daemon.server.notify", "a host notification named an unknown kind",
-			dlog.Context{"kind": string(note.Kind)})
-	}
-	return &agentreplv1.HostNotificationKind{
-		Kind: &agentreplv1.HostNotificationKind_AgentAddressed{
-			AgentAddressed: &agentreplv1.HostNotificationAgentAddressed{},
-		},
-	}
 }
 
 // PushTransferred pushes `transferred` on the host stream and

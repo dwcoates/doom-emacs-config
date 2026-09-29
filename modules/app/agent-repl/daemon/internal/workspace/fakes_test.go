@@ -32,7 +32,6 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -1104,7 +1103,6 @@ func (s *fakeSidebar) snapshot() (calls []string, selected []ids.WorkspaceID, re
 type fakeHost struct {
 	editorOpens []editorOpen
 	reloads     []ids.WorkspaceID
-	notes       []hostNote
 	// hostPublishes records every host-state republish the verbs asked for.
 	hostPublishes []ids.WorkspaceID
 }
@@ -1119,19 +1117,24 @@ type editorOpen struct {
 	Line *uint32
 }
 
-type hostNote struct {
-	WS                       ids.WorkspaceID
-	Text, Kind, Tool, Header string
-}
-
 func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	h.editorOpens = append(h.editorOpens, editorOpen{ws, path, line})
 }
 
 func (h *fakeHost) ReloadWebapp(ws ids.WorkspaceID) { h.reloads = append(h.reloads, ws) }
 
-func (h *fakeHost) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
-	h.notes = append(h.notes, hostNote{ws, note.Text, string(note.Kind), note.ToolName, note.Header})
+// fakeBanners is a Banners notifier: it records every raised banner.
+type fakeBanners struct {
+	raised []raisedBanner
+}
+
+type raisedBanner struct {
+	WS         ids.WorkspaceID
+	Kind, Text string
+}
+
+func (b *fakeBanners) Raise(ws ids.WorkspaceID, kind, text string) {
+	b.raised = append(b.raised, raisedBanner{ws, kind, text})
 }
 
 // fakeSessions is a Sessions fleet.
@@ -1670,6 +1673,7 @@ type fixture struct {
 	sidebar  *fakeSidebar
 	health   *fakeHealth
 	host     *fakeHost
+	banners  *fakeBanners
 	browser  *fakeBrowser
 	fleet    *fakeSessions
 	shim     *fakeShim
@@ -1713,6 +1717,7 @@ func newFixture(t *testing.T) *fixture {
 		sidebar:  &fakeSidebar{},
 		health:   &fakeHealth{},
 		host:     &fakeHost{},
+		banners:  &fakeBanners{},
 		browser:  &fakeBrowser{},
 		fleet:    newFakeSessions(),
 		shim:     &fakeShim{},
@@ -1735,7 +1740,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts}, Browser: f.browser,
-		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
+		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, Log: f.log,

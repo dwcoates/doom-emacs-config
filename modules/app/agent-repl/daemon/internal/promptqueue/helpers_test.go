@@ -609,6 +609,36 @@ func (w *fakeWatcher) handovers() int {
 }
 
 // fakeFeed records the synthesized rows.
+// fakeTurnBanners records every turn end the queue raised a banner for.
+type fakeTurnBanners struct {
+	mu    sync.Mutex
+	ended []bannerEnd
+	// onEnded, when set, runs as a banner is raised, which is where a test
+	// reads what the door had already done.
+	onEnded func()
+}
+
+type bannerEnd struct {
+	WS   ids.WorkspaceID
+	Turn ids.TurnID
+	How  wsm.TurnClose
+}
+
+func (b *fakeTurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ended = append(b.ended, bannerEnd{ws, turn, how})
+	if b.onEnded != nil {
+		b.onEnded()
+	}
+}
+
+func (b *fakeTurnBanners) raised() []bannerEnd {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]bannerEnd(nil), b.ended...)
+}
+
 type fakeFeed struct {
 	feed.Resolver
 	mu              sync.Mutex
@@ -946,6 +976,7 @@ type harness struct {
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
+	banners *fakeTurnBanners
 	log     *dlog.TestSurfaces
 
 	// parked records every parked route, parkedTurns the turn each was routed
@@ -995,9 +1026,11 @@ func newHarness(t *testing.T) *harness {
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
+		banners: &fakeTurnBanners{},
 		log:     dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
+		TurnBanners: h.banners,
 		// The harness's image resolver is a plain naming of the path, so a
 		// mirrored image block is legible in an assertion; every test whose
 		// SUBJECT is resolution overrides it.

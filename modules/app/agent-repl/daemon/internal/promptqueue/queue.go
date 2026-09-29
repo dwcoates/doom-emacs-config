@@ -173,6 +173,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs a classifier")
 	case deps.Feed == nil:
 		return nil, fmt.Errorf("the prompt queue needs the feed resolver")
+	case deps.TurnBanners == nil:
+		return nil, fmt.Errorf("the prompt queue needs the turn banners")
 	case deps.Footer == nil:
 		return nil, fmt.Errorf("the prompt queue needs the footer resolver")
 	case deps.Holds == nil:

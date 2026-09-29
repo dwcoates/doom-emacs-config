@@ -193,8 +193,8 @@ func TestOpenInEditorOpensNothingItself(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.host.reloads) != 0 || len(f.host.notes) != 0 {
-		t.Fatalf("host relay saw %d reloads and %d notes, want only the editor open", len(f.host.reloads), len(f.host.notes))
+	if len(f.host.reloads) != 0 || len(f.banners.raised) != 0 {
+		t.Fatalf("saw %d reloads and %d banners, want only the editor open", len(f.host.reloads), len(f.banners.raised))
 	}
 }
 

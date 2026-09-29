@@ -352,6 +352,11 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// feed resolver's next workspace lookup read a closed database. Arming
 	// them here makes the failed boot tear down in exactly the order the
 	// orderly exit does.
+	// THE BANNERS CLOSE AFTER THE WATCHERS and before the state client:
+	// deferred here, BEFORE CloseWatchers is, so it runs after it.
+	if built.CloseBanners != nil {
+		defer built.CloseBanners()
+	}
 	if built.CloseWatchers != nil {
 		defer built.CloseWatchers()
 	}

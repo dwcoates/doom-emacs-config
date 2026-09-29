@@ -9,7 +9,6 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/workspace"
 )
 
@@ -159,12 +158,6 @@ func (f *relayForwarder) ReloadWebapp(ws ids.WorkspaceID) {
 func (f *relayForwarder) PublishHostWorkspace(ws ids.WorkspaceID) {
 	if target, ok := f.relay(); ok {
 		target.PublishHostWorkspace(ws)
-	}
-}
-
-func (f *relayForwarder) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
-	if target, ok := f.relay(); ok {
-		target.Notify(ws, note)
 	}
 }
 
