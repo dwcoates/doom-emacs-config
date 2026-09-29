@@ -11,10 +11,6 @@ response mode per process.
 MODE is one of:
     healthy         HTTP 200, {"success":{}}          (an empty success arm)
     failure         HTTP 200, {"failure":{"detail"…}} (the store refuses the read)
-    scoped_refusal  HTTP 200, {"failure":{"detail"…,"invalidRequest":{"field":"session"}}}
-                    (the real GetLiveWork refusal for an unscoped request —
-                    see shim-store/AGENTS.md "GetLiveWork IS SCOPED TO ONE
-                    SESSION"; this is the doctor's expected HEALTHY answer)
     non200          HTTP 503 with a Connect error body
     malformed       HTTP 200 with a body that is not JSON
     slow            HTTP 200 {"success":{}} after SLOW_SECONDS, to trip --max-time
@@ -39,11 +35,6 @@ SLOW_SECONDS = float(sys.argv[5]) if len(sys.argv) > 5 else 5.0
 RESPONSES = {
     "healthy": (200, '{"success":{}}'),
     "failure": (200, '{"failure":{"detail":"database is locked"}}'),
-    "scoped_refusal": (
-        200,
-        '{"failure":{"detail":"session: GetLiveWork names no session, and the '
-        'store never answers it unscoped","invalidRequest":{"field":"session"}}}',
-    ),
     "non200": (503, '{"code":"unavailable","message":"store is shutting down"}'),
     "malformed": (200, '{"success":'),
     "slow": (200, '{"success":{}}'),

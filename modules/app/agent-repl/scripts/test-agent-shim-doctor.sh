@@ -165,30 +165,10 @@ grep -q '^/store\.v1\.ShimStore/GetLiveWork	doctor-' "$STORE_CALLS" ||
   fail "the store never received a correlated GetLiveWork request: $(cat "$STORE_CALLS")"
 grep -q '^/store\.v1\.ShimStore/GetSidecarCursors	doctor-' "$STORE_CALLS" ||
   fail "the store never received a correlated GetSidecarCursors request: $(cat "$STORE_CALLS")"
-grep -q '	{}$' "$STORE_CALLS" ||
-  fail "the probe did not send the empty request message: $(cat "$STORE_CALLS")"
-
-# ---- scoped refusal: GetLiveWork's expected healthy answer -------------
-#
-# GetLiveWork always refuses an unscoped (session-less) request with
-# invalid_request naming "session" (shim-store/AGENTS.md, "GetLiveWork IS
-# SCOPED TO ONE SESSION"). That refusal is the doctor's HEALTHY answer for
-# GetLiveWork specifically — it proves the store is serving and enforcing its
-# contract — but the SAME body is an unexpected, still-FAILing refusal for
-# GetSidecarCursors, which carries no such expectation.
-
-start_fake_store scoped_refusal
-run_doctor --json
-stop_fake_store
-assert_valid_json "$DOCTOR_OUT"
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-live-work","status":"PASS"' ||
-  fail "GetLiveWork's scoped invalid_request refusal should PASS (expected healthy answer): $DOCTOR_OUT"
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-live-work".*"healthy":true' ||
-  fail "GetLiveWork's scoped refusal did not report healthy:true metadata: $DOCTOR_OUT"
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-sidecar-cursors","status":"FAIL"' ||
-  fail "GetSidecarCursors has no scoped-refusal expectation; the same invalid_request body must still FAIL: $DOCTOR_OUT"
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-sidecar-cursors".*"failure_class":"failure_arm"' ||
-  fail "GetSidecarCursors' unexpected refusal lost its failure_arm class: $DOCTOR_OUT"
+grep -q '^/store\.v1\.ShimStore/GetLiveWork	doctor-[^	]*	{"session":{"value":"agent-shim-doctor-probe"}}$' "$STORE_CALLS" ||
+  fail "the GetLiveWork probe was not scoped to the doctor's sentinel session: $(cat "$STORE_CALLS")"
+grep -q '^/store\.v1\.ShimStore/GetSidecarCursors	doctor-[^	]*	{}$' "$STORE_CALLS" ||
+  fail "the GetSidecarCursors probe did not send the empty request message: $(cat "$STORE_CALLS")"
 
 # ---- failure arm: served, but the store refuses the read ---------------
 
