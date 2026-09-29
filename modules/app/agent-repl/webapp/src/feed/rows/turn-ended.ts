@@ -212,14 +212,19 @@ export function drawFeedTurnEndedConcluded(
  * the conclusion named, and the absent-row report below.
  *
  * The lookup is THIS FEED's, because a `FeedId` on a turn_ended row names a row
- * of the same feed; a row that is not there (a page that has not been walked
- * back to, a producer naming a row it never sent) is reported and nothing is
- * marked, since guessing which row is the answer would be worse than none.
+ * of the same feed. A row that is not there is ORDINARY, not a fault: the
+ * daemon names an answer only when it resolved it to a response row it drew
+ * (resolve/feed turnended.go raises a footer fault otherwise), so an absent
+ * row is one this page has not loaded -- older history above the page a fresh
+ * webview opened on, whose turn_ended row came first. MEASURED 2026-09-29: a
+ * webview precreated after an Emacs restart recorded this at WARN for a turn
+ * whose answer sat on the page above. Nothing is marked, since guessing which
+ * row is the answer would be worse than none.
  */
 function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   const row = rc.findRowElement?.(answer) ?? null;
   if (row === null) {
-    log.warn("the concluded turn names an answering row this feed has not drawn", {
+    log.debug("the concluded turn names an answering row this page has not loaded; nothing is marked", {
       operation: "feed.final-answer-row-absent",
       context: { answer: answer.value },
     });
