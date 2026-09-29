@@ -317,10 +317,8 @@ func (o *orchestrator) policyFor(ctx context.Context, ws ids.WorkspaceID) (promp
 	if err != nil {
 		return prompts.Source{}, fmt.Errorf("merge: reading the repository registry: %w", err)
 	}
-	for _, repository := range repositories {
-		if repository.ID == record.Repo {
-			return prompts.SourceFor(repository.Dir, o.deps.CheckoutRoot, o.deps.PromptsDir), nil
-		}
+	if repository, found := wsm.RepositoryWithID(repositories, record.Repo); found {
+		return prompts.SourceFor(repository.Dir, o.deps.CheckoutRoot, o.deps.PromptsDir), nil
 	}
 	return prompts.Source{}, fmt.Errorf("merge: workspace %s names repository %q, which is not registered", ws, record.Repo)
 }
