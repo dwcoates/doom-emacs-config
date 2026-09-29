@@ -586,7 +586,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     ["turnFailed", "open"],
     ["degraded", "open"],
     ["idle", "open"],
-    ["thinking", "open"],
+    ["working", "open"],
   ])("sets the gate %s -> %s by the footer's color", async (arm, want) => {
     await bootMain();
 
