@@ -202,11 +202,8 @@ func (s *server) runBackgroundCreate(ctx context.Context, rpc string, spec works
 // there is no rpc error left to carry it.
 func (s *server) publishCreateFailed(rpc, opID string, err error) {
 	failed := &agentreplv1.WorkspaceCreateFailed{}
-	if refused, ok := s.asRefusal(err); ok {
-		resp := &agentreplv1.CreateWorkspaceResponse{}
-		if s.refuse(s.log, rpc, resp, refused) == nil {
-			failed.Cause = &agentreplv1.WorkspaceCreateFailed_Refusal{Refusal: resp.GetError()}
-		}
+	if resp := (&agentreplv1.CreateWorkspaceResponse{}); s.refuseOnto(s.log, rpc, resp, err) {
+		failed.Cause = &agentreplv1.WorkspaceCreateFailed_Refusal{Refusal: resp.GetError()}
 	}
 	if failed.Cause == nil {
 		s.log.Error("daemon.server.create_workspace", "a background create failed",
@@ -567,11 +564,8 @@ func (s *server) publishNukeEnd(log dlog.Logger, rpc, opID string, err error) {
 		progress.Step = &agentreplv1.WorkspaceNukeProgress_Succeeded{Succeeded: &agentreplv1.WorkspaceNukeSucceeded{}}
 	default:
 		failed := &agentreplv1.WorkspaceNukeFailed{}
-		if refused, ok := s.asRefusal(err); ok {
-			resp := &agentreplv1.NukeWorkspaceResponse{}
-			if s.refuse(log, rpc, resp, refused) == nil {
-				failed.Cause = &agentreplv1.WorkspaceNukeFailed_Refusal{Refusal: resp.GetError()}
-			}
+		if resp := (&agentreplv1.NukeWorkspaceResponse{}); s.refuseOnto(log, rpc, resp, err) {
+			failed.Cause = &agentreplv1.WorkspaceNukeFailed_Refusal{Refusal: resp.GetError()}
 		}
 		if failed.Cause == nil {
 			log.Error(opServerTeardown, "an accepted nuke's teardown failed; the workspace stays closed", dlog.Context{

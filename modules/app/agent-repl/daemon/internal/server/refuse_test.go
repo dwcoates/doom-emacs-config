@@ -757,3 +757,71 @@ func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestRefuseOntoSetsTheTypedRefusalTheRPCWouldAnswer(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantSet bool
+	}{
+		{name: "a typed refusal the response declares", err: &workspace.Refusal{Arm: workspace.ArmGitFailed, Reason: "locked"}, wantSet: true},
+		{name: "a typed refusal the response does not declare", err: &workspace.Refusal{Arm: "no_such_arm", Reason: "x"}, wantSet: false},
+		{name: "an error that is no refusal", err: errors.New("forget failed"), wantSet: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			s := h.Server.(*server)
+			resp := &agentreplv1.NukeWorkspaceResponse{}
+
+			// Act.
+			got := s.refuseOnto(s.log, "NukeWorkspace", resp, tt.err)
+
+			// Assert.
+			if got != tt.wantSet {
+				t.Fatalf("refuseOnto = %v, want %v", got, tt.wantSet)
+			}
+			if tt.wantSet && resp.GetError().GetGitFailed() == nil {
+				t.Fatalf("response = %v, want git_failed set", resp.GetResult())
+			}
+			if !tt.wantSet && resp.GetError() != nil {
+				t.Fatalf("response = %v, want nothing set", resp.GetResult())
+			}
+		})
+	}
+}
+
+// TestDetachedFailuresMapTheirRefusalOnlyThroughRefuseOnto pins that every
+// detached mutation maps its typed refusal through the one helper, so no site
+// hand-rolls `asRefusal` then `refuse(...) == nil` and drifts from the others.
+func TestDetachedFailuresMapTheirRefusalOnlyThroughRefuseOnto(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package: %v", err)
+	}
+
+	// Act.
+	var offenders []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			if strings.Contains(line, "s.refuse(") && strings.Contains(line, "== nil") && !strings.Contains(line, "return s.refuse(") {
+				offenders = append(offenders, name+": "+strings.TrimSpace(line))
+			}
+		}
+	}
+
+	// Assert.
+	if len(offenders) > 0 {
+		t.Fatalf("hand-rolled typed-refusal mapping, use refuseOnto: %v", offenders)
+	}
+}
