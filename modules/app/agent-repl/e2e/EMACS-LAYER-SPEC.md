@@ -810,9 +810,11 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     scenario -- `agent-repl-status--marker-on` is set for the workspace and a
     notification was emitted, with the cadence taken from
     `agent-repl-status-blink-schedule`. Emacs answers nothing (see above).
-29. **FinishEdgeFiresTheReadyReaction** -- drive a turn to completion --
-    `agent-repl-roster-finish-functions` ran and the notification backend
-    recorded the "Agent ready" banner for an unfocused workspace.
+29. **UnfocusedTurnEndRaisesTheDaemonsBanner** -- Emacs reports itself
+    unfocused (`ReportEditorFocus`), then a turn is driven to completion --
+    `agent-repl-roster-finish-functions` ran, and the DAEMON posted the
+    "✅ <name> turn completed" banner through its banner program (the
+    recorder `AGENT_REPL_NOTIFIER_CMD` names). Emacs posts no banner itself.
 30. **DrainScheduleDrawsTheStandingBanner** --
     `agent-repl-daemon-shutdown-schedule` -- `agent-repl-link-drain` carries
     the reason and `at_ms`, and `agent-repl-link-drain-segment` renders it.

@@ -278,6 +278,9 @@ type Emacs struct {
 	Display *xdisplay
 	// ServerSocket is the `server-name` emacsclient dials.
 	ServerSocket string
+	// Notifier is the recorder the daemon Emacs spawns posts desktop banners
+	// through (AGENT_REPL_NOTIFIER_CMD).
+	Notifier *harness.Recorder
 	// EmacsDir is the per-test `~/.emacs.d` this Emacs boots Doom from. It
 	// is staged from the image's own EMACSDIR: see stageEmacsDir.
 	EmacsDir string
@@ -507,6 +510,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// no scenario may raise a real banner, and the container carries no
 	// banner program, which a daemon records at ERROR on its boot.
 	fakeNotifier := harness.NewFakeNotifier(t, filepath.Join(root, "fakebin"))
+	e.Notifier = fakeNotifier
 	prewarmTrampolines(t, box)
 	staged := time.Now()
 	e.stageEmacsDir()
