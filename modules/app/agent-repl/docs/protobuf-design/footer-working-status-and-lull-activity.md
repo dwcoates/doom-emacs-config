@@ -197,3 +197,6 @@ substatus that stands for the whole turn. The owner wants the status called
     once.
   - `FooterStatusActivityAt at = 3` was added to the ending so the held line
     ticks the same age it ticked while it was the activity.
+  - The ending is stated only for a ROOT-feed row (the feed's `ItemDrawn`
+    says whether the row is on the root): a sub-feed row is painted only when
+    the reader has that bubble open, so its drawing ends the stretch at once.

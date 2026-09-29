@@ -281,11 +281,12 @@ type Resolver interface {
 	// id). It is the feed resolver's Deps.EntryPlaced, and it is what a jump
 	// row names: FooterJump.entry, never an address the footer guessed.
 	OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
-	// OnItemDrawn records where the feed drew one activity unit's row. It is
-	// the feed resolver's Deps.ItemDrawn, and it is what ends a quiet stretch:
-	// the stretch ends when the next feed item is DRAWN, and the ended line is
-	// stated with that row (FooterStatusQuietStretchEnding).
-	OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	// OnItemDrawn records where the feed drew one activity unit's row, and
+	// whether it is on the root feed. It is the feed resolver's
+	// Deps.ItemDrawn, and it is what ends a quiet stretch: the stretch ends
+	// when the next feed item is DRAWN, and the ended line is stated with a
+	// root-feed row (FooterStatusQuietStretchEnding).
+	OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool)
 }
 
 // Option adjusts the resolver's injectable knobs. The defaults are the
