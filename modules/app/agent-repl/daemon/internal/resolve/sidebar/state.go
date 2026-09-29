@@ -182,7 +182,7 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 // The three TURN-END arms: how the last turn ended, once nothing more urgent
 // stands. They are the only arms that report a RESULT, so they are the only
 // arms a result can be unread or read on, and the only arms the viewed marker
-// may stand on. `closeArm` is the one table from a close to its arm, and
+// may stand on. `ladder.ResolveTurnEnd` is the one table from a close to its arm, and
 // `isTurnEndArm` is the one predicate every site asks, so a completion, an
 // interruption and a failure can never drift apart on the read rule.
 const (
@@ -190,27 +190,6 @@ const (
 	armInterrupted = "interrupted"
 	armTurnFailed  = "turn_failed"
 )
-
-// closeArm names the turn-end arm a close resolves to, and reports false for
-// a close this build does not know.
-//
-// A FAILURE IS A TURN END (owner ruling, 2026-09-28). The turn failing on its
-// own, a turn the daemon closed as orphaned on reconcile, and a turn the agent
-// process cut by dying under it all leave a result the user has not read,
-// exactly as a completion or an interruption does. They draw `turn_failed`,
-// which is blue, rather than a green `done` that claims a result was produced.
-func closeArm(how TurnClose) (string, bool) {
-	switch how {
-	case wsm.CloseCompleted:
-		return armDone, true
-	case wsm.CloseKilled:
-		return armInterrupted, true
-	case wsm.CloseFailed, wsm.CloseOrphaned, wsm.CloseAgentDied:
-		return armTurnFailed, true
-	default:
-		return "", false
-	}
-}
 
 // isTurnEndArm reports whether arm is one of the three turn-end arms.
 func isTurnEndArm(arm string) bool {
@@ -226,23 +205,18 @@ func readsResult(arm string) bool {
 	return isTurnEndArm(arm) || arm == "vendor_blocked"
 }
 
-// turnEndArm names the turn-end arm the last close resolves to. A close this
-// build does not know was refused loudly when it was installed
-// (SetTurnEnded), so it is never unread; it keeps the row on `done`, the arm
-// it has always drawn.
-//
-// AN EXPECTED STOP IS A COMPLETION (owner ruling, 2026-09-28): a Stop hook
-// that forbade continuing and a deferred tool close the turn as failed, but
-// they await the human, so they read `done`, never the blue `turn_failed`.
+// turnEndArm names the turn-end arm the last close resolves to, through
+// ladder.ResolveTurnEnd — the one table the desktop banner reads too, so the
+// row's colour and the banner cannot disagree (an expected stop reads `done`
+// on both). A close this build does not know was refused loudly when it was
+// installed (SetTurnEnded), so it is never unread; it keeps the row on
+// `done`, the arm it has always drawn.
 func (s *wsState) turnEndArm() string {
-	arm, ok := closeArm(s.lastClose)
+	end, ok := ladder.ResolveTurnEnd(s.lastClose, s.lastFailure)
 	if !ok {
 		return armDone
 	}
-	if arm == armTurnFailed && s.lastFailure == ladder.ExpectedStop {
-		return armDone
-	}
-	return arm
+	return end.String()
 }
 
 // noteArm records the arm being published for this workspace and reports

@@ -345,21 +345,21 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			// contract breach: it is recorded loudly and leaves no tracked
 			// result, and since it is still a NEW ending, a read state from
 			// before it does not carry over.
-			arm, known := closeArm(how)
+			end, known := ladder.ResolveTurnEnd(how, s.lastFailure)
 			if !known {
 				s.result = resultNone
 				log.Error("daemon.sidebar.set_turn_ended",
 					"the roster took a turn close it has no turn-end arm for", dlog.Context{
 						"close":               int(how),
 						"invariant_violation": "every turn close resolves to a turn-end arm",
-						"remediation":         "add the close to closeArm",
+						"remediation":         "add the close to ladder.ResolveTurnEnd",
 					})
 				return
 			}
 			s.result = resultUnread
 			log.Info("daemon.sidebar.result_unread",
 				"the turn ended, so its result is unread until the user views the row", dlog.Context{
-					"status":     arm,
+					"status":     end.String(),
 					"async_live": s.asyncLive(),
 				})
 		})
