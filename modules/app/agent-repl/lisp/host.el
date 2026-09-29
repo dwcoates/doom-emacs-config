@@ -1150,9 +1150,10 @@ missing one, and it WAITS on the same acceptance seam the pending branch
 uses.  A successor that genuinely never arrives simply never wakes it, and
 the workspace keeps the old stream throughout -- exactly as before.
 
-It is a WARNING rather than an INFO because the overtaking order is
-unusual and worth seeing in a log, and never an ERROR because nothing is
-wrong: the announcement is on its way."
+It is an INFO record: the order is seen in the log, and nothing is wrong,
+since the announcement is on its way.  It was once a WARNING, which the
+standing rule forbids for ordinary operation (a deploy on 2026-09-29
+recorded seven of them, one per busy-free workspace handed over)."
   (let ((new (agent-repl-link-successor)))
     (cond
      (new
@@ -1163,7 +1164,7 @@ wrong: the announcement is on its way."
       (agent-repl--info ws "elisp.host.transferred-awaiting-successor ws=%s" ws)
       (agent-repl-host--adopt-on-acceptance ws))
      (t
-      (agent-repl--warn ws "elisp.host.transferred-before-the-announcement ws=%s" ws)
+      (agent-repl--info ws "elisp.host.transferred-before-the-announcement ws=%s" ws)
       (agent-repl-host--adopt-on-acceptance ws)))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----

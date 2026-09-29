@@ -1130,7 +1130,7 @@ Emacs decodes first is a coin toss.  Measured in the e2e sandbox: the two
                  :error "elisp.host.transferred-without-successor"))))
 
 (ert-deftest agent-repl-test-host-transferred-before-the-announcement-records-the-order ()
-  "The overtaking order is unusual, so it is seen; it is not an error."
+  "The overtaking order is recorded at INFO: it is ordinary, never a warning."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-test-host--successor nil
@@ -1140,7 +1140,9 @@ Emacs decodes first is a coin toss.  Measured in the e2e sandbox: the two
     (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :warn "elisp.host.transferred-before-the-announcement"))))
+             :info "elisp.host.transferred-before-the-announcement"))
+    (should-not (agent-repl-test-host--logged-p
+                 :warn "elisp.host.transferred-before-the-announcement"))))
 
 (ert-deftest agent-repl-test-host-transferred-before-the-announcement-adopts-on-acceptance ()
   "THE DEFECT: this adopt was dropped, so the workspace was never handed over.
