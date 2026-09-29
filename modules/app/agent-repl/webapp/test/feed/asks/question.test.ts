@@ -29,6 +29,7 @@ import {
 } from "../../../src/feed/asks/question.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
+import { stopClocks } from "../../../src/feed/ticking.js";
 import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
@@ -716,6 +717,18 @@ describe("the settled card", () => {
       askHarness().rc,
     );
     expect(el.querySelector(".q-when")?.textContent).toBe("1m ago");
+  });
+
+  it("keeps ticking the stamp after its turn's clocks are stopped", async () => {
+    vi.setSystemTime(0);
+    const el = drawFeedQuestion(
+      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
+      askHarness().rc,
+    );
+    document.body.append(el);
+    stopClocks(el);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(el.querySelector(".q-when")?.textContent).toBe("5s ago");
   });
 
   it("reads the stamp's nearest second when a tick samples just short of one", () => {

@@ -58,7 +58,7 @@ import {
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick } from "../ticking.js";
+import { tick, tickWhileShown } from "../ticking.js";
 import { buildAnswerQuestionRequest, type QuestionAnswer } from "./requests.js";
 
 const PATH = "FeedQuestion";
@@ -649,7 +649,7 @@ function stampedAge(atMs: bigint, path: string, rc: RowContext): HTMLElement {
   const at = msOf(atMs, path);
   const el = document.createElement("span");
   el.className = "q-when";
-  tick(el, rc.ctx.ticker, (nowMs) => {
+  tickWhileShown(el, rc.ctx.ticker, (nowMs) => {
     el.textContent = `${formatTickedAge(nowMs - at)} ago`;
   });
   return el;

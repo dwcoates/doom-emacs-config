@@ -70,7 +70,7 @@ import {
 import { callFailure, refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick } from "../ticking.js";
+import { tickWhileShown } from "../ticking.js";
 import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
 
 const PATH = "FeedColdGate";
@@ -230,7 +230,7 @@ export function drawFeedColdGateLastRequest(
   const at = msOf(u.atMs, `${path}.at_ms`);
   const el = document.createElement("span");
   el.className = "hibernation-since";
-  tick(el, rc.ctx.ticker, (nowMs) => {
+  tickWhileShown(el, rc.ctx.ticker, (nowMs) => {
     el.textContent = COLD_GATE_COPY.lapse.replace("{age}", formatTickedAge(nowMs - at));
   });
   return el;
@@ -281,7 +281,7 @@ export function drawFeedColdGateResolved(
   const when = document.createElement("span");
   when.className = "cold-gate-when";
   const at = msOf(u.atMs, `${path}.at_ms`);
-  tick(when, rc.ctx.ticker, (nowMs) => {
+  tickWhileShown(when, rc.ctx.ticker, (nowMs) => {
     when.textContent = `${formatTickedAge(nowMs - at)} ago`;
   });
   el.append(word, when);
