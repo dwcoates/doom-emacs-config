@@ -382,24 +382,24 @@ func TestEveryDrawnActivityRowIsAnnouncedToTheFooterOnce(t *testing.T) {
 		name string
 		// frames are sent in order as the main agent's.
 		frames []*conversationv1.AgentActivity
-		want   []placedEntry
+		want   []drawnEntry
 	}{
 		{
 			name:   "a first draw is announced at its row",
 			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test")},
-			want:   []placedEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")}},
+			want:   []drawnEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash"), onRoot: true}},
 		},
 		{
 			name:   "a redraw at the same address announces nothing more",
 			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test"), bashCall("toolu_bash", "npm test")},
-			want:   []placedEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")}},
+			want:   []drawnEntry{{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash"), onRoot: true}},
 		},
 		{
 			name:   "each unit is announced at its own row",
 			frames: []*conversationv1.AgentActivity{bashCall("toolu_bash", "npm test"), settledRead("toolu_read")},
-			want: []placedEntry{
-				{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash")},
-				{unit: "toolu_read", row: activityRowID(rootFeed(), "toolu_read")},
+			want: []drawnEntry{
+				{unit: "toolu_bash", row: activityRowID(rootFeed(), "toolu_bash"), onRoot: true},
+				{unit: "toolu_read", row: activityRowID(rootFeed(), "toolu_read"), onRoot: true},
 			},
 		},
 		{
@@ -428,5 +428,24 @@ func TestEveryDrawnActivityRowIsAnnouncedToTheFooterOnce(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestASubagentsRowIsAnnouncedAsNotOnTheRoot pins that a row drawn on a
+// subagent's sub-feed is announced as off the root: the client promises to
+// paint only the root feed, so the footer holds no ended line for it.
+func TestASubagentsRowIsAnnouncedAsNotOnTheRoot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	h.send(spawnCall("toolu_spawn", sub))
+
+	// Act.
+	h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+
+	// Assert.
+	want := drawnEntry{unit: "toolu_bash", row: activityRowID(agentFeed(sub), "toolu_bash"), onRoot: false}
+	if len(h.drawn) != 2 || h.drawn[0].onRoot != true || h.drawn[1] != want {
+		t.Fatalf("drawn = %+v, want the spawn on the root, then %+v", h.drawn, want)
 	}
 }

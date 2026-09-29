@@ -311,15 +311,16 @@ type Deps struct {
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
 	// ItemDrawn is told the FeedId of EVERY activity row the moment the feed
-	// first draws it for its unit, and again whenever that FeedId changes. It
-	// is how the footer ends a quiet stretch on the row that ended it
-	// (frontend.v1.FooterStatusQuietStretchEnding): the client holds the
-	// ended line until it has painted that row.
+	// first draws it for its unit, and again whenever that FeedId changes, and
+	// whether the row is on the ROOT feed. It is how the footer ends a quiet
+	// stretch on the row that ended it (frontend.v1.FooterStatusQuietStretchEnding):
+	// the client holds the ended line until it has painted that row, which it
+	// can promise only for the root feed it always shows.
 	//
 	// CALLED WITH THE RESOLVER'S LOCK HELD, as EntryPlaced is, and before the
 	// footer takes the same frame (the watcher routes every frame to the feed
 	// first). nil tells nobody.
-	ItemDrawn func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	ItemDrawn func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool)
 	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
 	PageSize int
 	// TailRetention is how many published rows a feed retains for a tail's

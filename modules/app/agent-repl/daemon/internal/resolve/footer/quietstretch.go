@@ -172,7 +172,7 @@ type feedMotion struct {
 	left map[string]struct{}
 	// drawn are the rows the feed drew for units that have not landed, by
 	// unit (OnItemDrawn).
-	drawn map[string]*frontendv1.FeedId
+	drawn map[string]drawnRow
 	// ending is the line the next feed item's drawing ended, nil when none.
 	ending *lineEnding
 }
@@ -186,24 +186,36 @@ type lineEnding struct {
 	row *frontendv1.FeedId
 }
 
+// drawnRow is where the feed drew one unit's row.
+type drawnRow struct {
+	row *frontendv1.FeedId
+	// onRoot reports a row on the root feed, the one feed the client always
+	// shows and so the only one it can promise to paint.
+	onRoot bool
+}
+
 func newFeedMotion() feedMotion {
 	return feedMotion{
 		open:  map[string]openItem{},
 		left:  map[string]struct{}{},
-		drawn: map[string]*frontendv1.FeedId{},
+		drawn: map[string]drawnRow{},
 	}
 }
 
 // surface ends the standing line if UNIT's row is drawn: the stretch ends when
 // the next feed item is drawn, not merely surfaced. An item surfaced but not
 // yet drawn leaves the line standing, and OnItemDrawn ends it at the draw.
+//
+// Only a ROOT-FEED row holds the ended line: a row on a sub-feed is painted
+// only if the reader has that bubble open, so the client could not promise to
+// clear a line held on it, and the line ends at the draw.
 func (m *feedMotion) surface(unit string) {
-	row := m.drawn[unit]
-	if row == nil {
+	drawn, ok := m.drawn[unit]
+	if !ok {
 		return
 	}
-	if m.line != nil {
-		m.ending = &lineEnding{text: m.line.text, at: m.line.at, row: row}
+	if m.line != nil && drawn.onRoot {
+		m.ending = &lineEnding{text: m.line.text, at: m.line.at, row: drawn.row}
 	}
 	m.line = nil
 }
@@ -246,7 +258,7 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 // usually recorded here before its surfacing is. An item the feed draws LATER
 // than its surfacing (a spawn held for the frame naming its agent) is open
 // already, and its draw ends the stretch here.
-func (r *resolver) OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
+func (r *resolver) OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool) {
 	if unit == "" || row.GetValue() == "" {
 		r.workspaceLog(ws).Error("daemon.footer.item_drawn_unaddressed",
 			"the feed announced a drawn row with no unit or no FeedId; no quiet stretch can end on it",
@@ -254,9 +266,9 @@ func (r *resolver) OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.
 		return
 	}
 	r.mutate(ws, "daemon.footer.on_item_drawn", "the footer took the feed's drawing of an activity row",
-		dlog.Context{"unit": unit, "row": row.GetValue()}, func(s *wsState) {
+		dlog.Context{"unit": unit, "row": row.GetValue(), "on_root": onRoot}, func(s *wsState) {
 			m := &s.motion
-			m.drawn[unit] = row
+			m.drawn[unit] = drawnRow{row: row, onRoot: onRoot}
 			if item, open := m.open[unit]; open && item.feed {
 				m.surface(unit)
 			}

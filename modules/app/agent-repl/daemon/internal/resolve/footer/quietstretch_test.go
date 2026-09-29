@@ -41,7 +41,7 @@ func rowOf(unit string) *frontendv1.FeedId { return &frontendv1.FeedId{Value: "r
 // draws the item's row (OnItemDrawn) before the footer takes the frame.
 func surface(t *testing.T, h *harness, agent *conversationv1.AgentId, unit string, arm protoreflect.Name) {
 	t.Helper()
-	h.r.OnItemDrawn(testWS, unit, rowOf(unit))
+	h.r.OnItemDrawn(testWS, unit, rowOf(unit), true)
 	h.r.OnActivity(testWS, agent, itemFrame(t, unit, arm, "start"))
 }
 
@@ -687,7 +687,7 @@ func TestADrawAfterItsSurfacingEndsTheStretch(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
 
 	// Act
-	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"))
+	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"), true)
 
 	// Assert
 	got := endingOf(t, h)
@@ -705,7 +705,7 @@ func TestADrawOfAnItemNotYetSurfacedEndsNothing(t *testing.T) {
 	inTurn(h)
 
 	// Act: the feed draws before the footer takes the frame.
-	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"))
+	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"), true)
 
 	// Assert
 	if got := quietLine(t, h); got != "✅ Prompt delivered — awaiting response..." {
@@ -814,7 +814,7 @@ func TestADrawnRowWithNoIdentityIsAnError(t *testing.T) {
 			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
 
 			// Act
-			h.r.OnItemDrawn(testWS, tc.unit, tc.row)
+			h.r.OnItemDrawn(testWS, tc.unit, tc.row, true)
 
 			// Assert
 			if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.item_drawn_unaddressed"); got != 1 {
@@ -889,5 +889,23 @@ func TestTheEndingCarriesWhenTheEndedLineBeganStanding(t *testing.T) {
 	// Assert
 	if got, want := endingOf(t, h).GetAt().GetAtMs(), instant.Add(2*time.Second).UnixMilli(); got != want {
 		t.Fatalf("ending at = %d, want %d: the line's own standing instant", got, want)
+	}
+}
+
+func TestASubFeedDrawingEndsTheStretchWithNoEnding(t *testing.T) {
+	// Arrange: background, with a subagent's line standing.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+
+	// Act: the next item is drawn on the subagent's own sub-feed.
+	h.r.OnItemDrawn(testWS, "u-9", rowOf("u-9"), false)
+	h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-9", "read", "start"))
+
+	// Assert
+	background := h.view(t).GetStrip().GetStatus().GetBackground()
+	if background.GetActivity().GetQuietStretch() != nil || background.GetQuietStretchEnding() != nil {
+		t.Fatalf("background = %v, want the line ended with no hold: the client cannot promise to paint a sub-feed row", background)
 	}
 }
