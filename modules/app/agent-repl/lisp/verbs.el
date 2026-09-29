@@ -491,34 +491,90 @@ front of it can still say why."
                         "see the workspace footer")))
            t))))))
 
-(defun agent-repl-verb-kill (ws)
-  "Kill WS's session by force.  The worktree and branch survive."
-  (let ((ref (agent-repl-verbs--ref ws)))
+(defconst agent-repl-verbs--teardown-scope
+  '(:agent-repl-central "a teardown's end arrives after its workspace's tab is gone")
+  "The log scope for an accepted kill's or nuke's end.
+The tab, and with it the workspace's own log routing, is gone by the time
+the daemon pushes the end, so the end is recorded centrally.")
+
+(cl-defun agent-repl-verbs--send-teardown (ws op rpc &key on-error)
+  "Send the teardown verb OP (\"kill\" or \"nuke\") for WS through RPC.
+THE TAB CLOSES ON THE DAEMON\='S ACK, NOT ON THE TEARDOWN\='S END (owner
+ruling, 2026-09-29).  The request carries a minted op id, so the daemon
+answers `accepted' the moment it has refused nothing and marked the
+workspace closed -- the roster already says so everywhere -- and tears the
+session (and for a nuke the worktree and branch) down in the background.
+The tab goes on that ack; the teardown\='s end arrives on the progress
+channel, where a failure is recorded at ERROR and echoed.
+
+A daemon that answered `success' synchronously (an op id it did not honor)
+tore everything down already, so the tab goes then too.  ON-ERROR, when
+given, sees a synchronous refusal first and may claim it, as the shared
+dispatcher\='s ON-ERROR does.  Every path that ends the op without a
+progress push forgets it."
+  (let ((ref (agent-repl-verbs--ref ws))
+        (op-id (agent-repl-mutation-progress-new-op-id)))
+    (agent-repl-mutation-progress-register
+     op-id
+     :on-succeeded
+     (lambda (_)
+       (agent-repl--info agent-repl-verbs--teardown-scope
+                         "elisp.verbs.%s-teardown-finished ws=%s op-id=%s" op ws op-id))
+     :on-failed
+     (lambda (arm value)
+       (agent-repl--error agent-repl-verbs--teardown-scope
+                          "elisp.verbs.%s-teardown-failed ws=%s op-id=%s arm=%S value=%S"
+                          op ws op-id arm value)
+       (message "agent-repl: %s of %s FAILED after its tab closed: %s"
+                op ws (agent-repl-verbs--teardown-failure-sentence arm value))))
     (agent-repl-verbs--send
-     #'agent-repl-rpc-kill-workspace (agent-repl-verbs--conn ws)
-     (list :workspace ref)
-     :ws ws :op "kill"
-     :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "kill")))))
+     rpc (agent-repl-verbs--conn ws)
+     (list :workspace ref :op-id op-id)
+     :ws ws :op op
+     :on-accepted (lambda (_) (agent-repl-verbs--teardown-tab ws op))
+     :on-success (lambda (_)
+                   (agent-repl-mutation-progress-forget op-id)
+                   (agent-repl-verbs--teardown-tab ws op))
+     :on-error (lambda (value)
+                 (agent-repl-mutation-progress-forget op-id)
+                 (and on-error (funcall on-error value)))
+     :on-transport-failure (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
+
+(defun agent-repl-verbs--teardown-failure-sentence (arm value)
+  "Word a teardown failure ARM with VALUE for the echo area.
+`:internal' carries the daemon\='s own sentence; `:refusal' a typed error,
+worded as the refusal dispatcher words one."
+  (pcase arm
+    (:internal value)
+    (:refusal
+     (let* ((refusal (agent-repl-verbs--refusal-arm value))
+            (keyword (plist-get refusal :arm)))
+       (format "%s%s"
+               (if keyword (substring (symbol-name keyword) 1) "unstated")
+               (agent-repl-verbs--refusal-fields refusal))))
+    (_ (format "%S %S" arm value))))
+
+(defun agent-repl-verb-kill (ws)
+  "Kill WS's session by force.  The worktree and branch survive.
+The tab closes on the daemon\='s ack (`agent-repl-verbs--send-teardown')."
+  (agent-repl-verbs--send-teardown ws "kill" #'agent-repl-rpc-kill-workspace))
 
 (defun agent-repl-verb-nuke (ws)
-  "Destroy WS: its session, its worktree and its branch.  Unrecoverable."
-  (let ((ref (agent-repl-verbs--ref ws)))
-    ;; The worktree goes as soon as the daemon acts, which is BEFORE the
-    ;; answer arrives and well before the tab teardown; records written in
-    ;; between are attributed to a workspace whose registered directory has
-    ;; already gone.  The order is what explains that, so the order is
-    ;; declared at the moment it is given rather than when it completes.
-    (agent-repl--log-note-workspace-departing ws)
-    (agent-repl-verbs--send
-     #'agent-repl-rpc-nuke-workspace (agent-repl-verbs--conn ws)
-     (list :workspace ref)
-     :ws ws :op "nuke"
-     :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "nuke"))
-     ;; A REFUSED nuke destroyed nothing, so the order above is withdrawn and
-     ;; the arm is left unclaimed for the generic refusal handling.
-     :on-error (lambda (_value)
-                 (agent-repl--log-forget-workspace-departure ws)
-                 nil))))
+  "Destroy WS: its session, its worktree and its branch.  Unrecoverable.
+The tab closes on the daemon\='s ack (`agent-repl-verbs--send-teardown')."
+  ;; The worktree goes as soon as the daemon acts, which is BEFORE the
+  ;; answer arrives and well before the tab teardown; records written in
+  ;; between are attributed to a workspace whose registered directory has
+  ;; already gone.  The order is what explains that, so the order is
+  ;; declared at the moment it is given rather than when it completes.
+  (agent-repl--log-note-workspace-departing ws)
+  (agent-repl-verbs--send-teardown
+   ws "nuke" #'agent-repl-rpc-nuke-workspace
+   ;; A REFUSED nuke destroyed nothing, so the order above is withdrawn and
+   ;; the arm is left unclaimed for the generic refusal handling.
+   :on-error (lambda (_value)
+               (agent-repl--log-forget-workspace-departure ws)
+               nil)))
 
 (defun agent-repl-verb-open (ref)
   "Open the closed workspace named by REF.  Any revival is the daemon's.

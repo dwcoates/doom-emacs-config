@@ -230,6 +230,13 @@ for another client's op, or a replayed stale one, is expected."
         (pcase arm
           (:create (agent-repl-mutation-progress--dispatch-create op-id callbacks value))
           (:open (agent-repl-mutation-progress--dispatch-open op-id callbacks value))
+          ;; A kill's failure is a bare sentence; a nuke's is arm-shaped,
+          ;; exactly as a create's is.
+          (:kill (agent-repl-mutation-progress--dispatch-steps
+                  op-id callbacks value
+                  (lambda (failed) (list :internal (plist-get failed :internal)))))
+          (:nuke (agent-repl-mutation-progress--dispatch-steps
+                  op-id callbacks value #'agent-repl-mutation-progress--arm-failure))
           (_
            (agent-repl--error agent-repl-mutation-progress--scope
                               "elisp.mutation-progress.unknown-mutation op-id=%s arm=%S"
