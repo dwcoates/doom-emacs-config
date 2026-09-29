@@ -58,11 +58,13 @@ func (s *server) repositoryDir(ctx context.Context, ref *workspacev1.RepositoryR
 	if err != nil {
 		return "", err, false
 	}
-	for _, repository := range repositories {
-		if id := ref.GetId(); id != "" && string(repository.ID) == id {
+	if id := ref.GetId(); id != "" {
+		if repository, found := wsm.RepositoryWithID(repositories, ids.RepoID(id)); found {
 			return repository.Dir, nil, true
 		}
-		if dir := ref.GetDir(); dir != "" && repository.Dir == dir {
+	}
+	if dir := ref.GetDir(); dir != "" {
+		if repository, found := wsm.RepositoryAt(repositories, dir); found {
 			return repository.Dir, nil, true
 		}
 	}

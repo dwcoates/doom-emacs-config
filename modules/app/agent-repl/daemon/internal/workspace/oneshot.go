@@ -8,6 +8,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/wsm"
 )
 
 // The brief names the one-shot decoration reads from the prompts directory AT
@@ -132,12 +133,8 @@ func (v *verbs) repositoryRegisteredAt(ctx context.Context, repoDir string) (boo
 	if err != nil {
 		return false, fmt.Errorf("read the repository registry: %w", err)
 	}
-	for _, repository := range repositories {
-		if repository.Dir == repoDir {
-			return true, nil
-		}
-	}
-	return false, nil
+	_, found := wsm.RepositoryAt(repositories, repoDir)
+	return found, nil
 }
 
 // repositoryRootOf answers a registered workspace's repository main checkout
@@ -148,10 +145,8 @@ func (v *verbs) repositoryRootOf(ctx context.Context, repo ids.RepoID) (string, 
 	if err != nil {
 		return "", fmt.Errorf("read the repository registry: %w", err)
 	}
-	for _, repository := range repositories {
-		if repository.ID == repo {
-			return repository.Dir, nil
-		}
+	if repository, found := wsm.RepositoryWithID(repositories, repo); found {
+		return repository.Dir, nil
 	}
 	return "", fmt.Errorf("no repository %q is registered", repo)
 }

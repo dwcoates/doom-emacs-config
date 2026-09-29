@@ -218,10 +218,8 @@ func (v *verbs) repoDirOf(ctx context.Context, record wsm.Workspace) (string, er
 	if err != nil {
 		return "", fmt.Errorf("list the repositories: %w", err)
 	}
-	for _, repo := range repositories {
-		if repo.ID == record.Repo {
-			return repo.Dir, nil
-		}
+	if repo, found := wsm.RepositoryWithID(repositories, record.Repo); found {
+		return repo.Dir, nil
 	}
 	return "", fmt.Errorf("repository %q is not registered", record.Repo)
 }
