@@ -515,6 +515,39 @@ left as-is."
         (agent-repl--frontend-dispatch-show ws))
     (agent-repl--log ws "reclaim-frame-fullscreen: no live view for ws=%s, skipping" ws)))
 
+(defvar agent-repl--panels-restore-awaiting-view nil
+  "Workspaces whose panel restore found no live view buffer to remount.
+At startup the first workspace is activated before the pre-creation
+drain has made its webview, so its restore can only decline
+\(`no-live-view') -- and nothing used to run it again, leaving the
+workspace the user first sees with no panels until they switched away and
+back (owner report, 2026-09-29).  A workspace recorded here has its
+restore run again by `agent-repl--panels-on-view-created' the moment its
+view exists, if it is still the one the user stands on.")
+
+(defun agent-repl--panels-note-restore-outcome (ws reason)
+  "Record whether WS\='s panel restore, which decided REASON, awaits a view."
+  (if (eq reason 'no-live-view)
+      (cl-pushnew ws agent-repl--panels-restore-awaiting-view :test #'equal)
+    (setq agent-repl--panels-restore-awaiting-view
+          (delete ws agent-repl--panels-restore-awaiting-view))))
+
+(defun agent-repl--panels-on-view-created (ws)
+  "Run WS\='s restore that declined for want of a view, now that one exists.
+Called when the pre-creation drain has made WS\='s view buffer.  The
+restore runs only for a workspace that awaited one and is still the one
+the user stands on; any other workspace restores on its next switch, which
+now finds a live view."
+  (when (member ws agent-repl--panels-restore-awaiting-view)
+    (setq agent-repl--panels-restore-awaiting-view
+          (delete ws agent-repl--panels-restore-awaiting-view))
+    (if (equal ws (agent-repl--ws-current-name))
+        (progn
+          (agent-repl--info ws "elisp.panels.restore-on-view-created ws=%s" ws)
+          (agent-repl--ensure-own-panels-on-persp-switch ws)
+          (agent-repl--maybe-autoselect-input ws))
+      (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws=%s reason=not-current" ws))))
+
 (defun agent-repl--ensure-own-panels-on-persp-switch (ws)
   "Reconcile panel visibility with workspace ownership after a persp switch.
 
@@ -595,6 +628,7 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       (agent-repl--info log-ws "elisp.panels.restore-decision: ws=%s decision=%s reason=%s"
                         ws (if (eq reason 'default-open-now-missing) "re-show" "no-show")
                         reason)
+      (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
