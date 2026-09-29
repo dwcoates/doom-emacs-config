@@ -107,8 +107,10 @@ logging rung that never signals, so the stub is a no-op: the typed
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
     ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
     ("agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceResponse")
-    ("agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceResponse")
-    ("agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceResponse")
+    ("agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceResponse"
+     ("accepted" "error" "success"))
+    ("agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceResponse"
+     ("accepted" "error" "success"))
     ("agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceResponse")
     ("agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceResponse")
     ("agentrepl/v1/endpoint_set_workspace_priority.pb.go" "SetWorkspacePriorityResponse")
@@ -3364,6 +3366,26 @@ three arms its own way."
          (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
     (should (= (agent-repl-test-wire-verbs--occurrences "(cons 'opId" source) 1))
     (should (= (agent-repl-test-wire-verbs--occurrences "'(success error accepted)" source) 1))))
+
+;;;; ---- KillWorkspace / NukeWorkspace: the immediate ack --------------
+
+(ert-deftest agent-repl-test-wire-verbs-kill-and-nuke-requests-carry-the-op-id ()
+  "An op id rides a kill's and a nuke's request, opting into the immediate ack."
+  (agent-repl-test-wire-verbs--with-common
+   (dolist (encode '(agent-repl-wire-encode-kill-workspace-request
+                     agent-repl-wire-encode-nuke-workspace-request))
+     (should (equal (cdr (assq 'opId (funcall encode
+                                              (list :workspace agent-repl-test-wire-verbs--ref
+                                                    :op-id "op-7"))))
+                    "op-7")))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-and-nuke-decode-the-accepted-arm ()
+  "The immediate ack decodes to the accepted arm, echoing the op id."
+  (dolist (decode '(agent-repl-wire-decode-kill-workspace-response
+                    agent-repl-wire-decode-nuke-workspace-response))
+    (should (equal (funcall decode (agent-repl-test-wire-verbs--parse
+                                    "{\"accepted\":{\"opId\":\"op-7\"}}"))
+                   '(:arm :accepted :value (:op-id "op-7"))))))
 
 ;;;; ---- OpenWorkspace: the optional correlation id ----------------------
 
