@@ -228,9 +228,7 @@
   "Every declared push arm decodes to its own keyword."
   (dolist (case (list (list (concat "{\"host\":" agent-repl-test-wire-host--live-json "}")
                             :host)
-                      (list (concat "{\"notification\":{\"text\":\"hi\",\"atMs\":\"1\","
-                                    "\"kind\":{\"agentAddressed\":{}}}}")
-                            :notification)
+                      (list "{\"notificationClicked\":{}}" :notification-clicked)
                       (list "{\"transferred\":{}}" :transferred)
                       (list "{\"reloadWebapp\":{}}" :reload-webapp)
                       (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)))
@@ -284,103 +282,28 @@
                   "{\"path\":\"/w/a.el\",\"column\":3}")
                  '("HostOpenInEditor" column "unknown field"))))
 
-;;;; ---- The notification push ----
+;;;; ---- The notification click push ----
 
-(ert-deftest agent-repl-test-wire-host-notification-decodes-agent-addressed ()
-  "The agent addressed the user: text, instant, and the kind arm."
+(ert-deftest agent-repl-test-wire-host-notification-clicked-decodes-empty ()
+  "The click push is empty: presence is the fact, and the stream names the workspace."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-notification
-                  (concat "{\"text\":\"ready for review\",\"atMs\":\"1756400000000\","
-                          "\"kind\":{\"agentAddressed\":{}}}"))
-                 '(:text "ready for review" :at-ms 1756400000000
-                   :kind (:arm :agent-addressed :value nil)))))
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"notificationClicked\":{}}")
+                 '(:arm :notification-clicked :value nil))))
 
-(ert-deftest agent-repl-test-wire-host-notification-decodes-permission-requested ()
-  "A permission ask names the gated tool for the banner line."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             (concat "{\"text\":\"allow Bash?\",\"atMs\":1,"
-                                     "\"kind\":{\"permissionRequested\":"
-                                     "{\"toolName\":\"Bash\"}}}"))
-                            :kind)
-                 '(:arm :permission-requested :value (:tool-name "Bash")))))
-
-(ert-deftest agent-repl-test-wire-host-notification-decodes-question-asked ()
-  "A question ask carries the first question's chip label as its header."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             (concat "{\"text\":\"which approach?\",\"atMs\":1,"
-                                     "\"kind\":{\"questionAsked\":"
-                                     "{\"header\":\"Which approach?\"}}}"))
-                            :kind)
-                 '(:arm :question-asked :value (:header "Which approach?")))))
-
-(ert-deftest agent-repl-test-wire-host-notification-question-asked-omitted-header-is-empty ()
-  "An omitted `header' is protojson's proto3 default, exactly as `tool_name' is."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             "{\"text\":\"x\",\"atMs\":1,\"kind\":{\"questionAsked\":{}}}")
-                            :kind)
-                 '(:arm :question-asked :value (:header "")))))
-
-(ert-deftest agent-repl-test-wire-host-notification-accepts-a-numeric-instant ()
-  "protojson accepts a number for int64, and an instant is an int64."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             (concat "{\"text\":\"x\",\"atMs\":1756400000000,"
-                                     "\"kind\":{\"agentAddressed\":{}}}"))
-                            :at-ms)
-                 1756400000000)))
-
-(ert-deftest agent-repl-test-wire-host-notification-without-a-kind-is-a-breach ()
-  "The kind is not optional: the arm is the programmatic semantics."
+(ert-deftest agent-repl-test-wire-host-notification-clicked-refuses-a-field ()
+  "A field on the empty click message is refused, not ignored."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-notification
-                  "{\"text\":\"x\",\"atMs\":\"1\"}")
-                 '("HostWorkspaceNotification" kind "required message field is absent"))))
+                  #'agent-repl-wire-decode-host-workspace-notification-clicked
+                  "{\"workspace\":\"w\"}")
+                 '("HostWorkspaceNotificationClicked" workspace "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-host-notification-kind-unset-is-a-breach ()
-  "A kind message with no arm is a breach."
+(ert-deftest agent-repl-test-wire-host-retired-notification-arm-is-refused ()
+  "The retired `notification' push is refused as an unknown field."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-notification
-                  "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{}}")
-                 '("HostNotificationKind" kind "oneof is unset"))))
-
-(ert-deftest agent-repl-test-wire-host-question-asked-without-a-header-defaults ()
-  "`header' is a non-optional proto3 string: protojson omits the default."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             (concat "{\"text\":\"x\",\"atMs\":1,"
-                                     "\"kind\":{\"questionAsked\":{}}}"))
-                            :kind)
-                 '(:arm :question-asked :value (:header "")))))
-
-(ert-deftest agent-repl-test-wire-host-question-asked-unknown-field-is-a-breach ()
-  "An unmodeled field inside the arm is refused, not ignored."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-notification
-                  (concat "{\"text\":\"x\",\"atMs\":1,"
-                          "\"kind\":{\"questionAsked\":{\"count\":2}}}"))
-                 '("HostNotificationQuestionAsked" count "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-host-notification-kind-arms-match-the-bindings ()
-  "The kind decoder's arm set is exactly what the frozen schema declares.
-A future arm added to the proto fails this loudly rather than reaching the
-unknown-arm refusal at runtime."
-  (let ((declared (sort (agent-repl-test--generated-oneof-arms
-                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
-                         "HostNotificationKind")
-                        #'string<))
-        (spelled (sort (list "agentAddressed" "permissionRequested" "questionAsked")
-                       #'string<)))
-    (should (equal spelled declared))))
-
-(ert-deftest agent-repl-test-wire-host-notification-kind-unknown-arm-is-refused ()
-  "An unmodeled notification kind is refused rather than silently dropped."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-notification
-                  "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{\"budgetExceeded\":{}}}")
-                 '("HostNotificationKind" budgetExceeded "unknown field"))))
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"notification\":{\"text\":\"x\"}}")
+                 '("WatchHostWorkspaceResponse" notification "unknown field"))))
 
 ;;;; ---- HostWorkspace: the session axis ----
 
@@ -663,12 +586,70 @@ composer and vendor_info arms together."
         (progn (funcall encoder value) nil)
       (agent-repl-wire-error (cdr err)))))
 
-(ert-deftest agent-repl-test-wire-host-watch-daemon-request-names-emacs-and-its-build ()
-  "Emacs connects as the `emacs' client, stating the elisp build it loaded."
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-names-emacs-its-build-and-focus ()
+  "Emacs connects as the `emacs' client, stating its elisp build and focus."
   (should (equal (agent-repl-test-wire-host--quiet
                    (json-serialize (agent-repl-wire-encode-watch-daemon-request
-                                    '(:client (:arm :emacs :value (:elisp-build "abc123"))))))
-                 "{\"emacs\":{\"elispBuild\":\"abc123\"}}")))
+                                    '(:client (:arm :emacs :value (:elisp-build "abc123"
+                                                                   :focus (:arm :focused)))))))
+                 "{\"emacs\":{\"elispBuild\":\"abc123\",\"focus\":{\"focused\":{}}}}")))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-without-focus-is-refused ()
+  "The focus is REQUIRED: the daemon decides banners on it from the first instant."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build "abc123"))
+                 '("WatchDaemonEmacs" focus "required message field is absent"))))
+
+;;;; ---- EditorFocus and ReportEditorFocus ----
+
+(ert-deftest agent-repl-test-wire-host-editor-focus-encodes-each-arm ()
+  "Each focus arm encodes to its empty message."
+  (dolist (case '((t . "{\"focus\":{\"focused\":{}}}")
+                  (nil . "{\"focus\":{\"unfocused\":{}}}")))
+    (should (equal (agent-repl-test-wire-host--quiet
+                     (json-serialize
+                      (agent-repl-wire-encode-report-editor-focus-request
+                       (list :focus (agent-repl-wire-editor-focus (car case))))))
+                   (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-host-editor-focus-unset-is-refused ()
+  "A focus naming no arm never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-editor-focus nil)
+                 '("EditorFocus" focus "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-without-focus-is-refused ()
+  "The report's focus is REQUIRED."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-report-editor-focus-request nil)
+                 '("ReportEditorFocusRequest" focus "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-success ()
+  "The success arm is empty."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-editor-focus-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-no-emacs-stream ()
+  "The refusal names its cause: no Emacs stream stands."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"error\":{\"noEmacsStream\":{}}}")
+                 '(:arm :error :value (:cause (:arm :no-emacs-stream :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-unknown-cause-is-refused ()
+  "An unmodeled refusal cause is refused rather than silently dropped."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"error\":{\"busy\":{}}}")
+                 '("ReportEditorFocusError" busy "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-editor-focus-arms-match-the-bindings ()
+  "The focus encoder's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/editor_focus.pb.go" "EditorFocus")
+                       #'string<)
+                 (list "focused" "unfocused"))))
 
 (ert-deftest agent-repl-test-wire-host-watch-daemon-request-without-a-client-is-refused ()
   "The client arm is REQUIRED: a request naming none never leaves Emacs."
@@ -686,7 +667,7 @@ composer and vendor_info arms together."
 (ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-empty-build-is-refused ()
   "An EMPTY elisp build is refused before anything is sent."
   (should (equal (agent-repl-test-wire-host--encode-breach
-                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build ""))
+                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build "" :focus (:arm :focused)))
                  '("WatchDaemonEmacs" elispBuild "required string is empty"))))
 
 (ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-unset-build-is-refused ()
@@ -781,8 +762,8 @@ composer and vendor_info arms together."
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "WatchHostWorkspaceResponse")
                        #'string<)
-                 (sort (list "host" "notification" "transferred" "reloadWebapp"
-                             "openInEditor" "ending")
+                 (sort (list "host" "transferred" "reloadWebapp"
+                             "openInEditor" "ending" "notificationClicked")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

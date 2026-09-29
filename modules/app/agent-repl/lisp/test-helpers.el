@@ -351,16 +351,6 @@ from START (default 0), or nil when NEEDLE does not occur."
   (setq-default window-min-height 1)
   (setq-default window-min-width  1))
 
-;; Stub notification backend so notifications.el loads without error in
-;; environments lacking terminal-notifier / osascript.  `defvar' only
-;; initialises the variable when it is void; pre-binding it here means the
-;; `(defvar agent-repl--notification-backend (agent-repl--select-notification-backend))'
-;; form in notifications.el skips the init-form evaluation entirely, which
-;; is the call that would otherwise signal the FATAL load error.
-(unless (boundp 'agent-repl--notification-backend)
-  (defvar agent-repl--notification-backend (lambda (_ws _title _msg) nil)
-    "Stub: no-op notification backend for test environments."))
-
 (defun agent-repl-test--inert-timer (&rest _)
   "Return a fresh timer object that is not scheduled on any timer list.
 Used as the `:override' for `run-with-timer' / `run-with-idle-timer'

@@ -40,15 +40,12 @@
 (declare-function agent-repl-host-display-title "host")
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
-(declare-function agent-repl-status-blink-tab "status")
 (declare-function agent-repl-frontend-reload-webview "frontend")
 (declare-function agent-repl-popup-open "popup")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl--ws-put "workspace")
-(declare-function agent-repl--notify "notifications")
 (declare-function agent-repl--ws-switch "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
-(declare-function agent-repl--emacs-focused-p "notifications")
 (declare-function agent-repl-link-connect "daemon-link")
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-wire-decode-watch-host-workspace-response "wire-host")
@@ -595,275 +592,28 @@ dedicated ack verb exists."
                        (plist-get ref :id)))
         (should (equal agent-repl-host-last-selected-id (plist-get ref :id)))))))
 
-;;;; ---- Scenario 4: the notification policy ----
+;;;; ---- Scenario 4: the notification click ----
 ;;
-;; The daemon publishes the FACT and never asks whether Emacs is focused; each
-;; surface applies the policy it alone has the knowledge for.  Emacs's policy
-;; has three cases, and EVERY typed kind follows the same one — so the kinds
-;; are a table and the three focus states are three tests.
+;; The daemon posts every desktop banner and reads its click back; the host
+;; stream's `notification_clicked' is the whole of what reaches Emacs.
 
-(defconst agent-repl-itest-host--notification-kinds
-  '((agent-addressed . ((agentAddressed . ())))
-    (permission-requested . ((permissionRequested . ((toolName . "Bash")))))
-    (question-asked . ((questionAsked . ((header . "Which approach?"))))))
-  "Every HostNotificationKind arm endpoint_watch_host_workspace.proto declares.
-
-`question_asked{header}' landed with landing 3 and its comment says the
-SAME attention treatment as a permission ask.  That is the whole point of
-the table: a kind with its own policy would be a defect, so each arm is
-driven through the identical three cases rather than getting bespoke
-handling.")
-
-(ert-deftest agent-repl-itest-host-declares-every-notification-kind ()
-  "The suite's kind table matches the contract's arm count exactly.
-A drifted table would let a newly landed kind ship with no policy test at
-all, which is how a kind quietly acquires a different treatment."
-  ;; Arrange / Act / Assert.
-  (should (equal 3 (length agent-repl-itest-host--notification-kinds))))
-
-(defun agent-repl-itest-host--push-notification (daemon workspace-id kind)
-  "Push a `notification' carrying KIND on DAEMON's host stream for WORKSPACE-ID."
-  (agent-repl-itest--push
-   daemon "host"
-   `((notification . ((text . "Agent needs you")
-                      (atMs . "1735689600000")
-                      (kind . ,kind))))
-   workspace-id))
-
-(ert-deftest agent-repl-itest-host-unfocused-notification-posts-a-banner ()
-  "Emacs UNFOCUSED → an OS desktop banner carrying the pushed text.
-A banner is only useful when the user is looking elsewhere, and only this
-process knows whether they are."
+(ert-deftest agent-repl-itest-host-notification-click-selects-the-tab ()
+  "A `notification_clicked' push selects that workspace's tab.
+The daemon read the click back from the banner; raising the frame and
+selecting the tab is the one part only Emacs can do."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
-      (dolist (case agent-repl-itest-host--notification-kinds)
-        (let ((notified nil))
-          (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                    ((symbol-function 'agent-repl-status-blink-tab)
-                     (lambda (&rest _) (error "an unfocused Emacs must not blink a tab")))
-                    ;; `&rest' because the unfocused arm threads a
-                    ;; per-notification ACTIVATE (R-CLICK) behind the three
-                    ;; presentation arguments.
-                    ((symbol-function 'agent-repl--notify)
-                     (lambda (_ws _title message &rest _) (push message notified))))
-            ;; Act.
-            (agent-repl-itest-host--push-notification
-             daemon (plist-get ref :id) (cdr case))
-            ;; Assert.
-            (agent-repl-itest--wait-until
-             (lambda () notified) nil
-             (format "the %s desktop banner" (car case)))
-            (should (equal (car notified) "Agent needs you"))))))))
-
-(ert-deftest agent-repl-itest-host-focused-unselected-tab-blinks ()
-  "Focused with the tab NOT selected → the tab-bar entry blinks.
-THE CANONICAL BLINK CADENCE is specified once, on frontend.v1
-RosterRowAttention, and both surfaces implement exactly that spec."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (dolist (case agent-repl-itest-host--notification-kinds)
-        (let ((blinked nil))
-          (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
-                    ((symbol-function 'agent-repl--ws-current-name)
-                     (lambda (&rest _) "some-other-ws"))
-                    ((symbol-function 'agent-repl--notify)
-                     (lambda (&rest _) (error "a focused Emacs must not post a banner")))
-                    ((symbol-function 'agent-repl-status-blink-tab)
-                     (lambda (ws) (push ws blinked))))
-            ;; Act.
-            (agent-repl-itest-host--push-notification
-             daemon (plist-get ref :id) (cdr case))
-            ;; Assert.
-            (agent-repl-itest--wait-until
-             (lambda () blinked) nil (format "the %s tab blink" (car case)))
-            (should (equal (car blinked) agent-repl-itest-host--ws))))))))
-
-(ert-deftest agent-repl-itest-host-selected-tab-notification-does-nothing ()
-  "The tab already SELECTED → nothing at all is drawn.
-The footer's activity line already shows it, so a banner or a blink here
-would be noise about something the user is looking straight at."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (dolist (case agent-repl-itest-host--notification-kinds)
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
-                  ((symbol-function 'agent-repl--ws-current-name)
-                   (lambda (&rest _) agent-repl-itest-host--ws))
-                  ((symbol-function 'agent-repl--notify)
-                   (lambda (&rest _) (error "a selected tab must not post a banner")))
-                  ((symbol-function 'agent-repl-status-blink-tab)
-                   (lambda (&rest _) (error "a selected tab must not blink"))))
+      (let ((switched nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                   (lambda (ws &rest _) (push ws switched))))
           ;; Act.
-          (agent-repl-itest-host--push-notification
-           daemon (plist-get ref :id) (cdr case))
-          ;; Assert: the push was handled, and handling it drew nothing.  The
-          ;; log line is the only observable, which is the point.
-          (agent-repl-itest--await-log daemon "elisp.host.notification-selected" "info")
-          (should (agent-repl-itest--logged-p
-                   daemon "elisp.host.notification-selected" "info")))))))
-
-(ert-deftest agent-repl-itest-host-permission-kind-logs-its-tool-name ()
-  "A permission ask's gated tool name goes into the LOG CONTEXT.
-There is no permission-answering surface in Emacs at all (permission.el
-dies), so the tool name is diagnostic rather than drawn — dynamic values
-belong in the context, never only in the message."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--notify) (lambda (&rest _) nil)))
-        ;; Act.
-        (agent-repl-itest-host--push-notification
-         daemon (plist-get ref :id)
-         '((permissionRequested . ((toolName . "Bash")))))
-        ;; Assert.
-        (agent-repl-itest--await-log daemon "elisp.host.notification-desktop" "info")
-        (let ((entries (agent-repl-itest--log-entries
-                        daemon "elisp.host.notification-desktop" "info")))
-          (should (seq-some (lambda (record)
-                              (string-match-p "Bash" (or (alist-get 'message record) "")))
-                            entries)))))))
-
-(ert-deftest agent-repl-itest-host-question-kind-carries-its-header ()
-  "`question_asked' carries a `header', and it reaches the log context.
-The header is the question batch's own summary line; like a permission
-ask's tool name it is programmatic semantics beside the composed text.
-Asserting only the arm name (\"question-asked\") in the message would pass
-even if the HEADER ITSELF never made it anywhere — the dynamic value must
-actually appear on the record, per fanout §0: \"Dynamic values go in the
-context, never only in the message.\""
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--notify) (lambda (&rest _) nil)))
-        ;; Act.
-        (agent-repl-itest-host--push-notification
-         daemon (plist-get ref :id)
-         '((questionAsked . ((header . "Which approach?")))))
-        ;; Assert.
-        (agent-repl-itest--await-log daemon "elisp.host.notification-desktop" "info")
-        (let ((entries (agent-repl-itest--log-entries
-                        daemon "elisp.host.notification-desktop" "info")))
-          (should (seq-some
-                   (lambda (record)
-                     (string-match-p "question-asked" (or (alist-get 'message record) "")))
-                   entries))
-          (should (seq-some
-                   (lambda (record)
-                     (or (string-match-p "Which approach\\?" (or (alist-get 'message record) ""))
-                         (seq-some (lambda (arg) (string-match-p "Which approach\\?" arg))
-                                   (alist-get 'arguments (alist-get 'context record)))))
-                   entries)))))))
-
-(ert-deftest agent-repl-itest-host-unfocused-notification-click-selects-the-tab ()
-  "The banner's click raises the frame and selects the workspace's tab.
-elisp.md states this at the arm: decider and actor are one process, so it
-is plain elisp with no daemon round-trip.
-
-KNOWN PRODUCTION GAP — this test currently FAILS by design, and the
-failure is the report: `agent-repl--notify' takes exactly (WS TITLE
-MESSAGE) and host.el passes no activation callback, so nothing carries
-the click anywhere.  The stub takes `&rest' so the day an activation
-argument is threaded through, this passes without being rewritten."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (let ((activate nil)
-            (switched nil))
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--notify)
-                   (lambda (_ws _title _message &rest extra)
-                     (setq activate (seq-find #'functionp extra))))
-                  ((symbol-function 'agent-repl--ws-switch)
-                   (lambda (ws &rest _) (setq switched ws))))
-          (agent-repl-itest-host--push-notification
-           daemon (plist-get ref :id) '((agentAddressed . ())))
-          (agent-repl-itest--wait-until
-           (lambda () activate) nil
-           "an activation callback on the desktop notification")
-          ;; Act.
-          (funcall activate)
+          (agent-repl-itest--push daemon "host" '((notificationClicked . ()))
+                                  (plist-get ref :id))
           ;; Assert.
-          (should (equal switched agent-repl-itest-host--ws)))))))
-
-(ert-deftest agent-repl-itest-host-blink-cadence-fires-the-exact-schedule ()
-  "The blink cadence is EXACTLY 0/500/1000/1500/2000 ms, unstubbed end to end.
-elisp.md: \"THE CANONICAL BLINK CADENCE is specified ONCE, on `frontend.v1'
-`RosterRowAttention': two blinks — 500 ms on, 500 ms off, twice — then a
-steady marker until cleared.\"  Driven here by a REAL `notification' push
-through host.el's real `agent-repl-status-blink-tab' — every other test in
-this suite stubs that function away, so none of them can catch a divergent
-cadence; only `run-with-timer' is instrumented, to record what it is asked
-to schedule, and every call still runs for real."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (let ((captured nil)
-            (real-run-with-timer (symbol-function 'run-with-timer)))
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
-                  ((symbol-function 'agent-repl--ws-current-name) (lambda (&rest _) "some-other-ws"))
-                  ((symbol-function 'agent-repl--notify)
-                   (lambda (&rest _) (error "a focused Emacs must not post a banner")))
-                  ((symbol-function 'run-with-timer)
-                   (lambda (delay repeat fn &rest args)
-                     (when (eq fn #'agent-repl-status--set-marker)
-                       (push (cons delay (nth 1 args)) captured))
-                     (apply real-run-with-timer delay repeat fn args))))
-          ;; Act.
-          (agent-repl-itest-host--push-notification
-           daemon (plist-get ref :id) '((agentAddressed . ())))
-          ;; Assert.
-          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
-                                        "all five blink steps to be scheduled")
-          (should (equal (reverse captured)
-                         '((0.0 . t) (0.5 . nil) (1.0 . t) (1.5 . nil) (2.0 . t)))))))))
-
-(ert-deftest agent-repl-itest-host-blink-re-entrant-push-restarts-the-cadence ()
-  "A second notification while a blink is in flight RESTARTS the cadence.
-status.el: \"a second call ... RESTART[s] the cadence rather than
-interleaving with it, because each step is armed under a deterministic
-per-workspace key that replaces its predecessor.\"  Two pushes back to
-back must leave exactly ONE five-step schedule standing, not ten steps."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (let ((captured nil)
-            (real-run-with-timer (symbol-function 'run-with-timer)))
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
-                  ((symbol-function 'agent-repl--ws-current-name) (lambda (&rest _) "some-other-ws"))
-                  ((symbol-function 'agent-repl--notify)
-                   (lambda (&rest _) (error "a focused Emacs must not post a banner")))
-                  ((symbol-function 'run-with-timer)
-                   (lambda (delay repeat fn &rest args)
-                     (let ((timer (apply real-run-with-timer delay repeat fn args)))
-                       (when (eq fn #'agent-repl-status--set-marker)
-                         (push (list delay timer) captured))
-                       timer))))
-          ;; Act: two notifications back to back.
-          (agent-repl-itest-host--push-notification
-           daemon (plist-get ref :id) '((agentAddressed . ())))
-          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
-                                        "the first schedule's five timers")
-          (let ((first-schedule (copy-sequence captured)))
-            (agent-repl-itest-host--push-notification
-             daemon (plist-get ref :id) '((agentAddressed . ())))
-            ;; Assert.
-            (agent-repl-itest--wait-until (lambda () (= 10 (length captured))) nil
-                                          "the second schedule's five more timers")
-            (should (equal 10 (length captured)))
-            ;; The first schedule's own timer objects were cancelled by the
-            ;; second call's `agent-repl--register-timer', which replaces a
-            ;; key's held timer rather than stacking a second one beside it.
-            ;; The 0 ms step has almost certainly already FIRED by the time
-            ;; both pushes have landed, which also removes it from
-            ;; `timer-list' — that step is excluded, not asserted false.
-            (dolist (entry first-schedule)
-              (let ((delay (car entry)) (timer (cadr entry)))
-                (unless (= delay 0.0)
-                  (should-not (memq timer timer-list)))))))))))
+          (agent-repl-itest--wait-until (lambda () switched) nil "the tab selection")
+          (should (equal switched (list agent-repl-itest-host--ws)))
+          (should (agent-repl-itest--logged-p daemon "elisp.host.notification-clicked" "info")))))))
 
 ;;;; ---- Scenario 7: reload_webapp ----
 
@@ -1359,28 +1109,23 @@ unset oneof here is as much a breach as anywhere else in the contract."
       (should (seq-some (lambda (arg) (string-match-p "host-session-1" arg))
                         (agent-repl-itest-host--push-invalid-context-strings daemon))))))
 
-(ert-deftest agent-repl-itest-host-notification-without-kind-is-refused ()
-  "A `notification' push missing its non-optional `kind' is a contract breach.
-proto `HostWorkspaceNotification.kind': \"THE ARM IS THE KIND\" — `kind' is
-an ordinary required message field, not a oneof, so its absence is the
-required-message-field breach rather than an unset-oneof one."
+(ert-deftest agent-repl-itest-host-retired-notification-arm-is-refused ()
+  "The retired `notification' push is not a field this Emacs decodes.
+Field 2 of WatchHostWorkspaceResponse is reserved: desktop banners are the
+daemon's, so a push naming it is a contract breach, logged and dropped
+with the stream left standing."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl--notify)
-                 (lambda (&rest _) (error "an unset `kind' must draw nothing")))
-                ((symbol-function 'agent-repl-status-blink-tab)
-                 (lambda (&rest _) (error "an unset `kind' must draw nothing"))))
-        ;; Act: `text' and `atMs' present, `kind' entirely absent.
-        (agent-repl-itest--push
-         daemon "host"
-         '((notification . ((text . "Agent needs you") (atMs . "1735689600000"))))
-         (plist-get ref :id))
-        ;; Assert: the log, no banner and no blink, and the stream standing.
-        (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
-        (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-        (should (seq-some (lambda (arg) (string-match-p "Agent needs you" arg))
-                          (agent-repl-itest-host--push-invalid-context-strings daemon)))
+      ;; Act: the fake refuses to serve a push its own types reject, so the
+      ;; retired arm is proved unservable at the daemon's edge.
+      (let ((result (agent-repl-itest--control
+                     daemon "/_fake/push"
+                     (json-serialize
+                      `((stream . "host") (workspace_id . ,(plist-get ref :id))
+                        (message . ((notification . ((text . "x"))))))))))
+        ;; Assert.
+        (should (equal (car result) 400))
         (should (equal 1 (length (agent-repl-itest--subscribers
                                   daemon "host" (plist-get ref :id)))))))))
 
@@ -1408,7 +1153,6 @@ actually pins IT."
 (declare-function agent-repl-link-dial-successor "daemon-link")
 (declare-function agent-repl-connect-connection-address "connect")
 (declare-function agent-repl--ws-get "workspace")
-(defvar agent-repl-itest-notifications)
 (defvar persp-activated-functions)
 (defvar persp-before-deactivate-functions)
 
@@ -1930,32 +1674,6 @@ record an id the registry does not even hold."
         ;; Assert.
         (should (null agent-repl-host-last-selected-id))))))
 
-;; audit-2 #15
-(ert-deftest agent-repl-itest-host-unfocused-banner-reaches-the-real-backend ()
-  "The unfocused banner is recorded by PRODUCTION's own notifier backend.
-The harness installs `agent-repl-notify-make-fake-backend', which fixes
-the backend's arity and its recorded shape (WS TITLE MESSAGE ACTIVATE)
-beside the caller — a test that stubs `agent-repl--notify' instead
-asserts the message text and nothing about the contract R-CLICK fixed."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl-status-blink-tab)
-                 (lambda (&rest _) (error "an unfocused Emacs must not blink a tab"))))
-        ;; Act.
-        (agent-repl-itest-host--push-notification
-         daemon (plist-get ref :id) '((agentAddressed . ())))
-        ;; Assert: through the backend the harness installed.
-        (agent-repl-itest--wait-until (lambda () agent-repl-itest-notifications) nil
-                                      "the desktop banner to reach the backend")
-        (let ((record (car agent-repl-itest-notifications)))
-          (should (equal (nth 0 record) agent-repl-itest-host--ws))
-          (should (equal (nth 1 record)
-                         (agent-repl-host-display-title agent-repl-itest-host--ws)))
-          (should (equal (nth 2 record) "Agent needs you"))
-          (should (functionp (nth 3 record))))))))
-
 ;; audit-2 #16
 (ert-deftest agent-repl-itest-host-naming-title-renames-the-input-buffer ()
   "A `naming.title' push RENAMES the workspace's buffers.
@@ -2434,33 +2152,6 @@ skipped forever."
                              (plist-get ref :id)))))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (agent-repl-connect-close conn)))))
-
-;; audit-3 #25
-(ert-deftest agent-repl-itest-host-unfocused-wins-over-the-tab-being-selected ()
-  "UNFOCUSED takes precedence even when the pushed workspace IS the current tab.
-`endpoint_watch_host_workspace.proto' orders the notification policy's
-cases UNFOCUSED first; a decoder that checked \"selected\" before focus
-would draw nothing for a notification that arrives while the user has
-stepped away with this tab still the last one shown."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (let ((notified nil))
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--ws-current-name)
-                   (lambda (&rest _) agent-repl-itest-host--ws))
-                  ((symbol-function 'agent-repl-status-blink-tab)
-                   (lambda (&rest _) (error "unfocused must not blink")))
-                  ((symbol-function 'agent-repl--notify)
-                   (lambda (_ws _title message &rest _) (push message notified))))
-          ;; Act.
-          (agent-repl-itest-host--push-notification
-           daemon (plist-get ref :id) '((agentAddressed . ())))
-          ;; Assert.
-          (agent-repl-itest--wait-until (lambda () notified) nil "the desktop banner")
-          (should (equal (car notified) "Agent needs you"))
-          (should-not (agent-repl-itest--logged-p
-                       daemon "elisp.host.notification-selected" "info")))))))
 
 ;; audit-3 #26
 (ert-deftest agent-repl-itest-host-renamed-input-buffer-stays-an-agent-panel ()

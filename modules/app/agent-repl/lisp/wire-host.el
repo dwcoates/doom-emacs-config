@@ -37,6 +37,7 @@
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decoded "wire-common")
+(declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")
 (declare-function agent-repl-wire--encode-string "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
@@ -442,78 +443,13 @@ absent when no held-prompt edit stands, and its absence is that fact."
                               "HostWorkspace" 'heldPromptEdit object
                               #'agent-repl-wire-decode-host-held-prompt-edit)))))
 
-;;;; ---- The notification push ----
+;;;; ---- The notification click push ----
 
-(defun agent-repl-wire-decode-host-notification-agent-addressed (value)
-  "Decode VALUE as the empty message `HostNotificationAgentAddressed'."
-  (agent-repl-wire--decode-empty "HostNotificationAgentAddressed" value))
-
-(defun agent-repl-wire-decode-host-notification-permission-requested (value)
-  "Decode VALUE as `HostNotificationPermissionRequested' `(:tool-name)'.
-The gated tool's name, for the banner line; the same focus policy applies
-as for any other notification kind."
-  (let ((object (agent-repl-wire--object "HostNotificationPermissionRequested" value)))
-    (agent-repl-wire--check-keys "HostNotificationPermissionRequested" object '(toolName))
-    (agent-repl-wire--decoded
-     "HostNotificationPermissionRequested"
-     (list :tool-name (agent-repl-wire--decode-string
-                       "HostNotificationPermissionRequested" 'toolName object)))))
-
-(defun agent-repl-wire-decode-host-notification-question-asked (value)
-  "Decode VALUE as `HostNotificationQuestionAsked' `(:header)'.
-The first question's chip label, for the banner line.  A question batch
-blocks the agent exactly as a permission ask does, so it takes the same
-attention treatment; `header' is a non-optional proto3 string, so an
-absent one decodes to the empty string rather than to a breach."
-  (let ((object (agent-repl-wire--object "HostNotificationQuestionAsked" value)))
-    (agent-repl-wire--check-keys "HostNotificationQuestionAsked" object '(header))
-    (agent-repl-wire--decoded
-     "HostNotificationQuestionAsked"
-     (list :header (agent-repl-wire--decode-string
-                    "HostNotificationQuestionAsked" 'header object)))))
-
-(defun agent-repl-wire-decode-host-notification-kind-kind (value)
-  "Decode `HostNotificationKind''s `kind' oneof from the object VALUE."
-  (agent-repl-wire--decode-oneof
-   "HostNotificationKind" 'kind value
-   '((agentAddressed :agent-addressed
-                     agent-repl-wire-decode-host-notification-agent-addressed)
-     (permissionRequested :permission-requested
-                          agent-repl-wire-decode-host-notification-permission-requested)
-     (questionAsked :question-asked
-                    agent-repl-wire-decode-host-notification-question-asked))))
-
-(defun agent-repl-wire-decode-host-notification-kind (value)
-  "Decode VALUE as `HostNotificationKind', the oneof plist `(:arm :value)'.
-THE ARM IS THE KIND: the composed text is presentation, the arm is the
-programmatic semantics."
-  (let ((object (agent-repl-wire--object "HostNotificationKind" value)))
-    (agent-repl-wire--check-keys
-     "HostNotificationKind" object
-     '(agentAddressed permissionRequested questionAsked))
-    (agent-repl-wire--decoded
-     "HostNotificationKind"
-     (agent-repl-wire-decode-host-notification-kind-kind object))))
-
-(defun agent-repl-wire-decode-host-workspace-notification-kind (value)
-  "Decode `HostWorkspaceNotification''s `kind' field VALUE."
-  (agent-repl-wire-decode-host-notification-kind value))
-
-(defun agent-repl-wire-decode-host-workspace-notification (value)
-  "Decode VALUE as `HostWorkspaceNotification' `(:text :at-ms :kind)'.
-An EVENT, fired not state.  Emacs owns the presentation policy because
-Emacs owns the knowledge the policy needs."
-  (let ((object (agent-repl-wire--object "HostWorkspaceNotification" value)))
-    (agent-repl-wire--check-keys "HostWorkspaceNotification" object '(text atMs kind))
-    (agent-repl-wire--decoded
-     "HostWorkspaceNotification"
-     (list :text (agent-repl-wire--decode-string
-                  "HostWorkspaceNotification" 'text object)
-           :at-ms (agent-repl-wire--decode-int64
-                   "HostWorkspaceNotification" 'atMs object)
-           :kind (agent-repl-wire--decode-message
-                  "HostWorkspaceNotification" 'kind object
-                  #'agent-repl-wire-decode-host-workspace-notification-kind)))))
+(defun agent-repl-wire-decode-host-workspace-notification-clicked (value)
+  "Decode VALUE as the empty message `HostWorkspaceNotificationClicked'.
+The user clicked this workspace's desktop banner; the daemon posted it
+and read the click back, so selecting the tab is all that is left."
+  (agent-repl-wire--decode-empty "HostWorkspaceNotificationClicked" value))
 
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
@@ -558,9 +494,9 @@ directory."
   "Decode the `host' push arm VALUE as a HostWorkspace."
   (agent-repl-wire-decode-host-workspace value))
 
-(defun agent-repl-wire-decode-watch-host-workspace-response-notification (value)
-  "Decode the `notification' push arm VALUE."
-  (agent-repl-wire-decode-host-workspace-notification value))
+(defun agent-repl-wire-decode-watch-host-workspace-response-notification-clicked (value)
+  "Decode the `notification_clicked' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-notification-clicked value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-transferred (value)
   "Decode the `transferred' push arm VALUE."
@@ -583,22 +519,22 @@ directory."
   (agent-repl-wire--decode-oneof
    "WatchHostWorkspaceResponse" 'push value
    '((host :host agent-repl-wire-decode-watch-host-workspace-response-host)
-     (notification :notification
-                   agent-repl-wire-decode-watch-host-workspace-response-notification)
      (transferred :transferred
                   agent-repl-wire-decode-watch-host-workspace-response-transferred)
      (reloadWebapp :reload-webapp
                    agent-repl-wire-decode-watch-host-workspace-response-reload-webapp)
      (openInEditor :open-in-editor
                    agent-repl-wire-decode-watch-host-workspace-response-open-in-editor)
-     (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending))))
+     (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
+     (notificationClicked :notification-clicked
+                          agent-repl-wire-decode-watch-host-workspace-response-notification-clicked))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host notification transferred reloadWebapp openInEditor ending))
+     '(host transferred reloadWebapp openInEditor ending notificationClicked))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))
@@ -1003,20 +939,102 @@ arm this codec does not know is refused as an unknown field."
 
 ;;;; ---- WatchDaemon ----
 
+;;;; ---- EditorFocus ----
+
+(defun agent-repl-wire-encode-editor-focus-focused (value)
+  "Encode the empty message `EditorFocusFocused' from VALUE."
+  (agent-repl-wire--encode-empty "EditorFocusFocused" value))
+
+(defun agent-repl-wire-encode-editor-focus-unfocused (value)
+  "Encode the empty message `EditorFocusUnfocused' from VALUE."
+  (agent-repl-wire--encode-empty "EditorFocusUnfocused" value))
+
+(defun agent-repl-wire-encode-editor-focus (value)
+  "Encode `EditorFocus' from VALUE, the oneof plist `(:arm :focused)' or
+`(:arm :unfocused)'.  THE ARM IS THE FOCUS, and it is REQUIRED: a focus
+naming neither is refused HERE, before anything is sent."
+  (agent-repl-wire--encoded
+   "EditorFocus"
+   (agent-repl-wire--encode-oneof
+    "EditorFocus" 'focus value
+    '((:focused focused agent-repl-wire-encode-editor-focus-focused)
+      (:unfocused unfocused agent-repl-wire-encode-editor-focus-unfocused)))))
+
+(defun agent-repl-wire-editor-focus (focused)
+  "Answer the `EditorFocus' oneof plist for FOCUSED, non-nil or nil."
+  (list :arm (if focused :focused :unfocused)))
+
+;;;; ---- ReportEditorFocus ----
+
+(defun agent-repl-wire-encode-report-editor-focus-request (value)
+  "Encode the ReportEditorFocusRequest plist VALUE `(:focus F)'.
+The focus is REQUIRED."
+  (unless (plist-member value :focus)
+    (agent-repl-wire--fail "ReportEditorFocusRequest" 'focus
+                           "required message field is absent"))
+  (agent-repl-wire--encoded
+   "ReportEditorFocusRequest"
+   (list (cons 'focus (agent-repl-wire-encode-editor-focus
+                       (plist-get value :focus))))))
+
+(defun agent-repl-wire-decode-report-editor-focus-success (value)
+  "Decode VALUE as the empty `ReportEditorFocusSuccess'."
+  (agent-repl-wire--decode-empty "ReportEditorFocusSuccess" value))
+
+(defun agent-repl-wire-decode-report-editor-focus-no-emacs-stream (value)
+  "Decode VALUE as the empty `ReportEditorFocusNoEmacsStream'."
+  (agent-repl-wire--decode-empty "ReportEditorFocusNoEmacsStream" value))
+
+(defun agent-repl-wire-decode-report-editor-focus-error-cause (value)
+  "Decode `ReportEditorFocusError''s `cause' oneof from the object VALUE."
+  (agent-repl-wire--decode-oneof
+   "ReportEditorFocusError" 'cause value
+   '((noEmacsStream :no-emacs-stream
+                    agent-repl-wire-decode-report-editor-focus-no-emacs-stream))))
+
+(defun agent-repl-wire-decode-report-editor-focus-error (value)
+  "Decode VALUE as `ReportEditorFocusError', a plist (:cause ONEOF)."
+  (let ((object (agent-repl-wire--object "ReportEditorFocusError" value)))
+    (agent-repl-wire--check-keys "ReportEditorFocusError" object '(noEmacsStream))
+    (agent-repl-wire--decoded
+     "ReportEditorFocusError"
+     (list :cause (agent-repl-wire-decode-report-editor-focus-error-cause object)))))
+
+(defun agent-repl-wire-decode-report-editor-focus-response-result (value)
+  "Decode `ReportEditorFocusResponse''s `result' oneof from the object VALUE."
+  (agent-repl-wire--decode-oneof
+   "ReportEditorFocusResponse" 'result value
+   '((success :success agent-repl-wire-decode-report-editor-focus-success)
+     (error :error agent-repl-wire-decode-report-editor-focus-error))))
+
+(defun agent-repl-wire-decode-report-editor-focus-response (value)
+  "Decode VALUE as `ReportEditorFocusResponse'.  THE ARM IS THE OUTCOME."
+  (let ((object (agent-repl-wire--object "ReportEditorFocusResponse" value)))
+    (agent-repl-wire--check-keys "ReportEditorFocusResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "ReportEditorFocusResponse"
+     (agent-repl-wire-decode-report-editor-focus-response-result object))))
+
 (defun agent-repl-wire-encode-watch-daemon-emacs (value)
-  "Encode `WatchDaemonEmacs' from the plist VALUE `(:elisp-build BUILD)'.
+  "Encode `WatchDaemonEmacs' from the plist VALUE `(:elisp-build BUILD :focus F)'.
 The build is REQUIRED and never empty: a watch without it is refused,
 because a deploy could not tell whether this Emacs runs the checkout's
-elisp.  An empty one is refused HERE, before anything is sent."
+elisp.  An empty one is refused HERE, before anything is sent.  The focus
+is REQUIRED too: the daemon decides every desktop banner on it from the
+stream's first instant (`agent-repl-wire-encode-editor-focus')."
   (let ((build (plist-get value :elisp-build)))
     (unless (stringp build)
       (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required field is unset"))
     (when (string-empty-p build)
       (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required string is empty"))
+    (unless (plist-member value :focus)
+      (agent-repl-wire--fail "WatchDaemonEmacs" 'focus "required message field is absent"))
     (agent-repl-wire--encoded
      "WatchDaemonEmacs"
      (list (cons 'elispBuild (agent-repl-wire--encode-string
-                              "WatchDaemonEmacs" 'elispBuild build))))))
+                              "WatchDaemonEmacs" 'elispBuild build))
+           (cons 'focus (agent-repl-wire-encode-editor-focus
+                         (plist-get value :focus)))))))
 
 (defun agent-repl-wire-encode-watch-daemon-request-emacs (value)
   "Encode `WatchDaemonRequest''s `emacs' client arm from VALUE."

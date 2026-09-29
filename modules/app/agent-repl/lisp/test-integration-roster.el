@@ -45,7 +45,6 @@
 (declare-function agent-repl--tab-badge-str "status" (name arm))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host--on-workspace-activated "host" (&rest _))
-(declare-function agent-repl-roster-notify-finished "roster" (ws))
 (declare-function agent-repl-roster-echo-finished "roster" (ws))
 (declare-function agent-repl-roster-refresh-magit "roster" (ws))
 (declare-function agent-repl--input-said "input" (text attachments))
@@ -55,7 +54,6 @@
 (defvar agent-repl-host-last-selected-id)
 (defvar agent-repl-link--primary)
 (defvar persp-activated-functions)
-(defvar agent-repl-itest-notifications)
 
 ;;;; ---- Fixtures ----
 
@@ -349,6 +347,89 @@ sidebar and the Emacs tab-bar both implement exactly it."
           ;; Assert.
           (agent-repl-itest--wait-until (lambda () blinked) nil "the attention blink")
           (should (member "itest-attn" blinked)))))))
+
+(ert-deftest agent-repl-itest-roster-attention-blink-fires-the-exact-schedule ()
+  "The attention blink cadence is EXACTLY 0/500/1000/1500/2000 ms, unstubbed.
+RosterRowAttention's own comment is THE CANONICAL BLINK CADENCE: two
+blinks — 500 ms on, 500 ms off, twice — then a steady marker until
+cleared.  Driven by a REAL attention push through status.el's real
+`agent-repl-status-blink-tab'; only `run-with-timer' is instrumented, to
+record what it is asked to schedule, and every call still runs for real."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((captured nil)
+            (real-run-with-timer (symbol-function 'run-with-timer))
+            (agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
+        (agent-repl--ws-put "itest-cadence" :project-dir (agent-repl-itest--fixture-dir "itest-cadence"))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (delay repeat fn &rest args)
+                     (when (eq fn #'agent-repl-status--set-marker)
+                       (push (cons delay (nth 1 args)) captured))
+                     (apply real-run-with-timer delay repeat fn args))))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-cadence" "itest-cadence" 'thinking
+                          '(attention . ())))))
+          ;; Assert.
+          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
+                                        "all five blink steps to be scheduled")
+          (should (equal (reverse captured)
+                         '((0.0 . t) (0.5 . nil) (1.0 . t) (1.5 . nil) (2.0 . t)))))))))
+
+(ert-deftest agent-repl-itest-roster-attention-that-returns-restarts-the-cadence ()
+  "An attention marker that leaves and returns RESTARTS the cadence.
+status.el: a second blink RESTARTS the cadence rather than interleaving
+with it, because each step is armed under a deterministic per-workspace
+key that replaces its predecessor.  Two arrivals must leave exactly ONE
+five-step schedule standing, not ten steps."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((captured nil)
+            (real-run-with-timer (symbol-function 'run-with-timer))
+            (agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
+        (agent-repl--ws-put "itest-recadence" :project-dir (agent-repl-itest--fixture-dir "itest-recadence"))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (delay repeat fn &rest args)
+                     (let ((timer (apply real-run-with-timer delay repeat fn args)))
+                       (when (eq fn #'agent-repl-status--set-marker)
+                         (push (list delay timer) captured))
+                       timer))))
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-recadence" "itest-recadence" 'thinking
+                          '(attention . ())))))
+          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
+                                        "the first schedule's five timers")
+          (let ((first-schedule (copy-sequence captured)))
+            ;; Act: the marker leaves, then arrives again.
+            (agent-repl-itest-roster--push
+             daemon (agent-repl-itest-roster--roster
+                     (list (agent-repl-itest-roster--row
+                            "itest-recadence" "itest-recadence" 'thinking))))
+            (agent-repl-itest-roster--push
+             daemon (agent-repl-itest-roster--roster
+                     (list (agent-repl-itest-roster--row
+                            "itest-recadence" "itest-recadence" 'thinking
+                            '(attention . ())))))
+            ;; Assert.
+            (agent-repl-itest--wait-until (lambda () (= 10 (length captured))) nil
+                                          "the second schedule's five more timers")
+            ;; The first schedule's own timers were cancelled: the marker's
+            ;; clear cancels a blink in flight, and the new blink's steps
+            ;; replace their keys.  The 0 ms step has almost certainly
+            ;; already FIRED, which also removes it from `timer-list', so it
+            ;; is excluded, not asserted false.
+            (dolist (entry first-schedule)
+              (let ((delay (car entry)) (timer (cadr entry)))
+                (unless (= delay 0.0)
+                  (should-not (memq timer timer-list)))))))))))
 
 (ert-deftest agent-repl-itest-roster-attention-still-present-does-not-reblink ()
   "A row that keeps `attention' across a re-push does not blink a second time.
@@ -1130,39 +1211,6 @@ not a transition, whatever the arriving state is."
         ;; Assert.
         (should (null finished))))))
 
-(ert-deftest agent-repl-itest-roster-finish-edge-posts-the-unfocused-banner ()
-  "Reaction (1): the finish edge posts the desktop banner \"Agent ready: <name>\".
-Fanout §8: \"unfocused desktop banner 'Agent ready: <name>'\" —
-`agent-repl-roster-notify-finished' is registered on
-`agent-repl-roster-finish-functions'; if the wiring or the text broke, the
-user would never be told their turn finished while looking away."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      ;; The fixture blanks the finish hook so scenarios do not see each
-      ;; other's reactions; THIS scenario's subject IS that reaction, so it
-      ;; puts the production consumer back and nothing else.
-      (let ((agent-repl-roster-finish-functions
-             (list #'agent-repl-roster-notify-finished)))
-      (agent-repl--ws-put "itest-fin-banner" :project-dir (agent-repl-itest--fixture-dir "itest-fin-banner"))
-      (agent-repl-itest-roster--push
-       daemon (agent-repl-itest-roster--roster
-               (list (agent-repl-itest-roster--row
-                      "itest-fin-banner" "itest-fin-banner" 'thinking))))
-      (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-status-tab-state "itest-fin-banner") :thinking))
-       nil "the running state")
-      ;; Act.
-      (agent-repl-itest-roster--push
-       daemon (agent-repl-itest-roster--roster
-               (list (agent-repl-itest-roster--row
-                      "itest-fin-banner" "itest-fin-banner" 'done))))
-      ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () agent-repl-itest-notifications) nil "the desktop banner")
-      (should (equal (nth 2 (car agent-repl-itest-notifications))
-                     "Agent ready: itest-fin-banner"))))))
-
 (ert-deftest agent-repl-itest-roster-finish-edge-echoes-a-message-when-not-selected ()
   "Reaction (2): the cross-workspace echo message fires when WS is not selected.
 Fanout §8: \"cross-workspace echo `message' when WS is not the selected
@@ -1390,16 +1438,16 @@ skips, and host.el is handed no ref to hold."
 
 ;; audit-2 #19
 (ert-deftest agent-repl-itest-roster-finish-reactions-are-globally-registered ()
-  "The three finish-edge reactions are registered at LOAD time, globally.
+  "The two finish-edge reactions are registered at LOAD time, globally.
 Every other finish-edge test binds `agent-repl-roster-finish-functions'
 to exactly the consumer it exercises, so a production that dropped its
 `add-hook' would pass all of them.  The GLOBAL value is the only place
-the wiring itself is observable.  A deferred prompt is NOT a fourth: the
+the wiring itself is observable.  A deferred prompt is NOT a third: the
 daemon holds it and runs it as its own turn (owner ruling, 2026-09-28),
 so nothing on this edge releases one (test-prompt-queue.el pins that)."
   ;; Arrange / Act / Assert.
   (let ((registered (default-value 'agent-repl-roster-finish-functions)))
-    (should (memq #'agent-repl-roster-notify-finished registered))
+    (should-not (memq 'agent-repl-roster-notify-finished registered))
     (should (memq #'agent-repl-roster-echo-finished registered))
     (should (memq #'agent-repl-roster-refresh-magit registered))))
 
@@ -1544,52 +1592,6 @@ pinned directly."
           (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
                              (rows . ((rows . [])))))))))
    :type 'agent-repl-wire-error))
-
-;; audit-2 #23
-(ert-deftest agent-repl-itest-roster-finish-edge-banner-is-suppressed-when-focused ()
-  "Reaction (1) is the UNFOCUSED banner: a focused Emacs posts nothing.
-fanout §8 (1).  The focus test is the whole policy — Emacs is the only
-process that knows — so a reaction asserted only by its message text
-would pass with the guard deleted and banner every finished turn straight
-into the user's face."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      (let ((agent-repl-roster-finish-functions
-             (list #'agent-repl-roster-notify-finished)))
-        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
-          (agent-repl--ws-put "itest-fin-focused" :project-dir (agent-repl-itest--fixture-dir "itest-fin-focused"))
-          (agent-repl-itest-roster--push
-           daemon (agent-repl-itest-roster--roster
-                   (list (agent-repl-itest-roster--row
-                          "itest-fin-focused" "itest-fin-focused" 'thinking))))
-          (agent-repl-itest--wait-until
-           (lambda () (eq (agent-repl-status-tab-state "itest-fin-focused") :thinking))
-           nil "the running state")
-          ;; Act.
-          (agent-repl-itest-roster--push
-           daemon (agent-repl-itest-roster--roster
-                   (list (agent-repl-itest-roster--row
-                          "itest-fin-focused" "itest-fin-focused" 'done))))
-          ;; Assert: the edge fired, and it drew no banner.
-          (agent-repl-itest--await-log daemon "elisp.roster.finish-edge" "info")
-          (should (null agent-repl-itest-notifications)))))))
-
-;;;; ---- Audit-3 additions (R-SUITE-3) ----
-;;
-;; Findings 33-42 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
-;; their own section so they merge cleanly beside concurrent edits above.
-;;
-;; Finding #33 is a live PRODUCTION DEFECT under parallel repair (R-AUDIT3-PROD):
-;; roster.el:312 `agent-repl-roster--rename-tab' never re-keys
-;; `agent-repl-host--by-name' (workspace.el:240-252 mutates
-;; `agent-repl--workspaces' only).  Both of its tests below are scripted to
-;; the RULED post-fix behavior the finding spells out and are EXPECTED RED
-;; until that production fix lands.
-
-(declare-function agent-repl-host-composer-gate "host" (ws))
-(declare-function agent-repl--live-ws-names "workspace" ())
-(declare-function agent-repl-roster-row-for-ws "roster" (ws))
 
 (defun agent-repl-itest-roster--host-live (composer)
   "Return a minimal valid live `HostWorkspace' alist with COMPOSER's arm set.
@@ -1947,50 +1949,6 @@ sidebar.proto:60 marks `task' non-optional; audit-1 #49 pinned
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (agent-repl-itest-roster--push-invalid-carries-raw
                daemon "ws-no-task-marker")))))
-
-;; audit-3 #41
-(ert-deftest agent-repl-itest-roster-finish-edge-banner-names-the-workspace-and-activates ()
-  "The banner backend record's WS is the finished workspace, and the click raises it.
-R-CLICK backend shape `(WS TITLE MESSAGE ACTIVATE)': the message text
-alone does not pin which workspace clicking the banner would raise, nor
-that it raises anything at all.
-
-ACTIVATE is the PER-NOTIFICATION override and nil is its documented
-workspace-shaped default: `agent-repl--notify-backend-alerter' runs
-`(agent-repl--notification-activate WS)' on a click when ACTIVATE is nil,
-which is exactly \"raise the frame and select WS's tab\".  So the finish
-edge passing nil is the CORRECT call -- host.el:518 passes an explicit
-function only because its click must carry more than the workspace name,
-and a finish edge that invented one would replace the default with a
-worse spelling of it.  What must therefore be pinned here is that WS is
-the finished workspace AND that the slot is nil rather than some third
-value the backend would neither run nor default for; the click itself is
-pinned in test-notifications.el
-\(`agent-repl-test-alerter-on-activate-jumps-on-click') and the caller
-side in test-session.el."
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      (let ((agent-repl-roster-finish-functions
-             (list #'agent-repl-roster-notify-finished)))
-        (agent-repl--ws-put "itest-fin-banner-shape" :project-dir (agent-repl-itest--fixture-dir "itest-fin-banner-shape"))
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row
-                        "itest-fin-banner-shape" "itest-fin-banner-shape" 'thinking))))
-        (agent-repl-itest--wait-until
-         (lambda () (eq (agent-repl-status-tab-state "itest-fin-banner-shape") :thinking))
-         nil "the running state")
-        ;; Act.
-        (agent-repl-itest-roster--push
-         daemon (agent-repl-itest-roster--roster
-                 (list (agent-repl-itest-roster--row
-                        "itest-fin-banner-shape" "itest-fin-banner-shape" 'done))))
-        ;; Assert.
-        (agent-repl-itest--wait-until
-         (lambda () agent-repl-itest-notifications) nil "the desktop banner")
-        (let ((recorded (car agent-repl-itest-notifications)))
-          (should (equal (nth 0 recorded) "itest-fin-banner-shape"))
-          (should (null (nth 3 recorded))))))))
 
 ;; audit-3 #42
 (ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()

@@ -9,10 +9,9 @@
 ;; The rpc layer is stubbed with functions that invoke their callbacks
 ;; SYNCHRONOUSLY, so every arm — success, daemon-authored error, transport
 ;; failure — is exercised deterministically with no process anywhere.  The
-;; three W2-B surfaces host.el calls (`agent-repl-status-blink-tab',
+;; surfaces host.el calls in other modules (`agent-repl--notification-activate',
 ;; `agent-repl-frontend-reload-webview', `agent-repl-popup-open') are
-;; NAMED by host.el and defined by W2-B, so they are recorded here rather
-;; than invoked for real.
+;; recorded here rather than invoked for real.
 
 ;;; Code:
 
@@ -61,15 +60,6 @@
   (list :session (list :arm :none :value nil)
         :naming (list :slug nil :title nil)))
 
-(defun agent-repl-test-host--notification (&rest overrides)
-  "Return a `HostWorkspaceNotification' plist, with OVERRIDES applied."
-  (let ((base (list :text "the agent has a question"
-                    :at-ms 1700000000000
-                    :kind (list :arm :agent-addressed :value nil))))
-    (while overrides
-      (setq base (plist-put base (pop overrides) (pop overrides))))
-    base))
-
 ;;;; ---- Harness ----
 
 (defvar agent-repl-test-host--streams nil
@@ -95,12 +85,6 @@
 
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
-
-(defvar agent-repl-test-host--notifications nil
-  "Desktop notifications posted, newest first: `(WS TITLE MESSAGE ACTIVATE)'.")
-
-(defvar agent-repl-test-host--focused nil
-  "What the stubbed `agent-repl--emacs-focused-p' answers.")
 
 (defvar agent-repl-test-host--current-ws nil
   "What the stubbed `agent-repl--ws-current-name' answers.")
@@ -176,9 +160,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--cancelled nil)
          (agent-repl-test-host--calls nil)
          (agent-repl-test-host--effects nil)
-         (agent-repl-test-host--notifications nil)
          (agent-repl-test-host--logs nil)
-         (agent-repl-test-host--focused nil)
          (agent-repl-test-host--current-ws nil)
          (agent-repl-test-host--successor nil)
          (agent-repl-test-host--successor-pending nil)
@@ -255,14 +237,8 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl--ws-put) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--ws-current-name)
                 (lambda () agent-repl-test-host--current-ws))
-               ((symbol-function 'agent-repl--emacs-focused-p)
-                (lambda (&optional _ws) agent-repl-test-host--focused))
-               ((symbol-function 'agent-repl--notify)
-                (lambda (ws title message &optional activate)
-                  (push (list ws title message activate)
-                        agent-repl-test-host--notifications)))
-               ((symbol-function 'agent-repl-status-blink-tab)
-                (lambda (ws) (push (cons :blink ws) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl--notification-activate)
+                (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
                 (lambda (ws)
                   ;; The conn is captured AS THE RELOAD SEES IT: frontend.el
@@ -1073,209 +1049,27 @@ looked at."
             (should (equal (buffer-name buffer) "*agent-panel-input-ws-1*")))
         (kill-buffer buffer)))))
 
-;;;; ---- The notification policy ----
+;;;; ---- The notification click ----
 
-(ert-deftest agent-repl-test-host-notification-unfocused-posts-a-desktop-banner ()
-  "Emacs unfocused: the OS banner is the whole reaction."
+(ert-deftest agent-repl-test-host-notification-click-selects-this-workspace ()
+  "A `notification_clicked' push selects the workspace its stream carries."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (setq agent-repl-test-host--focused nil)
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
+    (agent-repl-test-host--push "ws-1" (list :arm :notification-clicked :value nil))
     ;; Assert
-    (should (equal (seq-take (car agent-repl-test-host--notifications) 3)
-                   (list "ws-1" "ws-1" "the agent has a question")))))
+    (should (equal (car agent-repl-test-host--effects) '(:activate . "ws-1")))))
 
-(ert-deftest agent-repl-test-host-notification-unfocused-does-not-blink ()
-  "The three cases are exclusive: an unfocused Emacs blinks nothing."
+(ert-deftest agent-repl-test-host-notification-click-is-logged ()
+  "The click reaching Emacs leaves an INFO record naming the workspace."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (setq agent-repl-test-host--focused nil)
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
+    (agent-repl-test-host--push "ws-1" (list :arm :notification-clicked :value nil))
     ;; Assert
-    (should (null (assq :blink agent-repl-test-host--effects)))))
-
-(ert-deftest agent-repl-test-host-notification-focused-unselected-blinks-the-tab ()
-  "Focused with the tab elsewhere: the canonical blink cadence."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-other")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    ;; Assert
-    (should (equal (assq :blink agent-repl-test-host--effects) '(:blink . "ws-1")))))
-
-(ert-deftest agent-repl-test-host-notification-focused-unselected-posts-no-banner ()
-  "A banner while the user is looking at Emacs would be noise."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-other")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    ;; Assert
-    (should (null agent-repl-test-host--notifications))))
-
-(ert-deftest agent-repl-test-host-notification-on-the-selected-tab-does-nothing ()
-  "The footer's activity line already shows it."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-1")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    ;; Assert
-    (should (null agent-repl-test-host--effects))))
-
-(ert-deftest agent-repl-test-host-notification-on-the-selected-tab-is-still-logged ()
-  "Doing nothing is a decision, and it is on the record."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-1")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.notification-selected"))))
-
-(ert-deftest agent-repl-test-host-permission-request-follows-the-same-policy ()
-  "A permission ask is a notification kind, not a separate reaction."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-other")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :permission-requested
-                                      :value (list :tool-name "Bash")))))
-    ;; Assert
-    (should (equal (assq :blink agent-repl-test-host--effects) '(:blink . "ws-1")))))
-
-(ert-deftest agent-repl-test-host-permission-request-logs-the-tool-name ()
-  "The gated tool belongs in the log context, not in a line Emacs composes."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :permission-requested
-                                      :value (list :tool-name "Bash")))))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :info "tool=\"Bash\""))))
-
-(ert-deftest agent-repl-test-host-notification-carries-a-click-activation ()
-  "R-CLICK: the unfocused banner carries an activation, not a bare line."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    ;; Assert
-    (should (functionp (nth 3 (car agent-repl-test-host--notifications))))))
-
-(ert-deftest agent-repl-test-host-notification-activation-selects-this-workspace ()
-  "Running the activation selects the workspace the banner came from."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
-    (let ((activated nil))
-      (cl-letf (((symbol-function 'agent-repl--notification-activate)
-                 (lambda (ws) (setq activated ws))))
-        ;; Act
-        (funcall (nth 3 (car agent-repl-test-host--notifications)))
-        ;; Assert
-        (should (equal activated "ws-1"))))))
-
-(ert-deftest agent-repl-test-host-question-asked-unfocused-posts-a-banner ()
-  "A question batch blocks the agent: unfocused, it earns the OS banner."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :question-asked
-                                      :value (list :header "Which branch?")))))
-    ;; Assert
-    ;; R-CLICK appended an activation closure as the record's 4th element;
-    ;; the banner facts are the first three.
-    (should (equal (seq-take (car agent-repl-test-host--notifications) 3)
-                   (list "ws-1" "ws-1" "the agent has a question")))))
-
-(ert-deftest agent-repl-test-host-question-asked-focused-unselected-blinks ()
-  "Focused with the tab elsewhere: the same blink a permission ask gets."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-other")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :question-asked
-                                      :value (list :header "Which branch?")))))
-    ;; Assert
-    (should (equal (assq :blink agent-repl-test-host--effects) '(:blink . "ws-1")))))
-
-(ert-deftest agent-repl-test-host-question-asked-on-the-selected-tab-is-logged-only ()
-  "Selected: the footer already shows it, so the log is the whole reaction."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused t
-          agent-repl-test-host--current-ws "ws-1")
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :question-asked
-                                      :value (list :header "Which branch?")))))
-    ;; Assert
-    (should (and (null agent-repl-test-host--effects)
-                 (agent-repl-test-host--logged-p :info "elisp.host.notification-selected")))))
-
-(ert-deftest agent-repl-test-host-question-asked-logs-the-header ()
-  "The chip header belongs in the log context, like a gated tool's name."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--focused nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :notification
-                  :value (agent-repl-test-host--notification
-                          :kind (list :arm :question-asked
-                                      :value (list :header "Which branch?")))))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :info "header=\"Which branch?\""))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked ws=ws-1"))))
 
 ;;;; ---- The handover ----
 

@@ -888,25 +888,6 @@ The transport's ONE dial point is the boundary the integration suite
 exists to exercise, against a fake daemon on loopback."
   (agent-repl-itest--real-boundary 'agent-repl-connect--open-socket))
 
-(defvar agent-repl-itest-notifications nil
-  "Desktop notifications the fake notifier backend recorded, newest first.
-Each entry is the list (WS TITLE MESSAGE ACTIVATE) — the shape
-`agent-repl-notify-make-fake-backend' records, because that is the seam
-this harness installs.")
-
-(defun agent-repl-itest--fake-notifier ()
-  "Return a notifier backend that records instead of notifying.
-Emacs's notification POLICY is the whole reaction to a `notification'
-push, so the suite must observe the call rather than an OS side effect.
-
-THE SEAM IS PRODUCTION'S OWN.  `agent-repl--notify' calls its backend
-with FOUR arguments (the per-notification click action is the fourth), so
-a hand-rolled three-argument recorder here signals inside the delayed
-notification timer and records nothing at all.  Using
-`agent-repl-notify-make-fake-backend' keeps the arity and the recorded
-shape defined in ONE place, beside the caller that fixes them."
-  (agent-repl-notify-make-fake-backend 'agent-repl-itest-notifications))
-
 (defvar agent-repl-itest-webview-urls nil
   "URLs the fake webview factory was asked to mount, newest first.")
 
@@ -922,15 +903,13 @@ Inside BODY:
   which is what `agent-repl-itest--log-entries' reads;
 - the ONE external boundary the transport dials through is restored to
   its real implementation, and every other guard stays armed;
-- the notifier backend and the webview factory record into
-  `agent-repl-itest-notifications' and `agent-repl-itest-webview-urls'.
+- the webview factory records into `agent-repl-itest-webview-urls'.
 
 The daemon is always stopped and its state dir removed, even when BODY
 signals."
   (declare (indent 1) (debug (symbolp body)))
   `(let ((,var (agent-repl-itest--begin-scenario)))
-     (let* ((agent-repl-itest-notifications nil)
-                (agent-repl-itest-webview-urls nil)
+     (let* ((agent-repl-itest-webview-urls nil)
                 (agent-repl-itest--orphaned-log-targets nil)
                 ;; SCRATCH REGISTRIES, one set per scenario.  Each of these is
                 ;; a process-global production table, and a scenario that
@@ -1005,8 +984,7 @@ signals."
                           (agent-repl-itest--note-orphaned-log-targets ws)
                           (funcall real ws reason))))
                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                      (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
-                     (agent-repl--notification-backend (agent-repl-itest--fake-notifier)))
+                      (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls)))
          (unwind-protect
              (progn ,@body)
            ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be
