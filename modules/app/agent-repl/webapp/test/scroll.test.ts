@@ -21,7 +21,7 @@ import {
   sectionFor,
   sectionTakesWheel,
   wheelDeltaPx,
-  detachedWorkDelta,
+  revealCenterDelta,
   revealGeometry,
   centerDelta,
   collapseDelta,
@@ -1677,7 +1677,7 @@ describe("observeScrollBox", () => {
  * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to CENTER
  * the card the reader picked in the footer (owner ruling, 2026-09-23).
  */
-describe("detachedWorkDelta", () => {
+describe("revealCenterDelta", () => {
   /** A 300px viewport at the top of the screen over a 1000px feed. */
   const view = { boxTop: 0, boxHeight: 300 };
 
@@ -1724,7 +1724,7 @@ describe("detachedWorkDelta", () => {
     },
   ])("$name", ({ node, box, want }) => {
     // Arrange, Act
-    const got = detachedWorkDelta({ ...view, ...node }, box);
+    const got = revealCenterDelta({ ...view, ...node }, box);
 
     // Assert
     expect(got).toBe(want);
