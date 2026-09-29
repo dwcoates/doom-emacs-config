@@ -624,3 +624,16 @@ func (s *server) answerRefusal(
 	}
 	return s.refuse(log, rpc, resp, refused)
 }
+
+// refuseOnto sets ERR on RESP's error arm exactly as the synchronous rpc would
+// answer it, and reports whether it did: false for an error that is not a
+// typed refusal, or whose arm RESP does not declare. It is how a detached
+// mutation's terminal failure carries the same typed refusal the rpc's own
+// `error` would have.
+func (s *server) refuseOnto(log dlog.Logger, rpc string, resp proto.Message, err error) bool {
+	refused, ok := s.asRefusal(err)
+	if !ok {
+		return false
+	}
+	return s.refuse(log, rpc, resp, refused) == nil
+}
