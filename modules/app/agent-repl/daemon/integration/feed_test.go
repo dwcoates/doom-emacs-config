@@ -1775,14 +1775,13 @@ func TestContextCutCompactionFailedDrawsTheCompactionFailedDivider(t *testing.T)
 // Permission and question cards.
 // ==========================================================================
 
-func TestPermissionStartDrawsOpenRowFooterAndHostNotification(t *testing.T) {
+func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-permstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
-	host := f.d.WatchHost(f.ws)
 
 	// Act
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1799,12 +1798,10 @@ func TestPermissionStartDrawsOpenRowFooterAndHostNotification(t *testing.T) {
 	awaitFooter(t, f, footer, "footer waiting.permission", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetPermission() != nil
 	})
-	awaitRow2 := harness.AwaitView(t, f.d.Ctx(), host, "the host notification for the permission ask", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetNotification().GetKind().GetPermissionRequested() != nil
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the permission ask's desktop banner", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.post" && r.Message == "posting a desktop banner" &&
+			r.Context["kind"] == "permission_requested"
 	})
-	if awaitRow2.GetNotification().GetKind().GetPermissionRequested().GetToolName() == "" {
-		t.Fatal("the permission_requested notification carries no tool name")
-	}
 }
 
 func TestPermissionAnsweredRepushesAsAnswered(t *testing.T) {

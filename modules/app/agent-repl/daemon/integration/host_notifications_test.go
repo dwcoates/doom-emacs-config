@@ -3,7 +3,13 @@
 package integration
 
 import (
+	"context"
+	"runtime"
+	"slices"
+	"strings"
 	"testing"
+
+	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,30 +19,64 @@ import (
 )
 
 // ==========================================================================
-// Host notifications (critique 6): the kind is typed
-// (agentrepl/v1/endpoint_watch_host_workspace.proto HostNotificationKind),
-// and the composed line rides the envelope (HostWorkspaceNotification.text)
-// rather than the per-kind message, which is why question_asked's own
-// payload is `header` (HostNotificationQuestionAsked.header) and
-// agent_addressed's is empty (HostNotificationAgentAddressed{}).
+// Desktop banners. The daemon posts every banner itself, through the platform's
+// banner program (the harness's recorder), decided on Emacs's focus: the focus
+// an Emacs WatchDaemon stream connects with, moved by ReportEditorFocus, and
+// forgotten when the stream ends. A banner click reaches Emacs as the host
+// stream's notification_clicked.
 // ==========================================================================
 
-// TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention pins
-// HostNotificationKind.question_asked: the first question's chip label rides
-// the notification's own `header` field
-// (internal/sessionwatcher/route.go's notifyQuestionLocked), and the same
-// notification is what raises the roster's attention marker — every
-// notification kind does, alike (internal/workspace/notify.go's Notify sets
-// it unconditionally once note.Kind is set).
-func TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention(t *testing.T) {
+// awaitBannerSettled waits for the daemon's record that a banner's program
+// returned without a click, and answers every banner argv posted so far.
+func awaitBannerSettled(t *testing.T, f *fixture, what string) [][]string {
+	t.Helper()
+	f.d.AwaitLogRecord(f.d.RunLogPath(), what, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.post" && r.Message == "the banner was dismissed or timed out"
+	})
+	var argvs [][]string
+	for _, inv := range f.d.Notifier.Invocations() {
+		argvs = append(argvs, inv.Argv)
+	}
+	return argvs
+}
+
+// bannerCarrying reports whether any posted argv carries every one of words
+// as an argument, whatever the platform's flag spelling.
+func bannerCarrying(argvs [][]string, words ...string) bool {
+	for _, argv := range argvs {
+		matched := true
+		for _, word := range words {
+			if !slices.ContainsFunc(argv, func(arg string) bool { return strings.Contains(arg, word) }) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// clickToken is what this platform's banner program prints for a click.
+func clickToken() string {
+	if runtime.GOOS == "darwin" {
+		return "@CONTENTCLICKED"
+	}
+	return "default"
+}
+
+// TestQuestionAskedRaisesABannerAndSetsAttention pins that a question batch
+// raises the workspace's desktop banner — the question's line under the
+// workspace's name — and the roster's attention marker.
+func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notify-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	roster := f.d.WatchRoster()
 
-	// Act: a question batch blocks the agent, per feed_test.go's
-	// TestQuestionStartDrawsAnOpenRow pushing idiom.
+	// Act
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
 			Id: &conversationv1.AgentQuestionId{Value: "q-notify"},
@@ -53,33 +93,26 @@ func TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention(t *testing.T)
 		}},
 	}))
 
-	// Assert: the host notification carries the header.
-	push := harness.AwaitView(t, f.d.Ctx(), f.host, "the question_asked host notification", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetNotification().GetKind().GetQuestionAsked() != nil
-	})
-	if got := push.GetNotification().GetKind().GetQuestionAsked().GetHeader(); got != "Auth method" {
-		t.Fatalf("question_asked.header = %q, want %q", got, "Auth method")
+	// Assert
+	argvs := awaitBannerSettled(t, f, "the question banner")
+	if !bannerCarrying(argvs, "Auth method") {
+		t.Fatalf("banners %q, want one carrying the question's line", argvs)
 	}
-
-	// Assert: the same notification set the roster's attention marker.
-	awaitRoster(t, f.d, roster, "the attention marker set by the question_asked notification", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker set by the question", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() != nil
 	})
 }
 
-// TestAgentAddressedNotificationCarriesItsText pins
-// HostNotificationKind.agent_addressed: an AgentPushNotification start frame
-// is the agent reaching an ABSENT user, and the local attention presentation
-// is this system's own fan-out of it (agent_activity.proto). The pushed
-// message rides the envelope's `text`; the kind arm itself carries no fields.
-func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
+// TestAgentAddressedRaisesABannerWithItsText pins that an agent push
+// notification raises a banner carrying the pushed message verbatim.
+func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notify-addressed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
-	// Act: the agent sends a push notification directly to the user.
+	// Act
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("push-1"),
 		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
@@ -91,45 +124,128 @@ func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
 	}))
 
 	// Assert
-	push := harness.AwaitView(t, f.d.Ctx(), f.host, "the agent_addressed host notification",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			return r.GetNotification().GetKind().GetAgentAddressed() != nil
-		})
-	if got := push.GetNotification().GetText(); got != "the deploy finished" {
-		t.Fatalf("agent_addressed notification text = %q, want the pushed message verbatim", got)
+	if argvs := awaitBannerSettled(t, f, "the agent push banner"); !bannerCarrying(argvs, "the deploy finished") {
+		t.Fatalf("banners %q, want one carrying the pushed message", argvs)
 	}
 }
 
-// TestOpeningAWorkspaceLogsNoHostIdentityError guards the realtest-1 regression:
-// right after Emacs subscribes to WatchHostWorkspace, the shim may not yet have
-// described the session, so a briefly missing host identity is a STARTUP
-// TRANSIENT and must never be recorded as the compose_host_workspace ERROR that
-// names a mint defect. Once the host view carries an identity, the boot is past
-// that window, so neither the workspace daemon log nor the run log may hold that
-// ERROR.
-func TestOpeningAWorkspaceLogsNoHostIdentityError(t *testing.T) {
+// TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
+// that concluded raises ✅ "<name> turn completed <time>" over the summary the
+// daemon's headless call wrote (the fake vendor answers ROUTE_HOLD to text).
+func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 	t.Parallel()
-	// Arrange: an opened workspace whose host stream is held from open.
+	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-turn-banner", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
-	// Act: wait until the session is fully described — the host view carries a
-	// minted identity — so the boot's identity window has certainly closed.
-	harness.AwaitView(t, f.d.Ctx(), f.host, "the host session identity",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			return r.GetHost().GetExisting().GetId().GetValue() != ""
-		})
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 
-	// Assert: no host-identity ERROR was recorded on either sink.
-	const wantOp = "daemon.server.compose_host_workspace"
-	const wantMsg = "a session record carries no host identity; the host view was withheld"
-	assertNoHostIdentityError := func(where string, records []harness.LogRecord) {
-		for _, r := range records {
-			if r.Level == "ERROR" && r.Operation == wantOp && r.Message == wantMsg {
-				t.Fatalf("the %s recorded a host-identity ERROR during a healthy boot: %+v", where, r)
-			}
-		}
+	// Assert
+	argvs := awaitBannerSettled(t, f, "the completed-turn banner")
+	if !bannerCarrying(argvs, "✅", "turn completed", "ROUTE_HOLD") {
+		t.Fatalf("banners %q, want the completed title over the model's summary", argvs)
 	}
-	assertNoHostIdentityError("workspace daemon log",
-		f.d.WorkspaceLog(f.repo.Dir, "daemon"))
-	assertNoHostIdentityError("run log", f.d.RunLog())
+}
+
+// TestAFailedTurnRaisesTheErroredBanner pins that a failed turn raises ❌
+// "<name> turn errored <time>" over the errored ending's line.
+func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-turn-failed-banner", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
+	}))
+
+	// Assert
+	if argvs := awaitBannerSettled(t, f, "the errored-turn banner"); !bannerCarrying(argvs, "❌", "turn errored") {
+		t.Fatalf("banners %q, want the errored title", argvs)
+	}
+}
+
+// TestAFocusedEmacsGetsNoBanner pins the focus rule: an Emacs stream that
+// connects focused suppresses every banner.
+func TestAFocusedEmacsGetsNoBanner(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.WatchEmacsDaemonStream(harness.FocusedEditor())
+	f.submit("go", "k-focused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
+
+	// Assert
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
+	})
+	if got := f.d.Notifier.Invocations(); len(got) != 0 {
+		t.Fatalf("a focused Emacs got %d banners, want none", len(got))
+	}
+}
+
+// TestReportEditorFocusMovesTheBannerDecision pins that a report moves the
+// focus the next banner is decided on.
+func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
+	resp, err := f.d.Client().ReportEditorFocus(context.Background(),
+		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: harness.FocusedEditor()}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
+	}
+	f.submit("go", "k-reported", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
+
+	// Assert
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
+	})
+	if got := f.d.Notifier.Invocations(); len(got) != 0 {
+		t.Fatalf("a reported-focused Emacs got %d banners, want none", len(got))
+	}
+}
+
+// TestReportEditorFocusWithNoEmacsStreamIsRefused pins the refusal arm.
+func TestReportEditorFocusWithNoEmacsStreamIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+
+	// Act
+	resp, err := d.Client().ReportEditorFocus(context.Background(),
+		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: harness.FocusedEditor()}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReportEditorFocus: %v", err)
+	}
+	if resp.Msg.GetError().GetNoEmacsStream() == nil {
+		t.Fatalf("response = %v, want the no_emacs_stream arm", resp.Msg)
+	}
+}
+
+// TestAClickedBannerAsksEmacsToSelectTheWorkspace pins the click: the banner
+// program reports a click, and the host stream carries notification_clicked.
+func TestAClickedBannerAsksEmacsToSelectTheWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.Notifier.SetStdout(clickToken())
+	f.submit("go", "k-clicked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
+
+	// Assert
+	harness.AwaitView(t, f.d.Ctx(), f.host, "the banner click on the host stream",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool { return r.GetNotificationClicked() != nil })
 }
