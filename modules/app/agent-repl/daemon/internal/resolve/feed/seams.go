@@ -172,17 +172,6 @@ func lostSentence(cause detachedLostCause) string {
 	return "we lost sight of this work"
 }
 
-// compactScope is FeedColdGateResolvedCompact.scope: WHAT a resolved
-// compaction summarized.
-type compactScope = conversationv1.SessionCompactScope
-
-// applyResolvedCompact fills a resolved compact trace with the summarizer and
-// the scope it ran at.
-func applyResolvedCompact(compact *frontendv1.FeedColdGateResolvedCompact, model *conversationv1.AgentModel, scope compactScope) {
-	compact.Model = &frontendv1.FeedColdGateModel{Model: model}
-	compact.Scope = scope
-}
-
 // applySubagentLostHow relays a DetachedLost arm by name onto a subagent's
 // lost row. It reports false when the cause names no arm this build carries:
 // AN UNLANDED ARM IS NEVER SILENTLY DEFAULTED — the caller says so in the log
