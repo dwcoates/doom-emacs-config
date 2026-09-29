@@ -256,30 +256,26 @@ func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 29. FinishEdgeFiresTheReadyReaction
+// 29. UnfocusedTurnEndRaisesTheDaemonsBanner
 // ---------------------------------------------------------------------------
 
-// TestEmacsFinishEdgeFiresTheReadyReaction is scenario 29.
+// TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner is scenario 29.
 //
-// The banner is Emacs's OWN presentation policy: the daemon publishes that
-// the turn finished and never asks whether Emacs is focused. So both halves
-// of the policy input are supplied deliberately —
-// `agent-repl--emacs-focused-p' is overridden to nil (an unfocused
-// Emacs is the case that posts), and the notification backend is the
-// module's own `agent-repl-notify-make-fake-backend' test seam, which proves
-// what Emacs DECIDED to post without any host notification tool existing.
-func TestEmacsFinishEdgeFiresTheReadyReaction(t *testing.T) {
+// THE DAEMON POSTS EVERY DESKTOP BANNER, decided on the focus Emacs reports.
+// Under Xvfb the frame's focus is whatever the display says, so the scenario
+// states it: `agent-repl--emacs-focused-p' is overridden to nil and Emacs
+// REPORTS that through its own `agent-repl--focus-report', the path its
+// `after-focus-change-function' takes. The banner is then read off the
+// recorder the daemon's banner program is (AGENT_REPL_NOTIFIER_CMD), which
+// proves what the daemon posted without any host banner program existing.
+func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 
 	e.Eval(`(progn
-             (defvar agent-repl-e2e--banners nil)
-             (setq agent-repl-e2e--banners nil)
              (defun agent-repl-e2e--unfocused (&rest _) nil)
              (advice-add 'agent-repl--emacs-focused-p :override #'agent-repl-e2e--unfocused)
-             (setq agent-repl--notification-backend
-                   (agent-repl-notify-make-fake-backend 'agent-repl-e2e--banners))
              ;; Record that the finish edge ran its hook at all, so a missing
              ;; banner can be told apart from a missing edge.
              (defvar agent-repl-e2e--finished nil)
@@ -287,7 +283,10 @@ func TestEmacsFinishEdgeFiresTheReadyReaction(t *testing.T) {
              (defun agent-repl-e2e--note-finish (ws)
                (push ws agent-repl-e2e--finished))
              (add-hook 'agent-repl-roster-finish-functions #'agent-repl-e2e--note-finish)
+             (agent-repl--focus-report)
              t)`)
+	e.AwaitTrue("Emacs's unfocused report to be answered",
+		`(not agent-repl--focus-report-in-flight)`)
 
 	typeIntoComposer(e, s.Input, "finish this turn and tell me about it")
 	e.KeysIn(s.Input, "RET")
@@ -295,24 +294,31 @@ func TestEmacsFinishEdgeFiresTheReadyReaction(t *testing.T) {
 	e.AwaitTrue("the finish edge to run agent-repl-roster-finish-functions",
 		`(and (member `+elispString(s.Name)+` agent-repl-e2e--finished) t)`)
 
-	// The banner body is frozen as "Agent ready: <name>": the workspace name
-	// is the fact the user scans for in a stack of notifications. The post
-	// is scheduled through `agent-repl-notify-delay', so the recording is
-	// awaited rather than read once.
-	bannersForm := `(mapcar (lambda (entry) (format "%s" (nth 2 entry))) agent-repl-e2e--banners)`
-	raw := e.AwaitEval("the notification backend to record the ready banner", bannersForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > 0 })
+	// The daemon posts after the summary call returns, so the recorder is
+	// awaited rather than read once. Emacs reads the record file because it
+	// is the process the scenario already polls through.
+	recordForm := `(if (file-exists-p ` + elispString(e.Notifier.Record) + `)
+	                   (with-temp-buffer (insert-file-contents ` + elispString(e.Notifier.Record) + `) (buffer-string))
+	                 "")`
+	e.AwaitEval("the daemon's banner program to record the completed-turn banner", recordForm,
+		func(raw json.RawMessage) bool {
+			var text string
+			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, "turn completed")
+		})
 
-	want := "Agent ready: " + s.Name
-	banners := decodeStrings(raw)
+	wantTitle := "✅ " + s.Name + " turn completed"
 	found := false
-	for _, banner := range banners {
-		if banner == want {
-			found = true
+	var argvs [][]string
+	for _, inv := range e.Notifier.Invocations() {
+		argvs = append(argvs, inv.Argv)
+		for _, arg := range inv.Argv {
+			if strings.HasPrefix(arg, wantTitle) {
+				found = true
+			}
 		}
 	}
 	if !found {
-		t.Errorf("the recorded banners are %v, want one reading %q", banners, want)
+		t.Errorf("the daemon's banners are %q, want one titled %q", argvs, wantTitle)
 	}
 }
 
