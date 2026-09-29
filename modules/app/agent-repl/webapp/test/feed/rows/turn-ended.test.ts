@@ -192,6 +192,20 @@ describe("drawFeedTurnEnded: the final answer", () => {
       ),
     ).not.toThrow();
   });
+
+  it("records an answer on a page not loaded yet at debug, never as a warning", async () => {
+    // Arrange: the daemon names only rows it drew, so an absent row is older
+    // history this page has not loaded.
+    const capture = captureLogRecords("debug");
+    // Act
+    drawFeedTurnEnded(
+      ended({ case: "concluded", value: { answer: feedId("older") } }),
+      contextWithRow(null),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.final-answer-row-absent");
+    expect(record.level.case).toBe("debug");
+  });
 });
 
 describe("drawFeedTurnEnded: every error arm", () => {
