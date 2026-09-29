@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -18,7 +19,7 @@ func TestNewRefusesMissingCollaborators(t *testing.T) {
 	full := Deps{
 		Dir: "/output", Verbs: newFakeVerbs(), Merge: &fakeMerge{},
 		Prompts: &fakePrompts{}, Log: newFakeSurfaces(),
-		Serves: func() bool { return true },
+		Serves: func() bool { return true }, Home: "/Users/me",
 	}
 	tests := []struct {
 		name  string
@@ -30,6 +31,8 @@ func TestNewRefusesMissingCollaborators(t *testing.T) {
 		{name: "no prompt handler", strip: func(d *Deps) { d.Prompts = nil }},
 		{name: "no log surfaces", strip: func(d *Deps) { d.Log = nil }},
 		{name: "no serving answer", strip: func(d *Deps) { d.Serves = nil }},
+		{name: "no home directory", strip: func(d *Deps) { d.Home = "" }},
+		{name: "a relative home directory", strip: func(d *Deps) { d.Home = "me" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -693,5 +696,79 @@ func TestAnEntryRefusedAtApplyTimeQuarantinesTheFile(t *testing.T) {
 	quarantined := filepath.Join(f.dir, "quarantine", "workspace_commands_refused.json")
 	if _, statErr := os.Stat(quarantined); statErr != nil {
 		t.Fatalf("stat %q: %v, want the refused file in quarantine", quarantined, statErr)
+	}
+}
+
+// TestApplyFileExpandsTheSkillsTildeGitRoot pins the create the
+// /create-or-update-workspace skill dispatched on 2026-09-28: `git_root` was
+// the literal `~/.config/doom`, which the skill's contract says is expanded
+// downstream. The daemon absolutized it against its working directory instead,
+// looked for `/Users/me/~/.config/doom`, and quarantined the file.
+func TestApplyFileExpandsTheSkillsTildeGitRoot(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_tilde.json",
+		`[{"type":"create","name":"merge-rebase-first","git_root":"~/.config/doom","prompt":"rework the merge"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].Spec.RepoDir != fixtureHome+"/.config/doom" {
+		t.Fatalf("verb calls = %+v, want one create of %s/.config/doom", f.verbs.calls, fixtureHome)
+	}
+}
+
+func TestApplyFileResolvesATildeProjectDir(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", fixtureHome+"/tree/w1")
+	path := f.write(t, "workspace_commands_tilde_merge.json",
+		`[{"type":"merge","workspace":"w1-name","project_dir":"~/tree/w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.enqueued) != 1 || f.merge.enqueued[0] != "w1" {
+		t.Fatalf("enqueued merges = %v, want w1", f.merge.enqueued)
+	}
+}
+
+// TestApplyFileQuarantinesARelativeDirectory pins the refusal: a relative
+// directory is never guessed against the working directory, so the whole file
+// applies nothing, retires to quarantine, and the warning names the field.
+func TestApplyFileQuarantinesARelativeDirectory(t *testing.T) {
+	// Arrange: a valid merge first, so a partial apply would show.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_relative.json",
+		`[{"type":"merge","project_dir":"/tree/w1"},{"type":"create","name":"x","git_root":".config/doom"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want ErrQuarantined", err)
+	}
+	if len(f.merge.enqueued) != 0 || len(f.verbs.calls) != 0 {
+		t.Fatalf("enqueued %v and called %v, want nothing applied", f.merge.enqueued, verbNames(f.verbs.calls))
+	}
+	if got := entries(t, filepath.Join(f.dir, "quarantine")); len(got) != 1 {
+		t.Fatalf("quarantined files = %v, want exactly one", got)
+	}
+	var cause string
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == opQuarantine && record.Level == "warn" {
+			cause, _ = record.Context["cause"].(string)
+		}
+	}
+	if !strings.Contains(cause, "entry 1: create: git_root: ") || !strings.Contains(cause, "not an absolute path") {
+		t.Fatalf("quarantine warning cause = %q, want entry 1's git_root named as not absolute", cause)
 	}
 }

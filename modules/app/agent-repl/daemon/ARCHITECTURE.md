@@ -848,6 +848,25 @@ topbar swap imports):
 - Suffixes composed by the call site ("18.2k in", "12.4k tok") wrap this
   value; the formatter emits only the figure.
 
+## commandfile
+
+The command-file ingress sweeps `$AGENT_REPL_STATE_DIR/output/workspace_commands_*.json`
+and maps every entry onto the same internal path as the equivalent rpc. A file
+is ONE request: an entry that does not validate, or whose directory cannot be
+resolved, applies nothing from the whole file, which retires to `quarantine/`
+at WARN `daemon.commandfile.quarantine` with the refused entry and field in its
+cause.
+
+EVERY DIRECTORY FIELD (`git_root`, `project_dir`, `dir`) goes through
+`dirpath.Absolute` before anything reads it. A leading `~` expands to the home
+directory the daemon resolved at boot, because the `/create-or-update-workspace`
+skill's contract says a leading `~` is expanded downstream. `~user` and any path
+still relative afterwards are refused. None is resolved against the daemon's
+working directory, which is wherever launchd started it:
+`filepath.Abs("~/.config/doom")` once named `/Users/me/~/.config/doom`, and
+the create that carried it was quarantined as an unknown repository
+(2026-09-28).
+
 ## heldingress
 
 A client whose `SubmitPrompt` the daemon did not answer — no daemon, a stuck
