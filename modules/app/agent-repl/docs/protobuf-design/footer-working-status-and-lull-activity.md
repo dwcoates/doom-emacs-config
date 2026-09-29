@@ -176,3 +176,22 @@ substatus that stands for the whole turn. The owner wants the status called
   (the new daemon requires `WatchDaemonEmacs.focus`, so daemon and Emacs must
   update together).
 - Quit Docker when done with it.
+
+## 2026-09-29 addendum: the quiet-stretch line is held until its successor is painted
+
+- OWNER REPORT: the quiet-stretch line cleared visibly before the feed item
+  that ended it was on screen, leaving a gap with neither.
+- OWNER RULING (shape "ending hold"): landed in `frontend/v1/footer.proto` as
+  `frontend.v1.FooterStatusQuietStretchEnding { string text = 1; FeedId
+  until_painted = 2; }`, carried as `quiet_stretch_ending` on
+  `frontend.v1.FooterStatusWorking` (tag 12) and
+  `frontend.v1.FooterStatusBackground` (tag 2).
+  - The daemon ends a stretch when the next feed item is DRAWN (the feed
+    announces the row it drew for that unit), and states the ended line with
+    that row.
+  - `activity` keeps carrying what the precedence chain resolves now; the
+    ending is set only while nothing that outranks the quiet-stretch line
+    stands.
+  - The client draws `text` until it has painted `until_painted`, then 500ms
+    more, then `activity`; a feed not showing the live tail drops the hold at
+    once.
