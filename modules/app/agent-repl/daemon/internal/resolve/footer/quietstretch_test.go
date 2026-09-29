@@ -1,0 +1,589 @@
+package footer
+
+import (
+	"testing"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+)
+
+// itemFrame builds one activity frame generically: the item arm named ARM
+// carrying its own oneof arm PHASE, empty otherwise. The empty payloads are
+// all the working step and the quiet stretch read.
+func itemFrame(t *testing.T, unit string, arm protoreflect.Name, phase protoreflect.Name) *conversationv1.AgentActivity {
+	t.Helper()
+	act := &conversationv1.AgentActivity{ActivityId: &conversationv1.AgentActivityId{Value: unit}}
+	msg := act.ProtoReflect()
+	field := msg.Descriptor().Fields().ByName(arm)
+	if field == nil {
+		t.Fatalf("AgentActivity has no item arm %q", arm)
+	}
+	item := msg.NewField(field).Message()
+	phaseField := item.Descriptor().Fields().ByName(phase)
+	if phaseField == nil {
+		t.Fatalf("%s has no arm %q", item.Descriptor().FullName(), phase)
+	}
+	item.Set(phaseField, item.NewField(phaseField))
+	msg.Set(field, protoreflect.ValueOfMessage(item))
+	return act
+}
+
+// inTurn arranges a delivered turn whose main agent is named.
+func inTurn(h *harness) {
+	connected(h)
+	h.r.OnMainAgent(testWS, mainAgent)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnTurnOpened(testWS, testTurnID)
+}
+
+// working reads the published working arm.
+func working(t *testing.T, h *harness) *frontendv1.FooterStatusWorking {
+	t.Helper()
+	arm := h.view(t).GetStrip().GetStatus().GetWorking()
+	if arm == nil {
+		t.Fatalf("status = %q, want working", h.status(t))
+	}
+	return arm
+}
+
+// quietLine reads the published working arm's quiet-stretch line, "" when none.
+func quietLine(t *testing.T, h *harness) string {
+	t.Helper()
+	return working(t, h).GetActivity().GetQuietStretch().GetText()
+}
+
+// stepName names the working arm's step the way the strip spells it.
+func stepName(arm *frontendv1.FooterStatusWorking) string {
+	m := arm.ProtoReflect()
+	field := m.WhichOneof(m.Descriptor().Oneofs().ByName("substatus"))
+	if field == nil {
+		return ""
+	}
+	return string(field.Name())
+}
+
+func TestTheWorkingStepNamesTheRunningCall(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  protoreflect.Name
+		want string
+	}{
+		{"a read", "read", "reading"},
+		{"a write", "write", "writing"},
+		{"an edit", "edit", "writing"},
+		{"a grep", "grep", "searching"},
+		{"a glob", "glob", "searching"},
+		{"a web search", "web_search", "searching"},
+		{"a web fetch", "web_fetch", "fetching"},
+		{"a sync subagent", "subagent", "delegating"},
+		{"a shell command", "bash", "executing"},
+		{"an MCP tool", "mcp_tool_call", "executing"},
+		{"a tool the contract does not model", "unmodeled", "executing"},
+		{"a streaming response", "response", "thinking"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			inTurn(h)
+
+			// Act
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", tt.arm, "start"))
+
+			// Assert
+			if got := stepName(working(t, h)); got != tt.want {
+				t.Fatalf("step = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheWorkingStepIsThinkingOnceTheCallLands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: no call runs, so an inference call does", got)
+	}
+}
+
+func TestTheLatestRunningCallNamesTheStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "grep", "start"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "searching" {
+		t.Fatalf("step = %q, want searching: the latest running call names it", got)
+	}
+}
+
+func TestAnEarlierCallNamesTheStepWhenTheLatestLands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "grep", "start"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "grep", "success"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "reading" {
+		t.Fatalf("step = %q, want reading: the read still runs", got)
+	}
+}
+
+func TestASubagentsOwnCallNamesNoStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-sub", "read", "start"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: only the main agent's calls name the step", got)
+	}
+}
+
+func TestAnUnnamedMainAgentNamesNoStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnTurnOpened(testWS, testTurnID)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: attribution to the main agent is never guessed", got)
+	}
+}
+
+func TestADeliveredPromptStandsTheQuietLine(t *testing.T) {
+	tests := []struct {
+		name string
+		act  SessionAct
+		want string
+	}{
+		{"a prompt", ActPrompt, "✅ Prompt delivered — awaiting response..."},
+		{"a /clear", ActClear, "✅ /clear delivered — clearing context..."},
+		{"a /compact", ActCompact, "✅ /compact delivered — compacting context..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnMainAgent(testWS, mainAgent)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: tt.act})
+
+			// Act
+			h.r.OnTurnOpened(testWS, testTurnID)
+
+			// Assert
+			if got := deliveredLine(tt.act); got != tt.want {
+				t.Fatalf("delivered line = %q, want %q", got, tt.want)
+			}
+			if tt.act == ActPrompt {
+				if got := quietLine(t, h); got != tt.want {
+					t.Fatalf("line = %q, want %q", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestALandedItemStandsItsQuietLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		arm   protoreflect.Name
+		phase protoreflect.Name
+		want  string
+	}{
+		{"a finished shell command", "bash", "success", "✅ Bash finished — handling result..."},
+		{"a failed read", "read", "failure", "❌ Read failed — handling failure..."},
+		{"a finished response", "response", "success", "✅ Response finished — continuing..."},
+		{"a cancelled hook", "hook", "cancelled", "❌ Hook cancelled — continuing..."},
+		{"a blocking hook", "hook", "blocking_error", "❌ Hook failed — handling failure..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			inTurn(h)
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", tt.arm, "start"))
+
+			// Act
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", tt.arm, tt.phase))
+
+			// Assert
+			if got := quietLine(t, h); got != tt.want {
+				t.Fatalf("line = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheNextSurfacingClearsTheQuietLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Act: the response's FIRST frame, long before it lands.
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "response", "start"))
+
+	// Assert
+	if got := quietLine(t, h); got != "" {
+		t.Fatalf("line = %q, want none: the next item surfaced", got)
+	}
+}
+
+func TestTheFirstSurfacingClearsTheDeliveredLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "thinking", "start"))
+
+	// Assert
+	if got := quietLine(t, h); got != "" {
+		t.Fatalf("line = %q, want none once the turn's first item surfaced", got)
+	}
+}
+
+func TestALandingBesideARunningItemStandsNoLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "grep", "start"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
+
+	// Assert
+	if got := quietLine(t, h); got != "" {
+		t.Fatalf("line = %q, want none: the grep still runs, so the feed is moving", got)
+	}
+}
+
+func TestAnUndrawnItemSurfacingLeavesTheLineStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Act: a tool the feed draws no row for.
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "unmodeled", "start"))
+
+	// Assert
+	if got := quietLine(t, h); got != "✅ Bash finished — handling result..." {
+		t.Fatalf("line = %q, want the bash line: nothing surfaced in the feed", got)
+	}
+}
+
+func TestALandingReplacesAStandingNotification(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("look at this"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Assert
+	activity := working(t, h).GetActivity()
+	if activity.GetNotification() != nil || activity.GetQuietStretch() == nil {
+		t.Fatalf("activity = %v, want the quiet-stretch line in the notification's place", activity)
+	}
+}
+
+func TestARunningHookOutranksTheQuietLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
+
+	// Assert
+	if got := working(t, h).GetActivity().GetHook().GetName(); got != "pre-commit" {
+		t.Fatalf("activity = %v, want the running hook's line", working(t, h).GetActivity())
+	}
+}
+
+func TestTheTurnsEndRetiresTheQuietLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	endTurn(h, testTurnID)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+		t.Fatalf("background line = %v, want none: the turn's line ended with it", got)
+	}
+}
+
+func TestADetachedCallLeavesTheStepAndStandsTheLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("u-1"))
+
+	// Assert
+	arm := working(t, h)
+	if got := stepName(arm); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: detached work is never a step", got)
+	}
+	if got := arm.GetActivity().GetQuietStretch().GetText(); got != "✅ Moved to background — continuing..." {
+		t.Fatalf("line = %q, want the moved-to-background line", got)
+	}
+}
+
+func TestADetachedUnitsLaterFramesAreIgnored(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+		Work: workID("u-1"),
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "u-1"},
+		}},
+	})
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "tail"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: the shell left the turn", got)
+	}
+}
+
+func TestAMonitorSurfacesAndHandsOffAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "monitor", "start"))
+
+	// Assert
+	arm := working(t, h)
+	if got := arm.GetActivity().GetQuietStretch().GetText(); got != "✅ Monitor started — continuing..." {
+		t.Fatalf("line = %q, want the monitor-started line", got)
+	}
+	if got := stepName(arm); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: a monitor is always detached", got)
+	}
+}
+
+func TestABackgroundLandingStandsItsLine(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(t *testing.T, h *harness)
+		want string
+	}{
+		{"a detached subagent finishing", func(t *testing.T, h *harness) {
+			h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+		}, "✅ Subagent finished"},
+		{"a detached subagent failing", func(t *testing.T, h *harness) {
+			h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(true))
+		}, "❌ Subagent failed"},
+		{"a detached shell failing", func(t *testing.T, h *harness) {
+			h.r.OnBash(testWS, workID("w-1"), &conversationv1.AgentBash{
+				Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{}}})
+		}, "❌ Bash failed"},
+		{"a subagent's own read landing", func(t *testing.T, h *harness) {
+			h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-9", "read", "success"))
+		}, "✅ Read finished"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2", "w-2"}, nil, nil))
+
+			// Act
+			tt.act(t, h)
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch().GetText()
+			if got != tt.want {
+				t.Fatalf("background line = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestABackgroundSurfacingClearsTheLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+
+	// Act
+	h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-9", "read", "start"))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+		t.Fatalf("background line = %v, want none: the next item surfaced", got)
+	}
+}
+
+func TestADetachedLandingDuringATurnStandsNoLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "response", "start"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+
+	// Assert
+	if got := quietLine(t, h); got != "" {
+		t.Fatalf("line = %q, want none: background items are not surfaced while a turn runs", got)
+	}
+}
+
+func TestTheBackgroundLineEndsWithTheLastDetachedWork(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+
+	// Act
+	h.r.OnLiveWorkChanged(testWS, LiveWorkSet{})
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-3"}, nil, nil))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+		t.Fatalf("background line = %v, want none: it stood for work that has ended", got)
+	}
+}
+
+func TestAQuietStretchWithNoLineIsRecordedAtError(t *testing.T) {
+	// Arrange: a delivered turn whose line was lost, which the tracker never
+	// produces on its own.
+	h := newHarness(t)
+	inTurn(h)
+	h.r.mu.Lock()
+	s := h.r.states[testWS]
+	s.motion.line = nil
+
+	// Act
+	h.r.checkQuietStretch(testWS, s, "under_test")
+	h.r.mu.Unlock()
+
+	// Assert
+	records := recordsOf(h.log.Records(), "daemon.footer.quiet_stretch_without_line")
+	if len(records) != 1 || records[0].Level != dlog.LevelError {
+		t.Fatalf("records = %+v, want one ERROR", records)
+	}
+	if records[0].Context["cause"] != "under_test" || records[0].Context["invariant_violation"] == nil {
+		t.Fatalf("context = %v, want the cause and the invariant", records[0].Context)
+	}
+}
+
+func TestAnOrdinaryTurnRecordsNoQuietStretchError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "response", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "response", "success"))
+
+	// Assert
+	if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.quiet_stretch_without_line"); got != 0 {
+		t.Fatalf("%d quiet-stretch errors, want none", got)
+	}
+}
+
+func TestAnUnknownItemPhaseIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	saved := itemPhases["tail"]
+	delete(itemPhases, "tail")
+	t.Cleanup(func() { itemPhases["tail"] = saved })
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "tail"))
+
+	// Assert
+	records := recordsOf(h.log.Records(), "daemon.footer.quiet_stretch_unknown_phase")
+	if len(records) != 1 || records[0].Level != dlog.LevelError || records[0].Context["phase_arm"] != "tail" {
+		t.Fatalf("records = %+v, want one ERROR naming the arm", records)
+	}
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking: an unread frame opens nothing", got)
+	}
+}
+
+func TestEveryActivityArmHasAFeedKind(t *testing.T) {
+	items := (&conversationv1.AgentActivity{}).ProtoReflect().Descriptor().Oneofs().ByName("item").Fields()
+	for i := 0; i < items.Len(); i++ {
+		if _, ok := feedKinds[items.Get(i).Name()]; !ok {
+			t.Errorf("AgentActivity arm %q has no footer.feedKinds entry", items.Get(i).Name())
+		}
+	}
+	if len(feedKinds) != items.Len() {
+		t.Errorf("feedKinds holds %d arms, the contract declares %d", len(feedKinds), items.Len())
+	}
+}
+
+func TestEveryItemPhaseArmIsRead(t *testing.T) {
+	items := (&conversationv1.AgentActivity{}).ProtoReflect().Descriptor().Oneofs().ByName("item").Fields()
+	for i := 0; i < items.Len(); i++ {
+		item := items.Get(i).Message()
+		if item.Oneofs().Len() != 1 {
+			t.Errorf("%s carries %d oneofs, want exactly one", item.FullName(), item.Oneofs().Len())
+			continue
+		}
+		arms := item.Oneofs().Get(0).Fields()
+		for j := 0; j < arms.Len(); j++ {
+			if _, ok := itemPhases[arms.Get(j).Name()]; !ok {
+				t.Errorf("%s arm %q has no footer.itemPhases entry", item.FullName(), arms.Get(j).Name())
+			}
+		}
+	}
+}

@@ -32,6 +32,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.observeUsage(unit, s.usageAgent(agent.GetValue()), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			r.applyActivity(ws, s, agent, unit, act)
+			r.trackFeed(ws, s, agent, unit, act)
 		})
 }
 
@@ -419,6 +420,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 				return
 			}
 			s.turn = nil
+			r.endTurnMotion(s)
 			s.tok.settled = true
 			s.hook = nil
 			s.interrupting = false
@@ -563,12 +565,12 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 			if agent == nil {
 				markAdopted(s, id, work)
 			}
-			r.applyDetached(s, id, work)
+			r.applyDetached(ws, s, id, work)
 		})
 }
 
 // applyDetached folds a detachment announcement into the chips.
-func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.AgentDetachedWork) {
+func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work *conversationv1.AgentDetachedWork) {
 	// AN ANNOUNCEMENT AFTER THE TERMINAL IS A REPLAY TOO, for the reason a
 	// start is: the announcement reaches the footer once per book, and the
 	// second telling can arrive after the run has already settled.
@@ -578,6 +580,7 @@ func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.Age
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		unit := origin.Detached.GetDetachedFromId().GetValue()
+		r.leaveTurn(ws, s, unit)
 		if row, ok := s.bashUnits[unit]; ok {
 			s.shells[id] = &shellRow{
 				work: id, command: row.command, startedAt: row.startedAt, order: s.nextOrder()}
@@ -591,6 +594,9 @@ func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.Age
 			return
 		}
 	case *conversationv1.AgentDetachedWork_Created:
+		// The work's handle IS the unit that created it
+		// (`DetachedWorkId.value == AgentActivityId.value`).
+		r.leaveTurn(ws, s, id)
 		r.applyCreatedWork(s, id, origin.Created.GetWorkCreated())
 	}
 }
@@ -674,6 +680,9 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 					}
 				}
 			default:
+				if _, done := s.retiredWork[id]; !done {
+					r.landBackground(s, "Subagent", detachedPhase(sub.GetFailure() != nil))
+				}
 				retireWork(s, id)
 			}
 		})
@@ -721,6 +730,9 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
 			case *conversationv1.AgentBash_Tail:
 			default:
+				if _, done := s.retiredWork[id]; !done {
+					r.landBackground(s, "Bash", detachedPhase(bash.GetFailure() != nil))
+				}
 				s.retiredWork[id] = struct{}{}
 				delete(s.shells, id)
 			}

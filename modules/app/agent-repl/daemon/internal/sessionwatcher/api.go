@@ -199,6 +199,11 @@ type FooterSink interface {
 	// already over — so the footer is told here, and this is what raises
 	// `thinking submitting` and starts the strip's clock.
 	OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnMainAgent names the session's MAIN agent, whenever the feed is told
+	// it and in the same breath: the working step and the quiet-stretch line
+	// are the main agent's, and an agent the footer has not been told is the
+	// main one is never taken for it.
+	OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId)
 	// OnActivity advances the status tree and the activity line.
 	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity)
 	// OnQuestion moves the footer to waiting.
