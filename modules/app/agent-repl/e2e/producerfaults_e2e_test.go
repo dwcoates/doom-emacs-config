@@ -222,8 +222,9 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 
 // TestQueryDiedFailsTheFootersTurn is the same death seen on the FOOTER. A
 // dead query is a FAILED TURN, not a block (owner ruling, 2026-09-28): the
-// strip draws `idle · turn_failed`, the same turn end the roster draws
-// `turn_failed`, and the idle activity line is the daemon-composed
+// strip draws the turquoise `turn_failed` status arm (FooterStatusTurnFailed,
+// which replaced `idle · turn_failed`), the same turn end the roster draws
+// `turn_failed`, and its activity line is the daemon-composed
 // FooterStatusActivityQueryDied.
 func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 	t.Parallel()
@@ -242,12 +243,9 @@ func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 	view := pfAwaitView(t, w, footer.Stream, "the footer's failed turn after the query died", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetTurnFailed() != nil
 	})
-	idle := view.GetStrip().GetStatus().GetIdle()
-	if idle.GetTurnFailed() == nil {
-		t.Fatalf("footer push matched the failed turn but re-reading it found none: %v", view)
-	}
-	if got := idle.GetActivity().GetQueryDied().GetText(); got == "" {
-		t.Errorf("footer idle activity query_died text = %q, want the daemon's composed dead-query line", got)
+	failed := view.GetStrip().GetStatus().GetTurnFailed()
+	if got := failed.GetActivity().GetQueryDied().GetText(); got == "" {
+		t.Errorf("footer turn_failed activity query_died text = %q, want the daemon's composed dead-query line", got)
 	}
 }
 
