@@ -27,18 +27,6 @@ message WatchHostWorkspaceResponse {
   oneof push {
     // The workspace's host state, whole-replaced per push.
     HostWorkspace host = 1;
-    // A notification EVENT for this workspace — fired, not state. EMACS
-    // OWNS PRESENTATION POLICY, because Emacs owns the knowledge:
-    //   Emacs unfocused           → post the OS desktop notification; its
-    //                               click raises the frame and selects this
-    //                               workspace's tab (plain elisp, no daemon
-    //                               round-trip);
-    //   focused, tab not selected → blink the tab-bar entry, per THE
-    //                               CANONICAL BLINK CADENCE specified on
-    //                               frontend.v1 RosterRowAttention;
-    //   tab selected              → nothing (the footer's activity line
-    //                               already shows it).
-    HostWorkspaceNotification notification = 2;
     // DAEMON HANDOVER: this workspace has been released by this (old)
     // daemon at freeness — from this push on, this daemon does NO work for
     // the workspace. Emacs's obligation: call AdoptHostWorkspace on the NEW
@@ -63,7 +51,19 @@ message WatchHostWorkspaceResponse {
     // last frame; the client reattaches to the live daemon without treating
     // the end as a fault. See the message.
     DaemonStreamEnding ending = 6;
+    // THE USER CLICKED THIS WORKSPACE'S DESKTOP BANNER: raise Emacs's frame
+    // and select this workspace's tab. The daemon posts every desktop
+    // notification and reads the click back from the banner itself, so the
+    // selection it asks for is the only part of a notification Emacs acts on.
+    // An event, not state: never replayed to a late subscriber, because a
+    // click belongs to the moment it was made.
+    HostWorkspaceNotificationClicked notification_clicked = 7;
   }
+  // Retired: desktop notifications are posted by the daemon and never cross
+  // this stream, and the tab blink is drawn from the roster's attention
+  // marker (frontend.v1.RosterRowAttention).
+  reserved 2;
+  reserved "notification";
 }
 
 // The relayed click's target, verbatim from the request.
@@ -77,46 +77,10 @@ message HostOpenInEditor {
 message HostWorkspaceTransferred {}
 message HostWorkspaceReloadWebapp {}
 
-// A notification for this workspace's user. THE KIND IS TYPED — the
-// composed text is presentation; the kind arm is the programmatic
-// semantics.
-message HostWorkspaceNotification {
-  // The composed line, verbatim (agent-authored or daemon-composed).
-  string text = 1;
-  // When it fired, epoch ms.
-  int64 at_ms = 2;
-  // THE ARM IS THE KIND.
-  HostNotificationKind kind = 3;
-}
-
-// THE ARM IS THE KIND of notification.
-message HostNotificationKind {
-  oneof kind {
-    HostNotificationAgentAddressed agent_addressed = 1;
-    HostNotificationPermissionRequested permission_requested = 2;
-    // A question batch arrived and blocks the agent — the same attention
-    // treatment as a permission ask; the daemon also sets the attention
-    // marker.
-    HostNotificationQuestionAsked question_asked = 3;
-  }
-}
-
-// A question blocks the agent on the user's choice.
-message HostNotificationQuestionAsked {
-  // The first question's chip label, for the banner line.
-  string header = 1;
-}
-
-// The agent addressed the user directly.
-message HostNotificationAgentAddressed {
-}
-
-// A permission ask arrived and blocks the agent; the daemon also sets the
-// attention marker. The client's focus policy decides presentation.
-message HostNotificationPermissionRequested {
-  // The gated tool's name, for the banner line.
-  string tool_name = 1;
-}
+// The user clicked this workspace's desktop banner. Empty: the stream it
+// rides names the workspace, and selecting that workspace's tab is the whole
+// of Emacs's obligation.
+message HostWorkspaceNotificationClicked {}
 
 // The host-facing state of one workspace: what Emacs needs to correlate
 // processes, gate its composer, and manage buffers — nothing a webview draws.

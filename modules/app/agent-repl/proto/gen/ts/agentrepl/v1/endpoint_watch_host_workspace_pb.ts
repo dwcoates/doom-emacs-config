@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_host_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_host_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYigQMKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj8KDG5vdGlmaWNhdGlvbhgCIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlTm90aWZpY2F0aW9uSAASPQoLdHJhbnNmZXJyZWQYAyABKAsyJi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVRyYW5zZmVycmVkSAASQAoNcmVsb2FkX3dlYmFwcBgEIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlUmVsb2FkV2ViYXBwSAASOAoOb3Blbl9pbl9lZGl0b3IYBSABKAsyHi5hZ2VudHJlcGwudjEuSG9zdE9wZW5JbkVkaXRvckgAEjIKBmVuZGluZxgGIAEoCzIgLmFnZW50cmVwbC52MS5EYWVtb25TdHJlYW1FbmRpbmdIAEIGCgRwdXNoIjwKEEhvc3RPcGVuSW5FZGl0b3ISDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUiGgoYSG9zdFdvcmtzcGFjZVRyYW5zZmVycmVkIhsKGUhvc3RXb3Jrc3BhY2VSZWxvYWRXZWJhcHAiagoZSG9zdFdvcmtzcGFjZU5vdGlmaWNhdGlvbhIMCgR0ZXh0GAEgASgJEg0KBWF0X21zGAIgASgDEjAKBGtpbmQYAyABKAsyIi5hZ2VudHJlcGwudjEuSG9zdE5vdGlmaWNhdGlvbktpbmQigQIKFEhvc3ROb3RpZmljYXRpb25LaW5kEkcKD2FnZW50X2FkZHJlc3NlZBgBIAEoCzIsLmFnZW50cmVwbC52MS5Ib3N0Tm90aWZpY2F0aW9uQWdlbnRBZGRyZXNzZWRIABJRChRwZXJtaXNzaW9uX3JlcXVlc3RlZBgCIAEoCzIxLmFnZW50cmVwbC52MS5Ib3N0Tm90aWZpY2F0aW9uUGVybWlzc2lvblJlcXVlc3RlZEgAEkUKDnF1ZXN0aW9uX2Fza2VkGAMgASgLMisuYWdlbnRyZXBsLnYxLkhvc3ROb3RpZmljYXRpb25RdWVzdGlvbkFza2VkSABCBgoEa2luZCIvCh1Ib3N0Tm90aWZpY2F0aW9uUXVlc3Rpb25Bc2tlZBIOCgZoZWFkZXIYASABKAkiIAoeSG9zdE5vdGlmaWNhdGlvbkFnZW50QWRkcmVzc2VkIjgKI0hvc3ROb3RpZmljYXRpb25QZXJtaXNzaW9uUmVxdWVzdGVkEhEKCXRvb2xfbmFtZRgBIAEoCSLvAQoNSG9zdFdvcmtzcGFjZRItCgRub25lGAEgASgLMh0uYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uTm9uZUgAEjUKCGV4aXN0aW5nGAIgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uRXhpc3RpbmdIABIxCgZuYW1pbmcYAyABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZU5hbWluZxI6ChBoZWxkX3Byb21wdF9lZGl0GAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RIZWxkUHJvbXB0RWRpdEIJCgdzZXNzaW9uInIKEkhvc3RIZWxkUHJvbXB0RWRpdBIlCgR0dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBInCgRzYWlkGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkEgwKBGVkaXQYAyABKAQiEQoPSG9zdFNlc3Npb25Ob25lIrABChNIb3N0U2Vzc2lvbkV4aXN0aW5nEicKAmlkGAEgASgLMhsuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uSWQSLQoEbGl2ZRgCIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkxpdmVIABI1Cgh0ZXJtaW5hbBgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvblRlcm1pbmFsSABCCgoIc3RhbmRpbmcimQQKD0hvc3RTZXNzaW9uTGl2ZRIyCgpnZW5lcmF0aW9uGAEgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RHZW5lcmF0aW9uSWQSFQoNc2hpbV9hdHRhY2hlZBgCIAEoCBIwCgZjbGF1ZGUYAyABKAsyHi5hZ2VudHJlcGwudjEuSG9zdFZlbmRvckNsYXVkZUgAEiwKCGJhY2tmaWxsGAQgASgLMhouYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbBIuCgRvcGVuGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck9wZW5IARI0CgdtZXJnaW5nGAYgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck1lcmdpbmdIARI2CghkcmFpbmluZxgHIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJEcmFpbmluZ0gBEjoKCnJlc3RhcnRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyUmVzdGFydGluZ0gBEj0KDG1lcmdlX3BhcmtlZBgKIAEoCzIlLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnZVBhcmtlZEgBEicKBmZhdWx0cxgJIAMoCzIXLmFnZW50cmVwbC52MS5Ib3N0RmF1bHRCDQoLdmVuZG9yX2luZm9CCgoIY29tcG9zZXIiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmciGQoXSG9zdENvbXBvc2VyTWVyZ2VQYXJrZWQioAgKCUhvc3RGYXVsdBIOCgZkZXRhaWwYASABKAkSFAoMb3BlbmVkX2F0X21zGAIgASgDEkYKEXNoaW1fc3RhcnRfZmFpbGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZEgAEjcKCXNoaW1fZGllZBgEIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltRGllZEgAEj0KDGxpbmtfc2V2ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZEgAEj8KDXJlc3VtZV9mYWlsZWQYBiABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkSAASOwoLYm91bmNlX2RpZWQYByABKAsyJC5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Qm91bmNlRGllZEgAEkEKDmJvdW5jZV91bmtub3duGAggASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZVVua25vd25IABJHChFjbGFzc2lmaWVyX2ZhaWxlZBgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkSAASPwoNc2hpbV9yZXBvcnRlZBgKIAEoCzImLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWRIABJRChZjb252ZXJzYXRpb25fYWJhbmRvbmVkGAsgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZEgAEkEKDnNlc3Npb25fYWJzZW50GAwgASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNlc3Npb25BYnNlbnRIABJIChJ3YXRjaF9vcGVuX3JlZnVzZWQYDSABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0V2F0Y2hPcGVuUmVmdXNlZEgAElIKF2RhZW1vbl9zdGF0ZV91bnJlYWRhYmxlGA4gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZUgAElIKF2Fkb3B0aW9uX3dpbmRvd19leHBpcmVkGA8gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAElIKF2ZpbmFsX2Fuc3dlcl91bnJlc29sdmVkGBAgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEZpbmFsQW5zd2VyVW5yZXNvbHZlZEgAQgYKBGtpbmRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_session_health, file_conversation_v1_turn, file_conversation_v1_user]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYipAMKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj0KC3RyYW5zZmVycmVkGAMgASgLMiYuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkAKDXJlbG9hZF93ZWJhcHAYBCABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcEgAEjgKDm9wZW5faW5fZWRpdG9yGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RPcGVuSW5FZGl0b3JIABIyCgZlbmRpbmcYBiABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSAASTgoUbm90aWZpY2F0aW9uX2NsaWNrZWQYByABKAsyLi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZU5vdGlmaWNhdGlvbkNsaWNrZWRIAEIGCgRwdXNoSgQIAhADUgxub3RpZmljYXRpb24iPAoQSG9zdE9wZW5JbkVkaXRvchIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSIaChhIb3N0V29ya3NwYWNlVHJhbnNmZXJyZWQiGwoZSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcCIiCiBIb3N0V29ya3NwYWNlTm90aWZpY2F0aW9uQ2xpY2tlZCLvAQoNSG9zdFdvcmtzcGFjZRItCgRub25lGAEgASgLMh0uYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uTm9uZUgAEjUKCGV4aXN0aW5nGAIgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uRXhpc3RpbmdIABIxCgZuYW1pbmcYAyABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZU5hbWluZxI6ChBoZWxkX3Byb21wdF9lZGl0GAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RIZWxkUHJvbXB0RWRpdEIJCgdzZXNzaW9uInIKEkhvc3RIZWxkUHJvbXB0RWRpdBIlCgR0dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBInCgRzYWlkGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkEgwKBGVkaXQYAyABKAQiEQoPSG9zdFNlc3Npb25Ob25lIrABChNIb3N0U2Vzc2lvbkV4aXN0aW5nEicKAmlkGAEgASgLMhsuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uSWQSLQoEbGl2ZRgCIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkxpdmVIABI1Cgh0ZXJtaW5hbBgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvblRlcm1pbmFsSABCCgoIc3RhbmRpbmcimQQKD0hvc3RTZXNzaW9uTGl2ZRIyCgpnZW5lcmF0aW9uGAEgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RHZW5lcmF0aW9uSWQSFQoNc2hpbV9hdHRhY2hlZBgCIAEoCBIwCgZjbGF1ZGUYAyABKAsyHi5hZ2VudHJlcGwudjEuSG9zdFZlbmRvckNsYXVkZUgAEiwKCGJhY2tmaWxsGAQgASgLMhouYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbBIuCgRvcGVuGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck9wZW5IARI0CgdtZXJnaW5nGAYgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck1lcmdpbmdIARI2CghkcmFpbmluZxgHIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJEcmFpbmluZ0gBEjoKCnJlc3RhcnRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyUmVzdGFydGluZ0gBEj0KDG1lcmdlX3BhcmtlZBgKIAEoCzIlLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnZVBhcmtlZEgBEicKBmZhdWx0cxgJIAMoCzIXLmFnZW50cmVwbC52MS5Ib3N0RmF1bHRCDQoLdmVuZG9yX2luZm9CCgoIY29tcG9zZXIiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmciGQoXSG9zdENvbXBvc2VyTWVyZ2VQYXJrZWQioAgKCUhvc3RGYXVsdBIOCgZkZXRhaWwYASABKAkSFAoMb3BlbmVkX2F0X21zGAIgASgDEkYKEXNoaW1fc3RhcnRfZmFpbGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZEgAEjcKCXNoaW1fZGllZBgEIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltRGllZEgAEj0KDGxpbmtfc2V2ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZEgAEj8KDXJlc3VtZV9mYWlsZWQYBiABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkSAASOwoLYm91bmNlX2RpZWQYByABKAsyJC5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Qm91bmNlRGllZEgAEkEKDmJvdW5jZV91bmtub3duGAggASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZVVua25vd25IABJHChFjbGFzc2lmaWVyX2ZhaWxlZBgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkSAASPwoNc2hpbV9yZXBvcnRlZBgKIAEoCzImLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWRIABJRChZjb252ZXJzYXRpb25fYWJhbmRvbmVkGAsgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZEgAEkEKDnNlc3Npb25fYWJzZW50GAwgASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNlc3Npb25BYnNlbnRIABJIChJ3YXRjaF9vcGVuX3JlZnVzZWQYDSABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0V2F0Y2hPcGVuUmVmdXNlZEgAElIKF2RhZW1vbl9zdGF0ZV91bnJlYWRhYmxlGA4gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZUgAElIKF2Fkb3B0aW9uX3dpbmRvd19leHBpcmVkGA8gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAElIKF2ZpbmFsX2Fuc3dlcl91bnJlc29sdmVkGBAgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEZpbmFsQW5zd2VyVW5yZXNvbHZlZEgAQgYKBGtpbmRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_session_health, file_conversation_v1_turn, file_conversation_v1_user]);
 
 /**
  * @generated from message agentrepl.v1.WatchHostWorkspaceRequest
@@ -64,24 +64,6 @@ export type WatchHostWorkspaceResponse = Message<"agentrepl.v1.WatchHostWorkspac
      */
     value: HostWorkspace;
     case: "host";
-  } | {
-    /**
-     * A notification EVENT for this workspace — fired, not state. EMACS
-     * OWNS PRESENTATION POLICY, because Emacs owns the knowledge:
-     *   Emacs unfocused           → post the OS desktop notification; its
-     *                               click raises the frame and selects this
-     *                               workspace's tab (plain elisp, no daemon
-     *                               round-trip);
-     *   focused, tab not selected → blink the tab-bar entry, per THE
-     *                               CANONICAL BLINK CADENCE specified on
-     *                               frontend.v1 RosterRowAttention;
-     *   tab selected              → nothing (the footer's activity line
-     *                               already shows it).
-     *
-     * @generated from field: agentrepl.v1.HostWorkspaceNotification notification = 2;
-     */
-    value: HostWorkspaceNotification;
-    case: "notification";
   } | {
     /**
      * DAEMON HANDOVER: this workspace has been released by this (old)
@@ -130,6 +112,19 @@ export type WatchHostWorkspaceResponse = Message<"agentrepl.v1.WatchHostWorkspac
      */
     value: DaemonStreamEnding;
     case: "ending";
+  } | {
+    /**
+     * THE USER CLICKED THIS WORKSPACE'S DESKTOP BANNER: raise Emacs's frame
+     * and select this workspace's tab. The daemon posts every desktop
+     * notification and reads the click back from the banner itself, so the
+     * selection it asks for is the only part of a notification Emacs acts on.
+     * An event, not state: never replayed to a late subscriber, because a
+     * click belongs to the moment it was made.
+     *
+     * @generated from field: agentrepl.v1.HostWorkspaceNotificationClicked notification_clicked = 7;
+     */
+    value: HostWorkspaceNotificationClicked;
+    case: "notificationClicked";
   } | { case: undefined; value?: undefined };
 };
 
@@ -195,140 +190,21 @@ export const HostWorkspaceReloadWebappSchema: GenMessage<HostWorkspaceReloadWeba
   messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 4);
 
 /**
- * A notification for this workspace's user. THE KIND IS TYPED — the
- * composed text is presentation; the kind arm is the programmatic
- * semantics.
+ * The user clicked this workspace's desktop banner. Empty: the stream it
+ * rides names the workspace, and selecting that workspace's tab is the whole
+ * of Emacs's obligation.
  *
- * @generated from message agentrepl.v1.HostWorkspaceNotification
+ * @generated from message agentrepl.v1.HostWorkspaceNotificationClicked
  */
-export type HostWorkspaceNotification = Message<"agentrepl.v1.HostWorkspaceNotification"> & {
-  /**
-   * The composed line, verbatim (agent-authored or daemon-composed).
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-
-  /**
-   * When it fired, epoch ms.
-   *
-   * @generated from field: int64 at_ms = 2;
-   */
-  atMs: bigint;
-
-  /**
-   * THE ARM IS THE KIND.
-   *
-   * @generated from field: agentrepl.v1.HostNotificationKind kind = 3;
-   */
-  kind?: HostNotificationKind | undefined;
+export type HostWorkspaceNotificationClicked = Message<"agentrepl.v1.HostWorkspaceNotificationClicked"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.HostWorkspaceNotification.
- * Use `create(HostWorkspaceNotificationSchema)` to create a new message.
+ * Describes the message agentrepl.v1.HostWorkspaceNotificationClicked.
+ * Use `create(HostWorkspaceNotificationClickedSchema)` to create a new message.
  */
-export const HostWorkspaceNotificationSchema: GenMessage<HostWorkspaceNotification> = /*@__PURE__*/
+export const HostWorkspaceNotificationClickedSchema: GenMessage<HostWorkspaceNotificationClicked> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 5);
-
-/**
- * THE ARM IS THE KIND of notification.
- *
- * @generated from message agentrepl.v1.HostNotificationKind
- */
-export type HostNotificationKind = Message<"agentrepl.v1.HostNotificationKind"> & {
-  /**
-   * @generated from oneof agentrepl.v1.HostNotificationKind.kind
-   */
-  kind: {
-    /**
-     * @generated from field: agentrepl.v1.HostNotificationAgentAddressed agent_addressed = 1;
-     */
-    value: HostNotificationAgentAddressed;
-    case: "agentAddressed";
-  } | {
-    /**
-     * @generated from field: agentrepl.v1.HostNotificationPermissionRequested permission_requested = 2;
-     */
-    value: HostNotificationPermissionRequested;
-    case: "permissionRequested";
-  } | {
-    /**
-     * A question batch arrived and blocks the agent — the same attention
-     * treatment as a permission ask; the daemon also sets the attention
-     * marker.
-     *
-     * @generated from field: agentrepl.v1.HostNotificationQuestionAsked question_asked = 3;
-     */
-    value: HostNotificationQuestionAsked;
-    case: "questionAsked";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message agentrepl.v1.HostNotificationKind.
- * Use `create(HostNotificationKindSchema)` to create a new message.
- */
-export const HostNotificationKindSchema: GenMessage<HostNotificationKind> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 6);
-
-/**
- * A question blocks the agent on the user's choice.
- *
- * @generated from message agentrepl.v1.HostNotificationQuestionAsked
- */
-export type HostNotificationQuestionAsked = Message<"agentrepl.v1.HostNotificationQuestionAsked"> & {
-  /**
-   * The first question's chip label, for the banner line.
-   *
-   * @generated from field: string header = 1;
-   */
-  header: string;
-};
-
-/**
- * Describes the message agentrepl.v1.HostNotificationQuestionAsked.
- * Use `create(HostNotificationQuestionAskedSchema)` to create a new message.
- */
-export const HostNotificationQuestionAskedSchema: GenMessage<HostNotificationQuestionAsked> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 7);
-
-/**
- * The agent addressed the user directly.
- *
- * @generated from message agentrepl.v1.HostNotificationAgentAddressed
- */
-export type HostNotificationAgentAddressed = Message<"agentrepl.v1.HostNotificationAgentAddressed"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.HostNotificationAgentAddressed.
- * Use `create(HostNotificationAgentAddressedSchema)` to create a new message.
- */
-export const HostNotificationAgentAddressedSchema: GenMessage<HostNotificationAgentAddressed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 8);
-
-/**
- * A permission ask arrived and blocks the agent; the daemon also sets the
- * attention marker. The client's focus policy decides presentation.
- *
- * @generated from message agentrepl.v1.HostNotificationPermissionRequested
- */
-export type HostNotificationPermissionRequested = Message<"agentrepl.v1.HostNotificationPermissionRequested"> & {
-  /**
-   * The gated tool's name, for the banner line.
-   *
-   * @generated from field: string tool_name = 1;
-   */
-  toolName: string;
-};
-
-/**
- * Describes the message agentrepl.v1.HostNotificationPermissionRequested.
- * Use `create(HostNotificationPermissionRequestedSchema)` to create a new message.
- */
-export const HostNotificationPermissionRequestedSchema: GenMessage<HostNotificationPermissionRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 9);
 
 /**
  * The host-facing state of one workspace: what Emacs needs to correlate
@@ -387,7 +263,7 @@ export type HostWorkspace = Message<"agentrepl.v1.HostWorkspace"> & {
  * Use `create(HostWorkspaceSchema)` to create a new message.
  */
 export const HostWorkspaceSchema: GenMessage<HostWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 6);
 
 /**
  * One standing held-prompt edit.
@@ -423,7 +299,7 @@ export type HostHeldPromptEdit = Message<"agentrepl.v1.HostHeldPromptEdit"> & {
  * Use `create(HostHeldPromptEditSchema)` to create a new message.
  */
 export const HostHeldPromptEditSchema: GenMessage<HostHeldPromptEdit> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.HostSessionNone
@@ -436,7 +312,7 @@ export type HostSessionNone = Message<"agentrepl.v1.HostSessionNone"> & {
  * Use `create(HostSessionNoneSchema)` to create a new message.
  */
 export const HostSessionNoneSchema: GenMessage<HostSessionNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 8);
 
 /**
  * A session that exists: its identity, and its standing.
@@ -479,7 +355,7 @@ export type HostSessionExisting = Message<"agentrepl.v1.HostSessionExisting"> & 
  * Use `create(HostSessionExistingSchema)` to create a new message.
  */
 export const HostSessionExistingSchema: GenMessage<HostSessionExisting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.HostSessionLive
@@ -590,7 +466,7 @@ export type HostSessionLive = Message<"agentrepl.v1.HostSessionLive"> & {
  * Use `create(HostSessionLiveSchema)` to create a new message.
  */
 export const HostSessionLiveSchema: GenMessage<HostSessionLive> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 14);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.HostSessionTerminal
@@ -610,7 +486,7 @@ export type HostSessionTerminal = Message<"agentrepl.v1.HostSessionTerminal"> & 
  * Use `create(HostSessionTerminalSchema)` to create a new message.
  */
 export const HostSessionTerminalSchema: GenMessage<HostSessionTerminal> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 15);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 11);
 
 /**
  * A daemon-minted session identity — the echo token Emacs correlates by.
@@ -629,7 +505,7 @@ export type HostSessionId = Message<"agentrepl.v1.HostSessionId"> & {
  * Use `create(HostSessionIdSchema)` to create a new message.
  */
 export const HostSessionIdSchema: GenMessage<HostSessionId> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 16);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 12);
 
 /**
  * A daemon-minted controller-generation identity; rotates on restart within
@@ -649,7 +525,7 @@ export type HostGenerationId = Message<"agentrepl.v1.HostGenerationId"> & {
  * Use `create(HostGenerationIdSchema)` to create a new message.
  */
 export const HostGenerationIdSchema: GenMessage<HostGenerationId> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 17);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 13);
 
 /**
  * The vendor conversation's identifiers, for transcripts and support reports.
@@ -678,7 +554,7 @@ export type HostVendorClaude = Message<"agentrepl.v1.HostVendorClaude"> & {
  * Use `create(HostVendorClaudeSchema)` to create a new message.
  */
 export const HostVendorClaudeSchema: GenMessage<HostVendorClaude> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 18);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 14);
 
 /**
  * What Emacs names buffers from. Facts only — their DRAWN home is the
@@ -708,7 +584,7 @@ export type HostWorkspaceNaming = Message<"agentrepl.v1.HostWorkspaceNaming"> & 
  * Use `create(HostWorkspaceNamingSchema)` to create a new message.
  */
 export const HostWorkspaceNamingSchema: GenMessage<HostWorkspaceNaming> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 19);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 15);
 
 /**
  * Whether the on-disk transcript has been backfilled into the store. THE ARM
@@ -760,7 +636,7 @@ export type HostBackfill = Message<"agentrepl.v1.HostBackfill"> & {
  * Use `create(HostBackfillSchema)` to create a new message.
  */
 export const HostBackfillSchema: GenMessage<HostBackfill> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 20);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 16);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillNone
@@ -773,7 +649,7 @@ export type HostBackfillNone = Message<"agentrepl.v1.HostBackfillNone"> & {
  * Use `create(HostBackfillNoneSchema)` to create a new message.
  */
 export const HostBackfillNoneSchema: GenMessage<HostBackfillNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 21);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 17);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillPending
@@ -786,7 +662,7 @@ export type HostBackfillPending = Message<"agentrepl.v1.HostBackfillPending"> & 
  * Use `create(HostBackfillPendingSchema)` to create a new message.
  */
 export const HostBackfillPendingSchema: GenMessage<HostBackfillPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 22);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 18);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillDone
@@ -799,7 +675,7 @@ export type HostBackfillDone = Message<"agentrepl.v1.HostBackfillDone"> & {
  * Use `create(HostBackfillDoneSchema)` to create a new message.
  */
 export const HostBackfillDoneSchema: GenMessage<HostBackfillDone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 23);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 19);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillFailed
@@ -820,7 +696,7 @@ export type HostBackfillFailed = Message<"agentrepl.v1.HostBackfillFailed"> & {
  * Use `create(HostBackfillFailedSchema)` to create a new message.
  */
 export const HostBackfillFailedSchema: GenMessage<HostBackfillFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 24);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 20);
 
 /**
  * @generated from message agentrepl.v1.HostComposerOpen
@@ -833,7 +709,7 @@ export type HostComposerOpen = Message<"agentrepl.v1.HostComposerOpen"> & {
  * Use `create(HostComposerOpenSchema)` to create a new message.
  */
 export const HostComposerOpenSchema: GenMessage<HostComposerOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 25);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 21);
 
 /**
  * @generated from message agentrepl.v1.HostComposerMerging
@@ -846,7 +722,7 @@ export type HostComposerMerging = Message<"agentrepl.v1.HostComposerMerging"> & 
  * Use `create(HostComposerMergingSchema)` to create a new message.
  */
 export const HostComposerMergingSchema: GenMessage<HostComposerMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 26);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 22);
 
 /**
  * @generated from message agentrepl.v1.HostComposerDraining
@@ -859,7 +735,7 @@ export type HostComposerDraining = Message<"agentrepl.v1.HostComposerDraining"> 
  * Use `create(HostComposerDrainingSchema)` to create a new message.
  */
 export const HostComposerDrainingSchema: GenMessage<HostComposerDraining> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 27);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 23);
 
 /**
  * @generated from message agentrepl.v1.HostComposerRestarting
@@ -872,7 +748,7 @@ export type HostComposerRestarting = Message<"agentrepl.v1.HostComposerRestartin
  * Use `create(HostComposerRestartingSchema)` to create a new message.
  */
 export const HostComposerRestartingSchema: GenMessage<HostComposerRestarting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 28);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 24);
 
 /**
  * @generated from message agentrepl.v1.HostComposerMergeParked
@@ -885,7 +761,7 @@ export type HostComposerMergeParked = Message<"agentrepl.v1.HostComposerMergePar
  * Use `create(HostComposerMergeParkedSchema)` to create a new message.
  */
 export const HostComposerMergeParkedSchema: GenMessage<HostComposerMergeParked> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 29);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 25);
 
 /**
  * One standing fault — the same kinds SessionHealth's SessionFault carries,
@@ -1034,5 +910,5 @@ export type HostFault = Message<"agentrepl.v1.HostFault"> & {
  * Use `create(HostFaultSchema)` to create a new message.
  */
 export const HostFaultSchema: GenMessage<HostFault> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 30);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 26);
 
