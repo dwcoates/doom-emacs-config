@@ -478,14 +478,15 @@ missing here or there is a broken seam.")
       ;; Assert
       (should (equal requests '(nil))))))
 
-(ert-deftest agent-repl-test-rpc-daemon-stream-names-emacs-and-its-elisp-build ()
-  "Every WatchDaemon Emacs opens names it as `emacs' with the elisp it loaded."
+(ert-deftest agent-repl-test-rpc-daemon-stream-names-emacs-its-elisp-build-and-focus ()
+  "Every WatchDaemon Emacs opens names it as `emacs' with its elisp and focus."
   ;; Arrange
   (agent-repl-test-rpc--with-logs
     (let ((requests nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
                  (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
                 ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test"))
+                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) t))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
                  (lambda (request) (push request requests) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
@@ -494,21 +495,35 @@ missing here or there is a broken seam.")
         (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
       ;; Assert
       (should (equal requests
-                     '((:client (:arm :emacs :value (:elisp-build "b-test")))))))))
+                     '((:client (:arm :emacs :value (:elisp-build "b-test"
+                                                     :focus (:arm :focused))))))))))
 
-(ert-deftest agent-repl-test-rpc-daemon-stream-sends-the-build-on-the-wire ()
-  "The encoded WatchDaemon body carries `elispBuild' under the `emacs' arm."
+(ert-deftest agent-repl-test-rpc-daemon-stream-sends-the-build-and-focus-on-the-wire ()
+  "The encoded WatchDaemon body carries `elispBuild' and `focus' under `emacs'."
   ;; Arrange
   (agent-repl-test-rpc--with-logs
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
                  (lambda (_conn _method json _on-push _on-close &optional _on-open)
                    (setq sent json) nil))
+                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil))
                 ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test")))
         ;; Act
         (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
       ;; Assert
-      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\"}}")))))
+      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\",\"focus\":{\"unfocused\":{}}}}")))))
+
+(ert-deftest agent-repl-test-rpc-report-editor-focus-sends-the-focus ()
+  "ReportEditorFocus is a unary call carrying the focus arm on the wire."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl-connect-unary)
+                 (lambda (_conn method json &rest _keys) (setq sent (cons method json)) nil)))
+        ;; Act
+        (agent-repl-rpc-report-editor-focus nil '(:focus (:arm :focused))))
+      ;; Assert
+      (should (equal sent '("ReportEditorFocus" . "{\"focus\":{\"focused\":{}}}"))))))
 
 (ert-deftest agent-repl-test-rpc-daemon-stream-without-a-build-never-opens ()
   "An Emacs with no elisp build to report fails loudly and opens nothing."

@@ -59,6 +59,10 @@
 (declare-function agent-repl-wire-encode-watch-host-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-watch-host-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-daemon-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
+(declare-function agent-repl-wire-editor-focus "wire-host" (focused))
+(declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-wire-decode-watch-daemon-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-workspace-roster-request "wire-roster" (request))
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster" (alist))
@@ -246,6 +250,16 @@ reconciles to the same ref and answers one success.")
 The daemon stamps `current', records last-selected and clears the
 workspace's attention marker; the roster stream reflects it.  Idempotent —
 re-selecting the current workspace succeeds.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-editor-focus
+  "ReportEditorFocus"
+  agent-repl-wire-encode-report-editor-focus-request
+  agent-repl-wire-decode-report-editor-focus-response
+  "Tell the daemon Emacs gained or lost desktop focus.
+The daemon decides every desktop banner on the latest focus: a focused
+Emacs gets none.  The focus belongs to this Emacs's WatchDaemon stream, so
+a report with no stream standing is refused (`no_emacs_stream') and the
+next stream states its focus itself.  Idempotent.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
   "MarkWorkspaceViewed"
@@ -469,15 +483,21 @@ deploy's elisp reload, and nothing workspace-scoped.  The request names
 this client as EMACS and states the elisp it has loaded
 \(`agent-repl-elisp-build'), because every process reports its build when
 it connects; it is built HERE, so no WatchDaemon Emacs opens can go without
-it.  ON-PUSH receives the decoded push plist; ON-OPEN, when given, runs
-once the stream is ACCEPTED — which is what the link keys its up hooks on,
-since a healthy daemon may send no daemon-scoped push for hours."
+it.  The request also states whether Emacs is focused right now
+\(`agent-repl--emacs-focused-p'), because the daemon decides every desktop
+banner on that focus from the stream's first instant; later changes go by
+`agent-repl-rpc-report-editor-focus'.  ON-PUSH receives the decoded push
+plist; ON-OPEN, when given, runs once the stream is ACCEPTED — which is
+what the link keys its up hooks on, since a healthy daemon may send no
+daemon-scoped push for hours."
   (agent-repl-rpc--stream
    conn "WatchDaemon"
    #'agent-repl-wire-encode-watch-daemon-request
    #'agent-repl-wire-decode-watch-daemon-response
    (list :client (list :arm :emacs
-                       :value (list :elisp-build (agent-repl-elisp-build))))
+                       :value (list :elisp-build (agent-repl-elisp-build)
+                                    :focus (agent-repl-wire-editor-focus
+                                            (agent-repl--emacs-focused-p)))))
    on-push on-close on-open))
 
 (defun agent-repl-rpc-watch-workspace-roster (conn on-push on-close &optional on-open)

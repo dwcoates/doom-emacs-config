@@ -28,7 +28,7 @@
 ;; - the R8 CURRENT-CHANGE reaction: a `current' Emacs did not originate is a
 ;;   tab-switch request (re-selection is idempotent, so no loop forms);
 ;; - THE FINISH EDGE — a row moving from a RUNNING status to a SETTLED one —
-;;   and the three Emacs-local reactions that ride it.  A deferred prompt
+;;   and the two Emacs-local reactions that ride it.  A deferred prompt
 ;;   (`SPC j RET') is NOT one of them: the daemon holds it and runs it as
 ;;   its own turn when the running one ends (prompt-queue.el).
 ;;
@@ -74,7 +74,6 @@
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-log-name "workspace" (ws))
 (declare-function agent-repl--refresh-magit-status-for-dir "session" (dir &optional ws))
-(declare-function agent-repl--maybe-notify-finished "session" (ws))
 ;; W2-A's names (host.el, daemon-link.el).  Declared, never defined here.
 (declare-function agent-repl--panels-open-on-arrival "panels" (ws id))
 (declare-function agent-repl--panels-arm-arrivals "panels" ())
@@ -840,16 +839,8 @@ Returns the workspaces whose marker cleared."
 
 ;;;; ---- The reactions ----------------------------------------------------
 
-(defun agent-repl-roster-notify-finished (ws)
-  "Reaction (1): the unfocused desktop banner for WS.
-The focus test and the per-workspace debounce both live in
-`agent-repl--maybe-notify-finished' — Emacs owns this presentation
-policy because Emacs is the only process that knows whether it is
-focused."
-  (agent-repl--maybe-notify-finished ws))
-
 (defun agent-repl-roster-echo-finished (ws)
-  "Reaction (2): the cross-workspace echo for WS.
+  "Reaction (1): the cross-workspace echo for WS.
 Only when WS is NOT the selected tab: a user standing in the workspace
 already has the footer's activity line telling them."
   (if (agent-repl--current-ws-p ws)
@@ -858,12 +849,11 @@ already has the footer's activity line telling them."
     (message "Agent finished in workspace: %s" ws)))
 
 (defun agent-repl-roster-refresh-magit (ws)
-  "Reaction (3): refresh any magit-status buffer on WS's directory.
+  "Reaction (2): refresh any magit-status buffer on WS's directory.
 The turn ended, so the worktree the user is looking at has probably
 changed underneath their status buffer."
   (agent-repl--refresh-magit-status-for-dir (agent-repl--ws-get ws :dir) ws))
 
-(add-hook 'agent-repl-roster-finish-functions #'agent-repl-roster-notify-finished)
 (add-hook 'agent-repl-roster-finish-functions #'agent-repl-roster-echo-finished)
 (add-hook 'agent-repl-roster-finish-functions #'agent-repl-roster-refresh-magit)
 

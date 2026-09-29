@@ -541,13 +541,8 @@ When t, it should call `message'."
 ;;;; ---- Bug regression tests ----
 
 (ert-deftest agent-repl-test-bug10-defvar-declarations ()
-  "Bug 10: All key variables should be properly declared.
-Note: agent-repl--notification-backend may not be bound in headless
-environments without notification tools (terminal-notifier or osascript)."
+  "Bug 10: All key variables should be properly declared."
   (should (boundp 'agent-repl--workspaces))
-  ;; notification-backend requires osascript or terminal-notifier at load time
-  (when (or (executable-find "terminal-notifier") (executable-find "osascript"))
-    (should (boundp 'agent-repl--notification-backend)))
   (should (boundp 'agent-repl--sync-timer)))
 
 (ert-deftest agent-repl-test-bug11-fullscreen-config-stored-in-plist ()
