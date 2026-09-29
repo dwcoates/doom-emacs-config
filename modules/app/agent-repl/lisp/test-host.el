@@ -2245,6 +2245,44 @@ could only be invented, and the link already holds the accepted successor."
       ;; Assert
       (should (agent-repl-test-host--logged-p :info "method=\"WatchHostWorkspace\"")))))
 
+;;;; ---- Teardown ----
+
+(ert-deftest agent-repl-test-host-a-tombstoned-workspace-is-forgotten ()
+  "The tombstone hook drops WS's host entry: nothing answers for it after."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (run-hook-with-args 'agent-repl-ws-del-hook "ws-1")
+    ;; Assert
+    (should (null (gethash "ws-1" agent-repl-host--by-name)))))
+
+(ert-deftest agent-repl-test-host-a-tombstoned-workspace-s-stream-is-cancelled ()
+  "Forgetting WS cancels its standing host stream."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (run-hook-with-args 'agent-repl-ws-del-hook "ws-1")
+    ;; Assert
+    (should (equal (length agent-repl-test-host--cancelled) 1))))
+
+(ert-deftest agent-repl-test-host-a-promotion-re-registers-no-torn-down-workspace ()
+  "A workspace torn down before a promotion is not walked onto the successor.
+MEASURED 2026-09-29: two nuked workspaces were re-registered on a deploy's
+promotion and refused with `not-a-worktree'."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((old (agent-repl-connect-open "127.0.0.1:9001"))
+          (new (agent-repl-connect-open "127.0.0.1:9002")))
+      (agent-repl-test-host--subscribe "ws-1" old)
+      (run-hook-with-args 'agent-repl-ws-del-hook "ws-1")
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (agent-repl-host-on-link-promote old new)
+      ;; Assert
+      (should-not (assoc "RegisterWorkspace" agent-repl-test-host--calls)))))
+
 ;;;; ---- Rename ----
 
 (ert-deftest agent-repl-test-host-rename-re-keys-the-entry ()

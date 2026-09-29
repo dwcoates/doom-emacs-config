@@ -1425,6 +1425,14 @@ detached, is walked onto NEW through the one reattach path.  Runs from
     (dolist (ws (nreverse left))
       (agent-repl-host--reattach ws new :register "promotion"))))
 
+;; A TORN-DOWN WORKSPACE LEAVES NOTHING BEHIND HERE.  Every teardown of a
+;; tab tombstones it through `agent-repl--ws-del', so that is where its host
+;; entry dies too: an entry kept past the teardown is re-registered on the
+;; next promotion (`agent-repl-host-on-link-promote'), and the daemon refuses
+;; a workspace it closed, killed or nuked.  MEASURED, 2026-09-29T17:15:29: two
+;; workspaces nuked hours earlier were re-registered on a deploy's promotion
+;; and refused with `not-a-worktree'.
+(add-hook 'agent-repl-ws-del-hook #'agent-repl-host-forget)
 (add-hook 'agent-repl-link-up-functions #'agent-repl-host-on-link-up)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-host-on-link-down)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl-host-on-link-promote)
