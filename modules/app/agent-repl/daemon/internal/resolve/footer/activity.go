@@ -29,6 +29,10 @@ import (
 //	              is waiting on while a deploy moves under the session, and it
 //	              ranks directly below a fault (owner request, 2026-09-27).
 //	notification  ranks next.
+//	quiet_stretch ranks below the working status's compaction, hook and
+//	              retry lines, and below background's notification. A feed
+//	              item landing REPLACES a standing notification with it
+//	              (quietstretch.go), so it outranks none that it follows.
 //	rate_limited  is SECOND-LOWEST.
 //	context_budget is LOWEST — shown only when nothing else stands.
 //
@@ -238,6 +242,12 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusWorkingA
 					Attempt: s.retrying.attempt,
 					Status:  s.retrying.status,
 				}},
+		}
+	}
+	if line := r.quietStretchLine(s); line != nil {
+		return &frontendv1.FooterStatusWorkingActivity{
+			At:   stamp(s.motion.line.at),
+			Kind: &frontendv1.FooterStatusWorkingActivity_QuietStretch{QuietStretch: line},
 		}
 	}
 	if s.injected != nil {
@@ -451,6 +461,12 @@ func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgr
 		return &frontendv1.FooterStatusBackgroundActivity{
 			At:   stamp(s.notification.at),
 			Kind: &frontendv1.FooterStatusBackgroundActivity_Notification{Notification: line},
+		}
+	}
+	if line := r.quietStretchLine(s); line != nil {
+		return &frontendv1.FooterStatusBackgroundActivity{
+			At:   stamp(s.motion.line.at),
+			Kind: &frontendv1.FooterStatusBackgroundActivity_QuietStretch{QuietStretch: line},
 		}
 	}
 	if line := r.rateLine(s); line != nil {

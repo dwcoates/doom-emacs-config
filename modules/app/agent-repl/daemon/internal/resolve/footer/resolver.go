@@ -327,9 +327,11 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 				r.logOf(ws, s).Debug("daemon.footer.on_turn_opened",
 					"the turn was already installed at acceptance; the edge re-took the context baseline and kept what the turn had said",
 					dlog.Context{"turn_id": string(turn), "saw_activity": s.sawActivity})
+				r.deliverTurn(ws, s)
 				return
 			}
 			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt})
+			r.deliverTurn(ws, s)
 		})
 }
 
@@ -363,6 +365,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	// a turn opening.
 	s.compacting = s.compacting || turn.Act == ActCompact
 	s.retrying = nil
+	r.startTurnMotion(s)
 	s.tok.reset(liveDetachedAgents(s))
 	r.cancelMomentary(s)
 }

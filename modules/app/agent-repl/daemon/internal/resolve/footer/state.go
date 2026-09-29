@@ -432,8 +432,15 @@ type wsState struct {
 	// next turn resets it.
 	turnFailed bool
 	// sawActivity reports whether this turn has produced an activity yet,
-	// which is what moves `submitting` to `thinking`.
+	// which is what moves `submitting` to a working step.
 	sawActivity bool
+	// mainAgent is the session's main agent as the watcher named it, empty
+	// until named. Only its items name the working step and, while a turn
+	// runs, the quiet-stretch line.
+	mainAgent string
+	// motion is the feed's items as the working step and the quiet stretch
+	// read them (quietstretch.go).
+	motion feedMotion
 	// compacting reports a vendor-initiated auto-compaction in flight.
 	compacting bool
 	// compaction is the compaction's own progress line, from whichever
@@ -616,6 +623,7 @@ func newWSState() *wsState {
 		adoptedWork: map[string]struct{}{},
 		entries:     map[string]*frontendv1.FeedId{},
 		tok:         newTokenState(),
+		motion:      newFeedMotion(),
 	}
 }
 

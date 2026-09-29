@@ -1949,12 +1949,12 @@ func TestTheMainWatchNamesTheRootsOwnerForTheViews(t *testing.T) {
 		{
 			name:   "a main-watch frame names its agent for the feed",
 			frames: []*shimv1.WatchAgentResponse{entryFrame(frameSuccess("main-1", backgrounded()))},
-			want:   []string{"feed:main-1"},
+			want:   []string{"feed:main-1", "footer:main-1"},
 		},
 		{
 			name:   "a main-watch page names the agent of its first row",
 			frames: []*shimv1.WatchAgentResponse{pageFrame(frameEntryAt("ptr-1", frameSuccess("main-1", completed())))},
-			want:   []string{"feed:main-1"},
+			want:   []string{"feed:main-1", "footer:main-1"},
 		},
 		{
 			name: "a later row naming another agent on the main watch is not a rename",
@@ -1962,7 +1962,7 @@ func TestTheMainWatchNamesTheRootsOwnerForTheViews(t *testing.T) {
 				entryFrame(frameSuccess("main-1", backgrounded())),
 				entryFrame(frameSuccess("sub-9", backgrounded())),
 			},
-			want: []string{"feed:main-1"},
+			want: []string{"feed:main-1", "footer:main-1"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
