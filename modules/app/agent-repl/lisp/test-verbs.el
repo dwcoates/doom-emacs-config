@@ -285,18 +285,20 @@ answers a bare success, which is what almost every verb's success is."
                    (list :workspace (agent-repl-test-verbs--ref))))))
 
 (ert-deftest agent-repl-verbs-kill-echoes-the-ref ()
-  "KillWorkspace carries the ref and nothing else."
+  "KillWorkspace carries the ref, and a minted op id opting into the ack."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-kill "ws-one")
-    (should (equal (agent-repl-test-verbs--request :kill)
-                   (list :workspace (agent-repl-test-verbs--ref))))))
+    (let ((request (agent-repl-test-verbs--request :kill)))
+      (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
+      (should (stringp (plist-get request :op-id))))))
 
 (ert-deftest agent-repl-verbs-nuke-echoes-the-ref ()
-  "NukeWorkspace carries the ref and nothing else."
+  "NukeWorkspace carries the ref, and a minted op id opting into the ack."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-nuke "ws-one")
-    (should (equal (agent-repl-test-verbs--request :nuke)
-                   (list :workspace (agent-repl-test-verbs--ref))))))
+    (let ((request (agent-repl-test-verbs--request :nuke)))
+      (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
+      (should (stringp (plist-get request :op-id))))))
 
 (ert-deftest agent-repl-verbs-nuke-declares-the-departure-it-orders ()
   "The worktree goes before the answer lands, so the ORDER is what is recorded."
@@ -629,6 +631,72 @@ never signalled as an error."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-nuke "ws-one")
     (should (equal agent-repl-test-verbs--torn-down '("ws-one")))))
+
+;;;; ---- Kill and nuke: the tab closes on the ack ----
+
+(ert-deftest agent-repl-verbs-an-accepted-teardown-closes-the-tab-at-once ()
+  "The daemon's `accepted' ack tears the tab down; the teardown's end is later."
+  (dolist (verb '((:kill . agent-repl-verb-kill) (:nuke . agent-repl-verb-nuke)))
+    (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (agent-repl-test-verbs--with
+          (list (cons (car verb) '(:response (:arm :accepted :value (:op-id "op")))))
+        ;; Act
+        (funcall (cdr verb) "ws-one")
+        ;; Assert
+        (should (equal agent-repl-test-verbs--torn-down '("ws-one")))))))
+
+(ert-deftest agent-repl-verbs-an-accepted-teardown-awaits-its-end-on-the-channel ()
+  "The op stays registered after the ack: its end arrives on the channel."
+  (agent-repl-test-verbs--with '((:kill . (:response (:arm :accepted :value (:op-id "op")))))
+    (agent-repl-verb-kill "ws-one")
+    (should (gethash (plist-get (agent-repl-test-verbs--request :kill) :op-id)
+                     agent-repl-mutation-progress--pending))))
+
+(ert-deftest agent-repl-verbs-a-failed-teardown-is-recorded-and-echoed ()
+  "A teardown that failed after its tab closed is an ERROR and an echo."
+  (agent-repl-test-verbs--with '((:kill . (:response (:arm :accepted :value (:op-id "op")))))
+    (agent-repl-verb-kill "ws-one")
+    (let ((op-id (plist-get (agent-repl-test-verbs--request :kill) :op-id))
+          errors)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl-mutation-progress-handle
+         (list :op-id op-id
+               :event '(:arm :kill :value (:arm :failed :value (:internal "could not stop"))))))
+      ;; Assert
+      (should (cl-some (lambda (e) (string-match-p "elisp.verbs.kill-teardown-failed ws=ws-one" e)) errors))
+      (should (agent-repl-test-verbs--messaged-p "kill of ws-one FAILED after its tab closed: could not stop")))))
+
+(ert-deftest agent-repl-verbs-a-failed-nuke-words-its-typed-refusal ()
+  "A nuke's typed git refusal is echoed as the arm and its fields."
+  (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+    (agent-repl-test-verbs--with '((:nuke . (:response (:arm :accepted :value (:op-id "op")))))
+      (agent-repl-verb-nuke "ws-one")
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+        (agent-repl-mutation-progress-handle
+         (list :op-id (plist-get (agent-repl-test-verbs--request :nuke) :op-id)
+               :event '(:arm :nuke :value (:arm :failed :value (:arm :refusal :value (:cause (:arm :git-failed :value (:detail "locked")))))))))
+      ;; Assert
+      (should (agent-repl-test-verbs--messaged-p "nuke of ws-one FAILED after its tab closed: git-failed")))))
+
+(ert-deftest agent-repl-verbs-a-refused-teardown-forgets-its-op-and-keeps-the-tab ()
+  "A synchronous refusal ends the op: nothing will be pushed for it."
+  (agent-repl-test-verbs--with
+      '((:kill . (:response (:arm :error :value (:cause (:arm :unknown-workspace :value nil))))))
+    (agent-repl-verb-kill "ws-one")
+    (should-not (gethash (plist-get (agent-repl-test-verbs--request :kill) :op-id)
+                         agent-repl-mutation-progress--pending))
+    (should-not agent-repl-test-verbs--torn-down)))
+
+(ert-deftest agent-repl-verbs-an-unanswered-teardown-forgets-its-op-and-keeps-the-tab ()
+  "Nobody answering ends the op too, and is no permission to close the tab."
+  (agent-repl-test-verbs--with '((:kill . (:failure (:kind :transport))))
+    (agent-repl-verb-kill "ws-one")
+    (should-not (gethash (plist-get (agent-repl-test-verbs--request :kill) :op-id)
+                         agent-repl-mutation-progress--pending))
+    (should-not agent-repl-test-verbs--torn-down)))
 
 (ert-deftest agent-repl-verbs-merge-success-says-enqueued-only ()
   "Merge success means ENQUEUED; Emacs holds no further merge state."

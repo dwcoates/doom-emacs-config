@@ -107,6 +107,46 @@
   (should (equal (agent-repl-mutation-progress--arm-failure '(:arm :internal :value "x"))
                  '(:internal "x"))))
 
+;;;; ---- Kill and nuke ----
+
+(ert-deftest agent-repl-test-mp-kill-and-nuke-successes-dispatch-and-forget ()
+  "An accepted kill's or nuke's success calls on-succeeded and drops the op."
+  (dolist (mutation '(:kill :nuke))
+    ;; Arrange.
+    (agent-repl-test-mp--reset)
+    (let (called)
+      (agent-repl-mutation-progress-register "op-t" :on-succeeded (lambda (_) (setq called t)))
+      ;; Act.
+      (agent-repl-mutation-progress-handle
+       (list :op-id "op-t" :event (list :arm mutation :value '(:arm :succeeded :value nil))))
+      ;; Assert.
+      (should called)
+      (should-not (gethash "op-t" agent-repl-mutation-progress--pending)))))
+
+(ert-deftest agent-repl-test-mp-a-kill-failure-is-its-internal-sentence ()
+  "A failed kill reaches on-failed as the internal arm with its sentence."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (let (got)
+    (agent-repl-mutation-progress-register "op-k" :on-failed (lambda (&rest args) (setq got args)))
+    ;; Act.
+    (agent-repl-mutation-progress-handle
+     '(:op-id "op-k" :event (:arm :kill :value (:arm :failed :value (:internal "could not stop")))))
+    ;; Assert.
+    (should (equal got '(:internal "could not stop")))))
+
+(ert-deftest agent-repl-test-mp-a-nuke-failure-keeps-its-typed-refusal ()
+  "A failed nuke reaches on-failed with its failure arm and value."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (let (got)
+    (agent-repl-mutation-progress-register "op-n" :on-failed (lambda (&rest args) (setq got args)))
+    ;; Act.
+    (agent-repl-mutation-progress-handle
+     '(:op-id "op-n" :event (:arm :nuke :value (:arm :failed :value (:arm :refusal :value (:cause (:arm :git-failed :value (:detail "locked"))))))))
+    ;; Assert.
+    (should (equal got '(:refusal (:cause (:arm :git-failed :value (:detail "locked"))))))))
+
 (ert-deftest agent-repl-test-mp-unknown-op-is-dropped-quietly ()
   "A progress event for an op this Emacs never registered is dropped, not erred."
   ;; Arrange: nothing registered.
