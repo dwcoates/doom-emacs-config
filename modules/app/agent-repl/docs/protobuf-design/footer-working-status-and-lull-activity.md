@@ -20,4 +20,26 @@ substatus that stands for the whole turn. The owner wants the status called
 
 ## Context
 
+- **The working steps.** While a turn is in flight the footer's step names
+  what the MAIN agent is doing now: `thinking` (an inference call, no sync
+  tool running), `executing` (bash, MCP tools, and any tool without its own
+  step), `reading` (read), `writing` (write, edit), `searching` (grep, glob,
+  web search), `fetching` (web fetch), `delegating` (a sync subagent);
+  `submitting`, `clearing` and `compacting` stand as they are. Owner agreed to
+  the separate searching / fetching / delegating steps.
+- **The lull line: from the moment a feed item LANDS until the next SURFACES.**
+  The quiet stretch is between one feed item landing fully and the next feed
+  item surfacing partially. The activity line names what just landed (for a
+  tool call: ✅ or ❌, the tool, and that the agent is handling it) and CLEARS
+  THE MOMENT THE NEXT ITEM SURFACES — a response that starts streaming clears
+  it at its first fragment, not when it finishes. The owner: this stretch
+  between items is "the main point".
+- **Not only while working.** The lull line also serves the `background`
+  status (for example a subagent's message to the main agent surfacing).
+  While a turn is in flight the footer reads `working` even if background work
+  also runs, and background items are NOT surfaced on the activity line then.
+- **Every activity line is one line.** An activity update is always a single
+  line, truncated with an ellipsis when it would overflow; codified in the
+  webapp's AGENTS.md.
+
 ## Landed changes
