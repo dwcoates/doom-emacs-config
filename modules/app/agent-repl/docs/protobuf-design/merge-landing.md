@@ -73,4 +73,50 @@ branch into the target as a non-fast-forward merge.
     that is two resolved copies of one fact, one per component, never one
     shared message the client fans out.
 
+- **The footer's merging substatuses and their activity lines (owner,
+  2026-09-29).** Status is "merging" throughout; the substatus is the phase,
+  in plain words, and the activity line under it is the phase's own salient
+  detail, cleared when the substatus ends.
+  - "enqueued k/n": n is how many merges are WAITING in the repository's
+    queue, not counting the one being worked on; k is this workspace's
+    1-based place among them, so 1 means next to be taken and there is never
+    a 0. Activity: the workspace currently being merged and its substatus,
+    coarse (one line per substatus change of that merge, never finer), so the
+    line is not chatty.
+  - "preprocessing": the configured before-merge prompt is running.
+    Activity: the prompt text itself.
+  - "rebasing k/n": k of n commits replayed onto the target's tip.
+    Activity: the rebase command running for the current commit, and any
+    failure it hits.
+  - "conflict resolution": the agent is resolving a rebase conflict; the
+    merge usually returns to "rebasing" afterwards. Activity: the conflicting
+    commit and how many files conflict, then the resolution agent's own
+    notifications, the same way a normal turn's take the line.
+  - "testing": no detail in the substatus. Activity: a line as each suite
+    starts, and as each finishes, a passed suite preceded by a green check.
+    The expanded footer lists every suite; that section opens and is selected
+    when "testing" begins and closes, returning to whatever other sections
+    stand, when it ends. Its shape follows the existing expanded-footer
+    practice (the owner leaves that design to the orchestrator).
+  - "fixing": the agent is repairing failed suites; the merge returns to
+    "testing" afterwards. Activity: which suites are being fixed.
+  - "committing": the non-fast-forward merge commit into the target.
+    Activity: that merge commit's first line.
+  - "updating main": a PR-merged merge pulling the default branch in the
+    repository's main worktree. Activity: the step it is on (fetching, then
+    fast-forwarding to the new tip).
+  - "postprocessing": the configured after-merge prompt is running.
+    Activity: the prompt text itself.
+- **A failed merge leaves the queue and hands the workspace back (owner,
+  2026-09-29).** When conflict resolution or test repair fails, the merge is
+  removed from the queue at once, which unblocks the merges behind it and
+  ends the merging status. The workspace's status becomes "idle", with the
+  substatus "conflicts failed" or "tests failed": the workspace is idle and
+  the user decides what happens next.
+  - Reopens: the 2026-09-28 ruling that made a stopped merge the
+    `merge_conflict` status (with its `parked` step, whose composer delivered
+    what the user typed to the merge's agent) and a failed merge the
+    `merge_failed` status. Neither state survives: nothing is parked, and the
+    user's next prompt is an ordinary turn of the workspace.
+
 ## Landed changes
