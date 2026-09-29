@@ -36,6 +36,8 @@ import { fireIntersection, intersectionObservers } from "../intersection-observe
 import { OVERSCAN_CLASS } from "../../src/feed/overscan.js";
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
+import { bubbleBox } from "../../src/feed/bubble-scroll.js";
+import { createBubbleBody } from "../../src/bubble/body.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -1073,6 +1075,127 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
 
     // Assert
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+    feed.dispose();
+  });
+});
+
+describe("mountFeed: expanding a bubble centers it in the feed", () => {
+  const rect = (top: number, height: number) => (): DOMRect =>
+    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+
+  /** A scroll box scripted at scrollTop 100 over a 300px viewport of 2000px. */
+  function scriptedScroll(scroll: HTMLElement): void {
+    let top = 100;
+    Object.defineProperties(scroll, {
+      scrollHeight: { configurable: true, get: () => 2000 },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: { configurable: true, get: () => top, set: (next: number) => { top = next; } },
+    });
+    scroll.getBoundingClientRect = rect(0, 300);
+  }
+
+  /** A capped `.bubble > .bubble-scroll` hung in HOST, laid out at TOP. */
+  function bubbleAt(host: HTMLElement, top: number, parentClass = "bubble"): HTMLElement {
+    const bubble = document.createElement("div");
+    bubble.className = parentClass;
+    bubble.dataset.role = "response";
+    const box = bubbleBox(createBubbleBody(), true);
+    bubble.append(box);
+    host.append(bubble);
+    bubble.getBoundingClientRect = rect(top, 100);
+    return box;
+  }
+
+  it("centers the bubble a click expands", async () => {
+    // Arrange -- the bubble hangs 500..600 under a 300px viewport at 100.
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptedScroll(scroll);
+    const box = bubbleAt(host, 500);
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
+    expect(scroll.scrollTop).toBe(500);
+    feed.dispose();
+  });
+
+  it("records the move under the bubbleExpanded cause", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    scriptedScroll(host.parentElement as HTMLElement);
+    const box = bubbleAt(host, 500);
+    const capture = captureLogRecords("debug");
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect((record.context as Record<string, unknown>).cause).toBe("bubbleExpanded");
+    feed.dispose();
+  });
+
+  it("does not move the feed when a click collapses the bubble", async () => {
+    // Arrange -- an expanded bubble, already centered.
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptedScroll(scroll);
+    const box = bubbleAt(host, 500);
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    scroll.scrollTop = 250;
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(scroll.scrollTop).toBe(250);
+    feed.dispose();
+  });
+
+  it("does not move the feed when a click expands a tool card", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptedScroll(scroll);
+    const card = document.createElement("div");
+    card.className = "tool-card tool-fold";
+    card.getBoundingClientRect = rect(500, 100);
+    host.append(card);
+    // Act
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(scroll.scrollTop).toBe(100);
+    feed.dispose();
+  });
+
+  it("reports and throws on a bubble scroll box that hangs in no bubble", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptedScroll(scroll);
+    const box = bubbleAt(host, 500, "not-a-bubble");
+    const capture = captureLogRecords();
+    const thrown: unknown[] = [];
+    const onError = (e: ErrorEvent): void => {
+      thrown.push(e.error);
+      e.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    window.removeEventListener("error", onError);
+    // Assert -- the fault is logged with its context, thrown, and nothing moved.
+    const record = await forwardedRecord(capture, "feed.center-expanded-bubble");
+    expect([
+      record.context,
+      (thrown[0] as Error | undefined)?.message,
+      scroll.scrollTop,
+    ]).toEqual([
+      expect.objectContaining({ parent: "not-a-bubble" }),
+      "feed: an expanded bubble scroll box hangs in no bubble",
+      100,
+    ]);
     feed.dispose();
   });
 });

@@ -390,13 +390,14 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the nine causes the owner rules allow", () => {
+  it("names exactly the ten causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
       "promptHeld",
       "selectionMoved",
       "detachedWorkSelected",
+      "bubbleExpanded",
       "initialPlacement",
       "replaceRestore",
       "prependCompensation",
@@ -945,6 +946,68 @@ describe("TailFollow.detachedWorkSelected", () => {
     expect(await moves(capture)).toEqual([
       { cause: "detachedWorkSelected", from: 100, to: 300, follow: false },
     ]);
+  });
+});
+
+describe("TailFollow.bubbleExpanded", () => {
+  it("centers an expanded bubble below the fold in the viewport", () => {
+    // Arrange: a 200px bubble whose top is 250px down a 300px viewport.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
+    expect(box.scrollTop).toBe(300);
+  });
+
+  it("ends a standing follow", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("is recorded at DEBUG as bubbleExpanded", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "bubbleExpanded", from: 100, to: 300, follow: false },
+    ]);
+  });
+});
+
+describe("TailFollow's centering reveals share one shape", () => {
+  const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void]> = [
+    ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g)],
+    ["bubbleExpanded", (tail, g) => tail.bubbleExpanded(g)],
+  ];
+  const geometries: RevealGeometry[] = [
+    { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 },
+    { boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 600 },
+    { boxTop: 0, boxHeight: 300, nodeTop: -900, nodeHeight: 50 },
+    { boxTop: 0, boxHeight: 300, nodeTop: 900, nodeHeight: 50 },
+  ];
+
+  it.each(reveals)("%s lands exactly where revealCenterDelta says", (_name, reveal) => {
+    // Arrange
+    const landed = geometries.map((g) => {
+      const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+      const a = armed(box);
+      // Act
+      reveal(a.tail, g);
+      return box.scrollTop;
+    });
+    // Assert
+    const expected = geometries.map(
+      (g) => 100 + revealCenterDelta(g, { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 }),
+    );
+    expect(landed).toEqual(expected);
   });
 });
 
