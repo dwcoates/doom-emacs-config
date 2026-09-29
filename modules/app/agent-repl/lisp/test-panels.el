@@ -4300,3 +4300,89 @@ exemption has its own test."
     (agent-repl--panels-open-on-arrival "never-registered-ws" "ws-2")
     ;; Assert
     (should-not opened)))
+
+;;;; ---- The one pre-panel layout save ----
+
+(ert-deftest agent-repl-test-panels-own-buffers-include-the-open-placeholder ()
+  "An open's placeholder is one of the workspace's own panel buffers.
+It takes the main-area window the view mounts into, so a frame showing
+it is covered by the mount, not by the user's work."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((placeholder (get-buffer-create " *agent-opening-own1*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder)
+                     (lambda (_ws) placeholder)))
+            ;; Act / Assert
+            (should (memq placeholder (agent-repl--panels-own-buffers "test-ws"))))
+        (kill-buffer placeholder)))))
+
+(ert-deftest agent-repl-test-panels-a-frame-showing-the-placeholder-is-covered ()
+  "A frame holding only the placeholder is covered by the mount."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((placeholder (get-buffer-create " *agent-opening-cover1*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder)
+                     (lambda (_ws) placeholder)))
+            (delete-other-windows)
+            (set-window-buffer (selected-window) placeholder)
+            ;; Act / Assert
+            (should (agent-repl--panels-cover-frame-p "test-ws")))
+        (kill-buffer placeholder)
+        (delete-other-windows)))))
+
+(ert-deftest agent-repl-test-panels-save-pre-panel-layout-saves-the-users-frame ()
+  "The layout under a mount that has not yet taken the frame is saved."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((work (get-buffer-create "*pre-panel-work1*")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work)
+            ;; Act
+            (agent-repl--save-pre-panel-layout "test-ws" "test")
+            ;; Assert
+            (should (window-configuration-p
+                     (agent-repl--ws-get "test-ws" :fullscreen-config))))
+        (kill-buffer work)
+        (delete-other-windows)))))
+
+(ert-deftest agent-repl-test-panels-save-pre-panel-layout-keeps-it-under-the-mount ()
+  "A save while the mount covers the frame keeps the layout already saved."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((placeholder (get-buffer-create " *agent-opening-keep1*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder)
+                     (lambda (_ws) placeholder)))
+            (delete-other-windows)
+            (set-window-buffer (selected-window) placeholder)
+            (agent-repl--ws-put "test-ws" :fullscreen-config 'users-frame)
+            ;; Act
+            (agent-repl--save-pre-panel-layout "test-ws" "test")
+            ;; Assert
+            (should (eq (agent-repl--ws-get "test-ws" :fullscreen-config) 'users-frame)))
+        (kill-buffer placeholder)
+        (delete-other-windows)))))
+
+(defconst agent-repl-test-panels--dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The lisp/ directory the mount sources are read from.")
+
+(ert-deftest agent-repl-test-panels-every-mount-saves-through-the-one-helper ()
+  "No mount site records `:fullscreen-config' by hand.
+The layout under the mount is saved by `agent-repl--save-pre-panel-layout'
+alone; a site writing `current-window-configuration' into the key itself
+would save whatever the mount had already put on the frame."
+  (let ((dir agent-repl-test-panels--dir))
+    (dolist (file '("frontend.el" "open-progress.el" "panels.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file dir))
+        (goto-char (point-min))
+        (let ((hits 0))
+          (while (re-search-forward
+                  ":fullscreen-config (current-window-configuration)" nil t)
+            (setq hits (1+ hits)))
+          (should (= hits (if (equal file "panels.el") 1 0))))))))
