@@ -178,7 +178,7 @@
   ],
   "footer_status": {
     "idle": "green",
-    "thinking": "red",
+    "working": "red",
     "waiting": "green",
     "interrupted": "green",
     "merging": "purple",
