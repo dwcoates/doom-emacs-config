@@ -31,6 +31,19 @@ type resolver struct {
 	mu    sync.Mutex
 	state *rosterState
 	topic publish.Topic[*frontendv1.WorkspaceRoster]
+
+	// results is told every change of a workspace's last turn result, so the
+	// daemon keeps it durable (wsm.SetResult). nil tells nobody.
+	results ResultSink
+	// pendingResults are the changes a render found, reported after the lock
+	// is released.
+	pendingResults []resultChange
+}
+
+// resultChange is one workspace's changed last turn result.
+type resultChange struct {
+	ws     ids.WorkspaceID
+	result *wsm.TurnResult
 }
 
 // newResolver builds the resolver, asserting the render-colors tables against
@@ -119,7 +132,12 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	if ready {
 		roster = r.render(log)
 	}
+	changes := r.pendingResults
+	r.pendingResults = nil
 	r.mu.Unlock()
+	for _, change := range changes {
+		r.results(change.ws, change.result)
+	}
 
 	if ctx == nil {
 		ctx = dlog.Context{}
@@ -292,6 +310,7 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 					"async_live": s.asyncLive(),
 				})
 			s.result = resultRead
+			s.resultSettled = true
 		})
 }
 
@@ -365,6 +384,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			s.turnEverRan = true
 			s.lastClose = how
 			s.compacting = false
+			s.settleResult()
 			// A COMPLETED, INTERRUPTED or FAILED turn leaves a result the
 			// user has not read. A close this build does not know is a
 			// contract breach: it is recorded loudly and leaves no tracked

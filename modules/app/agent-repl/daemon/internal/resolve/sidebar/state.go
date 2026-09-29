@@ -99,6 +99,19 @@ type wsState struct {
 	// turn-end arm (SetViewed), and reset to none by a new turn (startTurn) —
 	// a new prompt is the user moving on.
 	result resultState
+	// resultSettled reports that the result has been decided by this
+	// resolver: by a live turn event (a turn starting, ending, or being
+	// viewed), or by seeding it ONCE from the durable record (restoreResult).
+	// A durable record is read only while nothing live has spoken.
+	resultSettled bool
+	// restoredEnd is the turn-end arm seeded from the durable record, drawn in
+	// place of the one lastClose resolves to until a turn of this resolver's
+	// own supersedes it. Empty when the result is live.
+	restoredEnd string
+	// persisted is the result the durable record holds, as far as this
+	// resolver knows: what it seeded from, or last reported through the result
+	// sink. A render whose result differs reports it (resolver.row).
+	persisted *wsm.TurnResult
 	// reviving reports a revival of this workspace's parked session in
 	// flight (SetReviving). It is a marker beside the status, never an arm:
 	// it neither changes the arm nor clears the viewed marker.
@@ -177,6 +190,55 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	// A new prompt is the user moving on: whatever the last turn left, read
 	// or not, is no longer the result the row reports.
 	s.result = resultNone
+	s.settleResult()
+}
+
+// settleResult records that a live turn event decided the result, which
+// retires whatever was seeded from the durable record.
+func (s *wsState) settleResult() {
+	s.resultSettled = true
+	s.restoredEnd = ""
+}
+
+// restoreResult seeds the result ONCE from the workspace's durable record,
+// while no live turn event has decided it. It is how a daemon that did not see
+// a workspace's last turn end -- a successor after a handover, a restart --
+// draws the row as it stood (owner report, 2026-09-29: every row read `ready`
+// FULL after a deploy). It answers whether it seeded a result.
+func (s *wsState) restoreResult(rec wsm.Workspace) bool {
+	if s.resultSettled {
+		return false
+	}
+	s.resultSettled = true
+	if rec.Result == nil {
+		return false
+	}
+	restored := *rec.Result
+	s.persisted = &restored
+	s.turnEverRan = true
+	s.restoredEnd = string(restored.End)
+	s.result = resultUnread
+	if restored.Read {
+		s.result = resultRead
+	}
+	return true
+}
+
+// resultSnapshot is the durable spelling of the result standing now, nil when
+// none does.
+func (s *wsState) resultSnapshot() *wsm.TurnResult {
+	if s.result == resultNone {
+		return nil
+	}
+	return &wsm.TurnResult{End: wsm.TurnResultEnd(s.turnEndArm()), Read: s.result == resultRead}
+}
+
+// sameResult reports whether two durable results are the same.
+func sameResult(a, b *wsm.TurnResult) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // The three TURN-END arms: how the last turn ended, once nothing more urgent
@@ -212,6 +274,9 @@ func readsResult(arm string) bool {
 // installed (SetTurnEnded), so it is never unread; it keeps the row on
 // `done`, the arm it has always drawn.
 func (s *wsState) turnEndArm() string {
+	if s.restoredEnd != "" {
+		return s.restoredEnd
+	}
 	end, ok := ladder.ResolveTurnEnd(s.lastClose, s.lastFailure)
 	if !ok {
 		return armDone
