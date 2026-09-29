@@ -20,4 +20,27 @@ workspace's tab) and the tab blink.
 
 ## Context
 
+- **Objective.** The daemon posts every workspace desktop notification,
+  turn end included; Emacs keeps only the click action (select the
+  workspace's tab) and the tab blink.
+- **Frontend component.** None in the webapp's figma→idl views; the tab blink
+  is Emacs's tab bar.
+- **Systems.** `proto` (`agentrepl.v1` host stream), `daemon` (banner
+  decision, banner spawning, click read-back, turn-end firing), Emacs `lisp`
+  (click → tab selection, blink), test support (`lisp/testsupport/fakedaemon`,
+  `e2e`). Owner confirmed this list.
+- **Non-additive changes.** The banner backends leave `lisp/notifications.el`;
+  the roster-diff turn-end banner (`agent-repl--maybe-notify-finished`, via
+  `agent-repl-roster-finish-functions`) is removed; the host stream's
+  notification arm stops asking Emacs to decide presentation; Emacs's focus
+  check leaves the notification path. Owner confirmed.
+- **Trigger is the TURN, not the workspace.** A turn-end notification fires
+  when a turn ends. Detached work and queued prompts have nothing to do with
+  it: the owner's words, "it has nothing to do with any detached work at all,
+  only turns".
+- **Focus policy is Emacs-wide, and only Emacs.** Emacs focused (whatever
+  workspace is open in it) → no desktop notification; Emacs not focused →
+  desktop notification. External-browser webapp viewers are out of scope.
+- **Platforms.** macOS AND Linux, not macOS only.
+
 ## Landed changes
