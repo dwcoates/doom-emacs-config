@@ -395,13 +395,10 @@ export class TailFollow {
 
   /**
    * The reader picked a detached-work item in the footer: stop following, and
-   * CENTER the item's card in the viewport (`detachedWorkDelta`).
+   * CENTER the item's card in the viewport (`revealCenterDelta`).
    */
   detachedWorkSelected(geometry: RevealGeometry): void {
-    this.release();
-    this.shift("detachedWorkSelected", detachedWorkDelta(geometry, this.box));
-    this.takeAnchor();
-    this.latchIfLatestVisible();
+    this.centerReveal("detachedWorkSelected", geometry);
   }
 
   /**
@@ -501,6 +498,18 @@ export class TailFollow {
     // not recorded; every cause's own act is, moved or not.
     if (wasFollowing && this.lastTop === from) return;
     recordMove(cause, from, this.lastTop, wasFollowing);
+  }
+
+  /**
+   * THE ONE CENTERING REVEAL: stop following, CENTER the node GEOMETRY reads
+   * in the viewport (`revealCenterDelta`) under CAUSE, take the anchor there,
+   * and latch where the view lands if the latest entry is then in sight.
+   */
+  private centerReveal(cause: "detachedWorkSelected", geometry: RevealGeometry): void {
+    this.release();
+    this.shift(cause, revealCenterDelta(geometry, this.box));
+    this.takeAnchor();
+    this.latchIfLatestVisible();
   }
 
   /** Move the box BY delta without starting a follow. */
@@ -837,10 +846,11 @@ export interface RevealGeometry {
 }
 
 /**
- * How far the box must move to CENTER NODE in its viewport — the detached-work
- * selection (`TailFollow.detachedWorkSelected`) as an arithmetic (owner ruling,
- * 2026-09-23: the item the reader picked in the footer lands in the middle of
- * their view of the feed, where it used to land at the fold's edge).
+ * How far the box must move to CENTER NODE in its viewport — every centering
+ * reveal (`TailFollow.centerReveal`) as an arithmetic. First ruled for the
+ * detached-work selection (owner ruling, 2026-09-23: the item the reader picked
+ * in the footer lands in the middle of their view of the feed, where it used to
+ * land at the fold's edge).
  *
  * - a card that fits is placed with its vertical MIDPOINT on the viewport's;
  * - a card TALLER than the viewport lands with its own top at the viewport's
@@ -853,7 +863,7 @@ export interface RevealGeometry {
  * The rects are viewport coordinates (see `RevealGeometry`); BOX supplies the
  * scroll range the clamp needs. Positive is downward, matching `scrollTop`.
  */
-export function detachedWorkDelta(g: RevealGeometry, box: ScrollPosition): number {
+export function revealCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
   const offset =
     g.nodeHeight > g.boxHeight
       ? g.nodeTop - g.boxTop
