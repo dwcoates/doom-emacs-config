@@ -16,6 +16,17 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message KillWorkspaceRequest {
   workspace.v1.WorkspaceRef workspace = 1;
+  // A CLIENT-MINTED OPERATION ID, as CreateWorkspaceRequest.op_id is: PRESENCE
+  // IS OPT-IN TO THE IMMEDIATE ACK (owner ruling, 2026-09-29: the tab closes
+  // the moment the daemon acks, never after the teardown). A request that
+  // carries one is answered `accepted` as soon as the daemon has refused
+  // nothing and marked the workspace CLOSED (so the roster says so
+  // everywhere); the teardown then KILLS THE SESSION in the background, detached from
+  // this request's context, and its end rides WatchDaemon's
+  // `mutation_progress` keyed on this id (WorkspaceMutationProgress.kill).
+  // UNSET = the synchronous form: the rpc answers `success` once the teardown
+  // is done. The ownership refusals are answered on `error` in both forms.
+  optional string op_id = 2;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -25,7 +36,16 @@ message KillWorkspaceResponse {
     // its stream.
     KillWorkspaceSuccess success = 1;
     KillWorkspaceError error = 2;
+    // THE IMMEDIATE ACK. Answered, instead of `success`, precisely when the
+    // request carried an `op_id`: the workspace is closed and its teardown is
+    // running; its end arrives on `mutation_progress` under the same id.
+    KillWorkspaceAccepted accepted = 3;
   }
+}
+// The immediate ack: the workspace is closed and its teardown detached.
+message KillWorkspaceAccepted {
+  // The op_id the request supplied, echoed back.
+  string op_id = 1;
 }
 message KillWorkspaceSuccess {}
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

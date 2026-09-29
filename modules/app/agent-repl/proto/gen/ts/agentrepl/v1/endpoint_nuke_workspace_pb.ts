@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_nuke_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_nuke_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChROdWtlV29ya3NwYWNlU3VjY2VzcyKFAwoSTnVrZVdvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEjoKCmdpdF9mYWlsZWQYBSABKAsyJC5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZUdpdEZhaWxlZEgAQgcKBWNhdXNlIh8KHU51a2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU51a2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodTnVrZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpOdWtlV29ya3NwYWNlTm90WWV0QWRvcHRlZCIoChZOdWtlV29ya3NwYWNlR2l0RmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVOdWtlV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUTnVrZVdvcmtzcGFjZVN1Y2Nlc3MihQMKEk51a2VXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABI6CgpnaXRfZmFpbGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VHaXRGYWlsZWRIAEIHCgVjYXVzZSIfCh1OdWtlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFOdWtlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHU51a2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaTnVrZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWQiKAoWTnVrZVdvcmtzcGFjZUdpdEZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceRequest
@@ -29,6 +29,22 @@ export type NukeWorkspaceRequest = Message<"agentrepl.v1.NukeWorkspaceRequest"> 
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * A CLIENT-MINTED OPERATION ID, as CreateWorkspaceRequest.op_id is: PRESENCE
+   * IS OPT-IN TO THE IMMEDIATE ACK (owner ruling, 2026-09-29: the tab closes
+   * the moment the daemon acks, never after the teardown). A request that
+   * carries one is answered `accepted` as soon as the daemon has refused
+   * nothing and marked the workspace CLOSED (so the roster says so
+   * everywhere); the teardown then KILLS THE SESSION AND DESTROYS THE WORKTREE AND BRANCH in the background, detached from
+   * this request's context, and its end rides WatchDaemon's
+   * `mutation_progress` keyed on this id (WorkspaceMutationProgress.nuke).
+   * UNSET = the synchronous form: the rpc answers `success` once the teardown
+   * is done. The ownership refusals are answered on `error` in both forms.
+   *
+   * @generated from field: optional string op_id = 2;
+   */
+  opId?: string | undefined;
 };
 
 /**
@@ -62,6 +78,16 @@ export type NukeWorkspaceResponse = Message<"agentrepl.v1.NukeWorkspaceResponse"
      */
     value: NukeWorkspaceError;
     case: "error";
+  } | {
+    /**
+     * THE IMMEDIATE ACK. Answered, instead of `success`, precisely when the
+     * request carried an `op_id`: the workspace is closed and its teardown is
+     * running; its end arrives on `mutation_progress` under the same id.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceAccepted accepted = 3;
+     */
+    value: NukeWorkspaceAccepted;
+    case: "accepted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -71,6 +97,27 @@ export type NukeWorkspaceResponse = Message<"agentrepl.v1.NukeWorkspaceResponse"
  */
 export const NukeWorkspaceResponseSchema: GenMessage<NukeWorkspaceResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 1);
+
+/**
+ * The immediate ack: the workspace is closed and its teardown detached.
+ *
+ * @generated from message agentrepl.v1.NukeWorkspaceAccepted
+ */
+export type NukeWorkspaceAccepted = Message<"agentrepl.v1.NukeWorkspaceAccepted"> & {
+  /**
+   * The op_id the request supplied, echoed back.
+   *
+   * @generated from field: string op_id = 1;
+   */
+  opId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceAccepted.
+ * Use `create(NukeWorkspaceAcceptedSchema)` to create a new message.
+ */
+export const NukeWorkspaceAcceptedSchema: GenMessage<NukeWorkspaceAccepted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 2);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceSuccess
@@ -83,7 +130,7 @@ export type NukeWorkspaceSuccess = Message<"agentrepl.v1.NukeWorkspaceSuccess"> 
  * Use `create(NukeWorkspaceSuccessSchema)` to create a new message.
  */
 export const NukeWorkspaceSuccessSchema: GenMessage<NukeWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 2);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 3);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -143,7 +190,7 @@ export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
  * Use `create(NukeWorkspaceErrorSchema)` to create a new message.
  */
 export const NukeWorkspaceErrorSchema: GenMessage<NukeWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 4);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceUnknownWorkspace
@@ -156,7 +203,7 @@ export type NukeWorkspaceUnknownWorkspace = Message<"agentrepl.v1.NukeWorkspaceU
  * Use `create(NukeWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const NukeWorkspaceUnknownWorkspaceSchema: GenMessage<NukeWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
@@ -175,7 +222,7 @@ export type NukeWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.NukeWorksp
  * Use `create(NukeWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const NukeWorkspaceWorkspaceRefMismatchSchema: GenMessage<NukeWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceTransferringAway
@@ -194,7 +241,7 @@ export type NukeWorkspaceTransferringAway = Message<"agentrepl.v1.NukeWorkspaceT
  * Use `create(NukeWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const NukeWorkspaceTransferringAwaySchema: GenMessage<NukeWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceNotYetAdopted
@@ -207,7 +254,7 @@ export type NukeWorkspaceNotYetAdopted = Message<"agentrepl.v1.NukeWorkspaceNotY
  * Use `create(NukeWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const NukeWorkspaceNotYetAdoptedSchema: GenMessage<NukeWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceGitFailed
@@ -226,5 +273,5 @@ export type NukeWorkspaceGitFailed = Message<"agentrepl.v1.NukeWorkspaceGitFaile
  * Use `create(NukeWorkspaceGitFailedSchema)` to create a new message.
  */
 export const NukeWorkspaceGitFailedSchema: GenMessage<NukeWorkspaceGitFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 9);
 
