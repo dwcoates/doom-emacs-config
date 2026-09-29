@@ -161,6 +161,24 @@ half of why they live on a keymap of the module's own."
                   (intern (format "agent-repl-switch-to-workspace-%d" n))))
       (should (commandp (intern (format "agent-repl-switch-to-workspace-%d" n)))))))
 
+(ert-deftest agent-repl-test-keybindings-numerals-command-digits-name-the-same-commands ()
+  "Command-digit (`s-N\=') runs the SAME slot command as Option-digit (`M-N\=').
+On macOS the Command key is Super; Doom binds `s-1\=' .. `s-9\=' to its
+persp-indexed switch, so an unclaimed Command-digit landed on the wrong
+workspace while Command-{ / Command-} walked the bar correctly."
+  (dotimes (i agent-repl-switch-numeral-count)
+    (let ((n (1+ i)))
+      (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd (format "s-%d" n)))
+                  (lookup-key agent-repl-workspace-numerals-mode-map (kbd (format "M-%d" n))))))))
+
+(ert-deftest agent-repl-test-keybindings-numerals-are-an-evil-intercept-map ()
+  "The numerals map is an evil INTERCEPT map for every state.
+Doom binds Command-digit in `evil-normal-state-map\=', which outranks any
+minor-mode map; only an intercept map is consulted before evil's state
+maps.  The mark is the `[intercept-state]\=' entry `evil-make-intercept-map\='
+writes, with `all\=' for every state."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map [intercept-state]) 'all)))
+
 (ert-deftest agent-repl-test-keybindings-numerals-shadow-dooms-own ()
   "A numeral reaches OUR command even with Doom's binding in `global-map'.
 Doom binds `M-1' .. `M-0' to `+workspace/switch-to-N', which indexes
@@ -216,6 +234,10 @@ walked for KEY followed by its #\\='COMMAND."
 (ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
   "`M-0' is the one numeral the module does not claim."
   (should-not (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))))
+
+(ert-deftest agent-repl-test-keybindings-leaves-s-0-to-doom ()
+  "`s-0' stays Doom's too: the final-workspace chord needs no slot index."
+  (should-not (lookup-key agent-repl-workspace-numerals-mode-map (kbd "s-0"))))
 
 ;;;; ---- The helpers a binding needs ----
 

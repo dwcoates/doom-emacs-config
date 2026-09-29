@@ -149,7 +149,8 @@ the module."
 ;;;; ---- M-1 .. M-9 : the tab-bar numerals --------------------------------
 
 ;; ONE SOURCE OF TRUTH FOR NAVIGATION: THE DRAWN TAB ORDER.  Doom binds
-;; `M-1' .. `M-0' to `+workspace/switch-to-N', which indexes PERSP-MODE'S
+;; `M-1' .. `M-0' (and, on macOS, `s-1' .. `s-0' -- Command-digit) to
+;; `+workspace/switch-to-N', which indexes PERSP-MODE'S
 ;; perspective list -- Doom's own `main' at slot 0, persp-mode's `none'
 ;; among them -- so `M-1' landed on the splash screen with no tab
 ;; highlighted and `M-2' on the FIRST tab.  Every chord here indexes
@@ -166,21 +167,41 @@ the module."
 ;; is structural instead of probabilistic.  It is also the reason the chords
 ;; are observable in batch: this map is plain data, where `map!' is a no-op
 ;; stub outside a Doom session.
+;;
+;; BOTH MODIFIERS, AND AN EVIL INTERCEPT MAP.  Doom binds the Command-digit
+;; chords with `:n', i.e. in `evil-normal-state-map', and an evil state map
+;; outranks every minor-mode map.  So Command-2 pressed in a normal-state
+;; buffer (the webview) ran Doom's `+workspace/switch-to-1' and landed on
+;; persp-mode's SECOND perspective -- a different workspace from the bar's
+;; second tab whenever the two lists disagree -- while Command-{ and
+;; Command-} walked the bar correctly.  The map therefore carries both
+;; modifiers and is marked an evil INTERCEPT map for every state, which evil
+;; consults before any state map.  The mark is keymap DATA (the
+;; `[intercept-state]' entry `evil-make-intercept-map' writes), set when the
+;; map is built, so it holds whether evil loads before this module or after.
+
+(defconst agent-repl-switch-numeral-modifiers '("M" "s")
+  "The modifiers the tab-bar slot chords ride: Meta (Option) and Super (Command).")
 
 (defvar agent-repl-workspace-numerals-mode-map
   (let ((map (make-sparse-keymap)))
-    (dotimes (i agent-repl-switch-numeral-count)
-      (let ((n (1+ i)))
-        (define-key map (kbd (format "M-%d" n))
-                    (intern (format "agent-repl-switch-to-workspace-%d" n)))))
+    (dolist (modifier agent-repl-switch-numeral-modifiers)
+      (dotimes (i agent-repl-switch-numeral-count)
+        (let ((n (1+ i)))
+          (define-key map (kbd (format "%s-%d" modifier n))
+                      (intern (format "agent-repl-switch-to-workspace-%d" n))))))
+    ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
+    (define-key map [intercept-state] 'all)
     map)
-  "Keymap carrying `M-1\=' .. `M-9\=', the tab-bar slot chords.
-Built from `agent-repl-switch-numeral-count' and the commands
-`commands.el\=' generates from the same number, so a chord with no
-command behind it -- or a command with no chord -- cannot be spelled.")
+  "Keymap carrying `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=', the slot chords.
+Built from `agent-repl-switch-numeral-count', the modifiers in
+`agent-repl-switch-numeral-modifiers' and the commands `commands.el\='
+generates from the same number, so a chord with no command behind it --
+or a command with no chord -- cannot be spelled.  An evil intercept map
+for every state; see the commentary above.")
 
 (define-minor-mode agent-repl-workspace-numerals-mode
-  "Make `M-1\=' .. `M-9\=' switch to a SLOT OF THE DRAWN TAB BAR.
+  "Make `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=' switch to a SLOT OF THE DRAWN TAB BAR.
 Global, and enabled by this module\='s own load, because the chords are
 about the tab bar rather than about any one buffer.  Its keymap shadows
 Doom\='s `global-map\=' numerals structurally; see the commentary above."
