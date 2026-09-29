@@ -16,7 +16,7 @@ import (
 var statusArms = []string{
 	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
 	"merge_conflict", "merge_failed", "merged", "degraded", "waiting",
-	"thinking", "background", "turn_failed", "idle",
+	"working", "background", "turn_failed", "idle",
 }
 
 // The FooterAllowance.status arms this resolver emits, asserted the same way
@@ -471,25 +471,25 @@ func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.Foote
 	if s.coldAnswer == nil {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusThinking{Activity: r.thinkingActivity(s)}
+	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
 	switch s.coldAnswer.Choice {
 	case ChoiceCompact:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with compact"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
-			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
+			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}
 	case ChoiceClear:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with clear"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Clearing{
-			Clearing: &frontendv1.FooterSubStatusThinkingClearing{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Clearing{
+			Clearing: &frontendv1.FooterSubStatusWorkingClearing{}}
 	default:
 		// A PAID RESUME SUBMITS THE CONVERSATION AND NOTHING ELSE, which is
 		// what `submitting` already says; an unrecognized choice reads the
 		// same rather than falling out of the tree unpainted.
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with pay"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Submitting{
-			Submitting: &frontendv1.FooterSubStatusThinkingSubmitting{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Submitting{
+			Submitting: &frontendv1.FooterSubStatusWorkingSubmitting{}}
 	}
-	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{Thinking: arm}}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 
 // wakeup resolves the self-scheduled wakeup fallback, which the contract
@@ -519,30 +519,30 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 	if s.turn == nil && !s.compacting {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusThinking{Activity: r.thinkingActivity(s)}
+	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
 	switch {
 	case s.turn == nil:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
-			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
+			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}
 	case s.turn.Act == ActClear:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActClear"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Clearing{
-			Clearing: &frontendv1.FooterSubStatusThinkingClearing{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Clearing{
+			Clearing: &frontendv1.FooterSubStatusWorkingClearing{}}
 	case s.turn.Act == ActCompact || s.compacting:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActCompact || s.compacting"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
-			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
+			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}
 	case !s.sawActivity:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case !s.sawActivity"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Submitting{
-			Submitting: &frontendv1.FooterSubStatusThinkingSubmitting{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Submitting{
+			Submitting: &frontendv1.FooterSubStatusWorkingSubmitting{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
-		arm.Substatus = &frontendv1.FooterStatusThinking_Thinking{
-			Thinking: &frontendv1.FooterSubStatusThinkingThinking{}}
+		arm.Substatus = &frontendv1.FooterStatusWorking_Thinking{
+			Thinking: &frontendv1.FooterSubStatusWorkingThinking{}}
 	}
-	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{Thinking: arm}}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 
 // background resolves detached work running while the main thread is free.
@@ -614,8 +614,8 @@ func statusName(status *frontendv1.FooterStatus) string {
 	switch status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Idle:
 		return "idle"
-	case *frontendv1.FooterStatus_Thinking:
-		return "thinking"
+	case *frontendv1.FooterStatus_Working:
+		return "working"
 	case *frontendv1.FooterStatus_Waiting:
 		return "waiting"
 	case *frontendv1.FooterStatus_Interrupted:

@@ -26,7 +26,7 @@
 //     FeedContextCutCompacted, FeedWorktreeEntered, FeedWorktreeLeft, and
 //     (Landing 8, docs/overhaul/PROTO-CHANGES.md) FeedContextCutCompactionFailed
 //     — see TestCompactionFailed's header for the exact shape.
-//   - proto/src/frontend/v1/footer.proto: FooterSubStatusThinkingCompacting
+//   - proto/src/frontend/v1/footer.proto: FooterSubStatusWorkingCompacting
 //     (the in-progress signal) and FooterStatusActivityContextBudget (the
 //     context-budget-warning carrier).
 //
@@ -136,7 +136,7 @@ func cpContextBudgetText(v *frontendv1.FooterView) string {
 	if cb := status.GetIdle().GetActivity().GetContextBudget(); cb != nil {
 		return cb.GetText()
 	}
-	if cb := status.GetThinking().GetActivity().GetContextBudget(); cb != nil {
+	if cb := status.GetWorking().GetActivity().GetContextBudget(); cb != nil {
 		return cb.GetText()
 	}
 	return ""
@@ -162,7 +162,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 
 	turn := SubmitPrompt(t, w, ws, prompt)
 	cpAwaitFooterView(t, w, footer.Stream, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking().GetCompacting() != nil
+		return v.GetStrip().GetStatus().GetWorking().GetCompacting() != nil
 	})
 
 	AwaitTurnEnded(t, w, ws, turn)

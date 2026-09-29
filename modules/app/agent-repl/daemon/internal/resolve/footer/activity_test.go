@@ -166,7 +166,7 @@ func TestANotificationOutranksEveryCompetingActivity(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
 
 	// Assert
-	activity := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity()
+	activity := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity()
 	if activity.GetNotification().GetText() != "the agent needs you" {
 		t.Fatalf("activity = %+v, want the notification to outrank the hook", activity.GetKind())
 	}
@@ -183,7 +183,7 @@ func TestAStatusBoundHookOutranksTheRateReport(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Assert
-	activity := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity()
+	activity := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity()
 	if activity.GetHook().GetName() != "pre-commit" {
 		t.Fatalf("activity = %+v, want the status-bound hook line", activity.GetKind())
 	}
@@ -763,7 +763,7 @@ func TestASettledHookLeavesTheActivityLine(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", false))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetActivity() != nil {
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetActivity() != nil {
 		t.Fatalf("a settled hook kept its line standing")
 	}
 }
@@ -783,7 +783,7 @@ func TestAMidTurnApiFailureDrawsTheRetryLine(t *testing.T) {
 	})
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetRetrying()
 	if retry.GetAttempt() != 2 || retry.GetStatus() != "overloaded" {
 		t.Fatalf("retry = %+v, want attempt 2 with the vendor's summary", retry)
 	}
@@ -801,7 +801,7 @@ func TestASecondApiFailureCountsTheNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, failed)
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetRetrying()
 	if retry.GetAttempt() != 3 {
 		t.Fatalf("attempt = %d, want 3 after two recorded failures", retry.GetAttempt())
 	}
@@ -1057,18 +1057,18 @@ func TestActivityLineOfReadsTheStandingLine(t *testing.T) {
 		},
 		{
 			name: "a kind that carries its own text",
-			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
-				Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
-					Kind: &frontendv1.FooterStatusThinkingActivity_Compaction{
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{
+				Working: &frontendv1.FooterStatusWorking{Activity: &frontendv1.FooterStatusWorkingActivity{
+					Kind: &frontendv1.FooterStatusWorkingActivity_Compaction{
 						Compaction: &frontendv1.FooterStatusActivityCompaction{Text: "compacting the context…"}},
 				}}}},
 			want: activityLine{kind: "compaction", text: "compacting the context…"},
 		},
 		{
 			name: "a kind with no text field names the kind",
-			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
-				Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
-					Kind: &frontendv1.FooterStatusThinkingActivity_Hook{
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{
+				Working: &frontendv1.FooterStatusWorking{Activity: &frontendv1.FooterStatusWorkingActivity{
+					Kind: &frontendv1.FooterStatusWorkingActivity_Hook{
 						Hook: &frontendv1.FooterStatusActivityHook{Name: "PreToolUse"}},
 				}}}},
 			want: activityLine{kind: "hook"},
@@ -1093,9 +1093,9 @@ func TestActivityLineOfReadsTheStandingLine(t *testing.T) {
 
 func TestActivityLineOfRendersATextlessKindsFields(t *testing.T) {
 	// Arrange
-	status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
-		Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
-			Kind: &frontendv1.FooterStatusThinkingActivity_Hook{
+	status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{
+		Working: &frontendv1.FooterStatusWorking{Activity: &frontendv1.FooterStatusWorkingActivity{
+			Kind: &frontendv1.FooterStatusWorkingActivity_Hook{
 				Hook: &frontendv1.FooterStatusActivityHook{Name: "PreToolUse"}},
 		}}}}
 

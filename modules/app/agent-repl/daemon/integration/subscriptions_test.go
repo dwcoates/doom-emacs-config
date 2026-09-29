@@ -70,7 +70,7 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				f.shim.ExpectStartTurn()
 			},
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetThinking() != nil
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking() != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
