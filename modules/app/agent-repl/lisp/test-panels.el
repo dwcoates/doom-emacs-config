@@ -4386,3 +4386,53 @@ would save whatever the mount had already put on the frame."
                   ":fullscreen-config (current-window-configuration)" nil t)
             (setq hits (1+ hits)))
           (should (= hits (if (equal file "panels.el") 1 0))))))))
+
+;;;; ---- A restore that awaited its view ----
+
+(ert-deftest agent-repl-test-panels-a-restore-with-no-view-awaits-one ()
+  "A restore that declined for want of a view is recorded as awaiting it."
+  (let ((agent-repl--panels-restore-awaiting-view nil))
+    (agent-repl--panels-note-restore-outcome "ws-a" 'no-live-view)
+    (should (equal agent-repl--panels-restore-awaiting-view '("ws-a")))))
+
+(ert-deftest agent-repl-test-panels-any-other-restore-outcome-awaits-nothing ()
+  "A restore that decided anything else no longer awaits a view."
+  (let ((agent-repl--panels-restore-awaiting-view (list "ws-a")))
+    (agent-repl--panels-note-restore-outcome "ws-a" 'already-visible)
+    (should-not agent-repl--panels-restore-awaiting-view)))
+
+(ert-deftest agent-repl-test-panels-a-created-view-restores-the-current-workspace ()
+  "The view the current workspace awaited runs its restore and input select.
+MEASURED 2026-09-29: the first workspace at startup showed no panels until
+the user switched away and back."
+  (let ((agent-repl--panels-restore-awaiting-view (list "ws-a"))
+        calls)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-a"))
+              ((symbol-function 'agent-repl--ensure-own-panels-on-persp-switch)
+               (lambda (ws) (push (list 'restore ws) calls)))
+              ((symbol-function 'agent-repl--maybe-autoselect-input)
+               (lambda (ws) (push (list 'select ws) calls))))
+      (agent-repl--panels-on-view-created "ws-a")
+      (should (equal (nreverse calls) '((restore "ws-a") (select "ws-a"))))
+      (should-not agent-repl--panels-restore-awaiting-view))))
+
+(ert-deftest agent-repl-test-panels-a-created-view-leaves-another-workspace-to-its-switch ()
+  "A workspace the user has left restores on its next switch, not now."
+  (let ((agent-repl--panels-restore-awaiting-view (list "ws-a"))
+        restored)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-b"))
+              ((symbol-function 'agent-repl--ensure-own-panels-on-persp-switch)
+               (lambda (_ws) (setq restored t))))
+      (agent-repl--panels-on-view-created "ws-a")
+      (should-not restored)
+      (should-not agent-repl--panels-restore-awaiting-view))))
+
+(ert-deftest agent-repl-test-panels-a-created-view-nobody-awaited-restores-nothing ()
+  "A view no restore awaited changes nothing about the panels."
+  (let ((agent-repl--panels-restore-awaiting-view nil)
+        restored)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-a"))
+              ((symbol-function 'agent-repl--ensure-own-panels-on-persp-switch)
+               (lambda (_ws) (setq restored t))))
+      (agent-repl--panels-on-view-created "ws-a")
+      (should-not restored))))

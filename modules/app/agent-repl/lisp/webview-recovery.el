@@ -24,6 +24,8 @@
 (require 'cl-lib)
 (require 'url-util)
 
+(declare-function agent-repl--panels-on-view-created "panels" (ws))
+(declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
 (declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
 (declare-function agent-repl--deferred-quit-hand-off "agent-repl-core" (context))
@@ -299,7 +301,7 @@ guard and so a tick is drivable from a test without a timer."
            (not agent-repl--webview-precreate-pass-open)
            (agent-repl--webview-precreate-hold-p))
       (agent-repl--webview-precreate-park)
-    (let ((ws (pop agent-repl--webview-precreate-queue)))
+    (let ((ws (agent-repl--webview-precreate-next)))
       (when ws
         (unless agent-repl--webview-precreate-pass-open
           (agent-repl--webview-precreate-open-pass))
@@ -310,12 +312,29 @@ guard and so a tick is drivable from a test without a timer."
                                 ws (agent-repl--webview-precreate-allow-reason))
               (agent-repl--frontend-precreate-webview ws)
               (setq agent-repl--webview-precreate-pass-mounted
-                    (1+ agent-repl--webview-precreate-pass-mounted)))
+                    (1+ agent-repl--webview-precreate-pass-mounted))
+              ;; The workspace the user stands on may have declined its
+              ;; panel restore for want of exactly this view.
+              (agent-repl--panels-on-view-created ws))
           (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
                                    ws err))))
       (unless agent-repl--webview-precreate-queue
         (agent-repl--webview-precreate-close-pass))
       (agent-repl--webview-precreate-arm))))
+
+(defun agent-repl--webview-precreate-next ()
+  "Take the next workspace off the pre-creation queue.
+THE WORKSPACE THE USER STANDS ON GOES FIRST when it is queued: it is the
+one whose panels are waiting on its view (`agent-repl--panels-on-view-created'),
+and at startup it is the first thing the user sees.  Otherwise the queue
+drains in order."
+  (let ((current (agent-repl--ws-current-name)))
+    (if (and current (member current agent-repl--webview-precreate-queue))
+        (progn
+          (setq agent-repl--webview-precreate-queue
+                (delete current agent-repl--webview-precreate-queue))
+          current)
+      (pop agent-repl--webview-precreate-queue))))
 
 (defun agent-repl--webview-precreate-schedule (workspaces)
   "Queue WORKSPACES for paced pre-creation, returning how many were queued.
