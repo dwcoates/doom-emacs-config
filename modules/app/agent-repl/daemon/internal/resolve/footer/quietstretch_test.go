@@ -731,7 +731,7 @@ func TestTheNextQuietLineRetiresTheEnding(t *testing.T) {
 	}
 }
 
-func TestAnActivityThatOutranksTheQuietLineHoldsNoEnding(t *testing.T) {
+func TestARunningHookHoldsNoEnding(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	inTurn(h)
@@ -827,48 +827,35 @@ func TestADrawnRowWithNoIdentityIsAnError(t *testing.T) {
 	}
 }
 
-func TestOnlyActivitiesAboveTheQuietLineOutrankIt(t *testing.T) {
-	working := []struct {
+func TestAnyNewerActivitySupersedesTheEnding(t *testing.T) {
+	tests := []struct {
 		name string
-		act  *frontendv1.FooterStatusWorkingActivity
-		want bool
+		// arrange stands an activity after the stretch ended.
+		arrange func(t *testing.T, h *harness)
 	}{
-		{"none", nil, false},
-		{"a fault", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Fault{}}, true},
-		{"an update", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Update{}}, true},
-		{"a notification", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Notification{}}, true},
-		{"a compaction", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Compaction{}}, true},
-		{"a hook", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Hook{}}, true},
-		{"a retry", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Retrying{}}, true},
-		{"a new quiet line", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_QuietStretch{}}, true},
-		{"injected context", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_ContextInjected{}}, false},
-		{"a rate limit", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_RateLimited{}}, false},
-		{"a context budget", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_ContextBudget{}}, false},
+		{name: "a running hook, which outranks the line", arrange: func(t *testing.T, h *harness) {
+			h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
+		}},
+		{name: "a notification", arrange: func(t *testing.T, h *harness) {
+			h.r.OnActivity(testWS, mainAgent, notificationFrame("look at this"))
+		}},
 	}
-	for _, tc := range working {
-		t.Run("working: "+tc.name, func(t *testing.T) {
-			if got := workingOutranksQuietLine(tc.act); got != tc.want {
-				t.Fatalf("workingOutranksQuietLine = %v, want %v", got, tc.want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			inTurn(h)
+			surface(t, h, mainAgent, "u-1", "response")
+
+			// Act
+			tc.arrange(t, h)
+
+			// Assert
+			if got := endingOf(t, h); got != nil {
+				t.Fatalf("ending = %v, want none: a newer activity is drawn at once", got)
 			}
-		})
-	}
-	background := []struct {
-		name string
-		act  *frontendv1.FooterStatusBackgroundActivity
-		want bool
-	}{
-		{"none", nil, false},
-		{"a fault", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Fault{}}, true},
-		{"an update", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Update{}}, true},
-		{"a notification", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Notification{}}, true},
-		{"a new quiet line", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_QuietStretch{}}, true},
-		{"a rate limit", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_RateLimited{}}, false},
-		{"a context budget", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_ContextBudget{}}, false},
-	}
-	for _, tc := range background {
-		t.Run("background: "+tc.name, func(t *testing.T) {
-			if got := backgroundOutranksQuietLine(tc.act); got != tc.want {
-				t.Fatalf("backgroundOutranksQuietLine = %v, want %v", got, tc.want)
+			if working(t, h).GetActivity() == nil {
+				t.Fatal("activity = none, want the newer activity")
 			}
 		})
 	}
