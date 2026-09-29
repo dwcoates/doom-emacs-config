@@ -296,14 +296,28 @@ func (r *RunOutput) TerminalAttribution(taskID, ownerAgentID, run string) conver
 // (from another file's records, or from its own staleness policy) and only this
 // side can spell it, because only this side holds the run's bytes.
 func (r *RunOutput) Cancelled(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
+	return r.seamTerminal("cancel-terminal", "a stopped run", taskID, run, ownerAgentID,
+		func(at convert.Attribution, output string, omitted uint64) *storev1.StoreEntry {
+			return r.conv.BashCancelled(at, run, output, omitted, settledAtMs, r.read)
+		})
+}
+
+// seamTerminal is the ONE shape every seam-minted terminal takes: it refuses
+// loudly (under OPERATION, naming WHICH run) when no spawning-call activity id
+// was supplied, because the frame would name no unit, and otherwise hands
+// SPELL the run's attribution and the output this handler holds.
+func (r *RunOutput) seamTerminal(
+	operation, which, taskID, run, ownerAgentID string,
+	spell func(at convert.Attribution, output string, omitted uint64) *storev1.StoreEntry,
+) []*storev1.StoreEntry {
 	if run == "" {
-		r.log.With(logging.Context{Operation: "cancel-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a stopped run: no spawning-call activity id was supplied, so the frame would name no unit")
+		r.log.With(logging.Context{Operation: operation, Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
+			Log("no terminal minted for %s: no spawning-call activity id was supplied, so the frame would name no unit", which)
 		return nil
 	}
 	at := r.TerminalAttribution(taskID, ownerAgentID, run)
 	output, omitted := r.Seen()
-	return []*storev1.StoreEntry{r.conv.BashCancelled(at, run, output, omitted, settledAtMs, r.read)}
+	return []*storev1.StoreEntry{spell(at, output, omitted)}
 }
 
 // Notified spells the vendor's task notification as the run's terminal,
@@ -314,14 +328,10 @@ func (r *RunOutput) Cancelled(taskID, run, ownerAgentID string, settledAtMs int6
 // read no byte of the spool — or a fresh one, for a run whose spool never
 // existed — states the output `not_observed`.
 func (r *RunOutput) Notified(taskID, run, ownerAgentID, status string, settledAtMs int64) []*storev1.StoreEntry {
-	if run == "" {
-		r.log.With(logging.Context{Operation: "notified-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a notified run: no spawning-call activity id was supplied, so the frame would name no unit (status=%s)", status)
-		return nil
-	}
-	at := r.TerminalAttribution(taskID, ownerAgentID, run)
-	output, omitted := r.Seen()
-	return []*storev1.StoreEntry{r.conv.BashNotified(at, run, output, omitted, status, settledAtMs, r.read)}
+	return r.seamTerminal("notified-terminal", "a notified run (status="+status+")", taskID, run, ownerAgentID,
+		func(at convert.Attribution, output string, omitted uint64) *storev1.StoreEntry {
+			return r.conv.BashNotified(at, run, output, omitted, status, settledAtMs, r.read)
+		})
 }
 
 // Lost spells the reader's LOST conclusion as the detached run's terminal.
@@ -341,16 +351,11 @@ func (r *RunOutput) Lost(taskID, runActivityID, ownerAgentID, reason string, cat
 	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE. Falling back to the vendor
 	// task id would key the terminal on a row no reader of the conversation can
 	// join to the call, which is worse than saying nothing: the run would appear
-	// settled while the call it belongs to stayed open forever.
-	run := runActivityID
-	if run == "" {
-		// Nothing to name the run by: the terminal would upsert no row. Refused
-		// loudly rather than emitted against an invented key.
-		r.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a LOST run: no spawning-call activity id was supplied, so the frame would name no unit (reason=%s)", reason)
-		return nil
-	}
-	at := r.TerminalAttribution(taskID, ownerAgentID, run)
-	output, omitted := r.Seen()
-	return []*storev1.StoreEntry{r.conv.BashLost(at, run, output, omitted, convert.LostReason(reason), r.read, catchup)}
+	// settled while the call it belongs to stayed open forever — so a missing
+	// one is refused loudly by seamTerminal rather than emitted against an
+	// invented key.
+	return r.seamTerminal("lost-terminal", "a LOST run (reason="+reason+")", taskID, runActivityID, ownerAgentID,
+		func(at convert.Attribution, output string, omitted uint64) *storev1.StoreEntry {
+			return r.conv.BashLost(at, runActivityID, output, omitted, convert.LostReason(reason), r.read, catchup)
+		})
 }
