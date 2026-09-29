@@ -168,6 +168,26 @@ SUCCESS and ERROR are the two arms' use-site decoders."
    (list (list 'success :success success)
          (list 'error :error error))))
 
+(defun agent-repl-wire-verbs--decode-accepting-result (message json success error accepted)
+  "Decode MESSAGE's `result' oneof from JSON, with its option-B `accepted' arm.
+A verb whose request carries an op id is answered `accepted' in place of
+`success' (CreateWorkspace, KillWorkspace, NukeWorkspace): three arms, not
+the standard two.  SUCCESS, ERROR and ACCEPTED are the arms' decoders."
+  (agent-repl-wire-verbs--check-keys message json '(success error accepted))
+  (agent-repl-wire-verbs--decode-oneof
+   message "result" json
+   (list (list 'success :success success)
+         (list 'error :error error)
+         (list 'accepted :accepted accepted))))
+
+(defun agent-repl-wire-verbs--append-op-id (out request)
+  "Return OUT, an encoded request alist, with REQUEST's optional op id last.
+Every verb that carries a client-minted op id carries it the same way:
+absent, the request is sent without it; present, it rides as `opId'."
+  (if (plist-get request :op-id)
+      (append out (list (cons 'opId (plist-get request :op-id))))
+    out))
+
 (defun agent-repl-wire-verbs--decode-string (message field json)
   "Decode the non-optional string FIELD of MESSAGE out of JSON.
 protojson omits default-valued scalars, so an absent field is the proto3
@@ -416,14 +436,12 @@ unprioritized workspace, a top-level workspace, no ungated consent."
                   (agent-repl-wire-encode-create-workspace-request-allow-ungated
                    (plist-get request :allow-ungated)))
             out))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form=%s"
+                      (plist-get (plist-get request :form) :arm))
     ;; THE OP ID OPTS INTO OPTION B. Present, the daemon acks at once and pushes
     ;; this create's progress on WatchDaemon keyed on it; absent, the create is
     ;; the legacy synchronous form.
-    (when (plist-get request :op-id)
-      (push (cons 'opId (plist-get request :op-id)) out))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form=%s"
-                      (plist-get (plist-get request :form) :arm))
-    (nreverse out)))
+    (agent-repl-wire-verbs--append-op-id (nreverse out) request)))
 
 
 ;;;; ---- CreateWorkspace: decode ----------------------------------------
@@ -625,16 +643,11 @@ so the real outcome arrives on the WatchDaemon progress channel, not here."
   "Decode CreateWorkspaceResponse from JSON into (:arm ARM :value V).
 THREE arms, not the standard two: `accepted' is the option-B ack answered
 when the request carried an op_id, in place of `success'/`error'."
-  (agent-repl-wire-verbs--check-keys
-   "CreateWorkspaceResponse" json '(success error accepted))
-  (agent-repl-wire-verbs--decode-oneof
-   "CreateWorkspaceResponse" "result" json
-   (list (list 'success :success
-               #'agent-repl-wire-decode-create-workspace-response-success)
-         (list 'error :error
-               #'agent-repl-wire-decode-create-workspace-response-error)
-         (list 'accepted :accepted
-               #'agent-repl-wire-decode-create-workspace-response-accepted))))
+  (agent-repl-wire-verbs--decode-accepting-result
+   "CreateWorkspaceResponse" json
+   #'agent-repl-wire-decode-create-workspace-response-success
+   #'agent-repl-wire-decode-create-workspace-response-error
+   #'agent-repl-wire-decode-create-workspace-response-accepted))
 
 
 ;;;; ---- OpenWorkspace --------------------------------------------------
@@ -653,9 +666,7 @@ on it; absent, the open reports only its terminal answer."
                          (agent-repl-wire-encode-open-workspace-request-workspace
                           (agent-repl-wire-verbs--require "OpenWorkspaceRequest" "workspace"
                                                           (plist-get request :workspace)))))))
-    (when (plist-get request :op-id)
-      (setq out (append out (list (cons 'opId (plist-get request :op-id))))))
-    out))
+    (agent-repl-wire-verbs--append-op-id out request)))
 
 (defun agent-repl-wire-decode-open-workspace-success (json)
   "Decode OpenWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
@@ -1005,9 +1016,7 @@ WatchDaemon keyed on it; absent, the bind emits no stages at all."
                          (agent-repl-wire-verbs--require-string
                           "BindWorkspaceSessionRequest" "vendor_session_id"
                           (plist-get request :vendor-session-id))))))
-    (when (plist-get request :op-id)
-      (setq out (append out (list (cons 'opId (plist-get request :op-id))))))
-    out))
+    (agent-repl-wire-verbs--append-op-id out request)))
 
 (defun agent-repl-wire-decode-bind-workspace-session-success (json)
   "Decode BindWorkspaceSessionSuccess from JSON.  Empty: every visible effect

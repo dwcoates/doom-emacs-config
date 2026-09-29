@@ -3320,6 +3320,51 @@ always registers the main worktree, so an answer without it is not one."
                   (agent-repl-test-wire-verbs--parse "{\"scale\":1.02}"))
                  '(:scale 1.02))))
 
+;;;; ---- The shared op id and accepted-result helpers --------------------
+
+(ert-deftest agent-repl-test-wire-verbs-append-op-id-leaves-a-request-without-one-alone ()
+  "A request that minted no op id is returned as encoded."
+  (should (equal (agent-repl-wire-verbs--append-op-id '((workspace . 1)) nil)
+                 '((workspace . 1)))))
+
+(ert-deftest agent-repl-test-wire-verbs-append-op-id-puts-the-op-id-last ()
+  "A minted op id rides as `opId', after every other field."
+  (should (equal (agent-repl-wire-verbs--append-op-id '((workspace . 1)) '(:op-id "op-1"))
+                 '((workspace . 1) (opId . "op-1")))))
+
+(ert-deftest agent-repl-test-wire-verbs-accepting-result-decodes-each-arm ()
+  "The three-arm result decodes success, error and accepted by their decoders."
+  (dolist (case '((success :success) (error :error) (accepted :accepted)))
+    (should (equal (agent-repl-wire-verbs--decode-accepting-result
+                    "M" (list (cons (car case) '((x . 1))))
+                    (lambda (_) 'decoded-success)
+                    (lambda (_) 'decoded-error)
+                    (lambda (_) 'decoded-accepted))
+                   (list :arm (cadr case)
+                         :value (intern (format "decoded-%s" (car case))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-accepting-result-refuses-an-unknown-arm ()
+  "A field outside the three arms is a contract breach."
+  (should-error (agent-repl-wire-verbs--decode-accepting-result
+                 "M" '((other . 1)) #'ignore #'ignore #'ignore)))
+
+(defun agent-repl-test-wire-verbs--occurrences (needle haystack)
+  "Count the non-overlapping occurrences of NEEDLE in HAYSTACK."
+  (let ((count 0) (start 0))
+    (while (setq start (string-search needle haystack start))
+      (setq count (1+ count) start (+ start (length needle))))
+    count))
+
+(ert-deftest agent-repl-test-wire-verbs-no-codec-hand-rolls-the-op-id-or-accepted-result ()
+  "Every op id and every accepted result goes through the shared helpers.
+A hand-rolled site is exactly the one that drifts: it spells `opId' or the
+three arms its own way."
+  (let* ((file (file-name-with-extension
+                (symbol-file 'agent-repl-wire-verbs--append-op-id 'defun) "el"))
+         (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
+    (should (= (agent-repl-test-wire-verbs--occurrences "(cons 'opId" source) 1))
+    (should (= (agent-repl-test-wire-verbs--occurrences "'(success error accepted)" source) 1))))
+
 ;;;; ---- OpenWorkspace: the optional correlation id ----------------------
 
 (ert-deftest agent-repl-test-wire-verbs-open-workspace-request-omits-an-absent-op-id ()
