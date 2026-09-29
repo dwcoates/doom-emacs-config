@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -75,25 +74,22 @@ func forceShimLogRoll(
 	req.Log.Info(shimLogRollOperation, "asking the bounce registry to roll the workspace's shim at freeness", fields)
 	done := func(err error) {
 		ended := copyFields(fields)
-		if errors.Is(err, bounce.ErrUnregistered) {
+		switch bounce.OutcomeOf(err) {
+		case bounce.OutcomeUnregistered:
 			// The shim departed before the roll was taken, and nothing is left
 			// to roll: the next shim spawned for the workspace starts its log
 			// afresh.
 			req.Log.Info(shimLogRollOperation, "the shim whose log reached its hard ceiling departed before the roll; nothing is left to roll", ended)
-			return
-		}
-		if errors.Is(err, bounce.ErrHandedAcross) {
+		case bounce.OutcomeHandedAcross:
 			// A handover carried the roll to the daemon the workspace moved
 			// to, which runs it after its adoption.
 			req.Log.Info(shimLogRollOperation, "the shim-log roll was handed across: the daemon the workspace moved to runs it after its adoption", ended)
-			return
-		}
-		if err != nil {
+		case bounce.OutcomeFailed:
 			ended["cause"] = err.Error()
 			req.Log.Error(shimLogRollOperation, "could not roll the shim whose log reached its hard ceiling", ended)
-			return
+		case bounce.OutcomeFinished:
+			req.Log.Info(shimLogRollOperation, "rolled the shim whose log reached its hard ceiling", ended)
 		}
-		req.Log.Info(shimLogRollOperation, "rolled the shim whose log reached its hard ceiling", ended)
 	}
 	decision, err := relauncher.BounceShim(ctx, workspace.ID, rollout.ReasonShimLogCeiling, false, done)
 	if err != nil {

@@ -69,23 +69,24 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 // bounce, or the bounce's failure. Nobody is waiting on it, so its failures
 // are RECORDED rather than returned.
 func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, err error) {
-	if errors.Is(err, bounce.ErrUnregistered) {
+	switch bounce.OutcomeOf(err) {
+	case bounce.OutcomeUnregistered:
 		// AN OUTCOME, NOT A FAILURE: the shim the restart would replace
 		// departed first, and nothing is left to replace -- the session was
 		// ended, the workspace closed, or a fresh shim already serves it.
 		log.Info(opRestart, "the restart was unregistered: the shim it would replace departed and nothing is left to replace", dlog.Context{"force": force})
 		return
-	}
-	if errors.Is(err, bounce.ErrHandedAcross) {
+	case bounce.OutcomeHandedAcross:
 		// AN OUTCOME, NOT A FAILURE (owner ruling, 2026-09-27): the restart
 		// raced a handover's move of the workspace, and the daemon that
 		// adopted it runs the restart -- and the webapp reload after it.
 		log.Info(opRestart, "the restart was handed to the daemon the workspace moved to, which runs it after its adoption", dlog.Context{"force": force})
 		return
-	}
-	if err != nil {
+	case bounce.OutcomeFailed:
 		log.Error(opRestart, "the shim relaunch failed", dlog.Context{"force": force, "cause": err.Error()})
 		return
+	case bounce.OutcomeFinished:
+		// The webapp reload below follows the finished bounce.
 	}
 
 	// The reload_webapp push follows the bounce, not the other way round: a

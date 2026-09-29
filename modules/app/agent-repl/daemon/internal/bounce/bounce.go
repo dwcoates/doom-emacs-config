@@ -110,6 +110,38 @@ func (g Gate) String() string {
 // an outcome, not a failure.
 var ErrHandedAcross = errors.New("bounce: handed across; the daemon the workspace moved to runs the replacement after its adoption")
 
+// Outcome is what a bounce's Done error MEANS. Every Done that reports a shim
+// replacement's end classifies it here, so no caller reads a non-failure
+// outcome (ErrUnregistered, ErrHandedAcross) as a failure by forgetting one.
+type Outcome int
+
+const (
+	// OutcomeFinished: the bounce ran and succeeded.
+	OutcomeFinished Outcome = iota
+	// OutcomeUnregistered: the bounce was dropped unrun because what it would
+	// replace departed and nothing is left to replace.
+	OutcomeUnregistered
+	// OutcomeHandedAcross: a move carried the bounce to the daemon the
+	// workspace moved to, which runs it after its adoption.
+	OutcomeHandedAcross
+	// OutcomeFailed: the bounce failed.
+	OutcomeFailed
+)
+
+// OutcomeOf classifies a Done error.
+func OutcomeOf(err error) Outcome {
+	switch {
+	case err == nil:
+		return OutcomeFinished
+	case errors.Is(err, ErrUnregistered):
+		return OutcomeUnregistered
+	case errors.Is(err, ErrHandedAcross):
+		return OutcomeHandedAcross
+	default:
+		return OutcomeFailed
+	}
+}
+
 // ErrMovedAway refuses a request against a workspace whose move has already
 // SEALED what it carries to the next daemon: nothing asked of this daemon now
 // can reach that daemon, so the caller asks the daemon the workspace moved to.
