@@ -779,6 +779,18 @@ func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentI
 
 type footerSink struct{ rec *recorder }
 
+func (s *footerSink) OnTurnRunningAtAttach(_ ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
+	s.rec.emit(event{sink: "footer", method: "OnTurnRunningAtAttach", detail: runningDetail(turn, startedAt)})
+}
+
+// runningDetail names a running-at-attach turn and whether its start is known.
+func runningDetail(turn ids.TurnID, startedAt *time.Time) string {
+	if startedAt == nil {
+		return string(turn) + "|start-unknown"
+	}
+	return string(turn) + "|" + startedAt.UTC().Format(time.RFC3339)
+}
+
 func (s *footerSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
 	s.rec.emit(event{sink: "footer", method: "OnTurnOpened", detail: string(turn)})
 }
@@ -872,6 +884,10 @@ func (s *topbarSink) OnLink(_ ids.WorkspaceID, link LinkState) {
 }
 
 type sidebarSink struct{ rec *recorder }
+
+func (s *sidebarSink) OnTurnRunningAtAttach(_ ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
+	s.rec.emit(event{sink: "sidebar", method: "OnTurnRunningAtAttach", detail: runningDetail(turn, startedAt)})
+}
 
 func (s *sidebarSink) OnSessionStarted(_ ids.WorkspaceID, _ *conversationv1.SessionStarted) {
 	s.rec.emit(event{sink: "sidebar", method: "OnSessionStarted"})

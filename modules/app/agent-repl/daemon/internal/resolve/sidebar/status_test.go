@@ -1355,3 +1355,41 @@ func TestAnUnknownTurnCloseIsRecordedAndLeavesNoUnreadResult(t *testing.T) {
 		t.Fatalf("status = %q, want idle_async", got)
 	}
 }
+
+func TestARunningTurnFoundAtAttachDrawsThinking(t *testing.T) {
+	tests := []struct {
+		name      string
+		startedAt *time.Time
+	}{
+		{name: "with its row's start", startedAt: at(0)},
+		{name: "with no row", startedAt: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a daemon that took a busy workspace over.
+			r := live(t, arrange(t))
+
+			// Act.
+			r.OnTurnRunningAtAttach(theWS, "turn-1", tt.startedAt)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != "thinking" {
+				t.Fatalf("status = %q, want thinking: the adopted turn is running", got)
+			}
+		})
+	}
+}
+
+func TestARunningTurnFoundAtAttachLeavesThisDaemonsOwnTurn(t *testing.T) {
+	// Arrange: the queue already stood a clear of this daemon's.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
+
+	// Act.
+	r.OnTurnRunningAtAttach(theWS, "turn-1", at(0))
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "clearing" {
+		t.Fatalf("status = %q, want the standing clear untouched", got)
+	}
+}

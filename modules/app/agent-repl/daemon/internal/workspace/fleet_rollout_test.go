@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -1110,7 +1111,11 @@ func TestAnInstallHandsTheWatcherTheTurnsOpenAtAttach(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.db.openTurns = []wsm.Turn{{ID: "turn-1", Workspace: ws.ID}, {ID: "turn-2", Workspace: ws.ID}}
+	started := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	f.db.openTurns = []wsm.Turn{
+		{ID: "turn-1", Workspace: ws.ID, StartedAt: started},
+		{ID: "turn-2", Workspace: ws.ID, StartedAt: started.Add(time.Minute)},
+	}
 
 	// Act.
 	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
@@ -1121,8 +1126,12 @@ func TestAnInstallHandsTheWatcherTheTurnsOpenAtAttach(t *testing.T) {
 	if len(f.openAtAttach) != 1 {
 		t.Fatalf("watchers started = %d, want exactly one", len(f.openAtAttach))
 	}
-	if got := f.openAtAttach[0]; len(got) != 2 || got[0] != "turn-1" || got[1] != "turn-2" {
-		t.Fatalf("OpenAtAttach = %v, want [turn-1 turn-2]", got)
+	want := []sessionwatcher.OpenTurn{
+		{ID: "turn-1", StartedAt: started},
+		{ID: "turn-2", StartedAt: started.Add(time.Minute)},
+	}
+	if got := f.openAtAttach[0]; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("OpenAtAttach = %v, want %v: each open row with its own start", got, want)
 	}
 }
 
