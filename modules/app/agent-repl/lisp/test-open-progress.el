@@ -514,3 +514,30 @@ placement is recorded rather than performed."
 
 (provide 'test-open-progress)
 ;;; test-open-progress.el ends here
+
+;;;; ---- The layout under the placeholder ----
+
+(ert-deftest agent-repl-test-open-progress-show-saves-the-layout-before-covering-it ()
+  "The placeholder saves the frame it covers before it covers it.
+It is the first part of the mount to take the frame, so the saved
+pre-panel layout must show the user's buffer, never the placeholder."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((work (get-buffer-create "*placeholder-work1*"))
+          (buf  (get-buffer-create " *agent-opening-save1*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-main-area-window)
+                     (lambda () (selected-window))))
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work)
+            ;; Act
+            (agent-repl--open-progress-show "test-ws" buf)
+            ;; Assert
+            (let ((saved (agent-repl--ws-get "test-ws" :fullscreen-config)))
+              (should (window-configuration-p saved))
+              (save-window-excursion
+                (set-window-configuration saved)
+                (should (eq (window-buffer (selected-window)) work)))))
+        (kill-buffer work)
+        (kill-buffer buf)
+        (delete-other-windows)))))

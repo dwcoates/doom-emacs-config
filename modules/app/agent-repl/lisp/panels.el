@@ -7,6 +7,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
 (declare-function agent-repl--agent-panel-buffer-p "core")
 (declare-function agent-repl--align-buffer-to-ws-dir "status")
@@ -1608,6 +1609,38 @@ If the agent isn't running, start it (same as `agent-repl')."
       (when-let ((win (get-buffer-window (agent-repl--ws-get ws :input-buffer))))
         (select-window win))))))
 
+(defun agent-repl--panels-own-buffers (ws)
+  "Return the buffers WS's panel mount puts on the frame.
+Its agent view, its input panel, and -- while an open is in flight --
+its open placeholder (`agent-repl--open-progress-placeholder'), which
+takes the main-area window the view is about to mount into.  The
+placeholder is part of the mount: the frame under it is the frame the
+panels are covering."
+  (delq nil (list (agent-repl-window--panel-buffer :view ws)
+                  (agent-repl-window--panel-buffer :input ws)
+                  (and (fboundp 'agent-repl--open-progress-placeholder)
+                       (agent-repl--open-progress-placeholder ws)))))
+
+(defun agent-repl--save-pre-panel-layout (ws site)
+  "Record the layout WS's panels are about to cover as its `:fullscreen-config'.
+THE ONE PLACE the pre-panel layout is saved.  SITE names the caller in
+the record.
+
+It is saved the moment ANY part of the mount first takes the frame --
+the open placeholder when an open shows one, the view otherwise -- and
+kept, not re-saved, while the frame holds nothing but WS's own panels
+\(`agent-repl--panels-cover-frame-p'): the layout underneath is then
+the one already saved, and saving again would record the mount itself
+as the frame to restore.  That is what used to happen: the placeholder
+took the main area before the view saved, so the saved layout WAS the
+placeholder, the close restored it after the placeholder was killed,
+and Emacs filled the window with the webview -- which the layout
+reconciler then remounted the composer beside, so a close undid itself."
+  (if (agent-repl--panels-cover-frame-p ws)
+      (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site)
+    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
+    (agent-repl--log ws "%s: saved-fullscreen-layout" site)))
+
 (defun agent-repl--panels-cover-frame-p (ws)
   "Return non-nil when WS's own panels are all this frame's main area holds.
 
@@ -1620,11 +1653,10 @@ preserves them and the saved layout carries them too
 
 Any OTHER window on the frame says the frame has moved on from what the
 configuration describes."
-  (let ((view  (agent-repl-window--panel-buffer :view ws))
-        (input (agent-repl-window--panel-buffer :input ws)))
+  (let ((own (agent-repl--panels-own-buffers ws)))
     (cl-every (lambda (win)
                 (or (agent-repl-window--side-window-p win ws)
-                    (memq (window-buffer win) (list view input))))
+                    (memq (window-buffer win) own)))
               (window-list))))
 
 (defun agent-repl--fullscreen-config-stale-p (ws)

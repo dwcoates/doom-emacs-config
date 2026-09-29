@@ -48,6 +48,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--save-pre-panel-layout "agent-repl-panels" (ws site))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--sanitize-ws-name "agent-repl-core" (name))
@@ -288,6 +289,11 @@ been killed out from under us."
           (goto-char (point-min))))
       buf)))
 
+(defun agent-repl--open-progress-placeholder (ws)
+  "Return WS's open placeholder buffer while an open is in flight, else nil."
+  (let ((buf (plist-get (agent-repl--open-progress-entry ws) :buffer)))
+    (and (buffer-live-p buf) buf)))
+
 (defun agent-repl--open-progress-show (ws buf)
   "Display BUF as WS's placeholder in the window the webview will take.
 Uses the webview's own host resolution so the placeholder occupies the
@@ -295,6 +301,10 @@ main area the mount is about to claim — the mount then REPLACES it in
 place rather than shuffling the frame a second time."
   (let ((win (agent-repl--frontend-main-area-window)))
     (when (window-live-p win)
+      ;; THE PLACEHOLDER IS THE FIRST PART OF THE MOUNT TO TAKE THE FRAME,
+      ;; so the layout it covers is saved here, before it does -- the view
+      ;; mounting into its window later keeps that one.
+      (agent-repl--save-pre-panel-layout ws "open-progress")
       (set-window-buffer win buf)
       (agent-repl--log ws "open-progress: shown window=%s buffer=%s" win (buffer-name buf)))
     win))

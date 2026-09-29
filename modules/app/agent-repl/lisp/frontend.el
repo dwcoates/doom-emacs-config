@@ -85,7 +85,7 @@
 (declare-function agent-repl--clear-main-area-for-panels "agent-repl-panels" ())
 (declare-function agent-repl--close-buffer-windows "agent-repl-panels" (&rest bufs))
 (declare-function agent-repl--restore-fullscreen-config "agent-repl-panels" (ws))
-(declare-function agent-repl--panels-cover-frame-p "agent-repl-panels" (ws))
+(declare-function agent-repl--save-pre-panel-layout "agent-repl-panels" (ws site))
 (declare-function agent-repl--buffer-name "agent-repl-core" (suffix ws))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
 (declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name &optional env))
@@ -585,10 +585,7 @@ panels — the extra-windows-on-first-switch bug."
     ;; Saved AFTER the stale-input-window reclaim above so a leftover
     ;; composer window is not baked into the layout a later close
     ;; restores.
-    (if (agent-repl--panels-cover-frame-p ws)
-        (agent-repl--log ws "display-webview: kept-fullscreen-layout reason=panels-cover-frame")
-      (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
-      (agent-repl--log ws "display-webview: saved-fullscreen-layout"))
+    (agent-repl--save-pre-panel-layout ws "display-webview")
     (let ((win (agent-repl--frontend-main-area-window)))
       (select-window win)
       (agent-repl--clear-main-area-for-panels)
