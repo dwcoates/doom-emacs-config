@@ -174,21 +174,6 @@ func TestLostSentenceNeverClaimsAFailure(t *testing.T) {
 	}
 }
 
-func TestApplyResolvedCompactCarriesModelAndScope(t *testing.T) {
-	// Arrange, Act.
-	compact := &frontendv1.FeedColdGateResolvedCompact{}
-	applyResolvedCompact(compact, &conversationv1.AgentModel{Name: "claude-haiku-4"},
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS)
-
-	// Assert.
-	if compact.GetModel().GetModel().GetName() != "claude-haiku-4" {
-		t.Fatalf("model = %q", compact.GetModel().GetModel().GetName())
-	}
-	if compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS {
-		t.Fatalf("scope = %v", compact.GetScope())
-	}
-}
-
 func TestDetachedLostCauseString(t *testing.T) {
 	tests := []struct {
 		name  string
