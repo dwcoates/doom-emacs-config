@@ -47,6 +47,7 @@
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 (declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
+(declare-function agent-repl-wire-decode-nuke-workspace-error "wire-verbs")
 (declare-function agent-repl-wire-decode-daemon-fault "wire-verbs")
 (declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
@@ -1311,6 +1312,59 @@ an unknown field rather than misread."
                    "WorkspaceOpenProgress" 'enteredStage object
                    #'agent-repl-wire-decode-workspace-open-stage)))))
 
+(defun agent-repl-wire-decode-workspace-kill-succeeded (value)
+  "Decode VALUE as the empty `WorkspaceKillSucceeded'."
+  (agent-repl-wire--decode-empty "WorkspaceKillSucceeded" value))
+
+(defun agent-repl-wire-decode-workspace-kill-failed (value)
+  "Decode `WorkspaceKillFailed' from VALUE into `(:internal SENTENCE)'.
+A kill has no typed refusal after its ack, so the sentence is the whole
+account."
+  (let ((object (agent-repl-wire--object "WorkspaceKillFailed" value)))
+    (agent-repl-wire--check-keys "WorkspaceKillFailed" object '(internal))
+    (agent-repl-wire--decoded
+     "WorkspaceKillFailed"
+     (list :internal (agent-repl-wire--decode-string "WorkspaceKillFailed" 'internal object)))))
+
+(defun agent-repl-wire-decode-workspace-kill-progress (value)
+  "Decode `WorkspaceKillProgress' from VALUE into `(:arm STEP :value V)'.
+THE ARM IS THE END of an accepted kill: `succeeded' or `failed'."
+  (let ((object (agent-repl-wire--object "WorkspaceKillProgress" value)))
+    (agent-repl-wire--check-keys "WorkspaceKillProgress" object '(succeeded failed))
+    (agent-repl-wire--decode-oneof
+     "WorkspaceKillProgress" 'step object
+     '((succeeded :succeeded agent-repl-wire-decode-workspace-kill-succeeded)
+       (failed :failed agent-repl-wire-decode-workspace-kill-failed)))))
+
+(defun agent-repl-wire-decode-workspace-nuke-succeeded (value)
+  "Decode VALUE as the empty `WorkspaceNukeSucceeded'."
+  (agent-repl-wire--decode-empty "WorkspaceNukeSucceeded" value))
+
+(defun agent-repl-wire-decode-workspace-nuke-failed-refusal (value)
+  "Decode `WorkspaceNukeFailed''s `refusal' arm — a NukeWorkspaceError."
+  (agent-repl-wire-decode-nuke-workspace-error value))
+
+(defun agent-repl-wire-decode-workspace-nuke-failed (value)
+  "Decode `WorkspaceNukeFailed' from VALUE into `(:arm ARM :value V)'.
+THE ARM IS THE KIND OF FAILURE: a typed `refusal' (after the ack, only
+`git_failed') or an `internal' sentence."
+  (let ((object (agent-repl-wire--object "WorkspaceNukeFailed" value)))
+    (agent-repl-wire--check-keys "WorkspaceNukeFailed" object '(refusal internal))
+    (agent-repl-wire--decode-oneof
+     "WorkspaceNukeFailed" 'cause object
+     '((refusal :refusal agent-repl-wire-decode-workspace-nuke-failed-refusal)
+       (internal :internal identity)))))
+
+(defun agent-repl-wire-decode-workspace-nuke-progress (value)
+  "Decode `WorkspaceNukeProgress' from VALUE into `(:arm STEP :value V)'.
+THE ARM IS THE END of an accepted nuke: `succeeded' or `failed'."
+  (let ((object (agent-repl-wire--object "WorkspaceNukeProgress" value)))
+    (agent-repl-wire--check-keys "WorkspaceNukeProgress" object '(succeeded failed))
+    (agent-repl-wire--decode-oneof
+     "WorkspaceNukeProgress" 'step object
+     '((succeeded :succeeded agent-repl-wire-decode-workspace-nuke-succeeded)
+       (failed :failed agent-repl-wire-decode-workspace-nuke-failed)))))
+
 (defun agent-repl-wire-decode-workspace-mutation-progress-create (value)
   "Decode `WorkspaceMutationProgress''s `create' event arm from VALUE."
   (agent-repl-wire-decode-workspace-create-progress value))
@@ -1319,13 +1373,21 @@ an unknown field rather than misread."
   "Decode `WorkspaceMutationProgress''s `open' event arm from VALUE."
   (agent-repl-wire-decode-workspace-open-progress value))
 
+(defun agent-repl-wire-decode-workspace-mutation-progress-kill (value)
+  "Decode `WorkspaceMutationProgress''s `kill' event arm from VALUE."
+  (agent-repl-wire-decode-workspace-kill-progress value))
+
+(defun agent-repl-wire-decode-workspace-mutation-progress-nuke (value)
+  "Decode `WorkspaceMutationProgress''s `nuke' event arm from VALUE."
+  (agent-repl-wire-decode-workspace-nuke-progress value))
+
 (defun agent-repl-wire-decode-workspace-mutation-progress (value)
   "Decode `WorkspaceMutationProgress' from VALUE.
 Returns `(:op-id ID :event (:arm ARM :value V))'.  THE OP ID IS THE
 CORRELATION KEY: a client matches this push to the operation it issued by
 it, and drops any it does not recognize."
   (let ((object (agent-repl-wire--object "WorkspaceMutationProgress" value)))
-    (agent-repl-wire--check-keys "WorkspaceMutationProgress" object '(opId create open))
+    (agent-repl-wire--check-keys "WorkspaceMutationProgress" object '(opId create open kill nuke))
     (agent-repl-wire--decoded
      "WorkspaceMutationProgress"
      (list :op-id (agent-repl-wire--decode-string "WorkspaceMutationProgress" 'opId object)
@@ -1334,7 +1396,11 @@ it, and drops any it does not recognize."
                    '((create :create
                              agent-repl-wire-decode-workspace-mutation-progress-create)
                      (open :open
-                           agent-repl-wire-decode-workspace-mutation-progress-open)))))))
+                           agent-repl-wire-decode-workspace-mutation-progress-open)
+                     (kill :kill
+                           agent-repl-wire-decode-workspace-mutation-progress-kill)
+                     (nuke :nuke
+                           agent-repl-wire-decode-workspace-mutation-progress-nuke)))))))
 
 (defun agent-repl-wire-decode-daemon-standing-fault-fault (value)
   "Decode `DaemonStandingFault''s `fault' field VALUE as a `DaemonFault'.
