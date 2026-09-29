@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
 )
@@ -155,12 +156,10 @@ func (v *verbs) RegisterRepository(ctx context.Context, path string) (Registered
 // repositoryProbeDir answers the directory git is asked about for PATH: the
 // path itself when it is a directory, its parent when it is a file. A path
 // that cannot be stat'ed at all has no probe directory, which is the
-// unreadable_path refusal.
+// unreadable_path refusal, and so is an empty or relative one: it is never
+// resolved against the daemon's working directory (dirpath.Absolute).
 func repositoryProbeDir(path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("a path is required")
-	}
-	abs, err := filepath.Abs(path)
+	abs, err := dirpath.Absolute(path, "")
 	if err != nil {
 		return "", err
 	}

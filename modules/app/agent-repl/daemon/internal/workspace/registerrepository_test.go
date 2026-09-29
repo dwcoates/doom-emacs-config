@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,6 +142,20 @@ func TestRegisterRepositoryRefusesAnEmptyPath(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnreadablePath)
+}
+
+func TestRegisterRepositoryRefusesARelativePath(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	_, err := f.verbs.RegisterRepository(context.Background(), "some/repo/file.go")
+
+	// Assert.
+	asRefusal(t, err, ArmUnreadablePath)
+	if !strings.Contains(err.Error(), "not an absolute path") {
+		t.Fatalf("RegisterRepository = %v, want the relative path named as the cause", err)
+	}
 }
 
 func TestRegisterRepositoryRecordsTheRepositoryDefaultBranch(t *testing.T) {
