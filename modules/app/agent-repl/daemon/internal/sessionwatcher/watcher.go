@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -195,7 +196,7 @@ type watcher struct {
 	pendingTurnEnds []endedTurn
 	// openAtAttach is Session.OpenAtAttach, held until the session facts
 	// arrive and then consumed ONCE: see reconcileOpenAtAttachLocked.
-	openAtAttach []ids.TurnID
+	openAtAttach []OpenTurn
 	// pendingUnobserved are the turns the facts showed ended unobserved, not
 	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
 	// the turn ends.
@@ -1839,7 +1840,11 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	}
 	if t := started.GetTurnInFlight(); t != nil {
 		ahead := ids.TurnID(t.GetValue())
+		ownTurn := w.turn != nil && *w.turn == ahead
 		if w.standTurnLocked(ahead, "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight") {
+			if !ownTurn {
+				w.standRunningAtAttachLocked(ahead)
+			}
 			w.restoreWaitingLocked(ahead, started.GetTurnsWaiting())
 		}
 	} else if len(started.GetTurnsWaiting()) > 0 {
@@ -1848,6 +1853,33 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 		})
 	}
 	w.reconcileOpenAtAttachLocked(started)
+}
+
+// standRunningAtAttachLocked tells the views that TURN, which the adopted
+// shim names as its turn in flight and no delivery of this watcher's opened,
+// is running. Without it a daemon that took a busy workspace over drew it
+// `ready` until the turn ended (owner report, 2026-09-29: the workspace the
+// agent was working in read done after a deploy's handover).
+//
+// UNDER THE LOCK, BEFORE THE MAIN AGENT'S WATCH OPENS (the caller's caller
+// opens it after the facts): the running turn's frames then land on a turn
+// that already stands, and nothing standing it afterwards can wipe what they
+// said.
+func (w *watcher) standRunningAtAttachLocked(turn ids.TurnID) {
+	var startedAt *time.Time
+	for _, open := range w.openAtAttach {
+		if open.ID == turn {
+			at := open.StartedAt
+			startedAt = &at
+			break
+		}
+	}
+	w.log.Info("daemon.sessionwatcher.turn_running_at_attach",
+		"the adopted shim is running a turn; the views stand it", dlog.Context{
+			"turn_id": string(turn), "row_known": startedAt != nil,
+		})
+	w.sinks.Footer.OnTurnRunningAtAttach(w.ws, turn, startedAt)
+	w.sinks.Sidebar.OnTurnRunningAtAttach(w.ws, turn, startedAt)
 }
 
 // restoreWaitingLocked stands the turns the session's facts name as WAITING
@@ -1900,7 +1932,8 @@ func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionSta
 	for _, t := range started.GetTurnsWaiting() {
 		held[ids.TurnID(t.GetValue())] = struct{}{}
 	}
-	for _, turn := range w.openAtAttach {
+	for _, open := range w.openAtAttach {
+		turn := open.ID
 		if _, ok := held[turn]; ok {
 			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still held by the shim; it stays open", dlog.Context{
 				"turn_id": string(turn), "turn_in_flight": string(inFlight),
