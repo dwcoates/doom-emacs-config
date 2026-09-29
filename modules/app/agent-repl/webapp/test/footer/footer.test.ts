@@ -12,7 +12,6 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
 import type { PaintWatch } from "../../src/feed/painted.js";
-import { QUIET_HOLD_DWELL_MS } from "../../src/footer/quiet-hold.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import {
   buildWatchFooterRequest,
@@ -1076,7 +1075,7 @@ describe("mountFooter: the ended quiet-stretch line", () => {
     );
   }
 
-  it("draws the ended line until its row is painted, then clears it after the dwell", async () => {
+  it("draws the ended line until its row is painted, then clears it on that paint", async () => {
     // Arrange
     const edge: { painted: ((id: string, at: number) => void) | null } = { painted: null };
     const paints: PaintWatch = {
@@ -1098,7 +1097,6 @@ describe("mountFooter: the ended quiet-stretch line", () => {
 
     // Act
     edge.painted?.("row-2", Date.now());
-    await vi.advanceTimersByTimeAsync(QUIET_HOLD_DWELL_MS);
 
     // Assert
     expect(host.querySelector(".footer-activity-quiet-stretch")).toBeNull();
