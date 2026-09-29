@@ -49,6 +49,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,13 +92,58 @@ var scenarioFactoryForm = regexp.MustCompile(`=\s*[a-z][A-Za-z0-9]*Scenario\(\s*
 // registry: the empty string.
 const defaultScenarioName = ""
 
-// failMarkerScenarioName is the name of the one scenario NOT selected by a
-// `!name` prompt — the daemon's merge-pipeline gate reaches it by putting
-// `e2e-fail-this-turn` anywhere in an otherwise ordinary prose prompt.
-const failMarkerScenarioName = "fail-marker"
+// markerScenario is a scenario NOT selected by a `!name` prompt but by a
+// marker the prompt carries, as `fake/registry.ts` checks for it.
+type markerScenario struct {
+	// name is the scenario's own name in the registry.
+	name string
+	// marker is the prompt marker that selects it, verbatim from the shim.
+	marker string
+	// startsWith: the marker must open the (left-trimmed) prompt; otherwise it
+	// may sit anywhere in it.
+	startsWith bool
+}
 
-// failTurnMarker is that prompt marker, verbatim from `fake/registry.ts`.
-const failTurnMarker = "e2e-fail-this-turn"
+// markerScenarios are every marker-selected scenario, in the order
+// `fake/registry.ts`'s `selectScenario` tries them after its `!name` tokens:
+//   - `network-resume`: the shim's OWN network-resume prompt, which opens with
+//     `NETWORK_RESUME_MARKER` (engine/network-resume-prompt.ts);
+//   - `fail-marker`: the daemon's merge-pipeline gate puts
+//     `e2e-fail-this-turn` anywhere in an otherwise ordinary prose prompt.
+var markerScenarios = []markerScenario{
+	{name: "network-resume", marker: "<!--agent-repl:network-resume-->", startsWith: true},
+	{name: "fail-marker", marker: "e2e-fail-this-turn"},
+}
+
+// matches answers whether PROMPT carries this scenario's marker, by the
+// vendor's own rule for it.
+func (m markerScenario) matches(prompt string) bool {
+	if m.startsWith {
+		return strings.HasPrefix(strings.TrimLeft(prompt, " \t\n\r"), m.marker)
+	}
+	return strings.Contains(prompt, m.marker)
+}
+
+// markerScenarioIn is the marker scenario whose marker VALUE carries anywhere
+// in it (a test literal, a rendered document cell), if any.
+func markerScenarioIn(value string) (markerScenario, bool) {
+	for _, m := range markerScenarios {
+		if strings.Contains(value, m.marker) {
+			return m, true
+		}
+	}
+	return markerScenario{}, false
+}
+
+// markerScenarioNamed is the marker scenario called NAME, if any.
+func markerScenarioNamed(name string) (markerScenario, bool) {
+	for _, m := range markerScenarios {
+		if m.name == name {
+			return m, true
+		}
+	}
+	return markerScenario{}, false
+}
 
 // scenarioNamesFromVendorSource reads every registered scenario's name out of
 // the mocked vendor's scenario modules.
@@ -241,35 +287,42 @@ func deriveRegistry(t *testing.T) registry {
 	if len(phantom) > 0 {
 		t.Fatalf("the shim's generated prompt table names scenarios its own source does not declare: %v", phantom)
 	}
-	// And every source scenario must appear in the table, except the two that
-	// are not selected by a `!name` prompt at all.
-	unlisted := map[string]bool{}
+	// And every source scenario must appear in the table, except those that
+	// are not selected by a `!name` prompt at all: the prose fall-through and
+	// the marker scenarios.
+	want := map[string]bool{defaultScenarioName: true}
+	for _, m := range markerScenarios {
+		want[m.name] = true
+	}
+	var got, wantNames []string
 	for name := range fromSource {
 		if !fromTable[name] {
-			unlisted[name] = true
-		}
-	}
-	if len(unlisted) != 2 || !unlisted[defaultScenarioName] || !unlisted[failMarkerScenarioName] {
-		var got []string
-		for name := range unlisted {
 			got = append(got, strconv.Quote(name))
 		}
-		sort.Strings(got)
+	}
+	for name := range want {
+		wantNames = append(wantNames, strconv.Quote(name))
+	}
+	sort.Strings(got)
+	sort.Strings(wantNames)
+	if !slices.Equal(got, wantNames) {
 		t.Fatalf("scenarios declared in the mocked vendor's source but absent from its generated prompt table = %v; "+
-			"want exactly the two that no `!name` prompt selects (%q, the prose fall-through, and %q, the e2e failure marker). "+
-			"A third name here means either a new unlisted scenario or a table that was not regenerated",
-			got, defaultScenarioName, failMarkerScenarioName)
+			"want exactly those no `!name` prompt selects, %v (the prose fall-through %q and every marker scenario). "+
+			"Another name here means either a new unlisted scenario or a table that was not regenerated",
+			got, wantNames, defaultScenarioName)
 	}
 
 	r := registry{}
 	for name := range fromTable {
 		r.canonical = append(r.canonical, name)
 	}
-	// The marker scenario earns a row of its own: the suite really does drive
-	// it, just not through a `!name`. The prose fall-through does NOT — it is
-	// selected by every unrecognized prompt in the suite, so "which tests
-	// drive it" is not a fact any derivation can state usefully.
-	r.canonical = append(r.canonical, failMarkerScenarioName)
+	// Each marker scenario earns a row of its own: it is selected, just not
+	// through a `!name`. The prose fall-through does NOT — it is selected by
+	// every unrecognized prompt in the suite, so "which tests drive it" is not
+	// a fact any derivation can state usefully.
+	for _, m := range markerScenarios {
+		r.canonical = append(r.canonical, m.name)
+	}
 	sort.Strings(r.canonical)
 
 	for name := range fromTable {
@@ -309,8 +362,10 @@ func (r registry) selectScenario(prompt string) (string, bool) {
 			return cand.scenario, true
 		}
 	}
-	if strings.Contains(prompt, failTurnMarker) {
-		return failMarkerScenarioName, true
+	for _, m := range markerScenarios {
+		if m.matches(prompt) {
+			return m.name, true
+		}
 	}
 	return defaultScenarioName, false
 }
@@ -420,8 +475,8 @@ func deriveGoCoverage(t *testing.T, r registry, c coverage) {
 			if err != nil {
 				return true
 			}
-			if strings.Contains(value, failTurnMarker) {
-				c.add(failMarkerScenarioName, layer, base)
+			if m, ok := markerScenarioIn(value); ok {
+				c.add(m.name, layer, base)
 			}
 			if !triggerShaped.MatchString(value) {
 				return true
@@ -905,8 +960,8 @@ func deriveWebappCoverage(t *testing.T, r registry, c coverage) {
 			if !lit.plain {
 				continue
 			}
-			if strings.Contains(lit.value, failTurnMarker) {
-				c.add(failMarkerScenarioName, layerWebapp, name)
+			if m, ok := markerScenarioIn(lit.value); ok {
+				c.add(m.name, layerWebapp, name)
 			}
 			if !triggerShaped.MatchString(lit.value) {
 				continue
@@ -1159,8 +1214,8 @@ func parseMatrix(t *testing.T) matrixDoc {
 // parseScenarioCell reads a scenario name back out of its rendered cell,
 // undoing scenarioCell.
 func parseScenarioCell(cell string) string {
-	if strings.Contains(cell, failTurnMarker) {
-		return failMarkerScenarioName
+	if m, ok := markerScenarioIn(cell); ok {
+		return m.name
 	}
 	return strings.TrimPrefix(strings.Trim(cell, "`"), "!")
 }
@@ -1202,8 +1257,8 @@ func renderFileCell(files []string) string {
 
 // scenarioCell renders a scenario's own name cell.
 func scenarioCell(scenario string) string {
-	if scenario == failMarkerScenarioName {
-		return "`" + failTurnMarker + "` (marker)"
+	if m, ok := markerScenarioNamed(scenario); ok {
+		return "`" + m.marker + "` (marker)"
 	}
 	return "`!" + scenario + "`"
 }
@@ -1585,4 +1640,54 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, doc matrixDoc) {
 
 func replaceBoldInt(line string, n int) string {
 	return matrixCountMarker.ReplaceAllString(line, fmt.Sprintf("**%d**", n))
+}
+
+// TestMarkerScenarioSelection pins the marker half of `selectScenario` to the
+// vendor's own rule: the network-resume marker only when it OPENS the prompt,
+// the failure marker anywhere, and the network-resume marker tried first.
+func TestMarkerScenarioSelection(t *testing.T) {
+	t.Parallel()
+	r := registry{}
+	cases := []struct {
+		name    string
+		prompt  string
+		want    string
+		matched bool
+	}{
+		{"network-resume opening the prompt", "<!--agent-repl:network-resume-->\nresume a1", "network-resume", true},
+		{"network-resume after leading whitespace", "  \n<!--agent-repl:network-resume-->", "network-resume", true},
+		{"network-resume not opening the prompt", "see <!--agent-repl:network-resume-->", defaultScenarioName, false},
+		{"fail marker anywhere", "please e2e-fail-this-turn now", "fail-marker", true},
+		{"network-resume tried before the fail marker", "<!--agent-repl:network-resume--> e2e-fail-this-turn", "network-resume", true},
+		{"no marker", "hello", defaultScenarioName, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Act
+			got, matched := r.selectScenario(tc.prompt)
+			// Assert
+			if got != tc.want || matched != tc.matched {
+				t.Fatalf("selectScenario(%q) = (%q, %v), want (%q, %v)", tc.prompt, got, matched, tc.want, tc.matched)
+			}
+		})
+	}
+}
+
+// TestMarkerScenarioCellRoundTrips checks every marker scenario's rendered
+// document cell reads back to its own name, so a marker row is never mistaken
+// for a `!name` row or for another marker's.
+func TestMarkerScenarioCellRoundTrips(t *testing.T) {
+	t.Parallel()
+	for _, m := range markerScenarios {
+		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
+			// Act
+			cell := scenarioCell(m.name)
+			// Assert
+			if got := parseScenarioCell(cell); got != m.name {
+				t.Fatalf("parseScenarioCell(%q) = %q, want %q", cell, got, m.name)
+			}
+		})
+	}
 }

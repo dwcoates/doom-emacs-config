@@ -151,6 +151,7 @@ Two further limits, stated rather than hidden:
 | `!model-fallback` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestModelChanged asserts TopbarModelSelector.selected.model.name is `fake-sonnet-5` — the model the VENDOR swapped to unasked, which session.proto:173-174 says is stated in one authoritative place whether or not the consumer asked for it. | covered |
 | `!monitor-deadline` | grounded | mcpmonitors_e2e_test.go | — | — | Go: TestMonitorDeadline asserts exact Description, Persistent==false, chip count==1. | covered |
 | `!monitor-persistent` | grounded | mcpmonitors_e2e_test.go | — | — | Go: TestMonitorPersistent asserts exact Description, Persistent==true. | covered |
+| `<!--agent-repl:network-resume-->` (marker) | ungrounded | — | — | — | No counted e2e layer drives this scenario; the shim's own network-resume prompt selects it, and the shim integration suite drives it end to end (test/integration/detached.test.ts). | uncovered |
 | `!perm-allow-once` | grounded | permission_e2e_test.go | — | — | Go: TestPermissionAskAnsweredArms/AllowOnce asserts AllowedOnce()!=nil, tool succeeded, turn concluded. | covered |
 | `!perm-allow-standing` | grounded | permission_e2e_test.go | — | — | Go: TestPermissionAskAnsweredArms/AllowStanding asserts AllowedStanding()!=nil. | covered |
 | `!perm-allow-standing-mode` | grounded | permission_e2e_test.go | cards.layer.test.ts | — | Go: TestPermissionModeChangedMidSession asserts exact topbar PermissionModePicker.Current.Mode==accept_edits. Web: cards.layer asserts [data-permission=allowStanding] selector. | covered |
@@ -196,6 +197,7 @@ Two further limits, stated rather than hidden:
 | `!subagent-detached-utterance` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedUtteranceStaysOffTopLevel asserts bubble stays Live, exact utterance text confined to sub-feed (positive+negative on exact string). | covered |
 | `!subagent-failed` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentFailed asserts the DETACHED wrapper placement, the head still naming the commission, and FeedSubagentSettled.outcome == failed with all three neighbouring arms (succeeded, cancelled, lost) checked ABSENT — the discrimination a resolver that collapsed the four would fail. | covered |
 | `!subagent-interleaved` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentInterleavedResponsesStayOnTheirOwnFeeds asserts the main turn draws exactly ONE thinking unit and ONE final_answer response, each with its whole exact text, the subagent's two exact responses on its sub-feed and absent from the root feed, and the bubble settled succeeded. | covered |
+| `!subagent-network-failed` | grounded | — | — | — | No counted e2e layer drives this scenario; the shim integration suite drives it (test/integration/detached.test.ts). Grounded in the 2026-09-27 outage's production records, not a capture. | uncovered |
 | `!subagent-resumed` | ungrounded | — | — | — | No counted e2e layer drives this scenario; the shim integration suite drives it across a shim restart (test/integration/detached.test.ts). | uncovered |
 | `!task-change` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts a checklist row with Status.GetRunning()!=nil. | covered |
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
@@ -231,8 +233,8 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 
 - Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
-- Uncovered (no counted layer drives the scenario at all): **1**
-- Total canonical scenarios: 155
+- Uncovered (no counted layer drives the scenario at all): **3**
+- Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
 - Go e2e (non-emacs): 153 scenarios referenced across 26 files
@@ -252,7 +254,9 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
+- `!subagent-network-failed`
 - `!subagent-resumed`
+- `<!--agent-repl:network-resume-->` (marker)
 
 <!-- END DERIVED: uncovered -->
 
