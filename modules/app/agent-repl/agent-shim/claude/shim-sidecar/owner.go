@@ -199,32 +199,60 @@ func (s *sidecar) applyStop(taskID string) {
 			s.watchers[path].target.Kind)
 		return
 	}
-	entries := sink.CancelTerminal(taskID, run, s.owners.agentFor(taskID), stoppedAt)
+	s.commitInferredTerminal(bound, inferredTerminal{
+		what: "cancelled terminal", fact: "stop", retry: "restated on the next cycle",
+		path: path, run: run, retire: func() { delete(s.stopped, taskID) },
+	}, sink.CancelTerminal(taskID, run, s.owners.agentFor(taskID), stoppedAt))
+}
+
+// inferredTerminal is a terminal the reader mints from a fact a TRANSCRIPT
+// stated (a person's stop, the vendor's notification) rather than one read off
+// the run's own file, for commitInferredTerminal.
+type inferredTerminal struct {
+	// what names the terminal in the log ("cancelled terminal").
+	what string
+	// fact names the pending fact it retires ("stop").
+	fact string
+	// retry says when a refused write is tried again.
+	retry string
+	// path is the run's spool, empty when the run has none.
+	path string
+	// run is the spawning call's activity id the terminal is keyed on.
+	run string
+	// retire forgets the pending fact, once the terminal is DURABLE.
+	retire func()
+}
+
+// commitInferredTerminal writes an inferred terminal and, once it is DURABLE,
+// retires the pending fact and stops tracking the run's spool.
+//
+// THE PENDING FACT IS RETIRED ONLY ON A DURABLE WRITE: a fact forgotten against
+// a refused write would be a run that is neither ended nor waiting to be. A
+// shutdown withdrawing the write is not the store failing — storeWrite has
+// already stated the one INFO `shutdown` record, the fact stays pending, and the
+// next boot re-reads the same bytes and re-applies it — so it returns quietly.
+// An inferred terminal names no file, so a book-conflict skip on it is
+// unexpected and warned, never folded into a catch-up summary.
+func (s *sidecar) commitInferredTerminal(bound *logging.Bound, t inferredTerminal, entries []*storev1.StoreEntry) {
 	if len(entries) == 0 {
-		// CancelTerminal already stated why it refused.
+		// The minting side already stated why it refused.
 		return
 	}
-	skips, err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries})
+	skips, err := s.storeWrite(t.what, &storev1.EntryBatch{Entries: entries})
 	if err != nil {
 		if s.interrupted(err) {
-			// THE LAST storeWrite CALLER WITHOUT THIS GUARD. A shutdown
-			// withdrawing the write is not the store failing: storeWrite has
-			// already stated the one INFO `shutdown` record, the stop stays
-			// pending, and the next boot re-reads the same bytes and re-applies
-			// it. Its two siblings in cycle.go already returned quietly here;
-			// this one accused the store instead.
 			return
 		}
 		bound.With(logging.Context{Level: "error"}).Log(
-			"the cancelled terminal was not committed; the stop stays pending and is restated on the next cycle: %v", err)
+			"the %s was not committed; the %s stays pending and is %s: %v", t.what, t.fact, t.retry, err)
 		return
 	}
-	// A cancelled terminal is an inferred record naming no file: a book-conflict
-	// skip here is unexpected and warned, never folded into a catch-up summary.
-	s.warnUnexpectedSkips("cancelled terminal", skips)
-	delete(s.stopped, taskID)
-	s.tracker.Settle(path)
-	bound.With(logging.Context{ActivityID: run}).Log("cancelled terminal minted and committed entries=%d", len(entries))
+	s.warnUnexpectedSkips(t.what, skips)
+	t.retire()
+	if t.path != "" {
+		s.tracker.Settle(t.path)
+	}
+	bound.With(logging.Context{ActivityID: t.run}).Log("%s minted and committed entries=%d", t.what, len(entries))
 }
 
 // spoolForTask answers the watched file that IS a task's run.
@@ -542,7 +570,7 @@ func (s *sidecar) applyNotified(taskID, path string) {
 			s.watchers[path].target.Kind)
 		return
 	}
-	s.commitNotified(taskID, path, run, sink.NotifiedTerminal(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs))
+	s.commitNotified(bound, taskID, path, run, sink.NotifiedTerminal(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs))
 }
 
 // applyNotifiedUnread writes a notified shell run's terminal when the run's
@@ -578,33 +606,14 @@ func (s *sidecar) applyNotifiedUnread(taskID string) {
 		}
 	}
 	entries := handler.NewRunOutput(s.log).Notified(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs)
-	s.commitNotified(taskID, "", run, entries)
+	s.commitNotified(bound, taskID, "", run, entries)
 }
 
-// commitNotified writes a notified terminal and, once it is DURABLE, retires
-// the pending notice and stops tracking the run's spool (PATH, empty when the
-// run has none). A refused write keeps the notice pending, for applyStop's
-// reason: a notice forgotten against a write that never committed is a run
-// that is neither ended nor waiting to be.
-func (s *sidecar) commitNotified(taskID, path, run string, entries []*storev1.StoreEntry) {
-	if len(entries) == 0 {
-		// Notified already stated why it refused.
-		return
-	}
-	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID, Path: path, ActivityID: run})
-	skips, err := s.storeWrite("notified terminal", &storev1.EntryBatch{Entries: entries})
-	if err != nil {
-		if s.interrupted(err) {
-			return
-		}
-		bound.With(logging.Context{Level: "error"}).Log(
-			"the notified terminal was not committed; the notification stays pending and is applied again at the spool's next end: %v", err)
-		return
-	}
-	s.warnUnexpectedSkips("notified terminal", skips)
-	delete(s.notified, taskID)
-	if path != "" {
-		s.tracker.Settle(path)
-	}
-	bound.Log("notified terminal minted and committed entries=%d", len(entries))
+// commitNotified commits a notified shell run's terminal through the one
+// inferred-terminal commit (commitInferredTerminal).
+func (s *sidecar) commitNotified(bound *logging.Bound, taskID, path, run string, entries []*storev1.StoreEntry) {
+	s.commitInferredTerminal(bound, inferredTerminal{
+		what: "notified terminal", fact: "notification", retry: "applied again at the spool's next end",
+		path: path, run: run, retire: func() { delete(s.notified, taskID) },
+	}, entries)
 }

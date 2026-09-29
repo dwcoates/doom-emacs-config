@@ -975,3 +975,91 @@ func TestANotifiedTerminalTheStoreRefusedStaysPending(t *testing.T) {
 		t.Fatal("a notice whose terminal never committed was forgotten")
 	}
 }
+
+func TestCommitInferredTerminalRetiresTheFactOnlyWhenDurable(t *testing.T) {
+	entry := &storev1.StoreEntry{WriteId: "w1", UpsertKey: "bash:toolu_x:terminal"}
+	cases := []struct {
+		name        string
+		writeFail   string
+		entries     []*storev1.StoreEntry
+		wantRetired bool
+		wantError   bool
+		wantWrites  int
+	}{
+		{"a durable write retires the fact", "", []*storev1.StoreEntry{entry}, true, false, 1},
+		{"a refused write keeps the fact pending", "disk full", []*storev1.StoreEntry{entry}, false, true, 0},
+		{"nothing minted writes nothing", "", nil, false, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := &fakeStore{writeFail: tc.writeFail}
+			h := newHarness(t, store)
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+			retired := false
+			bound := h.sc.log.With(logging.Context{Operation: "test-terminal"})
+
+			// Act.
+			h.sc.commitInferredTerminal(bound, inferredTerminal{
+				what: "test terminal", fact: "test fact", retry: "retried",
+				run: "toolu_x", retire: func() { retired = true },
+			}, tc.entries)
+
+			// Assert.
+			if retired != tc.wantRetired {
+				t.Fatalf("retired = %t, want %t", retired, tc.wantRetired)
+			}
+			if got := len(h.opsAt(t, "test-terminal", "error")); (got == 1) != tc.wantError {
+				t.Fatalf("error records = %d, want error=%t", got, tc.wantError)
+			}
+			if tc.wantWrites == 1 && len(store.writes) != 1 {
+				t.Fatalf("writes = %d, want the terminal written once", len(store.writes))
+			}
+		})
+	}
+}
+
+func TestInferredTerminalsShareOneRefusedWriteShape(t *testing.T) {
+	// Every inferred terminal goes through commitInferredTerminal, so a refused
+	// write is stated once at error under the caller's own operation and its
+	// fact stays pending — a hand-rolled commit that forgot either fails here.
+	cases := []struct {
+		name      string
+		operation string
+		pending   func(s *sidecar) bool
+		apply     func(h *harness)
+	}{
+		{
+			"a stop", "cancel-terminal",
+			func(s *sidecar) bool { _, ok := s.stopped["b1shape"]; return ok },
+			func(h *harness) { h.sc.TaskStopped("b1shape") },
+		},
+		{
+			"a notification", "notified-terminal",
+			func(s *sidecar) bool { _, ok := s.notified["b1shape"]; return ok },
+			func(h *harness) {
+				h.sc.ShellConcluded("b1shape", "completed", 1700)
+				h.sc.pollAll()
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := &fakeStore{}
+			h, _ := watchedShellRun(t, store, "b1shape", "toolu_shape_run", "partial\n")
+			store.writeFail = "disk full"
+
+			// Act.
+			tc.apply(h)
+
+			// Assert.
+			h.requireOnce(t, tc.operation, "error")
+			if !tc.pending(h.sc) {
+				t.Fatal("the fact was forgotten against a write that never committed")
+			}
+		})
+	}
+}
