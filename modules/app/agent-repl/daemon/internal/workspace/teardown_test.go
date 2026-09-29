@@ -388,3 +388,122 @@ func TestKillRecordsTheUnansweredSessionKillByWhoOrderedIt(t *testing.T) {
 		})
 	}
 }
+
+// ---- the fast half: the workspace is closed before its teardown runs ----
+
+// beginVerbs are the two verbs with a fast half, run against one fixture.
+var beginVerbs = []struct {
+	name  string
+	begin func(f *fixture) (Teardown, error)
+}{
+	{name: "kill", begin: func(f *fixture) (Teardown, error) { return f.verbs.BeginKill(context.Background(), "w1") }},
+	{name: "nuke", begin: func(f *fixture) (Teardown, error) { return f.verbs.BeginNuke(context.Background(), "w1") }},
+}
+
+func TestBeginMarksTheWorkspaceClosedBeforeItsTeardownRuns(t *testing.T) {
+	for _, tt := range beginVerbs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.fleet.live["w1"] = true
+
+			// Act.
+			teardown, err := tt.begin(f)
+
+			// Assert.
+			if err != nil || teardown == nil {
+				t.Fatalf("begin = (%v, %v), want a teardown", teardown != nil, err)
+			}
+			if !f.db.closedFlags["w1"] {
+				t.Fatal("the workspace is not closed after the fast half")
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republishes = %d, want the close published at once", len(f.sidebar.registries))
+			}
+			if len(f.shim.killedSession) != 0 || len(f.fleet.stopped) != 0 || len(f.git.nuked) != 0 {
+				t.Fatalf("the fast half tore something down: kills=%v stops=%v nuked=%v",
+					f.shim.killedSession, f.fleet.stopped, f.git.nuked)
+			}
+			if len(f.merge.closed) != 1 {
+				t.Fatalf("merges dropped = %v, want the queued merge dropped", f.merge.closed)
+			}
+		})
+	}
+}
+
+func TestTheTeardownKillsTheSessionTheFastHalfLeftAlive(t *testing.T) {
+	for _, tt := range beginVerbs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.fleet.live["w1"] = true
+			teardown, err := tt.begin(f)
+			if err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+
+			// Act.
+			if err := teardown(context.Background()); err != nil {
+				t.Fatalf("teardown: %v", err)
+			}
+
+			// Assert.
+			if len(f.shim.killedSession) != 1 {
+				t.Fatalf("KillSession calls = %v, want the session killed by the teardown", f.shim.killedSession)
+			}
+		})
+	}
+}
+
+func TestBeginRefusesAWorkspaceThatIsNotThisDaemonsAndClosesNothing(t *testing.T) {
+	for _, tt := range beginVerbs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.owner.standing = StandingTransferringAway
+
+			// Act.
+			teardown, err := tt.begin(f)
+
+			// Assert.
+			if err == nil || teardown != nil {
+				t.Fatalf("begin = (%v, %v), want a refusal and no teardown", teardown != nil, err)
+			}
+			if _, set := f.db.closedFlags["w1"]; set {
+				t.Fatal("a refused verb marked the workspace closed")
+			}
+			if len(f.merge.closed) != 0 {
+				t.Fatalf("merges dropped = %v, want none for a refused verb", f.merge.closed)
+			}
+		})
+	}
+}
+
+func TestBeginFailsLoudlyWhenTheCloseCannotBeRecorded(t *testing.T) {
+	for _, tt := range beginVerbs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.setClosedErr = errFake
+
+			// Act.
+			teardown, err := tt.begin(f)
+
+			// Assert.
+			if err == nil || teardown != nil {
+				t.Fatalf("begin = (%v, %v), want the failure and no teardown", teardown != nil, err)
+			}
+			if !strings.Contains(err.Error(), "record closed") {
+				t.Fatalf("error = %v, want it to name the close record", err)
+			}
+			awaitRecord(t, f, "error", "daemon.workspace."+tt.name)
+			if len(f.sidebar.registries) != 0 {
+				t.Fatalf("roster republishes = %d, want none for an unrecorded close", len(f.sidebar.registries))
+			}
+		})
+	}
+}
