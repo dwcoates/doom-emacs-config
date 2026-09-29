@@ -249,7 +249,7 @@ func (f *emacsWorkspaceFixture) parkAHeldTurn() {
 // coming.
 func (f *emacsWorkspaceFixture) releaseHeldWork() {
 	f.Emacs.t.Helper()
-	f.Emacs.Eval(`(ignore-errors (agent-repl-kill-workspace ` + elispString(f.Name) + `) t)`)
+	f.Emacs.Eval(`(ignore-errors ` + killWorkspaceForm(f.Name) + `)`)
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +735,9 @@ func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
 
 	f.parkAHeldTurn()
 
-	e.Leader("j x")
+	// The kill asks first (owner ruling: `SPC j x' confirms with y/n), and the
+	// user answers yes.
+	e.LeaderAnsweringYes(killConfirmPrompt, "j x")
 
 	e.AwaitEvalFor(emacsVerbBound, "the killed workspace's tab to go away",
 		emacsWSTablineNamesForm,
@@ -796,7 +798,7 @@ func TestEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
 	f.openPanel()
 
 	e.Leader("j d")
-	e.Eval(`(progn (agent-repl-kill-workspace ` + elispString(f.Name) + `) t)`)
+	e.Eval(killWorkspaceForm(f.Name))
 
 	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after close-then-kill",
 		`(emacs-pid)`,
