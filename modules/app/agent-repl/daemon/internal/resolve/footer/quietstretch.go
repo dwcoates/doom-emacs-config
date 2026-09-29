@@ -22,8 +22,11 @@ import (
 // A QUIET STRETCH is the period between the moment a feed item has FULLY
 // LANDED and the moment the next feed item FIRST SURFACES. Through it the
 // activity line says what just landed and what the turn does next
-// ("✅ Bash finished — handling result..."), and it clears the moment the next
-// feed item surfaces — a streaming response at its first fragment. While a
+// ("✅ Bash finished — handling result..."), and it ends the moment the feed
+// DRAWS the next item — a streaming response at its first fragment. The ended
+// line is then stated with the row that ended it
+// (FooterStatusQuietStretchEnding), and the client holds it until it has
+// painted that row, so the line never clears before its successor is visible. While a
 // turn is in flight only the main agent's items count: a subagent's items
 // run inside its own feed item, and detached work is not surfaced on the line
 // then. With no turn in flight and detached work live (`background`), every
@@ -166,10 +169,40 @@ type feedMotion struct {
 	// left are the units that left the turn (detached): their later frames
 	// are detached work's, never a surfacing or a step.
 	left map[string]struct{}
+	// drawn are the rows the feed drew for units that have not landed, by
+	// unit (OnItemDrawn).
+	drawn map[string]*frontendv1.FeedId
+	// ending is the line the next feed item's drawing ended, nil when none.
+	ending *lineEnding
+}
+
+// lineEnding is a quiet-stretch line ended by the drawing of the next feed
+// item, and that item's row.
+type lineEnding struct {
+	text string
+	row  *frontendv1.FeedId
 }
 
 func newFeedMotion() feedMotion {
-	return feedMotion{open: map[string]openItem{}, left: map[string]struct{}{}}
+	return feedMotion{
+		open:  map[string]openItem{},
+		left:  map[string]struct{}{},
+		drawn: map[string]*frontendv1.FeedId{},
+	}
+}
+
+// surface ends the standing line if UNIT's row is drawn: the stretch ends when
+// the next feed item is drawn, not merely surfaced. An item surfaced but not
+// yet drawn leaves the line standing, and OnItemDrawn ends it at the draw.
+func (m *feedMotion) surface(unit string) {
+	row := m.drawn[unit]
+	if row == nil {
+		return
+	}
+	if m.line != nil {
+		m.ending = &lineEnding{text: m.line.text, row: row}
+	}
+	m.line = nil
 }
 
 // step answers the working step: the latest-surfaced running item that names
@@ -199,6 +232,31 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 	r.mutate(ws, "daemon.footer.on_main_agent", "the footer was told the session's main agent",
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
 			s.mainAgent = agent.GetValue()
+		})
+}
+
+// OnItemDrawn records where the feed drew one activity unit's row. See
+// Resolver.OnItemDrawn. CALLED UNDER THE FEED RESOLVER'S LOCK; it takes this
+// resolver's lock and nothing else.
+//
+// The feed draws a frame before the footer takes it, so an item's row is
+// usually recorded here before its surfacing is. An item the feed draws LATER
+// than its surfacing (a spawn held for the frame naming its agent) is open
+// already, and its draw ends the stretch here.
+func (r *resolver) OnItemDrawn(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
+	if unit == "" || row.GetValue() == "" {
+		r.workspaceLog(ws).Error("daemon.footer.item_drawn_unaddressed",
+			"the feed announced a drawn row with no unit or no FeedId; no quiet stretch can end on it",
+			dlog.Context{"unit": unit, "row": row.GetValue()})
+		return
+	}
+	r.mutate(ws, "daemon.footer.on_item_drawn", "the footer took the feed's drawing of an activity row",
+		dlog.Context{"unit": unit, "row": row.GetValue()}, func(s *wsState) {
+			m := &s.motion
+			m.drawn[unit] = row
+			if item, open := m.open[unit]; open && item.feed {
+				m.surface(unit)
+			}
 		})
 }
 
@@ -261,6 +319,10 @@ func (r *resolver) trackFeed(ws ids.WorkspaceID, s *wsState, agent *conversation
 	if !ok || phase == phaseNone {
 		return
 	}
+	if phase != phaseRunning {
+		// A landed item's row ends nothing more.
+		delete(s.motion.drawn, unit)
+	}
 	if s.turn != nil {
 		if s.mainAgent == "" || agent.GetValue() != s.mainAgent {
 			return
@@ -295,7 +357,7 @@ func (r *resolver) trackTurnItem(ws ids.WorkspaceID, s *wsState, unit string, ki
 		m.open[unit] = openItem{step: kind.step, feed: kind.feed, seq: m.seq}
 		m.seq++
 		if kind.feed {
-			m.line = nil
+			m.surface(unit)
 		}
 		return
 	}
@@ -315,7 +377,7 @@ func (r *resolver) trackBackgroundItem(s *wsState, unit string, kind feedKind, p
 		}
 		m.open[unit] = openItem{step: kind.step, feed: true, seq: m.seq}
 		m.seq++
-		m.line = nil
+		m.surface(unit)
 		return
 	}
 	delete(m.open, unit)
@@ -388,6 +450,7 @@ func deliveredLine(act SessionAct) string {
 // and a feed item landing is that activity.
 func (r *resolver) standQuietLine(s *wsState, text string) {
 	s.motion.line = &standing{text: text, at: r.opts.clock.Now()}
+	s.motion.ending = nil
 	s.notification = nil
 }
 
@@ -426,6 +489,7 @@ func (r *resolver) leaveTurn(ws ids.WorkspaceID, s *wsState, unit string) {
 	}
 	m := &s.motion
 	m.left[unit] = struct{}{}
+	delete(m.drawn, unit)
 	item, running := m.open[unit]
 	if !running {
 		return
@@ -443,6 +507,7 @@ func (r *resolver) leaveTurn(ws ids.WorkspaceID, s *wsState, unit string) {
 func (r *resolver) settleBackgroundLine(s *wsState) {
 	if s.turn == nil && !s.detachedLive() {
 		s.motion.line = nil
+		s.motion.ending = nil
 	}
 }
 
@@ -469,6 +534,47 @@ func (r *resolver) quietStretchLine(s *wsState) *frontendv1.FooterStatusActivity
 		return nil
 	}
 	return &frontendv1.FooterStatusActivityQuietStretch{Text: s.motion.line.text}
+}
+
+// quietStretchEnding states the line the next feed item's drawing ended, or
+// nil. OUTRANKED reports that the activity drawn now outranks the quiet-stretch
+// line, which is then drawn at once and holds nothing.
+func quietStretchEnding(s *wsState, outranked bool) *frontendv1.FooterStatusQuietStretchEnding {
+	if s.motion.ending == nil || outranked {
+		return nil
+	}
+	return &frontendv1.FooterStatusQuietStretchEnding{
+		Text: s.motion.ending.text, UntilPainted: s.motion.ending.row,
+	}
+}
+
+// workingOutranksQuietLine reports whether a working activity outranks the
+// quiet-stretch line (thinkingActivity's precedence).
+func workingOutranksQuietLine(act *frontendv1.FooterStatusWorkingActivity) bool {
+	switch act.GetKind().(type) {
+	case *frontendv1.FooterStatusWorkingActivity_Fault,
+		*frontendv1.FooterStatusWorkingActivity_Update,
+		*frontendv1.FooterStatusWorkingActivity_Notification,
+		*frontendv1.FooterStatusWorkingActivity_Compaction,
+		*frontendv1.FooterStatusWorkingActivity_Hook,
+		*frontendv1.FooterStatusWorkingActivity_Retrying,
+		*frontendv1.FooterStatusWorkingActivity_QuietStretch:
+		return true
+	}
+	return false
+}
+
+// backgroundOutranksQuietLine reports whether a background activity outranks
+// the quiet-stretch line (backgroundActivity's precedence).
+func backgroundOutranksQuietLine(act *frontendv1.FooterStatusBackgroundActivity) bool {
+	switch act.GetKind().(type) {
+	case *frontendv1.FooterStatusBackgroundActivity_Fault,
+		*frontendv1.FooterStatusBackgroundActivity_Update,
+		*frontendv1.FooterStatusBackgroundActivity_Notification,
+		*frontendv1.FooterStatusBackgroundActivity_QuietStretch:
+		return true
+	}
+	return false
 }
 
 // workingStep resolves the working status's step once the turn has said

@@ -432,6 +432,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// footer never calls back into the feed (the fault path above already
 		// takes the same feed-then-footer order).
 		EntryPlaced: footerResolver.OnEntryPlaced,
+		// A QUIET STRETCH ENDS ON THE ROW THAT ENDED IT: the footer states
+		// the ended line with the row the feed drew for the next item, and
+		// the client holds the line until it has painted that row. Called
+		// under the feed's lock, in the same feed-then-footer order.
+		ItemDrawn: footerResolver.OnItemDrawn,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)

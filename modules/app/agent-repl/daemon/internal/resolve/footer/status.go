@@ -520,6 +520,7 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 		return nil
 	}
 	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
+	arm.QuietStretchEnding = quietStretchEnding(s, workingOutranksQuietLine(arm.Activity))
 	switch {
 	case s.turn == nil:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
@@ -555,9 +556,13 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 	if !s.detachedLive() {
 		return nil
 	}
+	activity := r.backgroundActivity(s)
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_Background{
-			Background: &frontendv1.FooterStatusBackground{Activity: r.backgroundActivity(s)}}}
+			Background: &frontendv1.FooterStatusBackground{
+				Activity:           activity,
+				QuietStretchEnding: quietStretchEnding(s, backgroundOutranksQuietLine(activity)),
+			}}}
 }
 
 // degraded resolves the degraded rung: the session serves, but the daemon's
