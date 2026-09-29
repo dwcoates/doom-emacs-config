@@ -172,16 +172,6 @@ type Resolver interface {
 	// question the batch never carried is refused rather than forwarded.
 	ServedQuestion(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentQuestionBatch, bool)
 
-	// RaiseColdGate draws the STANDING cold-context gate from the shim's cold
-	// facts: the raw counts and instants the CLIENT formats and ticks, plus the
-	// summarizers and compaction scopes the daemon will accept back. While
-	// standing the gate owns the composer.
-	RaiseColdGate(ws ids.WorkspaceID, cold *conversationv1.SessionCold, summarizers []*conversationv1.AgentModel, scopes []conversationv1.SessionCompactScope) *frontendv1.FeedId
-	// ResolveColdGate replaces the standing gate with the trace of what was
-	// chosen. The row stays in history: the decision is a fact a reader
-	// scrolling back must find.
-	ResolveColdGate(ws ids.WorkspaceID, remediation *conversationv1.SessionColdRemediation) *frontendv1.FeedId
-
 	// FinalResponses answers the workspace's ordered selectable final-response
 	// rows — the ones drawn with the green final-answer border, oldest first —
 	// for reply-to-a-past-response mode. The server owns the selection cursor
