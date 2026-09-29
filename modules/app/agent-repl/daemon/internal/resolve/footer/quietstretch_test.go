@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -584,6 +585,40 @@ func TestEveryItemPhaseArmIsRead(t *testing.T) {
 			if _, ok := itemPhases[arms.Get(j).Name()]; !ok {
 				t.Errorf("%s arm %q has no footer.itemPhases entry", item.FullName(), arms.Get(j).Name())
 			}
+		}
+	}
+}
+
+func TestLandedHeadWordsEveryOutcome(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase itemPhase
+		want  string
+	}{
+		{"finished", phaseFinished, "✅ Bash finished"},
+		{"failed", phaseFailed, "❌ Bash failed"},
+		{"cancelled", phaseCancelled, "❌ Bash cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := landedHead("Bash", tt.phase); got != tt.want {
+				t.Fatalf("landedHead = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryLandedLineStartsWithTheSharedHead pins that both landed lines are
+// built on landedHead, so a hand-worded line cannot drift from it.
+func TestEveryLandedLineStartsWithTheSharedHead(t *testing.T) {
+	kind := feedKinds["read"]
+	for _, phase := range []itemPhase{phaseFinished, phaseFailed, phaseCancelled} {
+		head := landedHead(kind.label, phase)
+		if got := turnLandedLine(kind, phase); !strings.HasPrefix(got, head+" — ") {
+			t.Errorf("turnLandedLine(%v) = %q, want it to start with %q", phase, got, head)
+		}
+		if got := backgroundLandedLine(kind.label, phase); got != head {
+			t.Errorf("backgroundLandedLine(%v) = %q, want %q", phase, got, head)
 		}
 	}
 }

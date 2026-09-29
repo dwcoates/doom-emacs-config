@@ -339,21 +339,8 @@ func detachedPhase(failed bool) itemPhase {
 	return phaseFinished
 }
 
-// turnLandedLine words a landed item's line while a turn runs.
-func turnLandedLine(kind feedKind, phase itemPhase) string {
-	switch phase {
-	case phaseFailed:
-		return fmt.Sprintf("❌ %s failed — %s", kind.label, nextHandlingFailure)
-	case phaseCancelled:
-		return fmt.Sprintf("❌ %s cancelled — %s", kind.label, nextContinuing)
-	default:
-		return fmt.Sprintf("✅ %s finished — %s", kind.label, kind.next)
-	}
-}
-
-// backgroundLandedLine words a landed item's line with no turn in flight:
-// nothing is handling it, so the line names the landing alone.
-func backgroundLandedLine(label string, phase itemPhase) string {
+// landedHead words what landed, the head every landed line shares.
+func landedHead(label string, phase itemPhase) string {
 	switch phase {
 	case phaseFailed:
 		return fmt.Sprintf("❌ %s failed", label)
@@ -362,6 +349,25 @@ func backgroundLandedLine(label string, phase itemPhase) string {
 	default:
 		return fmt.Sprintf("✅ %s finished", label)
 	}
+}
+
+// turnLandedLine words a landed item's line while a turn runs: what landed,
+// then what the turn does next.
+func turnLandedLine(kind feedKind, phase itemPhase) string {
+	next := kind.next
+	switch phase {
+	case phaseFailed:
+		next = nextHandlingFailure
+	case phaseCancelled:
+		next = nextContinuing
+	}
+	return landedHead(kind.label, phase) + " — " + next
+}
+
+// backgroundLandedLine words a landed item's line with no turn in flight:
+// nothing is handling it, so the line names the landing alone.
+func backgroundLandedLine(label string, phase itemPhase) string {
+	return landedHead(label, phase)
 }
 
 // deliveredLine words the line a delivered prompt stands, by the act the turn
