@@ -24,15 +24,21 @@ func completeSubmit(key string) *agentreplv1.SubmitPromptRequest {
 }
 
 // emacsWatchDaemon is the WatchDaemon request Emacs sends: the client arm is
-// REQUIRED, and the Emacs arm must state the elisp it has loaded.
+// REQUIRED, and the Emacs arm must state the elisp it has loaded and whether
+// Emacs is focused.
 func emacsWatchDaemon() *agentreplv1.WatchDaemonRequest {
 	return &agentreplv1.WatchDaemonRequest{
 		Client: &agentreplv1.WatchDaemonRequest_Emacs{
-			Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build"},
+			Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build", Focus: unfocused()},
 		},
 	}
 }
 
+// unfocused is the EditorFocus an unfocused Emacs states.
+func unfocused() *agentreplv1.EditorFocus {
+	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Unfocused{Unfocused: &agentreplv1.EditorFocusUnfocused{}}}
+}
+
 // emacsWatchDaemonJSON is emacsWatchDaemon's protojson spelling, for the tests
 // that speak the wire by hand.
-const emacsWatchDaemonJSON = `{"emacs":{"elispBuild":"fixture-elisp-build"}}`
+const emacsWatchDaemonJSON = `{"emacs":{"elispBuild":"fixture-elisp-build","focus":{"unfocused":{}}}}`
