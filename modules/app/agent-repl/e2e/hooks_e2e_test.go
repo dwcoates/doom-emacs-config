@@ -42,7 +42,6 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -79,20 +78,6 @@ func openFeedPage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*front
 		t.Fatalf("OpenFeed = %v, want success", resp.Msg)
 	}
 	return success.GetPage().GetSuccess().GetRows()
-}
-
-// turnEndedRow finds the given turn's terminal row in a feed snapshot, or
-// fails the test loudly — every hook test needs this to confirm hook
-// activity never froze or misclassified the turn's own outcome.
-func turnEndedRow(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
-	t.Helper()
-	for _, row := range rows {
-		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
-			return row.GetTurnEnded()
-		}
-	}
-	t.Fatalf("no FeedTurnEnded row for turn %s in %d rows", turn.GetValue(), len(rows))
-	return nil
 }
 
 // hookRow answers the one FeedHook card in a feed snapshot, or nil if the

@@ -127,18 +127,6 @@ func cpFindCompactionFailedSeparation(rows []*frontendv1.FeedRow) *frontendv1.Fe
 	return nil
 }
 
-// cpFindTurnEnded answers the row carrying turn's FeedTurnEnded terminal.
-func cpFindTurnEnded(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
-	t.Helper()
-	for _, row := range rows {
-		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
-			return row.GetTurnEnded()
-		}
-	}
-	t.Fatalf("no FeedTurnEnded row found for turn %s among %d rows", turn.GetValue(), len(rows))
-	return nil
-}
-
 // cpContextBudgetText answers the footer's standing context-budget activity
 // text, whichever status arm it currently stands under (idle or thinking —
 // footer.proto legalizes FooterStatusActivityContextBudget under both), or ""
@@ -230,7 +218,7 @@ func TestCompactionDirected(t *testing.T) {
 	}
 
 	// Assert: the turn itself concluded normally.
-	ended := cpFindTurnEnded(t, rows, turn)
+	ended := turnEndedRow(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -268,7 +256,7 @@ func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 		t.Errorf("compacted summary = %q, want the override %q", got, wantSummary)
 	}
 
-	ended := cpFindTurnEnded(t, rows, turn)
+	ended := turnEndedRow(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -321,7 +309,7 @@ func TestCompactionAuto(t *testing.T) {
 			got, "context compacted automatically")
 	}
 
-	ended := cpFindTurnEnded(t, rows, turn)
+	ended := turnEndedRow(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -375,7 +363,7 @@ func TestCompactionFailed(t *testing.T) {
 	// Assert: the turn concluded normally (conclude()'s ordinary success
 	// path, not a hibernate-error or a turn-level failure arm).
 	rows := cpOpenFeedRows(t, w, ws)
-	ended := cpFindTurnEnded(t, rows, turn)
+	ended := turnEndedRow(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome (compact-failed still ends the turn normally)", ended)
 	}

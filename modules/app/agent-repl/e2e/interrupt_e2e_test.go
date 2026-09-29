@@ -204,7 +204,7 @@ func TestBashInterruptedByTimeout(t *testing.T) {
 	var turnTerminal *frontendv1.FeedRow
 	var shell *frontendv1.FeedShell
 	for _, row := range rows {
-		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
+		if endsTurn(turn)(row) {
 			turnTerminal = row
 		}
 		if row.GetDetachedShell() != nil {

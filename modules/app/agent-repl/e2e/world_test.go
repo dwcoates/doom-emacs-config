@@ -19,6 +19,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -1197,37 +1198,48 @@ func newIdempotencyKey(t *testing.T) string {
 // turn's FeedTurnEnded row arrives, and answers that row.
 func AwaitTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed: %v", err)
+	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", endsTurn(turn))
+}
+
+// endsTurn matches TURN's FeedTurnEnded row.
+func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
+	return func(row *frontendv1.FeedRow) bool {
+		return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
 	}
-	success := opened.Msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
-	}
-	for _, row := range success.GetPage().GetSuccess().GetRows() {
-		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
-			return row
+}
+
+// turnEndedRow finds the given turn's terminal row in a feed snapshot, or
+// fails the test loudly — every hook test needs this to confirm hook
+// activity never froze or misclassified the turn's own outcome.
+func turnEndedRow(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
+	t.Helper()
+	ends := endsTurn(turn)
+	for _, row := range rows {
+		if ends(row) {
+			return row.GetTurnEnded()
 		}
 	}
-	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
-	defer stream.Close()
-	return harness.AwaitView(t, w.Ctx(), stream, "turn "+turn.GetValue()+" to end", func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-	})
+	t.Fatalf("no FeedTurnEnded row for turn %s in %d rows", turn.GetValue(), len(rows))
+	return nil
 }
 
 // awaitFeedRow opens ws's root feed and answers the first row satisfying
-// pred: it checks the already-materialized page first (a settled row from an
-// earlier driveScenarioToCompletion/AwaitTurnEnded call on this workspace is
-// normally already in the page by the time a caller reaches here), falling
-// back to watching the tail otherwise. Mirrors AwaitTurnEnded's
-// page-then-watch shape above, generalized to an arbitrary predicate. Bound
-// by the watch stream's own DefaultTimeout via harness.AwaitView; never
-// sleeps.
+// pred (awaitFeedRowOn, against the world's own daemon).
 func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	return awaitFeedRowOn(t, w, w.Client(), ws, what, pred)
+}
+
+// awaitFeedRowOn opens ws's root feed on CLIENT and answers the first row
+// satisfying pred: it checks the already-materialized page first (a settled
+// row from an earlier driveScenarioToCompletion/AwaitTurnEnded call on this
+// workspace is normally already in the page by the time a caller reaches
+// here), falling back to watching the tail otherwise. CLIENT is the world's
+// own daemon, or a successor a handover moved the workspace to. Bound by the
+// watch stream's own DefaultTimeout via harness.AwaitView; never sleeps.
+func awaitFeedRowOn(t *testing.T, w *World, client agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	t.Helper()
+	opened, err := client.OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenFeed: %v", err)
 	}
@@ -1240,7 +1252,7 @@ func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what str
 			return row
 		}
 	}
-	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
+	stream := w.WatchFeedOn(client, success.GetWatch())
 	defer stream.Close()
 	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
 }

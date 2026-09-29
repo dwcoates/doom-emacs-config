@@ -599,9 +599,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
-	endedRow := root.AwaitRow("the displaced turn's own terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-	})
+	endedRow := root.AwaitRow("the displaced turn's own terminal", endsTurn(turn))
 	if endedRow.GetTurnEnded().GetInterrupted() == nil {
 		t.Fatalf("the displaced turn's terminal = %v, want FeedTurnEndedInterrupted (KillTurn's feed-visible shape)", endedRow.GetTurnEnded())
 	}

@@ -112,9 +112,7 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	// cursor/replay semantics) — this daemon never started that session
 	// itself.
 	adAwaitReplayedFeedRow(t, successor, ws, "the prior REAL session's turn replayed from the store",
-		func(row *frontendv1.FeedRow) bool {
-			return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-		})
+		endsTurn(turn))
 }
 
 // ===========================================================================
