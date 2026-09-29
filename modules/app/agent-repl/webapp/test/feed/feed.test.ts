@@ -62,6 +62,24 @@ function mount(h: Harness = harness()) {
   return { feed, host, h };
 }
 
+/** A viewport rect at TOP, HEIGHT tall, since jsdom lays out nothing. */
+const domRect = (top: number, height: number) => (): DOMRect =>
+  ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+
+/**
+ * Script the feed's scroll box as a 300px viewport at the page's top over
+ * 2000px of content, the reader standing at scrollTop 100.
+ */
+function scriptFeedBox(scroll: HTMLElement): void {
+  let top = 100;
+  Object.defineProperties(scroll, {
+    scrollHeight: { configurable: true, get: () => 2000 },
+    clientHeight: { configurable: true, get: () => 300 },
+    scrollTop: { configurable: true, get: () => top, set: (next: number) => { top = next; } },
+  });
+  scroll.getBoundingClientRect = domRect(0, 300);
+}
+
 describe("mountFeed: opening the root feed", () => {
   it("opens the ROOT feed, which is the absence of an address", async () => {
     const { h } = mount();
@@ -305,22 +323,12 @@ describe("mountFeed: promptHeld", () => {
     resetLoggingForTests();
   });
 
-  /** The feed's scroll box, its geometry scripted since jsdom lays out nothing. */
-  function scriptedBox(scroll: HTMLElement): void {
-    let top = 100;
-    Object.defineProperties(scroll, {
-      scrollHeight: { get: () => 2000 },
-      clientHeight: { get: () => 300 },
-      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
-    });
-  }
-
   it("parks the feed at its tail", async () => {
     // Arrange
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
-    scriptedBox(scroll);
+    scriptFeedBox(scroll);
     // Act
     feed.promptHeld("t1");
     // Assert
@@ -331,7 +339,7 @@ describe("mountFeed: promptHeld", () => {
     // Arrange
     const { feed, host } = mount();
     await settle();
-    scriptedBox(host.parentElement as HTMLElement);
+    scriptFeedBox(host.parentElement as HTMLElement);
     const capture = captureLogRecords("debug");
     // Act
     feed.promptHeld("t1");
@@ -344,7 +352,7 @@ describe("mountFeed: promptHeld", () => {
     // Arrange
     const { feed, host } = mount();
     await settle();
-    scriptedBox(host.parentElement as HTMLElement);
+    scriptFeedBox(host.parentElement as HTMLElement);
     const capture = captureLogRecords("debug");
     // Act
     feed.promptHeld("t1");
@@ -419,18 +427,10 @@ describe("mountFeed: selectDetachedWork", () => {
 
   /** The feed's scroll box, with rects scripted since jsdom lays out nothing. */
   function scripted(scroll: HTMLElement, host: HTMLElement, rowId: string, rowTop: number): void {
-    const rect = (top: number, height: number) => (): DOMRect =>
-      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
-    let top = 100;
-    Object.defineProperties(scroll, {
-      scrollHeight: { get: () => 2000 },
-      clientHeight: { get: () => 300 },
-      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
-    });
-    scroll.getBoundingClientRect = rect(0, 300);
+    scriptFeedBox(scroll);
     const row = host.querySelector<HTMLElement>(`[data-feed-row="${rowId}"]`);
     if (row === null) throw new Error(`row ${rowId} is not drawn`);
-    row.getBoundingClientRect = rect(rowTop, 100);
+    row.getBoundingClientRect = domRect(rowTop, 100);
   }
 
   it("centers the selected detached-work card in the feed's viewport", async () => {
@@ -1080,20 +1080,6 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
 });
 
 describe("mountFeed: expanding a bubble centers it in the feed", () => {
-  const rect = (top: number, height: number) => (): DOMRect =>
-    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
-
-  /** A scroll box scripted at scrollTop 100 over a 300px viewport of 2000px. */
-  function scriptedScroll(scroll: HTMLElement): void {
-    let top = 100;
-    Object.defineProperties(scroll, {
-      scrollHeight: { configurable: true, get: () => 2000 },
-      clientHeight: { configurable: true, get: () => 300 },
-      scrollTop: { configurable: true, get: () => top, set: (next: number) => { top = next; } },
-    });
-    scroll.getBoundingClientRect = rect(0, 300);
-  }
-
   /** A capped `.bubble > .bubble-scroll` hung in HOST, laid out at TOP. */
   function bubbleAt(host: HTMLElement, top: number, parentClass = "bubble"): HTMLElement {
     const bubble = document.createElement("div");
@@ -1102,7 +1088,7 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     const box = bubbleBox(createBubbleBody(), true);
     bubble.append(box);
     host.append(bubble);
-    bubble.getBoundingClientRect = rect(top, 100);
+    bubble.getBoundingClientRect = domRect(top, 100);
     return box;
   }
 
@@ -1111,7 +1097,7 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
-    scriptedScroll(scroll);
+    scriptFeedBox(scroll);
     const box = bubbleAt(host, 500);
     // Act
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1124,7 +1110,7 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     // Arrange
     const { feed, host } = mount();
     await settle();
-    scriptedScroll(host.parentElement as HTMLElement);
+    scriptFeedBox(host.parentElement as HTMLElement);
     const box = bubbleAt(host, 500);
     const capture = captureLogRecords("debug");
     // Act
@@ -1140,7 +1126,7 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
-    scriptedScroll(scroll);
+    scriptFeedBox(scroll);
     const box = bubbleAt(host, 500);
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     scroll.scrollTop = 250;
@@ -1156,10 +1142,10 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
-    scriptedScroll(scroll);
+    scriptFeedBox(scroll);
     const card = document.createElement("div");
     card.className = "tool-card tool-fold";
-    card.getBoundingClientRect = rect(500, 100);
+    card.getBoundingClientRect = domRect(500, 100);
     host.append(card);
     // Act
     card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1173,7 +1159,7 @@ describe("mountFeed: expanding a bubble centers it in the feed", () => {
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
-    scriptedScroll(scroll);
+    scriptFeedBox(scroll);
     const box = bubbleAt(host, 500, "not-a-bubble");
     const capture = captureLogRecords();
     const thrown: unknown[] = [];
@@ -1258,9 +1244,6 @@ describe("latestEntry", () => {
 });
 
 describe("mountFeed: the latest-visible latch", () => {
-  const rect = (top: number, height: number) => (): DOMRect =>
-    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
-
   /**
    * A mounted root feed in a 300px viewport over 2000px of content, with the
    * hold tray after the feed holding HELD cards (none when 0). The first paint
@@ -1283,21 +1266,15 @@ describe("mountFeed: the latest-visible latch", () => {
       held === 0 ? "" : `<div class="hold-tray"><div class="hold-tray-items">${cards.join("")}</div></div>`;
     scroll.append(host, tray);
     document.body.replaceChildren(scroll);
-    let top = 100;
-    Object.defineProperties(scroll, {
-      scrollHeight: { get: () => 2000 },
-      clientHeight: { get: () => 300 },
-      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
-    });
-    scroll.getBoundingClientRect = rect(0, 300);
+    scriptFeedBox(scroll);
     const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
     await settle();
     scroll.dispatchEvent(new Event("wheel"));
-    top = 100;
+    scroll.scrollTop = 100;
     scroll.dispatchEvent(new Event("scroll"));
     const place = (el: Element | null, at: number): void => {
       if (!(el instanceof HTMLElement)) throw new Error("the entry is not drawn");
-      el.getBoundingClientRect = rect(at, 100);
+      el.getBoundingClientRect = domRect(at, 100);
     };
     return { feed, host, tray, scroll, channel, place };
   }
