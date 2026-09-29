@@ -867,6 +867,23 @@ working directory, which is wherever launchd started it:
 the create that carried it was quarantined as an unknown repository
 (2026-09-28).
 
+THE DECODE IS STRICT: a field this reader does not declare quarantines the
+file. `encoding/json` drops one without a word, and for a month that dropped
+every create field the `/create-or-update-workspace` skill writes beyond
+`name`, `git_root` and `prompt`. A create-only field on any other verb is
+refused for the same reason. A create maps onto the `CreateSpec` the
+`CreateWorkspace` rpc fills for the same request:
+
+| field | `CreateSpec` |
+|---|---|
+| `git_root` | `RepoDir`: a registered repository's main checkout, or the repository of the registered workspace whose worktree it is (the skill's default `git_root` is the source workspace's own path); anything else is left for the verb to refuse as `unknown_repository` |
+| `source_ws` `{name, path}` | `Parent`: none when `path` is the repository's main checkout, else the registered workspace at `path`, which must be of the same repository; `name` is display only |
+| `fork_from` | `ForkFrom` and `Parent`: the ONE open workspace of the repository with that name. A fork is always from the parent (`CreateWorkspaceParent.fork`), so a `source_ws` naming a different workspace is refused, and so is a base beside it |
+| `base_commit`, `base_ref` | `BaseRef`; the two spellings are refused together |
+| `model` | `Model`, blank as unset |
+| `priority` | `Priority`: `p05`, `p1`, `p2`, `p3` |
+| `before_ws_merge`, `postprocessing_prompt` | `MergeActions.Before`, `MergeActions.After` |
+
 ## heldingress
 
 A client whose `SubmitPrompt` the daemon did not answer — no daemon, a stuck

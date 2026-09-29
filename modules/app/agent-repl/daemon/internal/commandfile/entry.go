@@ -1,10 +1,14 @@
 package commandfile
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
 	"claude-repld/internal/dirpath"
+	"claude-repld/internal/wsm"
 )
 
 // The entry types the ingress accepts. They are the shapes the managed
@@ -91,23 +95,69 @@ type Entry struct {
 	OneShot bool `json:"one_shot"`
 	// BaseRef is a create's base.
 	BaseRef string `json:"base_ref"`
+
+	// THE SKILL'S CREATE FIELDS. The /create-or-update-workspace skill has
+	// written every one of these on its creates since before this ingress
+	// existed, and the CreateWorkspace rpc has always carried their meaning;
+	// this reader used to decode none of them, and encoding/json dropped each
+	// without a word (a `--master` create's base, 2026-09-28). Each is
+	// create-only, and each maps onto the same CreateSpec field the rpc fills.
+
+	// SourceWS is the workspace the create was spawned from. Its path is the
+	// key; its name is for display only, as `workspace` beside `project_dir`
+	// is. The repository's main checkout means no parent; any other
+	// registered workspace is the create's PARENT, which is its merge target
+	// and its roster nesting (CreateSpec.Parent).
+	SourceWS *SourceWorkspace `json:"source_ws,omitempty"`
+	// BaseCommit is the skill's spelling of BaseRef.
+	BaseCommit string `json:"base_commit,omitempty"`
+	// ForkFrom NAMES the workspace whose conversation the create forks. A fork
+	// is always from the parent (CreateWorkspaceParent.fork), so it is the
+	// create's parent too.
+	ForkFrom string `json:"fork_from,omitempty"`
+	// Model is the model the session starts under; blank is the default.
+	Model string `json:"model,omitempty"`
+	// Priority is the roster priority: p05, p1, p2 or p3.
+	Priority string `json:"priority,omitempty"`
+	// BeforeWSMerge is prompt text run in the workspace before its merge
+	// (CreateWorkspaceMergeActions.before_ws_merge).
+	BeforeWSMerge string `json:"before_ws_merge,omitempty"`
+	// PostprocessingPrompt is prompt text run after the merge lands
+	// (CreateWorkspaceMergeActions.postprocessing_prompt).
+	PostprocessingPrompt string `json:"postprocessing_prompt,omitempty"`
+}
+
+// SourceWorkspace is a create's `source_ws`: the workspace it was spawned
+// from, keyed by its worktree path.
+type SourceWorkspace struct {
+	// Name is the source workspace's display name, never resolved.
+	Name string `json:"name"`
+	// Path is the source workspace's worktree root: the key.
+	Path string `json:"path"`
+}
+
+// priorities spells each `priority` value the skill writes as the registry's.
+var priorities = map[string]wsm.Priority{
+	"p05": wsm.PriorityP05,
+	"p1":  wsm.PriorityP1,
+	"p2":  wsm.PriorityP2,
+	"p3":  wsm.PriorityP3,
 }
 
 // Validate refuses an entry the ingress could only act on by guessing. A file
 // with ONE invalid entry applies NOTHING: the array is one request, and half of
 // it is not a smaller request.
 func (e Entry) Validate() error {
+	if e.Type != TypeCreate && e.Type != "" {
+		if field := e.createOnly(); field != "" {
+			return fmt.Errorf("%s: %s is a create's field, and no %s reads it", e.Type, field, e.Type)
+		}
+	}
 	switch e.Type {
 	case "":
 		return fmt.Errorf("an entry must name a type")
 	case TypeCreate:
-		if e.GitRoot == "" {
-			return fmt.Errorf("%s: git_root is required", TypeCreate)
-		}
-		if e.Name == "" && e.Prompt == "" {
-			return fmt.Errorf("%s: a name or a prompt is required", TypeCreate)
-		}
-		return nil
+		return e.validateCreate()
 	case TypePrompt, TypeSend:
 		if err := e.requireTarget(); err != nil {
 			return err
@@ -141,6 +191,63 @@ func (e Entry) Validate() error {
 	}
 }
 
+// validateCreate refuses a create whose fields contradict each other or name
+// a value no create can take.
+func (e Entry) validateCreate() error {
+	switch {
+	case e.GitRoot == "":
+		return fmt.Errorf("%s: git_root is required", TypeCreate)
+	case e.Name == "" && e.Prompt == "":
+		return fmt.Errorf("%s: a name or a prompt is required", TypeCreate)
+	case e.BaseRef != "" && e.BaseCommit != "":
+		return fmt.Errorf("%s: base_ref and base_commit are two spellings of one base; name it once", TypeCreate)
+	case e.ForkFrom != "" && e.base() != "":
+		return fmt.Errorf("%s: a fork_from create takes no base, and this one names %q", TypeCreate, e.base())
+	case e.SourceWS != nil && e.SourceWS.Path == "":
+		return fmt.Errorf("%s: source_ws.path is required when source_ws is given", TypeCreate)
+	}
+	if _, ok := priorities[e.Priority]; e.Priority != "" && !ok {
+		return fmt.Errorf("%s: priority %q is none of p05, p1, p2, p3", TypeCreate, e.Priority)
+	}
+	return nil
+}
+
+// base is the create's base under whichever spelling it came in.
+func (e Entry) base() string {
+	if e.BaseCommit != "" {
+		return e.BaseCommit
+	}
+	return e.BaseRef
+}
+
+// createOnly names the first create-only field a non-create entry carries,
+// empty for none. Such a field would be dropped by every other verb, and a
+// dropped field is exactly the silence this reader refuses.
+func (e Entry) createOnly() string {
+	fields := []struct {
+		name string
+		set  bool
+	}{
+		{"git_root", e.GitRoot != ""},
+		{"name", e.Name != ""},
+		{"one_shot", e.OneShot},
+		{"base_ref", e.BaseRef != ""},
+		{"source_ws", e.SourceWS != nil},
+		{"base_commit", e.BaseCommit != ""},
+		{"fork_from", e.ForkFrom != ""},
+		{"model", e.Model != ""},
+		{"priority", e.Priority != ""},
+		{"before_ws_merge", e.BeforeWSMerge != ""},
+		{"postprocessing_prompt", e.PostprocessingPrompt != ""},
+	}
+	for _, field := range fields {
+		if field.set {
+			return field.name
+		}
+	}
+	return ""
+}
+
 // requireTarget refuses an entry that names no workspace at all.
 func (e Entry) requireTarget() error {
 	if e.Workspace == "" && e.TargetDir() == "" {
@@ -162,10 +269,20 @@ func (e Entry) TargetDir() string {
 // after the array are a decode failure rather than something to ignore: a file
 // that is still being written often ends mid-token, and tolerating a partial
 // document is exactly how a half-written file gets ingested.
+//
+// AN UNKNOWN FIELD IS A DECODE FAILURE TOO. encoding/json drops one without a
+// word, and that is how every field the skill wrote beyond this struct went
+// missing for a month; the held-prompt ingress refuses unknown fields for the
+// same reason.
 func parse(data []byte) ([]Entry, error) {
 	var entries []Entry
-	if err := json.Unmarshal(data, &entries); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&entries); err != nil {
 		return nil, fmt.Errorf("decode the command array: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("decode the command array: bytes follow the array")
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("the command array is empty, which asks for nothing")
@@ -191,6 +308,16 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "git_root", value: &e.GitRoot},
 		{name: "project_dir", value: &e.ProjectDir},
 		{name: "dir", value: &e.Dir},
+	}
+	if e.SourceWS != nil {
+		// A COPY, so resolving the path never writes through to the entry
+		// the caller still holds.
+		source := *e.SourceWS
+		e.SourceWS = &source
+		fields = append(fields, struct {
+			name  string
+			value *string
+		}{name: "source_ws.path", value: &e.SourceWS.Path})
 	}
 	for _, field := range fields {
 		if *field.value == "" {

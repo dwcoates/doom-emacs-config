@@ -3,6 +3,7 @@ package commandfile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,19 +166,41 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 	return prompthandler.Outcome{}, nil
 }
 
-// fakeDB resolves an entry that names only a directory.
+// fakeDB resolves an entry that names only a directory, and a create's
+// repository, source and fork workspaces.
 type fakeDB struct {
 	wsm.DB
 
-	byDir map[string]wsm.Workspace
+	byDir        map[string]wsm.Workspace
+	repositories []wsm.Repository
+	// listErr fails ListRepositories and ListWorkspaces alike.
+	listErr error
 }
 
 func (d *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, error) {
 	ws, ok := d.byDir[dir]
 	if !ok {
-		return wsm.Workspace{}, errors.New("no workspace at that dir")
+		return wsm.Workspace{}, fmt.Errorf("no workspace at %q: %w", dir, wsm.ErrNotFound)
 	}
 	return ws, nil
+}
+
+func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
+	if d.listErr != nil {
+		return nil, d.listErr
+	}
+	return d.repositories, nil
+}
+
+func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	if d.listErr != nil {
+		return nil, d.listErr
+	}
+	out := make([]wsm.Workspace, 0, len(d.byDir))
+	for _, ws := range d.byDir {
+		out = append(out, ws)
+	}
+	return out, nil
 }
 
 // fakeSurfaces is a dlog.Surfaces backed by one capturing logger.
@@ -255,6 +278,21 @@ func newFixture(t *testing.T) *fixture {
 
 // fixtureHome is the home directory every fixture's ingress expands `~` to.
 const fixtureHome = "/Users/fixture"
+
+// repository registers a repository whose main checkout is dir.
+func (f *fixture) repository(id ids.RepoID, dir string) wsm.Repository {
+	repo := wsm.Repository{ID: id, Dir: dir}
+	f.db.repositories = append(f.db.repositories, repo)
+	return repo
+}
+
+// member records a named workspace of repo at dir.
+func (f *fixture) member(id ids.WorkspaceID, repo ids.RepoID, name, dir string) wsm.Workspace {
+	ws := wsm.Workspace{ID: id, Repo: repo, Name: name, Dir: dir}
+	f.verbs.byID[id] = ws
+	f.db.byDir[dir] = ws
+	return ws
+}
 
 // workspace records one workspace both fakes can resolve.
 func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
