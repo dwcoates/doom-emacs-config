@@ -232,6 +232,106 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     expect(await settled(starting)).toBe(false);
   });
 
+  it("interrupts the keep-alive a real prompt waits behind", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    await settled(starting);
+
+    // Assert
+    expect(h.query.calls).toEqual(["interrupt"]);
+  });
+
+  it("keeps the keep-alive in the slot after the interrupt until its own result closes it", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    await settled(starting);
+
+    // Assert
+    expect(h.open?.id.value).toBe("keepalive-1");
+  });
+
+  it("logs the keep-alive interrupt at INFO with both turns named", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    const mark = logSinkMark();
+
+    // Act
+    await settled(h.turns.startTurn(startTurn()));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("interrupted the keep-alive"));
+    expect(record).toMatchObject({ level: "info", context: { turn_id: "turn-1", keepalive_turn: "keepalive-1" } });
+  });
+
+  it("logs a refused keep-alive interrupt at ERROR with its cause", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.interruptRejects = new Error("vendor said no");
+    openKeepalive(h);
+    const mark = logSinkMark();
+
+    // Act
+    await settled(h.turns.startTurn(startTurn()));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the vendor refused the interrupt"));
+    expect(record).toMatchObject({
+      level: "error",
+      context: { turn_id: "turn-1", keepalive_turn: "keepalive-1", cause: "vendor said no" },
+    });
+  });
+
+  it("still opens the turn when the keep-alive interrupt was refused and the keep-alive then leaves", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.interruptRejects = new Error("vendor said no");
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+    await settled(starting);
+
+    // Act
+    leave();
+    const response = await starting;
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("waits without an interrupt when no vendor query runs under the keep-alive", async () => {
+    // Arrange
+    const h = await harness();
+    h.queryDead = true;
+    openKeepalive(h);
+
+    // Act
+    await settled(h.turns.startTurn(startTurn()));
+
+    // Assert
+    expect(h.query.calls).toEqual([]);
+  });
+
+  it("never interrupts the network-resume turn a prompt waits behind", async () => {
+    // Arrange
+    const h = await harness();
+    h.keepaliveEnd = new Promise<void>(() => undefined);
+    h.open = { id: KEEPALIVE_TURN, keepalive: false, adopted: true, startedAtMs: 1 };
+
+    // Act
+    await settled(h.turns.startTurn(startTurn()));
+
+    // Assert
+    expect(h.query.calls).toEqual([]);
+  });
+
   it("opens the turn once the keep-alive leaves the slot", async () => {
     // Arrange
     const h = await harness();

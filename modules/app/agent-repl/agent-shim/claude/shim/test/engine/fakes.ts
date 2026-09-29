@@ -52,6 +52,8 @@ export class ScriptedQuery implements QueryLike {
   contextUsage: ContextUsageLike = emptyContextUsage();
   accountUsage: AccountUsageLike = emptyAccountUsage();
   backgroundTaskAnswer = false;
+  /** When set, `interrupt` rejects with it, as a vendor that refuses the interrupt does. */
+  interruptRejects: Error | undefined;
   setModelRejects: Error | undefined;
   setPermissionModeRejects: Error | undefined;
   /**
@@ -120,6 +122,7 @@ export class ScriptedQuery implements QueryLike {
 
   interrupt(): Promise<InterruptReceipt | undefined> {
     this.calls.push("interrupt");
+    if (this.interruptRejects !== undefined) return Promise.reject(this.interruptRejects);
     return Promise.resolve({ still_queued: [] });
   }
   setPermissionMode(mode: PermissionModeLike): Promise<void> {
