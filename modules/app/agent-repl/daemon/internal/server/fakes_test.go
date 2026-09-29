@@ -278,6 +278,41 @@ type fakeVerbs struct {
 	// while Create is mid-flight and prove the work is detached from it.
 	createEntered chan struct{}
 	createRelease chan struct{}
+
+	// beginErr refuses a kill's or a nuke's fast half; teardownErr is what
+	// its teardown answers. teardownRan, when set, receives the error of the
+	// context each teardown ran under, read while it runs, after
+	// teardownRelease (when set) is closed.
+	beginErr        error
+	teardownErr     error
+	teardownRan     chan error
+	teardownRelease chan struct{}
+}
+
+// BeginKill answers the scripted fast half and a teardown that reports the
+// context it ran under.
+func (f *fakeVerbs) BeginKill(context.Context, ids.WorkspaceID) (workspace.Teardown, error) {
+	return f.begin()
+}
+
+// BeginNuke is BeginKill for a nuke.
+func (f *fakeVerbs) BeginNuke(context.Context, ids.WorkspaceID) (workspace.Teardown, error) {
+	return f.begin()
+}
+
+func (f *fakeVerbs) begin() (workspace.Teardown, error) {
+	if f.beginErr != nil {
+		return nil, f.beginErr
+	}
+	return func(ctx context.Context) error {
+		if f.teardownRelease != nil {
+			<-f.teardownRelease
+		}
+		if f.teardownRan != nil {
+			f.teardownRan <- ctx.Err()
+		}
+		return f.teardownErr
+	}, nil
 }
 
 // Create records the spec, reports its scripted stages, optionally blocks until
