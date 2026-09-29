@@ -41,7 +41,7 @@ import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
 import { subagentConverter, subagentPrompt } from "./tools/subagent.js";
-import { bashConverter, shellCommandOf } from "./tools/bash.js";
+import { bashConverter } from "./tools/bash.js";
 import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
@@ -523,36 +523,33 @@ export function outputPathFromProse(
 }
 
 // ---------------------------------------------------------------------------
-// THE SHELL RUN'S OWN LIFECYCLE — the shim writes its start and its terminal.
+// THE SHELL RUN'S START — the shim writes it; the run's END is the sidecar's.
 // ---------------------------------------------------------------------------
 //
-// A detached shell's OUTPUT is the sidecar's to write, read off the spool. Its
-// LIFECYCLE is not: the sidecar mints no start at all (a spool exists only
-// after the launch this plane announced), and it writes a terminal only if it
-// ever tails the spool. A hand-backgrounded shell that concluded within seconds
-// (2026-09-27, task bfa5s1wjd) got no sidecar row whatsoever, so
-// `WatchBashRun` refused it forever, the stream never opened, and the run's
-// announcement stayed open in the record: re-announced as live long after the
-// shim had logged it concluded.
+// A detached shell's OUTPUT and its END are the sidecar's to write, read off
+// the spool. Its START is not: the sidecar mints no start at all (a spool exists
+// only after the launch this plane announced). A hand-backgrounded shell that
+// concluded within seconds (2026-09-27, task bfa5s1wjd) got no row whatsoever,
+// so `WatchBashRun` refused it forever and the run's announcement stayed open.
 //
-// So the shim, which OBSERVES both ends, writes both:
+// So the shim writes THE START at the announcement, ahead of the announcement
+// row in the one ordered buffer — a consumer that learned of the run from the
+// record can always open its stream and is sent `start` first — and restates it
+// at the task's notification, so a run concluded before any announcement
+// reached the record still replays its start ahead of its end.
 //
-// - THE START at the announcement, ahead of the announcement row in the one
-//   ordered buffer — so a consumer that learned of the run from the record can
-//   always open its stream and is sent `start` first;
-// - THE TERMINAL at the task's notification — the moment the engine retires
-//   the run from its live set — which closes the run's record (the store ends
-//   `detached_work` on a bash terminal) and ends every open `WatchBashRun`.
+// THE SHIM NEVER WRITES THE RUN'S TERMINAL (owner ruling, 2026-09-29). The
+// store ends a run's stream at its FIRST terminal, and the shim's had no exit
+// status and no output: it landed ~40ms before the sidecar read the spool's
+// terminator, so the exit code and the last lines were never delivered. The
+// sidecar is the only writer of a shell run's terminal — from the spool's own
+// terminator, or from the vendor's task notification once the spool has been
+// read to its end — so nothing can land after the end.
 //
-// ONE WRITE IDENTITY PER RUN AND ARM. The coordinate is the run itself, so
-// every restatement of the start (the tool result, a by-hand backgrounding, the
+// ONE WRITE IDENTITY PER RUN. The coordinate is the run itself, so every
+// restatement of the start (the tool result, a by-hand backgrounding, the
 // notification) mints the SAME write id and the store's ledger absorbs all but
-// the first. The keys are the cross-plane ones (`bash:<run>:start`,
-// `bash:<run>:terminal`), so a sidecar row for the same fact lands on the same
-// row: a sidecar terminal written later carries the spool's evidence (the exit
-// status, the output) and supersedes this one whole, and either way the run has
-// ONE terminal. Nothing that lands after a terminal reopens the run: the store
-// only ever ends a run's record, and a late tail is an upsert of its own row.
+// the first. The key is the cross-plane one (`bash:<run>:start`).
 
 /** The source coordinate every row this shim writes about one shell RUN shares. */
 function shellRunCoordinate(run: conversationv1.AgentActivityId): string {
@@ -589,116 +586,6 @@ export function shellRunStartEntry(
     keepalive: context.keepalive,
     turn: context.turnId,
     item: { kind: "bash_run", run, frame: started.value },
-  };
-}
-
-/** What the output of a run this shim concluded is: nothing it observed. */
-function outputNotObserved(): conversationv1.AgentBashOutput {
-  // EVERY BYTE OF A DETACHED RUN IS READ FROM THE SPOOL BY THE SIDECAR, and
-  // this shim read none of it. `not_observed` is the producer saying so,
-  // rather than an empty text claiming the command printed nothing.
-  return create(conversationv1.AgentBashOutputSchema, {
-    form: {
-      case: "notObserved",
-      value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
-    },
-  });
-}
-
-/**
- * How a shell run ended, as the vendor's task notification states it.
- *
- * - `completed` and `failed` are both a command that RAN: a non-zero exit is
- *   the command's own verdict on itself, never a failure of the call. The
- *   notification states no exit status, so `termination` is left UNSET — the
- *   sidecar's `EXIT=` row states it when it lands.
- * - `stopped` is a stop, which a person (or the model on one's behalf) asked
- *   for — except a `worker_restart`, where the vendor found the task orphaned
- *   and nobody decided anything, so the cause is left UNSET.
- * - a status this shim does not know ended the run somehow: interrupted with
- *   no cause, the honest weakest statement.
- */
-function shellRunOutcome(
-  status: string | undefined,
-  reason: string | undefined,
-): { readonly outcome: conversationv1.AgentBashSuccess["outcome"]; readonly arm: string } {
-  if (status === "completed" || status === "failed") {
-    return {
-      arm: "completed",
-      outcome: {
-        case: "completed",
-        value: create(conversationv1.AgentBashCompletedSchema, { output: outputNotObserved() }),
-      },
-    };
-  }
-  const byUser = status === "stopped" && reason !== "worker_restart";
-  if (status !== "stopped") {
-    LOGGER.debug(
-      { status: status ?? "" },
-      "a shell task concluded with a status this shim does not know; its terminal states no cause",
-    );
-  }
-  return {
-    arm: byUser ? "interrupted.by_user" : "interrupted",
-    outcome: {
-      case: "interrupted",
-      value: create(conversationv1.AgentBashInterruptedSchema, {
-        output: outputNotObserved(),
-        ...(byUser
-          ? {
-              cause: {
-                case: "byUser" as const,
-                value: create(conversationv1.AgentBashInterruptedByUserSchema, {}),
-              },
-            }
-          : {}),
-      }),
-    },
-  };
-}
-
-/**
- * A detached shell run's TERMINAL row, at the notification that concluded it.
- *
- * The command is restated from the spawning call, as every settled frame
- * restates what it settles; it is left unset only when this fold never saw
- * that call, which the contract allows (the daemon fills a blank terminal from
- * the run's own call).
- */
-export function shellRunTerminalEntry(
-  context: FoldContext,
-  agentId: conversationv1.AgentId,
-  toolUseId: string,
-  call: PendingCall | undefined,
-  status: string | undefined,
-  reason: string | undefined,
-): PersistEntry {
-  const run = toolCallActivityId(toolUseId);
-  const { outcome, arm } = shellRunOutcome(status, reason);
-  LOGGER.debug(
-    { run: run.value, status: status ?? "", arm },
-    "a detached shell run concluded; the shim writes its terminal, which closes the run's record",
-  );
-  return {
-    agentId,
-    upsertKey: bashTerminalUpsertKey(run),
-    source: { vendorUuid: shellRunCoordinate(run), discriminator: `agent_bash.success.${arm}` },
-    keepalive: context.keepalive,
-    turn: context.turnId,
-    item: {
-      kind: "bash_run",
-      run,
-      frame: create(conversationv1.AgentBashSchema, {
-        result: {
-          case: "success",
-          value: create(conversationv1.AgentBashSuccessSchema, {
-            command: call === undefined ? undefined : shellCommandOf(call),
-            outcome,
-            settledAt: settledAt(context.nowMs(), call?.startedAtMs),
-          }),
-        },
-      }),
-    },
   };
 }
 
@@ -1285,16 +1172,17 @@ export function convertDetached(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
           "the settling task is not an agent run; its own unit's result settles it and no subagent terminal is written",
         );
-        // THE RUN ITSELF ENDS HERE, and its terminal is ours to write: the
-        // sidecar may never have tailed its spool. The start is restated
-        // first — the same write identity, absorbed if it already landed — so
-        // a run concluded before any announcement reached the record still
-        // replays its start ahead of its terminal.
+        // THE RUN ENDS HERE, but its terminal is the SIDECAR's to write, from
+        // the spool (see "THE SHELL RUN'S START"). The start is restated — the
+        // same write identity, absorbed if it already landed — so a run
+        // concluded before any announcement reached the record still replays
+        // its start ahead of the end the sidecar writes.
         if (taskKindOf(taskType) === "bash") {
           const start = shellRunStartEntry(context, agentId, toolUseId, spawnCall);
           if (start !== undefined) entries.push(start);
-          entries.push(
-            shellRunTerminalEntry(context, agentId, toolUseId, spawnCall, raw.status, raw.reason),
+          LOGGER.debug(
+            { task_id: taskId, tool_use_id: toolUseId, status: raw.status ?? "" },
+            "a detached shell run concluded; its terminal is the sidecar's to write from its spool, so the shim writes none",
           );
         }
         return entries;
