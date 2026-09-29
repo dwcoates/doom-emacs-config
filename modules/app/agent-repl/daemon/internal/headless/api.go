@@ -45,6 +45,10 @@ const (
 // It is the spelling the CLI's `--model` takes.
 const ModelHaiku = "haiku"
 
+// ModelSonnet is the stronger model the daemon asks for prose a person reads
+// closely: the desktop banner's summary of a turn's final answer.
+const ModelSonnet = "sonnet"
+
 // The causes a failed run reports. They are a CLOSED set of tokens, because
 // each one rides a refusal arm to a client that renders it.
 const (
