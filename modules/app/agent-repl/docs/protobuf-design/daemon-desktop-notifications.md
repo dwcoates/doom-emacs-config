@@ -42,5 +42,18 @@ workspace's tab) and the tab blink.
   workspace is open in it) → no desktop notification; Emacs not focused →
   desktop notification. External-browser webapp viewers are out of scope.
 - **Platforms.** macOS AND Linux, not macOS only.
+- **The attention marker is untouched.** Turn-end notifications neither set
+  nor clear `frontend.v1.RosterRow.attention`. The owner: Emacs and the
+  webapp already learn of turn completion and update their statuses; that
+  already works and is out of band of this change.
+- **The banner rides the existing turn-completion path.** The desktop
+  notification is raised from the same daemon code path that tells clients a
+  turn completed, not from a second derivation of the same fact.
+- **Banner content.** A turn that ended normally:
+  `✅ <workspace title> turn completed <timestamp>` over a one-to-three-line
+  Sonnet summary of the turn's final response message (the content of the
+  green-bordered response bubble the webapp shows). A turn that ended in
+  failure: `❌ <workspace title> turn errored <timestamp>` over the daemon's
+  error message for why the turn failed.
 
 ## Landed changes
