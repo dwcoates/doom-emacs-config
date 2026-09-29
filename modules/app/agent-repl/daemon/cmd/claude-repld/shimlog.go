@@ -82,6 +82,12 @@ func forceShimLogRoll(
 			req.Log.Info(shimLogRollOperation, "the shim whose log reached its hard ceiling departed before the roll; nothing is left to roll", ended)
 			return
 		}
+		if errors.Is(err, bounce.ErrHandedAcross) {
+			// A handover carried the roll to the daemon the workspace moved
+			// to, which runs it after its adoption.
+			req.Log.Info(shimLogRollOperation, "the shim-log roll was handed across: the daemon the workspace moved to runs it after its adoption", ended)
+			return
+		}
 		if err != nil {
 			ended["cause"] = err.Error()
 			req.Log.Error(shimLogRollOperation, "could not roll the shim whose log reached its hard ceiling", ended)
