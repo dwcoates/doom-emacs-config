@@ -55,5 +55,23 @@ workspace's tab) and the tab blink.
   green-bordered response bubble the webapp shows). A turn that ended in
   failure: `❌ <workspace title> turn errored <timestamp>` over the daemon's
   error message for why the turn failed.
+- **The banner follows the roster status the turn end resolves to.** A turn
+  end resolving to `done` (green) raises the ✅ banner; one resolving to
+  `turn_failed` (turquoise) or `vendor_blocked` (blue) raises the ❌ banner,
+  whose line is the reason the feed shows for the failed turn. Owner agreed.
+- **An interrupted turn raises the ✅ banner.** The owner notes it is
+  impossible in practice (an interrupt means Emacs is focused), but the rule
+  is: it gets the done notification.
+- **`ExpectedStop` is `done`.** A Stop hook that prevented continuing, or a
+  deferred tool, resolves to the `done` roster status and raises the ✅
+  banner. Where the resolver does not already resolve it to `done`, that is
+  fixed as part of this change.
+- **Emacs reports its own focus to the daemon (option B).** Emacs pushes its
+  focus changes (`after-focus-change-function`) and the daemon decides on the
+  latest reported state. Chosen over the daemon asking the OS, which has no
+  standard answer on Wayland. The daemon still owns the decision and the
+  banner; Emacs only reports a fact.
+- **Prefer augmenting existing RPCs.** New RPCs only where no existing one is
+  suitable.
 
 ## Landed changes
