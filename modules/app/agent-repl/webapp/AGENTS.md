@@ -523,6 +523,12 @@ hand any more:
   footer, barring its expanded section, never grows in height for it. The
   cell's hover title carries the whole line. `test/styles.test.ts` pins both
   declarations.
+- **AN ENDED QUIET-STRETCH LINE STAYS UNTIL ITS SUCCESSOR IS PAINTED.** When
+  a push states `quiet_stretch_ending`, the footer draws that line in place of
+  the activity until the root feed has painted the `until_painted` row
+  (`src/feed/painted.ts`: in the document and a frame painted after its
+  insert), then `QUIET_HOLD_DWELL_MS` (500ms) more (`src/footer/quiet-hold.ts`).
+  A reader off the live tail gets no hold. `test/footer/quiet-hold.test.ts`.
 - **CSS** is appended in a delimited section headed
   `/* ---- <component> (<file>) ---- */`. Existing classes are never renamed or
   restyled.

@@ -613,7 +613,11 @@ async function mountApp(
   });
   handles.push(feed);
 
-  const footer = mountFooter(shell.footer, ctx, { selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id) });
+  const footer = mountFooter(shell.footer, ctx, {
+    selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id),
+    paints: feed.paints,
+    followingTail: feed.followingTail,
+  });
   handles.push(footer);
   // The per-bubble composers close on exactly these statuses (R7).
   footer.onStatus((statusCase) =>

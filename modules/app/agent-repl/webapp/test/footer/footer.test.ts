@@ -11,6 +11,8 @@ import {
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
+import type { PaintWatch } from "../../src/feed/painted.js";
+import { QUIET_HOLD_DWELL_MS } from "../../src/footer/quiet-hold.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import {
   buildWatchFooterRequest,
@@ -64,10 +66,15 @@ async function settle(): Promise<void> {
 function mount(
   h: Harness = harness(),
   selectDetachedWork: () => Promise<boolean> = async () => true,
+  paints: PaintWatch = { paintedAt: () => null, onPainted: () => () => {} },
 ) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  const footer = mountFooter(host, h.ctx, { selectDetachedWork });
+  const footer = mountFooter(host, h.ctx, {
+    selectDetachedWork,
+    paints,
+    followingTail: () => true,
+  });
   mounted.push(footer);
   return { host, h, footer };
 }
@@ -1044,5 +1051,56 @@ describe("mountFooter: the expanded section's scroll is the reader's", () => {
     expect(STYLESHEET).toMatch(
       /\.pfooter-sheet \{[^}]*max-height: calc\(var\(--pfooter-row-h\) \* var\(--pfooter-sheet-rows\)\);/,
     );
+  });
+});
+
+describe("mountFooter: the ended quiet-stretch line", () => {
+  /** A working push whose quiet stretch the drawing of ROW ended. */
+  function endedPush(row: string) {
+    return pushView(
+      footerView({
+        strip: strip({
+          status: {
+            case: "working",
+            value: {
+              substatus: { case: "thinking", value: {} },
+              quietStretchEnding: {
+                text: "✅ Bash finished — handling result...",
+                untilPainted: { value: row },
+                at: { atMs: BigInt(NOW) },
+              },
+            },
+          } as FooterStatus["status"],
+        }),
+      }),
+    );
+  }
+
+  it("draws the ended line until its row is painted, then clears it after the dwell", async () => {
+    // Arrange
+    const edge: { painted: ((id: string, at: number) => void) | null } = { painted: null };
+    const paints: PaintWatch = {
+      paintedAt: () => null,
+      onPainted: (fn) => {
+        edge.painted = fn;
+        return () => {
+          edge.painted = null;
+        };
+      },
+    };
+    const { host, h } = mount(harness(), async () => true, paints);
+    await settle();
+    h.tail.push(endedPush("row-2"));
+    await settle();
+    expect(host.querySelector(".footer-activity-quiet-stretch")?.textContent).toBe(
+      "✅ Bash finished — handling result...",
+    );
+
+    // Act
+    edge.painted?.("row-2", Date.now());
+    await vi.advanceTimersByTimeAsync(QUIET_HOLD_DWELL_MS);
+
+    // Assert
+    expect(host.querySelector(".footer-activity-quiet-stretch")).toBeNull();
   });
 });
