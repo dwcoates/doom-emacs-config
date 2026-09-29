@@ -539,8 +539,7 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 			Submitting: &frontendv1.FooterSubStatusWorkingSubmitting{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
-		arm.Substatus = &frontendv1.FooterStatusWorking_Thinking{
-			Thinking: &frontendv1.FooterSubStatusWorkingThinking{}}
+		arm.Substatus = workingStep(s).Substatus
 	}
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }

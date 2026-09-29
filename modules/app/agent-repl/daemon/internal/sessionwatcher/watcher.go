@@ -619,7 +619,7 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 	}
 }
 
-// nameMainForViewsLocked tells the feed which agent is the
+// nameMainForViewsLocked tells the feed and the footer which agent is the
 // session's main one, once per distinct naming.
 //
 // THE ROOT IS THE MAIN AGENT'S FEED AND NOTHING ELSE'S. The feed used to latch
@@ -651,6 +651,7 @@ func (w *watcher) nameMainForViewsLocked(agent *conversationv1.AgentId, source s
 		})
 	}
 	w.sinks.Feed.OnMainAgent(w.ws, agent)
+	w.sinks.Footer.OnMainAgent(w.ws, agent)
 }
 
 // waitingTurn is one turn stood behind an adopted turn in flight.
