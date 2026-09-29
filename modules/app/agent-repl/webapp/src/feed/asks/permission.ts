@@ -45,7 +45,7 @@ import type {
   FeedPermissionSubtitle,
   FeedPermissionTriggerNote,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import {
   clearRefusals,
@@ -57,6 +57,7 @@ import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
+import { stampedAge } from "./stamped-age.js";
 import { buildAnswerPermissionRequest, type PermissionAnswer } from "./requests.js";
 
 const PATH = "FeedPermission";
@@ -260,7 +261,7 @@ export function drawFeedPermissionAnswered(
     default:
       return unreachableArm(`${path}.answer`, armName(answer));
   }
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc));
+  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"));
   return el;
 }
 
@@ -280,7 +281,7 @@ export function drawFeedPermissionAbandoned(
   const word = document.createElement("span");
   word.className = "badge muted";
   word.textContent = "went away unanswered";
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc));
+  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"));
   return el;
 }
 
@@ -442,13 +443,3 @@ export function firstDrawnAt(rc: RowContext): number {
   return Number.isFinite(parsed) ? parsed : rc.ctx.ticker.now();
 }
 
-/** A settled instant as a ticking relative age ("3m ago"). */
-function stampedAge(atMs: bigint, path: string, rc: RowContext): HTMLElement {
-  const at = msOf(atMs, path);
-  const el = document.createElement("span");
-  el.className = "perm-when";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `${formatTickedAge(nowMs - at)} ago`;
-  });
-  return el;
-}

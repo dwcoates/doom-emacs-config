@@ -32,7 +32,7 @@ import {
 import { proseHtml } from "../../../src/bubble/body.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
-import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
+import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
@@ -307,6 +307,18 @@ describe("the usage corner's hover timestamp", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     // Assert
     expect(el.querySelector(".usage-ago")?.textContent).toBe("6m ago");
+  });
+
+  it("keeps advancing after its turn's clocks are stopped, since an age stays true", async () => {
+    // Arrange: a settled corner whose turn has just ended.
+    vi.setSystemTime(1_000);
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    // Act: the finished turn's backstop sweeps the bubble, then time passes.
+    stopClocks(el);
+    await vi.advanceTimersByTimeAsync(3_000);
+    // Assert
+    expect(el.querySelector(".usage-ago")?.textContent).toBe("3s ago");
   });
 
   it("reveals the timestamp when the corner is hovered", () => {

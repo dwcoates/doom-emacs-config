@@ -40,8 +40,27 @@ export const TICKING_ATTRIBUTE = "data-ticking";
  */
 export const DISCARD_ATTRIBUTE = "data-discard";
 
-/** Every live unsubscribe, per element that owns one. */
-const subscriptions = new WeakMap<Element, Set<() => void>>();
+/**
+ * Which stop ends a clock.
+ *
+ * WORK clocks count the unit a row is about — an elapsed time, a "quiet for
+ * N s", a countdown the turn is waiting on — so they end with the turn: a
+ * `stopClocks` sweep ends them, and so does a discard.
+ *
+ * PRESENT clocks measure the reader's now against a fixed instant — "5m 30s
+ * ago" — so they stay true after the turn ends and only a DISCARD ends them.
+ * A finished turn's backstop leaves them running.
+ */
+type ClockKind = "work" | "present";
+
+/** One live subscription and the stop that ends it. */
+interface Subscription {
+  readonly kind: ClockKind;
+  readonly unsubscribe: () => void;
+}
+
+/** Every live subscription, per element that owns one. */
+const subscriptions = new WeakMap<Element, Set<Subscription>>();
 
 /** Every discard hook, per element that registered one. */
 const discards = new WeakMap<Element, Set<() => void>>();
@@ -52,13 +71,33 @@ const discards = new WeakMap<Element, Set<() => void>>();
  * waiting up to a whole tick to say anything.
  */
 export function tick(el: Element, ticker: Ticker, fn: (nowMs: number) => void): void {
+  subscribe(el, ticker, fn, "work");
+}
+
+/**
+ * `tick`, for a PRESENT clock: a reading of the reader's now against a fixed
+ * instant ("5m 30s ago"), which stays true after the row's turn has ended.
+ * Only a discard (`stopTicking`) ends it; a `stopClocks` sweep leaves it
+ * running.
+ */
+export function tickWhileShown(el: Element, ticker: Ticker, fn: (nowMs: number) => void): void {
+  subscribe(el, ticker, fn, "present");
+}
+
+/** The subscription both `tick` flavors take, painting once immediately. */
+function subscribe(
+  el: Element,
+  ticker: Ticker,
+  fn: (nowMs: number) => void,
+  kind: ClockKind,
+): void {
   fn(ticker.now());
-  const unsubscribe = ticker.subscribe(fn);
+  const held: Subscription = { kind, unsubscribe: ticker.subscribe(fn) };
   const existing = subscriptions.get(el);
   if (existing === undefined) {
-    subscriptions.set(el, new Set([unsubscribe]));
+    subscriptions.set(el, new Set([held]));
   } else {
-    existing.add(unsubscribe);
+    existing.add(held);
   }
   el.setAttribute(TICKING_ATTRIBUTE, "1");
 }
@@ -90,7 +129,7 @@ export function onDiscard(el: Element, dispose: () => void): void {
  * whether it stopped anything, rather than logging on every sweep.
  */
 export function stopTicking(el: Element): number {
-  const stopped = stopClocks(el);
+  const stopped = releaseAcross(el, ALL_KINDS);
   releaseDiscards(el);
   for (const descendant of el.querySelectorAll(`[${DISCARD_ATTRIBUTE}]`)) {
     releaseDiscards(descendant);
@@ -99,16 +138,26 @@ export function stopTicking(el: Element): number {
 }
 
 /**
- * Drop every CLOCK subscription EL and its descendants hold, leaving their
- * discard hooks in place, and say how many elements held a clock.
+ * Drop every WORK clock EL and its descendants hold, leaving their PRESENT
+ * clocks (`tickWhileShown`) and discard hooks in place, and say how many
+ * elements had a work clock stopped.
  *
- * For an element that stays on screen while its clocks end — a finished turn's
- * rows, swept by feed-view's backstop — so a measurer drawn on it keeps working.
+ * For an element that stays on screen while its work ends — a finished turn's
+ * rows, swept by feed-view's backstop — so a measurer drawn on it keeps
+ * working and an "ago" drawn on it keeps counting.
  */
 export function stopClocks(el: Element): number {
-  let stopped = release(el);
+  return releaseAcross(el, WORK_ONLY);
+}
+
+const ALL_KINDS: ReadonlySet<ClockKind> = new Set(["work", "present"]);
+const WORK_ONLY: ReadonlySet<ClockKind> = new Set(["work"]);
+
+/** Release KINDS on EL and every ticking descendant; count elements released. */
+function releaseAcross(el: Element, kinds: ReadonlySet<ClockKind>): number {
+  let stopped = release(el, kinds);
   for (const descendant of el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)) {
-    stopped += release(descendant);
+    stopped += release(descendant, kinds);
   }
   return stopped;
 }
@@ -146,12 +195,23 @@ function releaseDiscards(el: Element): void {
   el.removeAttribute(DISCARD_ATTRIBUTE);
 }
 
-/** One element's subscriptions, dropped and forgotten. 1 if it held any. */
-function release(el: Element): number {
+/**
+ * One element's subscriptions of KINDS, dropped and forgotten. 1 if it held
+ * any. The marker stays while a subscription of another kind is still live.
+ */
+function release(el: Element, kinds: ReadonlySet<ClockKind>): number {
   const held = subscriptions.get(el);
   if (held === undefined) return 0;
-  for (const unsubscribe of held) unsubscribe();
-  subscriptions.delete(el);
-  el.removeAttribute(TICKING_ATTRIBUTE);
-  return 1;
+  let released = 0;
+  for (const sub of [...held]) {
+    if (!kinds.has(sub.kind)) continue;
+    sub.unsubscribe();
+    held.delete(sub);
+    released = 1;
+  }
+  if (held.size === 0) {
+    subscriptions.delete(el);
+    el.removeAttribute(TICKING_ATTRIBUTE);
+  }
+  return released;
 }

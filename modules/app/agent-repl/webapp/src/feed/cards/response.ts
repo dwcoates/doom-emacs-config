@@ -78,7 +78,7 @@ import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
-import { tick } from "../ticking.js";
+import { tickWhileShown } from "../ticking.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
@@ -464,9 +464,10 @@ export function usageAgeWithinReserve(label: string): boolean {
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * The subscription is taken through `tick`, which marks the element, so the
- * feed's teardown of the bubble unsubscribes it with no disposer to remember
- * here. A label the reserve cannot hold (an age of a thousand days or more)
+ * The subscription is taken through `tickWhileShown`, a PRESENT clock: the
+ * finished turn's backstop leaves it counting (an age stays true after the
+ * turn ends), and the feed's teardown of the bubble unsubscribes it with no
+ * disposer to remember here. A label the reserve cannot hold (an age of a thousand days or more)
  * would widen past it, so it is logged at ERROR, once per corner.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
@@ -516,7 +517,7 @@ export function drawFeedResponseUsageStamp(
     const ago = document.createElement("span");
     ago.className = "usage-ago";
     let overflowReported = false;
-    tick(ago, rc.ctx.ticker, (nowMs) => {
+    tickWhileShown(ago, rc.ctx.ticker, (nowMs) => {
       const label = usageAgeLabel(nowMs - atMs);
       ago.textContent = label;
       if (overflowReported || usageAgeWithinReserve(label)) return;

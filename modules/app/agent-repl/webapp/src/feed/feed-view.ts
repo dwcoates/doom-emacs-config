@@ -345,6 +345,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * has a `turn_ended` row on the page, nothing inside that turn's rows is
    * still counting, because nothing in a finished turn can still be running.
    *
+   * WORK CLOCKS ONLY. A PRESENT clock (`tickWhileShown`) — a response's
+   * "5m 30s ago" — reads the reader's now against a fixed instant, stays true
+   * after the turn ends, and keeps counting until its row is discarded.
+   *
    * THE TURN'S OWN END ROW IS EXEMPT. Its retry countdown is a clock about
    * what happens NEXT, not about the work that just stopped, and it stops
    * itself when it expires.
