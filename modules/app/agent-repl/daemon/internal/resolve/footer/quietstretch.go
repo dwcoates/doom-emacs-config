@@ -2,6 +2,7 @@ package footer
 
 import (
 	"fmt"
+	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -180,7 +181,9 @@ type feedMotion struct {
 // item, and that item's row.
 type lineEnding struct {
 	text string
-	row  *frontendv1.FeedId
+	// at is when the ended line began standing.
+	at  time.Time
+	row *frontendv1.FeedId
 }
 
 func newFeedMotion() feedMotion {
@@ -200,7 +203,7 @@ func (m *feedMotion) surface(unit string) {
 		return
 	}
 	if m.line != nil {
-		m.ending = &lineEnding{text: m.line.text, row: row}
+		m.ending = &lineEnding{text: m.line.text, at: m.line.at, row: row}
 	}
 	m.line = nil
 }
@@ -544,7 +547,7 @@ func quietStretchEnding(s *wsState, outranked bool) *frontendv1.FooterStatusQuie
 		return nil
 	}
 	return &frontendv1.FooterStatusQuietStretchEnding{
-		Text: s.motion.ending.text, UntilPainted: s.motion.ending.row,
+		Text: s.motion.ending.text, UntilPainted: s.motion.ending.row, At: stamp(s.motion.ending.at),
 	}
 }
 

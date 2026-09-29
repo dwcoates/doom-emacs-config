@@ -195,3 +195,5 @@ substatus that stands for the whole turn. The owner wants the status called
   - The client draws `text` until it has painted `until_painted`, then 500ms
     more, then `activity`; a feed not showing the live tail drops the hold at
     once.
+  - `FooterStatusActivityAt at = 3` was added to the ending so the held line
+    ticks the same age it ticked while it was the activity.
