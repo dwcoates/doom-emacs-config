@@ -1247,9 +1247,11 @@ A **quiet stretch** is the period between the moment a feed item has FULLY
 LANDED and the moment the next feed item FIRST SURFACES — partially: it need not
 have landed. Through it the footer's one activity line says what just landed
 and what happens next (`✅ Bash finished — handling result...`,
-`❌ Read failed — handling failure...`; never the word "agent"), and the line
-CLEARS THE MOMENT THE NEXT ITEM SURFACES: a streaming response clears it at its
-first fragment, not when it finishes.
+`❌ Read failed — handling failure...`; never the word "agent"). The stretch
+ENDS THE MOMENT THE FEED DRAWS THE NEXT ITEM: a streaming response ends it at
+its first fragment, not when it finishes. The line itself stays on screen until
+the webapp has PAINTED that item, then 500ms more (owner ruling, 2026-09-29), so
+it never clears before its successor is visible.
 
 - **Where it is legal.** Under the `working` status and under `background`.
   While a turn is in flight the status is `working` even if detached work runs,
@@ -1264,6 +1266,13 @@ first fragment, not when it finishes.
 - **Who owns it.** The daemon's footer resolver composes it
   (`daemon/internal/resolve/footer/quietstretch.go`) as
   `frontend.v1.FooterStatusActivityQuietStretch`; the webapp draws it verbatim.
+- **How it ends.** The feed resolver tells the footer every row it draws
+  (`Deps.ItemDrawn`, with whether it is on the root feed). A root-feed drawing
+  states the ended line as `frontend.v1.FooterStatusQuietStretchEnding`
+  (`until_painted` names the row), unless an activity that outranks the line
+  stands; the webapp holds it until that row is painted
+  (`webapp/src/footer/quiet-hold.ts`). A sub-feed drawing ends the line at once:
+  the webapp paints a sub-feed only when its bubble is open.
 
 The same file names the `working` status's step: what the main agent is doing
 now, sync only — `thinking` (an inference call, no call running), `executing`,
