@@ -1614,14 +1614,60 @@ func (e *Emacs) stop() {
 func (e *Emacs) holdsDaemonLink() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
 	defer cancel()
-	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-		"--eval", "(if (agent-repl-link-primary) t nil)")
-	if err != nil {
-		e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
-		return true
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+			"--eval", settleDaemonLinkForm)
+		if err != nil {
+			e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
+			return true
+		}
+		switch answer := strings.Trim(strings.TrimSpace(out), `"`); answer {
+		case "link":
+			return true
+		case "none":
+			return false
+		case "pending":
+			e.noteTeardownStep("a daemon spawn or link acceptance was in flight, so its outcome was awaited")
+		default:
+			e.t.Logf("emacs answered the teardown's daemon-link question with %q", answer)
+			return true
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			e.t.Logf("a daemon spawn in flight did not settle within %s", teardownStopBound)
+			return true
+		}
 	}
-	return strings.TrimSpace(out) == "t"
 }
+
+// settleDaemonLinkForm answers, in ONE command-loop turn, whether Emacs holds
+// a daemon link the teardown must ask to stop.
+//
+// A LINK IS NOT THE ONLY WAY EMACS CAN OWN A DAEMON. A scenario that ends with
+// the link down (a stopped daemon, a submit with none behind it) can leave an
+// ensure in flight that has already SPAWNED a daemon and not yet linked to it:
+// asking "is there a link?" then answered no, no stop was asked, and the
+// daemon outlived the scenario as a stray. So while an ensure, or a link
+// acceptance, is in flight the answer is "pending" and the teardown waits for
+// its outcome. Once neither is, the SAME form disarms every trigger that could
+// begin a new ensure -- the reconnect poll, the no-daemon hook, the cold-start
+// idle timer -- so none can start between this answer and Emacs's exit:
+// Emacs runs one form at a time, so the answer and the disarm are one act.
+const settleDaemonLinkForm = `(cond
+  ((or (bound-and-true-p agent-repl-daemon--ensure-in-flight)
+       (bound-and-true-p agent-repl-link--pending))
+   "pending")
+  (t
+   (when (fboundp 'agent-repl-link--cancel-reconnect)
+     (agent-repl-link--cancel-reconnect))
+   (when (boundp 'agent-repl-link-no-daemon-functions)
+     (remove-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure))
+   (when (timerp (bound-and-true-p agent-repl-daemon--startup-timer))
+     (cancel-timer agent-repl-daemon--startup-timer))
+   (if (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)) "link" "none")))`
 
 // askDaemonToStop asks the daemon to exit through Emacs's own command and
 // reports what came back.
