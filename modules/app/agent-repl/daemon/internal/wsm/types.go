@@ -90,6 +90,40 @@ type Workspace struct {
 	// workspace lock free and the socket absent reads this pid before
 	// concluding no shim survives.
 	SpawnedShimPID *int
+	// Result is the roster's last turn result: how the last turn ended and
+	// whether the user has seen it. Nil when none stands (no turn has ended
+	// since the last prompt). It is what a daemon that did not see the turn
+	// end -- a successor after a handover, a restart -- draws the row from
+	// until a turn of its own supersedes it.
+	Result *TurnResult
+}
+
+// TurnResult is the roster's durable read of a workspace's last turn result.
+type TurnResult struct {
+	// End is the turn-end arm the last turn resolved to.
+	End TurnResultEnd
+	// Read reports that the user has seen the result.
+	Read bool
+}
+
+// TurnResultEnd is a turn-end arm, spelled as the roster's status arm.
+type TurnResultEnd string
+
+// The turn-end arms a result can stand on. A closed set: a stored value
+// outside it is a corrupt row.
+const (
+	TurnResultDone        TurnResultEnd = "done"
+	TurnResultInterrupted TurnResultEnd = "interrupted"
+	TurnResultFailed      TurnResultEnd = "turn_failed"
+)
+
+// valid reports whether an end is one of the declared arms.
+func (e TurnResultEnd) valid() bool {
+	switch e {
+	case TurnResultDone, TurnResultInterrupted, TurnResultFailed:
+		return true
+	}
+	return false
 }
 
 // Repository is one repository's durable record.

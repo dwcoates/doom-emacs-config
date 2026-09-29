@@ -56,6 +56,8 @@ type DB interface {
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
+	// SetResult records, or clears with nil, the roster's last turn result.
+	SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error
 	// SetMergedAt records that the workspace's merge landed.
 	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Forget deletes a workspace's every record — the nuke's durable half and

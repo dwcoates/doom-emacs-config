@@ -1146,3 +1146,128 @@ func TestWorkspaceRefusesACorruptSpawnedShimPid(t *testing.T) {
 		t.Fatalf("Workspace = %v, want a DecodeError for a non-positive recorded pid", err)
 	}
 }
+
+func TestSetResultStoresTheLastTurnResult(t *testing.T) {
+	tests := []struct {
+		name string
+		want TurnResult
+	}{
+		{name: "an unread done", want: TurnResult{End: TurnResultDone}},
+		{name: "a read interrupted", want: TurnResult{End: TurnResultInterrupted, Read: true}},
+		{name: "an unread failed turn", want: TurnResult{End: TurnResultFailed}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			if err := s.SetResult(context.Background(), ws.ID, &tt.want); err != nil {
+				t.Fatalf("SetResult: %v", err)
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.Result == nil || *got.Result != tt.want {
+				t.Fatalf("result = %v, want %v", got.Result, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetResultClearsIt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.SetResult(context.Background(), ws.ID, &TurnResult{End: TurnResultDone, Read: true}); err != nil {
+		t.Fatalf("SetResult: %v", err)
+	}
+
+	// Act
+	if err := s.SetResult(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetResult(nil): %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Result != nil {
+		t.Fatalf("result = %v, want none", got.Result)
+	}
+}
+
+func TestANewWorkspaceHasNoResult(t *testing.T) {
+	// Arrange / Act
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Result != nil {
+		t.Fatalf("result = %v, want none", got.Result)
+	}
+}
+
+func TestSetResultRefusesAnUndeclaredArm(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.SetResult(context.Background(), ws.ID, &TurnResult{End: "sideways"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetResult with an undeclared arm succeeded")
+	}
+	if !loggedOperation(log, "daemon.wsm.set_result", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Result != nil {
+		t.Fatalf("result = %v, want nothing stored by a refused write", got.Result)
+	}
+}
+
+func TestSetResultOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.SetResult(context.Background(), "no-such", &TurnResult{End: TurnResultDone})
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetResult = %v, want ErrNotFound", err)
+	}
+}
+
+func TestACorruptStoredResultFailsTheDecode(t *testing.T) {
+	// Arrange: a row whose stored arm this build does not declare.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET result_end = 'sideways' WHERE id = ?`, ws.ID); err != nil {
+		t.Fatalf("corrupt the row: %v", err)
+	}
+
+	// Act
+	_, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "result_end" {
+		t.Fatalf("Workspace = %v, want a result_end decode failure", err)
+	}
+}
