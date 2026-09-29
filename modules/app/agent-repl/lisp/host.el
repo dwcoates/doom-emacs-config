@@ -81,14 +81,12 @@
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl--global-log-scope)
 
-(declare-function agent-repl--notify "notifications" (ws title message &optional activate))
 (declare-function agent-repl--notification-activate "notifications" (ws))
-(declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
+(declare-function agent-repl--notification-activate "notifications" (ws))
 
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
 ;; owns the webview, popup.el owns the one shared editor popup.
-(declare-function agent-repl-status-blink-tab "status" (ws))
 (declare-function agent-repl-frontend-reload-webview "frontend" (ws))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 
@@ -778,7 +776,7 @@ it, and the stream standing for WS now is meant."
         (value (plist-get push :value)))
     (pcase arm
       (:host (agent-repl-host--apply-state ws value))
-      (:notification (agent-repl-host--notify ws value))
+      (:notification-clicked (agent-repl-host--notification-clicked ws))
       (:transferred (agent-repl-host--transferred ws value))
       (:reload-webapp (agent-repl-host--reload-webapp ws))
       (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -831,51 +829,14 @@ purpose."
                    (length (agent-repl-host-faults ws)))
   (run-hook-with-args 'agent-repl-host-update-functions ws host))
 
-;;;; ---- The notification policy ----
+;;;; ---- The notification click ----
 
-(defun agent-repl-host--notification-context (note)
-  "Return a log-context string naming NOTE's typed kind.
-The composed text is PRESENTATION; the kind arm is the programmatic
-semantics, and a permission ask's gated tool name — or a question batch's
-chip header — belongs in the log context rather than in any drawn line
-Emacs composes itself."
-  (let* ((kind (plist-get note :kind))
-         (arm (plist-get kind :arm)))
-    (pcase arm
-      (:permission-requested
-       (format "kind=permission-requested tool=%S"
-               (plist-get (plist-get kind :value) :tool-name)))
-      (:question-asked
-       (format "kind=question-asked header=%S"
-               (plist-get (plist-get kind :value) :header)))
-      (:agent-addressed "kind=agent-addressed")
-      (_ (format "kind=%S" arm)))))
-
-(defun agent-repl-host--notify (ws note)
-  "Apply Emacs's notification policy to NOTE for workspace WS.
-Exactly the policy stated at the `notification' arm of
-`endpoint_watch_host_workspace.proto'; every kind, `permission_requested'
-included, follows the same three cases.  The daemon publishes the fact and
-never asks whether Emacs is focused — that knowledge is only here."
-  (let ((text (plist-get note :text))
-        (context (agent-repl-host--notification-context note))
-        (selected (equal ws (agent-repl--ws-current-name))))
-    (cond
-     ((not (agent-repl--emacs-focused-p ws))
-      (agent-repl--info ws "elisp.host.notification-desktop ws=%s %s at-ms=%S"
-                        ws context (plist-get note :at-ms))
-      ;; The click is R-CLICK: the banner carries THIS workspace, and
-      ;; activating it raises the frame and selects that tab.  Decider and
-      ;; actor are one process, so the activation is plain elisp.
-      (agent-repl--notify ws (agent-repl-host-display-title ws) text
-                          (lambda () (agent-repl--notification-activate ws))))
-     ((not selected)
-      (agent-repl--info ws "elisp.host.notification-blink ws=%s %s at-ms=%S"
-                        ws context (plist-get note :at-ms))
-      (agent-repl-status-blink-tab ws))
-     (t
-      (agent-repl--info ws "elisp.host.notification-selected ws=%s %s at-ms=%S text=%S"
-                        ws context (plist-get note :at-ms) text)))))
+(defun agent-repl-host--notification-clicked (ws)
+  "Select WS's tab: the user clicked WS's desktop banner.
+The daemon posted the banner and read the click back; raising the frame
+and selecting the tab is `agent-repl--notification-activate'."
+  (agent-repl--info ws "elisp.host.notification-clicked ws=%s" ws)
+  (agent-repl--notification-activate ws))
 
 ;;;; ---- Reattach: the ONE walk that moves a workspace onto a daemon ----
 

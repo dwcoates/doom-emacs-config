@@ -1373,6 +1373,32 @@ scheduled push's own required field."
         (should (equal (alist-get 'elispBuild (alist-get 'emacs body))
                        (agent-repl-elisp-build)))))))
 
+(ert-deftest agent-repl-itest-link-watch-daemon-states-emacs-focus ()
+  "The WatchDaemon the link opens states whether Emacs is focused.
+The daemon decides every desktop banner on that focus from the stream's
+first instant.  A batch Emacs holds no window-system focus: unfocused."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act.
+      (let ((body (car (last (agent-repl-itest--call-bodies daemon "WatchDaemon")))))
+        ;; Assert.
+        (should (equal (alist-get 'focus (alist-get 'emacs body))
+                       '((unfocused))))))))
+
+(ert-deftest agent-repl-itest-link-up-reports-emacs-focus ()
+  "Once the link stands, Emacs reports its focus to the daemon.
+Focus that moved between building the WatchDaemon request and its
+acceptance is told here, once a stream stands to own it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-real-hooks daemon
+      ;; Act: the link came up, which is the edge under test.
+      (agent-repl-itest--await-call daemon "ReportEditorFocus")
+      ;; Assert.
+      (should (equal (alist-get 'focus (car (agent-repl-itest--call-bodies daemon "ReportEditorFocus")))
+                     '((unfocused)))))))
+
 (ert-deftest agent-repl-itest-link-reload-elisp-for-another-root-is-refused ()
   "A reload naming another checkout is refused at ERROR; the link stays up."
   ;; Arrange.

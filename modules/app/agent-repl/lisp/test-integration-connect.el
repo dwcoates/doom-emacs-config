@@ -31,11 +31,12 @@
 (declare-function agent-repl-connect-stream-cancel "connect")
 
 (defconst agent-repl-itest-connect--watch-daemon-body
-  (json-serialize '((emacs . ((elispBuild . "itest-elisp-build")))))
+  (json-serialize '((emacs . ((elispBuild . "itest-elisp-build")
+                               (focus . ((unfocused)))))))
   "The WatchDaemon body these transport scenarios send.
-The request names its client and an Emacs client states its elisp build:
-the daemon (and the fake) refuse one that does not, and these scenarios
-are about the transport, not that refusal.")
+The request names its client and an Emacs client states its elisp build
+and its focus: the daemon (and the fake) refuse one that does not, and
+these scenarios are about the transport, not that refusal.")
 
 ;;;; ---- Scenario 1: discovery and the unary round trip ----
 
