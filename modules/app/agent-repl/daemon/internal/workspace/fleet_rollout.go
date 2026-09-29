@@ -1040,5 +1040,5 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 // disagree about which lock a workspace's is or about what "could not tell"
 // means.
 func (f *Fleet) ProbeLock(workspaceDir string) (sessionlock.State, error) {
-	return f.probe(f.lockDir(), workspaceDir)
+	return f.probe(f.deps.LockDir, workspaceDir)
 }

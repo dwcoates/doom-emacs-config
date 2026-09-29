@@ -616,6 +616,22 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 			},
 		},
+		{
+			name: "no lock directory",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(),
+			},
+		},
+		{
+			name: "a relative lock directory",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "~/.cache/agent-repl/run",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1840,35 +1856,6 @@ func TestShimAnswersFalseWithoutASession(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatal("Shim() answered a surface for a workspace with no session")
-	}
-}
-
-func TestLockDirPrefersTheExplicitSetting(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	t.Setenv(LockDirEnv, "/from/env")
-
-	// Act.
-	got := f.fleet.lockDir()
-
-	// Assert.
-	if got == "/from/env" {
-		t.Fatalf("lockDir() = %q, want the explicitly configured directory", got)
-	}
-}
-
-func TestLockDirFallsBackToTheEnvironmentOverride(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	f.fleet.deps.LockDir = ""
-	t.Setenv(LockDirEnv, "/from/env")
-
-	// Act.
-	got := f.fleet.lockDir()
-
-	// Assert.
-	if got != "/from/env" {
-		t.Fatalf("lockDir() = %q, want /from/env", got)
 	}
 }
 

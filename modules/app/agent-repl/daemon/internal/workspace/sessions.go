@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -30,14 +29,6 @@ import (
 	"claude-repld/internal/startingshim"
 	"claude-repld/internal/wsm"
 )
-
-// DefaultLockDir is where the shim-held kernel locks live. The daemon only ever
-// PROBES them.
-const DefaultLockDir = "~/.cache/agent-repl/run"
-
-// LockDirEnv overrides DefaultLockDir for tests; the fake shim honors it too, so
-// a test's probe and a test's shim agree about which lock is which.
-const LockDirEnv = "AGENT_REPL_LOCK_DIR"
 
 // ProbeFunc probes ONE workspace's kernel lock, deriving the lock path from the
 // run directory and the worktree. It takes the two inputs rather than a path so
@@ -130,8 +121,10 @@ type FleetDeps struct {
 	Fake bool
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS on every spawn.
 	ForbidVendor bool
-	// LockDir overrides DefaultLockDir; empty reads LockDirEnv, then the
-	// default.
+	// LockDir is the absolute directory the shim-held kernel locks live in,
+	// which the daemon only ever PROBES. It is resolved ONCE, at boot, by
+	// sessionlock.ResolveRunDir, so the fleet, the boot sequence and the
+	// reaper cannot disagree about it, and none of them guesses a default.
 	LockDir string
 	// Probe probes the workspace lock; nil means sessionlock.Probe.
 	Probe ProbeFunc
@@ -369,6 +362,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the installed shim bundle")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs log surfaces")
+	case !filepath.IsAbs(deps.LockDir):
+		return nil, fmt.Errorf("workspace: the session fleet needs the absolute kernel-lock directory, got %q", deps.LockDir)
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -431,21 +426,6 @@ func (f *Fleet) publishHost(ws ids.WorkspaceID) {
 		return
 	}
 	f.deps.PublishHost(ws)
-}
-
-// lockDir answers where the kernel locks live: the explicit setting, then the
-// environment override the fake shim honors, then the default.
-func (f *Fleet) lockDir() string {
-	if f.deps.LockDir != "" {
-		return f.deps.LockDir
-	}
-	if fromEnv := os.Getenv(LockDirEnv); fromEnv != "" {
-		return fromEnv
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "agent-repl", "run")
-	}
-	return DefaultLockDir
 }
 
 // Live reports whether the workspace currently has a live session.
@@ -1274,7 +1254,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
 			refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
 	}
-	lockPath := f.lockDir()
+	lockPath := f.deps.LockDir
 	state, err := f.probe(lockPath, dir)
 	// THE SOCKET IS THE SECOND KERNEL FACT. The lock says whether this
 	// conversation is OWNED; only the socket says whether its owner is

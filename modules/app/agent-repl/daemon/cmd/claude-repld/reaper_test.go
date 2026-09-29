@@ -22,13 +22,12 @@ func (noRegistry) ListWorkspaces(context.Context) ([]wsm.Workspace, error)    { 
 // these tests) and a registry nothing reads.
 func buildTestReaper(t *testing.T) (*worktreereap.Reaper, *dlog.TestLogger, error) {
 	t.Helper()
-	t.Setenv("AGENT_REPL_LOCK_DIR", t.TempDir())
 	log := dlog.NewTestLogger()
 	git, err := gitclient.New(dlog.NewTestSurfaces())
 	if err != nil {
 		t.Fatalf("gitclient.New: %v", err)
 	}
-	reaper, err := buildWorktreeReaper(git, noRegistry{}, func() []ids.WorkspaceID { return nil }, log)
+	reaper, err := buildWorktreeReaper(git, noRegistry{}, func() []ids.WorkspaceID { return nil }, t.TempDir(), log)
 	return reaper, log, err
 }
 
