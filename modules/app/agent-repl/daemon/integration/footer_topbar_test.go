@@ -55,7 +55,7 @@ func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
 	// Assert: every panel field is present (non-nil), whether or not it holds
 	// rows — ALL panels arrive populated on every push, per the contract.
 	got := awaitFooter(t, f, footer, "the footer after StartTurn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	exp := got.GetExpanded()
 	if exp == nil {
@@ -86,14 +86,14 @@ func TestFooterStatusTreeFollowsIdleThinkingDone(t *testing.T) {
 
 	// Assert: submitting, then thinking, then done once the turn concludes.
 	awaitFooter(t, f, footer, "thinking.submitting on StartTurn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking().GetSubmitting() != nil
+		return v.GetStrip().GetStatus().GetWorking().GetSubmitting() != nil
 	})
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("think-1"),
 		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
 	}))
 	awaitFooter(t, f, footer, "the bare thinking status while reasoning runs", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitFooter(t, f, footer, "idle.done after the turn concludes", func(v *frontendv1.FooterView) bool {
@@ -122,7 +122,7 @@ func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the interrupt", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 
 	// Act: the agent binary acknowledges a user stop.
@@ -146,7 +146,7 @@ func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-loading", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the injection", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 
 	// Act: a memory file is silently injected into context.
@@ -702,7 +702,7 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 	tail := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "thinking before the permission ask", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-deny-cont", "act-deny-cont")},
@@ -728,7 +728,7 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 	// Assert: the footer stays thinking (a deny does not end the turn) and no
 	// turn_ended row is drawn until the fake pushes the turn's own terminal.
 	got := awaitFooter(t, f, footer, "thinking still standing after the deny", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	if got.GetStrip().GetStatus().GetIdle() != nil {
 		t.Fatalf("footer status = %v after a permission deny, want the turn still in flight", got.GetStrip().GetStatus())
@@ -821,7 +821,7 @@ func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
 
 	// Assert: thinking wins; the wakeup fallback no longer shows.
 	got := awaitFooter(t, f, footer, "thinking replacing the wakeup fallback", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	if got.GetStrip().GetStatus().GetWaiting() != nil {
 		t.Fatalf("footer status = %v while a turn runs, want the wakeup fallback retired", got.GetStrip().GetStatus())
@@ -891,7 +891,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-api-error", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 
 	// Act: a 429 mid-turn, recorded but recovered from.
@@ -905,7 +905,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	// Assert: the turn is still thinking (not ended) and the footer shows the
 	// retry evidence.
 	got := awaitFooter(t, f, footer, "thinking.retrying evidence mid-turn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetThinking() != nil
+		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
 	if got.GetStrip().GetStatus().GetIdle() != nil {
 		t.Fatalf("footer status = %v after a recovered mid-turn api_error, want the turn still in flight", got.GetStrip().GetStatus())

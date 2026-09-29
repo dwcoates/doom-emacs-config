@@ -16,8 +16,8 @@ func updateOf(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityU
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Idle:
 		return arm.Idle.GetActivity().GetUpdate()
-	case *frontendv1.FooterStatus_Thinking:
-		return arm.Thinking.GetActivity().GetUpdate()
+	case *frontendv1.FooterStatus_Working:
+		return arm.Working.GetActivity().GetUpdate()
 	case *frontendv1.FooterStatus_Waiting:
 		return arm.Waiting.GetActivity().GetUpdate()
 	case *frontendv1.FooterStatus_Background:
@@ -387,7 +387,7 @@ func TestTheUpdateLineRidesEveryStatusArm(t *testing.T) {
 		arm     string
 	}{
 		{"idle", func(h *harness) {}, "idle"},
-		{"a turn in flight", func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant}) }, "thinking"},
+		{"a turn in flight", func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant}) }, "working"},
 		{"a consent ask", func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf")) }, "waiting"},
 		{"detached work", func(h *harness) { h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil)) }, "background"},
 	}

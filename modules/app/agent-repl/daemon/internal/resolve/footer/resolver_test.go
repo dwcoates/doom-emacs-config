@@ -382,8 +382,8 @@ func TestAContextCutRecordsTheArmItMoves(t *testing.T) {
 	})
 
 	// Assert
-	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "thinking", "idle"}) {
-		t.Fatalf("recorded arms = %v, want idle, thinking, idle", got)
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "working", "idle"}) {
+		t.Fatalf("recorded arms = %v, want idle, working, idle", got)
 	}
 }
 
@@ -629,7 +629,7 @@ func TestANewTurnSupersedesAStandingDwell(t *testing.T) {
 	h.clock.Advance(time.Second)
 
 	// Assert
-	if got := h.status(t); got != "thinking" {
+	if got := h.status(t); got != "working" {
 		t.Fatalf("status = %q, want the new turn to survive the cancelled dwell", got)
 	}
 }
@@ -663,9 +663,9 @@ func TestTheTurnOpenEdgeRaisesSubmittingBeforeAnyFrame(t *testing.T) {
 	h.r.OnTurnOpened(testWS, "turn-1")
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetThinking()
+	got := h.view(t).GetStrip().GetStatus().GetWorking()
 	if got.GetSubmitting() == nil {
-		t.Fatalf("status = %v, want thinking.submitting on the turn-open edge", got)
+		t.Fatalf("status = %v, want working.submitting on the turn-open edge", got)
 	}
 }
 
@@ -694,9 +694,9 @@ func TestTheTurnOpenEdgeKeepsAnAlreadyInstalledAct(t *testing.T) {
 	h.r.OnTurnOpened(testWS, "turn-1")
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetThinking()
+	got := h.view(t).GetStrip().GetStatus().GetWorking()
 	if got.GetCompacting() == nil {
-		t.Fatalf("status = %v, want thinking.compacting: the edge must not demote a named act", got)
+		t.Fatalf("status = %v, want working.compacting: the edge must not demote a named act", got)
 	}
 }
 
@@ -705,14 +705,14 @@ func TestTheTurnOpenEdgeKeepsAnAlreadyInstalledAct(t *testing.T) {
 func TestNewRefusesAFooterStatusTableMissingAnArm(t *testing.T) {
 	// Arrange.
 	colors := testColors()
-	delete(colors.FooterStatus, "thinking")
+	delete(colors.FooterStatus, "working")
 
 	// Act.
 	_, err := New(colors, dlog.NewTestSurfaces())
 
 	// Assert.
 	if err == nil {
-		t.Fatal("New accepted a footer_status table with no color for the thinking arm")
+		t.Fatal("New accepted a footer_status table with no color for the working arm")
 	}
 }
 
@@ -839,15 +839,15 @@ func TestPrimeReflectsAccumulatedFactsRatherThanIdle(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: h.clock.Now(), Act: ActPrompt})
-	if h.status(t) != "thinking" {
-		t.Fatalf("arrange status = %q, want thinking", h.status(t))
+	if h.status(t) != "working" {
+		t.Fatalf("arrange status = %q, want working", h.status(t))
 	}
 
 	// Act.
 	h.r.Prime(testWS)
 
 	// Assert: the prime kept the accumulated status rather than resetting it.
-	if h.status(t) != "thinking" {
+	if h.status(t) != "working" {
 		t.Fatalf("primed status = %q, want the accumulated thinking view", h.status(t))
 	}
 }
@@ -904,7 +904,7 @@ func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
 			name: "a line set",
 			act:  func(h *harness) { h.r.OnSessionUpdate(testWS, vendorCompacting()) },
 			want: map[string]any{
-				"arm": "thinking", "kind": "compaction", "text": "compacting the context…",
+				"arm": "working", "kind": "compaction", "text": "compacting the context…",
 				"previous_kind": "none", "previous_text": "",
 				"cause": "daemon.footer.on_session_update",
 			},
@@ -1025,7 +1025,7 @@ func TestTheTurnOpenEdgeKeepsTheActivityAFrameAlreadyShowed(t *testing.T) {
 	h.r.OnTurnOpened(testWS, testTurnID)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetSubmitting() != nil {
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetSubmitting() != nil {
 		t.Fatalf("status = %v, want the activity the frame showed kept, not thinking.submitting", h.view(t).GetStrip().GetStatus())
 	}
 }

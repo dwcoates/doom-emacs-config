@@ -689,8 +689,8 @@ func rmNotificationText(v *frontendv1.FooterView) string {
 	switch {
 	case status.GetIdle().GetActivity().GetNotification() != nil:
 		return status.GetIdle().GetActivity().GetNotification().GetText()
-	case status.GetThinking().GetActivity().GetNotification() != nil:
-		return status.GetThinking().GetActivity().GetNotification().GetText()
+	case status.GetWorking().GetActivity().GetNotification() != nil:
+		return status.GetWorking().GetActivity().GetNotification().GetText()
 	case status.GetWaiting().GetActivity().GetNotification() != nil:
 		return status.GetWaiting().GetActivity().GetNotification().GetText()
 	}

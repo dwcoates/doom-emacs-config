@@ -95,8 +95,8 @@ func TestTheArmIsThinkingFromSubmitBeforeAnyActivity(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Assert
-	if got := h.status(t); got != "thinking" {
-		t.Fatalf("status = %q, want thinking during the submitting phase", got)
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working during the submitting phase", got)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestThinkingIsSubmittingUntilTheFirstActivity(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Assert
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetSubmitting() == nil {
 		t.Fatalf("substatus = %+v, want submitting", thinking.GetSubstatus())
 	}
@@ -125,7 +125,7 @@ func TestTheFirstActivityMovesSubmittingToThinking(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, thinkingActivity("unit-1"))
 
 	// Assert
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetThinking() == nil {
 		t.Fatalf("substatus = %+v, want thinking", thinking.GetSubstatus())
 	}
@@ -140,8 +140,8 @@ func TestAClearActIsDrawnAsClearing(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActClear})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetClearing() == nil {
-		t.Fatalf("want thinking · clearing for a /clear act")
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetClearing() == nil {
+		t.Fatalf("want working · clearing for a /clear act")
 	}
 }
 
@@ -157,8 +157,8 @@ func TestASessionCompactingArmStartsCompacting(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
-		t.Fatalf("want thinking · compacting from the vendor's compacting signal")
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting() == nil {
+		t.Fatalf("want working · compacting from the vendor's compacting signal")
 	}
 }
 
@@ -278,8 +278,8 @@ func TestTheWakeupFallbackLosesToEveryRealStatus(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Assert
-	if got := h.status(t); got != "thinking" {
-		t.Fatalf("status = %q, want thinking: the wakeup fallback shows only where the footer reads idle", got)
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working: the wakeup fallback shows only where the footer reads idle", got)
 	}
 }
 
@@ -325,8 +325,8 @@ func TestATurnOutranksBackground(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Assert
-	if got := h.status(t); got != "thinking" {
-		t.Fatalf("status = %q, want thinking", got)
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working", got)
 	}
 }
 
@@ -769,8 +769,8 @@ func TestANewTurnClearsAStandingBlock(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Assert
-	if got := h.status(t); got != "thinking" {
-		t.Fatalf("status = %q, want thinking: a new turn lifts the block", got)
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working: a new turn lifts the block", got)
 	}
 }
 
@@ -1034,8 +1034,8 @@ func TestAVendorCompactionBeforeItsTurnIsThinking(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
-		t.Fatalf("status = %q, want thinking · compacting", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting() == nil {
+		t.Fatalf("status = %q, want working · compacting", h.status(t))
 	}
 }
 
@@ -1080,7 +1080,7 @@ func TestEveryFooterStatusArmIsPaintedByTheVocabulary(t *testing.T) {
 	// Arrange: the arm names this resolver can emit, which the render-colors
 	// footer_status table must cover row for row.
 	arms := []string{
-		"idle", "thinking", "waiting", "interrupted", "merging",
+		"idle", "working", "waiting", "interrupted", "merging",
 		"background", "blocked", "disconnected", "closing", "loading",
 		"merge_conflict", "merge_failed", "merged",
 	}
@@ -1109,7 +1109,7 @@ func TestEveryFooterStatusArmIsPaintedByTheVocabulary(t *testing.T) {
 func statusArmsFromProto() []string {
 	probes := []*frontendv1.FooterStatus{
 		{Status: &frontendv1.FooterStatus_Idle{}},
-		{Status: &frontendv1.FooterStatus_Thinking{}},
+		{Status: &frontendv1.FooterStatus_Working{}},
 		{Status: &frontendv1.FooterStatus_Waiting{}},
 		{Status: &frontendv1.FooterStatus_Interrupted{}},
 		{Status: &frontendv1.FooterStatus_Merging{}},
@@ -1284,8 +1284,8 @@ func TestCompactingAnnouncedBeforeTheTurnOpensSurvivesTheTurnOpen(t *testing.T) 
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
-		t.Fatalf("want thinking · compacting: the turn-open edge must not wipe the vendor's announcement")
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting() == nil {
+		t.Fatalf("want working · compacting: the turn-open edge must not wipe the vendor's announcement")
 	}
 }
 
@@ -1306,7 +1306,7 @@ func TestTheContextCutClearsCompacting(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() != nil {
+	if h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting() != nil {
 		t.Fatalf("want no compacting sub-status once the cut ended the compaction")
 	}
 }
@@ -1383,7 +1383,7 @@ func TestAShimsDeathEndsTheTurnTheStripDrew(t *testing.T) {
 			h.r.OnLink(testWS, shimclient.LinkConnected)
 
 			// Assert
-			if got := h.view(t).GetStrip().GetStatus().GetThinking() != nil; got != tt.wantThinking {
+			if got := h.view(t).GetStrip().GetStatus().GetWorking() != nil; got != tt.wantThinking {
 				t.Fatalf("thinking = %v, want %v; status %v", got, tt.wantThinking, h.view(t).GetStrip().GetStatus())
 			}
 		})

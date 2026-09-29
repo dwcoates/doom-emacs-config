@@ -218,7 +218,7 @@ func assertNoRateLimitedLine(t *testing.T, w *World, ws *workspacev1.WorkspaceRe
 	status := view.GetStrip().GetStatus()
 	for _, line := range []*frontendv1.FooterStatusActivityRateLimited{
 		status.GetIdle().GetActivity().GetRateLimited(),
-		status.GetThinking().GetActivity().GetRateLimited(),
+		status.GetWorking().GetActivity().GetRateLimited(),
 		status.GetWaiting().GetActivity().GetRateLimited(),
 	} {
 		if line != nil {

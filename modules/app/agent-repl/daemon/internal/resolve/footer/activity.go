@@ -192,23 +192,23 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 }
 
 // thinkingActivity resolves the line legal while a turn runs.
-func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinkingActivity {
+func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusWorkingActivity {
 	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Fault{Fault: line},
+			Kind: &frontendv1.FooterStatusWorkingActivity_Fault{Fault: line},
 		}
 	}
 	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Update{Update: line},
+			Kind: &frontendv1.FooterStatusWorkingActivity_Update{Update: line},
 		}
 	}
 	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Notification{Notification: line},
+			Kind: &frontendv1.FooterStatusWorkingActivity_Notification{Notification: line},
 		}
 	}
 	if s.compaction != nil {
@@ -217,23 +217,23 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinking
 		// remediation — the progress of the act in flight is the one thing the
 		// reader is waiting on, and the hook/retry/injection lines belong to a
 		// turn that is not running (owner ruling, 2026-09-14).
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At: stamp(s.compaction.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Compaction{
+			Kind: &frontendv1.FooterStatusWorkingActivity_Compaction{
 				Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}},
 		}
 	}
 	if s.hook != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At: stamp(s.hook.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Hook{
+			Kind: &frontendv1.FooterStatusWorkingActivity_Hook{
 				Hook: &frontendv1.FooterStatusActivityHook{Name: s.hook.name}},
 		}
 	}
 	if s.retrying != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At: stamp(s.retrying.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_Retrying{
+			Kind: &frontendv1.FooterStatusWorkingActivity_Retrying{
 				Retrying: &frontendv1.FooterStatusActivityRetrying{
 					Attempt: s.retrying.attempt,
 					Status:  s.retrying.status,
@@ -241,22 +241,22 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinking
 		}
 	}
 	if s.injected != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At: stamp(s.injected.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_ContextInjected{
+			Kind: &frontendv1.FooterStatusWorkingActivity_ContextInjected{
 				ContextInjected: &frontendv1.FooterStatusActivityContextInjected{Text: s.injected.text}},
 		}
 	}
 	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_RateLimited{RateLimited: line},
+			Kind: &frontendv1.FooterStatusWorkingActivity_RateLimited{RateLimited: line},
 		}
 	}
 	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusThinkingActivity{
+		return &frontendv1.FooterStatusWorkingActivity{
 			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusThinkingActivity_ContextBudget{ContextBudget: line},
+			Kind: &frontendv1.FooterStatusWorkingActivity_ContextBudget{ContextBudget: line},
 		}
 	}
 	return nil

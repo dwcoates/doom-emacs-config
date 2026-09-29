@@ -105,7 +105,7 @@ func TestTheVendorsAutoCompactionDrawsTheCompactionLine(t *testing.T) {
 	})
 
 	// Assert.
-	got := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction().GetText()
+	got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetCompaction().GetText()
 	if got != "compacting the context…" {
 		t.Fatalf("activity = %q, want the vendor compaction line", got)
 	}
@@ -122,7 +122,7 @@ func TestARelayedPhaseBecomesTheThinkingActivity(t *testing.T) {
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_RESUMING, 101_600, 12_400, "")))
 
 	// Assert.
-	got := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction().GetText()
+	got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetCompaction().GetText()
 	if got != "resuming the session from the summary…" {
 		t.Fatalf("activity = %q, want the relayed phase's line", got)
 	}
@@ -139,7 +139,7 @@ func TestARelayedPhaseTakesTheCompactingStep(t *testing.T) {
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0, "")))
 
 	// Assert. The SAME step the vendor's auto-compaction takes.
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetCompacting() == nil {
 		t.Fatalf("substatus = %+v, want compacting", thinking.GetSubstatus())
 	}
@@ -163,7 +163,7 @@ func TestAFailedPhaseEndsTheCompaction(t *testing.T) {
 
 	// Assert. The line still stands, but the session is no longer compacting.
 	status := h.view(t).GetStrip().GetStatus()
-	if status.GetThinking().GetCompacting() != nil {
+	if status.GetWorking().GetCompacting() != nil {
 		t.Fatalf("status = %+v, want the compaction over", status)
 	}
 }
@@ -180,8 +180,8 @@ func TestAnAnsweredColdGateThinksRatherThanWaits(t *testing.T) {
 
 	// Assert.
 	status := h.view(t).GetStrip().GetStatus()
-	if status.GetThinking().GetCompacting() == nil {
-		t.Fatalf("status = %+v, want thinking·compacting over the standing gate", status)
+	if status.GetWorking().GetCompacting() == nil {
+		t.Fatalf("status = %+v, want working·compacting over the standing gate", status)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestAnAnsweredColdGateDrawsTheDaemonsOwnLine(t *testing.T) {
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
 
 	// Assert.
-	got := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction().GetText()
+	got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetCompaction().GetText()
 	if got != "compaction requested" {
 		t.Fatalf("activity = %q, want the answer's own line", got)
 	}
@@ -211,7 +211,7 @@ func TestAClearedGateAnswerTakesTheClearingStep(t *testing.T) {
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceClear, Text: "clearing the context"})
 
 	// Assert.
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetClearing() == nil {
 		t.Fatalf("substatus = %+v, want clearing", thinking.GetSubstatus())
 	}
@@ -227,7 +227,7 @@ func TestAPaidGateAnswerTakesTheSubmittingStep(t *testing.T) {
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoicePay, Text: "resuming and paying"})
 
 	// Assert.
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetSubmitting() == nil {
 		t.Fatalf("substatus = %+v, want submitting", thinking.GetSubstatus())
 	}
@@ -261,7 +261,7 @@ func TestClearingTheAnswerRetiresItsProgressLine(t *testing.T) {
 
 	// Assert. No stale progress sentence survives the act it narrated.
 	var empty *frontendv1.FooterStatusActivityCompaction
-	if got := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction(); got != empty {
+	if got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetCompaction(); got != empty {
 		t.Fatalf("activity = %+v, want no compaction line", got)
 	}
 }
@@ -275,7 +275,7 @@ const outlivedTurn = "daemon.footer.compaction_line_outlived_turn"
 // none stands.
 func compactionText(t *testing.T, h *harness) string {
 	t.Helper()
-	return h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction().GetText()
+	return h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetCompaction().GetText()
 }
 
 // endTurn delivers the main thread's ordinary terminal for turn.
@@ -423,7 +423,7 @@ func TestAConcludedPhaseEndsTheCompactingStep(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
 
 			// Assert: the step is over at once.
-			if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() != nil {
+			if h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting() != nil {
 				t.Fatalf("substatus = compacting, want the compaction over")
 			}
 		})
@@ -559,7 +559,7 @@ func TestTheRepeatedVendorSignal(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, vendorCompacting())
 
 			// Assert
-			activity := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity()
+			activity := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity()
 			if got := activity.GetCompaction().GetText(); got != tt.wantText {
 				t.Fatalf("activity = %q, want %q", got, tt.wantText)
 			}
@@ -584,7 +584,7 @@ func TestADeadQueryEndsTheCompaction(t *testing.T) {
 
 	// Assert: the restarting turn draws neither the step nor the line.
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
-	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
 	if thinking.GetCompacting() != nil || thinking.GetActivity().GetCompaction() != nil {
 		t.Fatalf("thinking = %+v, want no compaction on the restarting turn", thinking)
 	}
