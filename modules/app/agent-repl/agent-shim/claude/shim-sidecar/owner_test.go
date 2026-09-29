@@ -754,3 +754,224 @@ func TestAConclusionWithNoTaskIsRefusedLoudly(t *testing.T) {
 	// Assert.
 	h.requireOnce(t, "task-concluded", "error")
 }
+
+// terminalsFor answers every terminal frame written for RUN, in write order.
+// A run gets exactly one terminal, so a subject counts them.
+func terminalsFor(batches []*storev1.EntryBatch, run string) []*conversationv1.AgentBashSuccess {
+	var out []*conversationv1.AgentBashSuccess
+	for _, batch := range batches {
+		for _, e := range batch.GetEntries() {
+			bash := e.GetAgentUpdate().GetBash()
+			if bash.GetRun().GetValue() != run {
+				continue
+			}
+			if success := bash.GetFrame().GetSuccess(); success != nil {
+				out = append(out, success)
+			}
+		}
+	}
+	return out
+}
+
+// watchedShellRun claims and reads a shell spool holding CONTENT for TASK/RUN,
+// and answers the harness and the spool's path.
+func watchedShellRun(t *testing.T, store *fakeStore, task, run, content string) (*harness, string) {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, content)
+	h.sc.TaskSpawned(task, run, "", spool, false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	return h, spool
+}
+
+func TestANotifiedRunWithNoTerminatorEndsOnItsNotificationAtTheSpoolsEnd(t *testing.T) {
+	// Arrange. A spool the vendor's wrapper wrote no terminator into.
+	store := &fakeStore{}
+	h, _ := watchedShellRun(t, store, "b1notified", "toolu_notified_run", "line-1\nline-2\n")
+
+	// Act.
+	h.sc.ShellConcluded("b1notified", "completed", 1700)
+	h.sc.pollAll()
+
+	// Assert.
+	got := terminalsFor(store.writes, "toolu_notified_run")
+	if len(got) != 1 {
+		t.Fatalf("terminals = %d, want exactly one: %s", len(got), h.logText())
+	}
+	completed := got[0].GetCompleted()
+	if completed == nil || completed.GetTermination() != nil {
+		t.Fatalf("terminal = %v, want completed with no exit status", got[0])
+	}
+	if stdout := completed.GetOutput().GetText().GetStdout(); stdout != "line-1\nline-2\n" {
+		t.Fatalf("stdout = %q, want the output the spool held", stdout)
+	}
+	if _, pending := h.sc.notified["b1notified"]; pending {
+		t.Fatal("the notice is still pending after its terminal was committed")
+	}
+}
+
+func TestATerminatorWrittenBeforeTheNotificationWinsOverIt(t *testing.T) {
+	// Arrange. The vendor wrote the rest of the spool, terminator included,
+	// after the reader's last read and before it notified: the drain at the
+	// notification must find the terminator.
+	store := &fakeStore{}
+	h, spool := watchedShellRun(t, store, "b1exitfirst", "toolu_exitfirst_run", "line-1\n")
+	h.write(t, spool, "line-1\nline-2\nEXIT=0\n")
+
+	// Act.
+	h.sc.ShellConcluded("b1exitfirst", "completed", 1700)
+	h.sc.pollAll()
+
+	// Assert.
+	got := terminalsFor(store.writes, "toolu_exitfirst_run")
+	if len(got) != 1 {
+		t.Fatalf("terminals = %d, want exactly one: %s", len(got), h.logText())
+	}
+	if exited := got[0].GetCompleted().GetTermination().GetExited(); exited == nil || exited.GetCode() != 0 {
+		t.Fatalf("terminal = %v, want the spool's own exit 0", got[0])
+	}
+	h.requireNone(t, "notified-terminal", "error")
+}
+
+func TestANotificationAfterTheTerminatorAddsNoSecondTerminal(t *testing.T) {
+	// Arrange. The spool's terminator already ended the run.
+	store := &fakeStore{}
+	h, _ := watchedShellRun(t, store, "b1ended", "toolu_ended_run", "done\nEXIT=3\n")
+
+	// Act.
+	h.sc.ShellConcluded("b1ended", "failed", 1700)
+	h.sc.pollAll()
+
+	// Assert.
+	got := terminalsFor(store.writes, "toolu_ended_run")
+	if len(got) != 1 || got[0].GetCompleted().GetTermination().GetExited().GetCode() != 3 {
+		t.Fatalf("terminals = %v, want only the spool's own exit 3", got)
+	}
+	if _, pending := h.sc.notified["b1ended"]; pending {
+		t.Fatal("the notice for an already-ended run is still pending")
+	}
+}
+
+func TestANotifiedRunWhoseSpoolIsUnclaimedEndsAtThatSpoolsEnd(t *testing.T) {
+	// Arrange. The spool exists but no rescan has claimed it yet.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1unclaimed", "only line\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.TaskSpawned("b1unclaimed", "toolu_unclaimed_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+
+	// Act.
+	h.sc.ShellConcluded("b1unclaimed", "completed", 1700)
+	if got := terminalsFor(store.writes, "toolu_unclaimed_run"); len(got) != 0 {
+		t.Fatalf("a terminal was written before the existing spool was read: %v", got)
+	}
+	h.sc.rescan()
+	h.sc.pollAll()
+
+	// Assert.
+	got := terminalsFor(store.writes, "toolu_unclaimed_run")
+	if len(got) != 1 || got[0].GetCompleted().GetOutput().GetText().GetStdout() != "only line\n" {
+		t.Fatalf("terminals = %v, want one carrying the spool's output", got)
+	}
+}
+
+func TestANotifiedRunWithNoSpoolEndsOnItsNotificationAtOnce(t *testing.T) {
+	// Arrange. The vendor named a spool it never wrote: nothing will ever be
+	// read, so the notification is the run's whole account.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	missing := filepath.Join(h.spool, "claude-501", "proj", "runtime-sess", "tasks", "b1nospool.output")
+	h.sc.TaskSpawned("b1nospool", "toolu_nospool_run", "", missing, false, "/workspace", "workspace-id", "session-1")
+
+	// Act.
+	h.sc.ShellConcluded("b1nospool", "completed", 1700)
+
+	// Assert.
+	got := terminalsFor(store.writes, "toolu_nospool_run")
+	if len(got) != 1 || got[0].GetCompleted().GetOutput().GetNotObserved() == nil {
+		t.Fatalf("terminals = %v, want one stating its output not_observed", got)
+	}
+}
+
+func TestANotificationBeforeItsLaunchIsHeldUntilTheLaunch(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.ShellConcluded("b1early", "completed", 1700)
+	if len(store.writes) != 0 {
+		t.Fatal("a terminal was written for a run whose spawning call is unknown")
+	}
+
+	// Act.
+	h.sc.TaskSpawned("b1early", "toolu_early_run", "", "", false, "/workspace", "workspace-id", "session-1")
+
+	// Assert.
+	if got := terminalsFor(store.writes, "toolu_early_run"); len(got) != 1 {
+		t.Fatalf("terminals = %d, want the held notification applied at the launch", len(got))
+	}
+}
+
+func TestAStopAfterTheRunEndedAddsNoCancelledTerminal(t *testing.T) {
+	// Arrange. The spool's terminator already ended the run.
+	store := &fakeStore{}
+	h, _ := watchedShellRun(t, store, "b1stoplate", "toolu_stoplate_run", "done\nEXIT=0\n")
+
+	// Act.
+	h.sc.TaskStopped("b1stoplate")
+
+	// Assert.
+	if cut := interruptedFor(store.writes, "toolu_stoplate_run"); cut != nil {
+		t.Fatalf("a cancelled terminal overwrote the run's own exit: %v", cut)
+	}
+	if _, pending := h.sc.stopped["b1stoplate"]; pending {
+		t.Fatal("the stop for an already-ended run is still pending")
+	}
+}
+
+func TestAShellConclusionWithNoTaskIsRefusedLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	h.sc.ShellConcluded("", "completed", 1700)
+
+	// Assert.
+	h.requireOnce(t, "shell-concluded", "error")
+	if len(h.sc.notified) != 0 {
+		t.Fatalf("notified = %v, want nothing recorded for an unnamed run", h.sc.notified)
+	}
+}
+
+func TestANotifiedTerminalTheStoreRefusedStaysPending(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", "", false, "/workspace", "workspace-id", "session-1")
+	store.writeFail = "disk full"
+
+	// Act.
+	h.sc.ShellConcluded("b1refused", "completed", 1700)
+
+	// Assert.
+	rec := h.requireOnce(t, "notified-terminal", "error")
+	if got := ctxString(t, rec, "task_id"); got != "b1refused" {
+		t.Fatalf("task_id = %q, want the refused run", got)
+	}
+	if _, pending := h.sc.notified["b1refused"]; !pending {
+		t.Fatal("a notice whose terminal never committed was forgotten")
+	}
+}

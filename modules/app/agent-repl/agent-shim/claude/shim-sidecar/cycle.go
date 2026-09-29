@@ -233,6 +233,14 @@ type sidecar struct {
 	// concluded LOST.
 	concluded map[string]struct{}
 
+	// notified holds the DETACHED SHELL runs whose vendor task notification a
+	// transcript reported, by task id, until the run's ONE terminal is durable.
+	// Process-scoped like `stopped`: it is a fact read out of a transcript. The
+	// terminal is written only once the run's spool has been read to its end
+	// after the notification (applyNotified), so a terminator the spool carries
+	// always wins over the notification's weaker account.
+	notified map[string]shellNotice
+
 	// cursors is CYCLE-SCOPED: recovered as the first act of every production
 	// cycle and dropped the moment production is suspended, so a tailer can
 	// never be built from a stale — or absent — recovery.
@@ -413,6 +421,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		settling:           map[string]string{},
 		stopped:            map[string]int64{},
 		concluded:          map[string]struct{}{},
+		notified:           map[string]shellNotice{},
 		parked:             map[string]bool{},
 		residueWithheld:    map[string]map[string]int{},
 		shapeCatalogued:    map[string]bool{},
@@ -1594,6 +1603,11 @@ func (s *sidecar) pollOnce(path string, w *watched, nowMs int64) (more, abandon 
 		return false, false
 	}
 	if !result.Changed {
+		// THE SPOOL HAS BEEN READ TO ITS END: nothing past the cursor. A shell
+		// run whose notification is pending ends here if no terminator did.
+		if w.target.TaskID != "" {
+			s.applyNotified(w.target.TaskID, path)
+		}
 		return false, false
 	}
 	skips, retired, err := s.writeBatch(w, result)
@@ -1644,6 +1658,11 @@ func (s *sidecar) pollOnce(path string, w *watched, nowMs int64) (more, abandon 
 	if w.target.TaskID != "" {
 		s.applyStop(w.target.TaskID)
 		s.applyConclusion(w.target.TaskID)
+		if !result.More {
+			// This durable batch reached the file's end, and any terminator in
+			// it has already settled the run above (applySettled).
+			s.applyNotified(w.target.TaskID, path)
+		}
 	}
 	if w.vanished {
 		// A file that is readable again was a rename race; the tracker

@@ -73,6 +73,16 @@ type Observer interface {
 	// itself — from its task notification or its agent TaskStop — so the reader
 	// never later concludes that run LOST over the terminal already written.
 	TaskConcluded(taskID string)
+
+	// ShellConcluded reports the vendor's task notification for a DETACHED
+	// SHELL run this stream read the launch of: its status as the vendor wrote
+	// it, and the instant the notification was written.
+	//
+	// THE TERMINAL IS NOT MINTED HERE, for TaskStopped's reason: the terminal
+	// owes the output the spool holds, and the spool may still hold a
+	// terminator carrying the exit status. The reader reads the spool to its
+	// end and mints the ONE terminal the run gets.
+	ShellConcluded(taskID, status string, atMs int64)
 }
 
 // noopObserver is the default: a converter with nobody listening still converts.
@@ -81,6 +91,7 @@ type noopObserver struct{}
 func (noopObserver) TaskSpawned(string, string, string, string, bool) {}
 func (noopObserver) TaskStopped(string)                               {}
 func (noopObserver) TaskConcluded(string)                             {}
+func (noopObserver) ShellConcluded(string, string, int64)             {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map

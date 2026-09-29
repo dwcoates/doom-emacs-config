@@ -662,3 +662,78 @@ func TestALostSubagentRestatesItsSpawn(t *testing.T) {
 		})
 	}
 }
+
+func TestBashNotifiedSpellsEachNotificationStatus(t *testing.T) {
+	cases := []struct {
+		status        string
+		wantCompleted bool
+	}{
+		{"completed", true},
+		{"failed", true},
+		{"stopped", false},
+		{"a-status-the-vendor-adds-later", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			at := testAttribution(0)
+			at.TaskID = "b1"
+
+			// Act.
+			entry := c.BashNotified(at, "toolu_run", "out", 0, tc.status, 1700, true)
+
+			// Assert.
+			success := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess()
+			if got := success.GetCompleted() != nil; got != tc.wantCompleted {
+				t.Fatalf("completed = %t, want %t: %v", got, tc.wantCompleted, success)
+			}
+			if completed := success.GetCompleted(); completed != nil && completed.GetTermination() != nil {
+				t.Fatalf("termination = %v, want UNSET: the notification states no exit status", completed.GetTermination())
+			}
+			if interrupted := success.GetInterrupted(); interrupted != nil && interrupted.GetCause() != nil {
+				t.Fatalf("cause = %v, want none: the notification names no actor", interrupted.GetCause())
+			}
+			if got := success.GetSettledAt().GetAtMs(); got != 1700 {
+				t.Fatalf("settled_at = %d, want the notification's instant", got)
+			}
+			if got := entry.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
+				t.Fatalf("key = %q, want the run's single terminal key", got)
+			}
+		})
+	}
+}
+
+func TestBashNotifiedStatesAnUnreadSpoolNotObserved(t *testing.T) {
+	// Arrange. A run whose spool was never read has nothing to say about its
+	// output, which is not the same as having printed nothing.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	entry := c.BashNotified(at, "toolu_run", "", 0, "completed", 1700, false)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetCompleted().GetOutput()
+	if output.GetNotObserved() == nil {
+		t.Fatalf("output = %v, want not_observed", output)
+	}
+}
+
+func TestNotifiedAndExitedShareTheTerminalDiscriminator(t *testing.T) {
+	// Arrange. A run reaches exactly ONE terminal, so a notification-minted one
+	// is the same write as the spool's own.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	exited := c.BashExited(at, "toolu_run", "out", 0, 0)
+	notified := c.BashNotified(at, "toolu_run", "out", 0, "completed", 1700, true)
+
+	// Assert.
+	if exited.GetWriteId() != notified.GetWriteId() {
+		t.Fatal("a run's terminal is one write: a notification-minted terminal must be absorbed beside an observed exit, never appended")
+	}
+}
