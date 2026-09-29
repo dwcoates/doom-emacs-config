@@ -74,4 +74,18 @@ workspace's tab) and the tab blink.
 - **Prefer augmenting existing RPCs.** New RPCs only where no existing one is
   suitable.
 
+## Iteration sequence
+
+Accepted as proposed, no amendments:
+
+1. Transport — the existing ConnectRPC `agentrepl.v1` service; no new
+   transport.
+2. Endpoint inventory — which existing rpcs are augmented and whether any new
+   rpc is needed (Emacs's focus report, the banner click reaching Emacs, the
+   retirement of what Emacs no longer consumes); names and one-line purposes
+   only.
+3. Conventions — the package's existing ones stand (`oneof result { success;
+   error; }`; validation failures are Connect `InvalidArgument`, never an arm).
+4. Shapes — one endpoint at a time, each landed on agreement.
+
 ## Landed changes
