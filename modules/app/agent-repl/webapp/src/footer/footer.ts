@@ -57,6 +57,8 @@ import {
 import { publishCompactionProgress } from "./progress.js";
 import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
+import { createQuietHold, quietStretchEndingOf, withHeldLine } from "./quiet-hold.js";
+import type { PaintWatch } from "../feed/painted.js";
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -66,6 +68,10 @@ export function panelStorageKey(workspaceId: string): string {
 export interface FooterDeps {
   /** The reader picked a detached-work item: scroll to its card (feed.ts). */
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
+  /** When the root feed's rows were painted (feed.ts), for the quiet hold. */
+  readonly paints: PaintWatch;
+  /** Whether the reader follows the feed's live tail (feed.ts). */
+  readonly followingTail: () => boolean;
 }
 
 export interface FooterHandle extends Handle {
@@ -99,6 +105,20 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // A notice drawn onto the clicked element was gone with the next push; held
   // here, every draw paints it (see `JumpNotices`).
   const notices = createJumpNotices();
+  // THE FOURTH: the ended quiet-stretch line, held until the feed has painted
+  // the row that ended it (see `quiet-hold.ts`).
+  const hold = createQuietHold({
+    paints: deps.paints,
+    followingTail: deps.followingTail,
+    now: () => Date.now(),
+    setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimer: (handle) => {
+      window.clearTimeout(handle);
+    },
+    redraw: () => {
+      draw();
+    },
+  });
   // THE DOCK AND THE OPEN SECTION ARE KEPT ACROSS PUSHES, so the section's own
   // scroll box — the reader's — is never detached and never reset. Only their
   // children are redrawn.
@@ -143,6 +163,11 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     open: (_client, signal) => ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
     onPush: (response) => {
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
+      hold.observe(
+        quietStretchEndingOf(
+          requireMessage(requireMessage(view.strip, "FooterView.strip").status, "FooterStrip.status"),
+        ),
+      );
       applyFocus(view);
       draw();
       publishStatus();
@@ -165,6 +190,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       log.info("disposing the footer", { operation: "footer.dispose", context: {} });
       unsubscribeFromVerdict();
       watch.cancel();
+      hold.dispose();
       // The page's compaction line belongs to the stream that just stopped.
       publishCompactionProgress(null);
       // Every clock this component started hangs off the host's subtree.
@@ -210,7 +236,9 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       section = null;
       return;
     }
-    const strip = requireMessage(view.strip, "FooterView.strip");
+    const pushed = requireMessage(view.strip, "FooterView.strip");
+    const held = hold.held();
+    const strip = held === null ? pushed : withHeldLine(pushed, held);
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
     // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
