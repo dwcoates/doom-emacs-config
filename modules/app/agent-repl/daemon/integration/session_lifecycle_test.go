@@ -1996,28 +1996,19 @@ func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
 	}
 }
 
-// TestAnswerColdGateWithNoLiveShimAnswersNoSession targets
-// AnswerColdGateError.no_session ("the workspace has no session to answer
-// to"). internal/workspace/answers.go's AnswerColdGate checks the served gate
-// (Cards.ColdGate) BEFORE liveness (Shim(ws)), so reaching no_session needs a
-// standing gate AND a dead session AT ONCE. KillWorkspace cannot produce that
-// combination: its teardown calls Sessions.Stop, which deletes
-// Fleet.coldGates and Fleet.sessions TOGETHER in the same critical section
-// (internal/workspace/sessions.go's Fleet.Stop) — so any daemon-driven
-// teardown clears the gate right along with the session, landing on
-// no_cold_gate instead (the test above). The only way left to split them is
-// to kill the shim's PROCESS out from under a standing gate without going
-// through any daemon verb: Fleet.Shim(ws) answers "live" purely from
-// Fleet.sessions map PRESENCE, never a real health check, so the map entry
-// (and the gate beside it) survives the process's death.
+// TestAnswerColdGateWithNoLiveShimStandsTheGateAgain pins what an answer to a
+// gate whose shim has died comes to. The answer is TAKEN (AnswerColdGate
+// answers success: the re-open runs after the answer, and
+// AnswerColdGateError.no_session is not produced since 2026-09-29), and the
+// re-open's failure is the footer's `cold_gate_reopen_failed` fault, with the
+// gate stood again so the choice is the user's once more.
 //
-// THE GAP THIS TEST EXPOSED IS CLOSED (2026-09-04). It used to be red: the
-// verb read liveness from Fleet.sessions map PRESENCE, never a health check,
-// so AnswerColdGate drove StartSession over the now-dead control connection and
-// answered a raw transport error instead of the typed refusal. The re-open now
-// goes through Fleet.ResumeCold, which reads the client's REAPED state exactly
-// as Fleet.Shim does and composes no_session before touching the link.
-func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
+// Reaching it needs a standing gate AND a dead session AT ONCE, which no
+// daemon verb produces: KillWorkspace's teardown (Fleet.Stop) clears the gate
+// together with the session. So the shim's PROCESS is killed out from under a
+// standing gate, and Fleet.ResumeCold reads the client's REAPED state before
+// touching the link.
+func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 	t.Parallel()
 	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never
 	// through KillWorkspace, which would also clear the coldGates record).
@@ -2044,6 +2035,7 @@ func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	footer := f.d.WatchFooter(f.ws)
 	killShim(t, f, shim)
 
 	// Act
@@ -2053,13 +2045,18 @@ func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
 		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
 	}))
 
-	// Assert
-	if err != nil {
-		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = transport error %v, want the no_session arm", err)
+	// Assert: the answer is taken.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = (%v, %v), want success: the re-open runs after the answer", resp, err)
 	}
-	if resp.Msg.GetError().GetNoSession() == nil {
-		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = %v, want error.no_session", resp.Msg)
-	}
+	// Assert: the re-open's failure is the footer's fault line.
+	awaitFooter(t, f, footer, "the cold_gate_reopen_failed fault", func(v *frontendv1.FooterView) bool {
+		return strings.Contains(v.GetStrip().GetStatus().String(), "cold_gate_reopen_failed")
+	})
+	// Assert: and the gate stands again.
+	awaitRow(t, f, feed, "the cold gate stood again", func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding() != nil
+	})
 }
 
 // TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate documents
