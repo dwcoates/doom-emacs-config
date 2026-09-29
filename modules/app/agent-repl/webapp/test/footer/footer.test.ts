@@ -105,7 +105,7 @@ describe("buildWatchFooterRequest", () => {
 /** A thinking status whose activity is the daemon's compaction line. */
 function compactingStatus(text: string): FooterStatus["status"] {
   return {
-    case: "thinking",
+    case: "working",
     value: {
       substatus: { case: "compacting", value: {} },
       activity: { at: { atMs: BigInt(NOW) }, kind: { case: "compaction", value: { text } } },

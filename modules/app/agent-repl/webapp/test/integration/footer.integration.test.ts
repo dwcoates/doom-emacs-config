@@ -241,7 +241,7 @@ describe("the activity cell", () => {
 
   it("draws the hook's own name verbatim", async () => {
     // Arrange / Act
-    await withFooter({ status: "thinking", activity: "hook" });
+    await withFooter({ status: "working", activity: "hook" });
     // Assert
     expect(harness.text(".footer-activity")).toContain("PreToolUse");
   });
@@ -262,7 +262,7 @@ describe("the activity cell", () => {
 
   it("colors the retry attempt as a typed datum", async () => {
     // Arrange / Act
-    await withFooter({ status: "thinking", activity: "retrying" });
+    await withFooter({ status: "working", activity: "retrying" });
     // Assert
     expect(harness.$(".footer-activity [data-datum='attempt']")?.textContent).toContain("3");
   });
@@ -399,7 +399,7 @@ describe("the activity cell", () => {
 describe("the clock", () => {
   it("ticks up from the served turn start", async () => {
     // Arrange
-    await withFooter({ status: "thinking", turnStartedAtMs: 0n });
+    await withFooter({ status: "working", turnStartedAtMs: 0n });
     const before = harness.text(".footer-clock");
     // Act
     await harness.tick(5_000);
@@ -782,7 +782,7 @@ describe("whole-view replacement", () => {
 
   it("replaces the status rather than accumulating it", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     // Act
     harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "done" }));
     await harness.settle();
@@ -804,7 +804,7 @@ describe("whole-view replacement", () => {
 describe("the turn stop", () => {
   it("sends the turn target", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     // Act
     await harness.click(".footer-clock [data-interrupt]");
     // Assert
@@ -814,7 +814,7 @@ describe("the turn stop", () => {
 
   it("echoes the page's own workspace", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     // Act
     await harness.click(".footer-clock [data-interrupt]");
     // Assert
@@ -824,7 +824,7 @@ describe("the turn stop", () => {
 
   it("draws the interrupted-turn outcome as a note, not a refusal", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     // Act
     await harness.click(".footer-clock [data-interrupt]");
     // Assert
@@ -833,7 +833,7 @@ describe("the turn stop", () => {
 
   it("draws no refusal for an interrupted turn", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     // Act
     await harness.click(".footer-clock [data-interrupt]");
     // Assert
@@ -843,7 +843,7 @@ describe("the turn stop", () => {
   it("draws the nothing-running outcome as a note", async () => {
     // Arrange: a domain outcome, not an error — the stop found the session
     // already quiet, which is a legitimate reply to a legitimate ask.
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     harness.fake.answer(
       "interrupt",
       create(InterruptResponseSchema, {
@@ -858,7 +858,7 @@ describe("the turn stop", () => {
 
   it("draws no refusal for a nothing-running answer", async () => {
     // Arrange
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     harness.fake.answer(
       "interrupt",
       create(InterruptResponseSchema, {
@@ -883,7 +883,7 @@ describe("the turn stop", () => {
 describe("the agents panel's stop-all", () => {
   /** Open the agents panel, where the fan-wide stop lives. */
   const openAgents = async (): Promise<void> => {
-    await withFooter({ status: "thinking" });
+    await withFooter({ status: "working" });
     await harness.click('.footer-chip[data-chip="agents"]');
   };
 
@@ -1125,14 +1125,14 @@ describe("the shells panel's runtime clock", () => {
 describe("the activity line's relative age", () => {
   it("reads the age since the served instant", async () => {
     // Arrange / Act: stamped AT the epoch, so the age is what the clock has run.
-    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    await withFooter({ status: "working", activity: "hook", activityAtMs: 10_000n });
     // Assert
     expect(harness.text(".footer-activity-age")).toBe("· 0s ago");
   });
 
   it("grows into minutes as time passes", async () => {
     // Arrange
-    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    await withFooter({ status: "working", activity: "hook", activityAtMs: 10_000n });
     // Act
     await harness.tick(120_000);
     // Assert
@@ -1141,7 +1141,7 @@ describe("the activity line's relative age", () => {
 
   it("truncates rather than rounding the second level", async () => {
     // Arrange
-    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    await withFooter({ status: "working", activity: "hook", activityAtMs: 10_000n });
     // Act
     await harness.tick(130_000);
     // Assert

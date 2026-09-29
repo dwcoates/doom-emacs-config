@@ -43,7 +43,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
         "mergeFailed",
         "merged",
         "merging",
-        "thinking",
+        "working",
         "turnFailed",
         "waiting",
       ].sort(),
@@ -74,7 +74,7 @@ describe("STATUS_ARM_CLASS: asserted row for row against render-colors.json", ()
 
 describe("statusArmClass", () => {
   it.each([
-    ["thinking", "tone-red"],
+    ["working", "tone-red"],
     ["waiting", "tone-green"],
     ["idle", "tone-green"],
     ["interrupted", "tone-green"],
