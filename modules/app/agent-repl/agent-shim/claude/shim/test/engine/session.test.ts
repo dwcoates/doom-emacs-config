@@ -2538,6 +2538,23 @@ describe("the keep-alive turn serves nothing", () => {
     expect((await startDuring(h, "turn-1")).result.case).toBe("success");
   });
 
+  it("interrupts a keep-alive in flight when a real prompt arrives, and opens the prompt's turn on the keep-alive's result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+    const starting = startDuring(h, "turn-1");
+    await settledSoon(starting);
+    const interrupted = h.queries.at(-1)?.query.calls.includes("interrupt");
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    const response = await starting;
+
+    // Assert
+    expect([interrupted, response.result.case]).toEqual([true, "success"]);
+  });
+
   it("leaves a real turn right after a keep-alive tagged as served", async () => {
     // Arrange
     const h = harness();

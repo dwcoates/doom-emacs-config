@@ -370,6 +370,9 @@ interface StartedTurn {
 export class TurnEngine {
   constructor(private readonly session: SessionContext) {}
 
+  /** The keep-alives a waiting StartTurn has already interrupted; see {@link interruptKeepalive}. */
+  private readonly interruptedKeepalives = new WeakSet<OpenTurn>();
+
   /**
    * The turn whose `StartTurn` is being processed right now, and a promise
    * that settles when it is.
@@ -680,7 +683,9 @@ export class TurnEngine {
 
   /**
    * Wait for the shim's own turn — its keep-alive, or the network-resume
-   * prompt — to leave the send slot, when one holds it.
+   * prompt — to leave the send slot, when one holds it. A keep-alive is
+   * interrupted first ({@link interruptKeepalive}) so it leaves at once; the
+   * network-resume prompt is a real delivery and is waited out.
    *
    * NO PROMPT IS LOST OR DOUBLED BY THE WAIT. Nothing of the turn exists until
    * the wait is over — no prompt row, no open turn, no send — so every way out
@@ -696,11 +701,13 @@ export class TurnEngine {
     const ended = this.session.shimTurnEnded();
     if (ended === undefined) return "free";
     const budgetMs = this.session.keepaliveYieldBudgetMs;
-    const behind = this.session.openTurn()?.keepalive === true ? "keepalive" : "network_resume";
+    const holder = this.session.openTurn();
+    const behind = holder?.keepalive === true ? "keepalive" : "network_resume";
     LOGGER.info(
       { turn_id: turn, budget_ms: budgetMs, shim_turn: behind },
       "a StartTurn arrived while the shim's own turn runs; it waits for that turn to end, then opens its turn",
     );
+    if (holder?.keepalive === true) await this.interruptKeepalive(holder, turn);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
     const expired = new Promise<KeepaliveWait>((resolve) => {
@@ -734,6 +741,53 @@ export class TurnEngine {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /**
+   * End the keep-alive a real prompt is waiting behind, NOW.
+   *
+   * A KEEP-ALIVE IS WORTH NOTHING TO A WAITING PROMPT. The prompt rolls the
+   * vendor context back past every keep-alive before it is delivered
+   * (engine/keepalive.ts, the yield obligation), so whatever the keep-alive
+   * would have produced is discarded anyway. Letting it run on only makes the
+   * user wait on a turn nobody asked for, and a keep-alive whose API call hangs
+   * (an outage) would hold every prompt behind it for the whole yield budget.
+   *
+   * THE SLOT IS NOT RELEASED HERE. The interrupt makes the vendor end the
+   * keep-alive with its own result, which closes the turn through the one slot
+   * writer and settles the wait the caller holds. Releasing the slot early
+   * would let that late result be attributed to the prompt's turn.
+   *
+   * ONCE PER KEEP-ALIVE: a second waiting StartTurn finds it already
+   * interrupted and only waits.
+   */
+  private async interruptKeepalive(keepalive: OpenTurn, turn: string): Promise<void> {
+    if (this.interruptedKeepalives.has(keepalive)) return;
+    this.interruptedKeepalives.add(keepalive);
+    const query = this.session.query();
+    if (query === undefined) {
+      LOGGER.info(
+        { turn_id: turn, keepalive_turn: keepalive.id.value },
+        "no vendor query to interrupt under the keep-alive; the StartTurn waits for the slot as before",
+      );
+      return;
+    }
+    try {
+      await query.interrupt();
+      LOGGER.info(
+        { turn_id: turn, keepalive_turn: keepalive.id.value },
+        "interrupted the keep-alive a real prompt was waiting behind; the prompt opens its turn when the keep-alive's result closes it",
+      );
+    } catch (err) {
+      LOGGER.error(
+        {
+          turn_id: turn,
+          keepalive_turn: keepalive.id.value,
+          cause: err instanceof Error ? err.message : String(err),
+        },
+        "the vendor refused the interrupt of the keep-alive a real prompt waits behind; the prompt waits out the keep-alive within its budget",
+      );
     }
   }
 
