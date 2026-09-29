@@ -861,7 +861,7 @@ calling it an error dropped the adopt with it."
                                 (plist-get ref :id))
         ;; Assert.
         (agent-repl-itest--await-log primary "elisp.host.transferred-before-the-announcement"
-                                     "warn")
+                                     "info")
         (should-not (agent-repl-itest--logged-p
                      primary "elisp.host.transferred-without-successor" "error"))
         (should (equal 1 (length (agent-repl-itest--subscribers
