@@ -33,6 +33,17 @@ func itemFrame(t *testing.T, unit string, arm protoreflect.Name, phase protorefl
 	return act
 }
 
+// rowOf is the FeedId the fake feed draws UNIT's row at.
+func rowOf(unit string) *frontendv1.FeedId { return &frontendv1.FeedId{Value: "row-" + unit} }
+
+// surface is a feed item's first frame as the watcher routes it: the feed
+// draws the item's row (OnItemDrawn) before the footer takes the frame.
+func surface(t *testing.T, h *harness, agent *conversationv1.AgentId, unit string, arm protoreflect.Name) {
+	t.Helper()
+	h.r.OnItemDrawn(testWS, unit, rowOf(unit))
+	h.r.OnActivity(testWS, agent, itemFrame(t, unit, arm, "start"))
+}
+
 // inTurn arranges a delivered turn whose main agent is named.
 func inTurn(h *harness) {
 	connected(h)
@@ -252,7 +263,7 @@ func TestTheNextSurfacingClearsTheQuietLine(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
 
 	// Act: the response's FIRST frame, long before it lands.
-	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "response", "start"))
+	surface(t, h, mainAgent, "u-2", "response")
 
 	// Assert
 	if got := quietLine(t, h); got != "" {
@@ -266,7 +277,7 @@ func TestTheFirstSurfacingClearsTheDeliveredLine(t *testing.T) {
 	inTurn(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "thinking", "start"))
+	surface(t, h, mainAgent, "u-1", "thinking")
 
 	// Assert
 	if got := quietLine(t, h); got != "" {
@@ -278,8 +289,8 @@ func TestALandingBesideARunningItemStandsNoLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	inTurn(h)
-	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
-	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "grep", "start"))
+	surface(t, h, mainAgent, "u-1", "read")
+	surface(t, h, mainAgent, "u-2", "grep")
 
 	// Act
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
@@ -457,7 +468,7 @@ func TestABackgroundSurfacingClearsTheLine(t *testing.T) {
 	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
 
 	// Act
-	h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-9", "read", "start"))
+	surface(t, h, detachedAgent, "u-9", "read")
 
 	// Assert
 	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
@@ -471,7 +482,7 @@ func TestADetachedLandingDuringATurnStandsNoLine(t *testing.T) {
 	connected(h)
 	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
 	inTurn(h)
-	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "response", "start"))
+	surface(t, h, mainAgent, "u-1", "response")
 
 	// Act
 	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
@@ -620,5 +631,244 @@ func TestEveryLandedLineStartsWithTheSharedHead(t *testing.T) {
 		if got := backgroundLandedLine(kind.label, phase); got != head {
 			t.Errorf("backgroundLandedLine(%v) = %q, want %q", phase, got, head)
 		}
+	}
+}
+
+// ---- the ended line is held until the client paints its successor ----
+
+// endingOf reads the published working arm's quiet-stretch ending.
+func endingOf(t *testing.T, h *harness) *frontendv1.FooterStatusQuietStretchEnding {
+	t.Helper()
+	return working(t, h).GetQuietStretchEnding()
+}
+
+func TestTheDrawingThatEndsAQuietStretchStatesTheEndedLineWithItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "bash")
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Act
+	surface(t, h, mainAgent, "u-2", "response")
+
+	// Assert
+	got := endingOf(t, h)
+	if got.GetText() != "✅ Bash finished — handling result..." || got.GetUntilPainted().GetValue() != "row-u-2" {
+		t.Fatalf("ending = %v, want the bash line held until row-u-2 is painted", got)
+	}
+	if line := quietLine(t, h); line != "" {
+		t.Fatalf("line = %q, want none in the activity: the stretch ended", line)
+	}
+}
+
+func TestASurfacingTheFeedHasNotDrawnLeavesTheLineStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act: a spawn the feed holds for the frame naming its agent.
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
+
+	// Assert
+	if got := quietLine(t, h); got != "✅ Prompt delivered — awaiting response..." {
+		t.Fatalf("line = %q, want the delivered line: nothing is drawn yet", got)
+	}
+	if got := endingOf(t, h); got != nil {
+		t.Fatalf("ending = %v, want none before the draw", got)
+	}
+}
+
+func TestADrawAfterItsSurfacingEndsTheStretch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
+
+	// Act
+	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"))
+
+	// Assert
+	got := endingOf(t, h)
+	if got.GetText() != "✅ Prompt delivered — awaiting response..." || got.GetUntilPainted().GetValue() != "row-u-1" {
+		t.Fatalf("ending = %v, want the delivered line held until row-u-1 is painted", got)
+	}
+	if line := quietLine(t, h); line != "" {
+		t.Fatalf("line = %q, want none in the activity once the item is drawn", line)
+	}
+}
+
+func TestADrawOfAnItemNotYetSurfacedEndsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act: the feed draws before the footer takes the frame.
+	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"))
+
+	// Assert
+	if got := quietLine(t, h); got != "✅ Prompt delivered — awaiting response..." {
+		t.Fatalf("line = %q, want the delivered line until the item surfaces", got)
+	}
+}
+
+func TestTheNextQuietLineRetiresTheEnding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "bash")
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Assert
+	if got := endingOf(t, h); got != nil {
+		t.Fatalf("ending = %v, want none: a new line stands", got)
+	}
+	if got := quietLine(t, h); got != "✅ Bash finished — handling result..." {
+		t.Fatalf("line = %q, want the bash line", got)
+	}
+}
+
+func TestAnActivityThatOutranksTheQuietLineHoldsNoEnding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "response")
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
+
+	// Assert
+	if got := endingOf(t, h); got != nil {
+		t.Fatalf("ending = %v, want none: the running hook outranks the line and is drawn at once", got)
+	}
+}
+
+func TestTheTurnsEndRetiresTheEnding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "response")
+
+	// Act
+	endTurn(h, testTurnID)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetQuietStretchEnding(); got != nil {
+		t.Fatalf("background ending = %v, want none: the turn's ending ended with it", got)
+	}
+}
+
+func TestABackgroundDrawingStatesTheEndedLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+
+	// Act
+	surface(t, h, detachedAgent, "u-9", "read")
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetBackground().GetQuietStretchEnding()
+	if got.GetText() != "✅ Subagent finished" || got.GetUntilPainted().GetValue() != "row-u-9" {
+		t.Fatalf("background ending = %v, want the subagent line held until row-u-9 is painted", got)
+	}
+}
+
+func TestALandedItemsRowIsForgotten(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	surface(t, h, mainAgent, "u-1", "bash")
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+
+	// Assert
+	h.r.mu.Lock()
+	_, kept := h.r.stateLocked(testWS).motion.drawn["u-1"]
+	h.r.mu.Unlock()
+	if kept {
+		t.Fatal("the landed item's row is still held; drawn rows must not outlive their items")
+	}
+}
+
+func TestADrawnRowWithNoIdentityIsAnError(t *testing.T) {
+	tests := []struct {
+		name string
+		unit string
+		row  *frontendv1.FeedId
+	}{
+		{name: "no unit", unit: "", row: rowOf("u-1")},
+		{name: "no FeedId", unit: "u-1", row: &frontendv1.FeedId{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			inTurn(h)
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
+
+			// Act
+			h.r.OnItemDrawn(testWS, tc.unit, tc.row)
+
+			// Assert
+			if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.item_drawn_unaddressed"); got != 1 {
+				t.Fatalf("errors = %d, want 1 item_drawn_unaddressed record", got)
+			}
+			if got := quietLine(t, h); got == "" {
+				t.Fatal("an unaddressed draw ended the stretch")
+			}
+		})
+	}
+}
+
+func TestOnlyActivitiesAboveTheQuietLineOutrankIt(t *testing.T) {
+	working := []struct {
+		name string
+		act  *frontendv1.FooterStatusWorkingActivity
+		want bool
+	}{
+		{"none", nil, false},
+		{"a fault", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Fault{}}, true},
+		{"an update", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Update{}}, true},
+		{"a notification", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Notification{}}, true},
+		{"a compaction", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Compaction{}}, true},
+		{"a hook", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Hook{}}, true},
+		{"a retry", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_Retrying{}}, true},
+		{"a new quiet line", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_QuietStretch{}}, true},
+		{"injected context", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_ContextInjected{}}, false},
+		{"a rate limit", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_RateLimited{}}, false},
+		{"a context budget", &frontendv1.FooterStatusWorkingActivity{Kind: &frontendv1.FooterStatusWorkingActivity_ContextBudget{}}, false},
+	}
+	for _, tc := range working {
+		t.Run("working: "+tc.name, func(t *testing.T) {
+			if got := workingOutranksQuietLine(tc.act); got != tc.want {
+				t.Fatalf("workingOutranksQuietLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	background := []struct {
+		name string
+		act  *frontendv1.FooterStatusBackgroundActivity
+		want bool
+	}{
+		{"none", nil, false},
+		{"a fault", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Fault{}}, true},
+		{"an update", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Update{}}, true},
+		{"a notification", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_Notification{}}, true},
+		{"a new quiet line", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_QuietStretch{}}, true},
+		{"a rate limit", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_RateLimited{}}, false},
+		{"a context budget", &frontendv1.FooterStatusBackgroundActivity{Kind: &frontendv1.FooterStatusBackgroundActivity_ContextBudget{}}, false},
+	}
+	for _, tc := range background {
+		t.Run("background: "+tc.name, func(t *testing.T) {
+			if got := backgroundOutranksQuietLine(tc.act); got != tc.want {
+				t.Fatalf("backgroundOutranksQuietLine = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
