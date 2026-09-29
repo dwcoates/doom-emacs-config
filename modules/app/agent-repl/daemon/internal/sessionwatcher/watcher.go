@@ -1372,6 +1372,19 @@ func (w *watcher) decideOpenLocked(stream, key string, current *openTicket) (*op
 		})
 		return nil, false
 	}
+	// A SESSION THIS DAEMON IS ENDING OPENS NO WATCH. The shim was asked to
+	// stand down (or the session is over), so it is closing every stream it
+	// serves: a watch opened now races the shim's own exit and can only come
+	// back EOF. MEASURED, deploy 2026-09-29T17:15:29: the successor's bounce
+	// stood six stale shims down, and a WatchAgent open decided after each
+	// stand-down was refused with "incomplete envelope: unexpected EOF" and
+	// recorded as two ERRORs apiece.
+	if w.endingLocked() {
+		w.log.Debug("daemon.sessionwatcher.open_skipped", "a session this daemon is ending opens no watch", dlog.Context{
+			"stream": stream, "key": key, "stand_down_asked": w.client.StandingDown(),
+		})
+		return nil, false
+	}
 	if w.inFlightLocked(current) {
 		w.log.Debug("daemon.sessionwatcher.open_skipped", "an open of this watch is already in flight", dlog.Context{
 			"stream": stream, "key": key,
@@ -1464,7 +1477,9 @@ func (w *watcher) openSession(t *openTicket) {
 	}
 	w.sessionOpening = nil
 	if err != nil {
-		w.severedLocked("watch_session", "WatchSession could not be opened", err)
+		if !w.openEndedByTeardownLocked("session", "", err) {
+			w.severedLocked("watch_session", "WatchSession could not be opened", err)
+		}
 		w.mu.Unlock()
 		t.cancel()
 		w.flushTurnEnds()
@@ -1547,9 +1562,11 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	a.opening = nil
 	if err != nil {
 		a.stream = nil
-		if refusedOpen(err) {
+		switch {
+		case w.openEndedByTeardownLocked("agent", watchKey(a.id), err):
+		case refusedOpen(err):
 			w.openRefusedLocked("watch_agent", watchKey(a.id), w.agentExpectedLocked(a), &a.refusals, err)
-		} else {
+		default:
 			w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
 		}
 		w.mu.Unlock()
@@ -1603,9 +1620,11 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 	s.opening = nil
 	if err != nil {
 		s.stream = nil
-		if refusedOpen(err) {
+		switch {
+		case w.openEndedByTeardownLocked("shell", key, err):
+		case refusedOpen(err):
 			w.openRefusedLocked("watch_bash", key, w.shells[key] == s, &s.refusals, err)
-		} else {
+		default:
 			w.severedLocked("watch_bash", "WatchBash could not be opened", err)
 		}
 		w.mu.Unlock()
@@ -2036,6 +2055,22 @@ func (w *watcher) stale(gen uint64) bool { return w.closed || gen != w.gen }
 // severs, still degrades the fleet and still raises its fault.
 func (w *watcher) endingLocked() bool {
 	return w.sessionEnded || w.client.StandingDown()
+}
+
+// openEndedByTeardownLocked classifies a failed watch open by the stand-down
+// latch, exactly as streamEnded classifies an installed stream's end. An open
+// decided before the shim was asked to stand down can still be in flight when
+// the shim closes on its way out; its failure is the answer to a teardown this
+// daemon ordered, so it neither severs the link nor raises a refusal fault. It
+// answers false, recording nothing, when no teardown is under way.
+func (w *watcher) openEndedByTeardownLocked(kind, key string, err error) bool {
+	if !w.endingLocked() {
+		return false
+	}
+	w.log.Debug("daemon.sessionwatcher.open_ended", "a watch open failed inside a teardown this daemon ordered", dlog.Context{
+		"stream": kind, "key": key, "error": err.Error(), "stand_down_asked": w.client.StandingDown(),
+	})
+	return true
 }
 
 // streamEnded decides what a stream's end MEANT. Only the consumer can: a
