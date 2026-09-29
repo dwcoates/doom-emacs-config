@@ -110,9 +110,7 @@ func scFindRow(t *testing.T, rows []*frontendv1.FeedRow, what string, pred func(
 func scAnsweringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) string {
 	t.Helper()
 	rows := scOpenFeedRows(t, w, ws)
-	ended := scFindRow(t, rows, "turn "+turn.GetValue()+"'s FeedTurnEnded", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == turn.GetValue() && r.GetTurnEnded() != nil
-	})
+	ended := scFindRow(t, rows, "turn "+turn.GetValue()+"'s FeedTurnEnded", endsTurn(turn))
 	concluded := ended.GetTurnEnded().GetConcluded()
 	if concluded == nil {
 		t.Fatalf("e2e: turn %s did not end Concluded: %v", turn.GetValue(), ended.GetTurnEnded())

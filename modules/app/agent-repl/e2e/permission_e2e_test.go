@@ -154,7 +154,7 @@ func pmExpectNoTurnEndedPush(t *testing.T, ctx context.Context, stream *harness.
 			if !ok {
 				return
 			}
-			if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
+			if endsTurn(turn)(row) {
 				t.Fatalf("%s: got a turn-ended push %v, want none", what, row.GetTurnEnded())
 			}
 		case <-deadline.Done():
