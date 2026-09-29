@@ -69,6 +69,44 @@
     (should (equal got-detail "boom"))
     (should-not (gethash "op-3" agent-repl-mutation-progress--pending))))
 
+;;;; ---- The shared step dispatch ----
+
+(ert-deftest agent-repl-test-mp-dispatch-steps-words-a-failure-through-its-mapper ()
+  "A failed step reaches on-failed as the list its FAILURE mapper answers."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (let (got)
+    (agent-repl-mutation-progress-register "op-s" :on-failed (lambda (&rest args) (setq got args)))
+    ;; Act.
+    (agent-repl-mutation-progress--dispatch-steps
+     "op-s" (gethash "op-s" agent-repl-mutation-progress--pending)
+     '(:arm :failed :value (:internal "no"))
+     (lambda (value) (list :internal (plist-get value :internal))))
+    ;; Assert.
+    (should (equal got '(:internal "no")))
+    (should-not (gethash "op-s" agent-repl-mutation-progress--pending))))
+
+(ert-deftest agent-repl-test-mp-dispatch-steps-records-an-unknown-step ()
+  "A step the dispatch does not know is recorded at ERROR, and the op stays."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (agent-repl-mutation-progress-register "op-u" :on-stage #'ignore)
+  (let (errors)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act.
+      (agent-repl-mutation-progress--dispatch-steps
+       "op-u" (gethash "op-u" agent-repl-mutation-progress--pending)
+       '(:arm :sideways :value nil) #'agent-repl-mutation-progress--arm-failure))
+    ;; Assert.
+    (should (string-match-p "elisp.mutation-progress.unknown-step op-id=op-u" (car errors)))
+    (should (gethash "op-u" agent-repl-mutation-progress--pending))))
+
+(ert-deftest agent-repl-test-mp-arm-failure-splits-an-arm-shaped-value ()
+  "An arm-shaped failed value becomes the (ARM VALUE) on-failed takes."
+  (should (equal (agent-repl-mutation-progress--arm-failure '(:arm :internal :value "x"))
+                 '(:internal "x"))))
+
 (ert-deftest agent-repl-test-mp-unknown-op-is-dropped-quietly ()
   "A progress event for an op this Emacs never registered is dropped, not erred."
   ;; Arrange: nothing registered.
