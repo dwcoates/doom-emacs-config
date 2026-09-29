@@ -3155,3 +3155,135 @@ func TestMalformedWaitingTurnsInTheFactsAreErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestASessionThisDaemonIsEndingOpensNoWatch pins that no watch is opened on
+// a shim this daemon has asked to stand down: the shim is closing every stream
+// it serves, so the open could only race its exit and come back EOF.
+//
+// MEASURED, deploy 2026-09-29T17:15:29: a WatchAgent opened after the
+// successor's bounce stood a stale shim down was refused with "incomplete
+// envelope: unexpected EOF" and recorded as two ERRORs.
+func TestASessionThisDaemonIsEndingOpensNoWatch(t *testing.T) {
+	tests := []struct {
+		name string
+		// decide asks the watcher to open one watch.
+		decide func(w *watcher)
+		// noOpen asserts the fake was asked for no open of that verb.
+		noOpen func(t *testing.T, c *fakeClient)
+	}{
+		{
+			name:   "WatchAgent",
+			decide: func(w *watcher) { w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")}) },
+			noOpen: func(t *testing.T, c *fakeClient) { c.noAgentOpen(t) },
+		},
+		{
+			name:   "WatchBash",
+			decide: func(w *watcher) { w.openShellStreamLocked(&shellWatch{work: workID("w-1")}) },
+			noOpen: func(t *testing.T, c *fakeClient) { c.noBashOpen(t) },
+		},
+		{
+			name:   "WatchSession",
+			decide: func(w *watcher) { w.openSessionLocked() },
+			noOpen: func(t *testing.T, c *fakeClient) { c.noSessionOpen(t) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.client.StandDown()
+
+			// Act.
+			h.w.mu.Lock()
+			tt.decide(h.w)
+			h.w.mu.Unlock()
+
+			// Assert.
+			tt.noOpen(t, h.client)
+			if !h.hasRecord("debug", "daemon.sessionwatcher.open_skipped") {
+				t.Fatalf("the skipped open logged %v, want a debug open_skipped record", h.log.Records())
+			}
+		})
+	}
+}
+
+// TestAnOpenInFlightWhenTheStandDownIsAskedEndsWithTheTeardown pins the other
+// half: an open decided BEFORE the stand-down was asked is still in flight
+// when the shim closes on its way out. Its failure is classified by the
+// stand-down latch, as an installed stream's end is, so it neither severs the
+// link nor raises a refusal fault.
+func TestAnOpenInFlightWhenTheStandDownIsAskedEndsWithTheTeardown(t *testing.T) {
+	eof := refusedOpenError("WatchAgent", connect.CodeInvalidArgument, "protocol error: incomplete envelope: unexpected EOF")
+	tests := []struct {
+		name      string
+		procedure string
+		// arrange gates the verb's next open and sets the error it answers.
+		arrange func(c *fakeClient) *openGate
+		decide  func(w *watcher)
+		// operation is the record a severing or refusal would carry.
+		operation string
+	}{
+		{
+			name:      "a WatchAgent the shim answers with EOF",
+			procedure: "WatchAgent",
+			arrange: func(c *fakeClient) *openGate {
+				c.setAgentErr(eof)
+				return c.gate(&c.agentGate, false)
+			},
+			decide:    func(w *watcher) { w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")}) },
+			operation: "daemon.sessionwatcher.watch_agent",
+		},
+		{
+			name:      "a WatchAgent the shim refuses as not_found",
+			procedure: "WatchAgent",
+			arrange: func(c *fakeClient) *openGate {
+				c.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such book"))
+				return c.gate(&c.agentGate, false)
+			},
+			decide:    func(w *watcher) { w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")}) },
+			operation: "daemon.sessionwatcher.watch_agent",
+		},
+		{
+			name:      "a WatchBash the shim answers with EOF",
+			procedure: "WatchBash",
+			arrange: func(c *fakeClient) *openGate {
+				c.setBashErr(eof)
+				return c.gate(&c.bashGate, false)
+			},
+			decide:    func(w *watcher) { w.openShellStreamLocked(&shellWatch{work: workID("w-1")}) },
+			operation: "daemon.sessionwatcher.watch_bash",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the open is decided and held by the shim.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			g := tt.arrange(h.client)
+			h.w.mu.Lock()
+			tt.decide(h.w)
+			h.w.mu.Unlock()
+			g.awaitBlocked(t)
+
+			// Act: the stand-down is asked, then the shim fails the open on
+			// its way out.
+			h.client.StandDown()
+			close(g.release)
+			h.client.awaitRefusedOpen(t, tt.procedure)
+
+			// Assert.
+			if !h.hasRecord("debug", "daemon.sessionwatcher.open_ended") {
+				t.Fatalf("the failed open logged %v, want a debug open_ended record", h.log.Records())
+			}
+			for _, level := range []string{"error", "warn", "info"} {
+				if h.hasRecord(level, tt.operation) {
+					t.Fatalf("the failed open inside the teardown was recorded at %s as %s", level, tt.operation)
+				}
+			}
+			if !h.w.Connected() {
+				t.Fatal("an open that failed inside an ordered teardown severed the link")
+			}
+		})
+	}
+}
