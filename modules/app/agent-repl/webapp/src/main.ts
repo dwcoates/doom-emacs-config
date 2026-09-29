@@ -276,7 +276,11 @@ export async function boot(): Promise<void> {
     // prompt-wave-driver.ts for the whole account.
     createPromptWaveDriver().start();
 
-    const footer = mountFooter(shell.footer, ctx, { selectDetachedWork: (id) => feed.selectDetachedWork(id) });
+    const footer = mountFooter(shell.footer, ctx, {
+      selectDetachedWork: (id) => feed.selectDetachedWork(id),
+      paints: feed.paints,
+      followingTail: feed.followingTail,
+    });
     // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
     // composer is closed exactly when the footer's status arm is blue (the
     // workspace is unusable: disconnected, closing, blocked) or purple (a
