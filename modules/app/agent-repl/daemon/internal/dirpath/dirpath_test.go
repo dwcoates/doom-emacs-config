@@ -108,6 +108,27 @@ func TestCanonicalRefusesAnEmptyDirectory(t *testing.T) {
 	}
 }
 
+// TestCanonicalRefusesARelativeDirectory pins that a relative directory is
+// never resolved against the working directory: `~/.config/doom` became
+// `/Users/me/~/.config/doom` that way (2026-09-28).
+func TestCanonicalRefusesARelativeDirectory(t *testing.T) {
+	for _, dir := range []string{"~/.config/doom", "repo", "./repo", "../repo"} {
+		t.Run(dir, func(t *testing.T) {
+			// Arrange: a volume on which the working directory's guess WOULD
+			// resolve, so only the refusal can pass.
+			r := chesscomVolume().resolver()
+
+			// Act.
+			got, err := r.canonical(dir)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), "is not an absolute directory") {
+				t.Fatalf("canonical(%q) = (%q, %v), want a refusal", dir, got, err)
+			}
+		})
+	}
+}
+
 func TestCanonicalResolvesASymlinkOnTheRealVolume(t *testing.T) {
 	// Arrange
 	base := t.TempDir()
