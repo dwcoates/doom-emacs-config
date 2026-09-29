@@ -316,14 +316,11 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 // what happens on completion is the repository's own directive, appended to the
 // commission by the daemon and carried out by the agent.
 func (i *ingress) applyCreate(ctx context.Context, entry Entry) error {
-	spec := workspace.CreateSpec{
-		RepoDir:       entry.GitRoot,
-		InitialPrompt: entry.Prompt,
-		Name:          entry.Name,
-		BaseRef:       entry.BaseRef,
-		OneShot:       entry.OneShot,
+	spec, err := i.createSpec(ctx, entry)
+	if err != nil {
+		return err
 	}
-	_, err := i.deps.Verbs.Create(ctx, spec)
+	_, err = i.deps.Verbs.Create(ctx, spec)
 	return err
 }
 
