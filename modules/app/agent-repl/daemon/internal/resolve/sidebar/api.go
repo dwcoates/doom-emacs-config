@@ -112,6 +112,27 @@ type Resolver interface {
 
 // New builds the roster resolver. colors supplies the roster_status and
 // merge_glyphs tables, which the resolver asserts its arms against.
-func New(colors vocab.RenderColors, log dlog.Surfaces) (Resolver, error) {
-	return newResolver(colors, log)
+func New(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (Resolver, error) {
+	r, err := newResolver(colors, log)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r, nil
+}
+
+// ResultSink is told every change of a workspace's last turn result: how its
+// last turn ended and whether the user has seen it, nil when none stands. The
+// daemon keeps it durable (wsm.SetResult), so a daemon that did not see the
+// turn end draws the row as it stood. It is called off the resolver's lock.
+type ResultSink func(ws ids.WorkspaceID, result *wsm.TurnResult)
+
+// Option adjusts the resolver.
+type Option func(*resolver)
+
+// WithResultSink installs the sink the resolver tells its result changes.
+func WithResultSink(sink ResultSink) Option {
+	return func(r *resolver) { r.results = sink }
 }

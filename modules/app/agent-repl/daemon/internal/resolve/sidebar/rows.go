@@ -26,7 +26,14 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	session := rc.sessions[rec.ID]
 	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
 
+	if s.restoreResult(rec) {
+		rowLog.Info("daemon.sidebar.result_restored",
+			"the roster drew the last turn result from the durable record, as it stood before this daemon", dlog.Context{
+				"end": s.restoredEnd, "result": s.result.String(),
+			})
+	}
 	armName := statusArm(s, rec, session, rowLog)
+	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 	// status, so the row's display mode cannot lag its status by a push and a
 	// read result is never drawn as unread (`wsState.viewedOn`).
@@ -175,4 +182,22 @@ func firstLine(text string) string {
 		}
 	}
 	return text
+}
+
+// noteResult queues a report of the workspace's last turn result when it
+// differs from what the durable record holds, for mutate to hand the result
+// sink once the lock is released.
+func (r *resolver) noteResult(ws ids.WorkspaceID, s *wsState, log dlog.Logger) {
+	snapshot := s.resultSnapshot()
+	if sameResult(snapshot, s.persisted) {
+		return
+	}
+	s.persisted = snapshot
+	if r.results == nil {
+		return
+	}
+	log.Debug("daemon.sidebar.result_changed", "the last turn result changed; the durable record is told", dlog.Context{
+		"result": s.result.String(), "end": s.turnEndArm(),
+	})
+	r.pendingResults = append(r.pendingResults, resultChange{ws: ws, result: snapshot})
 }
