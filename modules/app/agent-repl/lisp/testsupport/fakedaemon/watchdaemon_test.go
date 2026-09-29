@@ -19,7 +19,15 @@ func TestWatchDaemonRefusesAnIncompleteClient(t *testing.T) {
 	}{
 		{name: "no client named", req: &agentreplv1.WatchDaemonRequest{}},
 		{name: "emacs with an empty build", req: &agentreplv1.WatchDaemonRequest{
-			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{}},
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocused()}},
+		}},
+		{name: "emacs with no focus", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build"}},
+		}},
+		{name: "emacs with a focus naming no arm", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{
+				ElispBuild: "fixture-elisp-build", Focus: &agentreplv1.EditorFocus{},
+			}},
 		}},
 	}
 	for _, tc := range cases {
@@ -102,5 +110,35 @@ func TestDefaultDeployIsASuccess(t *testing.T) {
 	// Assert.
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("Deploy default is %v, want success", resp.Msg)
+	}
+}
+
+func TestReportEditorFocusAnswersSuccessByDefault(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.ReportEditorFocus(context.Background(), connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{
+		Focus: unfocused(),
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
+	}
+}
+
+func TestReportEditorFocusRefusesAnUnsetFocus(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	_, err := client.ReportEditorFocus(context.Background(), connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("ReportEditorFocus error = %v, want invalid_argument", err)
 	}
 }

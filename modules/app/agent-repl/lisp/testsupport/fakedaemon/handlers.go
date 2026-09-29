@@ -203,6 +203,10 @@ func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Reque
 	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
 }
 
+func (s *fakeServer) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
+	return handleUnary[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](ctx, s, "ReportEditorFocus", req.Msg)
+}
+
 func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest], stream *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
 	s.record(ctx, "WatchHostWorkspace", req.Msg)
 	if err := validateRequest(req.Msg); err != nil {

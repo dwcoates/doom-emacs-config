@@ -313,10 +313,9 @@ func TestControlBodyRefusesAnUnknownField(t *testing.T) {
 	}
 }
 
-func TestQuestionAskedNotificationKindIsAccepted(t *testing.T) {
-	// Arrange: landing 3 added HostNotificationKind.question_asked{header},
-	// and the fake validates every push against the REGENERATED types — so
-	// this also proves the bindings in the tree carry the new arm.
+func TestNotificationClickedPushIsAccepted(t *testing.T) {
+	// Arrange: the fake validates every push against the REGENERATED types,
+	// so this also proves the bindings in the tree carry the click arm.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
 	stream, cancel := openHost(t, server, client, "ws-a")
@@ -324,38 +323,30 @@ func TestQuestionAskedNotificationKindIsAccepted(t *testing.T) {
 
 	// Act.
 	status, body := controlPost(t, baseURL, "/_fake/push",
-		`{"stream":"host","workspace_id":"ws-a","message":{"notification":{`+
-			`"text":"A question is waiting","atMs":"1735689600000",`+
-			`"kind":{"questionAsked":{"header":"Which approach?"}}}}}`)
+		`{"stream":"host","workspace_id":"ws-a","message":{"notificationClicked":{}}}`)
 	if status != http.StatusOK {
 		t.Fatalf("/_fake/push = %d %s", status, body)
 	}
 
-	// Assert: the arm survives the round trip with its header intact.
+	// Assert.
 	if !stream.Receive() {
 		t.Fatalf("stream ended without the push: %v", stream.Err())
 	}
-	got := stream.Msg().GetNotification().GetKind().GetQuestionAsked()
-	if got == nil {
-		t.Fatalf("received %v, want the question_asked arm", stream.Msg())
-	}
-	if got.GetHeader() != "Which approach?" {
-		t.Fatalf("header = %q, want the pushed value", got.GetHeader())
+	if stream.Msg().GetNotificationClicked() == nil {
+		t.Fatalf("received %v, want the notification_clicked arm", stream.Msg())
 	}
 }
 
-func TestQuestionAskedRequiresItsHeader(t *testing.T) {
+func TestTheRetiredNotificationPushIsRefused(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
 
-	// Act: `headers' is not a field of HostNotificationQuestionAsked.
+	// Act: `notification' is a reserved field of WatchHostWorkspaceResponse.
 	status, body := controlPost(t, baseURL, "/_fake/push",
-		`{"stream":"host","workspace_id":"ws-a","message":{"notification":{`+
-			`"text":"x","atMs":"1","kind":{"questionAsked":{"headers":"y"}}}}}`)
+		`{"stream":"host","workspace_id":"ws-a","message":{"notification":{"text":"x"}}}`)
 
-	// Assert: the push is validated against the generated type, so a
-	// misspelled field on a NEW arm is caught exactly like an old one.
-	if status != http.StatusBadRequest || !strings.Contains(body, "headers") {
-		t.Fatalf("misspelled question_asked field = %d %s, want 400 naming it", status, body)
+	// Assert.
+	if status != http.StatusBadRequest || !strings.Contains(body, "notification") {
+		t.Fatalf("retired notification push = %d %s, want 400 naming it", status, body)
 	}
 }

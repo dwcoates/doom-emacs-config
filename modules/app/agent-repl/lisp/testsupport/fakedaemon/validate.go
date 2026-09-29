@@ -25,9 +25,10 @@ func validateRequest(msg proto.Message) error {
 }
 
 // validateWatchDaemonRequest is the WatchDaemon refusal the real daemon
-// performs: the generic invariant (the `client` oneof must name an arm), and
-// an Emacs arm's REQUIRED elisp_build, which protojson cannot distinguish from
-// "nobody filled this in" because an empty string is the proto3 default.
+// performs: the generic invariant (the `client` oneof must name an arm, and an
+// Emacs arm's REQUIRED `focus` must be set with its arm named), and an Emacs
+// arm's REQUIRED elisp_build, which protojson cannot distinguish from "nobody
+// filled this in" because an empty string is the proto3 default.
 func validateWatchDaemonRequest(req *v1.WatchDaemonRequest) error {
 	if err := validateRequest(req); err != nil {
 		return err
