@@ -883,7 +883,7 @@ record MEANS.
 - `tail.Context` carries, beyond the counters and the hold protocol: `FileID`,
   `MainAgentID`, `AgentID`, `SpawnBackgrounded`, `MetaPath`, `ConfigRoots`,
   `SessionID`, `Path`, `Kind`, `TaskID`, `SpoolDir`, `RunID`, `RunActivityID`.
-- FOUR OPTIONAL interfaces, adopted by adding a method. All take plain function
+- The OPTIONAL interfaces, adopted by adding a method. All take plain function
   and string arguments so neither package imports the other:
   - `SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool))` —
     the converter reports each spawn it reads off a tool result; the reader
@@ -906,6 +906,21 @@ record MEANS.
     and the demoted watcher is never rebuilt — so the reader knows the run, and
     a stop that reached a handler unable to spell one left the run open in every
     consumer (realtest 3, 21 runs in one pass).
+  - `SetShellConclusionObserver(func(taskID, status string, atMs int64))` — the
+    converter reports the vendor's task notification for a DETACHED SHELL run.
+    THE SIDECAR IS THE ONLY WRITER OF A SHELL RUN'S TERMINAL (owner ruling,
+    2026-09-29; the shim writes the run's start and never its terminal): the
+    reader holds the notice until the run's spool has been read to its END
+    after it, so a terminator the vendor wrote before notifying always wins,
+    and only a spool that carried none ends on the notification. A run whose
+    spool will never be read (none named, or none on disk) ends on the notice
+    at once. Every ending clears the LOST tracker, which is the one "already
+    ended" latch every later ending (a stop, a notice, a sweep) checks.
+  - `NotifiedTerminal(taskID, run, ownerAgentID, status string, settledAtMs int64) []*storev1.StoreEntry`
+    — the spool handler spells that notice as the run's terminal, carrying the
+    bytes read so far: `completed`/`failed` → completed with no termination
+    (the notification states no exit status), anything else → interrupted with
+    no cause.
   - `SetTerminalObserver(func(path, run string))` — the converter reports that
     it READ a run's own terminal off the file, and the reader untracks the run
     so the staleness sweep can never restate a finished run as LOST. The report
@@ -1651,7 +1666,10 @@ and each shape goes where the stream plane sends the same fact:
   on a CLI writing no origin) SETTLES the backgrounded agent spawn it names on
   `activity:<tool_use_id>`, the frame and key the shim writes from
   `task_notification` (`tasknotification.go`) — only for a launch THIS stream
-  read; anything else it says is `user/task_notification`;
+  read; a DETACHED SHELL run's notification is `user/task_notification`
+  residue whose fact travels to the reader (`SetShellConclusionObserver`),
+  which ends the run from its spool; anything else it says is
+  `user/task_notification`;
 - any other non-`human` `origin.kind` is `unknown` residue.
 
 A PROMPT COMMAND (a custom command's envelope: no caveat, not in the table) is

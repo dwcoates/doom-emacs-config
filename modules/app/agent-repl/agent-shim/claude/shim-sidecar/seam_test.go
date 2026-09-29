@@ -302,6 +302,18 @@ type conclusionCapable struct{ concluded func(taskID string) }
 func (c *conclusionCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
 func (c *conclusionCapable) SetTaskConclusionObserver(fn func(taskID string))         { c.concluded = fn }
 
+// shellConclusionCapable is a transcript converter that reports shell conclusions.
+type shellConclusionCapable struct {
+	concluded func(taskID, status string, atMs int64)
+}
+
+func (c *shellConclusionCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry {
+	return nil
+}
+func (c *shellConclusionCapable) SetShellConclusionObserver(fn func(taskID, status string, atMs int64)) {
+	c.concluded = fn
+}
+
 // TestPlumbTranscriptFactStatesEachOutcome pins the one helper every
 // transcript-fact plumbing goes through: an adopted fact is recorded verbose, a
 // spool declining one is ordinary (verbose), and a transcript declining one is
@@ -370,6 +382,14 @@ func TestTranscriptFactPlumbingSharesOneShape(t *testing.T) {
 			func(s *sidecar, kind tail.Kind, built tail.Handler) { s.plumbTaskConclusions(kind, built, s.log) },
 			func() (tail.Handler, func() bool) {
 				c := &conclusionCapable{}
+				return c, func() bool { return c.concluded != nil }
+			},
+		},
+		{
+			"shell conclusions", "plumb-shell-conclusion",
+			func(s *sidecar, kind tail.Kind, built tail.Handler) { s.plumbShellConclusions(kind, built, s.log) },
+			func() (tail.Handler, func() bool) {
+				c := &shellConclusionCapable{}
 				return c, func() bool { return c.concluded != nil }
 			},
 		},

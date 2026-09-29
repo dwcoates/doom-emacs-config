@@ -26,6 +26,7 @@ type seamObserver struct {
 	spawned         func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
 	stopped         func(taskID string)
 	concluded       func(taskID string)
+	shellConcluded  func(taskID, status string, atMs int64)
 	workspaceDir    string
 	workspaceID     string
 	claudeSessionID string
@@ -59,6 +60,27 @@ func (o *seamObserver) TaskConcluded(taskID string) {
 		return
 	}
 	o.concluded(taskID)
+}
+
+// ShellConcluded implements convert.Observer.
+func (o *seamObserver) ShellConcluded(taskID, status string, atMs int64) {
+	if o.shellConcluded == nil {
+		return
+	}
+	o.shellConcluded(taskID, status, atMs)
+}
+
+// SetShellConclusionObserver adopts the reader's shell-conclusion sink: the
+// vendor's notification that a detached shell run ended travels to the reader,
+// which writes the run's one terminal from the run's spool.
+func (h *SessionTranscriptHandler) SetShellConclusionObserver(fn func(taskID, status string, atMs int64)) {
+	h.obs.shellConcluded = fn
+}
+
+// SetShellConclusionObserver adopts the reader's shell-conclusion sink. A
+// sidechain's detached shells end on the same terms as a session's.
+func (h *AgentTranscriptHandler) SetShellConclusionObserver(fn func(taskID, status string, atMs int64)) {
+	h.obs.shellConcluded = fn
 }
 
 // SetTaskConclusionObserver adopts the reader's run-concluded sink: a
@@ -114,6 +136,15 @@ func (h *AgentTranscriptHandler) SetTaskStopObserver(fn func(taskID string)) {
 // handler asked for a cancelled terminal spells.
 func (h *ShellOutputHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
 	return h.Cancelled(taskID, run, ownerAgentID, settledAtMs)
+}
+
+// NotifiedTerminal spells the vendor's task notification as the run's
+// terminal, carrying the output THIS handler has read off the spool. The reader
+// asks for it only once the spool has been read to its end after the
+// notification and carried no terminator. The frame is RunOutput's, for the
+// reason CancelTerminal's is.
+func (h *ShellOutputHandler) NotifiedTerminal(taskID, run, ownerAgentID, status string, settledAtMs int64) []*storev1.StoreEntry {
+	return h.Notified(taskID, run, ownerAgentID, status, settledAtMs)
 }
 
 // SetTerminalObserver adopts the reader's terminal-read sink.

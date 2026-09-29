@@ -14,10 +14,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -47,6 +51,10 @@ type Observer interface {
 	// that means: the terminal is minted by the spool's handler, which is the
 	// only thing holding the output the terminal owes.
 	TaskStopped(taskID string)
+
+	// ShellConcluded reports the vendor's task notification for a detached
+	// shell run. The reader writes the run's one terminal from its spool.
+	ShellConcluded(taskID, status string, atMs int64)
 }
 
 var _ Observer = (*sidecar)(nil)
@@ -88,6 +96,9 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string
 	// (a restart catching up on a large transcript) no further batch ever
 	// arrived and the run stayed open forever. Now the launch itself closes it.
 	s.applyStop(taskID)
+	// A SPAWN IS ALSO WHAT A HELD NOTIFICATION WAITS FOR when the run's spool
+	// will never be read: the terminal is keyed on the spawning call.
+	s.applyNotifiedUnread(taskID)
 }
 
 // TaskStopped implements Observer for the sidecar.
@@ -157,6 +168,14 @@ func (s *sidecar) applyStop(taskID string) {
 		return
 	}
 	bound := s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID, Path: path})
+	// A RUN GETS ONE TERMINAL. A run whose spool terminator, notification or
+	// LOST conclusion already ended it is no longer tracked, and a stop read
+	// afterwards would overwrite how it actually ended.
+	if !s.tracker.Open(path) {
+		delete(s.stopped, taskID)
+		bound.LogVerbose("the stopped task's run had already ended; the stop adds nothing to its terminal")
+		return
+	}
 	// A STOP WAITING ON ITS SPAWNING CALL IS HELD, NOT REFUSED. The terminal is
 	// keyed on the spawning call's activity id and nothing else, so a stop read
 	// before the launch line naming that call has no unit to settle yet — which
@@ -466,4 +485,126 @@ func (o *ownerIndex) mainAgentFor(target discover.Target) string {
 		return obs.mainAgentID
 	}
 	return ""
+}
+
+// shellNotice is the vendor's task notification for a detached shell run: its
+// status as the vendor wrote it, and the instant it was written.
+type shellNotice struct {
+	status string
+	atMs   int64
+}
+
+// ShellConcluded records the vendor's task notification for a detached shell
+// run (see convert.Observer). The run's ONE terminal is written by this reader:
+// from the spool's own terminator when the spool carries one, and from this
+// notice once the spool has been read to its end without one.
+//
+// IT IS REMEMBERED, NOT APPLIED, while the spool is being read: bytes the
+// vendor wrote before notifying may still be past the cursor, and a terminator
+// among them is the evidence that wins. pollOnce applies it at the spool's end.
+func (s *sidecar) ShellConcluded(taskID, status string, atMs int64) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "shell-concluded", Level: "error"}).
+			Log("shell run conclusion reported with no task id; it names no run and cannot be attributed")
+		return
+	}
+	s.notified[taskID] = shellNotice{status: status, atMs: atMs}
+	s.log.With(logging.Context{Operation: "shell-concluded", TaskID: taskID}).
+		Log("the shell run's task notification was recorded (status=%s); its terminal is written once its spool is read to its end", status)
+	s.applyNotifiedUnread(taskID)
+}
+
+// applyNotified writes a notified shell run's terminal once its WATCHED spool
+// at PATH has been read to its end, unless the run already ended.
+func (s *sidecar) applyNotified(taskID, path string) {
+	notice, pending := s.notified[taskID]
+	if !pending {
+		return
+	}
+	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID, Path: path})
+	if !s.tracker.Open(path) {
+		// The spool's terminator (or a stop, or a LOST conclusion) already
+		// ended the run: that is its one terminal, and the notification's
+		// weaker account adds nothing.
+		delete(s.notified, taskID)
+		bound.LogVerbose("the run had already ended when its spool was read to the end; the notification adds nothing to its terminal")
+		return
+	}
+	run := s.owners.activityFor(taskID)
+	if run == "" {
+		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it")
+		return
+	}
+	sink, ok := s.watchers[path].tailer.Handler().(notifiedTerminalSink)
+	if !ok {
+		bound.With(logging.Context{Level: "error"}).Log(
+			"no terminal for the notified run: the %s converter implements no NotifiedTerminal, so the run stays open until it is concluded LOST",
+			s.watchers[path].target.Kind)
+		return
+	}
+	s.commitNotified(taskID, path, run, sink.NotifiedTerminal(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs))
+}
+
+// applyNotifiedUnread writes a notified shell run's terminal when the run's
+// spool will NEVER be read — the vendor named none, or named one that does not
+// exist, and it wrote the spool before notifying if it wrote one at all. A run
+// whose spool is being read, or exists to be claimed, ends at that spool's end
+// instead (applyNotified).
+func (s *sidecar) applyNotifiedUnread(taskID string) {
+	notice, pending := s.notified[taskID]
+	if !pending {
+		return
+	}
+	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID})
+	if path, watched := s.spoolForTask(taskID); watched {
+		bound.With(logging.Context{Path: path}).LogVerbose("the notified run's spool is being read; its terminal is written at the spool's end")
+		return
+	}
+	run := s.owners.activityFor(taskID)
+	if run == "" {
+		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it")
+		return
+	}
+	if output := s.owners.outputFor(taskID); output != "" {
+		_, err := os.Stat(output)
+		if err == nil {
+			bound.With(logging.Context{Path: output}).LogVerbose("the notified run's spool exists and is claimed on the next rescan; its terminal is written at the spool's end")
+			return
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			bound.With(logging.Context{Path: output, Level: "warn"}).Log(
+				"whether the notified run's spool exists could not be established; the notification is held and checked again when the spool is claimed: %v", err)
+			return
+		}
+	}
+	entries := handler.NewRunOutput(s.log).Notified(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs)
+	s.commitNotified(taskID, "", run, entries)
+}
+
+// commitNotified writes a notified terminal and, once it is DURABLE, retires
+// the pending notice and stops tracking the run's spool (PATH, empty when the
+// run has none). A refused write keeps the notice pending, for applyStop's
+// reason: a notice forgotten against a write that never committed is a run
+// that is neither ended nor waiting to be.
+func (s *sidecar) commitNotified(taskID, path, run string, entries []*storev1.StoreEntry) {
+	if len(entries) == 0 {
+		// Notified already stated why it refused.
+		return
+	}
+	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID, Path: path, ActivityID: run})
+	skips, err := s.storeWrite("notified terminal", &storev1.EntryBatch{Entries: entries})
+	if err != nil {
+		if s.interrupted(err) {
+			return
+		}
+		bound.With(logging.Context{Level: "error"}).Log(
+			"the notified terminal was not committed; the notification stays pending and is applied again at the spool's next end: %v", err)
+		return
+	}
+	s.warnUnexpectedSkips("notified terminal", skips)
+	delete(s.notified, taskID)
+	if path != "" {
+		s.tracker.Settle(path)
+	}
+	bound.Log("notified terminal minted and committed entries=%d", len(entries))
 }

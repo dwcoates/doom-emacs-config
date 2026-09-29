@@ -226,6 +226,42 @@ func (c *Converter) BashCancelled(at Attribution, run, output string, omitted ui
 	})
 }
 
+// BashNotified converts the vendor's TASK NOTIFICATION for a detached shell run
+// into the run's terminal, when the run's spool — read to its end after the
+// notification arrived — carried no terminator of its own.
+//
+// THE NOTIFICATION STATES NO EXIT STATUS, so nothing here invents one:
+//   - `completed` and `failed` are both a command that RAN. A non-zero exit is
+//     the command's own verdict on itself, never a failure of the call, so both
+//     are the COMPLETED arm with the termination left UNSET.
+//   - anything else (`stopped`, a status the vendor adds later) ended the run
+//     somehow: INTERRUPTED with no cause, the honest weakest statement. A
+//     person's stop has its own evidence (a TaskStop result, BashCancelled) and
+//     reaches the run through that path first.
+//
+// The output is what the spool's reader holds, or `not_observed` when no byte
+// of the spool was ever read.
+func (c *Converter) BashNotified(at Attribution, run, output string, omitted uint64, status string, settledAtMs int64, observed bool) *storev1.StoreEntry {
+	success := &conversationv1.AgentBashSuccess{SettledAt: settledAt(settledAtMs, 0)}
+	arm := "interrupted"
+	if status == taskStatusCompleted || status == taskStatusFailed {
+		arm = "completed"
+		success.Outcome = &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: terminalOutput(output, omitted, observed),
+		}}
+	} else {
+		success.Outcome = &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: terminalOutput(output, omitted, observed),
+		}}
+	}
+	c.log.With(at.ctxFor("bash-notified")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
+		Log("the vendor's task notification (status=%q) ended the detached run and its spool carried no terminator; it resolves %s with no exit status, output_observed=%t carrying %d byte(s)",
+			status, arm, observed, len(output))
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: success},
+	})
+}
+
 // DetachedLostArm spells a reader's LOST vocabulary as the wire's arm.
 //
 // AN UNRECOGNIZED REASON IS A PROGRAMMING ERROR, NOT A DEFAULT. The three arms

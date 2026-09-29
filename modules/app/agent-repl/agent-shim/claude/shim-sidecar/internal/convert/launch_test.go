@@ -39,6 +39,8 @@ func (o spawnObserver) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath s
 
 func (o spawnObserver) TaskConcluded(string) {}
 
+func (o spawnObserver) ShellConcluded(string, string, int64) {}
+
 func (o spawnObserver) TaskStopped(string) {}
 
 // TestALaunchReportsWhetherTheSpawnWasBackgrounded states the rule over the

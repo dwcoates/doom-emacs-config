@@ -63,6 +63,20 @@ type taskConclusionSink interface {
 	SetTaskConclusionObserver(func(taskID string))
 }
 
+// shellConclusionSink is implemented by a handler whose converter reports the
+// vendor's task notification for a DETACHED SHELL run. The transcript states
+// the fact; the reader writes the run's one terminal from the run's spool.
+type shellConclusionSink interface {
+	SetShellConclusionObserver(func(taskID, status string, atMs int64))
+}
+
+// notifiedTerminalSink is implemented by a handler that can spell the vendor's
+// task notification as a shell run's terminal. Only the spool's reader can: the
+// terminal owes the output the run produced, and those bytes exist nowhere else.
+type notifiedTerminalSink interface {
+	NotifiedTerminal(taskID, run, ownerAgentID, status string, settledAtMs int64) []*storev1.StoreEntry
+}
+
 // terminalReadSink is implemented by a handler that can tell the reader it READ
 // a detached run's own terminal off the file (a spool's EXIT marker). The reader
 // is what turns that into "this run can no longer be concluded LOST".
@@ -100,6 +114,7 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 	s.plumbObserver(kind, built, handlerLog)
 	s.plumbTaskStops(kind, built, handlerLog)
 	s.plumbTaskConclusions(kind, built, handlerLog)
+	s.plumbShellConclusions(kind, built, handlerLog)
 	s.plumbTerminals(kind, built, handlerLog)
 	return built
 }
@@ -178,6 +193,29 @@ func (s *sidecar) plumbTaskConclusions(kind tail.Kind, built tail.Handler, log *
 		sink, ok := built.(taskConclusionSink)
 		if ok {
 			sink.SetTaskConclusionObserver(s.TaskConcluded)
+		}
+		return ok
+	}, log)
+}
+
+// plumbShellConclusions hands the converter the reader's shell-conclusion
+// callback.
+//
+// THE SIDECAR IS THE ONLY WRITER OF A SHELL RUN'S TERMINAL, and a run whose
+// spool carries no terminator ends only on its notification — so a transcript
+// converter that reports none leaves such a run open until a silence window
+// concludes it LOST, a defect.
+func (s *sidecar) plumbShellConclusions(kind tail.Kind, built tail.Handler, log *logging.Bound) {
+	s.plumbTranscriptFact(kind, transcriptFact{
+		operation:   "plumb-shell-conclusion",
+		noun:        "shell conclusions",
+		onlyWhy:     "only a transcript carries a shell run's task notification",
+		method:      "SetShellConclusionObserver",
+		consequence: "a shell run whose spool carries no terminator stays open until it is concluded LOST",
+	}, func() bool {
+		sink, ok := built.(shellConclusionSink)
+		if ok {
+			sink.SetShellConclusionObserver(s.ShellConcluded)
 		}
 		return ok
 	}, log)

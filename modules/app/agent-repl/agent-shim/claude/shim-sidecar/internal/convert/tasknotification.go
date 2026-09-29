@@ -22,8 +22,11 @@ package convert
 //
 // Everything else a notification can say is DOCUMENTED RESIDUE
 // (`user/task_notification`), never a prompt:
-//   - a SHELL run's end: its terminal is the spool's own `EXIT=` line, which
-//     carries the output this record does not (detached.go);
+//   - a SHELL run's end: the record itself is residue, and the FACT travels to
+//     the reader (Observer.ShellConcluded), which reads the run's spool to its
+//     end and writes the run's ONE terminal — the spool's own terminator when it
+//     carries one, this notification's status when it does not. The sidecar is
+//     the only writer of a shell run's terminal, so nothing can land after it;
 //   - a run whose launch this stream never read (a different file's, or one
 //     behind this reader's cursor);
 //   - a notification naming no spawning call (a monitor's event, the vendor's
@@ -88,7 +91,8 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 	spawn, launched := c.spawns[notice.toolUseID]
 	if !launched {
 		if _, shell := c.spawnedRuns[notice.taskID]; shell {
-			return residue("the run is a detached shell, whose terminal is its spool's EXIT line carrying the output this record lacks")
+			c.observer.ShellConcluded(notice.taskID, notice.status, env.timestampMs)
+			return residue("the run is a detached shell; the reader ends it from its spool, read to the end, or from this notification's status")
 		}
 		return residue("no backgrounded agent launch on this stream opened the call it names; its launch was written elsewhere or lies behind this reader's cursor")
 	}

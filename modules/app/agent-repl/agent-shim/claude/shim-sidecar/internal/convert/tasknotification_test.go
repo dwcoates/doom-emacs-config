@@ -7,6 +7,7 @@ package convert
 import (
 	"strings"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -194,6 +195,53 @@ func TestShellRunNotificationIsWithheldForItsSpoolToSettle(t *testing.T) {
 	last := entries[len(entries)-1]
 	if vendorKindOf(last) != kindUserTaskNotification {
 		t.Fatalf("kind = %q, want %s", vendorKindOf(last), kindUserTaskNotification)
+	}
+}
+
+func TestShellRunNotificationReportsItsConclusionToTheReader(t *testing.T) {
+	// Arrange. The reader writes a shell run's one terminal, so the fact has to
+	// reach it with the status and the instant the vendor wrote.
+	c := newTestConverter(t)
+	var stopped, concluded []string
+	var shells []shellConclusion
+	c.SetObserver(recordingObserver{stopped: &stopped, concluded: &concluded, shells: &shells})
+	call := assistantWith("a0", "msg_0", ts1, toolCall("toolu_sh", "Bash", `{"command":"sleep 1","run_in_background":true}`))
+	launched := toolResultLine("u0", "toolu_sh", ts1, `[{"type":"text","text":"started"}]`,
+		`{"stdout":"","backgroundTaskId":"bsh1","outputFile":"/tmp/bsh1.output"}`)
+	notice := `{"type":"user","uuid":"n1","isSidechain":false,"entrypoint":"cli","origin":{"kind":"task-notification"},"timestamp":"` + ts2 +
+		`","message":{"role":"user","content":"<task-notification>\n<task-id>bsh1</task-id>\n<tool-use-id>toolu_sh</tool-use-id>\n<status>failed</status>\n</task-notification>"}}`
+	wantAt, err := time.Parse(time.RFC3339Nano, ts2)
+	if err != nil {
+		t.Fatalf("parse ts2: %v", err)
+	}
+
+	// Act.
+	convertLines(t, c, call, launched, notice)
+
+	// Assert.
+	want := []shellConclusion{{taskID: "bsh1", status: "failed", atMs: wantAt.UnixMilli()}}
+	if len(shells) != 1 || shells[0] != want[0] {
+		t.Fatalf("shell conclusions = %v, want %v", shells, want)
+	}
+	if len(concluded) != 0 {
+		t.Fatalf("agent conclusions = %v, want none: a shell run is not an agent run", concluded)
+	}
+}
+
+func TestAgentRunNotificationReportsNoShellConclusion(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	var stopped, concluded []string
+	var shells []shellConclusion
+	c.SetObserver(recordingObserver{stopped: &stopped, concluded: &concluded, shells: &shells})
+	lines := append(agentLaunchLines(), corpusLine(t, notificationFile))
+
+	// Act.
+	convertLines(t, c, lines...)
+
+	// Assert.
+	if len(shells) != 0 {
+		t.Fatalf("shell conclusions = %v, want none for an agent run", shells)
 	}
 }
 
