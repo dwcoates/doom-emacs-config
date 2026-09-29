@@ -769,12 +769,18 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
   `StartTurn` that lands while a keep-alive holds the slot waits for the
   keep-alive to leave it — its own result, an abandoned beat, the query's
   death, a teardown — and then opens its turn as on an idle session
-  (`TurnEngine.waitOutKeepalive`). Nothing of the turn exists during the wait,
+  (`TurnEngine.waitOutShimTurn`). Nothing of the turn exists during the wait,
   so its two exits lose and double nothing: the bound
   (`KEEPALIVE_YIELD_BUDGET_MS`) refuses `vendor_refused` at ERROR, and the
-  caller's abort signal refuses it undelivered at INFO. The keep-alive is never
-  interrupted, because the SDK declares no attribution for an interrupted
-  send's result. `setOpen` is the one writer of the slot, so every way a
+  caller's abort signal refuses it undelivered at INFO. THE WAITING PROMPT
+  INTERRUPTS THE KEEP-ALIVE FIRST (2026-09-29, `TurnEngine.interruptKeepalive`):
+  the prompt rolls the vendor context back past it anyway, so letting it run
+  only makes the user wait, and a keep-alive whose API call hangs (an outage on
+  2026-09-28) held every prompt behind it for whole budgets. The slot is NOT
+  released by the interrupt: the keep-alive leaves on its own result, which the
+  send ledger attributes to the keep-alive's own send by id, so nothing of it
+  can land on the prompt's turn. A refused interrupt is ERROR and the prompt
+  waits within the bound as before. `setOpen` is the one writer of the slot, so every way a
   keep-alive leaves releases the wait, ends the keep-alive's rewind watch (so a
   later anchor refusal cannot re-deliver the keep-alive under the real turn),
   and the keep-alive's rewind debt is counted before `closeTurn` first awaits.
