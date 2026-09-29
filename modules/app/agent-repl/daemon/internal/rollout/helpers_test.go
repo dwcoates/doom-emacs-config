@@ -897,15 +897,18 @@ func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 	}()
 }
 
-// unregister drops a workspace's registered bounce unrun, as the queue does
-// when the shim it would replace departs with nothing left to replace.
-func (r *fakeRegistry) unregister(ws ids.WorkspaceID) {
+// endUnrun drops a workspace's registered bounce unrun and tells its Done
+// why: bounce.ErrUnregistered, as the queue does when the shim it would
+// replace departs with nothing left to replace, or bounce.ErrHandedAcross, as
+// a dispatch-quiet move does when it carries the replacement to the daemon it
+// took the workspace to.
+func (r *fakeRegistry) endUnrun(ws ids.WorkspaceID, why error) {
 	r.mu.Lock()
 	req, ok := r.pending[ws]
 	delete(r.pending, ws)
 	r.mu.Unlock()
 	if ok && req.Done != nil {
-		req.Done(bounce.ErrUnregistered)
+		req.Done(why)
 	}
 }
 
