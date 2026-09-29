@@ -73,6 +73,7 @@ import { HELD_ENTRY_SELECTOR } from "../tray/tray.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
+import { createPaintReporter, type PaintWatch } from "./painted.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
@@ -104,6 +105,13 @@ export interface FeedHandle extends Handle {
    * so the tail is where the card is.
    */
   readonly promptHeld: (turn: string) => void;
+  /** When the root feed's rows were painted (`feed/painted.ts`). */
+  readonly paints: PaintWatch;
+  /**
+   * Whether the reader is following the live tail. A reader scrolled back
+   * through history is not looking where a new row paints.
+   */
+  readonly followingTail: () => boolean;
 }
 
 /** Mount the root feed into HOST. */
@@ -184,6 +192,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (section.classList.contains(BUBBLE_SCROLL_CLASS)) centerExpandedBubble(section);
   });
 
+  const paints = createPaintReporter((id) => root.paintedAt(id));
   const root: FeedController = createFeedController({
     ctx,
     host,
@@ -195,6 +204,9 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     bodyContext: feedContext(),
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
+    onPainted: (ids, at) => {
+      paints.report(ids, at);
+    },
   });
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends an active reply selection
@@ -205,7 +217,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
 
   openWatch();
 
-  return { selectDetachedWork, promptHeld, dispose };
+  return {
+    selectDetachedWork,
+    promptHeld,
+    paints: paints.watch,
+    followingTail: () => tail?.isFollowing() ?? false,
+    dispose,
+  };
 
   /**
    * A HELD PROMPT JUST LANDED PUTS THE READER AT THE TAIL (owner ruling,

@@ -182,6 +182,11 @@ export interface FeedControllerOptions {
    * `IntersectionObserver`.
    */
   overscan?: Overscan;
+  /**
+   * Told the rows that were PAINTED: in the document with a frame painted
+   * after their insert (`feed/painted.ts`). Root feed only; absent elsewhere.
+   */
+  onPainted?: (ids: readonly string[], at: number) => void;
 }
 
 /** One row, as the controller holds it. */
@@ -198,6 +203,8 @@ interface RowState {
   bubble: BubbleLike | null;
   /** Whether the message changed since the body was last drawn. */
   dirty: boolean;
+  /** When the row was painted (`Date.now()` ms), null until it has been. */
+  paintedAt: number | null;
 }
 
 export interface FeedController extends Handle {
@@ -223,6 +230,8 @@ export interface FeedController extends Handle {
   bubbles(): readonly BubbleLike[];
   /** The view a body renderer draws from. */
   view(): SubfeedView;
+  /** When row ID was painted, or null when it is not held or not painted yet. */
+  paintedAt(id: string): number | null;
 }
 
 
@@ -250,6 +259,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // what decides whether a pushed row sorting before every held row is drawn
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
+  // ROWS INSERTED AND NOT YET PAINTED, and whether a paint check is scheduled
+  // (`schedulePaintCheck`). Only a feed told `onPainted` keeps them.
+  const unpainted = new Set<string>();
+  let paintCheckPending = false;
 
   opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
 
@@ -284,6 +297,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     findRowElement,
     bubbles,
     view: () => subfeed,
+    paintedAt: (id) => states.get(id)?.paintedAt ?? null,
     dispose,
   };
 
@@ -334,6 +348,44 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     markLatestPrompt();
     stopEndedTurns();
     followTail();
+    schedulePaintCheck();
+  }
+
+  /**
+   * Check the unpainted rows once the next frame has been painted: the second
+   * `requestAnimationFrame` runs after the first frame drawn with them. A row
+   * not in the document yet stays unpainted for the next check.
+   */
+  function schedulePaintCheck(): void {
+    if (opts.onPainted === undefined || unpainted.size === 0 || paintCheckPending) return;
+    paintCheckPending = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(checkPainted);
+    });
+  }
+
+  function checkPainted(): void {
+    paintCheckPending = false;
+    if (disposed || opts.onPainted === undefined) return;
+    const at = Date.now();
+    const painted: string[] = [];
+    for (const id of [...unpainted]) {
+      const state = states.get(id);
+      if (state === undefined) {
+        unpainted.delete(id);
+        continue;
+      }
+      if (!state.element.isConnected) continue;
+      state.paintedAt = at;
+      unpainted.delete(id);
+      painted.push(id);
+    }
+    if (painted.length === 0) return;
+    log.debug(`${painted.length.toString()} feed rows were painted`, {
+      operation: "feed.rows-painted",
+      context: { feed: feedName(), rows: painted.length, last: painted[painted.length - 1] },
+    });
+    opts.onPainted(painted, at);
   }
 
   /**
@@ -1003,8 +1055,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const element = document.createElement("article");
     element.className = "feed-item";
     applyRowAttributes(element, row);
-    const state: RowState = { row, key, element, body: null, bubble: null, dirty: true };
+    const state: RowState = { row, key, element, body: null, bubble: null, dirty: true, paintedAt: null };
     states.set(id, state);
+    if (opts.onPainted !== undefined) unpainted.add(id);
     order.splice(index, 0, id);
     // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
     // reader reaches it. Every row born on this feed passes here exactly once,

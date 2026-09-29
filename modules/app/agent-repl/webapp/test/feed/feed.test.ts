@@ -1455,3 +1455,41 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     expect(m.h.calls.selectResponse).toEqual([]);
   });
 });
+
+describe("mountFeed: the root feed's paints", () => {
+  it("reports a pushed root row as painted once the frame drawn with it was painted", async () => {
+    // Arrange: frames run only when the test runs them.
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+    const runFrame = () => {
+      for (const cb of frames.splice(0)) cb(0);
+    };
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const { feed } = mount(harness({ channels }));
+    await settle();
+    const seen: string[] = [];
+    feed.paints.onPainted((id) => seen.push(id));
+
+    // Act
+    channel.push(push(responseRow("r1")));
+    await settle();
+    runFrame();
+    expect(seen).not.toContain("r1");
+    runFrame();
+
+    // Assert
+    expect(seen).toContain("r1");
+    expect(feed.paints.paintedAt("r1")).not.toBeNull();
+    feed.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("answers that a mount with no scroll box follows no tail", () => {
+    const host = document.createElement("div");
+    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers() });
+    expect(feed.followingTail()).toBe(false);
+    feed.dispose();
+  });
+});
