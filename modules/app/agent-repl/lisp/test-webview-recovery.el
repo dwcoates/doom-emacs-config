@@ -756,3 +756,47 @@ bounds the loop so a chain that never settles fails as a hang would."
                 agent-repl-roster-update-functions)))
 
 ;;; test-webview-recovery.el ends here
+
+;;;; ---- The workspace the user stands on ----
+
+(ert-deftest agent-repl-test-wr-the-current-workspace-is-created-first ()
+  "The workspace the user stands on jumps the queue: its panels wait on it."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta" "current")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "current"))
+                ((symbol-function 'agent-repl--panels-on-view-created) #'ignore))
+        (setq agent-repl--webview-precreate-queue (list "alpha" "beta" "current"))
+        ;; Act
+        (agent-repl--webview-precreate-tick)
+        ;; Assert
+        (should (equal agent-repl-test-wr--mounted '("current")))
+        (should (equal agent-repl--webview-precreate-queue '("alpha" "beta")))))))
+
+(ert-deftest agent-repl-test-wr-the-queue-drains-in-order-without-the-current-workspace ()
+  "With the current workspace not queued, the queue drains in order."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+                ((symbol-function 'agent-repl--panels-on-view-created) #'ignore))
+        (setq agent-repl--webview-precreate-queue (list "alpha" "beta"))
+        ;; Act
+        (agent-repl--webview-precreate-tick)
+        ;; Assert
+        (should (equal agent-repl-test-wr--mounted '("alpha")))))))
+
+(ert-deftest agent-repl-test-wr-a-created-view-is-announced-to-the-panels ()
+  "Each created view is handed to the panels, whose restore may await it."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha")
+      (let (announced)
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
+                  ((symbol-function 'agent-repl--panels-on-view-created)
+                   (lambda (ws) (push ws announced))))
+          (setq agent-repl--webview-precreate-queue (list "alpha"))
+          ;; Act
+          (agent-repl--webview-precreate-tick)
+          ;; Assert
+          (should (equal announced '("alpha"))))))))
