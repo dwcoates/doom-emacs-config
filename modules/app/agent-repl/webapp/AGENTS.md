@@ -517,6 +517,12 @@ hand any more:
 - **SEMANTIC COLOR** comes from `proto/vocab/render-colors.json` and
   `paint-classes.json` through `src/vocab.ts`, and every consumer asserts its
   table row for row against the file, so a new arm without a color fails loudly.
+- **THE FOOTER'S ACTIVITY SECTION IS ALWAYS EXACTLY ONE LINE.** A line longer
+  than the cell is truncated with an ellipsis (`.pfooter-cell` never wraps,
+  `.pfooter-grow` hides its overflow behind `text-overflow: ellipsis`), and the
+  footer, barring its expanded section, never grows in height for it. The
+  cell's hover title carries the whole line. `test/styles.test.ts` pins both
+  declarations.
 - **CSS** is appended in a delimited section headed
   `/* ---- <component> (<file>) ---- */`. Existing classes are never renamed or
   restyled.

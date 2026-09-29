@@ -1241,6 +1241,35 @@ agents chip opens and closes it rather than dropping a roster of its own, and
 the per-bubble agent strips inside feed cards are a different thing entirely:
 they are scoped to one bubble's own call.
 
+## A QUIET STRETCH always has a footer activity line
+
+A **quiet stretch** is the period between the moment a feed item has FULLY
+LANDED and the moment the next feed item FIRST SURFACES — partially: it need not
+have landed. Through it the footer's one activity line says what just landed
+and what happens next (`✅ Bash finished — handling result...`,
+`❌ Read failed — handling failure...`; never the word "agent"), and the line
+CLEARS THE MOMENT THE NEXT ITEM SURFACES: a streaming response clears it at its
+first fragment, not when it finishes.
+
+- **Where it is legal.** Under the `working` status and under `background`.
+  While a turn is in flight the status is `working` even if detached work runs,
+  and only the MAIN agent's items count: detached work is not surfaced on the
+  line then.
+- **What outranks it.** A standing fault, a deploy's update, a compaction's
+  progress, a running hook and a retry. A notification outranks it only until
+  the next feed item lands, which replaces the notification with the line.
+- **The invariant.** While a delivered turn runs, either a feed item is
+  surfacing or running, or the line stands. The daemon records a quiet stretch
+  with no line at ERROR (`daemon.footer.quiet_stretch_without_line`).
+- **Who owns it.** The daemon's footer resolver composes it
+  (`daemon/internal/resolve/footer/quietstretch.go`) as
+  `frontend.v1.FooterStatusActivityQuietStretch`; the webapp draws it verbatim.
+
+The same file names the `working` status's step: what the main agent is doing
+now, sync only — `thinking` (an inference call, no call running), `executing`,
+`reading`, `writing`, `searching`, `fetching`, `delegating`, beside
+`submitting`, `clearing` and `compacting`.
+
 ## "Fresh input" is the one token quantity every spend figure counts
 
 **Fresh input** is every input token of an API response that was NOT a cache
