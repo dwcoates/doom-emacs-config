@@ -539,3 +539,39 @@ func TestTheFaultSinkRetractsAClosedFaultFromEmacs(t *testing.T) {
 		t.Fatalf("loud faults = %v, want the empty set published", got)
 	}
 }
+
+// resolvePaths answers the ONE kernel-lock directory the fleet, the boot
+// sequence and the reaper are all handed: sessionlock.ResolveRunDir's.
+func TestResolvePathsTakesTheLockDirectoryFromSessionlock(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		want    string
+		wantErr string
+	}{
+		{name: "the override is the lock directory", env: "/tmp/locks", want: "/tmp/locks"},
+		{name: "a relative override refuses the boot", env: "locks", wantErr: "resolve the kernel-lock directory"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv("AGENT_REPL_CHECKOUT", "/repo/modules/app/agent-repl")
+			t.Setenv(envSelfRepo, "")
+			t.Setenv(sessionlock.RunDirEnv, tt.env)
+
+			// Act.
+			got, err := resolvePaths(options{})
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("resolvePaths() = (%+v, %v), want an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.RunDir != tt.want {
+				t.Fatalf("resolvePaths() = (RunDir %q, %v), want %q", got.RunDir, err, tt.want)
+			}
+		})
+	}
+}

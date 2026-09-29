@@ -47,7 +47,7 @@ func resolveWorktreeReapEvery(value string) (time.Duration, error) {
 
 // buildWorktreeReaper builds the landed-worktree reaper from its three knobs.
 // A refused knob is a BOOT FATAL, recorded here.
-func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, live func() []ids.WorkspaceID, log dlog.Logger) (*worktreereap.Reaper, error) {
+func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, live func() []ids.WorkspaceID, runDir string, log dlog.Logger) (*worktreereap.Reaper, error) {
 	var (
 		idle, start, every time.Duration
 		err                error
@@ -66,7 +66,7 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		Registry:     registry,
 		LiveSessions: live,
 		Clock:        clock.System{},
-		LockPath:     filepath.Join(lockDir(), worktreeReapLockName),
+		LockPath:     filepath.Join(runDir, worktreeReapLockName),
 		IdleAfter:    idle,
 		StartDelay:   start,
 		Every:        every,
