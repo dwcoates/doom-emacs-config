@@ -183,6 +183,12 @@ type Resolver interface {
 	// feedid the daemon does not deem selectable — the submit path refuses it
 	// rather than delivering an empty reply prefix.
 	ResponseMarkdown(ws ids.WorkspaceID, id *frontendv1.FeedId) (string, bool)
+	// TakeTurnEnding answers what a turn's LIVE end said — the final answer's
+	// prose, the errored ending's line, the terminal's failure class — and
+	// forgets it. False is a turn whose ending was not drawn live here. The
+	// prompt queue's turn end is the one caller: it hands the ending to the
+	// desktop banner.
+	TakeTurnEnding(ws ids.WorkspaceID, turn ids.TurnID) (TurnEnding, bool)
 
 	// MintSubFeedHead records a bubble row's sub-feed so pages opened on it
 	// resolve their breadcrumbs. The resolver calls it for subagent bubbles

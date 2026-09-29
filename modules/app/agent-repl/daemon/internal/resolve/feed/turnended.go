@@ -113,6 +113,12 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		r.upsert(s, at, row, true)
 	}
 
+	// A LIVE ENDING IS FILED FOR THE DESKTOP BANNER — unless a confirmed /clear
+	// suppressed it, whose divider is the whole of its outcome.
+	if !suppress {
+		r.fileLiveEnding(s, *turn, ended, failure)
+	}
+
 	// THE TURN'S PROMPTS STOP WORKING ON THIS EDGE, whether or not the terminal
 	// row itself was drawn (a confirmed /clear suppresses it, and still ended).
 	r.settleTurnPrompts(s, *turn)
