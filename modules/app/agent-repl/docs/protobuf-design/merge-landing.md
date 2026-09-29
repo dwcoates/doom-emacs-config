@@ -23,6 +23,28 @@ conflicts along the way; run the gate on the rebased branch, repairing
 failures on the branch; and only once every suite passes, merge the rebased
 branch into the target as a non-fast-forward merge.
 
+## Core design principles
+
+- **A merge reaches no client until the turn that asked for it has ended
+  (owner, 2026-09-29).** The daemon reports nothing about a workspace's merge
+  (bubble, footer status, substatus, activity) while the turn that requested
+  it is still in flight, and this holds structurally, not by a surface
+  choosing to hide something.
+  - Consequences for the contract: no client-facing arm, substatus or
+    activity names a "waiting for the turn to end" state; the first merge
+    fact any client sees is already past the turn's end. The first footer
+    substatus of a merge is "enqueued" (or later).
+  - Reopens: today's `frontend.v1.FooterSubStatusMergingEnqueuing` ("the merge
+    is being enqueued"), which exists only because the merge was reported
+    before admission.
+  - Does not claim: anything about when the daemon RECORDS the request. The
+    request is still recorded when it arrives, so it survives a daemon exit
+    before the turn ends; only its admission and every report of it wait.
+- **Footer text is for a human user (owner, 2026-09-29).** Every substatus
+  and activity line is short plain words a non-developer reads, never an
+  identifier spelling and never an internal mechanism (webapp `AGENTS.md`,
+  "FOOTER TEXT IS FOR A HUMAN USER").
+
 ## Context (step 1)
 
 - **The daemon does not verify a PR-merged assertion (owner ruling, 2026-09-29).**
