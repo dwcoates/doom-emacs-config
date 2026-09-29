@@ -63,6 +63,7 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
+	args = append(args, pinnedArgs...)
 
 	env := os.Environ()
 	if req.ConfigDir != "" {
@@ -98,6 +99,41 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 		}
 	}
 	return Response{Text: text, Model: req.Model, Duration: elapsed}, nil
+}
+
+// pinnedSettings is the settings every headless run carries on `--settings`,
+// so the user's INTERACTIVE configuration under CLAUDE_CONFIG_DIR can never
+// change what a headless call does. MEASURED 2026-09-29: a user settings file
+// with `alwaysThinkingEnabled: true` made the three-word naming call think for
+// 313-516 output tokens and 5-6.7s end to end, with a tail past the 15s naming
+// bound; pinned off it answers in ~19 tokens and ~2.4s.
+type pinnedSettings struct {
+	AlwaysThinkingEnabled bool `json:"alwaysThinkingEnabled"`
+}
+
+// pinnedArgs is THE ONE definition of the flags every headless run carries,
+// whatever its Request says:
+//
+//   - `--settings` with thinking off (pinnedSettings), because a daemon
+//     question is a short classification, not a reasoning task;
+//   - `--strict-mcp-config` with no `--mcp-config`, so no MCP server (the
+//     user's claude.ai connectors included) is started for a one-shot answer;
+//   - `--safe-mode`, which the CLI documents as disabling "CLAUDE.md, skills,
+//     installed plugins, hooks, MCP servers, custom commands and agents" while
+//     "Auth, model selection, built-in tools and plugins, and permissions work
+//     normally" -- so the per-account OAuth the call bills through survives.
+//     `--bare` is NOT usable: it refuses OAuth.
+var pinnedArgs = mustPinnedArgs()
+
+// mustPinnedArgs composes pinnedArgs. The settings are a fixed Go value, so a
+// marshal failure is a broken build, and it fails the process at start rather
+// than letting a headless call run on the user's settings.
+func mustPinnedArgs() []string {
+	settings, err := json.Marshal(pinnedSettings{AlwaysThinkingEnabled: false})
+	if err != nil {
+		panic(fmt.Sprintf("headless: the pinned settings did not marshal: %v", err))
+	}
+	return []string{"--settings", string(settings), "--strict-mcp-config", "--safe-mode"}
 }
 
 // envelope is the slice of the CLI's `--output-format json` answer this
