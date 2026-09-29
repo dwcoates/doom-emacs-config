@@ -160,11 +160,19 @@ with the failure ARM and VALUE).  Each is optional."
   "Drop any pending callbacks for OP-ID."
   (remhash op-id agent-repl-mutation-progress--pending))
 
-(defun agent-repl-mutation-progress--dispatch-create (op-id callbacks create)
-  "Dispatch one decoded WorkspaceCreateProgress CREATE for OP-ID to CALLBACKS.
-CREATE is `(:arm STEP :value V)'."
-  (let ((step (plist-get create :arm))
-        (value (plist-get create :value)))
+(defun agent-repl-mutation-progress--arm-failure (value)
+  "Return a failed VALUE shaped `(:arm ARM :value V)' as the list (ARM V)."
+  (list (plist-get value :arm) (plist-get value :value)))
+
+(defun agent-repl-mutation-progress--dispatch-steps (op-id callbacks progress failure)
+  "Dispatch one decoded step-shaped PROGRESS for OP-ID to CALLBACKS.
+PROGRESS is `(:arm STEP :value V)': an `entered_stage', or a terminal
+`succeeded' or `failed'.  FAILURE maps a failed value to the list (ARM
+VALUE) `:on-failed' is called with, since each mutation words its failure
+in its own message.  Every mutation whose progress ends on this channel
+dispatches through here, so the terminal rule below holds for all of them."
+  (let ((step (plist-get progress :arm))
+        (value (plist-get progress :value)))
     (pcase step
       (:entered-stage
        (when-let ((fn (plist-get callbacks :on-stage)))
@@ -178,11 +186,17 @@ CREATE is `(:arm STEP :value V)'."
       (:failed
        (agent-repl-mutation-progress-forget op-id)
        (when-let ((fn (plist-get callbacks :on-failed)))
-         (funcall fn (plist-get value :arm) (plist-get value :value))))
+         (apply fn (funcall failure value))))
       (_
        (agent-repl--error agent-repl-mutation-progress--scope
                           "elisp.mutation-progress.unknown-step op-id=%s step=%S"
                           op-id step)))))
+
+(defun agent-repl-mutation-progress--dispatch-create (op-id callbacks create)
+  "Dispatch one decoded WorkspaceCreateProgress CREATE for OP-ID to CALLBACKS.
+CREATE is `(:arm STEP :value V)'."
+  (agent-repl-mutation-progress--dispatch-steps
+   op-id callbacks create #'agent-repl-mutation-progress--arm-failure))
 
 (defun agent-repl-mutation-progress--dispatch-open (op-id callbacks open)
   "Dispatch one decoded WorkspaceOpenProgress OPEN for OP-ID to CALLBACKS.
