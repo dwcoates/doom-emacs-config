@@ -46,6 +46,13 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 				// daemon ended the session itself, or the workspace is closed,
 				// or a newer shim already runs the installed build.
 				c.log.Info(opBounce, "the shim bounce was unregistered: the shim it would replace is gone and nothing is left to replace", fields)
+			case errors.Is(err, bounce.ErrHandedAcross):
+				// AN OUTCOME, NOT A FAILURE: a dispatch-quiet move carried the
+				// replacement to the daemon the workspace moved to, which runs
+				// it after its adoption. MEASURED, deploy 2026-09-29T17:15:28:
+				// recorded here at ERROR for every busy workspace a deploy
+				// handed over.
+				c.log.Info(opBounce, "the shim bounce was handed across: the daemon the workspace moved to runs the replacement after its adoption", fields)
 			case err != nil:
 				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", withCause(fields, err))
 			default:
