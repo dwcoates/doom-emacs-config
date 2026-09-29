@@ -205,8 +205,8 @@ export function createLocalFailures(): LocalFailures {
       entries.set(arm, { arm, headline: ARM_HEADLINE[arm], evidence: evidenceRows(kind) });
       changed();
       // THE CHIP LISTS IT; THE FOOTER HEARS ABOUT IT TOO (the audit's N2 row
-      // 11: a footer left saying `thinking` under a dead link kept saying
-      // `thinking`). Only the two arms that describe THIS page's link to the
+      // 11: a footer left saying `working` under a dead link kept saying
+      // `working`). Only the two arms that describe THIS page's link to the
       // daemon are relayed -- a boot failure, a departed workspace or a stale
       // bundle is not a link this footer can speak for. AFTER the entry is
       // filed and drawn, so the relay can never cost the chip its row: the

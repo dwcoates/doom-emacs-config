@@ -1351,7 +1351,18 @@ export const emptyFeedPage = (): FeedPage => feedPageSuccess([]);
 /** Every status arm, with every legal substatus arm under it. */
 export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   idle: ["ready", "done", "turnFailed"],
-  thinking: ["submitting", "thinking", "clearing", "compacting"],
+  working: [
+    "submitting",
+    "thinking",
+    "clearing",
+    "compacting",
+    "executing",
+    "reading",
+    "writing",
+    "searching",
+    "fetching",
+    "delegating",
+  ],
   waiting: ["wakeup", "permission", "question", "coldGate", "interrupting"],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
@@ -1443,6 +1454,7 @@ export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
   blockedOnUser: { detail: "answer the permission card" },
   coldGateCost: { text: "184k tokens uncached" },
   compaction: { text: "compacting · summarizing 412 messages" },
+  quietStretch: { text: "✅ Bash finished — handling result..." },
   interrupting: { text: "stopping 3 agents" },
   mergingCommit: { sha: "abc1234", subject: "port the transport" },
   authenticating: { line: "opening the login terminal" },
@@ -1453,11 +1465,12 @@ export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
 /** Which activity kinds each status arm legally carries. */
 export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   idle: ["notification", "contextBudget", "rateLimited", "queryDied"],
-  thinking: [
+  working: [
     "hook",
     "retrying",
     "contextInjected",
     "compaction",
+    "quietStretch",
     "notification",
     "contextBudget",
     "rateLimited",
@@ -1475,7 +1488,7 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   ],
   interrupted: ["notification", "rateLimited", "contextBudget"],
   merging: ["mergingCommit", "notification", "rateLimited", "contextBudget"],
-  background: ["notification", "rateLimited", "contextBudget"],
+  background: ["notification", "rateLimited", "contextBudget", "quietStretch"],
   blocked: ["authenticating", "rateLimited", "notification", "queryDied", "contextBudget"],
   disconnected: ["notification", "rateLimited", "contextBudget"],
   closing: ["closeBlocked", "notification", "rateLimited", "contextBudget"],
@@ -1560,7 +1573,7 @@ export function footerView(init?: FooterInit): FooterView {
   const chips = init?.chips ?? { agents: true, tasks: true, shells: true, monitors: true, crons: true };
   return create(FooterViewSchema, {
     strip: {
-      status: { status: footerStatus(init?.status ?? "thinking", init) },
+      status: { status: footerStatus(init?.status ?? "working", init) },
       // `turn_started_at_ms` is optional: an EXPLICIT undefined is the
       // no-turn-is-live case, which a `??` default would quietly overwrite.
       clock: {

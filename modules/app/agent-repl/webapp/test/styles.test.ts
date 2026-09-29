@@ -3155,3 +3155,25 @@ describe("the turquoise token", () => {
     expect(rules.at(-1)?.declarations).toContain("color: var(--turquoise)");
   });
 });
+
+/*
+ * THE FOOTER'S ACTIVITY SECTION IS ALWAYS EXACTLY ONE LINE (webapp AGENTS.md):
+ * a line longer than the cell is truncated with an ellipsis, and the strip
+ * never grows in height for it.
+ */
+describe("the footer's one-line activity section", () => {
+  it("never wraps a strip cell's text", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".pfooter-cell") ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*nowrap\s*;/);
+  });
+
+  it("truncates the activity cell with an ellipsis", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".pfooter-grow") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow:\s*hidden\s*;/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis\s*;/);
+  });
+});

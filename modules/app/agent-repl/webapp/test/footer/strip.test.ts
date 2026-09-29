@@ -141,7 +141,7 @@ describe("drawFooterStatus: every arm the contract declares", () => {
   });
 
   it("paints the status cell with the vocabulary's tone class", () => {
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
     expect(row.querySelector(".footer-status")?.classList.contains("tone-red")).toBe(true);
   });
 
@@ -186,9 +186,14 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["interrupted", "byUser", "by user"],
     ["interrupted", "hostShutdown", "host shutdown"],
     ["blocked", "queryDied", "query died"],
-    // The running step of a thinking turn reads "working", never "thinking
-    // · thinking".
-    ["thinking", "thinking", "working"],
+    // Every step of a working turn reads as its own name.
+    ["working", "thinking", "thinking"],
+    ["working", "executing", "executing"],
+    ["working", "reading", "reading"],
+    ["working", "writing", "writing"],
+    ["working", "searching", "searching"],
+    ["working", "fetching", "fetching"],
+    ["working", "delegating", "delegating"],
   ])("spells %s/%s as '%s'", (statusCase, subCase, expected) => {
     expect(subStatusWords(statusCase, subCase)).toBe(expected);
   });
@@ -326,9 +331,9 @@ describe("drawFooterStatusActivity", () => {
     ["waiting", "permission", "blockedOnUser", { detail: "requires action" }, "requires action"],
     ["waiting", "coldGate", "coldGateCost", { text: "182k to re-read" }, "182k to re-read"],
     ["waiting", "interrupting", "interrupting", { text: "stopping the turn…" }, "stopping the turn…"],
-    ["thinking", "thinking", "hook", { name: "protect-master" }, "protect-master"],
-    ["thinking", "compacting", "compaction", { text: "compacting · 412 of 900 messages" }, "compacting · 412 of 900 messages"],
-    ["thinking", "thinking", "contextInjected", { text: "webapp/CLAUDE.md" }, "webapp/CLAUDE.md"],
+    ["working", "thinking", "hook", { name: "protect-master" }, "protect-master"],
+    ["working", "compacting", "compaction", { text: "compacting · 412 of 900 messages" }, "compacting · 412 of 900 messages"],
+    ["working", "thinking", "contextInjected", { text: "webapp/CLAUDE.md" }, "webapp/CLAUDE.md"],
     ["blocked", "auth", "authenticating", { line: "open the login" }, "open the login"],
     ["blocked", "queryDied", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
     // A dead query is a FAILED TURN (owner ruling, 2026-09-28): its line
@@ -338,7 +343,9 @@ describe("drawFooterStatusActivity", () => {
     ["disconnected", "startFailed", "fault", { kind: "resume_failed", detail: "the shim refused" }, "resume failed \u00b7 the shim refused"],
     ["blocked", "daemonImpaired", "fault", { kind: "prompts_dir_missing", detail: "no ~/.claude/prompts" }, "prompts dir missing \u00b7 no ~/.claude/prompts"],
     ["idle", null, "fault", { kind: "conversation_abandoned", detail: "no transcript on disk" }, "conversation abandoned \u00b7 no transcript on disk"],
-    ["thinking", "thinking", "fault", { kind: "classifier_failed", detail: "the run died" }, "classifier failed \u00b7 the run died"],
+    ["working", "thinking", "fault", { kind: "classifier_failed", detail: "the run died" }, "classifier failed \u00b7 the run died"],
+    ["working", "thinking", "quietStretch", { text: "✅ Bash finished — handling result..." }, "✅ Bash finished — handling result..."],
+    ["background", null, "quietStretch", { text: "✅ Subagent finished" }, "✅ Subagent finished"],
   ])("draws the %s/%s %s line verbatim", (statusCase, subCase, kindCase, value, expected) => {
     const { row } = drawStrip({
       status: withActivity(statusCase, subCase, kindCase, value),
@@ -394,21 +401,21 @@ describe("drawFooterStatusActivity", () => {
 
   it("names the activity's kind on the cell", () => {
     const { row } = drawStrip({
-      status: withActivity("thinking", "thinking", "hook", { name: "fmt" }),
+      status: withActivity("working", "thinking", "hook", { name: "fmt" }),
     });
     expect(row.querySelector(".footer-activity")?.getAttribute("data-arm")).toBe("hook");
   });
 
   it("colours the retry ATTEMPT as its own datum", () => {
     const { row } = drawStrip({
-      status: withActivity("thinking", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
+      status: withActivity("working", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
     });
     expect(row.querySelector('[data-datum="attempt"]')?.textContent).toBe("#2");
   });
 
   it("draws the retry's status verbatim beside the attempt", () => {
     const { row } = drawStrip({
-      status: withActivity("thinking", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
+      status: withActivity("working", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
     });
     expect(row.querySelector(".footer-activity-retrying")?.textContent).toContain("· overloaded");
   });
@@ -1053,7 +1060,7 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
 
   it.each([
     ["idle", null],
-    ["thinking", "thinking"],
+    ["working", "thinking"],
     ["waiting", "permission"],
     ["interrupted", "byUser"],
     ["merging", "merge"],
@@ -1164,10 +1171,10 @@ describe("the footer status word's letter wave", () => {
   );
 
   it("waves from the submitting phase, not only once the first activity lands", () => {
-    // Arrange / Act — the daemon publishes `thinking · submitting` the moment a
+    // Arrange / Act — the daemon publishes `working · submitting` the moment a
     // prompt is accepted (before the shim answers), so the wave must be present
-    // under the submitting substatus, not deferred to `thinking · thinking`.
-    const { row } = drawStrip({ status: withSubStatus("thinking", "submitting") });
+    // under the submitting substatus, not deferred to `working · thinking`.
+    const { row } = drawStrip({ status: withSubStatus("working", "submitting") });
 
     // Assert — the word is split into waving letters straight away.
     expect(letterDelays(row).length).toBeGreaterThan(0);
@@ -1176,15 +1183,15 @@ describe("the footer status word's letter wave", () => {
 
   it("leaves the split word reading exactly as the arm's own word", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert
-    expect(row.querySelector(".footer-status")?.textContent).toBe("thinking");
+    expect(row.querySelector(".footer-status")?.textContent).toBe("working");
   });
 
   it("marks the waving cell as a progress status", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert
     expect(row.querySelector(".footer-status")?.getAttribute("data-status-wave")).toBe("progress");
@@ -1192,7 +1199,7 @@ describe("the footer status word's letter wave", () => {
 
   it("advances the delay by one letter offset from each letter to the next", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert — modular, because the cycle can wrap between any two letters.
     const delays = letterDelays(row);
@@ -1205,11 +1212,11 @@ describe("the footer status word's letter wave", () => {
 
   it("continues the phase across a redraw rather than restarting at zero", () => {
     // Arrange
-    const before = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+    const before = letterDelays(drawStrip({ status: withSubStatus("working", "thinking") }).row);
     vi.setSystemTime(NOW + 900);
 
     // Act
-    const after = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+    const after = letterDelays(drawStrip({ status: withSubStatus("working", "thinking") }).row);
 
     // Assert — the redraw is 900ms further along the same cycle, not back at 0.
     expect(after[0]).toBe(((before[0] ?? 0) + 900) % STATUS_WAVE_CYCLE_MS);
@@ -1217,11 +1224,11 @@ describe("the footer status word's letter wave", () => {
 
   it("keeps the redrawn wave off the cycle's start, so no push reads as a stutter", () => {
     // Arrange
-    drawStrip({ status: withSubStatus("thinking", "thinking") });
+    drawStrip({ status: withSubStatus("working", "thinking") });
     vi.setSystemTime(NOW + 900);
 
     // Act
-    const after = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+    const after = letterDelays(drawStrip({ status: withSubStatus("working", "thinking") }).row);
 
     // Assert
     expect(after[0]).not.toBe(0);
@@ -1256,7 +1263,7 @@ describe("the footer status word's per-letter colour sweep", () => {
 
   it("gives each thinking letter a colour that is not transparent", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert — never the transparent fill that blanked the word before.
     for (const letter of statusLetters(row)) {
@@ -1268,7 +1275,7 @@ describe("the footer status word's per-letter colour sweep", () => {
 
   it("sets no clipped-gradient or transparent fill on any thinking letter", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert — the exact properties whose combination blanked the word.
     for (const letter of statusLetters(row)) {
@@ -1281,7 +1288,7 @@ describe("the footer status word's per-letter colour sweep", () => {
 
   it("sets no clipped-gradient or transparent fill on the word holder either", () => {
     // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
     const holder = row.querySelector(".footer-status .pfooter-status-word");
     const style = holder?.getAttribute("style") ?? "";
 
@@ -1380,7 +1387,7 @@ describe("the update activity: a deploy's progress on the strip", () => {
 
   it.each([
     ["idle", null],
-    ["thinking", "thinking"],
+    ["working", "thinking"],
     ["waiting", "permission"],
     ["interrupted", "byUser"],
     ["merging", "merge"],

@@ -55,6 +55,7 @@ import type {
   FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
+  FooterStatusActivityQuietStretch,
   FooterStatusActivityRateLimited,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
@@ -83,8 +84,8 @@ import type {
   FooterStatusMerged,
   FooterStatusMerging,
   FooterStatusMergingActivity,
-  FooterStatusThinking,
-  FooterStatusThinkingActivity,
+  FooterStatusWorking,
+  FooterStatusWorkingActivity,
   FooterStatusWaiting,
   FooterStatusWaitingActivity,
   FooterStrip,
@@ -235,7 +236,7 @@ export function drawClientDisconnectedStrip(
 /** Every substatus oneof in the contract, as one type to walk. */
 type SubStatusOneof =
   | FooterStatusIdle["substatus"]
-  | FooterStatusThinking["substatus"]
+  | FooterStatusWorking["substatus"]
   | FooterStatusWaiting["substatus"]
   | FooterStatusInterrupted["substatus"]
   | FooterStatusMerging["substatus"]
@@ -249,7 +250,7 @@ type SubStatusOneof =
 /** Every per-status activity message, as one type to walk. */
 export type FooterActivity =
   | FooterStatusIdleActivity
-  | FooterStatusThinkingActivity
+  | FooterStatusWorkingActivity
   | FooterStatusWaitingActivity
   | FooterStatusInterruptedActivity
   | FooterStatusMergingActivity
@@ -388,7 +389,7 @@ function statusParts(
 ): StatusParts {
   switch (status.case) {
     case "idle":
-    case "thinking":
+    case "working":
     case "interrupted":
     case "merging":
     case "mergeConflict":
@@ -571,6 +572,8 @@ function drawActivityKind(
       return drawFooterStatusActivityColdGateCost(kind.value);
     case "compaction":
       return drawFooterStatusActivityCompaction(kind.value);
+    case "quietStretch":
+      return drawFooterStatusActivityQuietStretch(kind.value);
     case "interrupting":
       return drawFooterStatusActivityInterrupting(kind.value);
     case "hook":
@@ -619,13 +622,24 @@ export function drawFooterStatusActivityContextBudget(
  *
  * BOTH COMPACTIONS SPEAK THROUGH IT — the vendor's auto-compaction and the cold
  * gate's "compact and resume" — and both draw under the existing
- * `thinking · compacting` step. The daemon composes the sentence out of the
+ * `working · compacting` step. The daemon composes the sentence out of the
  * phase it is in; this end adds no word of its own.
  */
 export function drawFooterStatusActivityCompaction(
   u: FooterStatusActivityCompaction,
 ): HTMLElement {
   return textLine("footer-activity-compaction", u.text);
+}
+
+/**
+ * The quiet-stretch line, verbatim: what just landed in the feed and what the
+ * turn does next, standing until the next feed item surfaces. The daemon
+ * words it; this end adds no word of its own.
+ */
+export function drawFooterStatusActivityQuietStretch(
+  u: FooterStatusActivityQuietStretch,
+): HTMLElement {
+  return textLine("footer-activity-quiet-stretch", u.text);
 }
 
 /** The gated call's composed line, verbatim. */
@@ -1336,16 +1350,11 @@ export function statusWords(armCase: string): string {
  * STATUS in this same strip — a close that cannot proceed would read exactly
  * like a session the vendor has blocked. The message's own name
  * (`FooterSubStatusCloseBlocked`) is what the schema calls it, so the cell
- * draws that.
- *
- * The RUNNING step of a thinking turn is spelled `thinking` in the schema, but
- * "thinking · thinking" says the status twice; the running turn reads as
- * "thinking · working" instead. These are declared exceptions, not a per-arm
- * label table: every other arm's name is already its label.
+ * draws that. It is a declared exception, not a per-arm label table: every
+ * other arm's name is already its label.
  */
 export function subStatusWords(statusCase: string, subCase: string): string {
   if (statusCase === "closing" && subCase === "blocked") return "close blocked";
-  if (statusCase === "thinking" && subCase === "thinking") return "working";
   return statusWords(subCase);
 }
 

@@ -328,10 +328,11 @@ export const STATUS_WAVE_CYCLE_MS = STATUS_WAVE_PERIOD_MS * 2;
  * How far one letter lags the letter before it, which is the ONLY thing that
  * makes the bulge travel rather than the whole word breathing in unison.
  *
- * A tenth of the period. Across the longest waving word (`thinking`, eight
- * letters) that spreads the word over 1820ms of the 5200ms cycle — far enough
- * apart to read as a bulge moving along the letters, near enough that the word
- * never comes apart into eight unrelated animations.
+ * A tenth of the period. Across the longest waving words (`working`,
+ * `loading`, `merging`, `closing`, seven letters each) that spreads the word
+ * over 1560ms of the 5200ms cycle — far enough apart to read as a bulge moving
+ * along the letters, near enough that the word never comes apart into seven
+ * unrelated animations.
  */
 export const STATUS_WAVE_LETTER_OFFSET_MS = STATUS_WAVE_PERIOD_MS / 10;
 
@@ -362,9 +363,9 @@ export const STATUS_WAVE_PROGRESS = "progress";
 /**
  * The `FooterStatus` arms that mean the session is GETTING SOMEWHERE.
  *
- * `thinking` is the turn itself and carries every one of its steps —
- * `submitting`, `thinking`, and the two context cuts `clearing` and
- * `compacting`. `loading` is a context item being taken on, `merging` a merge
+ * `working` is the turn itself and carries every one of its steps —
+ * `submitting`, the main agent's own steps (`thinking`, `executing`,
+ * `reading`, …), and the two context cuts `clearing` and `compacting`. `loading` is a context item being taken on, `merging` a merge
  * running, `closing` a teardown running: all three are an operation underway.
  *
  * Everything else stands still because the session does: `waiting` is waiting on
@@ -373,7 +374,7 @@ export const STATUS_WAVE_PROGRESS = "progress";
  * nothing while detached work continues elsewhere.
  */
 export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
-  "thinking",
+  "working",
   "loading",
   "merging",
   "closing",

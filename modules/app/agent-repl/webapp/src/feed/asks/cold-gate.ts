@@ -26,7 +26,7 @@
  * starts a compaction that runs for as long as it runs — a minute is ordinary —
  * with every button on this card latched inert. The daemon composes the phase
  * line for exactly that on the footer's own stream
- * (`FooterStatusThinkingActivity.compaction`), so the card SUBSCRIBES to the
+ * (`FooterStatusWorkingActivity.compaction`), so the card SUBSCRIBES to the
  * line the footer already has (`src/footer/progress.ts`) and draws it verbatim
  * in its progress slot. It opens no stream of its own, it composes no sentence
  * of its own, and a moment the footer carries no compaction line is a moment
