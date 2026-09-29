@@ -397,7 +397,7 @@ hand any more:
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
-  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
+  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `bubbleExpanded`, `initialPlacement`,
   `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
   bubble wholly above the reader collapsing when its own final text lands,
   i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
@@ -418,9 +418,12 @@ hand any more:
   redirect and
   collapse click are input, not causes, and are the only other writes.
   `detachedWorkSelected` CENTERS the picked card in the feed's viewport
-  (`detachedWorkDelta`: midpoint onto midpoint, a card taller than the
+  (`revealCenterDelta`: midpoint onto midpoint, a card taller than the
   viewport top-aligned, clamped at the feed's edges), and a reveal opens only
-  the containers selecting the row requires. `prependCompensation` also covers
+  the containers selecting the row requires. `bubbleExpanded` (owner ruling,
+  2026-09-29) CENTERS a bubble the reader clicks open to its expanded view,
+  through the same `TailFollow.centerReveal`; a collapse, and a tool card's
+  fold, move nothing. `prependCompensation` also covers
   a bubble whose sub-feed lies wholly above the viewport collapsing (a
   negative shift). THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27): WebKit has
   no native CSS scroll anchoring, and every `.feed-item` is

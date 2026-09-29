@@ -78,6 +78,9 @@ export interface ScrollPosition {
  *   expanded footer; the feed CENTERS that item's card in its viewport
  *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
  *   taller than the viewport lands with its top at the viewport's top.
+ * - `bubbleExpanded`: the reader clicked a bubble in the feed open to its
+ *   expanded view; the feed CENTERS that bubble in its viewport, exactly as
+ *   for `detachedWorkSelected`.
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -105,6 +108,7 @@ export const SCROLL_CAUSES = [
   "promptHeld",
   "selectionMoved",
   "detachedWorkSelected",
+  "bubbleExpanded",
   "initialPlacement",
   "replaceRestore",
   "prependCompensation",
@@ -402,6 +406,14 @@ export class TailFollow {
   }
 
   /**
+   * The reader opened a bubble to its expanded view: stop following, and
+   * CENTER the bubble in the viewport (`revealCenterDelta`).
+   */
+  bubbleExpanded(geometry: RevealGeometry): void {
+    this.centerReveal("bubbleExpanded", geometry);
+  }
+
+  /**
    * The content above the reader changed by GROWN px (older rows landing: a
    * positive figure; a sub-feed wholly above the viewport collapsing: a
    * negative one): shift by exactly that, so the content under them stays put
@@ -505,7 +517,7 @@ export class TailFollow {
    * in the viewport (`revealCenterDelta`) under CAUSE, take the anchor there,
    * and latch where the view lands if the latest entry is then in sight.
    */
-  private centerReveal(cause: "detachedWorkSelected", geometry: RevealGeometry): void {
+  private centerReveal(cause: "detachedWorkSelected" | "bubbleExpanded", geometry: RevealGeometry): void {
     this.release();
     this.shift(cause, revealCenterDelta(geometry, this.box));
     this.takeAnchor();
