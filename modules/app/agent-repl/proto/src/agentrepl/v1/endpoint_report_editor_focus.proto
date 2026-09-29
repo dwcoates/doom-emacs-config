@@ -1,0 +1,52 @@
+// endpoint_report_editor_focus.proto — ReportEditorFocus: Emacs gained or
+// lost desktop focus. HOST section.
+//
+// Emacs is the only sender. It calls this on every focus change its
+// `after-focus-change-function` observes; the focus it holds when it CONNECTS
+// rides WatchDaemonEmacs instead, so the daemon never stands on an Emacs
+// stream without knowing its focus. The daemon replaces its held focus with
+// the reported one and decides every later desktop banner on it.
+//
+// IDEMPOTENT: reporting the focus the daemon already holds is a success and
+// changes nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/editor_focus.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportEditorFocusRequest {
+  // The focus Emacs holds now. REQUIRED — unset is Connect InvalidArgument.
+  EditorFocus focus = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportEditorFocusResponse {
+  oneof result {
+    ReportEditorFocusSuccess success = 1;
+    ReportEditorFocusError error = 2;
+  }
+}
+
+// The daemon now decides desktop banners on the reported focus.
+message ReportEditorFocusSuccess {}
+
+// Validation failures (unset field, unset oneof) are Connect InvalidArgument,
+// never an arm.
+message ReportEditorFocusError {
+  // Why the report was refused. One cause today; a refusal is never a focus
+  // the daemon silently drops.
+  oneof cause {
+    // No Emacs WatchDaemon stream stands on this daemon.
+    ReportEditorFocusNoEmacsStream no_emacs_stream = 1;
+  }
+}
+
+// No Emacs WatchDaemon stream stands on this daemon, so there is no
+// connection for the reported focus to belong to (see EditorFocus: the focus
+// lives and dies with that stream). Emacs's recovery is the stream itself:
+// opening WatchDaemon carries its current focus.
+message ReportEditorFocusNoEmacsStream {}

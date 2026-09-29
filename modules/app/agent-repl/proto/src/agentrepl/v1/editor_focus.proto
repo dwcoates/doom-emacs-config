@@ -1,0 +1,39 @@
+// editor_focus.proto — whether the editor is the focused desktop application.
+// HOST section. Shared by WatchDaemon (the focus Emacs connects with) and
+// ReportEditorFocus (every later change), because both carry the same fact.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Whether Emacs is the focused desktop application — ANY of its frames holding
+// input focus, whatever workspace is selected in it. THE ARM IS THE FOCUS.
+//
+// The daemon owns every desktop notification and decides on this fact alone:
+// a focused Emacs gets no desktop banner (the user is already looking at the
+// editor), an unfocused one does. Emacs reports it because Emacs is the one
+// process that can observe it on every platform it runs on — the operating
+// system offers no standard way to ask which window is focused under Wayland.
+//
+// The fact is SCOPED TO EMACS'S WatchDaemon STREAM: it arrives with the
+// stream's request, is updated by ReportEditorFocus while the stream stands,
+// and is forgotten when the stream ends, at which point the daemon treats
+// Emacs as unfocused. A daemon therefore never decides on a focus older than
+// the connection that reported it.
+message EditorFocus {
+  // Focused or not. REQUIRED — a report naming neither is Connect
+  // InvalidArgument.
+  oneof focus {
+    EditorFocusFocused focused = 1;
+    EditorFocusUnfocused unfocused = 2;
+  }
+}
+
+// Some Emacs frame holds desktop input focus: the daemon posts no desktop
+// banner.
+message EditorFocusFocused {}
+
+// No Emacs frame holds desktop input focus: the daemon posts desktop banners.
+message EditorFocusUnfocused {}
