@@ -201,10 +201,11 @@ or a command with no chord -- cannot be spelled.  An evil intercept map
 for every state; see the commentary above.")
 
 (define-minor-mode agent-repl-workspace-numerals-mode
-  "Make `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=' switch to a SLOT OF THE DRAWN TAB BAR.
-Global, and enabled by this module\='s own load, because the chords are
-about the tab bar rather than about any one buffer.  Its keymap shadows
-Doom\='s `global-map\=' numerals structurally; see the commentary above."
+  "Make `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=' switch to a DRAWN TAB SLOT.
+The slot is one of the tab bar as drawn.  Global, and enabled by this
+module\='s own load, because the chords are about the tab bar rather than
+about any one buffer.  Its keymap shadows Doom\='s `global-map\=' numerals
+structurally; see the commentary above."
   :global t
   :lighter nil
   :group 'agent-repl
