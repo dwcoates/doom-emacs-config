@@ -552,44 +552,16 @@ func (r *resolver) quietStretchLine(s *wsState) *frontendv1.FooterStatusActivity
 }
 
 // quietStretchEnding states the line the next feed item's drawing ended, or
-// nil. OUTRANKED reports that the activity drawn now outranks the quiet-stretch
-// line, which is then drawn at once and holds nothing.
-func quietStretchEnding(s *wsState, outranked bool) *frontendv1.FooterStatusQuietStretchEnding {
-	if s.motion.ending == nil || outranked {
+// nil. SUPERSEDED reports that an activity stands now, which is newer than the
+// ended line whatever its rank: it is drawn at once, and the ended line is
+// never shown again in its place (owner ruling, 2026-09-29).
+func quietStretchEnding(s *wsState, superseded bool) *frontendv1.FooterStatusQuietStretchEnding {
+	if s.motion.ending == nil || superseded {
 		return nil
 	}
 	return &frontendv1.FooterStatusQuietStretchEnding{
 		Text: s.motion.ending.text, UntilPainted: s.motion.ending.row, At: stamp(s.motion.ending.at),
 	}
-}
-
-// workingOutranksQuietLine reports whether a working activity outranks the
-// quiet-stretch line (thinkingActivity's precedence).
-func workingOutranksQuietLine(act *frontendv1.FooterStatusWorkingActivity) bool {
-	switch act.GetKind().(type) {
-	case *frontendv1.FooterStatusWorkingActivity_Fault,
-		*frontendv1.FooterStatusWorkingActivity_Update,
-		*frontendv1.FooterStatusWorkingActivity_Notification,
-		*frontendv1.FooterStatusWorkingActivity_Compaction,
-		*frontendv1.FooterStatusWorkingActivity_Hook,
-		*frontendv1.FooterStatusWorkingActivity_Retrying,
-		*frontendv1.FooterStatusWorkingActivity_QuietStretch:
-		return true
-	}
-	return false
-}
-
-// backgroundOutranksQuietLine reports whether a background activity outranks
-// the quiet-stretch line (backgroundActivity's precedence).
-func backgroundOutranksQuietLine(act *frontendv1.FooterStatusBackgroundActivity) bool {
-	switch act.GetKind().(type) {
-	case *frontendv1.FooterStatusBackgroundActivity_Fault,
-		*frontendv1.FooterStatusBackgroundActivity_Update,
-		*frontendv1.FooterStatusBackgroundActivity_Notification,
-		*frontendv1.FooterStatusBackgroundActivity_QuietStretch:
-		return true
-	}
-	return false
 }
 
 // workingStep resolves the working status's step once the turn has said

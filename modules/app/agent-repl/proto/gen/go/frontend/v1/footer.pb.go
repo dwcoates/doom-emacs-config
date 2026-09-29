@@ -1857,11 +1857,11 @@ func (x *FooterStatusActivityQuietStretch) GetText() string {
 //     always shows. An item drawn on a sub-feed (a subagent's own items) is
 //     painted only if the reader has that bubble open, so its drawing ends
 //     the stretch with no ending, and the line clears at once.
-//   - The daemon sets it only while nothing that OUTRANKS the quiet-stretch
-//     line stands (a fault, a deploy's update, a notification, a compaction, a
-//     running hook, a retry): an activity that outranks the line is drawn at
-//     once. It is cleared when the next quiet-stretch line stands and when
-//     the status changes.
+//   - The daemon sets it only while NO activity stands. Any activity update,
+//     whatever its rank, is newer than the ended line and is drawn at once:
+//     the client never flashes a line that has already been superseded
+//     (owner ruling, 2026-09-29). It is cleared when the next quiet-stretch
+//     line stands and when the status changes.
 type FooterStatusQuietStretchEnding struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The line that just ended, drawn verbatim.

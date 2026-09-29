@@ -1269,8 +1269,8 @@ it never clears before its successor is visible.
 - **How it ends.** The feed resolver tells the footer every row it draws
   (`Deps.ItemDrawn`, with whether it is on the root feed). A root-feed drawing
   states the ended line as `frontend.v1.FooterStatusQuietStretchEnding`
-  (`until_painted` names the row), unless an activity that outranks the line
-  stands; the webapp holds it until that row is painted
+  (`until_painted` names the row), unless any activity stands (a newer
+  activity update always wins at once); the webapp holds it until that row is painted
   (`webapp/src/footer/quiet-hold.ts`). A sub-feed drawing ends the line at once:
   the webapp paints a sub-feed only when its bubble is open.
 

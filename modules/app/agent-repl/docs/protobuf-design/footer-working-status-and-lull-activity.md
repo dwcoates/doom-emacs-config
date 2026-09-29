@@ -190,8 +190,8 @@ substatus that stands for the whole turn. The owner wants the status called
     announces the row it drew for that unit), and states the ended line with
     that row.
   - `activity` keeps carrying what the precedence chain resolves now; the
-    ending is set only while nothing that outranks the quiet-stretch line
-    stands.
+    ending is set only while NO activity stands (owner follow-up: a newer
+    activity update of any rank supersedes the ended line at once).
   - The client draws `text` until it has painted `until_painted`, then 500ms
     more, then `activity`; a feed not showing the live tail drops the hold at
     once.
