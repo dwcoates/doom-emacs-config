@@ -886,6 +886,14 @@ and not something this change touches.
   RECORD — a start was written and no terminal ever was — so it is timeless and
   cannot go stale. Main agents are never listed; `live_workflows` is empty this
   wave.
+- **`GetRunSettlements` IS THE SETTLED HALF, BY RUN AND UNSCOPED**
+  (`internal/db/settlement.go`, 2026-09-30). The sidecar asks it before its
+  LOST policy tracks a detached run's file, by the spawning call's activity id
+  (the row's `origin_unit`). A run is answered only when EVERY row its origin
+  unit locates has ended, with the latest `ended_at_ms`; a run absent from the
+  answer is NOT settled (no row yet, or a row still live), never an error.
+  Empty `run_ids` or an empty id is refused (`run_id_empty`). Design record:
+  `../../docs/protobuf-design/run-settlements.md`.
 - **`GetLiveWork` IS SCOPED TO ONE SESSION, AND NEVER ANSWERED UNSCOPED.** This
   store serves every workspace and session on the host, and the shim writes a
   closing terminal for every item its own vendor does not hold — so on
