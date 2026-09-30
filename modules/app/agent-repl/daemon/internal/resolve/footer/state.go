@@ -119,15 +119,6 @@ type rateState struct {
 	overage allowanceWindow
 	// at is when the newest evidence for either window was observed.
 	at time.Time
-	// figuresReadAt is when the figures on hand were last successfully READ
-	// off an account-usage sample, zero before any readable sample. It is
-	// STAMPED ONLY BY A READABLE SAMPLE and never by an unreadable attempt or
-	// a rate-limit event, so the age the client ticks from it is the age of
-	// the last successful reading — an unreadable sample leaves the figures
-	// (and this instant) standing rather than making them look freshly read.
-	// A figure sourced from an EVENT alone leaves it zero, which the client
-	// reads as "no read instant" and draws the figures with no age.
-	figuresReadAt time.Time
 }
 
 // retryState is a vendor call being retried mid-turn.
@@ -530,7 +521,6 @@ type wsState struct {
 	vendorSession string
 	// contextWindow is the main agent's last readable context-usage report,
 	// nil until one arrives. The enduring line draws it.
-	contextWindow *contextWindowState
 	// retrying is the standing mid-turn retry evidence. It stands until the
 	// retried call's response lands (the first frame that proves the vendor
 	// answered) or the next turn opens.
@@ -629,13 +619,6 @@ type wsState struct {
 	focus focusState
 	// seq mints the panel orders so a row's place is its arrival order.
 	seq int
-}
-
-// contextWindowState is one readable context-usage report: the tokens held
-// and the usable window they are held against.
-type contextWindowState struct {
-	used   int64
-	window int64
 }
 
 // mergingCommit is the commit a merge is landing right now.

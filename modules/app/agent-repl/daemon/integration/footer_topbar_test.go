@@ -1927,9 +1927,6 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 	if session := enduring.GetUsage().GetSession(); session.GetUtilization() != 0.12 || session.GetNewsworthy() {
 		t.Fatalf("session allowance = %v, want 0.12 drawn and not newsworthy", session)
 	}
-	if enduring.GetContextWindow() != nil {
-		t.Fatalf("enduring = %v, want the usage line alone: neither figure is at 80%%", enduring)
-	}
 }
 
 // A BACKGROUND SUBAGENT WAITING FOR THE API KEEPS ITS ROW (visibility only,

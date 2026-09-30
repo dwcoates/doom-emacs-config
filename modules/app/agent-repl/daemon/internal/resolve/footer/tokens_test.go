@@ -1185,33 +1185,3 @@ func TestTheFirstReadingOfATurnWithNoBaselineIsRecorded(t *testing.T) {
 		t.Fatalf("records = %+v, want INFO daemon.footer.context_baseline_taken", h.log.Records())
 	}
 }
-
-func TestAnUndrawableContextWindowIsRecordedAndTheLastOneStands(t *testing.T) {
-	tests := []struct {
-		name  string
-		total int64
-		max   int64
-	}{
-		{name: "no usable window", total: 10, max: 0},
-		{name: "more held than the window allows", total: 300_000, max: 200_000},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-			h.r.OnSessionUpdate(testWS, contextUsage(50_000, 200_000))
-
-			// Act
-			h.r.OnSessionUpdate(testWS, contextUsage(tt.total, tt.max))
-
-			// Assert
-			if got := enduringOf(t, h).GetContextWindow().GetUsedTokens(); got != 50_000 {
-				t.Fatalf("used = %d, want the last readable report standing", got)
-			}
-			if !hasLevel(h.log.Records(), "warn", "daemon.footer.context_window_unreadable") {
-				t.Fatalf("no WARN daemon.footer.context_window_unreadable was recorded")
-			}
-		})
-	}
-}

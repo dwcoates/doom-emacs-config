@@ -876,13 +876,10 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 // standing, and a sample whose seven_day window the vendor omitted leaves the
 // weekly allowance unfigured, which draws it absent rather than invented.
 //
-// A READABLE SAMPLE STAMPS `figuresReadAt`, an unreadable one does not. The
-// strip renders the figures LAST READ and the age of that reading; an
-// unreadable attempt therefore leaves both the figures and their read-instant
-// standing, so the age stays anchored to the last successful read rather than
-// jumping to the failed attempt. The strip no longer draws a "usage unread"
-// line (owner ruling), but the unreadable outcome is still surfaced to the
-// logs here so a read that keeps failing does not vanish silently.
+// The strip renders the figures LAST READ; an unreadable attempt leaves the
+// figures standing. The strip no longer draws a "usage unread" line (owner
+// ruling), but the unreadable outcome is still surfaced to the logs here so a
+// read that keeps failing does not vanish silently.
 func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
 	if usage == nil {
 		return
@@ -903,11 +900,6 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 	if moved {
 		now := r.opts.clock.Now()
 		s.rate.at = now
-		// The figures were just READ off this sample, so this is the instant
-		// the strip ticks their age from. Only a readable sample reaches here,
-		// which is exactly the "stamp on a readable sample, never on an
-		// unreadable attempt" the contract asks for.
-		s.rate.figuresReadAt = now
 	}
 }
 
