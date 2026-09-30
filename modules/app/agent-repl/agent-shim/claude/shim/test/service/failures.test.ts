@@ -450,6 +450,7 @@ describe("detachForegroundFailure", () => {
     ["alreadyConcluded"],
     ["notDetachable"],
     ["noSession"],
+    ["notInForeground"],
   ] as const)("states the %s arm", (kind) => {
     // Arrange, Act.
     const failure = failures.detachForegroundFailure({ kind }, "why");

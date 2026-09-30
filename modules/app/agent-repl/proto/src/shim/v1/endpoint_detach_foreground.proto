@@ -40,15 +40,13 @@ message DetachForegroundFailure {
     DetachForegroundNotDetachable not_detachable = 4;
     // No session is open on this shim.
     DetachForegroundNoSession no_session = 5;
-    // The unit is detachable in kind and still in flight, but the vendor
-    // offers NO VERB to initiate a detachment on the pinned SDK: the shim can
-    // only observe detachments the vendor made on its own (announced on the
-    // turn's stream as `detached_work.detached`), never cause one.
-    DetachForegroundUnsupported unsupported = 6;
+    // The vendor matched no foreground task for this unit: it left the
+    // foreground between the shim's check and the vendor's.
+    DetachForegroundNotInForeground not_in_foreground = 6;
   }
 }
 message DetachForegroundUnknownUnit {}
 message DetachForegroundAlreadyConcluded {}
 message DetachForegroundNotDetachable {}
 message DetachForegroundNoSession {}
-message DetachForegroundUnsupported {}
+message DetachForegroundNotInForeground {}

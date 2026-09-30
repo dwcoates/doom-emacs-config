@@ -1737,8 +1737,8 @@ describe("DetachForeground", () => {
     stream.close();
   });
 
-  test("a live unit the SDK cannot detach is refused unsupported", async () => {
-    // `unsupported` and NOT `not_detachable`: the unit is perfectly
+  test("a live unit the vendor matched to no foreground task is refused not_in_foreground", async () => {
+    // `not_in_foreground` and NOT `not_detachable`: the unit is perfectly
     // detachable-in-kind, but the vendor tracks no foreground task for it, so
     // `backgroundTasks` moved nothing — the wrong arm would have lied about
     // the reason.
@@ -1774,7 +1774,7 @@ describe("DetachForeground", () => {
       create(shimv1.DetachForegroundRequestSchema, { unit: activityId(unit) }),
     );
 
-    expect(detachForegroundKind(response)).toBe("unsupported");
+    expect(detachForegroundKind(response)).toBe("notInForeground");
     stream.close();
   });
 
@@ -1832,7 +1832,7 @@ describe("DetachForeground", () => {
 
   test("a unit of a non-detachable kind is refused not_detachable", async () => {
     // A Read is not detachable IN KIND — the four detachable kinds are subagent,
-    // bash, workflow and monitor — which is the distinction `unsupported` does
+    // bash, workflow and monitor — which is the distinction `not_in_foreground` does
     // not make.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
