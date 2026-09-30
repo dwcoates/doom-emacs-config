@@ -622,6 +622,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let adopted: OpenTurn | undefined;
   /**
+   * THE PROMPT WAITING TO JOIN THE SEND SLOT'S TURN
+   * (`StartTurnRequest.join_running_turn`): pushed into the vendor's input
+   * while `into` runs, its row not yet written because its fate is not yet
+   * known. It leaves by exactly one of two doors:
+   *   - FOLDED: a frame of the running turn names its send among the ones the
+   *     turn consumed, and its row is written there with `folded_into`
+   *     ({@link noteJoinFolded});
+   *   - ITS OWN TURN: `into` leaves the send slot first, however it leaves,
+   *     and the prompt takes the slot as the turn the vendor runs next
+   *     ({@link openJoinAsOwnTurn}).
+   */
+  let joining: { readonly turn: OpenTurn; readonly prompt: conversationv1.AgentPrompt; readonly into: OpenTurn } | undefined;
+  /**
    * HOW the person commanded the last stop issued on the main thread, held for
    * the stopped turn's terminal (`KillTurnRequest.commanded_by`; `command` is
    * undefined when the caller stated none).
@@ -2028,6 +2041,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function concludeAbsorbedTurns(verdict: SendVerdict): Promise<void> {
     for (const absorbed of verdict.absorbed) {
+      if (absorbed.kind === "send" && absorbed.send.turnId === joining?.turn.id.value) {
+        noteJoinFolded(turnFor(false, verdict.turn));
+        continue;
+      }
       const turn = absorbedShimTurn(absorbed);
       if (turn === undefined) {
         LOGGER.debug(
@@ -2532,10 +2549,94 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * keep-alive cadence beats again once neither slot holds a turn.
    */
   function releaseTurn(turn: OpenTurn): void {
-    if (open === turn) setOpen(undefined);
-    else if (adopted === turn) adopted = undefined;
-    sends.forget(turn.id.value, "its turn left the slot");
+    if (open === turn) {
+      setOpen(undefined);
+      sends.forget(turn.id.value, "its turn left the slot");
+      // THE JOIN THE TURN NEVER FOLDED IS THE VENDOR'S NEXT TURN, and it takes
+      // the slot in the same step the turn leaves it, so nothing -- a beat, a
+      // StartTurn -- can come between them.
+      if (joining?.into === turn) openJoinAsOwnTurn("the turn it waited to join left the send slot");
+    } else {
+      if (adopted === turn) adopted = undefined;
+      sends.forget(turn.id.value, "its turn left the slot");
+    }
     if (open === undefined && adopted === undefined) cadence?.resume();
+  }
+
+  /**
+   * The waiting join takes the send slot as its own turn: its prompt row is
+   * written as the turn's first row, ahead of anything the vendor answers it
+   * with. Returns that turn, or absence when no join waits.
+   */
+  function openJoinAsOwnTurn(why: string): OpenTurn | undefined {
+    const waiting = joining;
+    if (waiting === undefined) return undefined;
+    joining = undefined;
+    setOpen(waiting.turn);
+    const agentId = requireIdentity().agentId;
+    deps.persistence.write([promptEntry(waiting.prompt, agentId, false)]);
+    LOGGER.info(
+      { turn_id: waiting.turn.id.value, joined_turn: waiting.into.id.value, why },
+      "the prompt sent to join a running turn was not folded into it; it runs as its own turn",
+    );
+    return waiting.turn;
+  }
+
+  /**
+   * The vendor folded the waiting join into the turn now running: its prompt
+   * row is written here, where the vendor took it, naming that turn, and it
+   * opens no turn of its own.
+   */
+  function noteJoinFolded(into: conversationv1.TurnId | undefined): void {
+    const waiting = joining;
+    if (waiting === undefined) return;
+    if (into === undefined) {
+      // The send ledger reports a join absorbed only by a vendor turn that
+      // answers a send of ours or one the vendor started, and both are turns
+      // this session holds.
+      throw new Error(`shim session: the join ${waiting.turn.id.value} was folded into no turn this session holds`);
+    }
+    joining = undefined;
+    const agentId = requireIdentity().agentId;
+    const prompt = create(conversationv1.AgentPromptSchema, {
+      id: waiting.prompt.id,
+      agent: waiting.prompt.agent,
+      said: waiting.prompt.said,
+      origin: waiting.prompt.origin,
+      foldedInto: into,
+    });
+    deps.persistence.write([promptEntry(prompt, agentId, false)]);
+    LOGGER.info(
+      { turn_id: waiting.turn.id.value, folded_into: into.value },
+      "the vendor folded the prompt sent to join the running turn into it at a tool boundary",
+    );
+  }
+
+  /** Push a join while the send slot's turn runs; see SessionContext.joinRunningTurn. */
+  function joinRunningTurn(prompt: conversationv1.AgentPrompt, turn: OpenTurn, into: OpenTurn): void {
+    if (joining !== undefined) {
+      throw new Error(`shim session: turn ${joining.turn.id.value} already waits to join ${joining.into.id.value}`);
+    }
+    if (open !== into) {
+      throw new Error(`shim session: turn ${turn.id.value} was sent to join ${into.id.value}, which is not the send slot's turn`);
+    }
+    // NO REWIND IS OWED WHILE A REAL TURN RUNS: the obligation is a keep-alive's
+    // debt, discharged by the send that opened the running turn.
+    const owed = rewind.obligation();
+    if (owed !== undefined) {
+      throw new Error(`shim session: a rewind to ${owed.resumeSessionAt} is owed while turn ${into.id.value} runs`);
+    }
+    const queue = prompts;
+    if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
+    const said = prompt.said;
+    if (said === undefined) throw new Error(`shim session: the join ${turn.id.value} carries no prompt`);
+    joining = { turn, prompt, into };
+    try {
+      pushSend(queue, saidText(said), { uuid: newUuid(), turnId: turn.id.value, keepalive: false });
+    } catch (err) {
+      joining = undefined;
+      throw err;
+    }
   }
 
   /** A turn in the send slot the shim sent on its own: its keep-alive, or the network-resume prompt. */
@@ -3886,14 +3987,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * turns has no turn to conclude.
    */
   function writeQueryDeathTerminal(died: conversationv1.SessionQueryDied, detail: string): void {
-    // THE ADOPTED VENDOR-STARTED TURN IS OWED ONE TOO: it is a real turn a
-    // consumer is watching, and it ends with the query.
-    for (const ended of [open, adopted]) {
-      if (ended === undefined) continue;
+    for (const ended of turnsOwedAnEnd(`the vendor query died: ${detail}`)) {
       writeQueryDeathTerminalFor(ended, died, detail);
       sends.forget(ended.id.value, `the vendor query died: ${detail}`);
     }
     adopted = undefined;
+  }
+
+  /**
+   * Every turn the query's death or a teardown ends, in the order their
+   * terminals are written: the send slot's, the adopted vendor-started turn
+   * (a real turn a consumer is watching, which ends with the query), and last
+   * a prompt still waiting to join the send slot's turn. That one was accepted
+   * and never answered, so it is announced as its own turn -- its prompt row,
+   * written only once the terminals ahead of it are -- and ended with the
+   * rest. LAZY for that ordering: the join is announced when it is reached.
+   */
+  function* turnsOwedAnEnd(why: string): Generator<OpenTurn> {
+    if (open !== undefined) yield open;
+    if (adopted !== undefined) yield adopted;
+    const joined = openJoinAsOwnTurn(why);
+    if (joined !== undefined) yield joined;
   }
 
   function writeQueryDeathTerminalFor(ended: OpenTurn, died: conversationv1.SessionQueryDied, detail: string): void {
@@ -3948,10 +4062,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * decision tells the user they stopped something they never touched.
    */
   function writeHostShutdownTerminal(reason: string): void {
-    // THE ADOPTED VENDOR-STARTED TURN IS OWED ONE TOO: it is a real turn a
-    // consumer is watching, and it ends with the query.
-    for (const ended of [open, adopted]) {
-      if (ended === undefined) continue;
+    for (const ended of turnsOwedAnEnd(`the session is being torn down: ${reason}`)) {
       writeHostShutdownTerminalFor(ended, reason);
       sends.forget(ended.id.value, `the session is being torn down: ${reason}`);
     }
@@ -4527,6 +4638,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       cadence?.pause();
     },
     releaseTurn,
+    joiningTurn: () => joining?.turn,
+    joinRunningTurn,
     noteStopCommand: (turn, command) => {
       stopCommand = { turn, command };
       LOGGER.debug(
