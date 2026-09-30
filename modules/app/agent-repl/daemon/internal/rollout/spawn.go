@@ -236,6 +236,14 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	defer deadline.Stop()
 	poll := time.NewTicker(s.Poll)
 	defer poll.Stop()
+	// reaped is set once the successor has exited. A REAPED successor has
+	// written everything it ever will, so the read that follows is the final
+	// answer, not a race: a report written before the exit is still its
+	// address (Ready then names the exit), and no report means it died without
+	// one. A successor that exits at once -- a flag it refuses, a layout it
+	// cannot read -- is named by its exit, never left for the deadline to
+	// misreport as slowness.
+	reaped := false
 	for {
 		address, reported, err := ReadJoiningAddr(s.StateDir)
 		if err != nil {
@@ -245,11 +253,16 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 			child.address = address
 			return child, nil
 		}
+		if reaped {
+			return child, fmt.Errorf("rollout: the successor exited before it reported an address: %w", child.exitError())
+		}
 		select {
 		case <-ctx.Done():
 			return child, ctx.Err()
 		case <-deadline.C:
 			return child, fmt.Errorf("rollout: the successor did not report an address within %s", s.Timeout)
+		case <-child.exited:
+			reaped = true
 		case <-poll.C:
 		}
 	}
