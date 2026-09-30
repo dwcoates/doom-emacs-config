@@ -340,7 +340,10 @@ interface Reader {
     pageSize: number,
     through: conversationv1.ConversationThrough,
   ): Promise<conversationv1.HistoryPage>;
-  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  openBashRun(
+    work: conversationv1.DetachedWorkId,
+    options: { readonly awaitFirstRow: boolean },
+  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe one shell-run frame the writer took: the log line that says it was written. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
   /**
@@ -1233,7 +1236,7 @@ export function createReader(options: ReaderOptions): Reader {
         readAgentPageOnce(agent, pageSize, { case: "through", value: through }),
       );
     },
-    async openBashRun(work) {
+    async openBashRun(work, { awaitFirstRow }) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
       // is no side table to consult and no way for a lookup to go stale — and a
@@ -1251,21 +1254,23 @@ export function createReader(options: ReaderOptions): Reader {
       // same path whether this shim wrote the rows or the sidecar did.
       const run = create(conversationv1.AgentActivityIdSchema, { value: runValue });
       const abort = new AbortController();
-      LOGGER.debug({ run: runValue, work: work.value }, "following a shell run's stored rows");
+      LOGGER.debug({ run: runValue, work: work.value, await_first_row: awaitFirstRow }, "following a shell run's stored rows");
       let opened = false;
       return {
         async *[Symbol.asyncIterator]() {
           try {
-            // A REFUSED OPEN IS THE ANSWER, NEVER A RACE TO WAIT OUT. A run
-            // this shim announced has its START in the store before its
-            // announcement (the writer's one ordered buffer), and the caller
-            // makes that start durable before it opens (engine/turn.ts
-            // `watchBash`). So the store refusing the run means no row for it
-            // exists: the contract's "not a live shell: refused". Waiting for a
-            // producer this process cannot see stood the stream open, SILENT,
-            // forever on a shell the sidecar never tailed (2026-09-27).
+            // A RUN THIS SHIM HOLDS LIVE IS WAITED ON; ANY OTHER IS REFUSED.
+            // A live run's rows can all be the sidecar's, written once it reads
+            // the run's spool — for a shell launched inside a backgrounded
+            // subagent this shim never saw the call, so there is no start of
+            // its own to write — and refusing it then left the run with no
+            // watch able to see its terminal (2026-09-28). The caller vouches
+            // (`awaitFirstRow`) only for a run in its live set, which the
+            // vendor's own notification or level retires, so the wait is
+            // bounded by the run's life. A run it does not hold live is refused
+            // as the contract says: the store holding no row means none exists.
             for await (const push of client.watchBashRun(
-              create(storev1.WatchBashRunRequestSchema, { run }),
+              create(storev1.WatchBashRunRequestSchema, { run, awaitFirstRow }),
               abort.signal,
             )) {
               opened = true;

@@ -180,6 +180,33 @@ describe("PersistEntry → StoreEntry routing", () => {
     expect(() => toStoreEntry(PRODUCER, broken)).toThrow(/empty upsert key/);
   });
 
+  it("lifts a shell run claim into the batch's claim list, never into its entries", () => {
+    // Arrange.
+    const claim: PersistEntry = {
+      agentId: BOOK,
+      upsertKey: "shell-run-claim:b1",
+      source: { vendorUuid: "shell-run:toolu_run:claim:b1", discriminator: "shell_run_claim" },
+      keepalive: false,
+      turn: undefined,
+      item: {
+        kind: "shell_run_claim",
+        claim: create(storev1.ShellRunClaimSchema, {
+          vendorTaskId: "b1",
+          run: create(conversationv1.AgentActivityIdSchema, { value: "toolu_run" }),
+        }),
+      },
+    };
+
+    // Act.
+    const request = toWriteBatchRequest(PRODUCER, [readEntry(BOOK, "unit-1", "/tmp/a"), claim]);
+
+    // Assert.
+    expect(request.batch?.entries).toHaveLength(1);
+    expect(request.batch?.shellRunClaims.map((c) => `${c.vendorTaskId} -> ${c.run?.value ?? ""}`)).toEqual([
+      "b1 -> toolu_run",
+    ]);
+  });
+
   it("carries no cursor advance: a stream-plane producer has no file to be positioned in", () => {
     const request = toWriteBatchRequest(PRODUCER, [readEntry(BOOK, "unit-1", "/tmp/a")]);
 

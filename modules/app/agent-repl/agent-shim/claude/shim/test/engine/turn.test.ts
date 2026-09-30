@@ -2702,6 +2702,40 @@ describe("WatchBash's durability barrier", () => {
     }
   }
 
+  it("asks the store to wait for the first row of a run it holds live", async () => {
+    // Arrange: a live detached shell whose rows are all the sidecar's.
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "t",
+      description: "",
+      is_backgrounded: true,
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    });
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    // Act.
+    await openOnce(h);
+
+    // Assert.
+    expect(h.persistence.bashRunAwaits).toEqual([true]);
+  });
+
+  it("does not ask the store to wait for a run it does not hold live", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    // Act.
+    await openOnce(h);
+
+    // Assert.
+    expect(h.persistence.bashRunAwaits).toEqual([false]);
+  });
+
   it("makes the run's remembered start durable before it opens the run", async () => {
     // Arrange.
     const h = await harness();
