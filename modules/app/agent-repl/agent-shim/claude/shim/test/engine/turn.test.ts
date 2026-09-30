@@ -27,6 +27,7 @@ import {
   STARTED_TURNS_REMEMBERED,
   textSaid,
   TurnEngine,
+  vendorSaid,
   type OpenTurn,
   type SessionContext,
 } from "../../src/engine/turn.js";
@@ -985,6 +986,66 @@ function openDaemonTurn(h: Harness): OpenTurn {
   h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
   return h.open;
 }
+
+describe("the vendor note on a prompt", () => {
+  it("sends what was said untouched when there is no note", () => {
+    const said = textSaid("do the thing");
+    expect(vendorSaid(said, undefined)).toBe(said);
+  });
+
+  it("sends what was said untouched when the note is empty", () => {
+    const said = textSaid("do the thing");
+    expect(vendorSaid(said, "")).toBe(said);
+  });
+
+  it("closes what was said with the note, marked as the harness's own", () => {
+    const blocks = vendorSaid(textSaid("do the thing"), "the work was cut for this").content?.blocks ?? [];
+    expect(blocks.map((block) => (block.block.case === "text" ? block.block.value.text : block.block.case))).toEqual([
+      "do the thing",
+      "<system-reminder>the work was cut for this</system-reminder>",
+    ]);
+  });
+
+  it("sends the vendor the note with the prompt", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: TURN,
+        said: textSaid("do it the other way"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 20,
+        vendorNote: "the work was cut for this",
+      }),
+    );
+
+    // Assert
+    expect(saidText(h.submitted[0]?.said ?? textSaid(""))).toContain("<system-reminder>the work was cut for this</system-reminder>");
+  });
+
+  it("keeps the note off the prompt row", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: TURN,
+        said: textSaid("do it the other way"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 20,
+        vendorNote: "the work was cut for this",
+      }),
+    );
+
+    // Assert
+    const row = h.persistence.durable.find((entry) => entry.item.kind === "prompt");
+    const said = row?.item.kind === "prompt" ? row.item.prompt.said : undefined;
+    expect(saidText(said ?? textSaid(""))).toBe("do it the other way");
+  });
+});
 
 describe("StartTurn joining the running turn", () => {
   it("accepts a join while a daemon turn runs", async () => {
