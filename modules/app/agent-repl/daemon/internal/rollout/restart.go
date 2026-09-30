@@ -38,6 +38,10 @@ const (
 	// LayoutVersionFlagName asks a binary for the state layout it writes
 	// (`claude-repld -layout-version`), and starts nothing.
 	LayoutVersionFlagName = "layout-version"
+	// MigrationKindFromFlagName asks a binary what its migration steps from a
+	// running layout mean (`claude-repld -migration-kind-from N`): additive or
+	// breaking. It starts nothing.
+	MigrationKindFromFlagName = "migration-kind-from"
 	// ReplacingFlagName marks the daemon an incumbent restarting across a
 	// layout change spawns: it waits ReplacementClaimWait for the claim.
 	ReplacingFlagName = "replacing"

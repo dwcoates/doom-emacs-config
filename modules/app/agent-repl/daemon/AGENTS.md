@@ -215,6 +215,7 @@ environment. Every flag is optional.
 | `--footer-momentary-dwell <duration>` | how long a MOMENTARY footer status (`interrupted`, `loading`) stands before the daemon's own successor push retires it | `$AGENT_REPL_FOOTER_MOMENTARY_DWELL`, else the resolver's `DefaultMomentaryDwell` (1.5s) |
 | `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
 | `--layout-version` | print the state layout this binary writes (`wsm.LayoutVersion`) and exit, opening nothing; a deploy asks it of the STAGED binary | off |
+| `--migration-kind-from=N` | print whether the migration steps from layout N to this binary's own are `additive` or `breaking` (`wsm.ChainKind`) and exit, opening nothing; exit 1 with the reason on stderr when no chain reaches this layout; a deploy asks it of the STAGED binary | unset |
 | `--replacing` | this daemon replaces an incumbent restarting across a state layout change: it waits `rollout.ReplacementClaimWait` (1m) for the boot claim instead of `daemonaddr.ClaimWaitBound`; exclusive with `--joining` | off |
 
 ## Run and boot order (binding; `cmd/claude-repld`)
@@ -998,8 +999,10 @@ Owner ruling, 2026-09-27. A handover transfer asks the bounce registry for
 `bounce.GateDispatchQuiet`: it is decided under the per-workspace delivery lock
 (no delivery mid-flight) and does NOT wait for a turn or detached work. The
 transfer detaches the shim (never kills it) and the successor adopts it
-mid-turn. A shim REPLACEMENT (stale build, restart verb, log ceiling) and the
-layout restart's stand-down keep `bounce.GateFreeness`.
+mid-turn. The layout restart's stand-down asks for the same gate (owner
+ruling, 2026-09-30) and carries the same carry (see "A breaking state layout
+change is rolled out stop-then-start"). Only a shim REPLACEMENT (stale build,
+restart verb, log ceiling) keeps `bounce.GateFreeness`.
 
 - **What lives only in memory travels in the handover carry**
   (`rollout/carry.go`, `<state>/intent/handover-carry/<ws>.json`). The transfer
@@ -1049,30 +1052,70 @@ replaced by the restart verb that joined it, the restart ran on the outgoing
 daemon, the transfer's requester was told it had finished, and the daemon
 exited without ever pushing that workspace's transfer notice.
 
-## A state layout change is rolled out stop-then-start, never handed over
+## A breaking state layout change is rolled out stop-then-start; an additive one is handed over
 
-A joining successor opens the state READ-ONLY and cannot carry an older layout
-forward (2026-09-27: master landed layout 11 and the successor died refusing
-layout 10). So the deploy asks the STAGED daemon binary its layout
-(`claude-repld -layout-version`, `deploy.BinaryLayout`) before deciding; a
-binary that cannot answer is refused at ERROR. A different layout goes to
-`rollout.Controller.Restart` (`deploy.RestartingAcrossLayout`; shim and webapp
-deferred to the replacement):
+Every step in `internal/wsm/migrate.go` declares its `Kind`
+(`wsm.MigrationAdditive` or `wsm.MigrationBreaking`), and
+`TestEveryMigrationDeclaresItsKind` fails a step that does not. ADDITIVE means
+the build before the step keeps working against the migrated file: a new
+table, a new column with a default or NULL, a backfill of a value the old build
+never reads. BREAKING is anything else: a dropped or renamed column or table, a
+column whose meaning changed. A breaking change is shipped as two deploys
+whenever it can be: an additive step that adds the new shape beside the old
+(the code writes both and reads the new), then, once no running build reads the
+old shape, the breaking step that drops it. Only the second is a restart.
+
+The deploy asks the STAGED daemon binary its layout (`claude-repld
+-layout-version`, `deploy.BinaryLayout`), and when it differs from the running
+one, what the steps between them are (`claude-repld -migration-kind-from=N`,
+`deploy.BinaryMigrationKind`, answering `additive` or `breaking` from
+`wsm.ChainKind`). A binary that cannot answer either question is refused at
+ERROR: nothing is handed over or restarted on a guess.
+
+- **The same layout, or a newer one reached by additive steps alone, is HANDED
+  OVER.** The joining successor opens the state with `wsm.OpenJoining`: it
+  applies the additive steps through a writing handle that exists only for
+  them (the file is copied aside first, as every migration is), closes it, and
+  opens read-only. The incumbent keeps serving across the step, because its
+  statements name their columns.
+- **A breaking step, or an older fresh layout, goes to
+  `rollout.Controller.Restart`** (`deploy.RestartingAcrossLayout`; shim and
+  webapp deferred to the replacement). A handed-over successor could not make
+  the change while the incumbent still writes (2026-09-27: master landed layout
+  11 and the successor died refusing layout 10).
+
+The restart:
 
 1. the one rollout slot is claimed (a handover in flight refuses it, and vice
    versa), the intent manifest written (no successor), and a PLAIN BOUNCE
    announced (`shutdown_announced`, cause `self_merge_rollout`, no address);
 2. every served workspace's serving stands down through the bounce registry at
-   its own freeness (all at once when forced): quiesce, detach the shim (left
-   running), release serving -- no transfer notice, no adoption window;
+   `bounce.GateDispatchQuiet`, NEVER at freeness (owner ruling, 2026-09-30:
+   every shim keeps running, so waiting for work protected nothing, and one busy
+   workspace held every other one down): quiesce, SEAL the queue into the
+   workspace's carry exactly as a handover transfer does, detach the shim (left
+   running mid-turn), release serving -- no transfer notice, no adoption
+   window;
 3. the fresh binary is spawned with `--replacing` (inherited argv and
-   environment, its own session) and this daemon exits. The replacement waits
-   on the boot claim, so it opens -- and migrates -- the state only as its sole
-   writer, then adopts the shims, restores the held prompts and accounts the
-   sessions against the manifest; this process's close released its holds.
+   environment, its own session), every carried replacement's requester is told
+   it was handed across, and this daemon exits. The replacement waits on the
+   boot claim, so it opens -- and migrates -- the state only as its sole writer,
+   then adopts the shims, restores the held prompts, TAKES EACH CARRY UP
+   (`rollout.Controller.TakeUpCarries`: the queue memory installed and a
+   carried cold gate raised again, before the outgoing daemon's holds are
+   released, whose drain runs the carried memory ahead of the held prompts),
+   and after the release re-judges the held verdicts and runs the carried
+   replacements (`FinishCarries`). The carries a boot honors are the ones the
+   daemon its reconciled manifest names wrote; a carry for a shim the boot did
+   not adopt is retired untaken at INFO, and one another daemon wrote is
+   retired unread at ERROR. A carry that cannot be read fails the boot. A
+   second turn beside the adopted one is impossible without waiting for the
+   shim's facts: the shim refuses a daemon's StartTurn while one of the
+   daemon's turns is open (`turn_already_open`).
 
 A restart that cannot finish (a failed stand-down, a replacement that will not
-start) takes EVERY workspace back, frees the slot and keeps serving, at ERROR.
+start) takes EVERY workspace back, puts each sealed carry back, frees the slot
+and keeps serving, at ERROR.
 
 The `Deploy` rpc answers this decision with the daemon's
 `DeployComponentOutcome.restarting` arm (`DeployRestarting`: the running and

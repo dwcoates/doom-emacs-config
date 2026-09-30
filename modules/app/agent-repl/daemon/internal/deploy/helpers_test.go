@@ -336,8 +336,14 @@ type harness struct {
 	freshLayout int
 	layoutErr   error
 	layoutAsked []string
-	progress    *fakeProgress
-	faults      *fakeFaults
+	// migrationKind is what the staged daemon says its steps are (breaking
+	// unless a test says otherwise), migrationErr fails the question, and
+	// migrationAsked records the running layout each question named.
+	migrationKind  wsm.MigrationKind
+	migrationErr   error
+	migrationAsked []int
+	progress       *fakeProgress
+	faults         *fakeFaults
 }
 
 // fakeFaults is the state client's fault table: every fault ever opened, in
@@ -480,9 +486,10 @@ func newHarness(t *testing.T) *harness {
 		fresh:     theFresh,
 		elisp:     elisp,
 
-		freshLayout: runningLayout,
-		progress:    &fakeProgress{},
-		faults:      newFakeFaults(),
+		freshLayout:   runningLayout,
+		migrationKind: wsm.MigrationBreaking,
+		progress:      &fakeProgress{},
+		faults:        newFakeFaults(),
 	}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -510,6 +517,10 @@ func newHarness(t *testing.T) *harness {
 		StateLayout: func(_ context.Context, bin string) (int, error) {
 			h.layoutAsked = append(h.layoutAsked, bin)
 			return h.freshLayout, h.layoutErr
+		},
+		MigrationKind: func(_ context.Context, _ string, from int) (wsm.MigrationKind, error) {
+			h.migrationAsked = append(h.migrationAsked, from)
+			return h.migrationKind, h.migrationErr
 		},
 		RunningLayout: runningLayout,
 	})

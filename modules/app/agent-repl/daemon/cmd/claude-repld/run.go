@@ -574,11 +574,13 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 // openState opens the state client. A JOINING daemon opens it READ-ONLY: until
 // it has adopted a workspace the incumbent is still the sole writer, and two
 // writers on one SQLite file is the lost-update class the single-handle rule
-// exists to prevent.
+// exists to prevent. Its one write is carrying an older file forward by
+// ADDITIVE steps, which leave the incumbent's statements working
+// (wsm.OpenJoining).
 func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool) (wsm.DB, error) {
 	open := wsm.Open
 	if joining {
-		open = wsm.OpenReadOnly
+		open = wsm.OpenJoining
 	}
 	db, err := open(ctx, layout.DB(), wsm.WithLogger(log))
 	if err != nil {
