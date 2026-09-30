@@ -1405,9 +1405,8 @@ export class TurnEngine {
     // A UNIT THIS SHIM HOLDS AS LIVE AND DETACHABLE THAT THE VENDOR MATCHED TO
     // NO FOREGROUND TASK is the one refusal left here: the vendor tracks no
     // foreground task for that call (not registered yet, or no longer in the
-    // foreground), so nothing was moved. It is refused `unsupported`, the arm
-    // the contract has for "detachable in kind and in flight, but not
-    // detached" -- never `notDetachable`, which would say its kind cannot
+    // foreground), so nothing was moved. It is refused `not_in_foreground`
+    // -- never `notDetachable`, which would say its kind cannot
     // detach at all and tell a consumer to stop offering an affordance for
     // work that backgrounds routinely.
     if (!live && verdict.kind === "live_detachable") {
@@ -1416,7 +1415,7 @@ export class TurnEngine {
         "refused DetachForeground because the vendor matched the unit to no foreground task, so nothing was moved",
       );
       return detachForegroundRefused(
-        { kind: "unsupported" },
+        { kind: "notInForeground" },
         `unit ${JSON.stringify(unit)} is detachable in kind and in flight here, but the vendor tracks no ` +
           "foreground task for it, so backgroundTasks moved nothing",
       );
