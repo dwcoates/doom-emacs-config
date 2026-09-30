@@ -1813,31 +1813,25 @@ message FooterActivityTransientUpdated {
 // Facts that are always true, drawn whenever nothing salient stands, no
 // transient is live and no quiet-stretch line stands.
 
-// The enduring line: ONE line, the account's usage or the context window's
-// fill, CHOSEN BY THE DAEMON by the 80% rule (owner ruling, 2026-09-30):
-//
-//   - The rule compares the FIVE-HOUR allowance's utilization with the
-//     context window's fill; the weekly and overage allowances are drawn but
-//     do not enter the choice.
-//   - Both under 80%: `usage`. Exactly one at or above 80%: that one. Both at
-//     or above 80%: the higher, and `usage` wins a tie.
-//   - A figure never observed does not compete: with only one observed, that
-//     one is drawn, and with neither, `unobserved`.
+// The enduring line: the account's usage allowances. It is ENDURING, always
+// true while it stands, so it carries no age: when it was drawn says nothing
+// a reader needs.
 //
 // The client draws the line it is given and decides nothing.
 message FooterActivityEnduring {
-  // Which line the rule chose. Exactly one is set.
+  // Whether a usage figure has been observed. Exactly one is set.
   oneof line {
     // The account's usage allowances.
     FooterActivityEnduringUsage usage = 1;
-    // How full the MAIN agent's context window is.
-    FooterActivityEnduringContextWindow context_window = 2;
-    // Neither an account-usage figure nor a context-usage report has been
-    // observed yet.
+    // No account-usage figure has been observed yet; the line is empty.
     FooterActivityEnduringUnobserved unobserved = 3;
   }
+  // Tag 2 (`context_window`, the main agent's context fill) is RETIRED: the
+  // enduring line is the usage allowances alone.
+  reserved 2;
+  reserved "context_window";
 }
-// No enduring figure has been observed yet.
+// No usage figure has been observed yet.
 message FooterActivityEnduringUnobserved {}
 
 // The account's usage allowances. The vendor bills independent allowances
@@ -1868,18 +1862,10 @@ message FooterActivityEnduringUsage {
   // above, reported through the same rate-limit event. UNSET until the
   // vendor has reported the overage window, which most accounts never do.
   optional FooterAllowance overage = 4;
-  // The instant the figures were last successfully READ off an account
-  // usage sample, epoch ms, so the client ticks the reading's age from it
-  // ("session 41% … 10m 30s ago") per the clock convention.
-  //
-  // UNSET means no read instant exists: the figures came from a rate-limit
-  // EVENT rather than a sample (an event carries no observation instant), or
-  // no figure has been read at all. The client then draws the figures with
-  // no age.
-  //
-  // STAMPED ON A READABLE SAMPLE AND NEVER ON AN UNREADABLE ATTEMPT: the age
-  // is the age of the last successful reading.
-  optional int64 figures_read_at_ms = 5;
+  // Tag 5 (`figures_read_at_ms`, the reading's age) is RETIRED: the enduring
+  // line carries no age.
+  reserved 5;
+  reserved "figures_read_at_ms";
 }
 
 // The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A
@@ -1947,17 +1933,6 @@ message FooterAllowanceAllowedWarning {}
 // The vendor refuses requests.
 message FooterAllowanceRejected {}
 
-// How full the main agent's context window is.
-message FooterActivityEnduringContextWindow {
-  // Tokens the context currently holds, from the vendor's context-usage
-  // report.
-  int64 used_tokens = 1;
-  // The window's size in tokens, from the same report.
-  int64 window_tokens = 2;
-  // used_tokens / window_tokens, 0..1, resolved by the daemon so the client
-  // draws the percentage without arithmetic.
-  double fill = 3;
-}
 // ---- 4. Clock ------------------------------------------------------------
 
 // The turn clock. UNSET = no turn in flight; the cell renders idle.
