@@ -364,6 +364,11 @@ func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
 			incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"},
 			want:      []string{"--node", "node", JoiningFlag, "127.0.0.1:1"},
 		},
+		{
+			name:      "a replacing flag an incumbent booted with is dropped",
+			incumbent: []string{"--default-config-dir", "/roots/default", "--replacing"},
+			want:      []string{"--default-config-dir", "/roots/default", JoiningFlag, "127.0.0.1:1"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

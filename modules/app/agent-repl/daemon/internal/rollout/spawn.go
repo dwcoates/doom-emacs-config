@@ -42,21 +42,28 @@ func JoiningAddrPath(stateDir string) string {
 // test did pass (the account roots, the shim entry, the webapp dist, the
 // prompts directory) is the incumbent's configuration, and a successor
 // without it is a different daemon.
+//
+// An existing joining flag is DROPPED, value and all: this successor joins the
+// daemon that spawned it, not the one its parent joined. A replacing flag is
+// dropped too: an incumbent that was itself booted as a replacement carries
+// it, and a successor handed `--replacing --joining` refuses the pair and
+// exits before it binds, so every handover that incumbent attempted failed as
+// a successor that never reported an address (2026-09-30).
 func successorArgv(incumbent []string, address string) []string {
 	out := make([]string, 0, len(incumbent)+2)
 	for i := 0; i < len(incumbent); i++ {
 		arg := incumbent[i]
-		bare := strings.TrimLeft(arg, "-")
-		name, _, hasValue := strings.Cut(bare, "=")
-		if name != joiningName {
-			out = append(out, arg)
+		name, _, hasValue := cutFlag(arg)
+		switch name {
+		case joiningName:
+			if !hasValue && i+1 < len(incumbent) {
+				i++
+			}
+			continue
+		case ReplacingFlagName:
 			continue
 		}
-		// An existing joining flag is DROPPED, value and all: this successor
-		// joins the daemon that spawned it, not the one its parent joined.
-		if !hasValue && i+1 < len(incumbent) {
-			i++
-		}
+		out = append(out, arg)
 	}
 	return append(out, JoiningFlag, address)
 }
