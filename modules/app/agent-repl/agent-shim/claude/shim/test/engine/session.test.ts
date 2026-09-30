@@ -1985,6 +1985,211 @@ describe("a turn the vendor started on its own", () => {
 });
 
 /**
+ * A PROMPT SENT TO JOIN THE RUNNING TURN (`join_running_turn`, 2026-09-30).
+ *
+ * The prompt is pushed while the daemon's turn runs, and its row waits for the
+ * vendor to decide its fate: folded into the running turn at a tool boundary,
+ * or run as the vendor's next turn once the running turn leaves the slot.
+ */
+describe("a prompt joining the running turn", () => {
+  /** Send `turnId` to join the running turn, and answer its client uuid. */
+  async function join(h: Harness, turnId: string): Promise<string> {
+    const response = await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+        said: textSaid("also this"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+        joinRunningTurn: true,
+      }),
+    );
+    if (response.result.case !== "success") throw new Error(`the join was refused: ${response.result.case}`);
+    return h.minted.at(-1) ?? "";
+  }
+
+  /** A frame answering `answers` in a turn that consumed every send in `all`. */
+  const consumed = (message: SdkMessage, answers: string, all: string[]): SdkMessage =>
+    ({ ...message, user_message_uuid: answers, user_message_uuids: all }) as SdkMessage;
+
+  /** Every prompt row written, as [turn, folded_into], in order. */
+  const promptRows = (h: Harness): [string, string | undefined][] =>
+    [...h.persistence.durable, ...h.persistence.buffered].flatMap((entry) =>
+      entry.item.kind === "prompt"
+        ? [[entry.item.prompt.id?.value ?? "", entry.item.prompt.foldedInto?.value] as [string, string | undefined]]
+        : [],
+    );
+
+  /** Every row written after the first, as its turn and kind, in order. */
+  const rowsAfterStart = (h: Harness): string[] =>
+    h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind === "prompt") return [`prompt:${entry.item.prompt.id?.value ?? ""}`];
+      if (entry.item.kind === "frame" && entry.item.frame.result.case !== undefined) {
+        return [`terminal:${entry.turn?.value ?? ""}`];
+      }
+      return [];
+    });
+
+  it("writes the folded prompt's row naming the turn the vendor folded it into", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const joined = await join(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("after-the-tool"), running, [running, joined]));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", "turn-1"],
+    ]);
+  });
+
+  it("charges the running turn's frames after a fold to the running turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const joined = await join(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("after-the-tool"), running, [running, joined]));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toBe("turn-1");
+  });
+
+  it("opens no turn for a folded prompt: the slot is free once the running turn ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const joined = await join(h, "turn-2");
+    await h.engine.onSdkMessage(consumed(assistantMessage("after-the-tool"), running, [running, joined]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running, joined]));
+
+    // Assert
+    expect((await startDuring(h, "turn-3")).result.case).toBe("success");
+  });
+
+  it("writes the unfolded prompt's row as its own turn right after the running turn's end", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    await join(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", undefined],
+    ]);
+  });
+
+  it("holds the send slot for the unfolded prompt's turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    await join(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+
+    // Assert
+    const next = await startDuring(h, "turn-3");
+    expect(next.result.case === "failure" ? next.result.value.kind.case : "accepted").toBe("turnAlreadyOpen");
+  });
+
+  it("charges the vendor's next turn to the unfolded prompt and closes it on its own result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const joined = await join(h, "turn-2");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-2-reply"), joined, [joined]));
+    const charged = h.fold.contexts.at(-1)?.turnId?.value;
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-2-result"), joined, [joined]));
+
+    // Assert
+    expect([charged, (await startDuring(h, "turn-3")).result.case]).toEqual(["turn-2", "success"]);
+  });
+
+  it("opens the waiting prompt as its own turn when the running turn is killed", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await join(h, "turn-2");
+
+    // Act
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }) }),
+    );
+
+    // Assert
+    expect(promptRows(h).at(-1)).toEqual(["turn-2", undefined]);
+  });
+
+  it("ends the waiting prompt's turn too when the query dies, after the running turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await join(h, "turn-2");
+
+    // Act
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(rowsAfterStart(h).slice(-3)).toEqual(["terminal:turn-1", "prompt:turn-2", "terminal:turn-2"]);
+  });
+
+  it("ends the waiting prompt's turn too when the session is torn down, after the running turn's terminal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await join(h, "turn-2");
+
+    // Act
+    await h.engine.standDown("SIGTERM");
+
+    // Assert
+    expect(rowsAfterStart(h).slice(-3)).toEqual(["terminal:turn-1", "prompt:turn-2", "terminal:turn-2"]);
+  });
+
+  it("interrupts nothing to send a prompt to join the running turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await join(h, "turn-2");
+
+    // Assert
+    expect(h.queries[0]?.query.calls ?? []).not.toContain("interrupt");
+  });
+});
+
+/**
  * A REPLY IS MATCHED TO THE SEND THAT CAUSED IT BY ID (owner ruling 2026-09-28).
  *
  * Every send carries a client uuid the vendor echoes on the reply, and the

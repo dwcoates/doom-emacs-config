@@ -127,6 +127,21 @@ export interface SessionContext {
   /** How long a `StartTurn` waits behind a keep-alive before refusing, loudly. */
   readonly keepaliveYieldBudgetMs: number;
   /**
+   * The prompt waiting to JOIN the running turn
+   * (`StartTurnRequest.join_running_turn`), or absence. At most one waits.
+   */
+  joiningTurn(): OpenTurn | undefined;
+  /**
+   * Push `prompt` into the vendor's input as the send of `turn` while `into`,
+   * the daemon's turn in the send slot, runs: no interrupt, and no rewind,
+   * since none is owed while a real turn runs. The session writes the
+   * prompt's row once the vendor decides its fate: folded into `into` at a
+   * tool boundary, or opened as its own turn the moment `into` leaves the
+   * slot. Synchronous, so nothing can take the slot between the caller's
+   * check of it and the push.
+   */
+  joinRunningTurn(prompt: conversationv1.AgentPrompt, turn: OpenTurn, into: OpenTurn): void;
+  /**
    * Deliver a prompt to the vendor as the send of `turn`, under a client uuid
    * the vendor echoes on its reply (engine/sends.ts).
    *
@@ -575,6 +590,9 @@ export class TurnEngine {
       return startTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
     }
     const open = this.session.openTurn();
+    if (open !== undefined && request.joinRunningTurn && !open.keepalive && open.adopted !== true) {
+      return this.joinRunningTurn(request, identity.agentId, open);
+    }
     if (open !== undefined) {
       LOGGER.debug(
         { open_turn: open.id.value, requested_turn: requested },
@@ -677,6 +695,64 @@ export class TurnEngine {
     LOGGER.info(
       { turn_id: turn.value, origin: request.origin, page_entries: page.entries.length },
       "opened a turn, delivered its prompt, and painted the opening page",
+    );
+    return startTurnAccepted(prompt, page);
+  }
+
+  /**
+   * `join_running_turn` with a turn of the daemon's running: the prompt is
+   * pushed into the vendor's input at once, and the session writes its row
+   * when the vendor decides its fate (see the SessionContext's
+   * `joinRunningTurn`).
+   *
+   * THE PUSH PRECEDES EVERY AWAIT. The running turn can end at any moment,
+   * and the session promotes a waiting join the instant it does; checked and
+   * pushed in one synchronous step, the join is either registered before the
+   * turn leaves the slot or never made.
+   */
+  private async joinRunningTurn(
+    request: shimv1.StartTurnRequest,
+    agentId: conversationv1.AgentId,
+    running: OpenTurn,
+  ): Promise<shimv1.StartTurnResponse> {
+    const requested = request.turn?.value ?? "";
+    const waiting = this.session.joiningTurn();
+    if (waiting !== undefined) {
+      LOGGER.debug(
+        { joining_turn: waiting.id.value, requested_turn: requested, running_turn: running.id.value },
+        "refused a join because another prompt already waits to join the running turn",
+      );
+      return startTurnRefused(
+        { kind: "turnAlreadyOpen" },
+        `turn ${waiting.id.value} already waits to join turn ${running.id.value}; the daemon holds the queue and the shim never does`,
+      );
+    }
+    if (this.session.query() === undefined) {
+      return startTurnRefused({ kind: "queryDead" }, "the vendor query is dead; nothing can accept a prompt");
+    }
+    const turn = request.turn;
+    const said = request.said;
+    if (turn === undefined || said === undefined) {
+      // validate/ refuses this at the wire; the guard keeps the invariant local.
+      throw new Error("shim turn: StartTurn reached the engine without a turn id or a prompt");
+    }
+    const prompt = buildPrompt(turn, agentId, said, request.origin);
+    const joining: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
+    try {
+      this.session.joinRunningTurn(prompt, joining, running);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.error(
+        { turn_id: turn.value, running_turn: running.id.value, cause: detail },
+        "the vendor refused the prompt sent to join the running turn",
+      );
+      return startTurnRefused({ kind: "vendorRefused" }, detail);
+    }
+    this.rememberStarted(turn.value, request.origin);
+    const page = await this.openingPage(agentId, request.pageSize, request.knownThrough);
+    LOGGER.info(
+      { turn_id: turn.value, running_turn: running.id.value, origin: request.origin },
+      "sent a prompt to join the running turn after its current tool call; nothing was interrupted",
     );
     return startTurnAccepted(prompt, page);
   }
