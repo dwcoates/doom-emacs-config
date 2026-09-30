@@ -87,6 +87,42 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    one drawer entry marked `coalesced` — needs a daemon_hold.proto/tray
    field; emit footer `StageCoalesced`); explicit interrupts still stop an
    act. Integration test of the owner's worked example.
+4-PLAN (held-queue + verdict split, written 2026-09-30 mid-work):
+    Findings: `SubmitSessionAct` (promptqueue/acts.go) parks every act in the
+    in-memory `wsState.acts` when anything is ahead; `drainActs` runs them at
+    a turn end BEFORE `popAndDeliver`, and `releaseActsLocked`, bounce.go:831
+    and handoff.go carry them too. A HELD prompt whose text is /compact or
+    /clear is already never classified (`sessionActVerdict`) and delivered as
+    the cut (`deliver` -> `runContextCut`). /model is a typed command
+    (prompthandler `ActCommands`); permission mode has NO typed form, so text
+    recognition cannot cover every act.
+    Design: (H1) wsm.HeldPrompt gains `Act *HeldAct{Kind, Value}` (migration:
+    held_prompts act_kind/act_value, nullable). (H2) SubmitSessionAct, when
+    anything is ahead, HOLDS the act through `q.hold`: a context cut as a
+    held prompt whose Said is its literal text (the existing path); a model
+    or permission-mode act as a held entry with Act set. Delete
+    `wsState.acts`, `drainActs`, `releaseActsLocked` and the handoff carrying
+    of acts (holds are durable and already carried). (H3) `neverJudged`
+    covers Act entries; `deliver` runs an Act entry via runAct and the pop
+    continues to the next entry (an act opens no turn). (H4) tray:
+    frontend.v1 DaemonHoldItem gains an `act` arm (HeldSessionAct: turn,
+    queued_at, kind oneof model/permission_mode with value, badges); webapp
+    draws it; cancel works by turn. (H5) classification judges only the item
+    immediately ahead: ahead is an act/cut -> not classified (hold); ahead is
+    a classifiable prompt (running or queued) -> classified against it.
+    (H6) verdict split: classifier returns queue | after_tool_call |
+    interrupt (unsure -> after_tool_call). after_tool_call against a RUNNING
+    turn: the shim pushes the prompt into its streaming input with no
+    interrupt (probe settled: it folds in at the next tool boundary); needs a
+    shim verb (e.g. shim.v1 StartTurn with a `fold_into_running` flag or a
+    new InjectPrompt rpc) and the watcher binding by user_message_uuids.
+    interrupt: as today, plus a daemon note on the delivered prompt naming
+    the classifier's reason. Against a QUEUED prompt, either non-queue
+    verdict COALESCES (fold text into the queued entry, drop the new entry,
+    mark `coalesced` on the tray entry, footer StageCoalesced). (H7) footer
+    stage arm for after_tool_call; proto frontend.v1 HeldPrompt verdict arm
+    for after_tool_call and a `coalesced` marker. (H8) tests incl. the
+    owner's worked example in the daemon integration suite.
 4a. OWNER REQUESTS QUEUED 2026-09-30 (implement when convenient, before the
     docs and green pass so they land in the same cherry-pick):
     - Response bubble's top-right token figure (`webapp/src/feed/cards/
