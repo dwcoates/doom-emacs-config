@@ -1375,6 +1375,63 @@ and how long it stood. Do NOT list kinds at a call site: add the kind's row to
 the table. `lifetime_test.go` fails a kind with no lifetime and an edge with no
 production caller.
 
+## Footer activity lines are salient, transient, quiet, or enduring
+
+The owner's rulings of 2026-09-28 through 2026-09-30 (the design record is
+`docs/protobuf-design/footer-activity-tiers.md`). The strip's activity cell is
+meant to be ACTIVE: continual feedback that the session is doing something,
+never a line that stands for an hour because nothing arrived to clear it, and
+never an empty cell. It is always exactly ONE line, cut off with an ellipsis
+when it would overflow. Every activity kind belongs to exactly ONE of four
+tiers, and the tier is defined by WHAT ENDS the line:
+
+| tier | ends when | examples |
+| --- | --- | --- |
+| **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); a vendor rate-limit event (`allowed_warning`, `rejected`); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
+| **transient** | its 10 s display window lapses, or a newer transient replaces it | tool-call starts; task-tracker moves; the `submitting` line with the held-prompt queue and classification progress; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
+| **quiet** | the next feed item surfaces | the quiet-stretch line: from the moment a feed item has FULLY LANDED until the next feed item FIRST SURFACES, e.g. `✅ Bash finished — handling result...`; a prompt delivered, `✅ Prompt delivered — awaiting response...` |
+| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage, or how full the context window is, whichever the 80% rule below picks |
+
+**PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then quiet, then
+enduring. A transient never covers a salient line; it covers only a quiet or
+enduring line, and when it lapses the line beneath it shows again. Within the
+salient tier the contract's precedence decides (the kind that explains the
+standing step first, then a fault, then a deploy's progress, and so on);
+within the transient tier the NEWEST wins, so submitting a prompt (which
+raises the `submitting` transient) replaces whatever transient stood.
+
+**QUIET NEVER LEAVES A TURN SILENT.** While a turn is in flight, either a feed
+item is surfacing or running, or the quiet line stands. A quiet stretch with no
+line is an invariant break the daemon records at ERROR. The quiet line is legal
+under the `working` status and under `background`; while a turn is in flight
+the status is `working` even if background work runs, and background items are
+not surfaced on the line then. Quiet lines never say "agent".
+
+**THE ENDURING LINE IS CHOSEN BY THE 80% RULE, NOT ROTATED.** Two facts
+compete: the 5-hour usage percentage (the weekly and overage figures do not
+enter the choice, though the line draws them) and the context window's fill.
+Both under 80%: `usage`. Exactly one at or above 80%: that one. Both at or
+above 80%: the higher, and `usage` wins a tie.
+
+**A TIMER MAY END ONLY A TRANSIENT.** A salient or quiet line with no clearing
+event is a missing end signal, and the fix is the end signal, not an expiry.
+The transient window is a presentation choice, which is why it alone is timed,
+and it is never shortened or lengthened by what arrives next: the next event
+may never come.
+
+**THE DAEMON DECIDES THE EXPIRY; THE CLIENT APPLIES IT.** Every push carries
+the standing transient WITH its expiry instant, AND the resolved line beneath
+it (the quiet line if one stands, else the enduring line). The client draws the
+transient until its clock passes the expiry, then the line beneath — the same
+client-side ticking from a shipped instant the turn clock already does. The
+daemon runs no expiry timer and pushes nothing when a transient lapses, so
+what is drawn is a pure function of the last push and the client's clock.
+
+**NON-BLOCKING ERRORS AND WARNINGS ARE TRANSIENT.** Only a condition the user
+must see until it ends is salient; a non-escalating fault announces as a
+transient, and its standing record lives elsewhere (the topbar's warning
+strip, the status panel), never as a line pinned over the session's feedback.
+
 ## Hibernation is the memory knob, and it is gated on real elapsed quiet
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
