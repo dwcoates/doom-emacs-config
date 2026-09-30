@@ -75,10 +75,15 @@ func (l *TestLogger) append(level, operation, message string, ctx Context) {
 	})
 }
 
-// derivedTestLogger is a TestLogger view with extra base context.
+// derivedTestLogger is a TestLogger view with extra base context. A view
+// TestSurfaces.Workspace handed out is bound to a workspace and tees its Warn
+// and Error records exactly as the real workspace logger does.
 type derivedTestLogger struct {
 	parent *TestLogger
 	base   Context
+	// surfaces and workspaceID are set on a workspace-bound view only.
+	surfaces    *TestSurfaces
+	workspaceID string
 }
 
 func (l *derivedTestLogger) Debug(operation, message string, ctx Context) {
@@ -91,14 +96,35 @@ func (l *derivedTestLogger) Info(operation, message string, ctx Context) {
 
 func (l *derivedTestLogger) Warn(operation, message string, ctx Context) {
 	l.parent.append("warn", operation, message, merge(l.base, ctx))
+	l.tee(LevelWarn, operation, message)
 }
 
 func (l *derivedTestLogger) Error(operation, message string, ctx Context) {
 	l.parent.append("error", operation, message, merge(l.base, ctx))
+	l.tee(LevelError, operation, message)
 }
 
 func (l *derivedTestLogger) With(ctx Context) Logger {
-	return &derivedTestLogger{parent: l.parent, base: merge(l.base, ctx)}
+	return &derivedTestLogger{parent: l.parent, base: merge(l.base, ctx), surfaces: l.surfaces, workspaceID: l.workspaceID}
+}
+
+// tee hands a workspace-bound view's record to the double's bound tee.
+func (l *derivedTestLogger) tee(level, operation, message string) {
+	if l.surfaces == nil || l.workspaceID == "" {
+		return
+	}
+	l.surfaces.mu.Lock()
+	tee := l.surfaces.tee
+	l.surfaces.mu.Unlock()
+	if tee == nil {
+		return
+	}
+	tee.OnWorkspaceRecord(WorkspaceRecord{
+		WorkspaceID: l.workspaceID,
+		Level:       level,
+		Operation:   operation,
+		Message:     message,
+	})
 }
 
 // merge builds a new Context from base overlaid with extra.
@@ -143,6 +169,8 @@ type TestSurfaces struct {
 	// dirEvents records every DetachDir and AttachDir call, in order, as
 	// "detach <dir>" and "attach <dir>".
 	dirEvents []string
+	// tee is the bound record tee, nil when none is bound.
+	tee RecordTee
 }
 
 // ClientLogCall is one captured ClientLog call.
@@ -168,11 +196,24 @@ func (s *TestSurfaces) Workspace(dir string) (Logger, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.logger.With(Context{
-		KeyWorkspaceDir:     dir,
-		KeyWorkspaceID:      id,
-		KeyWorkspaceDirHash: hash,
-	}), nil
+	return &derivedTestLogger{
+		parent: s.logger,
+		base: merge(s.logger.base, Context{
+			KeyWorkspaceDir:     dir,
+			KeyWorkspaceID:      id,
+			KeyWorkspaceDirHash: hash,
+		}),
+		surfaces:    s,
+		workspaceID: id,
+	}, nil
+}
+
+// BindRecordTee implements Surfaces: a workspace-bound logger this double
+// handed out tees its Warn and Error records to it, as the real one does.
+func (s *TestSurfaces) BindRecordTee(tee RecordTee) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tee = tee
 }
 
 // WorkspaceOrCentral implements Surfaces with the production semantics: the

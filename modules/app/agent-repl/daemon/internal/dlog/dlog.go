@@ -88,8 +88,38 @@ type Surfaces interface {
 	DetachDir(dir string) error
 	// AttachDir lifts DetachDir once a worktree exists at that path again.
 	AttachDir(dir string) error
+	// BindRecordTee installs the ONE place a workspace's Warn and Error
+	// records are copied out of the log: every such record a workspace logger
+	// emits is handed to the tee after it is durably written. It is how the
+	// footer shows the daemon's warnings and errors about a workspace without
+	// a hook beside each call site. A nil tee unbinds it.
+	BindRecordTee(tee RecordTee)
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
+}
+
+// WorkspaceRecord is one Warn or Error record a WORKSPACE logger emitted, as
+// the record tee hands it on. Only records bound to a workspace are teed: a
+// run-log record belongs to no workspace's strip.
+type WorkspaceRecord struct {
+	// WorkspaceID is the daemon-minted ids.WorkspaceID the record's logger is
+	// bound to.
+	WorkspaceID string
+	// Level is LevelWarn or LevelError.
+	Level string
+	// Operation is the record's operation, verbatim.
+	Operation string
+	// Message is the record's message, verbatim.
+	Message string
+}
+
+// RecordTee receives every Warn and Error record a workspace logger emits,
+// synchronously and after the record is durable. It is called on the
+// emitter's goroutine, possibly while the emitter holds its own locks, so an
+// implementation takes no lock the emitter might need and never logs a Warn or
+// Error through a workspace logger it would then receive again.
+type RecordTee interface {
+	OnWorkspaceRecord(rec WorkspaceRecord)
 }
 
 // ShimRollRequest asks the daemon's session owner to replace a shim whose log
