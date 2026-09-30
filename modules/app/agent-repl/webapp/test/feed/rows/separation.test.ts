@@ -463,3 +463,9 @@ describe("drawFeedSessionSeparation: a tree in the summary", () => {
     expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 });
+
+describe("the compaction summary's fold toggle style", () => {
+  it("draws the toggle at twice the divider's size, in white", () => {
+    expect(stylesheet).toMatch(/\.sep-fold-toggle \{[^}]*font-size: 2em;[^}]*color: #ffffff;/);
+  });
+});
