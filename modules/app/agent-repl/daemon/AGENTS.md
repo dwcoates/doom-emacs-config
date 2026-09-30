@@ -1557,8 +1557,7 @@ landed changes 1-5; `internal/resolve/footer`).
   it (a timer never does); a transient carries its own expiry, which the
   client applies; the quiet-stretch line stands under `working` and
   `background` until the next feed item surfaces; the enduring line is the
-  one figure the daemon chose by the 80% rule (usage, or the context window
-  once it passes 80%). The salient kinds are shared across status arms.
+  usage allowances, or `unobserved` before any figure is read. The salient kinds are shared across status arms.
 - **A PROMPT'S DELIVERY IS A `submitting` TRANSIENT PER STAGE**: held (its
   place in the queue), classifying, interrupting the turn, after this tool
   call, coalesced, sent.

@@ -28,7 +28,7 @@ describe("footerClockSpan", () => {
   });
 
   it("wears the class it is given", () => {
-    expect(footerClockSpan(createTicker(1000), "age", "footer-rate-age", () => undefined).className).toBe("footer-rate-age");
+    expect(footerClockSpan(createTicker(1000), "age", "footer-activity-age", () => undefined).className).toBe("footer-activity-age");
   });
 
   it("wears no class when none is given", () => {

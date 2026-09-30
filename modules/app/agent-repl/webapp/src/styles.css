@@ -6847,27 +6847,15 @@ bubble-body.bubble-body { display: block; }
    (drawFooterActivityEnduring), laid out exactly as the retired rate line was.
    Every other kind is prose the grow cell may ellipsize anywhere, because a
    clipped sentence is still read from its front. This one is different things
-   -- allowance figures (`.footer-rate-figures`, elastic), the age of their
-   reading, the context window's fill -- so it is an inline flex box no wider
-   than the cell, and the read-age and the fill stay rigid beside the figures:
-   they are on the glass whenever they are in the DOM, and the figures are what
-   gives when the strip tightens. The figures in full are rows of the tokens
-   sheet. */
+   -- allowance figures (`.footer-rate-figures`, elastic) -- so it is an
+   inline flex box no wider than the cell, and the figures are what gives when
+   the strip tightens. The figures in full are rows of the tokens sheet. */
 .footer-activity-enduring {
   display: inline-flex;
   align-items: baseline;
   max-width: 100%;
   vertical-align: bottom;
 }
-/* THE READ-AGE (drawFiguresReadAge): a caveat about freshness, not a figure,
-   so it stays un-cut and takes a caveat's muted weight. */
-.footer-activity-enduring > .footer-rate-age {
-  flex: 0 0 auto;
-  color: var(--muted);
-}
-/* THE CONTEXT FILL (drawFooterActivityEnduringContextWindow): one short figure,
-   rigid like the age. */
-.footer-activity-enduring > .footer-context-window { flex: 0 0 auto; }
 
 /* ---- footer agents-panel row state (src/footer/expanded.ts) ---- */
 /* THE WAITING-FOR-THE-API STATE (drawFooterAgentRowWaitingForApi): it keeps to
