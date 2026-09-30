@@ -65,6 +65,25 @@ message ApiRequestFailed {
     // A type the API declared that this schema does not model, kept by name.
     ApiUnmodeledError unmodeled = 10;
   }
+  // THE VENDOR'S RETRY SCHEDULE, when it will retry this request: which
+  // attempt failed, how many retries it allows, and when it said the next
+  // attempt starts. Unset when the vendor stated no retry. Carried for EVERY
+  // kind -- a connection failure is retried on the same schedule as a rate
+  // limit -- so a consumer can say when the next try is due and see one that
+  // never came.
+  optional ApiRetry retry = 14;
+}
+
+// The vendor's schedule for retrying a failed request.
+message ApiRetry {
+  // The retry the vendor makes next, as it counts them (its `retryAttempt`):
+  // 1 when the first request failed and its first retry is coming.
+  uint32 attempt = 1;
+  // How many retries the vendor allows before it gives up.
+  uint32 max_retries = 2;
+  // When the vendor said the next attempt starts, epoch ms: the failure's own
+  // instant plus the delay it stated.
+  int64 next_attempt_at_ms = 3;
 }
 
 // The API rate-limited the request.

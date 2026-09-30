@@ -1437,12 +1437,25 @@ message FooterStatusActivityMergingCommit {
   string subject = 2;
 }
 
+// The API answered again after one or more failed attempts.
+message FooterActivityTransientApiRestored {
+  // How many attempts had failed before it answered.
+  int32 failed_attempts = 1;
+}
+
 // The vendor call is being retried.
 message FooterStatusActivityRetrying {
-  // Which attempt this is: 2 for the first retry, counting up.
+  // Which attempt is next: 2 for the first retry, counting up.
   int32 attempt = 1;
   // The retry's status summary, verbatim.
   string status = 2;
+  // When the vendor said the next attempt starts, so the line counts down to
+  // it and shows an attempt that is overdue. Unset when the vendor stated no
+  // schedule.
+  optional FooterStatusActivityAt next_attempt = 3;
+  // The last attempt the vendor will make before it gives up. Unset when the
+  // vendor stated no schedule.
+  optional int32 max_attempt = 4;
 }
 
 // An auth prompt is up.
@@ -1626,6 +1639,9 @@ message FooterActivityTransient {
     // compaction that FAILED is the salient `context_budget` line instead,
     // because the context is still as large as it was.
     FooterActivityTransientCompactionConcluded compaction_concluded = 19;
+    // The API answered again after failed attempts: the retrying line ended
+    // because a response landed.
+    FooterActivityTransientApiRestored api_restored = 20;
   }
 }
 
