@@ -303,6 +303,13 @@ func spawnScript(t *testing.T, state, body string) string {
 	return script
 }
 
+// reportingBody is the stand-in's report of 127.0.0.1:7788, written the way a
+// successor writes it: to a temporary file renamed into place.
+func reportingBody(state string) string {
+	return "printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n"
+}
+
 func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 	// Arrange: a successor that stays up and never reports.
 	state := t.TempDir()
@@ -351,9 +358,7 @@ func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 func TestSpawnAnswersTheAddressASuccessorReportedBeforeItExited(t *testing.T) {
 	// Arrange: the report lands, then the process ends, before any poll.
 	state := t.TempDir()
-	body := "printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
-		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\nexit 3\n"
-	spawner := NewProcessSpawner(spawnScript(t, state, body), state)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state)
 	spawner.Poll = time.Hour
 	spawner.Timeout = time.Hour
 
@@ -543,14 +548,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	t.Helper()
 	state := t.TempDir()
-	script := filepath.Join(state, "successor.sh")
-	body := "#!/bin/sh\n" +
-		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
-		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" + tail
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write the stand-in: %v", err)
-	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	spawner.StopGrace = 50 * time.Millisecond
