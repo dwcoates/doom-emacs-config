@@ -264,7 +264,7 @@ func TestABootingDaemonClosesEveryDeployFaultAnEarlierOneLeft(t *testing.T) {
 	h := newHarness(t)
 	build := deployFault(t, h, health.DeployStepBuild)
 	install := deployFault(t, h, health.DeployStepInstall)
-	other := h.faults.seed(t, wsm.Fault{Kind: health.KindSuccessorSpawnFailed})
+	other := h.faults.seed(t, wsm.Fault{Kind: health.KindPromptsDirMissing})
 
 	// Act
 	h.d.CloseEarlierFailures(context.Background())
@@ -288,6 +288,7 @@ func TestABootingDaemonClosesEveryFaultWhoseLifetimeEndsAtABoot(t *testing.T) {
 	}{
 		{"an earlier process's poisoned sink", health.KindLogSinkPoisoned, true},
 		{"an earlier process's read-only handle", health.KindWsmReadOnly, true},
+		{"an earlier process's failed handover", health.KindSuccessorSpawnFailed, true},
 		{"a missing prompts directory waits for a served brief", health.KindPromptsDirMissing, false},
 	}
 	for _, tt := range tests {

@@ -80,9 +80,13 @@ func (c *controller) clearDeployLine(why string, fields dlog.Context) {
 
 // openSuccessorFault records a successor that would not start (or never
 // proved it was serving) as the daemon-scoped `successor_spawn_failed` fault,
-// which the footer draws on every strip. A fault that cannot be recorded is
+// which the footer draws on every strip. It SUPERSEDES any standing one first,
+// so a run of failed handovers stands as one fault, the latest. A fault that cannot be recorded is
 // ERROR: the handover's own failure is still the caller's answer.
 func (c *controller) openSuccessorFault(ctx context.Context, cause error, fields dlog.Context) {
+	health.CloseOnEdge(context.WithoutCancel(ctx), c.deps.DB, c.log.With(fields), health.EdgeSuperseded,
+		health.EdgeScope{DaemonOnly: true, Match: func(f wsm.Fault) bool { return f.Kind == health.KindSuccessorSpawnFailed }},
+		c.deps.Clock.Now())
 	_, err := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
 		Kind:     health.KindSuccessorSpawnFailed,
 		Detail:   fmt.Sprintf("the deploy's successor daemon did not come up; this daemon keeps serving: %v", cause),
