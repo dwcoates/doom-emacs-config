@@ -133,6 +133,13 @@ A. **Merge queue analysis (no changes until reviewed with the owner).**
 B. **After a workspace closes** (killed, closed or nuked by the user, or
    implicitly, e.g. a completed merge), Emacs and the webapp select the LAST
    selected workspace, not the first one in the tab bar or sidebar.
+   - Only when the user is looking at the closing workspace (owner, 2026-09-30).
+     If they are on another workspace when it closes, the selection stays where
+     it is: switching them away would disrupt what they are looking at.
+   - How the workspace closed does not matter. There is one rule for an
+     explicit close by the user and an implicit one such as a merge: if the
+     closing workspace is the selected one, select the one selected before it;
+     otherwise change nothing.
 C. **The merge bubble's test log link.** The test failure log's path rides
    statically in the proto on the merge queue feed entry. The Tests tab draws
    it as a link, in the same blue as links elsewhere in response bubbles.
