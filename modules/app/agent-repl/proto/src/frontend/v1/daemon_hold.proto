@@ -151,6 +151,43 @@ message HeldPrompt {
   // A list whose length disagrees with the facts above is a malformed frame and
   // is rejected loudly rather than drawn with a missing or surplus badge.
   repeated HeldPromptBadge badges = 14;
+  // PRESENT WHEN LATER PROMPTS WERE FOLDED INTO THIS ONE while it was still
+  // queued: a prompt the classifier ruled should interrupt a prompt that had
+  // not started yet is merged into it rather than queued behind it. `said`
+  // already carries the merged text; this says the merge happened.
+  HeldPromptCoalesced coalesced = 15;
+  // PRESENT WHEN THIS ENTRY IS A SESSION ACT rather than a prompt: a model or
+  // permission-mode change queued in order with the prompts around it, never
+  // classified, applied when what is ahead of it ends. `said` is what the act
+  // is shown as; this is what it does. A context cut is not here: /compact and
+  // /clear are prompts whose text is the command.
+  HeldSessionAct act = 16;
+}
+
+// Later prompts were folded into this one while it was queued. DELIBERATELY
+// EMPTY: the field's presence is the whole fact.
+message HeldPromptCoalesced {}
+
+// A session act held in the queue. THE ARM IS THE ACT.
+message HeldSessionAct {
+  oneof act {
+    // The session's model changes to this one.
+    HeldSessionActModel model = 1;
+    // The session's permission mode changes to this one.
+    HeldSessionActPermissionMode permission_mode = 2;
+  }
+}
+
+// A model change.
+message HeldSessionActModel {
+  // The model the session changes to, as the served catalog names it.
+  string model = 1;
+}
+
+// A permission-mode change.
+message HeldSessionActPermissionMode {
+  // The permission mode the session changes to, as the vendor names it.
+  string mode = 1;
 }
 
 // One status badge on a held prompt's card, composed daemon-side.
