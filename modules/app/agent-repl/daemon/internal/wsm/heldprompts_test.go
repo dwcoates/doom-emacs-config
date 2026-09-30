@@ -901,3 +901,148 @@ func TestAHeldPromptWithAnUnknownDeliveryIsNeverReadAsOrdinary(t *testing.T) {
 		t.Fatalf("AllHeldPrompts = %v, want a *DecodeError naming held_prompts.delivery", err)
 	}
 }
+
+func TestPutHeldPromptRoundTripsAHeldAct(t *testing.T) {
+	tests := []struct {
+		name string
+		act  HeldAct
+	}{
+		{name: "a model change", act: HeldAct{Kind: ActModel, Value: "claude-opus-5-5"}},
+		{name: "a permission-mode change", act: HeldAct{Kind: ActPermissionMode, Value: "plan"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			act := tc.act
+
+			// Act
+			if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+				Workspace: ws.ID, Turn: NewTurnID(), Said: said("/model x"), Origin: "webapp", QueuedAt: instant, Act: &act,
+			}); err != nil {
+				t.Fatalf("PutHeldPrompt: %v", err)
+			}
+			got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil || len(got) != 1 || got[0].Act == nil || *got[0].Act != tc.act {
+				t.Fatalf("HeldPrompts = (%+v, %v), want one hold carrying %+v", got, err, tc.act)
+			}
+		})
+	}
+}
+
+func TestPutHeldPromptRoundTripsAPromptAsNoAct(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	standingHold(t, s, ws.ID)
+
+	// Act
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].Act != nil || got[0].Coalesced {
+		t.Fatalf("HeldPrompts = (%+v, %v), want one uncoalesced prompt with no act", got, err)
+	}
+}
+
+func TestPutHeldPromptRoundTripsTheCoalescedMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+		Workspace: ws.ID, Turn: NewTurnID(), Said: said("a\n\nb"), Origin: "webapp", QueuedAt: instant, Coalesced: true,
+	}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil || len(got) != 1 || !got[0].Coalesced {
+		t.Fatalf("HeldPrompts = (%+v, %v), want one coalesced hold", got, err)
+	}
+}
+
+func TestPutHeldPromptRefusesAMalformedAct(t *testing.T) {
+	tests := []struct {
+		name string
+		act  HeldAct
+	}{
+		{name: "an undeclared kind", act: HeldAct{Kind: "theme", Value: "dark"}},
+		{name: "no value", act: HeldAct{Kind: ActModel}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			act := tc.act
+
+			// Act
+			err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+				Workspace: ws.ID, Turn: NewTurnID(), Said: said("x"), Origin: "webapp", QueuedAt: instant, Act: &act,
+			})
+
+			// Assert
+			if err == nil {
+				t.Fatalf("PutHeldPrompt with %s succeeded", tc.name)
+			}
+		})
+	}
+}
+
+func TestHeldPromptsFailsWholeOnAHalfWrittenAct(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	broken := standingHold(t, s, ws.ID)
+	corrupt(t, s, `UPDATE held_prompts SET act_kind = 'model' WHERE turn_id = ?`, broken)
+
+	// Act
+	_, err := s.AllHeldPrompts(context.Background())
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Field != "act" {
+		t.Fatalf("AllHeldPrompts = %v, want a *DecodeError naming held_prompts.act", err)
+	}
+}
+
+func TestHeldPromptsFailsWholeOnAnUndeclaredActKind(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	broken := standingHold(t, s, ws.ID)
+	corrupt(t, s, `UPDATE held_prompts SET act_kind = 'theme', act_value = 'dark' WHERE turn_id = ?`, broken)
+
+	// Act
+	_, err := s.AllHeldPrompts(context.Background())
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Field != "act" {
+		t.Fatalf("AllHeldPrompts = %v, want a *DecodeError naming held_prompts.act", err)
+	}
+}
+
+func TestUpdateHeldPromptClassificationRoundTripsAfterToolCall(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+		Workspace: ws.ID, Turn: NewTurnID(), Said: said("x"), Origin: "webapp", QueuedAt: instant,
+		Classification: &Classification{Arm: ArmAfterToolCall, Reason: "adds a constraint", At: instant},
+	})
+	got, readErr := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil || readErr != nil || len(got) != 1 || got[0].Classification.Arm != ArmAfterToolCall {
+		t.Fatalf("HeldPrompts = (%+v, %v / %v), want an after_tool_call verdict", got, err, readErr)
+	}
+}

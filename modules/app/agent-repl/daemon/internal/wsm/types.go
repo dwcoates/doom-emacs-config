@@ -407,7 +407,30 @@ type HeldPrompt struct {
 	// prompt is never classified and never interjected, whichever daemon holds
 	// it and however often the hold is judged again.
 	Delivery Delivery
+	// Act, when set, makes the entry a held SESSION ACT rather than a prompt:
+	// a model or permission-mode change queued behind the work ahead of it,
+	// in order with the prompts around it, and never classified. Said is
+	// then what the act is shown as. A context cut is not an Act: it is a
+	// prompt whose text is the command, delivered as the cut it is.
+	Act *HeldAct
+	// Coalesced records that later prompts were folded into this one while it
+	// was still queued, so the tray can say so.
+	Coalesced bool
 }
+
+// HeldAct is a session act held in the queue.
+type HeldAct struct {
+	// Kind is ActModel or ActPermissionMode.
+	Kind string
+	// Value is the model or the permission mode the act sets.
+	Value string
+}
+
+// The held act kinds.
+const (
+	ActModel          = "model"
+	ActPermissionMode = "permission_mode"
+)
 
 // Delivery is how a held prompt asked to be delivered: agentrepl.v1's
 // SubmitPromptDelivery, as the queue stores it.
@@ -459,6 +482,10 @@ const (
 	// ArmHoldForTurnEnd. It is kept, with its tray projection, because
 	// removing error coverage needs the owner's sign-off.
 	ArmClassificationError
+	// ArmAfterToolCall reaches the running turn at its next tool boundary:
+	// nothing is interrupted, and the prompt is folded into the turn after
+	// the call in flight returns.
+	ArmAfterToolCall
 )
 
 // Classification is the classifier's verdict on a held prompt.

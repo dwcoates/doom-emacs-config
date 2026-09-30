@@ -17,7 +17,7 @@ import (
 // column added to the row can never be decoded by only some of them.
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	accepted, tombstone_kind, tombstone_at, queued_at, delivery`
+	accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -40,9 +40,12 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		tombAt   sql.NullInt64
 		queued   int64
 		delivery int64
+		actKind  sql.NullString
+		actValue sql.NullString
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
-		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued, &delivery); err != nil {
+		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued, &delivery,
+		&actKind, &actValue, &h.Coalesced); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
@@ -114,8 +117,33 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 	default:
 		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "tombstone", Err: errors.New("a tombstone is stored whole or not at all")}
 	}
+	switch {
+	case !actKind.Valid && !actValue.Valid:
+	case actKind.Valid && actValue.Valid:
+		act := &HeldAct{Kind: actKind.String, Value: actValue.String}
+		if err := validateAct(act); err != nil {
+			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "act", Err: err}
+		}
+		h.Act = act
+	default:
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "act", Err: errors.New("an act is stored whole or not at all")}
+	}
 	h.QueuedAt = fromNanos(queued)
 	return h, nil
+}
+
+// validateAct refuses an act of a kind no build declares, or one that sets
+// nothing.
+func validateAct(act *HeldAct) error {
+	switch act.Kind {
+	case ActModel, ActPermissionMode:
+	default:
+		return fmt.Errorf("wsm: undeclared act kind %q", act.Kind)
+	}
+	if act.Value == "" {
+		return fmt.Errorf("wsm: a %s act names the value it sets", act.Kind)
+	}
+	return nil
 }
 
 // PutHeldPrompt records a parked submission. WSM is the ONE durable hold store.
@@ -168,11 +196,15 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		if h.Tombstone != nil {
 			tombKind, tombAt = h.Tombstone.Kind, nanos(h.Tombstone.At)
 		}
+		var actKind, actValue any
+		if h.Act != nil {
+			actKind, actValue = h.Act.Kind, h.Act.Value
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
-			   accepted, tombstone_kind, tombstone_at, queued_at, delivery)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -183,9 +215,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   classification_at = excluded.classification_at,
 			   accepted = excluded.accepted,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
-			   queued_at = excluded.queued_at, delivery = excluded.delivery`,
+			   queued_at = excluded.queued_at, delivery = excluded.delivery,
+			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
-			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery))
+			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
+			actKind, actValue, h.Coalesced)
 		return err
 	})
 }
@@ -205,6 +239,11 @@ func validateHold(h HeldPrompt) error {
 	}
 	if !h.Delivery.valid() {
 		return fmt.Errorf("wsm: undeclared delivery %d", int(h.Delivery))
+	}
+	if h.Act != nil {
+		if err := validateAct(h.Act); err != nil {
+			return err
+		}
 	}
 	if h.Classification != nil && !h.Classification.Arm.valid() {
 		return fmt.Errorf("wsm: undeclared classification arm %d", int(h.Classification.Arm))
