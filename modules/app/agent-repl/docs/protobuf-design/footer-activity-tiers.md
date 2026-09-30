@@ -672,6 +672,66 @@ unchanged.
   - **Webapp** (`webapp/src/footer/`): renders the row state, the chip
     glyph and the transient.
 
+### 3. The combined model (2026-09-30)
+
+- **Decided by** this design under the owner's standing no-questions ruling of
+  2026-09-30, following "The combined model" above.
+- **What changed, on the wire** (`frontend.v1`, `footer.proto`):
+  - The quiet tier is its own message,
+    `frontend.v1.FooterActivityQuietStretch` (`text`, and `at`, the instant
+    the stretch began, so the client draws its age).
+    - It is carried only by
+      `frontend.v1.FooterActivityTransientOverQuietOverEnduring`
+      (`transient`, `quiet_stretch`, `enduring`), the unpinned tier of the
+      `working` and `background` arms.
+    - Every other arm keeps
+      `frontend.v1.FooterActivityTransientOverEnduring`, so a quiet line is
+      unrepresentable where no turn runs.
+  - The shared salient kinds ride every arm's salient `kind` oneof under the
+    same field names:
+    - `rate_limit` (`frontend.v1.FooterStatusActivityRateLimit`: `window`,
+      `verdict` of `allowed_warning` or `rejected`, `utilization`,
+      `resets_at_s`).
+    - `notification` (`frontend.v1.FooterStatusActivityNotification`).
+    - `context_budget` (`frontend.v1.FooterStatusActivityContextBudget`),
+      which also carries "compaction failed — ...".
+    - Among the shared kinds: update, then rate limit, then notification,
+      then context budget.
+  - `frontend.v1.FooterActivityEnduring` is `oneof line { usage;
+    context_window; unobserved }`.
+    - The daemon applies the 80% rule and ships the one chosen line.
+    - `unobserved` (`frontend.v1.FooterActivityEnduringUnobserved`) states
+      that neither figure has been read yet, so the element is never empty.
+  - `frontend.v1.FooterActivityTransientSubmitting` gains `oneof stage`:
+    - `held` (`position`, `queued`).
+    - `classifying`.
+    - `interjecting`.
+    - `coalesced` (emitted by the held-queue fix).
+    - `delivered`.
+  - Transient tags 4, 5, 11 and 12 are reserved: the reasoning and response
+    tails and the transient notification and budget kinds are gone.
+- **What changed, in the daemon:**
+  - Each shared salient kind has its own end signal
+    (`internal/resolve/footer/salient.go`):
+    - The notification ends at the next prompt.
+    - The context budget ends at a successful cut, `/clear`, a concluded
+      compaction, or a session switch (a new vendor session id).
+    - A rate-limit line ends at an `allowed` event for its window.
+  - The cold gate's answer carries the compaction's `Progress`, so a gate
+    that ran a compaction announces it concluded; the gate retires before its
+    answer clears, so no intermediate status flashes.
+  - The prompt queue reports each submitting stage (`reportHeld`,
+    `OnSubmission`).
+- **Owner requests of 2026-09-30, landed with it** (webapp and Lisp, no wire
+  change):
+  - The composer is 20% shorter (`agent-repl-input-height-fraction` 0.184).
+  - The compaction boundary's "▸ summary" toggle is twice as large and white.
+  - Expanding any feed item centers its row in the feed (`itemExpanded`).
+    - This supersedes the 2026-09-23 rule that an expansion never moves the
+      feed; a collapse or a reveal still never moves it.
+  - An expanded non-prompt, non-response item never exceeds
+    `--feed-item-max-h: 80cqh` on the `#feed-scroll` size container.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.
