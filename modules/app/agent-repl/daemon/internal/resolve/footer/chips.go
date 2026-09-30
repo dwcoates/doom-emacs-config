@@ -166,7 +166,9 @@ func (r *resolver) applySubagent(s *wsState, agent *conversationv1.AgentId, unit
 		}
 		row.takeStart(item.Start)
 	case *conversationv1.AgentSubagent_Update:
-		if row, ok := s.agents[unit]; ok {
+		// BY ANY IDENTITY THE ROW IS ADDRESSED BY: a resumed run's beats ride
+		// the send's unit, which is the row's handle and not its key.
+		if row := s.subagentRow(unit); row != nil {
 			row.takeUpdate(item.Update)
 		}
 	default:
@@ -189,10 +191,20 @@ func (row *agentRow) takeStart(start *conversationv1.AgentSubagentStart) {
 }
 
 // takeUpdate folds a running beat into the row: the running token sum, and
-// the description when the beat restates one. The ONE reading of an update,
-// for the spawning call's stream and the run's own alike.
+// the label and description when the beat restates a commission that names
+// them. The ONE reading of an update, for the spawning call's stream and the
+// run's own alike.
+//
+// THE BEAT RESTATES THE COMMISSION so it stands alone, which is what describes
+// a row this daemon never saw launch (bindDetachedAgent): a row still drawn
+// under the generic label takes the label the commission names. A row already
+// labelled keeps its label, which its start established from the same
+// commission.
 func (row *agentRow) takeUpdate(update *conversationv1.AgentSubagentUpdate) {
 	row.tokens = update.GetProgress().GetTotalTokens()
+	if row.label == subagentLabel(nil) {
+		row.label = subagentLabel(update.GetPrompt())
+	}
 	if desc := update.GetPrompt().GetDescription(); desc != "" {
 		row.description = desc
 	}
@@ -617,12 +629,76 @@ func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work
 			row.work = id
 			return
 		}
+		// THE UNIT IS NOT ALWAYS THE AGENT'S SPAWN. A subagent resumed by a
+		// send is detached from the SEND, which drew no row here; the
+		// announcement's kind names the agent that is running, and the run
+		// is that agent's row. See bindDetachedAgent.
+		if agent := work.GetKind().GetSubagent().GetAgentId().GetValue(); agent != "" {
+			r.bindDetachedAgent(ws, s, id, unit, agent)
+			return
+		}
 	case *conversationv1.AgentDetachedWork_Created:
 		// The work's handle IS the unit that created it
 		// (`DetachedWorkId.value == AgentActivityId.value`).
 		r.leaveTurn(ws, s, id)
 		r.applyCreatedWork(s, id, origin.Created.GetWorkCreated())
 	}
+}
+
+// bindDetachedAgent makes a detached run that no row stood for under its unit
+// the row of the AGENT it runs, addressed by the run's own handle.
+//
+// A RESUMED SUBAGENT IS THE SAME AGENT AS ITS LAUNCH. The vendor runs a
+// subagent resumed by a send under a NEW handle (the send's id) but the SAME
+// agent, so its row carries the launch's identity -- label, description,
+// tokens -- rather than a minimal "subagent" row with no tokens that nothing
+// will describe again (owner's report, workspace footer-activity-updates,
+// 2026-09-30: daemon.footer.live_work_taken readded_retired). The identity is
+// taken from, in order of what the footer holds:
+//
+//   - the agent's LIVE row, which is re-addressed by the new handle;
+//   - the row retired at the agent's previous terminal (retiredRows), copied
+//     into a live row -- a copy, because the retired row stays the record of
+//     that earlier run for every identity it was kept under;
+//   - neither, when this daemon never saw the agent launch: a minimal row the
+//     run's own frames describe, since every one of them restates the
+//     commission (AgentSubagentUpdate.prompt, "repeated so this frame stands
+//     alone").
+//
+// The handle joins the row's addresses (row.work), so the run's beats and its
+// terminal -- addressed to the handle's unit -- reach this row, and its jump
+// names the entry the feed draws for the run under that unit.
+func (r *resolver) bindDetachedAgent(ws ids.WorkspaceID, s *wsState, work, unit, agent string) {
+	ctx := dlog.Context{"work_id": work, "unit": unit, "agent_id": agent}
+	if row := s.subagentRow(agent); row != nil {
+		row.work = work
+		ctx["identity"] = "live_row"
+		r.logOf(ws, s).Info("daemon.footer.detached_agent_bound",
+			"a detached run was bound to its agent's row by the run's own handle", ctx)
+		return
+	}
+	row := &agentRow{
+		work:         work,
+		spawnUnit:    agent,
+		createdAgent: agent,
+		label:        subagentLabel(nil),
+		startedAt:    r.opts.clock.Now(),
+		order:        s.nextOrder(),
+		provenance:   provenanceDetachedAnnouncement,
+	}
+	ctx["identity"] = "undescribed"
+	if retired, ok := s.retiredRows[agent]; ok {
+		row.spawnUnit = retired.spawnUnit
+		row.label = retired.label
+		row.description = retired.description
+		row.tokens = retired.tokens
+		row.provenance = retired.provenance
+		row.spawnedOn = retired.spawnedOn
+		ctx["identity"] = "retired_row"
+	}
+	s.agents[agent] = row
+	r.logOf(ws, s).Info("daemon.footer.detached_agent_bound",
+		"a detached run was bound to its agent's row by the run's own handle", ctx)
 }
 
 // applyCreatedWork describes work that is detached from the moment the footer
@@ -679,15 +755,17 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 				if _, done := s.retiredWork[id]; done {
 					return
 				}
-				row, ok := s.agents[id]
-				if !ok {
+				// BY ANY IDENTITY THE ROW IS ADDRESSED BY, exactly as the
+				// retirement below: a resumed run's handle is not its row's key.
+				row := s.subagentRow(id)
+				if row == nil {
 					row = &agentRow{spawnUnit: id, order: s.nextOrder(), provenance: provenanceRunFrame}
 					s.agents[id] = row
 				}
 				row.work = id
 				row.takeStart(item.Start)
 			case *conversationv1.AgentSubagent_Update:
-				if row, ok := s.agents[id]; ok {
+				if row := s.subagentRow(id); row != nil {
 					row.takeUpdate(item.Update)
 				}
 			default:
@@ -889,7 +967,10 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 		if workID == "" {
 			workID = row.spawnUnit
 		}
-		entry := s.entryFor(row.spawnUnit, row.work)
+		// THE RUN'S OWN ENTRY FIRST: a resumed run is drawn under its
+		// handle's unit (the send), which is on screen whether or not the
+		// launch's bubble still is; an ordinary run's handle IS its spawn unit.
+		entry := s.entryFor(row.work, row.spawnUnit)
 		jump := jumpTo(entry)
 		s.noteJump(&row.jump, "agent", workID, jump, dlog.Context{
 			"provenance":      string(row.provenance),
