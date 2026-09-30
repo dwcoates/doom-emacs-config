@@ -23,7 +23,7 @@ func TestOnTurnEndedStampsTheTurnsClose(t *testing.T) {
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseFailed)
 	// Assert
 	if got := h.db.closedTurns["running-turn"]; got != wsm.CloseFailed {
-		t.Fatalf("close = %s, want failed", closeName(got))
+		t.Fatalf("close = %s, want failed", got.String())
 	}
 }
 
@@ -378,7 +378,7 @@ func TestOnTurnsEndedUnobservedClosesEachTurnAsOrphaned(t *testing.T) {
 	// Assert
 	for _, turn := range []ids.TurnID{"turn-1", "turn-2"} {
 		if got, closed := h.db.closedTurns[turn]; !closed || got != wsm.CloseOrphaned {
-			t.Fatalf("%s close = (%s, closed %v), want orphaned", turn, closeName(got), closed)
+			t.Fatalf("%s close = (%s, closed %v), want orphaned", turn, got.String(), closed)
 		}
 	}
 }
@@ -433,7 +433,7 @@ func TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest(t *testing.T)
 		t.Fatalf("records = %+v, want an error daemon.promptqueue.turn_ended for the failed close", h.log.Records())
 	}
 	if got := h.db.closedTurns["turn-2"]; got != wsm.CloseOrphaned {
-		t.Fatalf("turn-2 close = %s, want orphaned despite turn-1's failure", closeName(got))
+		t.Fatalf("turn-2 close = %s, want orphaned despite turn-1's failure", got.String())
 	}
 }
 
@@ -581,7 +581,7 @@ func TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow(t *testing.T) {
 	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)
 	// Assert
 	if got, closed := h.db.closedTurns["earlier-turn"]; !closed || got != wsm.CloseCompleted {
-		t.Fatalf("close = (%s, closed %v), want completed", closeName(got), closed)
+		t.Fatalf("close = (%s, closed %v), want completed", got.String(), closed)
 	}
 }
 
