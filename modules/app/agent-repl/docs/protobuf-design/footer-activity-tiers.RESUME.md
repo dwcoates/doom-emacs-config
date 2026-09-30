@@ -91,7 +91,8 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
     PROGRESS: H1-H5 + tray + coalescing + worked-example integration test
     DONE (wsm `f927fd33e`, proto `8f0bb28f5`, queue `17f162095`, tray
     `867f390db`, integration `949aabaf5`); daemon unit + integration green.
-    NEXT: 4a, then 4c, then H6/H7 verdict split (own unit). H6 design notes:
+    4a DONE (token heat `0ed7302c4` `503f8794e`; visible-only collapse
+    `c5ed51356`). NEXT: 4c, then H6/H7 verdict split (own unit). H6 design notes:
     the SDK folds a pushed message only at a TOOL BOUNDARY; with no tool call
     in flight the message becomes the vendor's NEXT turn. So the shim verb
     (StartTurn `fold_into_open_turn` or a FoldPrompt rpc) must handle both:
