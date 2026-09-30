@@ -1163,7 +1163,9 @@ owns the rule, `src/engine/api-reachability.ts` the probe, and
   `late: true` plus one INFO naming the ended and the standing wait, and it
   moves no history, removes no wait and gives nothing up, so a newer wait of
   the same agent keeps its own lifecycle and its own outcome. A superseded
-  wait has no outcome arm on the wire; the restated set drops it. A wait's `work` is the FAILED RUN's
+  wait is ended on the wire by the new waiting edge for the same agent, which
+  the restated set already expresses (ruled 2026-09-30: no outcome arm, no
+  proto change). A wait's `work` is the FAILED RUN's
   `DetachedWorkId`: the notification's `tool_use_id`, else the agent's latest
   run, so after a resume it is the resuming `SendMessage`'s handle, the one the
   fold's failure terminal retired. A seam failure is recorded at ERROR and the
