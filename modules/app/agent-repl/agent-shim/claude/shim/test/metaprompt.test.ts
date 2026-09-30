@@ -101,7 +101,7 @@ describe("readMetaprompt", () => {
 const REPO_ROOT = fileURLToPath(new URL("../../../../../../..", import.meta.url));
 
 describe("this repository's committed metaprompt", () => {
-  it("pins subagent dispatch to opus at medium effort", () => {
+  it("defaults subagent dispatch to opus at medium effort and allows the sonnet tier", () => {
     // Arrange — a throwaway home whose canonical checkout path points at this
     // repository, so the real committed file is read exactly as a session
     // reads it without touching the developer's actual home.
@@ -112,8 +112,10 @@ describe("this repository's committed metaprompt", () => {
     const text = readMetaprompt(home);
     // Assert — the directive only governs a session if it survives into the
     // system-prompt append, so the guard is on the delivered text.
-    expect(text).toContain("Every subagent runs as opus at medium reasoning effort");
+    expect(text).toContain("Subagents default to opus at medium reasoning effort");
     expect(text).toContain("subagent_type: opus-medium");
+    expect(text).toContain("dispatched through the `sonnet-medium` subagent type");
+    expect(text).not.toContain("weaker tier than opus is a defect");
   });
 });
 
