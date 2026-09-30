@@ -1,0 +1,107 @@
+# TODO — footer-activity-updates, remaining work (written 2026-09-30, before a compaction)
+
+Read this first after the compaction. Background and the full rules live in
+`footer-activity-tiers.RESUME.md` (history, plans H1-H8, design notes) and
+`footer-activity-tiers.md` ("THE PLAN", "Held-queue", "Detached-work
+liveness", landed changes 1-4). Worktree
+`~/.config/doom-worktrees/footer-activity-updates`, branch
+`footer-activity-updates`. Work in-session, no implementation subagents, no
+questions; commit per atomic unit, check EXIT CODES (`make test` hides a gofmt
+failure).
+
+The owner's interrupts in this session were ADDITIONS, never rejections: a
+"tool use was rejected" message on an interrupt means "new info arrived",
+not "stop".
+
+## Done this stretch (all committed)
+
+- e2e on the combined model; landed change 3 recorded.
+- Footer percentages colored green <40 → yellow 70 → orange 90, red >=90.
+- Detached-work liveness fix (shell run claims, waiting WatchBash,
+  `vendor_moved` cause, sidecar claim pass, timeout sentence); landed change 4.
+- Held-queue fix: acts are durable held entries, FIFO with prompts, judged
+  only against the item ahead, coalescing into a still-queued prompt,
+  tray act + coalesced badge, worked-example integration test.
+- 4a: response bubble token figure colored by the shared token-heat rule;
+  expanded items auto-collapse only once wholly out of view.
+- 4c, partly: proto (`05360ec4d`), sidecar (`70aea48d5`), daemon footer
+  (`e986ba0ab`) — see item 1.
+
+## Remaining, in order
+
+1. **4c network-interruption footer — FINISH (was in progress).**
+   - Diagnosis (for the final report): the vendor's own `system:api_error`
+     records show attempt 8 at 15:36:52 local promising the next try in 32s;
+     no 9th attempt, response or result ever came until the owner's
+     interrupt at 15:54:09. The line was not left uncleared after a
+     recovery the system saw: the vendor HUNG. The daemon also self-counted
+     one ahead of the vendor. Fixed: the vendor's attempt/limit/next-instant
+     now ride `conversation.v1.ApiRequestFailed.retry` to
+     `frontend.v1.FooterStatusActivityRetrying.{next_attempt,max_attempt}`,
+     and the first response raises `FooterActivityTransientApiRestored`.
+   - LEFT: webapp `src/footer/activity.ts`: draw the retrying line as
+     "retrying · attempt 9 of 11 · next try in 12s · <status>", the
+     countdown ticking off `next_attempt` (shared ticker, like the usage
+     resets), and when past due "next try overdue by 2m" (makes a hung vendor
+     visible). Draw the `api_restored` transient ("API answering again after
+     8 failed attempts"). Exhaustive transient switch needs the new arm.
+     Tests for each (Vitest), typecheck, lint, integration.
+   - Check the daemon's transient-kind name switches/log (`activity_line
+     _changed` kind names) cover `api_restored`; daemon integration test
+     that a scheduled failure then a response yields the transient.
+   - Record in the design record ("Landed changes 5").
+2. **H6/H7 verdict split** (`queue` / `after_tool_call` / `interrupt`,
+   unsure → `after_tool_call`). Design notes are in RESUME "4-PLAN" and
+   "4b". Key fact from the live probe: the SDK folds a pushed user message
+   into the running turn only at a TOOL BOUNDARY; with no tool call in flight
+   it becomes the vendor's NEXT turn. So the new shim verb (StartTurn
+   `fold_into_open_turn` or a `FoldPrompt` rpc) must handle both outcomes:
+   folded (result `user_message_uuids` lists it) and not folded (the shim
+   opens the next SDK turn under the prompt's turn id and origin; the daemon
+   learns it as that turn, not a vendor-started adoption). `interrupt`
+   verdict: attach a daemon note to the delivered prompt naming the
+   classifier's reason (work was cut because this prompt changes it; follow
+   it, do not stop). Classifier prompt/parsing to three verdicts
+   (`internal/classifier`, incl. the `-fake` judge's markers). wsm already
+   has `ArmAfterToolCall`. Proto: `frontend.v1.HeldPrompt` classification
+   arm `after_tool_call` + badge; footer submitting stage arm for
+   after-tool-call; tray projection (`resolve/holds/tray.go`, today its
+   default branch logs an error for the arm). Tests incl. the worked
+   example's last step ("actually also do X" → after_tool_call).
+3. **Docs**: `AGENTS.md` (footer: four tiers, shared salient kinds, 80%
+   rule, submitting stages, retry countdown/restored; prompt queue: acts are
+   held entries, FIFO, judge-ahead, coalescing, verdict split; detached-work
+   claims/waiting watch; auto-collapse visibility rule); webapp `AGENTS.md`;
+   one line per landed fix in `docs/REMEDIATION-CHANGELOG.md` (combined
+   model, compaction-failed clearing, cold-gate flash, composer height,
+   toggle style, item centering, expanded ceiling, footer percent gradient,
+   token-heat stamp, visible-only collapse, liveness fix, held-queue fix,
+   retry countdown/restored, verdict split).
+4. **Green everywhere, exit codes checked**: daemon `make test`,
+   `make integration`; shim typecheck/lint/`npm test`/`test:integration`
+   (AGENT_REPL_FORBID_VENDOR_CALLS=1); sidecar and store
+   `go test -race ./...` via `bin/background.sh`; webapp
+   typecheck/lint/test/test:integration/test:webkit; proto `make validate`;
+   the touched e2e scenarios (see RESUME for the command) plus any e2e the
+   held-queue / liveness changes touch.
+5. **Consolidation sweep** over `git diff master..HEAD`; extractions as their
+   own behavior-preserving commits with tests (done so far: percent gradient,
+   token heat, visibility-fake test helper).
+6. **Land through the merge queue** (`/merge-queue`,
+   `.claude/skills/merge-queue/SKILL.md`), NOT cherry-pick (owner,
+   2026-09-30). On park/fail/refusal report and stop.
+7. **Bounce all systems**: `bin/build-frontend.sh` + restart claude-repld;
+   build shim-store and shim-claude-sidecar into `~/.cache/agent-repl/bin` +
+   `launchctl kickstart`; verify `bin/readiness-report.sh` and
+   `scripts/agent-shim-doctor.sh`; hot-load `lisp/panels.el` into the main
+   Emacs (never test-*.el).
+
+## Leftovers for the final report (out of scope)
+
+- `/tmp` CEE worktree directory left behind; CEE `test-skill.sh` 14 failures.
+- Shim latent late-resume bug (a late delivery can clear a newer wait).
+- Light theme: the compaction toggle is white, invisible on white.
+- An agent moved to the background by a `task_updated` patch is still
+  announced `by_user`; the patch states no cause for agents either.
+- The vendor hang of 2026-09-30 (a retry promised in 32s never came): the
+  countdown makes it visible; nothing yet acts on an overdue retry.
