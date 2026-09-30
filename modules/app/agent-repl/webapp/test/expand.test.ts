@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_STRIP_CLASS,
   CAPPED_CLASSES,
@@ -28,7 +28,11 @@ import {
   onVerticalScrollbar,
   ITEM_EXPANDED_EVENT,
   announceItemExpanded,
+  useVisibilityWatcher,
+  intersectionWatcher,
+  scrollRootOf,
 } from "../src/expand.js";
+import { fakeVisibility } from "./visibility-fake.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { BUBBLE_UNCAPPED, drawBubble, type BubbleCapLines } from "../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS } from "../src/feed/bubble-scroll.js";
@@ -954,6 +958,12 @@ describe("autoCollapseFor", () => {
 describe("AutoCollapse", () => {
   let uninstall: Array<() => void> = [];
   let mounted: HTMLElement[] = [];
+  let seen: ReturnType<typeof fakeVisibility>;
+
+  beforeEach(() => {
+    seen = fakeVisibility();
+    useVisibilityWatcher(document, seen.watcher);
+  });
 
   afterEach(() => {
     for (const fn of uninstall) fn();
@@ -1007,14 +1017,59 @@ describe("AutoCollapse", () => {
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("closes an open section under a wheel on the feed outside it", () => {
+  it("closes an open section once a wheel outside it has scrolled it wholly out of view", () => {
     // Arrange
     const { feed, first } = armed();
     first.click();
-    // Act
     wheel(feed);
+    // Act
+    seen.report(first, false);
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("keeps an open section open under a wheel outside it while any part still shows", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    wheel(feed);
+    // Act
+    seen.report(first, true);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("never closes a section no reader gesture armed, however far a layout move takes it", () => {
+    // Arrange: a tail follow scrolls the open section out of view.
+    const { first } = armed();
+    first.click();
+    // Act
+    seen.report(first, false);
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("watches an armed section only until it closes", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    wheel(feed);
+    // Act
+    seen.report(first, false);
+    // Assert
+    expect(seen.observed()).toEqual([]);
+  });
+
+  it("stops watching an armed section a click closed first", () => {
+    // Arrange
+    const { feed, first } = armed();
+    first.click();
+    wheel(feed);
+    first.click();
+    // Act
+    seen.report(first, false);
+    // Assert
+    expect([first.classList.contains(EXPANDED_CLASS), seen.observed()]).toEqual([false, []]);
   });
 
   it("closes an open section under a wheel on another element of the page", () => {
@@ -1024,8 +1079,9 @@ describe("AutoCollapse", () => {
     document.body.appendChild(other);
     mounted.push(other);
     first.click();
-    // Act
     wheel(other);
+    // Act
+    seen.report(first, false);
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
@@ -1077,8 +1133,9 @@ describe("AutoCollapse", () => {
     const { feed, first } = armed();
     layOut(feed, 0, 200, 15);
     first.click();
-    // Act
     feed.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 190 }));
+    // Act
+    seen.report(first, false);
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
@@ -1117,8 +1174,9 @@ describe("AutoCollapse", () => {
       },
     });
     first.click();
-    // Act
     wheel(feed);
+    // Act
+    seen.report(first, false);
     // Assert
     expect(calls).toEqual([
       [first, true],
@@ -1141,8 +1199,10 @@ describe("AutoCollapse", () => {
     const { feed, first, second } = armed();
     first.click();
     second.click();
-    // Act
     wheel(feed.querySelector("#card-body") as HTMLElement);
+    // Act
+    seen.report(first, false);
+    seen.report(second, false);
     // Assert
     expect([first.classList.contains(EXPANDED_CLASS), second.classList.contains(EXPANDED_CLASS)]).toEqual([
       false,
@@ -1154,8 +1214,9 @@ describe("AutoCollapse", () => {
     // Arrange
     const { feed, first, calls } = armed();
     first.click();
-    // Act
     wheel(feed);
+    // Act
+    seen.report(first, false);
     // Assert
     expect(calls.at(-1)).toEqual([first, false]);
   });
@@ -1301,11 +1362,14 @@ describe("an uncapped bubble", () => {
 
   it("does not hold an open capped section open under a wheel inside it", () => {
     // Arrange — an open thinking bubble, then an uncapped response elsewhere.
+    const seen = fakeVisibility();
+    useVisibilityWatcher(document, seen.watcher);
     const { box: open } = feedWith("feed");
     open.click();
     const { text } = feedWith(BUBBLE_UNCAPPED);
-    // Act
     text.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
+    // Act
+    seen.report(open, false);
     // Assert
     expect(open.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
@@ -1323,5 +1387,75 @@ describe("announceItemExpanded", () => {
     announceItemExpanded(inner);
     // Assert
     expect(targets).toEqual([inner]);
+  });
+});
+
+describe("scrollRootOf", () => {
+  it("answers the nearest box that scrolls vertically", () => {
+    // Arrange
+    const zone = document.createElement("div");
+    zone.style.overflowY = "auto";
+    const host = document.createElement("div");
+    zone.appendChild(host);
+    document.body.appendChild(zone);
+    // Act
+    const root = scrollRootOf(host);
+    zone.remove();
+    // Assert
+    expect(root).toBe(zone);
+  });
+
+  it("answers the viewport when no box scrolls", () => {
+    // Arrange
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    // Act
+    const root = scrollRootOf(host);
+    host.remove();
+    // Assert
+    expect(root).toBeNull();
+  });
+});
+
+describe("intersectionWatcher", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a section visible while any part of it intersects its root", () => {
+    // Arrange
+    let fire: ((entries: Array<{ target: Element; isIntersecting: boolean }>) => void) | undefined;
+    let options: IntersectionObserverInit | undefined;
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(cb: typeof fire, init: IntersectionObserverInit) {
+          fire = cb;
+          options = init;
+        }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    const root = document.createElement("div");
+    const section = document.createElement("div");
+    const seen: Array<[HTMLElement, boolean]> = [];
+    const watch = intersectionWatcher(root, (s, visible) => seen.push([s, visible]));
+    watch.observe(section);
+    // Act
+    fire?.([
+      { target: section, isIntersecting: true },
+      { target: section, isIntersecting: false },
+    ]);
+    // Assert
+    expect([options?.root, options?.threshold, seen]).toEqual([
+      root,
+      0,
+      [
+        [section, true],
+        [section, false],
+      ],
+    ]);
   });
 });
