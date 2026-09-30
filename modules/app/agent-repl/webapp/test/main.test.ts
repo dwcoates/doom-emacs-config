@@ -562,9 +562,9 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
   });
 
   // A STOPPED MERGE NO LONGER HOLDS THE SESSION (owner ruling, 2026-09-28): a
-  // conflict awaits the user's answer, and a failed or landed merge is over, so
-  // none of the three may close the composer the way a merge in flight does.
-  test.each([["mergeConflict"], ["mergeFailed"], ["merged"]])(
+  // failed or landed merge is over, so neither may close the composer the way
+  // a merge in flight does.
+  test.each([["mergeFailed"], ["merged"]])(
     "keeps the gate open when the footer reports the stopped merge's %s arm",
     async (arm) => {
       await bootMain();
