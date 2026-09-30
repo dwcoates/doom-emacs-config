@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
 )
 
 func TestHandOverNamesTheMainAgentTheShimNamed(t *testing.T) {
@@ -146,5 +147,69 @@ func TestTurnsAreHandedOverAndRetiredThroughOneHelper(t *testing.T) {
 	// Assert
 	if len(offenders) > 0 {
 		t.Fatalf("hand-rolled hand-over or retirement: %v", offenders)
+	}
+}
+
+func TestVerdictStaleLockedAnswersWhetherTheContentMoved(t *testing.T) {
+	tests := []struct {
+		name      string
+		judged    uint64
+		wantStale bool
+	}{
+		{name: "the content still stands", judged: 2, wantStale: false},
+		{name: "an edit replaced the content", judged: 1, wantStale: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			state := &wsState{epochs: map[ids.TurnID]uint64{"t1": 2}}
+			log := dlog.NewTestSurfaces()
+
+			// Act
+			stale := state.verdictStaleLocked("t1", tt.judged, wsm.Classification{Arm: wsm.ArmInterject}, log.Global())
+
+			// Assert
+			logged := false
+			for _, r := range log.Records() {
+				logged = logged || (r.Level == dlog.LevelInfo && r.Operation == opClassify && r.Context["content_epoch"] == uint64(2))
+			}
+			if stale != tt.wantStale || logged != tt.wantStale {
+				t.Fatalf("stale = %v, logged = %v; want both %v", stale, logged, tt.wantStale)
+			}
+		})
+	}
+}
+
+// TestTheEpochIsComparedOnlyByVerdictStaleLocked fails a queue source that
+// reads a turn's content epoch to judge a verdict by hand.
+func TestTheEpochIsComparedOnlyByVerdictStaleLocked(t *testing.T) {
+	// Arrange
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package: %v", err)
+	}
+	var offenders []string
+
+	// Act
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if strings.Count(string(src), `"content_epoch"`) > 0 && name != "classify.go" {
+			offenders = append(offenders, name)
+		}
+		if strings.Count(string(src), `"content_epoch"`) > 1 {
+			offenders = append(offenders, name+" (twice)")
+		}
+	}
+
+	// Assert
+	if len(offenders) > 0 {
+		t.Fatalf("a stale-verdict check written by hand in %v", offenders)
 	}
 }

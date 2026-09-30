@@ -366,10 +366,7 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 	state := q.state(sub.WS)
 	state.verdicts.Lock()
 	defer state.verdicts.Unlock()
-	if now := state.epochs[sub.Turn]; now != epoch {
-		log.Info(opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded", dlog.Context{
-			"turn": string(sub.Turn), "arm": c.Arm.String(), "judged_epoch": epoch, "content_epoch": now,
-		})
+	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
 		return
 	}
 	q.record(ctx, sub, c, log)
@@ -614,4 +611,19 @@ func routeArm(route classifier.Route) wsm.ClassificationArm {
 	default:
 		panic(fmt.Sprintf("promptqueue: classifier route %d has no verdict arm", int(route)))
 	}
+}
+
+// verdictStaleLocked reports whether a verdict judged at EPOCH is about
+// content an edit has since replaced or a move has since superseded, and
+// records the discard at INFO when it is. The caller holds the verdict lock,
+// under which every epoch bump happens.
+func (state *wsState) verdictStaleLocked(turn ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) bool {
+	now := state.epochs[turn]
+	if now == epoch {
+		return false
+	}
+	log.Info(opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded", dlog.Context{
+		"turn": string(turn), "arm": c.Arm.String(), "judged_epoch": epoch, "content_epoch": now,
+	})
+	return true
 }
