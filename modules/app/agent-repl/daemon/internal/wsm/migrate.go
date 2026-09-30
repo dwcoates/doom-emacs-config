@@ -57,7 +57,22 @@ var migrations = []migration{
 	{To: 11, Name: "idempotency_keys_accepted_at", DDL: acceptedAtDDL},
 	{To: 12, Name: "held_prompts_delivery", DDL: heldPromptsDeliveryDDL},
 	{To: 13, Name: "workspaces_turn_result", DDL: turnResultDDL},
+	{To: 14, Name: "held_prompts_act_and_coalesced", DDL: heldPromptsActDDL},
 }
+
+// heldPromptsActDDL adds a held entry's SESSION ACT (a model or
+// permission-mode change queued in order with the prompts around it) and
+// whether later prompts were COALESCED into it. Every existing row is a
+// prompt (NULL act) and was never coalesced (0), which is exactly right: no
+// build before this one held an act durably or coalesced a prompt.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the columns inline in schema.go.
+const heldPromptsActDDL = `
+ALTER TABLE held_prompts ADD COLUMN act_kind TEXT;
+ALTER TABLE held_prompts ADD COLUMN act_value TEXT;
+ALTER TABLE held_prompts ADD COLUMN coalesced INTEGER NOT NULL DEFAULT 0;
+`
 
 // turnResultDDL adds the roster's last TURN RESULT: the turn-end arm the last
 // turn resolved to and whether the user has seen it. The roster held both only

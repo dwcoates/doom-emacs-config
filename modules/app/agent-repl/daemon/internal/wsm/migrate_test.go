@@ -719,3 +719,48 @@ func TestTheMigratedHeldPromptsAreOrdinary(t *testing.T) {
 		t.Fatalf("migrated delivery = %d, want the ordinary %d", got, DeliveryOrdinary)
 	}
 }
+
+// TestTheMigrationAddsTheHeldActAndCoalescedColumns pins the layout-14 step.
+func TestTheMigrationAddsTheHeldActAndCoalescedColumns(t *testing.T) {
+	// Arrange — a file written before a held act existed.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('held_prompts') WHERE name IN ('act_kind', 'act_value', 'coalesced')`)
+	if got != 3 {
+		t.Fatalf("held_prompts carries %d of the three new columns after the migration, want 3", got)
+	}
+}
+
+// TestTheMigratedHeldPromptsAreUncoalescedPrompts pins the layout-14 defaults.
+func TestTheMigratedHeldPromptsAreUncoalescedPrompts(t *testing.T) {
+	// Arrange — a hold written before the columns existed.
+	path := layout3Fixture(t)
+	withRawDB(t, path, func(db *sql.DB) {
+		if _, err := db.Exec(`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, accepted, queued_at) VALUES ('turn-1', 'ws-layout3', x'', 'emacs', 0, 1)`); err != nil {
+			t.Fatalf("seed the hold: %v", err)
+		}
+	})
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	coalesced := scalar[int](t, handle.(*store), `SELECT coalesced FROM held_prompts WHERE turn_id = 'turn-1'`)
+	acts := scalar[int](t, handle.(*store), `SELECT count(*) FROM held_prompts WHERE turn_id = 'turn-1' AND act_kind IS NULL`)
+	if coalesced != 0 || acts != 1 {
+		t.Fatalf("migrated row coalesced=%d with-no-act=%d, want 0 and 1", coalesced, acts)
+	}
+}

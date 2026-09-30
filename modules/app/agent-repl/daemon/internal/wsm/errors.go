@@ -224,7 +224,7 @@ func (d Delivery) String() string {
 }
 
 // valid reports whether the classification arm is one of the declared arms.
-func (a ClassificationArm) valid() bool { return a >= ArmClassifying && a <= ArmClassificationError }
+func (a ClassificationArm) valid() bool { return a >= ArmClassifying && a <= ArmAfterToolCall }
 
 // String names a classification arm, for logs and refusals.
 func (a ClassificationArm) String() string {
@@ -239,6 +239,8 @@ func (a ClassificationArm) String() string {
 		return "uninterruptible_turn"
 	case ArmClassificationError:
 		return "classification_error"
+	case ArmAfterToolCall:
+		return "after_tool_call"
 	default:
 		return fmt.Sprintf("classification_arm(%d)", int(a))
 	}
