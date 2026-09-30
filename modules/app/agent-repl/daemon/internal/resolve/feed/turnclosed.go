@@ -32,6 +32,14 @@ func (r *resolver) OnTurnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.R
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	// A FOLDED PROMPT'S TURN NEVER RAN: its bubble was drawn under the turn it
+	// joined, whose own terminal settles it, so there is no ending to draw.
+	if close.How == wsm.CloseFolded {
+		r.logger(ws).Debug("daemon.feed.turn_closed_folded",
+			"a prompt folded into another turn closed; the turn it joined carries its ending",
+			dlog.Context{"turn": string(turn)})
+		return
+	}
 	if !s.knownTurns[turn] {
 		// The feed has not seen this turn opened (a boot closes turns before
 		// any watch replays them). Its prompt, when it is replayed, is ended
