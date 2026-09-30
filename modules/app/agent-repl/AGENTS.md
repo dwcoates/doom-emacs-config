@@ -1390,7 +1390,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); a vendor rate-limit event (`allowed_warning`, `rejected`); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | tool-call starts; task-tracker moves; the `submitting` line with the held-prompt queue and classification progress; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
 | **quiet** | the next feed item surfaces | the quiet-stretch line: from the moment a feed item has FULLY LANDED until the next feed item FIRST SURFACES, e.g. `✅ Bash finished — handling result...`; a prompt delivered, `✅ Prompt delivered — awaiting response...` |
-| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage, or how full the context window is, whichever the 80% rule below picks |
+| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then quiet, then
 enduring. A transient never covers a salient line; it covers only a quiet or
@@ -1407,11 +1407,13 @@ under the `working` status and under `background`; while a turn is in flight
 the status is `working` even if background work runs, and background items are
 not surfaced on the line then. Quiet lines never say "agent".
 
-**THE ENDURING LINE IS CHOSEN BY THE 80% RULE, NOT ROTATED.** Two facts
-compete: the 5-hour usage percentage (the weekly and overage figures do not
-enter the choice, though the line draws them) and the context window's fill.
-Both under 80%: `usage`. Exactly one at or above 80%: that one. Both at or
-above 80%: the higher, and `usage` wins a tie.
+**THE ENDURING LINE IS THE USAGE, AND ONLY ITS PERCENTAGES ARE COLORED.**
+The line draws the 5-hour and weekly allowances (and overage when present),
+or reads `unobserved` before any figure is read. Only each `<number>%` wears
+the percent gradient; labels and reset countdowns stay the line's color. The
+line draws no reading age: it is enduring, so when it was read does not
+matter. The context window's fill is not an enduring line (owner ruling,
+2026-09-30); the topbar's context chip carries it.
 
 **A TIMER MAY END ONLY A TRANSIENT.** A salient or quiet line with no clearing
 event is a missing end signal, and the fix is the end signal, not an expiry.

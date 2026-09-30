@@ -214,7 +214,7 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
 | salient | the condition it describes stops being true; never a timer | every existing status-bound kind (fault under `disconnected` and `blocked`, start failed, a compaction RUNNING, retrying until a response lands, wakeup, gated call, question lead, cold gate cost, interrupting, blocked on user, authenticating, merging commit, close blocked, deploy update); the dead-query line (ends at the next prompt); the agent's push notification (ends at the next prompt); the context-budget warning and "compaction failed — ..." (end when a cut shrinks the context); a vendor rate-limit event, `allowed_warning` or `rejected` (ends when a later event reports the window allowed) |
 | transient | its 10 s window lapses, or a newer transient replaces it | tool-call starts (`Bash: npm test`); task-tracker moves (`write tests · 3/7`); `submitting`, which states the delivery as it happens (held behind a turn, the held queue's size, classifying, interjecting, delivered); a concluded compaction; non-escalating faults; daemon Warn and Error records; session changes; a finished deploy; network-resume edges; a detached run finishing while the status is `background` |
 | quiet | the next feed item surfaces | the quiet-stretch line (`✅ Bash finished — handling result...`, `❌ Read failed — handling failure...`, `✅ Prompt delivered — awaiting response...`), legal under `working` and `background` |
-| enduring | never | ONE line: `usage` or `context_window`, chosen by the 80% rule |
+| enduring | never | ONE line: `usage`, or `unobserved` before any figure is read |
 
 ### Precedence: salient, then transient, then quiet, then enduring, always
 
@@ -229,16 +229,16 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
   never come, or come much later. A newer transient replacing an older one is
   a separate, orthogonal end.
 
-### The enduring line: the 80% rule (replaces any rotation)
+### The enduring line: usage only
 
-- Compare the 5-hour usage percentage (weekly and overage do not enter the
-  choice, though the line draws them) and the context window's fill.
-- Both under 80%: `usage`. Exactly one at or above 80%: that one. Both at or
-  above 80%: the higher; `usage` wins a tie.
-- The DAEMON applies the rule (the client derives nothing): the enduring
-  element carries the one chosen line.
-- Worked: weekly 90, 5-hour 50, context 83 → `context_window`. Weekly 30,
-  5-hour 86, context 83 → `usage`.
+- Owner ruling, 2026-09-30: the context window's enduring line is dropped
+  ("it's not useful"), and with it the 80% rule that chose between it and
+  the usage. `context_window` (tag 2) is reserved.
+- The line draws the 5-hour and weekly allowances; before any figure is
+  read it is `unobserved`, so the element is never empty.
+- Only each `<number>%` is colored, by the unchanged percent gradient.
+- No enduring line draws a reading age: it is enduring, so when it was drawn
+  does not matter. `figures_read_at_ms` (tag 5) is reserved.
 
 ### Taken from the other workspace's plan (on `master`), unchanged
 
@@ -261,7 +261,8 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
 
 - Live reasoning and response text tails (`thinking` and `response`
   transients): they would conflict with the existing updates.
-- Rotating the enduring lines: replaced by the 80% rule.
+- Rotating the enduring lines, then the 80% rule that replaced it: the
+  enduring line is the usage alone.
 - `master`'s standing notification, rate-limit and budget lines: replaced by
   the salient kinds and the enduring rule above.
 
@@ -479,6 +480,7 @@ unchanged.
   - Optional `usage`, the renamed rate-limit report.
   - Optional `context_window`: used tokens, window size, and the fill
     resolved by the daemon.
+    - Retired 2026-09-30 by the owner; see "The enduring line: usage only".
 - **Moved or renamed:**
   - `FooterStatusActivityNotification` became
     `FooterActivityTransientNotification`.
@@ -698,8 +700,9 @@ unchanged.
     - Among the shared kinds: update, then rate limit, then notification,
       then context budget.
   - `frontend.v1.FooterActivityEnduring` is `oneof line { usage;
-    context_window; unobserved }`.
-    - The daemon applies the 80% rule and ships the one chosen line.
+    unobserved }`.
+    - `context_window` (tag 2) was retired on 2026-09-30; see "The enduring
+      line: usage only".
     - `unobserved` (`frontend.v1.FooterActivityEnduringUnobserved`) states
       that neither figure has been read yet, so the element is never empty.
   - `frontend.v1.FooterActivityTransientSubmitting` gains `oneof stage`:
