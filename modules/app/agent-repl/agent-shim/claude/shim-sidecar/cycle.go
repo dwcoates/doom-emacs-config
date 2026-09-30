@@ -326,6 +326,12 @@ type sidecar struct {
 	// sidechain files can share it, so rediscovery reuses the proven identity.
 	workspaceBySession map[string]workspaceAttribution
 	workspaceFailures  map[string]string
+	// attributedBooks is each watched transcript's attribution by the book its
+	// records land in, and unclaimedShells each held shell spool no launch
+	// claimed, by task id: together they let a claim the shim wrote to the
+	// store claim a spool (claims.go).
+	attributedBooks map[string]bookAttribution
+	unclaimedShells map[string]string
 
 	nextAttemptAt  time.Time
 	attempting     bool
@@ -435,6 +441,8 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		rewound:            map[string]bool{},
 		workspaceBySession: map[string]workspaceAttribution{},
 		workspaceFailures:  map[string]string{},
+		attributedBooks:    map[string]bookAttribution{},
+		unclaimedShells:    map[string]string{},
 		rotationHeld:       map[string]discover.Target{},
 		lockHeld:           livelock.Held,
 		active:             map[string]string{},
@@ -876,6 +884,12 @@ func (s *sidecar) rescan() {
 	}
 	s.rekeyRotations()
 	s.refreshSpawnFacts()
+	s.claimHeldShells()
+	if s.cursors == nil {
+		// The claims read found the store unable to answer and suspended
+		// production; the next cycle rescans.
+		return
+	}
 	scanned := s.disc.Scan()
 	s.pruneDormant(scanned)
 	if _, ok := s.watchTargets(scanned, now); !ok {
@@ -1167,6 +1181,8 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		RunID:             target.RunID,
 		RunActivityID:     s.owners.activityFor(target.TaskID),
 	}
+	s.rememberBookAttribution(target, ctx.AgentID)
+	s.rememberBookAttribution(target, ctx.MainAgentID)
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
 	heal := healOwed(target.Kind, cursor)
 	switch {

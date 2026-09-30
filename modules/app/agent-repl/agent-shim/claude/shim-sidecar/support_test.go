@@ -78,6 +78,37 @@ type fakeStore struct {
 	// entry per WriteBatch call, so a test can assert what a withheld line left
 	// behind.
 	shapes [][]*storev1.ShapeObservation
+
+	// claims is every shell run claim on record; claimsFail, non-empty,
+	// answers the failure arm; claimsAsked is every id list asked.
+	claims      []*storev1.ShellRunClaimed
+	claimsFail  string
+	claimsAsked [][]string
+}
+
+func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
+	f.claimsAsked = append(f.claimsAsked, request.Msg.GetVendorTaskIds())
+	if f.claimsFail != "" {
+		return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
+			Result: &storev1.GetShellRunClaimsResponse_Failure{Failure: &storev1.GetShellRunClaimsFailure{
+				Detail: f.claimsFail,
+				Kind:   &storev1.GetShellRunClaimsFailure_StorageFailure{StorageFailure: &storev1.GetShellRunClaimsStorageFailure{}},
+			}},
+		}), nil
+	}
+	asked := map[string]bool{}
+	for _, id := range request.Msg.GetVendorTaskIds() {
+		asked[id] = true
+	}
+	var claims []*storev1.ShellRunClaimed
+	for _, claim := range f.claims {
+		if asked[claim.GetClaim().GetVendorTaskId()] {
+			claims = append(claims, claim)
+		}
+	}
+	return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
+		Result: &storev1.GetShellRunClaimsResponse_Success{Success: &storev1.GetShellRunClaimsSuccess{Claims: claims}},
+	}), nil
 }
 
 func (f *fakeStore) GetSidecarCursors(ctx context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {

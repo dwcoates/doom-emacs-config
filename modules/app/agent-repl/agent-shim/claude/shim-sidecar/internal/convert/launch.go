@@ -9,7 +9,9 @@ package convert
 // with no shared mutable map across the package boundary.
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -82,6 +84,18 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 // (outputPathFromProse); this is its file-plane twin for the task id.
 var backgroundSentence = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)\.`)
 
+// timeoutSentence is the vendor's account of a FOREGROUND shell its own
+// timeout moved to the background:
+//
+//	Command did not complete within its 600s timeout and was moved to the
+//	background (ID: b3e6urkt6).
+//
+// Missing it left such a shell's spool unclaimed inside a subagent, where the
+// sentence is the only statement of the move (2026-09-28). The shim's claim in
+// the store (claims.go) covers every run the shim saw; this covers the runs it
+// did not.
+var timeoutSentence = regexp.MustCompile(`within its (\d+)s timeout and was moved to the background \(ID: ([A-Za-z0-9_-]+)\)`)
+
 // backgroundLaunchFromProse restates a shell result's backgrounding SENTENCE as
 // the structured launch the vendor writes beside it everywhere else, answering
 // false when the result text states no launch.
@@ -98,16 +112,32 @@ var backgroundSentence = regexp.MustCompile(`Command running in background with 
 // IT IS THE VENDOR'S STATEMENT, NOT A GUESS: the id is read from the sentence
 // that names it, and a result that does not carry the sentence reports nothing.
 // The restated shape is the one the vendor writes for this launch (empty
-// output, the task id), so every reader downstream treats both alike.
+// output, the task id, and the exceeded limit for a timeout), so every reader
+// downstream treats both alike.
 func backgroundLaunchFromProse(block map[string]any) (map[string]any, bool) {
-	match := backgroundSentence.FindStringSubmatch(resultText(block["content"]))
-	if match == nil {
-		return nil, false
+	text := resultText(block["content"])
+	if match := backgroundSentence.FindStringSubmatch(text); match != nil {
+		return map[string]any{
+			"stdout":           "",
+			"stderr":           "",
+			"interrupted":      false,
+			"backgroundTaskId": match[1],
+		}, true
 	}
-	return map[string]any{
-		"stdout":           "",
-		"stderr":           "",
-		"interrupted":      false,
-		"backgroundTaskId": match[1],
-	}, true
+	if match := timeoutSentence.FindStringSubmatch(text); match != nil {
+		seconds, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			// The pattern admits only digits, so a parse failure is a
+			// pattern defect, never vendor input.
+			panic(fmt.Sprintf("convert: timeout sentence captured a non-integer limit %q: %v", match[1], err))
+		}
+		return map[string]any{
+			"stdout":           "",
+			"stderr":           "",
+			"interrupted":      false,
+			"backgroundTaskId": match[2],
+			"timedOutAfterMs":  float64(seconds * 1000),
+		}, true
+	}
+	return nil, false
 }

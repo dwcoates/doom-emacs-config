@@ -1359,7 +1359,10 @@ type fakeStore struct {
 	bashRows map[string][]*storev1.StoreAgentBash
 	// bashWaiters are the open WatchBashRun streams, per run, each fed every
 	// subsequent row of that run.
-	bashWaiters    map[string][]chan *storev1.StoreAgentBash
+	bashWaiters map[string][]chan *storev1.StoreAgentBash
+	// shellRunClaims is every claim the shim would have written, answered
+	// to GetShellRunClaims for the ids asked.
+	shellRunClaims []*storev1.ShellRunClaimed
 	cursors        []*storev1.CursorState
 	cursorsFailure string
 	writeFailures  int
@@ -1851,6 +1854,37 @@ func (f *fakeStore) GetWorkflow(context.Context, *connect.Request[storev1.GetWor
 
 func (f *fakeStore) GetLiveWork(context.Context, *connect.Request[storev1.GetLiveWorkRequest]) (*connect.Response[storev1.GetLiveWorkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
+}
+
+// GetShellRunClaims answers the claims on record for the asked spool ids.
+func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "GetShellRunClaims")
+	asked := map[string]bool{}
+	for _, id := range request.Msg.GetVendorTaskIds() {
+		asked[id] = true
+	}
+	var claims []*storev1.ShellRunClaimed
+	for _, claim := range f.shellRunClaims {
+		if asked[claim.GetClaim().GetVendorTaskId()] {
+			claims = append(claims, claim)
+		}
+	}
+	return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
+		Result: &storev1.GetShellRunClaimsResponse_Success{Success: &storev1.GetShellRunClaimsSuccess{Claims: claims}},
+	}), nil
+}
+
+// claimShellRun records a claim the shim wrote, with the book holding its
+// run's launching call.
+func (f *fakeStore) claimShellRun(taskID, run, owner string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.shellRunClaims = append(f.shellRunClaims, &storev1.ShellRunClaimed{
+		Claim: &storev1.ShellRunClaim{VendorTaskId: taskID, Run: &conversationv1.AgentActivityId{Value: run}},
+		Owner: &conversationv1.AgentId{Value: owner},
+	})
 }
 
 func (f *fakeStore) GetAgentByVendorTask(context.Context, *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
