@@ -14,6 +14,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
+import { Code } from "@connectrpc/connect";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
 import { cwdSlug } from "../../src/engine/cold.js";
@@ -5072,7 +5073,9 @@ describe("the per-turn verbs, through the engine's own dispatch surface", () => 
     const h = harness();
 
     const response = await h.engine.detachForeground(
-      create(shimv1.DetachForegroundRequestSchema, {}),
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_1" }),
+      }),
     );
 
     expect(
@@ -9177,7 +9180,7 @@ describe("the fold rows the engine walks past", () => {
     await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
   });
 
-  it("tracks nothing for an activity that names no unit", async () => {
+  it("an activity naming no unit leaves nothing to detach: a detach naming none is invalid input", async () => {
     const h = harness();
     await started(h);
     h.fold.entriesFor = (message) =>
@@ -9214,15 +9217,16 @@ describe("the fold rows the engine walks past", () => {
         : [];
     await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-00000000010c"));
 
-    const response = await h.engine.detachForeground(
+    // An empty unit is invalid input, refused before the vendor is asked (the
+    // table's own refusal to track "" is foreground.test.ts's subject).
+    const refused = h.engine.detachForeground(
       create(shimv1.DetachForegroundRequestSchema, {
         unit: create(conversationv1.AgentActivityIdSchema, {}),
       }),
     );
 
-    expect(
-      response.result.case === "failure" ? response.result.value.kind.case : undefined,
-    ).toBe("unknownUnit");
+    await expect(refused).rejects.toMatchObject({ code: Code.InvalidArgument });
+    expect(h.queries[0]?.query.calls.filter((call) => call.startsWith("backgroundTasks"))).toEqual([]);
   });
 
   it("settles an activity that names a unit but no kind", async () => {
