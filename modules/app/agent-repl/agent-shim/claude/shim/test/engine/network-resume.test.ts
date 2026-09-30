@@ -1302,6 +1302,307 @@ describe("a delivery that completes after its wait was given up", () => {
   });
 });
 
+describe("a delivery that completes late, after a newer wait of the same agent opened", () => {
+  /**
+   * The first delivery is held open while its wait runs out and the agent
+   * (resumed meanwhile) fails again, opening a NEWER wait; only then is the
+   * first delivery answered with `answer`. Every later delivery answers
+   * `later` at once.
+   */
+  async function lateWithNewerWait(answer: ResumeDelivery, later: ResumeDelivery = { kind: "delivered" }): Promise<Harness> {
+    const h = harness();
+    let release: (delivery: ResumeDelivery) => void = () => undefined;
+    let delivering: () => void = () => undefined;
+    const asked = new Promise<void>((resolve) => {
+      delivering = resolve;
+    });
+    let calls = 0;
+    const resume = new NetworkResume({
+      probe: h.probe.probe,
+      deliver: (prompt) => {
+        h.prompts.push(prompt);
+        calls += 1;
+        if (calls > 1) return Promise.resolve(later);
+        return new Promise((resolve) => {
+          release = resolve;
+          delivering();
+        });
+      },
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      emit: (update) => h.emitted.push(update),
+    });
+    const held = { ...h, resume };
+    failWithOutage(held, "a1", "toolu_spawn");
+    const pending = resume.tick();
+    await asked;
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+    await resume.tick();
+    failWithOutage(held, "a1", "toolu_send");
+    release(answer);
+    await pending;
+    return held;
+  }
+
+  it("leaves the newer wait standing", async () => {
+    // Arrange / Act
+    const h = await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+
+  it("states no outcome for the newer wait", async () => {
+    // Arrange / Act
+    const h = await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "gaveUp" }]);
+  });
+
+  it("keeps the newer wait in the stated set", async () => {
+    // Arrange / Act
+    const h = await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_send"]);
+  });
+
+  it("keeps the probe loop running for the newer wait", async () => {
+    // Arrange / Act
+    const h = await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    expect(h.resume.looping()).toBe(true);
+  });
+
+  it("the newer wait is later ended by its own resume", async () => {
+    // Arrange
+    const h = await lateWithNewerWait({ kind: "delivered" });
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([
+      { work: "toolu_spawn", end: "gaveUp" },
+      { work: "toolu_send", end: "resumed" },
+    ]);
+  });
+
+  it("the newer wait is later ended by its own give-up", async () => {
+    // Arrange
+    const h = await lateWithNewerWait({ kind: "delivered" });
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([
+      { work: "toolu_spawn", end: "gaveUp" },
+      { work: "toolu_send", end: "gaveUp" },
+    ]);
+  });
+
+  it("an undeliverable late answer leaves the newer wait standing", async () => {
+    // Arrange / Act
+    const h = await lateWithNewerWait({ kind: "unavailable", detail: "no query" });
+
+    // Assert
+    expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+
+  it("an undeliverable late answer records no second give-up", async () => {
+    // Arrange
+    const mark = logSinkMark();
+
+    // Act
+    await lateWithNewerWait({ kind: "unavailable", detail: "no query" });
+
+    // Assert
+    expect(logRecordsSince(mark).filter((r) => r.context.outcome === "gave_up")).toHaveLength(1);
+  });
+
+  it("records at INFO that the late delivery ended only its own wait, naming the newer one", async () => {
+    // Arrange
+    const mark = logSinkMark();
+
+    // Act
+    await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    const late = logRecordsSince(mark).find((r) => r.context.delivery !== undefined);
+    expect([late?.level, late?.context]).toEqual([
+      "info",
+      expect.objectContaining({ task_id: "a1", wait_id: 1, ended: "gaveUp", delivery: "delivered", standing_wait_id: 2 }),
+    ]);
+  });
+
+  it("logs the late resume as delivered and late", async () => {
+    // Arrange
+    const mark = logSinkMark();
+
+    // Act
+    await lateWithNewerWait({ kind: "delivered" });
+
+    // Assert
+    const resumedRecords = logRecordsSince(mark).filter((r) => r.context.outcome === "resumed");
+    expect(resumedRecords.map((r) => [r.level, r.context.wait_id, r.context.late])).toEqual([["info", 1, true]]);
+  });
+});
+
+describe("a newer failure of an agent whose wait still stands", () => {
+  it("replaces the standing wait in the stated set", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act
+    failWithOutage(h, "a1", "toolu_send");
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_send"]);
+  });
+
+  it("records the replacement at INFO, naming both waits", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    const mark = logSinkMark();
+
+    // Act
+    failWithOutage(h, "a1", "toolu_send");
+
+    // Assert
+    const replaced = logRecordsSince(mark).find((r) => r.context.next_wait_id !== undefined);
+    expect([replaced?.level, replaced?.context]).toEqual([
+      "info",
+      expect.objectContaining({ task_id: "a1", wait_id: 1, work: "toolu_spawn", next_wait_id: 2 }),
+    ]);
+  });
+
+  it("a delivery still out for the replaced wait leaves the newer wait standing", async () => {
+    // Arrange
+    const h = harness();
+    let release: (delivery: ResumeDelivery) => void = () => undefined;
+    let delivering: () => void = () => undefined;
+    const asked = new Promise<void>((resolve) => {
+      delivering = resolve;
+    });
+    const resume = new NetworkResume({
+      probe: h.probe.probe,
+      deliver: () =>
+        new Promise((resolve) => {
+          release = resolve;
+          delivering();
+        }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      emit: (update) => h.emitted.push(update),
+    });
+    const held = { ...h, resume };
+    failWithOutage(held, "a1", "toolu_spawn");
+    const pending = resume.tick();
+    await asked;
+    failWithOutage(held, "a1", "toolu_send");
+
+    // Act
+    release({ kind: "delivered" });
+    await pending;
+
+    // Assert
+    expect([resume.waitingTaskIds(), statedOutcomes(h)]).toEqual([["a1"], []]);
+  });
+});
+
+describe("removing a wait that is not the one standing", () => {
+  /** The private removal, reached directly: no public path hands it a stale wait. */
+  function removeWaitOf(resume: NetworkResume): (entry: unknown) => void {
+    const target = resume as unknown as { removeWait: (entry: unknown) => void };
+    return (entry) => target.removeWait.call(resume, entry);
+  }
+
+  const stale = { id: 99, chain: { taskId: "a1" }, failedAtMs: 0, work: "toolu_old" };
+
+  it("throws", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act
+    const act = (): void => removeWaitOf(h.resume)(stale);
+
+    // Assert
+    expect(act).toThrow("wait 99 of agent a1 is not the standing wait (wait 1 stands)");
+  });
+
+  it("is recorded at ERROR, naming both waits", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    const mark = logSinkMark();
+
+    // Act
+    try {
+      removeWaitOf(h.resume)(stale);
+    } catch {
+      // the throw is the previous case's subject
+    }
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.context.standing_wait_id !== undefined);
+    expect([record?.level, record?.context]).toEqual([
+      "error",
+      expect.objectContaining({ task_id: "a1", wait_id: 99, standing_wait_id: 1 }),
+    ]);
+  });
+
+  it("leaves the standing wait in place", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act
+    try {
+      removeWaitOf(h.resume)(stale);
+    } catch {
+      // the throw is the first case's subject
+    }
+
+    // Assert
+    expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+});
+
+describe("an on-time delivery", () => {
+  it("ends its own wait", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect([h.resume.waitingTaskIds(), statedOutcomes(h)]).toEqual([[], [{ work: "toolu_spawn", end: "resumed" }]]);
+  });
+
+  it("is logged as not late, naming its wait", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    const mark = logSinkMark();
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    const resumedRecords = logRecordsSince(mark).filter((r) => r.context.outcome === "resumed");
+    expect(resumedRecords.map((r) => [r.level, r.context.wait_id, r.context.late])).toEqual([["info", 1, false]]);
+  });
+});
+
 describe("a session stream that cannot take the statement", () => {
   /** A harness whose seam throws. */
   function throwing(): Harness {
