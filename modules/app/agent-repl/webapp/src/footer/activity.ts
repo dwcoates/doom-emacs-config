@@ -105,6 +105,7 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
+import { footerClockSpan } from "./clock-span.js";
 import { grabber, statusWords, textLine } from "./parts.js";
 import { activityDatumClass, allowanceStatusClass, footerPercentColor } from "./tones.js";
 
@@ -455,13 +456,7 @@ export function drawFooterStatusActivityRateLimit(
     line.appendChild(drawFooterPercent(u.utilization));
   }
   if (u.resetsAtS !== undefined) {
-    const resets = document.createElement("span");
-    resets.setAttribute("data-countdown", "");
-    const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
-    tick(resets, deps.ctx.ticker, (nowMs) => {
-      resets.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
-    });
-    line.appendChild(resets);
+    line.appendChild(drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`));
   }
   return line;
 }
@@ -774,13 +769,9 @@ export function drawGivesUpCountdown(
   path: string,
 ): HTMLElement {
   const deadlineMs = msOf(givesUpAtMs, path);
-  const countdown = document.createElement("span");
-  countdown.className = "footer-gives-up";
-  countdown.setAttribute("data-countdown", "");
-  tick(countdown, deps.ctx.ticker, (nowMs) => {
-    countdown.textContent = `gives up in ${formatCountdown(deadlineMs - nowMs)}`;
+  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-gives-up", (span, nowMs) => {
+    span.textContent = `gives up in ${formatCountdown(deadlineMs - nowMs)}`;
   });
-  return countdown;
 }
 
 // ---- the enduring tier ------------------------------------------------------
@@ -910,13 +901,9 @@ export function drawFiguresReadAge(
 ): HTMLElement | null {
   if (u.figuresReadAtMs === undefined) return null;
   const readAtMs = msOf(u.figuresReadAtMs, `${path}.figures_read_at_ms`);
-  const age = document.createElement("span");
-  age.className = "footer-rate-age";
-  age.setAttribute("data-age", "");
-  tick(age, deps.ctx.ticker, (nowMs) => {
-    age.textContent = ` · ${formatTickedAge(nowMs - readAtMs)} ago`;
+  return footerClockSpan(deps.ctx.ticker, "age", "footer-rate-age", (span, nowMs) => {
+    span.textContent = ` · ${formatTickedAge(nowMs - readAtMs)} ago`;
   });
-  return age;
 }
 
 /** One drawable allowance, under the label the strip and the sheet both use. */
@@ -1178,17 +1165,13 @@ export function drawFooterStatusActivityRetrying(
  */
 function drawNextAttempt(u: FooterStatusActivityAt, deps: AllowanceDeps, path: string): HTMLElement {
   const atMs = msOf(u.atMs, `${path}.at_ms`);
-  const countdown = document.createElement("span");
-  countdown.className = "footer-next-attempt";
-  countdown.setAttribute("data-countdown", "");
-  tick(countdown, deps.ctx.ticker, (nowMs) => {
+  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-next-attempt", (span, nowMs) => {
     const overdue = nowMs >= atMs;
-    countdown.toggleAttribute("data-overdue", overdue);
-    countdown.textContent = overdue
+    span.toggleAttribute("data-overdue", overdue);
+    span.textContent = overdue
       ? `next try overdue by ${formatAge(nowMs - atMs)}`
       : `next try in ${remainingLabel(atMs - nowMs)}`;
   });
-  return countdown;
 }
 
 /**
@@ -1221,13 +1204,12 @@ export function drawFooterStatusActivityWakeup(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-wakeup";
-  const remaining = document.createElement("span");
-  remaining.setAttribute("data-countdown", "");
   const wakeAtMs = msOf(u.wakeAtMs, `${path}.wake_at_ms`);
-  tick(remaining, deps.ctx.ticker, (nowMs) => {
-    remaining.textContent = `wakes in ${remainingLabel(wakeAtMs - nowMs)}`;
-  });
-  line.appendChild(remaining);
+  line.appendChild(
+    footerClockSpan(deps.ctx.ticker, "countdown", undefined, (span, nowMs) => {
+      span.textContent = `wakes in ${remainingLabel(wakeAtMs - nowMs)}`;
+    }),
+  );
   if (u.reason !== undefined) {
     line.appendChild(document.createTextNode(` · ${u.reason.text}`));
   }
@@ -1282,14 +1264,21 @@ export function drawFooterAllowance(
   span.appendChild(document.createTextNode(`${label} `));
   span.appendChild(drawFooterPercent(u.utilization));
 
-  const resets = document.createElement("span");
-  resets.setAttribute("data-countdown", "");
-  const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
-  tick(resets, deps.ctx.ticker, (nowMs) => {
-    resets.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
-  });
-  span.appendChild(resets);
+  span.appendChild(drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`));
   return span;
+}
+
+/**
+ * " · resets in 1h 5m", ticking down to an allowance's reset at minute
+ * resolution. RESETS_AT_S is the vendor's own SECONDS, converted once here.
+ * Shared by the enduring allowance and the salient rate-limit line, which say
+ * the same deadline.
+ */
+export function drawResetsCountdown(resetsAtS: bigint, deps: AllowanceDeps, path: string): HTMLElement {
+  const resetsAtMs = msOf(resetsAtS, path) * 1000;
+  return footerClockSpan(deps.ctx.ticker, "countdown", undefined, (span, nowMs) => {
+    span.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
+  });
 }
 
 /**
@@ -1329,14 +1318,10 @@ export function drawFooterStatusActivityAt(
   deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
-  const age = document.createElement("span");
-  age.className = "footer-activity-age";
-  age.setAttribute("data-age", "");
   const atMs = msOf(u.atMs, `${path}.at_ms`);
-  tick(age, deps.ctx.ticker, (nowMs) => {
-    age.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
+  return footerClockSpan(deps.ctx.ticker, "age", "footer-activity-age", (span, nowMs) => {
+    span.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
   });
-  return age;
 }
 
 /**
