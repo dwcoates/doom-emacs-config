@@ -15,7 +15,7 @@ import (
 // the resolver can never reach.
 var statusArms = []string{
 	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
-	"merge_conflict", "merge_failed", "merged", "degraded", "waiting",
+	"merge_failed", "merged", "degraded", "waiting",
 	"working", "background", "turn_failed", "idle",
 }
 
@@ -71,8 +71,6 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 	switch claim {
 	case ladder.Merging:
 		return r.merging(s, log)
-	case ladder.MergeConflict:
-		return r.mergeConflict(s, log)
 	case ladder.Disconnected:
 		return r.disconnected(s, log)
 	case ladder.Closing:
@@ -351,51 +349,73 @@ func (r *resolver) blockedByFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	}
 }
 
-// merging projects a merge IN FLIGHT onto its phase. The ladder calls it only
-// when the merge state stands on the merging rung, so a stopped merge —
-// conflict, parked, failed, merged — never reaches here: each is its own arm.
+// merging projects a merge IN FLIGHT onto its step. The ladder calls it only
+// when the merge state stands on the merging rung, so a concluded merge --
+// failed or merged -- never reaches here: each is its own arm.
+//
+// THE STEP IS THE ORCHESTRATOR'S FACT; the footer never guesses one. A merge
+// in flight whose facts name no step it knows is an orchestrator defect,
+// recorded at ERROR and drawn with no substatus rather than a made-up one.
 func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
-	switch s.merge.State {
-	case "enqueuing":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"enqueuing\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueuing{
-			Enqueuing: &frontendv1.FooterSubStatusMergingEnqueuing{}}
-	case "queued":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"queued\""})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Queued{
-			Queued: &frontendv1.FooterSubStatusMergingQueued{
-				Position: int32(s.merge.QueuePosition),
-				Depth:    int32(s.merge.QueueDepth),
-			}}
-	case "merging":
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"merging\""})
-		setMergingPhase(arm, s.merge.ActiveTab)
+	m := s.merge
+	switch m.Step {
+	case StepEnqueued:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueued{Enqueued: &frontendv1.FooterSubStatusMergingEnqueued{
+			Place: uint32(m.QueuePlace), Waiting: uint32(m.QueueWaiting)}}
+	case StepPreprocessing:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Preprocessing{Preprocessing: &frontendv1.FooterSubStatusMergingPreprocessing{}}
+	case StepRebasing:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Rebasing{Rebasing: &frontendv1.FooterSubStatusMergingRebasing{
+			Replayed: uint32(m.Replayed), Total: uint32(m.Total)}}
+	case StepConflictResolution:
+		arm.Substatus = &frontendv1.FooterStatusMerging_ConflictResolution{ConflictResolution: &frontendv1.FooterSubStatusMergingConflictResolution{}}
+	case StepTesting:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Testing{Testing: &frontendv1.FooterSubStatusMergingTesting{}}
+	case StepFixing:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Fixing{Fixing: &frontendv1.FooterSubStatusMergingFixing{
+			Attempt: uint32(m.Attempt), MaxAttempts: uint32(m.MaxAttempts)}}
+	case StepCommitting:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Committing{Committing: &frontendv1.FooterSubStatusMergingCommitting{}}
+	case StepUpdatingMain:
+		arm.Substatus = &frontendv1.FooterStatusMerging_UpdatingMain{UpdatingMain: &frontendv1.FooterSubStatusMergingUpdatingMain{}}
+	case StepPostprocessing:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Postprocessing{Postprocessing: &frontendv1.FooterSubStatusMergingPostprocessing{}}
 	default:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
-		arm.Substatus = &frontendv1.FooterStatusMerging_Merge{
-			Merge: &frontendv1.FooterSubStatusMergingMerge{}}
+		log.Error("daemon.footer.merge_step", "a merge in flight names no step the footer draws; it is drawn with no substatus",
+			dlog.Context{
+				"state":               m.State,
+				"step":                string(m.Step),
+				"invariant_violation": "every merge in flight stands on a named step",
+				"remediation":         "set MergeFacts.Step with every queued or merging state",
+			})
 	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging", "step": string(m.Step)})
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
 }
 
-// mergeConflict draws a merge STOPPED awaiting the user: on a conflict, whose
-// name is the whole fact, or parked, whose line is the orchestrator's own.
-func (r *resolver) mergeConflict(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	arm := &frontendv1.FooterStatusMergeConflict{Activity: r.mergingActivity(s)}
-	if s.merge.State == "parked" {
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merge parked"})
-		arm.Substatus = &frontendv1.FooterStatusMergeConflict_Parked{
-			Parked: &frontendv1.FooterSubStatusMergingParked{Line: s.merge.ParkedLine}}
-	}
-	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeConflict{MergeConflict: arm}}
-}
-
-// mergeFailed draws a failed merge; the merge bubble carries the account.
+// mergeFailed draws a failed merge, its substatus the AREA it failed in. A
+// failed merge naming no area is an orchestrator defect, recorded at ERROR and
+// drawn with no substatus rather than a made-up one.
 func (r *resolver) mergeFailed(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merge failed"})
-	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeFailed{
-		MergeFailed: &frontendv1.FooterStatusMergeFailed{Activity: r.mergingActivity(s)}}}
+	arm := &frontendv1.FooterStatusMergeFailed{Activity: r.mergingActivity(s)}
+	switch s.merge.FailedArea {
+	case FailedConflicts:
+		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Conflicts{Conflicts: &frontendv1.FooterSubStatusMergeFailedConflicts{}}
+	case FailedTests:
+		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Tests{Tests: &frontendv1.FooterSubStatusMergeFailedTests{}}
+	case FailedOther:
+		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Other{Other: &frontendv1.FooterSubStatusMergeFailedOther{}}
+	default:
+		log.Error("daemon.footer.merge_failed_area", "a failed merge names no area; it is drawn with no substatus",
+			dlog.Context{
+				"area":                string(s.merge.FailedArea),
+				"invariant_violation": "every failed merge names the area it failed in",
+				"remediation":         "set MergeFacts.FailedArea with every failed state",
+			})
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merge failed", "area": string(s.merge.FailedArea)})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeFailed{MergeFailed: arm}}
 }
 
 // merged draws a landed merge.
@@ -403,31 +423,6 @@ func (r *resolver) merged(s *wsState, log dlog.Logger) *frontendv1.FooterStatus 
 	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merged"})
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merged{
 		Merged: &frontendv1.FooterStatusMerged{Activity: r.mergingActivity(s)}}}
-}
-
-// mergingPhase maps the front entry's ACTIVE TAB onto the phase substatus. The
-// tab is the orchestrator's own fact, so the footer never guesses a phase.
-func setMergingPhase(arm *frontendv1.FooterStatusMerging, tab string) {
-	switch tab {
-	case "pre_prompt":
-		arm.Substatus = &frontendv1.FooterStatusMerging_PrePrompt{
-			PrePrompt: &frontendv1.FooterSubStatusMergingPrePrompt{}}
-	case "testing":
-		arm.Substatus = &frontendv1.FooterStatusMerging_Testing{
-			Testing: &frontendv1.FooterSubStatusMergingTesting{}}
-	case "fixes":
-		arm.Substatus = &frontendv1.FooterStatusMerging_Fixes{
-			Fixes: &frontendv1.FooterSubStatusMergingFixes{}}
-	case "conflicts":
-		arm.Substatus = &frontendv1.FooterStatusMerging_Conflicts{
-			Conflicts: &frontendv1.FooterSubStatusMergingConflicts{}}
-	case "post_prompt":
-		arm.Substatus = &frontendv1.FooterStatusMerging_PostPrompt{
-			PostPrompt: &frontendv1.FooterSubStatusMergingPostPrompt{}}
-	default:
-		arm.Substatus = &frontendv1.FooterStatusMerging_Merge{
-			Merge: &frontendv1.FooterSubStatusMergingMerge{}}
-	}
 }
 
 // waiting resolves the parked states other than the wakeup fallback. Its
@@ -670,8 +665,6 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:
 		return "loading"
-	case *frontendv1.FooterStatus_MergeConflict:
-		return "merge_conflict"
 	case *frontendv1.FooterStatus_MergeFailed:
 		return "merge_failed"
 	case *frontendv1.FooterStatus_Merged:

@@ -9,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -327,79 +328,6 @@ func TestATurnOutranksBackground(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "working" {
 		t.Fatalf("status = %q, want working", got)
-	}
-}
-
-func TestAQueuedMergeCarriesItsPlace(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "queued", QueuePosition: 3, QueueDepth: 7})
-
-	// Assert
-	queued := h.view(t).GetStrip().GetStatus().GetMerging().GetQueued()
-	if queued.GetPosition() != 3 || queued.GetDepth() != 7 {
-		t.Fatalf("queued = %+v, want position 3 of 7", queued)
-	}
-}
-
-func TestAParkedMergeDrawsTheOrchestratorsComposedLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "parked", ParkedLine: "conflict in api.go needs you"})
-
-	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine()
-	if got != "conflict in api.go needs you" {
-		t.Fatalf("parked line = %q, want the orchestrator's own sentence", got)
-	}
-}
-
-func TestTheActiveTabRefinesTheMergingPhase(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "merging", ActiveTab: "testing"})
-
-	// Assert
-	if h.view(t).GetStrip().GetStatus().GetMerging().GetTesting() == nil {
-		t.Fatalf("want the testing phase from the front entry's active tab")
-	}
-}
-
-func TestAMergingStateWithNoTabFallsToTheMergePhase(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
-
-	// Assert
-	if h.view(t).GetStrip().GetStatus().GetMerging().GetMerge() == nil {
-		t.Fatalf("want the merge phase when no active tab was stated")
-	}
-}
-
-func TestAMergeOutranksWaiting(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "which?"))
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "merging", ActiveTab: "merge"})
-
-	// Assert
-	if got := h.status(t); got != "merging" {
-		t.Fatalf("status = %q, want merging", got)
 	}
 }
 
@@ -912,50 +840,6 @@ func TestAMergeInFlightOutranksDisconnected(t *testing.T) {
 	}
 }
 
-// TestAStoppedMergeIsNeverMerging pins the owner's ruling of 2026-09-28: a
-// merge that stopped is its own arm, never a `merging` step, so it can close
-// no composer.
-func TestAStoppedMergeIsNeverMerging(t *testing.T) {
-	cases := []struct {
-		state string
-		want  string
-	}{
-		{state: "conflict", want: "merge_conflict"},
-		{state: "parked", want: "merge_conflict"},
-		{state: "failed", want: "merge_failed"},
-		{state: "merged", want: "merged"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.state, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-
-			// Act
-			h.r.SetMerge(testWS, MergeFacts{State: tc.state})
-
-			// Assert
-			if got := h.status(t); got != tc.want {
-				t.Fatalf("status = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestAMergeStoppedOnAConflictHasNoFinerStep(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "conflict"})
-
-	// Assert
-	if sub := h.view(t).GetStrip().GetStatus().GetMergeConflict().GetSubstatus(); sub != nil {
-		t.Fatalf("substatus = %+v, want unset: the conflict's name is the whole fact", sub)
-	}
-}
-
 func TestAFailedMergeOutranksATurnInFlight(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -968,42 +852,6 @@ func TestAFailedMergeOutranksATurnInFlight(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "merge_failed" {
 		t.Fatalf("status = %q, want merge_failed", got)
-	}
-}
-
-func TestAMergeInFlightOutranksAVendorBlock(t *testing.T) {
-	// Arrange: the roster always ranked the merge above vendor_blocked, and
-	// the one ladder keeps that order.
-	h := newHarness(t)
-	connected(h)
-	turn := testTurnID
-	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
-
-	// Act
-	h.r.SetMerge(testWS, MergeFacts{State: "queued", QueuePosition: 1, QueueDepth: 1})
-
-	// Assert
-	if got := h.status(t); got != "merging" {
-		t.Fatalf("status = %q, want merging", got)
-	}
-}
-
-func TestAMergeInFlightOutranksTheMomentaryInterrupted(t *testing.T) {
-	// Arrange: the momentary interrupted is a turn END, so it sits in the idle
-	// rung under every claim above it.
-	h := newHarness(t)
-	connected(h)
-	turn := testTurnID
-	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.SetMerge(testWS, MergeFacts{State: "enqueuing"})
-
-	// Act
-	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
-
-	// Assert
-	if got := h.status(t); got != "merging" {
-		t.Fatalf("status = %q, want merging", got)
 	}
 }
 
@@ -1076,33 +924,6 @@ func TestClearingTheCloseRefusalLeavesClosing(t *testing.T) {
 	}
 }
 
-func TestEveryFooterStatusArmIsPaintedByTheVocabulary(t *testing.T) {
-	// Arrange: the arm names this resolver can emit, which the render-colors
-	// footer_status table must cover row for row.
-	arms := []string{
-		"idle", "working", "waiting", "interrupted", "merging",
-		"background", "blocked", "disconnected", "closing", "loading",
-		"merge_conflict", "merge_failed", "merged",
-	}
-	emitted := map[string]bool{}
-	for _, arm := range arms {
-		emitted[arm] = true
-	}
-
-	// Act
-	var missing []string
-	for _, arm := range statusArmsFromProto() {
-		if !emitted[arm] {
-			missing = append(missing, arm)
-		}
-	}
-
-	// Assert
-	if len(missing) > 0 {
-		t.Fatalf("arms %v exist in the contract but this resolver never emits them", missing)
-	}
-}
-
 // statusArmsFromProto lists the FooterStatus arms the generated code declares,
 // so an arm landing without a resolver branch fails here rather than drawing
 // nothing.
@@ -1118,7 +939,6 @@ func statusArmsFromProto() []string {
 		{Status: &frontendv1.FooterStatus_Disconnected{}},
 		{Status: &frontendv1.FooterStatus_Closing{}},
 		{Status: &frontendv1.FooterStatus_Loading{}},
-		{Status: &frontendv1.FooterStatus_MergeConflict{}},
 		{Status: &frontendv1.FooterStatus_MergeFailed{}},
 		{Status: &frontendv1.FooterStatus_Merged{}},
 	}
@@ -1527,5 +1347,242 @@ func TestTheCloseRefusalStandsFromWhenItWasRefused(t *testing.T) {
 	at := h.view(t).GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetAt()
 	if at.GetAtMs() != instant.UnixMilli() {
 		t.Fatalf("at = %d, want the instant the close was refused", at.GetAtMs())
+	}
+}
+
+func TestEveryFooterStatusArmTheContractDeclaresIsOneThisResolverEmits(t *testing.T) {
+	// Arrange: the arm names this resolver can emit.
+	emitted := map[string]bool{}
+	for _, arm := range statusArms {
+		emitted[arm] = true
+	}
+
+	// Act
+	var missing []string
+	for _, arm := range statusArmsFromProto() {
+		if !emitted[arm] {
+			missing = append(missing, arm)
+		}
+	}
+
+	// Assert
+	if len(missing) > 0 {
+		t.Fatalf("arms %v exist in the contract but this resolver never emits them", missing)
+	}
+}
+
+func TestAQueuedMergeOutranksAVendorBlock(t *testing.T) {
+	// Arrange: the roster always ranked the merge above vendor_blocked, and
+	// the one ladder keeps that order.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "queued", Step: StepEnqueued, QueuePlace: 1, QueueWaiting: 1})
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAQueuedMergeOutranksTheMomentaryInterrupted(t *testing.T) {
+	// Arrange: the momentary interrupted is a turn END, so it sits in the idle
+	// rung under every claim above it.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.SetMerge(testWS, MergeFacts{State: "queued", Step: StepEnqueued, QueuePlace: 1, QueueWaiting: 1})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestAMergeOnAStepOutranksWaiting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "which?"))
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepRebasing, Replayed: 1, Total: 2})
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts MergeFacts
+		check func(*frontendv1.FooterStatusMerging) bool
+	}{
+		{"enqueued carries its place among the waiting", MergeFacts{State: "queued", Step: StepEnqueued, QueuePlace: 2, QueueWaiting: 5},
+			func(m *frontendv1.FooterStatusMerging) bool {
+				return m.GetEnqueued().GetPlace() == 2 && m.GetEnqueued().GetWaiting() == 5
+			}},
+		{"preprocessing", MergeFacts{State: "merging", Step: StepPreprocessing},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPreprocessing() != nil }},
+		{"rebasing carries its progress", MergeFacts{State: "merging", Step: StepRebasing, Replayed: 3, Total: 7},
+			func(m *frontendv1.FooterStatusMerging) bool {
+				return m.GetRebasing().GetReplayed() == 3 && m.GetRebasing().GetTotal() == 7
+			}},
+		{"conflict resolution", MergeFacts{State: "merging", Step: StepConflictResolution},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetConflictResolution() != nil }},
+		{"testing", MergeFacts{State: "merging", Step: StepTesting},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetTesting() != nil }},
+		{"fixing carries its attempt and the bound", MergeFacts{State: "merging", Step: StepFixing, Attempt: 2, MaxAttempts: 3},
+			func(m *frontendv1.FooterStatusMerging) bool {
+				return m.GetFixing().GetAttempt() == 2 && m.GetFixing().GetMaxAttempts() == 3
+			}},
+		{"committing", MergeFacts{State: "merging", Step: StepCommitting},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetCommitting() != nil }},
+		{"updating main", MergeFacts{State: "merging", Step: StepUpdatingMain},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetUpdatingMain() != nil }},
+		{"postprocessing", MergeFacts{State: "merging", Step: StepPostprocessing},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPostprocessing() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, tt.facts)
+
+			// Assert
+			merging := h.view(t).GetStrip().GetStatus().GetMerging()
+			if !tt.check(merging) {
+				t.Fatalf("merging = %+v, want the %s substatus", merging, tt.name)
+			}
+		})
+	}
+}
+
+func TestAMergeInFlightWithNoStepIsRecordedAsAnInvariantViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging"})
+
+	// Assert
+	if sub := h.view(t).GetStrip().GetStatus().GetMerging().GetSubstatus(); sub != nil {
+		t.Fatalf("substatus = %+v, want none drawn for a step nobody named", sub)
+	}
+	records := recordsOf(h.log.Records(), "daemon.footer.merge_step")
+	if len(records) == 0 || records[0].Level != dlog.LevelError || records[0].Context["invariant_violation"] == nil {
+		t.Fatalf("merge_step records = %+v, want an ERROR naming the invariant", records)
+	}
+}
+
+func TestAConcludedMergeIsNeverMerging(t *testing.T) {
+	cases := []struct {
+		facts MergeFacts
+		want  string
+	}{
+		{facts: MergeFacts{State: "failed", FailedArea: FailedTests}, want: "merge_failed"},
+		{facts: MergeFacts{State: "merged"}, want: "merged"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.facts.State, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, tc.facts)
+
+			// Assert
+			if got := h.status(t); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAFailedMergeDrawsTheAreaItFailedIn(t *testing.T) {
+	tests := []struct {
+		area  MergeFailedArea
+		check func(*frontendv1.FooterStatusMergeFailed) bool
+	}{
+		{FailedConflicts, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetConflicts() != nil }},
+		{FailedTests, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetTests() != nil }},
+		{FailedOther, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetOther() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.area), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, MergeFacts{State: "failed", FailedArea: tt.area})
+
+			// Assert
+			failed := h.view(t).GetStrip().GetStatus().GetMergeFailed()
+			if !tt.check(failed) {
+				t.Fatalf("merge_failed = %+v, want the %s area", failed, tt.area)
+			}
+		})
+	}
+}
+
+func TestAFailedMergeWithNoAreaIsRecordedAsAnInvariantViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "failed"})
+
+	// Assert
+	if sub := h.view(t).GetStrip().GetStatus().GetMergeFailed().GetSubstatus(); sub != nil {
+		t.Fatalf("substatus = %+v, want none drawn for an area nobody named", sub)
+	}
+	records := recordsOf(h.log.Records(), "daemon.footer.merge_failed_area")
+	if len(records) == 0 || records[0].Level != dlog.LevelError || records[0].Context["invariant_violation"] == nil {
+		t.Fatalf("merge_failed_area records = %+v, want an ERROR naming the invariant", records)
+	}
+}
+
+func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
+	tests := []struct {
+		step MergeStep
+		want string
+	}{
+		{StepEnqueued, "enqueued"},
+		{StepPreprocessing, "preprocessing"},
+		{StepRebasing, "rebasing"},
+		{StepConflictResolution, "conflict resolution"},
+		{StepTesting, "testing"},
+		{StepFixing, "fixing"},
+		{StepCommitting, "committing"},
+		{StepUpdatingMain, "updating main"},
+		{StepPostprocessing, "postprocessing"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.step), func(t *testing.T) {
+			// Act
+			got := tt.step.Words()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Words() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -239,137 +239,6 @@ func lineName(t *testing.T, h *harness) string {
 	return activityLineOf(h.view(t).GetStrip().GetStatus()).name()
 }
 
-// TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinned covers every
-// status arm's cell: the kind that explains the step first, then an
-// escalating fault, then a deploy's progress, and the enduring line beneath
-// when nothing salient stands.
-func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinned(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(h *harness)
-		arm     string
-		want    string
-	}{
-		{"idle, nothing salient", func(h *harness) {}, "idle", "enduring"},
-		{"idle under a deploy", deploying, "idle", "salient.update"},
-		{"idle after a dead query with no turn", func(h *harness) {
-			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
-		}, "idle", "salient.query_died"},
-		{"a failed turn's dead query outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
-		}, "turn_failed", "salient.query_died"},
-		{"degraded shares the idle cell", func(h *harness) {
-			deploying(h)
-			h.r.SetStateUnreported(testWS, true)
-		}, "degraded", "salient.update"},
-		{"working, nothing salient", func(h *harness) {
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-		}, "working", "enduring"},
-		{"working under a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-		}, "working", "salient.update"},
-		{"a retry outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
-		}, "working", "salient.retrying"},
-		{"a compaction outranks a retry", func(h *harness) {
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
-			h.r.OnSessionUpdate(testWS, vendorCompacting())
-		}, "working", "salient.compaction"},
-		{"interrupted, nothing salient", func(h *harness) {
-			turn := testTurnID
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
-		}, "interrupted", "enduring"},
-		{"interrupted under a deploy", func(h *harness) {
-			turn := testTurnID
-			deploying(h)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
-		}, "interrupted", "salient.update"},
-		{"merging, nothing salient", func(h *harness) { h.r.SetMerge(testWS, MergeFacts{State: "merging"}) }, "merging", "enduring"},
-		{"merging under a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetMerge(testWS, MergeFacts{State: "merging"})
-		}, "merging", "salient.update"},
-		{"merge_conflict shares the merging cell", func(h *harness) {
-			deploying(h)
-			h.r.SetMerge(testWS, MergeFacts{State: "conflict"})
-		}, "merge_conflict", "salient.update"},
-		{"merge_failed shares the merging cell", func(h *harness) { h.r.SetMerge(testWS, MergeFacts{State: "failed"}) }, "merge_failed", "enduring"},
-		{"merged shares the merging cell", func(h *harness) { h.r.SetMerge(testWS, MergeFacts{State: "merged"}) }, "merged", "enduring"},
-		{"background, nothing salient", func(h *harness) {
-			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
-		}, "background", "enduring"},
-		{"background under a deploy", func(h *harness) {
-			deploying(h)
-			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
-		}, "background", "salient.update"},
-		{"blocked on the account, the vendor's refusal explains it", func(h *harness) {
-			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.rate_limit"},
-		{"the refusal that explains the block outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.rate_limit"},
-		{"an escalating blocked fault outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindStateUnreadable, false))
-		}, "blocked", "salient.fault"},
-		{"a severed link with no fault, nothing salient", func(h *harness) {
-			h.r.OnLink(testWS, shimclient.LinkRedialing)
-		}, "disconnected", "enduring"},
-		{"a severed link under a deploy", func(h *harness) {
-			deploying(h)
-			h.r.OnLink(testWS, shimclient.LinkRedialing)
-		}, "disconnected", "salient.update"},
-		{"an escalating disconnected fault outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
-		}, "disconnected", "salient.fault"},
-		{"the bring-up failure outranks a fault", func(h *harness) {
-			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
-			h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1"})
-		}, "disconnected", "salient.start_failed"},
-		{"a refused close outranks a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetClosing(testWS, &CloseBlocked{Reason: "turn_in_flight", Detail: "a turn is in flight"})
-		}, "closing", "salient.close_blocked"},
-		{"loading, the injected item is the transient", func(h *harness) {
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
-		}, "loading", "transient.context_injected"},
-		{"loading under a deploy", func(h *harness) {
-			deploying(h)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
-		}, "loading", "salient.update"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-
-			// Act
-			tt.arrange(h)
-
-			// Assert
-			if got := h.status(t); got != tt.arm {
-				t.Fatalf("status = %q, want %q", got, tt.arm)
-			}
-			if got := lineName(t, h); got != tt.want {
-				t.Fatalf("activity = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // rejectedFiveHour is the vendor refusing the five-hour allowance.
 func rejectedFiveHour() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{
@@ -756,5 +625,159 @@ func TestTheRetriedCallsResponseAnnouncesTheRestoredAPI(t *testing.T) {
 	}
 	if restored := transientOf(t, h).GetApiRestored(); restored.GetFailedAttempts() != 8 {
 		t.Fatalf("transient = %v, want api_restored after 8 failed attempts", transientOf(t, h))
+	}
+}
+
+func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerge(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		arm     string
+		want    string
+	}{
+		{"idle, nothing salient", func(h *harness) {}, "idle", "enduring"},
+		{"idle under a deploy", deploying, "idle", "salient.update"},
+		{"idle after a dead query with no turn", func(h *harness) {
+			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
+		}, "idle", "salient.query_died"},
+		{"a failed turn's dead query outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
+		}, "turn_failed", "salient.query_died"},
+		{"degraded shares the idle cell", func(h *harness) {
+			deploying(h)
+			h.r.SetStateUnreported(testWS, true)
+		}, "degraded", "salient.update"},
+		{"working, nothing salient", func(h *harness) {
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+		}, "working", "enduring"},
+		{"working under a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+		}, "working", "salient.update"},
+		{"a retry outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
+		}, "working", "salient.retrying"},
+		{"a compaction outranks a retry", func(h *harness) {
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
+			h.r.OnSessionUpdate(testWS, vendorCompacting())
+		}, "working", "salient.compaction"},
+		{"interrupted, nothing salient", func(h *harness) {
+			turn := testTurnID
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+		}, "interrupted", "enduring"},
+		{"interrupted under a deploy", func(h *harness) {
+			turn := testTurnID
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+		}, "interrupted", "salient.update"},
+		{"merging, nothing salient", func(h *harness) {
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting})
+		}, "merging", "enduring"},
+		{"merging under a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting})
+		}, "merging", "salient.update"},
+		{"the merge step's line outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepCommitting, LineAt: instant, Line: &frontendv1.FooterStatusActivityMergeStep{
+				Step: &frontendv1.FooterStatusActivityMergeStep_Committing{Committing: &frontendv1.FooterMergeStepCommitting{Subject: "merge(main): fix"}}}})
+		}, "merging", "salient.merge_step"},
+		{"merge_failed shares the merging cell", func(h *harness) {
+			deploying(h)
+			h.r.SetMerge(testWS, MergeFacts{State: "failed", FailedArea: FailedConflicts})
+		}, "merge_failed", "salient.update"},
+		{"merged shares the merging cell", func(h *harness) { h.r.SetMerge(testWS, MergeFacts{State: "merged"}) }, "merged", "enduring"},
+		{"background, nothing salient", func(h *harness) {
+			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
+		}, "background", "enduring"},
+		{"background under a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
+		}, "background", "salient.update"},
+		{"blocked on the account, the vendor's refusal explains it", func(h *harness) {
+			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
+		}, "blocked", "salient.rate_limit"},
+		{"the refusal that explains the block outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
+		}, "blocked", "salient.rate_limit"},
+		{"an escalating blocked fault outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindStateUnreadable, false))
+		}, "blocked", "salient.fault"},
+		{"a severed link with no fault, nothing salient", func(h *harness) {
+			h.r.OnLink(testWS, shimclient.LinkRedialing)
+		}, "disconnected", "enduring"},
+		{"a severed link under a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OnLink(testWS, shimclient.LinkRedialing)
+		}, "disconnected", "salient.update"},
+		{"an escalating disconnected fault outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
+		}, "disconnected", "salient.fault"},
+		{"the bring-up failure outranks a fault", func(h *harness) {
+			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
+			h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1"})
+		}, "disconnected", "salient.start_failed"},
+		{"a refused close outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetClosing(testWS, &CloseBlocked{Reason: "turn_in_flight", Detail: "a turn is in flight"})
+		}, "closing", "salient.close_blocked"},
+		{"loading, the injected item is the transient", func(h *harness) {
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
+		}, "loading", "transient.context_injected"},
+		{"loading under a deploy", func(h *harness) {
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
+		}, "loading", "salient.update"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := h.status(t); got != tt.arm {
+				t.Fatalf("status = %q, want %q", got, tt.arm)
+			}
+			if got := lineName(t, h); got != tt.want {
+				t.Fatalf("activity = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheMergeStepsLineStandsWithTheInstantItBegan(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	line := &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_Rebasing{
+		Rebasing: &frontendv1.FooterMergeStepRebasing{Line: &frontendv1.FooterMergeStepRebasing_Running{
+			Running: &frontendv1.FooterMergeStepRebaseCommand{Text: "pick 1a2b3c fix the loop"}}}}}
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepRebasing, Replayed: 0, Total: 2, Line: line, LineAt: instant})
+
+	// Assert
+	salient := h.view(t).GetStrip().GetStatus().GetMerging().GetActivity().GetSalient()
+	if got := salient.GetMergeStep().GetRebasing().GetRunning().GetText(); got != "pick 1a2b3c fix the loop" {
+		t.Fatalf("merge step line = %q, want the rebase command", got)
+	}
+	if salient.GetAt() == nil {
+		t.Fatalf("salient = %+v, want the instant the line began standing", salient)
 	}
 }

@@ -27,6 +27,8 @@ func focusOfView(view *frontendv1.FooterView) focusRead {
 		return focusRead{panel: "shells", generation: f.GetGeneration()}
 	case *frontendv1.FooterExpandedFocus_Monitors:
 		return focusRead{panel: "monitors", generation: f.GetGeneration()}
+	case *frontendv1.FooterExpandedFocus_MergeTests:
+		return focusRead{panel: "merge_tests", generation: f.GetGeneration()}
 	default:
 		return focusRead{panel: "unset arm", generation: f.GetGeneration()}
 	}
@@ -226,5 +228,71 @@ func TestAMintedFocusIsRecordedOnce(t *testing.T) {
 	rec := lastRecord(t, h, "daemon.footer.focus_minted")
 	if rec.Context["panel"] != "shells" || rec.Context["generation"] != uint64(1) || rec.Context["work_id"] != "shell:shell-1" {
 		t.Fatalf("record context = %+v, want panel shells, generation 1, work_id shell:shell-1", rec.Context)
+	}
+}
+
+// testingFacts is a merge testing in round n with one suite waiting.
+func testingFacts(n int) MergeFacts {
+	return MergeFacts{State: "merging", Step: StepTesting, TestsRound: n, Tests: []*frontendv1.FooterMergeTestRow{mergeTestRow("daemon", waitingRow())}}
+}
+
+func TestAMergeThatBeginsTestingFocusesTheMergeTestsPanel(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepRebasing, Total: 1})
+
+	// Act
+	h.r.SetMerge(testWS, testingFacts(1))
+
+	// Assert
+	if got := focusOfView(h.view(t)); got != (focusRead{panel: "merge_tests", generation: 1}) {
+		t.Fatalf("focus = %+v, want the merge tests panel at generation 1", got)
+	}
+}
+
+func TestEachNewTestingRoundMintsANewGeneration(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, testingFacts(1))
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 1, MaxAttempts: 3, TestsRound: 1})
+
+	// Act
+	h.r.SetMerge(testWS, testingFacts(2))
+
+	// Assert
+	if got := focusOfView(h.view(t)); got != (focusRead{panel: "merge_tests", generation: 2}) {
+		t.Fatalf("focus = %+v, want the merge tests panel at generation 2", got)
+	}
+}
+
+func TestARepublishOfTheSameTestingRoundMintsNothing(t *testing.T) {
+	// Arrange: a suite finishing republishes the round's facts.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, testingFacts(1))
+
+	// Act
+	h.r.SetMerge(testWS, testingFacts(1))
+
+	// Assert
+	if got := focusOfView(h.view(t)); got.generation != 1 {
+		t.Fatalf("focus = %+v, want generation 1 still: the round did not change", got)
+	}
+}
+
+func TestTheMergeTestsFocusIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, testingFacts(1))
+
+	// Assert
+	records := recordsOf(h.log.Records(), "daemon.footer.focus_minted")
+	if len(records) != 1 || records[0].Context["panel"] != "merge_tests" {
+		t.Fatalf("focus_minted records = %+v, want one naming the merge tests panel", records)
 	}
 }

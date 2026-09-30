@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"sort"
 	"time"
 
@@ -825,6 +827,36 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	if scheduled > 0 {
 		out.Crons = &frontendv1.FooterChipCrons{Count: uint32(scheduled)}
 	}
+	// THE 🧪 CHIP IS SET IFF THE MERGE TESTS PANEL HOLDS A SUITE: the panel
+	// holds the merge's current test round while it tests and nothing
+	// otherwise.
+	if total := len(s.merge.Tests); total > 0 {
+		out.MergeTests = &frontendv1.FooterChipMergeTests{Finished: uint32(finishedSuites(s.merge.Tests)), Total: uint32(total)}
+	}
+	return out
+}
+
+// finishedSuites counts the merge tests panel's rows that passed or failed.
+func finishedSuites(rows []*frontendv1.FooterMergeTestRow) int {
+	finished := 0
+	for _, row := range rows {
+		switch row.GetState().GetState().(type) {
+		case *frontendv1.FooterMergeTestRowState_Passed, *frontendv1.FooterMergeTestRowState_Failed:
+			finished++
+		}
+	}
+	return finished
+}
+
+// mergeTestsPanel renders the 🧪 panel: the merge's current test round, one
+// row per suite in the gate's order, and no rows when the merge is not
+// testing. The rows are the orchestrator's, cloned so a published view never
+// shares a message with the facts it was drawn from.
+func mergeTestsPanel(s *wsState) *frontendv1.FooterExpandedMergeTests {
+	out := &frontendv1.FooterExpandedMergeTests{}
+	for _, row := range s.merge.Tests {
+		out.Rows = append(out.Rows, proto.Clone(row).(*frontendv1.FooterMergeTestRow))
+	}
 	return out
 }
 
@@ -838,6 +870,8 @@ func (r *resolver) expanded(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterEx
 		Shells:   r.shellsPanel(ws, s),
 		Monitors: r.monitorsPanel(s),
 		Crons:    r.cronsPanel(s),
+		// The 🧪 panel: empty unless the merge is testing.
+		MergeTests: mergeTestsPanel(s),
 	}
 }
 
