@@ -751,6 +751,17 @@ and not something this change touches.
   replays it by `write_seq`), its pointer stays valid, the ledger is untouched,
   and a later write of a real record under the same key takes it back in place.
   Each retirement is recorded once at INFO.
+- **A LOST TERMINAL NEVER LANDS ON A RUN WHOSE ENDING IS ON RECORD**
+  (`internal/db/lostguard.go`, 2026-09-30). A FILE-plane LOST terminal — a
+  shell run's `interrupted.cause.lost` bash frame, or a backgrounded
+  subagent's `failure.cause.lost` spawn activity — for a run whose
+  `detached_work` row (by origin unit) has already ended refuses the batch
+  whole as `invalid_request` naming `entries[i]` at `lost_over_settled`. The
+  recorded terminal and `ended_at_ms` stand. The sidecar asks
+  `GetRunSettlements` before tracking, so this is an INVARIANT VIOLATION and the
+  server records it at ERROR, not at the warn an ordinary malformed request
+  gets. A LOST over a live row, a stream-plane LOST, and a non-LOST file
+  terminal are untouched.
 - **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
   is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
   tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one
@@ -936,7 +947,8 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `keepalive_retired`, `bash_tail_over_cap`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
 `session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
-`listen_occupied`, `place_not_positive`, `through_not_positive`, `position_unset`.
+`listen_occupied`, `place_not_positive`, `through_not_positive`, `position_unset`,
+`run_id_empty`, `lost_over_settled`.
 
 - **THE SITE IS NOT THE ARM.** A site says which of the store's many checks said
   no — the vocabulary an operator counts by — while the failure's `kind` arm says
