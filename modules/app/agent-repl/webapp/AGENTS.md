@@ -23,7 +23,7 @@ src/format.ts             the ONE client-side token formatter
 src/clock.ts src/duration.ts   the shared ticker and its formatters
 src/vocab.ts              typed accessors over proto/vocab/*.json
 src/log.ts                the canonical logging API
-src/link.ts               renderExternalLink / renderEditorLink
+src/link.ts               renderExternalLink / renderEditorLink / renderMergeTestLogLink
 src/bubble/               THE ONE BUBBLE: draw (drawBubble, the spec) and body (the pipeline)
 src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
   renderers.ts              THE SEAM, plus createRowRenderers: the registry
@@ -119,6 +119,11 @@ and are contract on the same terms:
 | `data-state` / `.footer-row-state` | every agents-panel row (`data-state`), and the waiting row's "waiting for the API · gives up in …" span | `running` \| `waitingForApi` | fa-webapp |
 | `data-datum` on the failed-deploy overlay | each line of a `deployFailed` warning's detail overlay (src/topbar/warnings.ts) | `step` \| `component` \| `rollback` \| `detail` \| `log` (absent when the build archived no log); the `detail` line also wears `.topbar-warning-whole`, which keeps its line breaks. The first push carrying a failed deploy is logged at ERROR as `topbar.deploy-failed` | deploy-failure-every-client, 2026-09-28 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
+| `data-merge-test-log` + `.merge-test-log-link` | the merge bubble tests tab's log link (`renderMergeTestLogLink`, src/link.ts), inside `.merge-test-log` | — (drawn in the response bubble's link blue, `var(--accent)`; its text is `FeedMergeTestLogLabel.text`; a click sends `OpenInEditor` with `target.merge_test_log` = the served token, which never appears in the markup) | merge queue rework, 2026-09-30 |
+| `data-chip="mergeTests"` / `data-panel="mergeTests"` | the 🧪 chip ("🧪 8/12") and the expanded merge tests panel | — (the panel folds away, like the agents panel, when the daemon empties it at the end of testing; a new `FooterExpandedFocus.merge_tests` generation opens and selects it) | merge queue rework, 2026-09-30 |
+| `data-suite-state` / `data-duration` | every merge tests panel row (`data-suite-state`), and a finished row's run-time clock (`data-duration`) | `waiting` \| `running` \| `passed` \| `failed`; a running row's `.footer-row-clock` ticks, a finished one's does not, a waiting one has none | merge queue rework, 2026-09-30 |
+| `data-step` + `.footer-activity-merge-step` | the salient `merge_step` line under `merging` and `merge failed` (src/footer/merge-step.ts) | the step's case name: `enqueued` \| `preprocessing` \| `rebasing` \| `conflictResolution` \| `testing` \| `fixing` \| `committing` \| `updatingMain` \| `postprocessing`; a testing line also wears `data-edge` (`started` \| `passed` in `tone-green` \| `failed` in `tone-red`), a rebasing line `data-line` (`running` \| `failed`), an updating-main line `data-update-step` (`fetching` \| `fastForwarding`) | merge queue rework, 2026-09-30 |
+| `data-merge-progress` / `data-merge-attempt` / `data-update-step` | the merge bubble's rebasing tab progress ("3/7"), a fixes tab's attempt ("attempt 2/3"), and the updating main tab's step (src/feed/merge/step-tabs.ts) | `data-update-step`: `fetching` \| `fastForwarding`; the other two carry no value | merge queue rework, 2026-09-30 |
 
 ## Commands
 
