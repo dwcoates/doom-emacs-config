@@ -211,11 +211,18 @@ func (q *queue) deliverHeld(ctx context.Context, ws ids.WorkspaceID, held wsm.He
 		return derr
 	}
 
-	if err := q.deps.DB.TombstoneHeldPrompt(ctx, held.Turn, wsm.Tombstone{Kind: tombstoneDelivered, At: q.deps.Now()}); err != nil {
+	return q.retireDelivered(ctx, ws, held.Turn, log)
+}
+
+// retireDelivered retires a hold the session took: tombstoned as delivered,
+// dropped as the semantic head, and the tray re-pushed. Shared by a started
+// hold and a joining one.
+func (q *queue) retireDelivered(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) error {
+	if err := q.deps.DB.TombstoneHeldPrompt(ctx, turn, wsm.Tombstone{Kind: tombstoneDelivered, At: q.deps.Now()}); err != nil {
 		log.Error(opDeliver, "the hold was delivered but not retired", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("retire delivered hold %q on %q: %w", held.Turn, ws, err)
+		return fmt.Errorf("retire delivered hold %q on %q: %w", turn, ws, err)
 	}
-	q.clearHeadIf(ws, held.Turn)
+	q.clearHeadIf(ws, turn)
 	return q.pushTray(ctx, ws, log)
 }
 
