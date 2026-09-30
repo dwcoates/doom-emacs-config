@@ -247,5 +247,5 @@ func classificationName(held wsm.HeldPrompt) string {
 	if held.Classification == nil {
 		return "none"
 	}
-	return armName(held.Classification.Arm)
+	return held.Classification.Arm.String()
 }
