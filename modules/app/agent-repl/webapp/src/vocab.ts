@@ -139,7 +139,7 @@ export function topbarTone(tone: string): Color {
  * The glyph NAME a merge arm reports itself with.
  *
  * The merge arms take no color, so the glyph is the whole report. This returns
- * the shared NAME ("queue", "recycle", "conflict", "failed", "check"); which
+ * the shared NAME ("queue", "recycle", "failed", "check"); which
  * character or CSS shape draws it is the surface's own business.
  */
 export function mergeGlyph(arm: string): string {
