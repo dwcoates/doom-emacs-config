@@ -191,6 +191,29 @@ stream: the verb retires the op itself on success, on refusal, and on a
 transport failure (`agent-repl-verbs--send`'s `:on-transport-failure`).
 Nothing on the stream would ever retire it.
 
+## A close lands on the workspace selected before it
+
+Owner ruling, 2026-09-30. When a workspace closes, for ANY reason (the
+user's close, kill or nuke, or an implicit close such as the daemon closing
+a workspace after its merge lands), ONE rule decides what Emacs selects:
+
+- Every close path tears the tab down through `agent-repl--ws-land-then-kill`:
+  the verbs' teardown (`agent-repl--kill-one-workspace`) and the roster
+  push's teardown of a closed or vanished row
+  (`agent-repl-roster--tear-down-tab`). Nothing else chooses a landing.
+- `agent-repl--land-before-teardown` moves the user ONLY when they stand on
+  the closing workspace; standing on another workspace changes nothing.
+- The target (`agent-repl--teardown-landing-target`) is the most recently
+  selected workspace still open, read from `agent-repl--workspace-history`
+  (maintained on every perspective activation, carried across renames by
+  `agent-repl--ws-rename-state`). Entries since closed are skipped.
+- The first open tab is taken only when the history names no survivor, the
+  expected case of a session in which the user has stood in no other open
+  workspace yet (the history is in memory and starts empty with Emacs).
+  The source that decided (`history` or `tab-order`) is logged at INFO.
+- The webapp decides nothing: its highlight is the daemon's `current`, which
+  the landing's own SelectWorkspace moves.
+
 ## Verification
 
 Run from `modules/app/agent-repl/`, always through the host suite slot, which
