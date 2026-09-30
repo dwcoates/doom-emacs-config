@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -47,51 +48,12 @@ const (
 	ReplacementClaimWait = time.Minute
 )
 
-// replacementArgv is the incumbent's own argv with its role flags dropped
-// (withoutRoleFlags) and the replacing flag appended, for the reason
-// successorArgv inherits it: the replacement is this daemon's configuration,
-// not a curated copy of it.
-func replacementArgv(incumbent []string) []string {
-	return append(withoutRoleFlags(incumbent), "--"+ReplacingFlagName)
-}
-
-// withoutRoleFlags is the incumbent's argv with every ROLE flag dropped: the
-// joining flag with its value, and the replacing flag. A role says how THIS
-// process booted, never how the daemon it spawns boots, so every spawn of a
-// daemon strips them all here and appends exactly its own. The two roles are
-// exclusive, so a role carried across a spawn is a daemon that refuses to
-// start.
-func withoutRoleFlags(incumbent []string) []string {
-	out := make([]string, 0, len(incumbent)+2)
-	for i := 0; i < len(incumbent); i++ {
-		arg := incumbent[i]
-		name, _, hasValue := cutFlag(arg)
-		switch name {
-		case joiningName:
-			if !hasValue && i+1 < len(incumbent) {
-				i++
-			}
-			continue
-		case ReplacingFlagName:
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
-}
-
-// cutFlag splits a `-name[=value]` argument into its bare name.
-func cutFlag(arg string) (name, value string, hasValue bool) {
-	bare := arg
-	for len(bare) > 0 && bare[0] == '-' {
-		bare = bare[1:]
-	}
-	for i := 0; i < len(bare); i++ {
-		if bare[i] == '=' {
-			return bare[:i], bare[i+1:], true
-		}
-	}
-	return bare, "", false
+// replacementArgv is the incumbent's CONFIGURATION argv with the replacing
+// flag appended, for the reason successorArgv inherits it: the replacement is
+// this daemon's configuration, not a curated copy of it, and never the flags
+// that said how this process booted.
+func replacementArgv(config []string) []string {
+	return append(slices.Clone(config), "--"+ReplacingFlagName)
 }
 
 // Restart implements Controller.
