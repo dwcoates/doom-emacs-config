@@ -233,6 +233,17 @@ interface EngineDeps {
    */
   readonly keepaliveIntervalMs?: number;
   /**
+   * How much LATER than now the cold gate judges a transcript, when something
+   * overrode the default of zero.
+   *
+   * `main.ts` fills this ONLY for a `--fake` process. It is how a suite
+   * resumes a conversation "two hours later" without waiting two hours: the
+   * seed turn is stamped honestly by every producer, and only the gate's
+   * reading of the time passed moves. Back-dating the seed's transcript
+   * instead made two producers state places hours apart for one entry.
+   */
+  readonly coldGateLaterMs?: number;
+  /**
    * How long a `StartTurn` waits behind the shim's own keep-alive, when
    * something overrode {@link KEEPALIVE_YIELD_BUDGET_MS}. A suite shortens it
    * to reach the bound's refusal; production always uses the constant.
@@ -537,6 +548,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
   const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
+  /** The instant BOTH cold-gate sites judge a transcript at. */
+  const coldNowMs = (): number => deps.nowMs() + (deps.coldGateLaterMs ?? 0);
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   const live = new LiveWorkTable();
   /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
@@ -3486,7 +3499,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         );
       }
       const remediation = source.value.coldRemediation;
-      const cold = judgeCold(facts, deps.nowMs(), requestedModel);
+      const cold = judgeCold(facts, coldNowMs(), requestedModel);
       if (cold !== undefined && remediation === undefined) {
         LOGGER.debug(
           { vendor_session_id: vendorSessionId, reason: cold, context_tokens: facts.contextTokens },
@@ -4701,7 +4714,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // owner ruled the gate off below it for a model change as much as for a
       // lapse, so a caller asking for a threshold of 0 still gets a small
       // switch through rather than a refusal.
-      !underColdGateFloor(facts, deps.nowMs(), "model_switch")
+      !underColdGateFloor(facts, coldNowMs(), "model_switch")
     ) {
       LOGGER.debug(
         { model: model.name, context_tokens: facts.contextTokens },
