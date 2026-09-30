@@ -55,7 +55,7 @@ describe("percentGradientColor", () => {
     expect(() => percentGradientColor(50, disordered)).toThrow("stop 1 sits below");
   });
 
-  it.each(["src/panels/context-colors.ts"])(
+  it.each(["src/panels/context-colors.ts", "src/footer/tones.ts"])(
     "%s colors its percent through the shared helper, not its own interpolation",
     (file) => {
       // Arrange

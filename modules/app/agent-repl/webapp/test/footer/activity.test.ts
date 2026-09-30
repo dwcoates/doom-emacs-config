@@ -16,7 +16,15 @@ import {
   FOOTER_STATUS_CASES,
   activityDatumClass,
   allowanceStatusClass,
+  footerPercentColor,
 } from "../../src/footer/tones.js";
+
+/** The color a footer percent of PERCENT is painted, as the DOM reports it. */
+function paintedAs(percent: number): string {
+  const probe = document.createElement("span");
+  probe.style.color = footerPercentColor(percent);
+  return probe.style.color;
+}
 import { harness } from "./harness.js";
 import { enduringLine } from "./enduring-line.js";
 
@@ -407,6 +415,13 @@ describe("the salient kinds", () => {
     expect(cell.querySelector(".footer-activity-rate-limit")?.className).toContain(allowanceStatusClass("rejected"));
   });
 
+  it("colours a rate-limit event's utilization by how full it is", () => {
+    const cell = salientCell("rateLimit", { verdict: { case: "allowedWarning", value: {} }, utilization: 0.92 }, "idle");
+    const percent = cell.querySelector<HTMLElement>('.footer-activity-rate-limit [data-datum="percent"]');
+    expect(percent?.textContent).toBe("92%");
+    expect(percent?.style.color).toBe(paintedAs(92));
+  });
+
   it("refuses a rate-limit event with no verdict", () => {
     expect(() => salientCell("rateLimit", {}, "idle")).toThrow(MalformedView);
   });
@@ -761,11 +776,18 @@ describe("the enduring line", () => {
     pair.enduring.line = { case: undefined };
     expect(() => draw(activity)).toThrow(MalformedView);
   });
-  it("colours the context fill as a figure", () => {
+  it("colours the context fill by how full it is", () => {
     const cell = enduringCell({ contextWindow: { usedTokens: 1n, windowTokens: 2n, fill: 0.5 } });
-    expect(cell.querySelector('.footer-context-window [data-datum="percent"]')?.className).toBe(
-      activityDatumClass("percent"),
-    );
+    const percent = cell.querySelector<HTMLElement>('.footer-context-window [data-datum="percent"]');
+    expect(percent?.textContent).toBe("50%");
+    expect(percent?.style.color).toBe(paintedAs(50));
+  });
+
+  it("colours an allowance's percent by how full it is", () => {
+    const cell = enduringCell({ usage: { session: allowance(0.85, true, 60_000) } });
+    const percent = cell.querySelector<HTMLElement>('[data-allowance="session"] [data-datum="percent"]');
+    expect(percent?.textContent).toBe("85%");
+    expect(percent?.style.color).toBe(paintedAs(85));
   });
 
   it("emphasizes the newsworthy allowance", () => {

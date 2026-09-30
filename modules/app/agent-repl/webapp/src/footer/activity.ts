@@ -105,7 +105,7 @@ import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
 import { grabber, statusWords, textLine } from "./parts.js";
-import { activityDatumClass, allowanceStatusClass } from "./tones.js";
+import { activityDatumClass, allowanceStatusClass, footerPercentColor } from "./tones.js";
 
 /**
  * What a clocked piece of the cell needs: the ticker its figure rides.
@@ -451,11 +451,7 @@ export function drawFooterStatusActivityRateLimit(
   line.appendChild(document.createTextNode(`${window} ${rateLimitVerdictWords(verdict.case, `${path}.verdict`)}`));
   if (u.utilization !== undefined) {
     line.appendChild(document.createTextNode(" "));
-    const percent = document.createElement("span");
-    percent.className = activityDatumClass("percent");
-    percent.setAttribute("data-datum", "percent");
-    percent.textContent = `${Math.round(u.utilization * 100)}%`;
-    line.appendChild(percent);
+    line.appendChild(drawFooterPercent(u.utilization));
   }
   if (u.resetsAtS !== undefined) {
     const resets = document.createElement("span");
@@ -855,12 +851,23 @@ export function drawFooterActivityEnduringContextWindow(
   const span = document.createElement("span");
   span.className = "footer-context-window";
   span.appendChild(document.createTextNode("context "));
-  const percent = document.createElement("span");
-  percent.className = activityDatumClass("percent");
-  percent.setAttribute("data-datum", "percent");
-  percent.textContent = `${Math.round(u.fill * 100)}%`;
-  span.appendChild(percent);
+  span.appendChild(drawFooterPercent(u.fill));
   return span;
+}
+
+/**
+ * A footer percentage, "42%": a 0..1 figure on the wire drawn as a whole
+ * percent, colored by how full it is (`footerPercentColor`). Every percentage
+ * the footer draws goes through here, so none is ever drawn unpainted.
+ */
+export function drawFooterPercent(fraction: number): HTMLElement {
+  const figure = Math.round(fraction * 100);
+  const percent = document.createElement("span");
+  percent.className = "footer-percent";
+  percent.setAttribute("data-datum", "percent");
+  percent.textContent = `${String(figure)}%`;
+  percent.style.color = footerPercentColor(figure);
+  return percent;
 }
 
 /**
@@ -1217,11 +1224,7 @@ export function drawFooterAllowance(
   });
 
   span.appendChild(document.createTextNode(`${label} `));
-  const percent = document.createElement("span");
-  percent.className = activityDatumClass("percent");
-  percent.setAttribute("data-datum", "percent");
-  percent.textContent = `${Math.round(u.utilization * 100)}%`;
-  span.appendChild(percent);
+  span.appendChild(drawFooterPercent(u.utilization));
 
   const resets = document.createElement("span");
   resets.setAttribute("data-countdown", "");
