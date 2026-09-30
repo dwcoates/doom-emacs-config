@@ -27,7 +27,10 @@ const (
 // Which command to follow.
 type WatchBashRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHICH item — the handle its announcement carried. Not a live shell: refused.
+	// WHICH item — the handle its announcement carried. A shell this shim
+	// announced and has not concluded is FOLLOWED even before any of its rows is
+	// stored: the stream waits for the first. Any other handle whose run has no
+	// stored row is refused.
 	Work          *v1.DetachedWorkId `protobuf:"bytes,1,opt,name=work,proto3" json:"work,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -71,8 +74,10 @@ func (x *WatchBashRequest) GetWork() *v1.DetachedWorkId {
 }
 
 // One frame: the bash unit itself. Opens with `start` (the command, the
-// ORIGINAL instant), then output deltas with their offsets, then the terminal
-// arm at the process's exit.
+// ORIGINAL instant) when a producer read the launching call, then output
+// deltas with their offsets, then the terminal arm at the process's exit. A
+// run whose spool was claimed only through its task id (the launching call was
+// read by no producer) has no `start` and opens on its output.
 type WatchBashResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Bash          *v1.AgentBash          `protobuf:"bytes,1,opt,name=bash,proto3" json:"bash,omitempty"`

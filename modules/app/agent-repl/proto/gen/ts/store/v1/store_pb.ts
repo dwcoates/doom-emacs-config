@@ -43,7 +43,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/store.proto.
  */
 export const file_store_v1_store: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi+AIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBARI2CgVwbGFjZRgIIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgDiAEBQgcKBWVudHJ5QgcKBV90dXJuQhUKE19jb252ZXJzaW9uX3ZlcnNpb25CCAoGX3BsYWNlIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSLaAQoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnRCEQoPX2N1cnNvcl9hZHZhbmNlIk8KDEFnZW50TG9jYXRvchIWCg52ZW5kb3JfdGFza19pZBgBIAEoCRInCgVhZ2VudBgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIkEKD1N0b3JlUmV0aXJlbWVudBISCgp1cHNlcnRfa2V5GAEgASgJEhoKEmNvbnZlcnNpb25fdmVyc2lvbhgCIAEoDSKPAQoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDBIzCgpjb252ZXJzaW9uGAUgASgLMhouc3RvcmUudjEuQ3Vyc29yQ29udmVyc2lvbkgAiAEBQg0KC19jb252ZXJzaW9uIpgBChBDdXJzb3JDb252ZXJzaW9uEg8KB3ZlcnNpb24YASABKA0SNAoHY3VycmVudBgCIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25DdXJyZW50SAASNAoHaGVhbGluZxgDIAEoCzIhLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IZWFsaW5nSABCBwoFc3RhdGUiGQoXQ3Vyc29yQ29udmVyc2lvbkN1cnJlbnQiKgoXQ3Vyc29yQ29udmVyc2lvbkhlYWxpbmcSDwoHdGhyb3VnaBgBIAEoAyIhChBTdG9yZUl0ZW1Qb2ludGVyEg0KBXZhbHVlGAEgASgJIpYCCgtTdG9yZUxpbmVBdBImCgJhdBgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXISJQoEbGluZRgCIAEoCzIXLnN0b3JlLnYxLlN0b3JlUGFnZUxpbmUSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARI8Cg5yZWNvcmRlZF9wbGFjZRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAEjwKDnJlY2VpdmVkX3BsYWNlGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblBsYWNlSABCBwoFcGxhY2VCBwoFX3R1cm4iQgoRUmVhZEFnZW50UGFnZU1vcmUSLQoJbGFzdF9pdGVtGAEgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlciIUChJSZWFkQWdlbnRQYWdlRmxvb3IiIgoRQWdlbnRTZXNzaW9uVG9rZW4SDQoFdmFsdWUYASABKAkioAEKEEFnZW50U2Vzc2lvblBhZ2USJAoFbGluZXMYASADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdBIrCgRtb3JlGAIgASgLMhsuc3RvcmUudjEuUmVhZEFnZW50UGFnZU1vcmVIABItCgVmbG9vchgDIAEoCzIcLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGbG9vckgAQgoKCGJvdW5kYXJ5QiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_history, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi+AIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBARI2CgVwbGFjZRgIIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgDiAEBQgcKBWVudHJ5QgcKBV90dXJuQhUKE19jb252ZXJzaW9uX3ZlcnNpb25CCAoGX3BsYWNlIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSKNAgoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnQSMQoQc2hlbGxfcnVuX2NsYWltcxgFIAMoCzIXLnN0b3JlLnYxLlNoZWxsUnVuQ2xhaW1CEQoPX2N1cnNvcl9hZHZhbmNlIlYKDVNoZWxsUnVuQ2xhaW0SFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSLQoDcnVuGAIgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZCJPCgxBZ2VudExvY2F0b3ISFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSJwoFYWdlbnQYAiABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCJBCg9TdG9yZVJldGlyZW1lbnQSEgoKdXBzZXJ0X2tleRgBIAEoCRIaChJjb252ZXJzaW9uX3ZlcnNpb24YAiABKA0ijwEKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwSMwoKY29udmVyc2lvbhgFIAEoCzIaLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IAIgBAUINCgtfY29udmVyc2lvbiKYAQoQQ3Vyc29yQ29udmVyc2lvbhIPCgd2ZXJzaW9uGAEgASgNEjQKB2N1cnJlbnQYAiABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uQ3VycmVudEgAEjQKB2hlYWxpbmcYAyABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uSGVhbGluZ0gAQgcKBXN0YXRlIhkKF0N1cnNvckNvbnZlcnNpb25DdXJyZW50IioKF0N1cnNvckNvbnZlcnNpb25IZWFsaW5nEg8KB3Rocm91Z2gYASABKAMiIQoQU3RvcmVJdGVtUG9pbnRlchINCgV2YWx1ZRgBIAEoCSKWAgoLU3RvcmVMaW5lQXQSJgoCYXQYASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyEiUKBGxpbmUYAiABKAsyFy5zdG9yZS52MS5TdG9yZVBhZ2VMaW5lEioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSAGIAQESPAoOcmVjb3JkZWRfcGxhY2UYBCABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIABI8Cg5yZWNlaXZlZF9wbGFjZRgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAQgcKBXBsYWNlQgcKBV90dXJuIkIKEVJlYWRBZ2VudFBhZ2VNb3JlEi0KCWxhc3RfaXRlbRgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXIiFAoSUmVhZEFnZW50UGFnZUZsb29yIiIKEUFnZW50U2Vzc2lvblRva2VuEg0KBXZhbHVlGAEgASgJIqABChBBZ2VudFNlc3Npb25QYWdlEiQKBWxpbmVzGAEgAygLMhUuc3RvcmUudjEuU3RvcmVMaW5lQXQSKwoEbW9yZRgCIAEoCzIbLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VNb3JlSAASLQoFZmxvb3IYAyABKAsyHC5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmxvb3JIAEIKCghib3VuZGFyeUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_history, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * One write: a conversation.v1 fact inside the storage envelope.
@@ -646,6 +646,20 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
    * @generated from field: repeated store.v1.StoreRetirement retirements = 4;
    */
   retirements: StoreRetirement[];
+
+  /**
+   * THE DETACHED SHELL RUNS THE STREAM PLANE SAW LEAVE THEIR TURN, each
+   * pairing the vendor's task id (the name of the run's spool) with the run.
+   * Only the shim sends any: the vendor's task stream states both halves
+   * (`task_started`'s `task_id` and `tool_use_id`) whatever wording the
+   * transcript uses for the backgrounding, and it is the one producer that
+   * reads that stream. The sidecar reads them back through GetShellRunClaims
+   * to claim a spool no transcript line claimed. Re-stating a claim already on
+   * record is absorbed; the store keeps one row per (task id, run).
+   *
+   * @generated from field: repeated store.v1.ShellRunClaim shell_run_claims = 5;
+   */
+  shellRunClaims: ShellRunClaim[];
 };
 
 /**
@@ -654,6 +668,39 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
  */
 export const EntryBatchSchema: GenMessage<EntryBatch> = /*@__PURE__*/
   messageDesc(file_store_v1_store, 13);
+
+/**
+ * One detached shell run's spool, claimed by the run.
+ *
+ * THE TASK ID IS NEVER THE RUN. The vendor names a shell's spool by its task
+ * id (`tasks/<task_id>.output`), while every plane books the run under the
+ * `tool_use_id` of the call that launched it. This message joins the two, and
+ * a consumer compares both for equality only.
+ *
+ * @generated from message store.v1.ShellRunClaim
+ */
+export type ShellRunClaim = Message<"store.v1.ShellRunClaim"> & {
+  /**
+   * The vendor's task id, verbatim. REQUIRED, non-empty.
+   *
+   * @generated from field: string vendor_task_id = 1;
+   */
+  vendorTaskId: string;
+
+  /**
+   * The run: the launching call's unit. REQUIRED, non-empty.
+   *
+   * @generated from field: conversation.v1.AgentActivityId run = 2;
+   */
+  run?: AgentActivityId | undefined;
+};
+
+/**
+ * Describes the message store.v1.ShellRunClaim.
+ * Use `create(ShellRunClaimSchema)` to create a new message.
+ */
+export const ShellRunClaimSchema: GenMessage<ShellRunClaim> = /*@__PURE__*/
+  messageDesc(file_store_v1_store, 14);
 
 /**
  * One subagent's vendor task locator, paired with the agent it names.
@@ -687,7 +734,7 @@ export type AgentLocator = Message<"store.v1.AgentLocator"> & {
  * Use `create(AgentLocatorSchema)` to create a new message.
  */
 export const AgentLocatorSchema: GenMessage<AgentLocator> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 14);
+  messageDesc(file_store_v1_store, 15);
 
 /**
  * One stored row a re-read record no longer converts to.
@@ -730,7 +777,7 @@ export type StoreRetirement = Message<"store.v1.StoreRetirement"> & {
  * Use `create(StoreRetirementSchema)` to create a new message.
  */
 export const StoreRetirementSchema: GenMessage<StoreRetirement> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 15);
+  messageDesc(file_store_v1_store, 16);
 
 /**
  * Where one file has been read to.
@@ -785,7 +832,7 @@ export type CursorState = Message<"store.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 16);
+  messageDesc(file_store_v1_store, 17);
 
 /**
  * The conversion bookkeeping of one file's cursor: the version its bytes were
@@ -844,7 +891,7 @@ export type CursorConversion = Message<"store.v1.CursorConversion"> & {
  * Use `create(CursorConversionSchema)` to create a new message.
  */
 export const CursorConversionSchema: GenMessage<CursorConversion> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 17);
+  messageDesc(file_store_v1_store, 18);
 
 /**
  * Nothing past the offset was converted under an older version.
@@ -859,7 +906,7 @@ export type CursorConversionCurrent = Message<"store.v1.CursorConversionCurrent"
  * Use `create(CursorConversionCurrentSchema)` to create a new message.
  */
 export const CursorConversionCurrentSchema: GenMessage<CursorConversionCurrent> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 18);
+  messageDesc(file_store_v1_store, 19);
 
 /**
  * A re-derivation of the file under CursorConversion.version is in progress.
@@ -882,7 +929,7 @@ export type CursorConversionHealing = Message<"store.v1.CursorConversionHealing"
  * Use `create(CursorConversionHealingSchema)` to create a new message.
  */
 export const CursorConversionHealingSchema: GenMessage<CursorConversionHealing> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 19);
+  messageDesc(file_store_v1_store, 20);
 
 /**
  * An opaque, store-minted name of one item of one book. Echoed verbatim, never
@@ -904,7 +951,7 @@ export type StoreItemPointer = Message<"store.v1.StoreItemPointer"> & {
  * Use `create(StoreItemPointerSchema)` to create a new message.
  */
 export const StoreItemPointerSchema: GenMessage<StoreItemPointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 20);
+  messageDesc(file_store_v1_store, 21);
 
 /**
  * One line, its pointer, its turn and its place, so the caller always holds a
@@ -968,7 +1015,7 @@ export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
  * Use `create(StoreLineAtSchema)` to create a new message.
  */
 export const StoreLineAtSchema: GenMessage<StoreLineAt> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 21);
+  messageDesc(file_store_v1_store, 22);
 
 /**
  * Older lines exist below this page.
@@ -989,7 +1036,7 @@ export type ReadAgentPageMore = Message<"store.v1.ReadAgentPageMore"> & {
  * Use `create(ReadAgentPageMoreSchema)` to create a new message.
  */
 export const ReadAgentPageMoreSchema: GenMessage<ReadAgentPageMore> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 22);
+  messageDesc(file_store_v1_store, 23);
 
 /**
  * This page reached the oldest retained line.
@@ -1004,7 +1051,7 @@ export type ReadAgentPageFloor = Message<"store.v1.ReadAgentPageFloor"> & {
  * Use `create(ReadAgentPageFloorSchema)` to create a new message.
  */
 export const ReadAgentPageFloorSchema: GenMessage<ReadAgentPageFloor> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 23);
+  messageDesc(file_store_v1_store, 24);
 
 /**
  * The address of one opened reading session: an opaque, store-minted token —
@@ -1025,7 +1072,7 @@ export type AgentSessionToken = Message<"store.v1.AgentSessionToken"> & {
  * Use `create(AgentSessionTokenSchema)` to create a new message.
  */
 export const AgentSessionTokenSchema: GenMessage<AgentSessionToken> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 24);
+  messageDesc(file_store_v1_store, 25);
 
 /**
  * The opening page, newest first.
@@ -1066,5 +1113,5 @@ export type AgentSessionPage = Message<"store.v1.AgentSessionPage"> & {
  * Use `create(AgentSessionPageSchema)` to create a new message.
  */
 export const AgentSessionPageSchema: GenMessage<AgentSessionPage> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 25);
+  messageDesc(file_store_v1_store, 26);
 
