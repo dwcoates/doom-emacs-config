@@ -185,6 +185,11 @@ type TurnStarted struct {
 	At time.Time
 	// Act is what the turn carries.
 	Act SessionAct
+	// Prompt is the text being delivered, whole: the prompt's text blocks, or
+	// the session act's own spelling ("/clear"). The footer's `submitting`
+	// transient draws its first line. EMPTY when the caller has no text to
+	// state, and then no submitting line is raised.
+	Prompt string
 }
 
 // Resolver is the footer's whole surface.
@@ -193,6 +198,12 @@ type Resolver interface {
 	// Sink is the ONE entry point a deploy's progress reaches the footer
 	// through: the update line, stood on every workspace's strip (update.go).
 	deployprogress.Sink
+	// RecordTee is how a workspace's daemon Warn and Error records reach the
+	// strip as the `daemon_warning` and `daemon_error` transients: dlog's ONE
+	// tee at the workspace-logger emit point, bound at boot
+	// (dlog.Surfaces.BindRecordTee), never a hook beside a call site. The
+	// footer's own records are excluded, so the tee cannot feed back.
+	dlog.RecordTee
 
 	// SetParticipants states the OTHER TWO HOPS of connectivity truth: whether
 	// this workspace's WatchHostWorkspace and WatchWebWorkspace streams are
@@ -295,10 +306,11 @@ type Option func(*options)
 
 // options are the resolver's knobs.
 type options struct {
-	clock         Clock
-	dwell         time.Duration
-	alarmTokens   uint64
-	rateNewsworth float64
+	clock           Clock
+	dwell           time.Duration
+	alarmTokens     uint64
+	rateNewsworth   float64
+	transientWindow time.Duration
 }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.
@@ -307,6 +319,11 @@ func WithClock(c Clock) Option { return func(o *options) { o.clock = c } }
 // WithMomentaryDwell sets how long a momentary status (`interrupted`,
 // `loading`) stands before the R1 successor push retires it.
 func WithMomentaryDwell(d time.Duration) Option { return func(o *options) { o.dwell = d } }
+
+// WithTransientWindow sets how long a transient line is drawn: its expiry is
+// the event's instant plus this window. The daemon only STAMPS the expiry; the
+// client's clock retires the line, and no daemon timer runs.
+func WithTransientWindow(d time.Duration) Option { return func(o *options) { o.transientWindow = d } }
 
 // WithTokenAlarmThreshold sets the uncached-input figure a turn must exceed
 // for the expensive-turn alarm to trip.
@@ -322,6 +339,10 @@ func WithRateLimitNewsworthyThreshold(f float64) Option {
 const (
 	// DefaultMomentaryDwell is how long `interrupted` and `loading` stand.
 	DefaultMomentaryDwell = 1500 * time.Millisecond
+	// DefaultTransientWindow is how long a transient line is drawn before the
+	// enduring line beneath it shows again (owner ruling, 2026-09-28: "the
+	// window starts at 10 s").
+	DefaultTransientWindow = 10 * time.Second
 	// DefaultTokenAlarmThreshold is the uncached-input figure that trips the
 	// expensive-turn alarm.
 	DefaultTokenAlarmThreshold uint64 = 20_000

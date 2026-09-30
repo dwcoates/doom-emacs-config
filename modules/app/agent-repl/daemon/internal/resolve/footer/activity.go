@@ -6,37 +6,33 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 )
 
-// THE ACTIVITY LINE is the strip's finest cell, and exactly ONE stands per
-// push. The precedence is the contract's, stated once here and applied by
-// every status arm below:
+// THE ACTIVITY CELL is the strip's finest cell, and every status arm ALWAYS
+// sets it. Every line belongs to exactly one TIER, defined by what ends it
+// (owner rulings, 2026-09-28 and 2026-09-30; agent-repl AGENTS.md "Footer
+// activity lines are salient, transient, quiet, or enduring"):
 //
-//	status-bound  ranks first where a kind EXPLAINS the standing substatus —
-//	              `start_failed` under disconnected, the wakeup countdown
-//	              under waiting, the injected item under loading. A cell that
-//	              exists to explain its step cannot be crowded out of it.
-//	fault         ranks next: a STANDING DAEMON FAULT outranks a notification,
-//	              because a notification from before the fault would otherwise
-//	              hide the condition the user has to be told about. It is the
-//	              same exception `start_failed` already held, generalized to
-//	              every fault kind by the owner's ruling of 2026-09-13.
-//	update        ranks next: a DEPLOY'S PROGRESS (update.go) is what the reader
-//	              is waiting on while a deploy moves under the session, and it
-//	              ranks directly below a fault (owner request, 2026-09-27).
-//	notification  ranks next.
-//	quiet_stretch ranks below the working status's compaction, hook and
-//	              retry lines, and below background's notification. A feed
-//	              item landing REPLACES a standing notification with it
-//	              (quietstretch.go), so it outranks none that it follows.
-//	rate_limited  is SECOND-LOWEST.
-//	context_budget is LOWEST — shown only when nothing else stands.
+//	salient    ends when the system state it describes stops being true, never
+//	           on a timer. Each status arm declares its own salient kinds.
+//	transient  ends when a newer transient replaces it or its expiry passes
+//	           (transient.go).
+//	quiet      the quiet-stretch line, legal under `working` and `background`:
+//	           ends when the next feed item surfaces (quietstretch.go).
+//	enduring   never ends (enduring.go).
 //
-// Every line ships the instant it began standing; the client ticks the
+// PRECEDENCE IS BY TIER, and this file applies it: a standing salient line
+// outranks every other tier, so the cell carries EITHER the arm's salient line
+// OR the unpinned tiers beneath it (`unpinned`): the transient over the quiet
+// line over the enduring line. Within the salient tier the
+// kind that explains the standing substatus ranks first, then an escalating
+// fault, then a deploy's progress (`update`), then the rest — each arm below
+// states its own order, which is footer.proto's.
+//
+// Every salient line ships the instant it began standing; the client ticks the
 // relative age from it.
 
 // stamp renders an activity's standing instant.
@@ -44,509 +40,164 @@ func stamp(t time.Time) *frontendv1.FooterStatusActivityAt {
 	return &frontendv1.FooterStatusActivityAt{AtMs: epochMs(t)}
 }
 
-// notificationLine is the standing notification, or nil.
-func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivityNotification {
-	if s.notification == nil {
-		return nil
-	}
-	return &frontendv1.FooterStatusActivityNotification{Text: s.notification.text}
-}
-
-// rateLine is the standing rate-limit report, or nil. The line draws when a
-// figure has been observed AND at least one allowance is newsworthy: figures
-// come from account_usage (complete from the first sample) or a rate-limit
-// event, and an unremarkable allowance is not news and would crowd out the
-// lines that are. The verdict arm joins each allowance later, when a
-// rate-limit event for that window arrives.
-//
-// AN UNREADABLE SAMPLE NO LONGER OPENS THE LINE (owner ruling): the strip
-// renders the figures LAST READ and the age of that reading, never a "usage
-// unread" caveat. A failed read still leaves the figures on hand standing
-// (`observeAccountUsage`), so a below-threshold session that only ever failed
-// to re-read simply keeps drawing nothing — the same no-figures behavior as
-// before, minus the caveat. The outcome stays visible in the logs
-// (`logUnreadableSample`).
-//
-// WHEN THE SAMPLE CARRIES NO SEVEN-DAY WINDOW (an account with no weekly
-// allowance, or a vendor that reported none) the weekly allowance is drawn
-// ABSENT rather than synthesized: FooterStatusActivityRateLimited.weekly is a
-// message field, so an unset weekly is representable, and stating a figure
-// nobody reported would be worse than stating none. THE OVERAGE WINDOW IS THE
-// SAME: most accounts never report one, so it is unfigured and draws absent,
-// and the accounts that do report one get the vendor's figure rather than a
-// log record nobody reads.
-func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimited {
-	session := r.allowance(&s.rate.session)
-	weekly := r.allowance(&s.rate.weekly)
-	overage := r.allowance(&s.rate.overage)
-	if session == nil && weekly == nil && overage == nil {
-		return nil
-	}
-	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !overage.GetNewsworthy() {
-		return nil
-	}
-	line := &frontendv1.FooterStatusActivityRateLimited{
-		Session: session,
-		Weekly:  weekly,
-		Overage: overage,
-	}
-	// The instant the figures were last READ off a sample, so the client can
-	// tick the reading's age ("… 10m 30s ago"). Left UNSET when the figures
-	// came from a rate-limit EVENT alone (no read instant), in which case the
-	// client draws them with no age.
-	if !s.rate.figuresReadAt.IsZero() {
-		readAt := epochMs(s.rate.figuresReadAt)
-		line.FiguresReadAtMs = &readAt
-	}
-	return line
-}
-
-// allowance projects one window's evidence onto the drawn allowance, or nil
-// when no figure has been observed for it. The status arm is COPIED, arm for
-// arm, from the window's last rate-limit event; no event yet, or an event the
-// vendor left statusless, draws NO arm — nothing is defaulted to "allowed".
-func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
-	if !w.figured {
-		return nil
-	}
-	allowance := &frontendv1.FooterAllowance{
-		Newsworthy:  w.utilization >= r.opts.rateNewsworth,
-		ResetsAtS:   w.resetsAtS,
-		Utilization: w.utilization,
-	}
-	switch w.verdict.GetStatus().(type) {
-	case *conversationv1.SessionRateLimitStatus_Allowed:
-		allowance.Status = &frontendv1.FooterAllowance_Allowed{Allowed: &frontendv1.FooterAllowanceAllowed{}}
-	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
-		allowance.Status = &frontendv1.FooterAllowance_AllowedWarning{AllowedWarning: &frontendv1.FooterAllowanceAllowedWarning{}}
-	case *conversationv1.SessionRateLimitStatus_Rejected:
-		allowance.Status = &frontendv1.FooterAllowance_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
-	}
-	return allowance
-}
-
-// faultLine is the standing daemon fault's line, or nil when none stands, and
-// the instant it began standing.
-//
-// ONE LINE FOR EVERY FAULT FAMILY BUT ONE. The kind names itself and the
-// detail says what it says; the status and substatus cells beside it are
-// already resolved, so the line carries no third copy of the classification.
-// `shim_start_failed` keeps its own richer leaf, which counts the held prompts
-// the failure dropped.
-func (r *resolver) faultLine(s *wsState) (*frontendv1.FooterStatusActivityFault, time.Time) {
+// salientFault is the standing ESCALATING fault that claims `status`, with the
+// instant it began standing, or nil. A non-escalating fault is never salient:
+// it was announced as a transient when it opened (faults.go).
+func (r *resolver) salientFault(s *wsState, status string) (*frontendv1.FooterStatusActivityFault, time.Time) {
 	fault := r.standingFault(s)
-	if fault == nil {
+	if fault == nil || fault.Status != status {
 		return nil, time.Time{}
 	}
 	return &frontendv1.FooterStatusActivityFault{Kind: fault.Kind, Detail: fault.Detail}, fault.At
 }
 
-// budgetLine is the vendor's standing context-budget warning, or nil.
-func (r *resolver) budgetLine(s *wsState) *frontendv1.FooterStatusActivityContextBudget {
-	if s.contextBudget == nil {
-		return nil
-	}
-	return &frontendv1.FooterStatusActivityContextBudget{Text: s.contextBudget.text}
-}
-
-// idleActivity resolves the line legal while idle: no status-bound kind
-// exists, so it is notification, then rate, then budget.
+// idleActivity resolves the cell idle, turn_failed and degraded share: the
+// dead-query line first, because it explains a `turn_failed` status; then a
+// deploy's progress; then unpinned.
 func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusIdleActivity_Fault{Fault: line},
-		}
-	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusIdleActivity_Update{Update: line},
-		}
-	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusIdleActivity_Notification{Notification: line},
-		}
-	}
-	// THE DEAD-QUERY LINE stands under the failed turn's idle, where it once
-	// stood under a block: a dead query is a failed turn (owner ruling,
-	// 2026-09-28), and the line is still the one sentence the strip has about it.
 	if s.queryDied != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At: stamp(s.queryDied.at),
-			Kind: &frontendv1.FooterStatusIdleActivity_QueryDied{
-				QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusIdleActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusIdleActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusIdleActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
-}
-
-// thinkingActivity resolves the line legal while a turn runs.
-func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusWorkingActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Fault{Fault: line},
-		}
+		return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Salient{
+			Salient: &frontendv1.FooterStatusIdleSalient{
+				At: stamp(s.queryDied.at),
+				Kind: &frontendv1.FooterStatusIdleSalient_QueryDied{
+					QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
+			}}}
 	}
 	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Update{Update: line},
-		}
+		return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Salient{
+			Salient: &frontendv1.FooterStatusIdleSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusIdleSalient_Update{Update: line},
+			}}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Notification{Notification: line},
-		}
-	}
-	if s.compaction != nil {
-		// A COMPACTION OUTRANKS THE REST OF THE THINKING LINES. Whichever
-		// producer is compacting — the vendor, or a cold gate's answered
-		// remediation — the progress of the act in flight is the one thing the
-		// reader is waiting on, and the hook/retry/injection lines belong to a
-		// turn that is not running (owner ruling, 2026-09-14).
-		return &frontendv1.FooterStatusWorkingActivity{
-			At: stamp(s.compaction.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Compaction{
-				Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}},
-		}
-	}
-	if s.hook != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At: stamp(s.hook.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Hook{
-				Hook: &frontendv1.FooterStatusActivityHook{Name: s.hook.name}},
-		}
-	}
-	if s.retrying != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At: stamp(s.retrying.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_Retrying{
-				Retrying: &frontendv1.FooterStatusActivityRetrying{
-					Attempt: s.retrying.attempt,
-					Status:  s.retrying.status,
-				}},
-		}
-	}
-	if line := r.quietStretchLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(s.motion.line.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_QuietStretch{QuietStretch: line},
-		}
-	}
-	if s.injected != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At: stamp(s.injected.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_ContextInjected{
-				ContextInjected: &frontendv1.FooterStatusActivityContextInjected{Text: s.injected.text}},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusWorkingActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusWorkingActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// waitingActivity resolves the line legal while waiting. It is REQUIRED, so
-// this never answers nil: every waiting state has a composable line by
-// construction, and a producer that cannot compose one has a bug.
-func (r *resolver) waitingActivity(s *wsState) *frontendv1.FooterStatusWaitingActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusWaitingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_Fault{Fault: line},
-		}
+// workingActivity resolves the cell while a turn runs: a compaction first,
+// because it explains the `compacting` step; then a retry; then a deploy's
+// progress; then unpinned, which is most of a turn.
+func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingActivity {
+	salient := func(at time.Time) *frontendv1.FooterStatusWorkingSalient {
+		return &frontendv1.FooterStatusWorkingSalient{At: stamp(at)}
 	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusWaitingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_Update{Update: line},
-		}
+	var line *frontendv1.FooterStatusWorkingSalient
+	switch update, updateAt := r.updateLine(s); {
+	case s.compaction != nil:
+		line = salient(s.compaction.at)
+		line.Kind = &frontendv1.FooterStatusWorkingSalient_Compaction{
+			Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}}
+	case s.retrying != nil:
+		line = salient(s.retrying.at)
+		line.Kind = &frontendv1.FooterStatusWorkingSalient_Retrying{
+			Retrying: &frontendv1.FooterStatusActivityRetrying{Attempt: s.retrying.attempt, Status: s.retrying.status}}
+	case update != nil:
+		line = salient(updateAt)
+		line.Kind = &frontendv1.FooterStatusWorkingSalient_Update{Update: update}
+	default:
+		return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusWaitingActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_Notification{Notification: line},
-		}
-	}
-	switch {
-	case s.interrupting:
-		return &frontendv1.FooterStatusWaitingActivity{
-			At: stamp(r.opts.clock.Now()),
-			Kind: &frontendv1.FooterStatusWaitingActivity_Interrupting{
-				Interrupting: &frontendv1.FooterStatusActivityInterrupting{
-					Text: "stopping the current turn…"}},
-		}
-	case len(s.permissionOrder) > 0:
-		return &frontendv1.FooterStatusWaitingActivity{
-			At: stamp(r.opts.clock.Now()),
-			Kind: &frontendv1.FooterStatusWaitingActivity_GatedCall{
-				GatedCall: &frontendv1.FooterStatusActivityGatedCall{
-					Text: s.permissions[s.permissionOrder[0]]}},
-		}
-	case len(s.questionOrder) > 0:
-		return &frontendv1.FooterStatusWaitingActivity{
-			At: stamp(r.opts.clock.Now()),
-			Kind: &frontendv1.FooterStatusWaitingActivity_QuestionLead{
-				QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{
-					Text: s.questions[s.questionOrder[0]]}},
-		}
-	case s.coldGate.Standing:
-		return &frontendv1.FooterStatusWaitingActivity{
-			At: stamp(r.opts.clock.Now()),
-			Kind: &frontendv1.FooterStatusWaitingActivity_ColdGateCost{
-				ColdGateCost: &frontendv1.FooterStatusActivityColdGateCost{
-					Text: s.coldGate.Detail}},
-		}
-	case s.wakeup != nil:
-		wakeup := &frontendv1.FooterStatusActivityWakeup{WakeAtMs: epochMs(s.wakeup.wakeAt)}
-		if s.wakeup.reason != "" {
-			wakeup.Reason = &frontendv1.FooterStatusActivityWakeupReason{Text: s.wakeup.reason}
-		}
-		return &frontendv1.FooterStatusWaitingActivity{
-			At:   stamp(s.wakeup.at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_Wakeup{Wakeup: wakeup},
-		}
-	case s.blockedOnUser != nil:
-		return &frontendv1.FooterStatusWaitingActivity{
-			At: stamp(s.blockedOnUser.at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_BlockedOnUser{
-				BlockedOnUser: &frontendv1.FooterStatusActivityBlockedOnUser{
-					Detail: s.blockedOnUser.text}},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusWaitingActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusWaitingActivity_RateLimited{RateLimited: line},
-		}
-	}
-	return &frontendv1.FooterStatusWaitingActivity{
-		At: stamp(r.opts.clock.Now()),
-		Kind: &frontendv1.FooterStatusWaitingActivity_ContextBudget{
-			ContextBudget: &frontendv1.FooterStatusActivityContextBudget{
-				Text: budgetText(s)}},
-	}
+	return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Salient{Salient: line}}
 }
 
-// budgetText answers the standing budget warning, or the sentence the waiting
-// state's required line falls back to when the vendor has warned about nothing.
-func budgetText(s *wsState) string {
-	if s.contextBudget != nil {
-		return s.contextBudget.text
-	}
-	return "the session is parked on you"
-}
-
-// interruptedActivity resolves the line legal while interrupted.
+// interruptedActivity resolves the cell while interrupted: a stopped turn
+// blocks nothing, so only a deploy's progress can stand.
 func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInterruptedActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusInterruptedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusInterruptedActivity_Fault{Fault: line},
-		}
-	}
 	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusInterruptedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusInterruptedActivity_Update{Update: line},
-		}
+		return &frontendv1.FooterStatusInterruptedActivity{Tier: &frontendv1.FooterStatusInterruptedActivity_Salient{
+			Salient: &frontendv1.FooterStatusInterruptedSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusInterruptedSalient_Update{Update: line},
+			}}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusInterruptedActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusInterruptedActivity_Notification{Notification: line},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusInterruptedActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusInterruptedActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusInterruptedActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusInterruptedActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusInterruptedActivity{Tier: &frontendv1.FooterStatusInterruptedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// mergingActivity resolves the line legal while merging.
+// mergingActivity resolves the cell merging, merge_conflict, merge_failed and
+// merged share: the commit landing first, because it explains the merge step;
+// then a deploy's progress; then unpinned.
 func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusMergingActivity_Fault{Fault: line},
-		}
-	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusMergingActivity_Update{Update: line},
-		}
-	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusMergingActivity_Notification{Notification: line},
-		}
-	}
 	if s.mergingCommit != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At: stamp(s.mergingCommit.at),
-			Kind: &frontendv1.FooterStatusMergingActivity_MergingCommit{
-				MergingCommit: &frontendv1.FooterStatusActivityMergingCommit{
-					Sha:     s.mergingCommit.sha,
-					Subject: s.mergingCommit.subject,
-				}},
-		}
+		return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{
+			Salient: &frontendv1.FooterStatusMergingSalient{
+				At: stamp(s.mergingCommit.at),
+				Kind: &frontendv1.FooterStatusMergingSalient_MergingCommit{
+					MergingCommit: &frontendv1.FooterStatusActivityMergingCommit{
+						Sha: s.mergingCommit.sha, Subject: s.mergingCommit.subject}},
+			}}}
 	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusMergingActivity_RateLimited{RateLimited: line},
-		}
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{
+			Salient: &frontendv1.FooterStatusMergingSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusMergingSalient_Update{Update: line},
+			}}}
 	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusMergingActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusMergingActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// backgroundActivity resolves the line legal while detached work runs.
+// backgroundActivity resolves the cell while detached work runs: detached work
+// blocks nothing, so only a deploy's progress can stand.
 func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgroundActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_Fault{Fault: line},
-		}
-	}
 	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_Update{Update: line},
-		}
+		return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Salient{
+			Salient: &frontendv1.FooterStatusBackgroundSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusBackgroundSalient_Update{Update: line},
+			}}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_Notification{Notification: line},
-		}
-	}
-	if line := r.quietStretchLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(s.motion.line.at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_QuietStretch{QuietStretch: line},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusBackgroundActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusBackgroundActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
 }
 
-// blockedActivity resolves the line legal while blocked.
+// coversEnduring reports whether a quiet-capable cell draws anything above its
+// enduring line: a salient line, a live transient or the quiet-stretch line.
+// Any of them is newer than a quiet-stretch line the next feed item ended, so
+// the ending is not stated beside it (quietStretchEnding).
+func coversEnduring(salient bool, unpinned *frontendv1.FooterActivityTransientOverQuietOverEnduring) bool {
+	return salient || unpinned.GetTransient() != nil || unpinned.GetQuietStretch() != nil
+}
+
+// blockedActivity resolves the cell while blocked: the auth prompt first,
+// because it explains the `auth` step; then an escalating fault that claims
+// `blocked`; then a deploy's progress; then unpinned, where the enduring usage
+// figures are exactly what explains a usage-limit block.
 func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_Fault{Fault: line},
-		}
+	salient := func(at time.Time) *frontendv1.FooterStatusBlockedSalient {
+		return &frontendv1.FooterStatusBlockedSalient{At: stamp(at)}
 	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_Update{Update: line},
-		}
+	fault, faultAt := r.salientFault(s, "blocked")
+	update, updateAt := r.updateLine(s)
+	var line *frontendv1.FooterStatusBlockedSalient
+	switch {
+	case s.blocked != nil && s.blocked.kind == blockedAuth && s.authLine != nil:
+		line = salient(s.authLine.at)
+		line.Kind = &frontendv1.FooterStatusBlockedSalient_Authenticating{
+			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
+	case fault != nil:
+		line = salient(faultAt)
+		line.Kind = &frontendv1.FooterStatusBlockedSalient_Fault{Fault: fault}
+	case update != nil:
+		line = salient(updateAt)
+		line.Kind = &frontendv1.FooterStatusBlockedSalient_Update{Update: update}
+	default:
+		return &frontendv1.FooterStatusBlockedActivity{Tier: &frontendv1.FooterStatusBlockedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_Notification{Notification: line},
-		}
-	}
-	if s.blocked != nil && s.blocked.kind == blockedAuth && s.authLine != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At: stamp(s.authLine.at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_Authenticating{
-				Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}},
-		}
-	}
-	// THE DEAD-QUERY LINE OUTLIVES THE SUBSTATUS THE TERMINAL PICKS. The turn's
-	// terminal can arrive after the session's query_died update and respells
-	// the block from the FAILURE alone; reading the line off the block let a
-	// terminal that did not say the query died leave the strip saying
-	// `blocked · vendor error` and nothing else. The line is the session's
-	// fact, so it stands under whichever blocked step the terminal chose.
-	if s.queryDied != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At: stamp(s.queryDied.at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_QueryDied{
-				QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusBlockedActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusBlockedActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusBlockedActivity{Tier: &frontendv1.FooterStatusBlockedActivity_Salient{Salient: line}}
 }
 
-// disconnectedActivity resolves the line legal while the link is not serving.
-//
-// The bring-up failure OUTRANKS a notification, per footer.proto: it is the
-// standing line the `start_failed` step exists to explain, and it can only
-// stand while that step does — the successful link edge that would move the
-// status off `start_failed` clears the failure in the same breath.
+// disconnectedActivity resolves the cell while the link is not serving: the
+// bring-up failure first, because it explains the `start_failed` step; then an
+// escalating fault that claims `disconnected`; then a deploy's progress; then
+// unpinned (a step with no line of its own: starting, a severed link being
+// retried with no fault yet).
 func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1.FooterStatusDisconnectedActivity {
-	if s.startFailed != nil {
+	salient := func(at time.Time) *frontendv1.FooterStatusDisconnectedSalient {
+		return &frontendv1.FooterStatusDisconnectedSalient{At: stamp(at)}
+	}
+	fault, faultAt := r.salientFault(s, "disconnected")
+	update, updateAt := r.updateLine(s)
+	var line *frontendv1.FooterStatusDisconnectedSalient
+	switch {
+	case s.startFailed != nil:
 		if !s.startFailed.announced {
 			s.startFailed.announced = true
 			log.Info("daemon.footer.start_failed_activity",
@@ -557,172 +208,168 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 					"detail":          s.startFailed.detail,
 				})
 		}
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At: stamp(s.startFailed.at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_StartFailed{
-				StartFailed: &frontendv1.FooterStatusActivityStartFailed{
-					Detail:         s.startFailed.detail,
-					DroppedPrompts: s.startFailed.dropped,
-				}},
-		}
+		line = salient(s.startFailed.at)
+		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_StartFailed{
+			StartFailed: &frontendv1.FooterStatusActivityStartFailed{
+				Detail:         s.startFailed.detail,
+				DroppedPrompts: s.startFailed.dropped,
+			}}
+	case fault != nil:
+		line = salient(faultAt)
+		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Fault{Fault: fault}
+	case update != nil:
+		line = salient(updateAt)
+		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Update{Update: update}
+	default:
+		return &frontendv1.FooterStatusDisconnectedActivity{Tier: &frontendv1.FooterStatusDisconnectedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_Fault{Fault: line},
-		}
-	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_Update{Update: line},
-		}
-	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_Notification{Notification: line},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusDisconnectedActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusDisconnectedActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
+	return &frontendv1.FooterStatusDisconnectedActivity{Tier: &frontendv1.FooterStatusDisconnectedActivity_Salient{Salient: line}}
 }
 
-// closingActivity resolves the line legal while closing. The blocked step
-// composes its reasons here.
+// closingActivity resolves the cell while closing: the refusal first, because
+// it explains the `blocked` step; then a deploy's progress; then unpinned.
 func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusClosingActivity_Fault{Fault: line},
-		}
-	}
-	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusClosingActivity_Update{Update: line},
-		}
-	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusClosingActivity_Notification{Notification: line},
-		}
-	}
 	if s.closing != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At: stamp(r.opts.clock.Now()),
-			Kind: &frontendv1.FooterStatusClosingActivity_CloseBlocked{
-				CloseBlocked: &frontendv1.FooterStatusActivityCloseBlocked{Text: s.closing.Detail}},
-		}
-	}
-	if line := r.rateLine(s); line != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At:   stamp(s.rate.at),
-			Kind: &frontendv1.FooterStatusClosingActivity_RateLimited{RateLimited: line},
-		}
-	}
-	if line := r.budgetLine(s); line != nil {
-		return &frontendv1.FooterStatusClosingActivity{
-			At:   stamp(s.contextBudget.at),
-			Kind: &frontendv1.FooterStatusClosingActivity_ContextBudget{ContextBudget: line},
-		}
-	}
-	return nil
-}
-
-// loadingActivity resolves the line legal while context is being injected. It
-// is REQUIRED: the injection IS the status, so the item line always exists.
-func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingActivity {
-	if line, at := r.faultLine(s); line != nil {
-		return &frontendv1.FooterStatusLoadingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusLoadingActivity_Fault{Fault: line},
-		}
+		return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Salient{
+			Salient: &frontendv1.FooterStatusClosingSalient{
+				At: stamp(s.closingAt),
+				Kind: &frontendv1.FooterStatusClosingSalient_CloseBlocked{
+					CloseBlocked: &frontendv1.FooterStatusActivityCloseBlocked{Text: s.closing.Detail}},
+			}}}
 	}
 	if line, at := r.updateLine(s); line != nil {
-		return &frontendv1.FooterStatusLoadingActivity{
-			At:   stamp(at),
-			Kind: &frontendv1.FooterStatusLoadingActivity_Update{Update: line},
-		}
+		return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Salient{
+			Salient: &frontendv1.FooterStatusClosingSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusClosingSalient_Update{Update: line},
+			}}}
 	}
-	if line := r.notificationLine(s); line != nil {
-		return &frontendv1.FooterStatusLoadingActivity{
-			At:   stamp(s.notification.at),
-			Kind: &frontendv1.FooterStatusLoadingActivity_Notification{Notification: line},
-		}
-	}
-	return &frontendv1.FooterStatusLoadingActivity{
-		At: stamp(s.loading.at),
-		Kind: &frontendv1.FooterStatusLoadingActivity_ContextInjected{
-			ContextInjected: &frontendv1.FooterStatusActivityContextInjected{Text: s.loading.line}},
-	}
+	return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// activityLine is the published activity line as the log states it: the kind
-// arm that stands and what it says. The zero value is no line at all.
+// loadingActivity resolves the cell while context is injected: an injection
+// blocks nothing, so only a deploy's progress can stand. The injected item
+// itself is the `context_injected` transient the same injection raised, which
+// the unpinned branch carries while the status stands.
+func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingActivity {
+	if line, at := r.updateLine(s); line != nil {
+		return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Salient{
+			Salient: &frontendv1.FooterStatusLoadingSalient{
+				At:   stamp(at),
+				Kind: &frontendv1.FooterStatusLoadingSalient_Update{Update: line},
+			}}}
+	}
+	return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Unpinned{Unpinned: r.unpinned(s)}}
+}
+
+// waitingSalient is the one salient line a waiting status stands on. It is
+// composed BY THE SAME DECISION that picks the waiting step (status.go
+// waiting, wakeup), so the kind that explains the step always exists and ranks
+// first: a waiting session is by construction parked on something, and the
+// contract gives its cell no unpinned branch.
+func waitingSalient(at time.Time, kind func(*frontendv1.FooterStatusWaitingSalient)) *frontendv1.FooterStatusWaitingActivity {
+	salient := &frontendv1.FooterStatusWaitingSalient{At: stamp(at)}
+	kind(salient)
+	return &frontendv1.FooterStatusWaitingActivity{Salient: salient}
+}
+
+// activityLine is the published activity line as the log states it: the tier,
+// the kind arm that stands and what it says. The zero value is no line.
 type activityLine struct {
+	tier string
 	kind string
 	text string
 }
 
-// name is the kind for the record, "none" when no line stands.
+// name is the tier and kind for the record ("salient.update",
+// "transient.tool_call", "quiet", "enduring"), "none" when no line stands.
 func (l activityLine) name() string {
-	if l.kind == "" {
+	switch {
+	case l.tier == "":
 		return "none"
+	case l.kind == "":
+		return l.tier
+	default:
+		return l.tier + "." + l.kind
 	}
-	return l.kind
 }
 
 // activityLineOf reads the one activity line a status carries, whichever status
-// arm and whichever kind arm it is. It reads the contract's SHAPE — every
-// status arm has an `activity` field whose line is its `kind` oneof — rather
-// than enumerating the arms, so a kind added to the contract is recorded the
-// day it is published instead of the day someone remembers this function.
+// arm, tier and kind it is. It reads the contract's SHAPE — every status arm has
+// an `activity` field; its line is a salient kind, a transient kind, or the
+// enduring line — rather than enumerating the arms, so a kind added to the
+// contract is recorded the day it is published.
 //
-// THE `at` STAMP IS NOT PART OF THE LINE. The line is what the reader sees;
-// a re-stamp of the same words is not a change to it.
+// THE `at` AND `expiry` STAMPS ARE NOT PART OF THE LINE, and neither are the
+// enduring line's figures: the line is what KIND of thing the reader sees and
+// what it says, and a re-stamp or a moved percentage is not a change to it.
 func activityLineOf(status *frontendv1.FooterStatus) activityLine {
-	m := status.ProtoReflect()
-	armField := m.WhichOneof(m.Descriptor().Oneofs().ByName("status"))
-	if armField == nil || armField.Kind() != protoreflect.MessageKind {
+	arm, ok := messageArm(status.ProtoReflect(), "status")
+	if !ok {
 		return activityLine{}
 	}
-	arm := m.Get(armField).Message()
 	activityField := arm.Descriptor().Fields().ByName("activity")
 	if activityField == nil || activityField.Kind() != protoreflect.MessageKind || !arm.Has(activityField) {
 		return activityLine{}
 	}
 	activity := arm.Get(activityField).Message()
-	kinds := activity.Descriptor().Oneofs().ByName("kind")
+	// The waiting cell has no tier oneof: its salient line is its only field.
+	if salientField := activity.Descriptor().Fields().ByName("salient"); salientField != nil && activity.Descriptor().Oneofs().ByName("tier") == nil {
+		return kindLine("salient", activity.Get(salientField).Message())
+	}
+	tier := activity.WhichOneof(activity.Descriptor().Oneofs().ByName("tier"))
+	if tier == nil || tier.Kind() != protoreflect.MessageKind {
+		return activityLine{}
+	}
+	cell := activity.Get(tier).Message()
+	if tier.Name() == "salient" {
+		return kindLine("salient", cell)
+	}
+	transientField := cell.Descriptor().Fields().ByName("transient")
+	if cell.Has(transientField) {
+		return kindLine("transient", cell.Get(transientField).Message())
+	}
+	if quietField := cell.Descriptor().Fields().ByName("quiet_stretch"); quietField != nil && cell.Has(quietField) {
+		quiet := cell.Get(quietField).Message()
+		return activityLine{tier: "quiet", text: quiet.Get(quiet.Descriptor().Fields().ByName("text")).String()}
+	}
+	return activityLine{tier: "enduring"}
+}
+
+// messageArm answers the message set in the named oneof, if any.
+func messageArm(m protoreflect.Message, oneof string) (protoreflect.Message, bool) {
+	o := m.Descriptor().Oneofs().ByName(protoreflect.Name(oneof))
+	if o == nil {
+		return nil, false
+	}
+	field := m.WhichOneof(o)
+	if field == nil || field.Kind() != protoreflect.MessageKind {
+		return nil, false
+	}
+	return m.Get(field).Message(), true
+}
+
+// kindLine reads a line message's `kind` oneof: its arm name, and its `text`
+// field when it has one (otherwise the arm's whole content).
+func kindLine(tier string, line protoreflect.Message) activityLine {
+	kinds := line.Descriptor().Oneofs().ByName("kind")
 	if kinds == nil {
 		return activityLine{}
 	}
-	kindField := activity.WhichOneof(kinds)
+	kindField := line.WhichOneof(kinds)
 	if kindField == nil {
 		return activityLine{}
 	}
-	line := activityLine{kind: string(kindField.Name())}
+	out := activityLine{tier: tier, kind: string(kindField.Name())}
 	if kindField.Kind() != protoreflect.MessageKind {
-		line.text = activity.Get(kindField).String()
-		return line
+		out.text = line.Get(kindField).String()
+		return out
 	}
-	kind := activity.Get(kindField).Message()
+	kind := line.Get(kindField).Message()
 	if text := kind.Descriptor().Fields().ByName("text"); text != nil && text.Kind() == protoreflect.StringKind {
-		line.text = kind.Get(text).String()
-		return line
+		out.text = kind.Get(text).String()
+		return out
 	}
-	line.text = prototext.MarshalOptions{}.Format(kind.Interface())
-	return line
+	out.text = prototext.MarshalOptions{}.Format(kind.Interface())
+	return out
 }

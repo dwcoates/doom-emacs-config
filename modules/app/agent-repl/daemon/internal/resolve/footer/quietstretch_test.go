@@ -66,7 +66,7 @@ func working(t *testing.T, h *harness) *frontendv1.FooterStatusWorking {
 // quietLine reads the published working arm's quiet-stretch line, "" when none.
 func quietLine(t *testing.T, h *harness) string {
 	t.Helper()
-	return working(t, h).GetActivity().GetQuietStretch().GetText()
+	return working(t, h).GetActivity().GetUnpinned().GetQuietStretch().GetText()
 }
 
 // stepName names the working arm's step the way the strip spells it.
@@ -318,24 +318,23 @@ func TestAnUndrawnItemSurfacingLeavesTheLineStanding(t *testing.T) {
 	}
 }
 
-func TestALandingReplacesAStandingNotification(t *testing.T) {
+func TestTheQuietLineRidesBeneathALiveTransient(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	inTurn(h)
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("look at this"))
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
 
 	// Act
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
 
 	// Assert
-	activity := working(t, h).GetActivity()
-	if activity.GetNotification() != nil || activity.GetQuietStretch() == nil {
-		t.Fatalf("activity = %v, want the quiet-stretch line in the notification's place", activity)
+	unpinned := working(t, h).GetActivity().GetUnpinned()
+	if unpinned.GetTransient().GetToolCall() == nil || unpinned.GetQuietStretch() == nil {
+		t.Fatalf("unpinned = %v, want the tool call's transient over the quiet-stretch line", unpinned)
 	}
 }
 
-func TestARunningHookOutranksTheQuietLine(t *testing.T) {
+func TestARunningHooksTransientCoversTheQuietLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	inTurn(h)
@@ -344,8 +343,9 @@ func TestARunningHookOutranksTheQuietLine(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Assert
-	if got := working(t, h).GetActivity().GetHook().GetName(); got != "pre-commit" {
-		t.Fatalf("activity = %v, want the running hook's line", working(t, h).GetActivity())
+	unpinned := working(t, h).GetActivity().GetUnpinned()
+	if got := unpinned.GetTransient().GetHook().GetName(); got != "pre-commit" || unpinned.GetQuietStretch() == nil {
+		t.Fatalf("unpinned = %v, want the hook's transient over the standing quiet-stretch line", unpinned)
 	}
 }
 
@@ -359,7 +359,7 @@ func TestTheTurnsEndRetiresTheQuietLine(t *testing.T) {
 	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
 
 	// Assert
-	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetUnpinned().GetQuietStretch(); got != nil {
 		t.Fatalf("background line = %v, want none: the turn's line ended with it", got)
 	}
 }
@@ -378,7 +378,7 @@ func TestADetachedCallLeavesTheStepAndStandsTheLine(t *testing.T) {
 	if got := stepName(arm); got != "thinking" {
 		t.Fatalf("step = %q, want thinking: detached work is never a step", got)
 	}
-	if got := arm.GetActivity().GetQuietStretch().GetText(); got != "✅ Moved to background — continuing..." {
+	if got := arm.GetActivity().GetUnpinned().GetQuietStretch().GetText(); got != "✅ Moved to background — continuing..." {
 		t.Fatalf("line = %q, want the moved-to-background line", got)
 	}
 }
@@ -414,7 +414,7 @@ func TestAMonitorSurfacesAndHandsOffAtOnce(t *testing.T) {
 
 	// Assert
 	arm := working(t, h)
-	if got := arm.GetActivity().GetQuietStretch().GetText(); got != "✅ Monitor started — continuing..." {
+	if got := arm.GetActivity().GetUnpinned().GetQuietStretch().GetText(); got != "✅ Monitor started — continuing..." {
 		t.Fatalf("line = %q, want the monitor-started line", got)
 	}
 	if got := stepName(arm); got != "thinking" {
@@ -453,7 +453,7 @@ func TestABackgroundLandingStandsItsLine(t *testing.T) {
 			tt.act(t, h)
 
 			// Assert
-			got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch().GetText()
+			got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetUnpinned().GetQuietStretch().GetText()
 			if got != tt.want {
 				t.Fatalf("background line = %q, want %q", got, tt.want)
 			}
@@ -472,7 +472,7 @@ func TestABackgroundSurfacingClearsTheLine(t *testing.T) {
 	surface(t, h, detachedAgent, "u-9", "read")
 
 	// Assert
-	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetUnpinned().GetQuietStretch(); got != nil {
 		t.Fatalf("background line = %v, want none: the next item surfaced", got)
 	}
 }
@@ -506,7 +506,7 @@ func TestTheBackgroundLineEndsWithTheLastDetachedWork(t *testing.T) {
 	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-3"}, nil, nil))
 
 	// Assert
-	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetQuietStretch(); got != nil {
+	if got := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity().GetUnpinned().GetQuietStretch(); got != nil {
 		t.Fatalf("background line = %v, want none: it stood for work that has ended", got)
 	}
 }
@@ -649,6 +649,9 @@ func TestTheDrawingThatEndsAQuietStretchStatesTheEndedLineWithItsRow(t *testing.
 	inTurn(h)
 	surface(t, h, mainAgent, "u-1", "bash")
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
+	// The bash call's transient lapses, so the quiet line alone stands above
+	// the enduring line.
+	h.clock.Advance(DefaultTransientWindow)
 
 	// Act
 	surface(t, h, mainAgent, "u-2", "response")
@@ -685,6 +688,8 @@ func TestADrawAfterItsSurfacingEndsTheStretch(t *testing.T) {
 	h := newHarness(t)
 	inTurn(h)
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
+	// The spawn's tool-call transient lapses, so nothing covers the ending.
+	h.clock.Advance(DefaultTransientWindow)
 
 	// Act
 	h.r.OnItemDrawn(testWS, "u-1", rowOf("u-1"), true)
@@ -768,9 +773,11 @@ func TestABackgroundDrawingStatesTheEndedLine(t *testing.T) {
 	connected(h)
 	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, nil, nil))
 	h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+	// The finish's transient lapses, so nothing covers the ending.
+	h.clock.Advance(DefaultTransientWindow)
 
-	// Act
-	surface(t, h, detachedAgent, "u-9", "read")
+	// Act: an item that raises no transient of its own.
+	surface(t, h, detachedAgent, "u-9", "response")
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetBackground().GetQuietStretchEnding()
@@ -833,10 +840,10 @@ func TestAnyNewerActivitySupersedesTheEnding(t *testing.T) {
 		// arrange stands an activity after the stretch ended.
 		arrange func(t *testing.T, h *harness)
 	}{
-		{name: "a running hook, which outranks the line", arrange: func(t *testing.T, h *harness) {
+		{name: "a running hook's transient", arrange: func(t *testing.T, h *harness) {
 			h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 		}},
-		{name: "a notification", arrange: func(t *testing.T, h *harness) {
+		{name: "a push notification's transient", arrange: func(t *testing.T, h *harness) {
 			h.r.OnActivity(testWS, mainAgent, notificationFrame("look at this"))
 		}},
 	}
@@ -854,21 +861,22 @@ func TestAnyNewerActivitySupersedesTheEnding(t *testing.T) {
 			if got := endingOf(t, h); got != nil {
 				t.Fatalf("ending = %v, want none: a newer activity is drawn at once", got)
 			}
-			if working(t, h).GetActivity() == nil {
-				t.Fatal("activity = none, want the newer activity")
+			if working(t, h).GetActivity().GetUnpinned().GetTransient() == nil {
+				t.Fatal("transient = none, want the newer activity")
 			}
 		})
 	}
 }
 
 func TestTheEndingCarriesWhenTheEndedLineBeganStanding(t *testing.T) {
-	// Arrange: the line stands at instant+2s, and is ended 5s later.
+	// Arrange: the line stands at instant+2s, and is ended once the bash
+	// call's transient has lapsed.
 	h := newHarness(t)
 	inTurn(h)
 	surface(t, h, mainAgent, "u-1", "bash")
 	h.clock.Advance(2 * time.Second)
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "success"))
-	h.clock.Advance(5 * time.Second)
+	h.clock.Advance(DefaultTransientWindow)
 
 	// Act
 	surface(t, h, mainAgent, "u-2", "response")
@@ -892,7 +900,7 @@ func TestASubFeedDrawingEndsTheStretchWithNoEnding(t *testing.T) {
 
 	// Assert
 	background := h.view(t).GetStrip().GetStatus().GetBackground()
-	if background.GetActivity().GetQuietStretch() != nil || background.GetQuietStretchEnding() != nil {
+	if background.GetActivity().GetUnpinned().GetQuietStretch() != nil || background.GetQuietStretchEnding() != nil {
 		t.Fatalf("background = %v, want the line ended with no hold: the client cannot promise to paint a sub-feed row", background)
 	}
 }

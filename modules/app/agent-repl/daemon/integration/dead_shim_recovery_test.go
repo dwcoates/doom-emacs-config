@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"claude-repld/integration/harness"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/encoding/prototext"
 )
 
 // dead_shim_recovery_test.go: a shim that dies ON ITS OWN, outside any
@@ -72,10 +70,13 @@ func concludeFirstTurn(t *testing.T, f *fixture) {
 	})
 }
 
-// footerSettled is a strip that is serving, idle and carries no fault.
+// footerSettled is a strip that is serving and idle with NOTHING STANDING on
+// its activity cell: no salient line. The death's own warning may still be a
+// live transient — it announces an event and stands on nothing — so the cell
+// is judged by its tier, not by what its text mentions.
 func footerSettled(v *frontendv1.FooterView) bool {
-	status := v.GetStrip().GetStatus()
-	return status.GetIdle() != nil && !strings.Contains(prototext.Format(status), "fault")
+	idle := v.GetStrip().GetStatus().GetIdle()
+	return idle != nil && idle.GetActivity().GetSalient() == nil
 }
 
 // footerDisconnected is a strip drawing a lost link.
@@ -399,4 +400,41 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// THE DAEMON'S OWN WARNING ABOUT A WORKSPACE REACHES ITS STRIP, through the one
+// record tee at dlog's workspace-logger emit point: the watcher's warning that
+// the shim is gone is announced as the `daemon_warning` transient.
+func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings(deadShimRecords...)
+	f.shim.ExpectStartSession()
+	concludeFirstTurn(t, f)
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act
+	killShim(t, f, f.shim)
+
+	// Assert
+	awaitFooter(t, f, footer, "the link warning announced", func(v *frontendv1.FooterView) bool {
+		warning := unpinnedWarning(v)
+		return warning.GetOperation() == "daemon.sessionwatcher.link_fault" && warning.GetMessage() != ""
+	})
+	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
+}
+
+// unpinnedWarning is the daemon_warning transient whatever status carries it.
+func unpinnedWarning(v *frontendv1.FooterView) *frontendv1.FooterActivityTransientDaemonWarning {
+	status := v.GetStrip().GetStatus()
+	for _, cell := range []*frontendv1.FooterActivityTransientOverEnduring{
+		status.GetIdle().GetActivity().GetUnpinned(),
+		status.GetDisconnected().GetActivity().GetUnpinned(),
+	} {
+		if w := cell.GetTransient().GetDaemonWarning(); w != nil {
+			return w
+		}
+	}
+	return nil
 }

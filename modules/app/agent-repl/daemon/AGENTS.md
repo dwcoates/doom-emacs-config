@@ -1110,6 +1110,17 @@ explicitly counted bootstrap, terminal-mirror self-report, and injected CLI
 reporting sites. New diagnostics go through `internal/dlog`, never by growing
 that allowlist.
 
+THE RECORD TEE. Every Warn and Error a WORKSPACE logger emits is handed, after
+it is durable, to the one `dlog.RecordTee` bound at boot
+(`Surfaces.BindRecordTee`, wired in `graph.go` to the footer resolver), which
+draws it as the footer's `daemon_warning` / `daemon_error` transient. It is the
+only way those records reach the strip: never add a footer call beside a log
+call. The tee runs synchronously on the emitter's goroutine, possibly under the
+emitter's own locks, so a tee takes no lock an emitter could hold, and the
+footer drops its own `daemon.footer.*` records BEFORE taking its lock — a
+footer record is often written under that lock, and feeding it back would
+deadlock. Run-log records are never teed.
+
 Read daemon records and harvest run windows through `../bin/logs.sh`; the full
 path, rotation, attribution, and level-switch table is in `../AGENTS.md`.
 

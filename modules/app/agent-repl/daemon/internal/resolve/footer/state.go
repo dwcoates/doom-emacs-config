@@ -130,16 +130,11 @@ type rateState struct {
 	figuresReadAt time.Time
 }
 
-// hookState is a hook running right now.
-type hookState struct {
-	// name is the hook's configured name.
-	name string
-	// at is when it fired.
-	at time.Time
-}
-
 // retryState is a vendor call being retried mid-turn.
 type retryState struct {
+	// agent is the agent whose call is being retried: only its own response
+	// ends the line.
+	agent string
 	// attempt is which attempt is running.
 	attempt int32
 	// status is the vendor's summary of the failure being retried.
@@ -271,6 +266,9 @@ const (
 	// clock from the instant the footer learned of it) while its descriptive
 	// frame was on its way — or never came.
 	provenanceLiveWorkSet rowProvenance = "live_work_set"
+	// provenanceResumeWait: a network-resume wait named work the footer never
+	// described, so a MINIMAL row stands for the wait (netresume.go).
+	provenanceResumeWait rowProvenance = "network_resume_wait"
 )
 
 // jumpMemo is the click resolution last recorded for one row, so the record is
@@ -449,26 +447,29 @@ type wsState struct {
 	// stood and ended through compaction.go's standCompaction/endCompaction,
 	// which bind it to the act it narrates.
 	compaction *standing
-	// compactionEnd is the dwell that retires a CONCLUDED phase's line
-	// (`started`, `failed`), nil when the standing line narrates an act still
-	// in flight.
-	compactionEnd Timer
 
 	// interrupting is the registered-interrupt flag SetInterrupting installs.
 	interrupting bool
+	// interruptingAt is when the interrupt registered: the instant its
+	// salient line began standing.
+	interruptingAt time.Time
 	// coldGate is the standing cold-context gate.
 	coldGate ColdGate
+	// coldGateAt is when the standing gate began standing.
+	coldGateAt time.Time
 	// coldAnswer is the gate answer in flight, nil when none is being spent.
 	// It OUTRANKS coldGate: the gate stays standing until the re-open lands,
 	// and drawing the question over the answer is what made the answer look
 	// like it had done nothing.
 	coldAnswer *ColdGateAnswer
-	// permissions are the open consent asks, by permission id.
-	permissions map[string]string
+	// permissions are the open consent asks' composed lines and the instant
+	// each opened, by permission id.
+	permissions map[string]standing
 	// permissionOrder is the order they were opened in.
 	permissionOrder []string
-	// questions are the open question batches' composed leads, by question id.
-	questions map[string]string
+	// questions are the open question batches' composed leads and the instant
+	// each opened, by question id.
+	questions map[string]standing
 	// questionOrder is the order they were opened in.
 	questionOrder []string
 	// wakeup is the pending self-scheduled wakeup, nil when none is.
@@ -478,6 +479,8 @@ type wsState struct {
 	merge MergeFacts
 	// closing is the standing close refusal, nil when no close is blocked.
 	closing *CloseBlocked
+	// closingAt is when the standing refusal began standing.
+	closingAt time.Time
 	// startFailed is the standing bring-up failure, nil when none stands. It
 	// is installed by the site that opens the `shim_start_failed` fault and
 	// cleared by the next successful link edge.
@@ -500,20 +503,24 @@ type wsState struct {
 	// momentary cancels an in-flight R1 dwell when its status is superseded.
 	momentary Timer
 
-	// notification is the standing agent notification.
-	notification *standing
-	// contextBudget is the vendor's standing context-budget warning.
-	contextBudget *standing
+	// transient is THE NEWEST TRANSIENT: the one slot every transient source
+	// fills, each raise replacing the last (transient.go). It carries its own
+	// event instant and expiry, and nothing ever clears it — the client's
+	// clock retires it at its expiry. Nil until the first transient.
+	transient *frontendv1.FooterActivityTransient
+	// streams are the reasoning and prose units streaming right now, by unit,
+	// each holding the tail of its text and the line last raised from it
+	// (tails.go).
+	streams map[string]*streamTail
 	// rate is the vendor's last rate-limit status per window.
 	rate rateState
-	// hook is the hook running right now, nil between hooks.
-	hook *hookState
-	// retrying is the standing mid-turn retry evidence.
+	// contextWindow is the main agent's last readable context-usage report,
+	// nil until one arrives. The enduring line draws it.
+	contextWindow *contextWindowState
+	// retrying is the standing mid-turn retry evidence. It stands until the
+	// retried call's response lands (the first frame that proves the vendor
+	// answered) or the next turn opens.
 	retrying *retryState
-	// injected is the standing context-injection line.
-	injected *standing
-	// blockedOnUser is the vendor's requires_action detail.
-	blockedOnUser *standing
 	// authLine is the standing auth prompt line.
 	authLine *standing
 	// queryDied is the standing dead-query line. It is SESSION-scoped, not
@@ -563,6 +570,18 @@ type wsState struct {
 	// CHANGE to it can be recorded and a push that leaves it standing is not.
 	lastLine activityLine
 
+	// resumeWaits are the background subagents the shim is waiting to resume
+	// after a network outage, in the order the shim stated them: the LAST
+	// standing set, restated whole on every change (netresume.go). They are
+	// read by the agents chip and panel ONLY — no status, freeness or drain
+	// rule reads them (owner ruling, 2026-09-28: visibility only).
+	resumeWaits []resumeWait
+	// retiredRows are the detached subagent rows retired at their terminal, by
+	// every identity the row is addressed by, so a wait that opens after the
+	// failure terminal took the row away can still draw it (label,
+	// description, tokens, jump). Kept for the same lifetime as retiredWork.
+	retiredRows map[string]*agentRow
+
 	// retiredWork are the detached handles that have already reached a
 	// terminal, so a REPLAY of the run's opening frames cannot count it live
 	// again.
@@ -598,6 +617,13 @@ type wsState struct {
 	seq int
 }
 
+// contextWindowState is one readable context-usage report: the tokens held
+// and the usable window they are held against.
+type contextWindowState struct {
+	used   int64
+	window int64
+}
+
 // mergingCommit is the commit a merge is landing right now.
 type mergingCommit struct {
 	// sha is the commit's abbreviated sha.
@@ -611,8 +637,10 @@ type mergingCommit struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
-		permissions: map[string]string{},
-		questions:   map[string]string{},
+		permissions: map[string]standing{},
+		questions:   map[string]standing{},
+		streams:     map[string]*streamTail{},
+		retiredRows: map[string]*agentRow{},
 		agents:      map[string]*agentRow{},
 		shells:      map[string]*shellRow{},
 		monitors:    map[string]*monitorRow{},

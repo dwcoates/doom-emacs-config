@@ -13,9 +13,11 @@ import (
 	"claude-repld/internal/resolve/ladder"
 )
 
-// OnActivity advances the status tree, the token accounting and the live-work
-// chips. Every arm the footer draws anything from has a branch; the rest are
-// recorded as observed and change nothing.
+// OnActivity advances the status tree, the token accounting, the live-work
+// chips and the activity cell's transient line. Every arm the footer draws
+// anything from has a branch; the rest are recorded as observed and change
+// nothing. Work a SUBAGENT does raises its transients under that subagent's
+// label, so its lines are never mistaken for the main agent's.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	if act == nil {
 		return
@@ -31,8 +33,14 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.responses.Observe(unit, act.GetUsage() != nil)
 			s.tok.observeUsage(unit, s.usageAgent(agent.GetValue()), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
-			r.applyActivity(ws, s, agent, unit, act)
+			label := s.agentLabel(agent.GetValue())
+			r.clearRetry(ws, s, agent.GetValue(), act)
+			r.applyActivity(ws, s, agent, label, unit, act)
 			r.trackFeed(ws, s, agent, unit, act)
+			if call, started := toolCallStart(act); started {
+				r.raiseTransient(ws, s, label, &frontendv1.FooterActivityTransient{
+					Kind: &frontendv1.FooterActivityTransient_ToolCall{ToolCall: call}})
+			}
 		})
 }
 
@@ -66,15 +74,22 @@ func activityArm(act *conversationv1.AgentActivity) string {
 	}
 }
 
-// applyActivity folds one activity frame into the accumulation.
-func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, unit string, act *conversationv1.AgentActivity) {
+// applyActivity folds one activity frame into the accumulation. `label` is the
+// subagent label the frame's transients carry, empty for the main agent.
+func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, label, unit string, act *conversationv1.AgentActivity) {
 	switch item := act.GetItem().(type) {
+	case *conversationv1.AgentActivity_Thinking:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Thinking"})
+		r.applyThinking(ws, s, label, unit, item.Thinking)
 	case *conversationv1.AgentActivity_Response:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
 		r.applyResponse(s, unit, item.Response)
+		r.applyResponseTail(ws, s, label, unit, item.Response)
 	case *conversationv1.AgentActivity_Hook:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
-		r.applyHook(s, item.Hook)
+		if start := item.Hook.GetStart(); start != nil {
+			r.raiseHook(ws, s, label, start.GetHookName())
+		}
 	case *conversationv1.AgentActivity_Subagent:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Subagent"})
 		r.applySubagent(s, agent, unit, item.Subagent)
@@ -83,7 +98,9 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversa
 		r.applyBash(s, unit, item.Bash)
 	case *conversationv1.AgentActivity_TaskAct:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_TaskAct"})
-		r.applyTaskAct(ws, s, item.TaskAct)
+		if subject, moved := r.applyTaskAct(ws, s, item.TaskAct); moved {
+			r.raiseTask(ws, s, label, subject)
+		}
 	case *conversationv1.AgentActivity_Monitor:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Monitor"})
 		r.applyMonitor(s, unit, item.Monitor)
@@ -95,10 +112,12 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversa
 		r.applyWakeup(s, item.ScheduleWakeup)
 	case *conversationv1.AgentActivity_ContextInjected:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ContextInjected"})
-		r.applyInjection(ws, s, item.ContextInjected)
+		r.applyInjection(ws, s, label, item.ContextInjected)
 	case *conversationv1.AgentActivity_PushNotification:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_PushNotification"})
-		r.applyNotification(s, item.PushNotification)
+		if start := item.PushNotification.GetStart(); start != nil {
+			r.raiseNotification(ws, s, label, start.GetMessage())
+		}
 	}
 }
 
@@ -117,16 +136,6 @@ func (r *resolver) applyResponse(s *wsState, unit string, resp *conversationv1.A
 	case *conversationv1.AgentResponse_Success, *conversationv1.AgentResponse_Failure:
 		s.tok.responses.Settle(unit)
 	}
-}
-
-// applyHook raises the hook line while a hook runs and drops it when the hook
-// settles, whichever way it settled.
-func (r *resolver) applyHook(s *wsState, hook *conversationv1.AgentHook) {
-	if start, running := hook.GetResult().(*conversationv1.AgentHook_Start); running {
-		s.hook = &hookState{name: start.Start.GetHookName(), at: r.opts.clock.Now()}
-		return
-	}
-	s.hook = nil
 }
 
 // applySubagent maintains the ⚙ chip's rows from the SPAWNING CALL's own
@@ -225,12 +234,22 @@ func (r *resolver) applyBash(s *wsState, unit string, bash *conversationv1.Agent
 // UNSET and an act that names an empty one is SET to "". The two are read
 // apart here rather than guessed at -- absent leaves the checklist's own
 // subject standing, present installs what the act states, whatever it states.
-func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentTaskAct) {
+//
+// IT ANSWERS THE MOVED TASK'S SUBJECT, and whether the tracker MOVED at all: a
+// refused act changed nothing, and an act the checklist could not hold moved
+// nothing the reader can see, so neither raises the `task` transient.
+func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentTaskAct) (string, bool) {
 	id := act.GetTask().GetValue()
 	state := act.GetState()
+	_, rejected := act.GetAct().(*conversationv1.AgentTaskAct_Rejected)
 	if _, deleted := state.GetStatus().(*conversationv1.AgentTaskState_Deleted); deleted {
-		delete(s.tasks, id)
-		return
+		subject := state.GetSubject()
+		if row, ok := s.tasks[id]; ok {
+			subject = row.subject
+			delete(s.tasks, id)
+			return subject, !rejected
+		}
+		return subject, false
 	}
 	subject := state.Subject
 	row, ok := s.tasks[id]
@@ -252,7 +271,7 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 			r.logOf(ws, s).Debug("daemon.footer.task_act_unheld",
 				"a task act names no subject and no entry is held for it; the checklist is unchanged",
 				dlog.Context{"task": id})
-			return
+			return "", false
 		}
 		row = &taskRow{id: id, order: s.nextOrder(), status: taskPending}
 		s.tasks[id] = row
@@ -274,6 +293,7 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 		row.status = taskPending
 		row.activeForm = ""
 	}
+	return row.subject, !rejected
 }
 
 // applyMonitor maintains the 👁 chip's rows.
@@ -356,11 +376,12 @@ func (r *resolver) applyWakeup(s *wsState, wakeup *conversationv1.AgentScheduleW
 	}
 }
 
-// applyInjection raises the MOMENTARY loading status. The kind is derived from
+// applyInjection raises the MOMENTARY loading status and announces the item
+// taken on as the transient `context_injected` line. The kind is derived from
 // what the injection carries: a memory file is `memory`; ONE skill with
 // content is an `invoked` skill; several with content are `discovered`; and
 // content-free entries are a `listing`.
-func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, injected *conversationv1.AgentContextInjected) {
+func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, label string, injected *conversationv1.AgentContextInjected) {
 	now := r.opts.clock.Now()
 	switch item := injected.GetInjected().(type) {
 	case *conversationv1.AgentContextInjected_Memory:
@@ -392,21 +413,8 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, injected *conv
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "default"})
 		return
 	}
-	s.injected = &standing{text: s.loading.line, at: now}
+	r.raiseContextInjected(ws, s, label, s.loading.line)
 	r.armMomentary(ws, s)
-}
-
-// applyNotification raises the standing notification, the highest-ranking
-// activity line there is.
-func (r *resolver) applyNotification(s *wsState, note *conversationv1.AgentPushNotification) {
-	start, ok := note.GetState().(*conversationv1.AgentPushNotification_Start)
-	if !ok {
-		return
-	}
-	s.notification = &standing{
-		text: truncate(start.Start.GetMessage(), DefaultWarningRowWidth),
-		at:   r.opts.clock.Now(),
-	}
 }
 
 // OnAgentTerminal retires an agent from the status tree. A terminal carrying a
@@ -422,8 +430,11 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			s.turn = nil
 			r.endTurnMotion(s)
 			s.tok.settled = true
-			s.hook = nil
 			s.interrupting = false
+			// THE TURN'S UNSETTLED UNITS END WITH IT: a unit the terminal cut
+			// short never settles, and its tail is not kept for a stream that
+			// will not resume.
+			s.streams = map[string]*streamTail{}
 			// THE TURN'S END IS THE COMPACTION'S END: the flag and the line
 			// go together (compaction.go, "the line's lifetime").
 			s.compacting = false
@@ -466,6 +477,7 @@ func (r *resolver) retireAgent(s *wsState, agent *conversationv1.AgentId) {
 	retired := false
 	for unit, row := range s.agents {
 		if row.createdAgent == id {
+			s.rememberRetired(row)
 			delete(s.agents, unit)
 			retired = true
 		}
@@ -700,10 +712,51 @@ func retireWork(s *wsState, id string) {
 	}
 	s.retiredWork[id] = struct{}{}
 	for unit, row := range s.agents {
-		if unit == id || row.work == id || row.spawnUnit == id || row.createdAgent == id {
+		if unit == id || row.addressedBy(id) {
 			// A retired detached run's token units stop counting with it.
 			s.tok.forgetAgent(row.createdAgent)
+			s.rememberRetired(row)
 			delete(s.agents, unit)
+		}
+	}
+}
+
+// addressedBy reports whether the row is addressed by this id: its handle, its
+// spawn unit or its created agent. The three are ONE value by the contract's
+// own ruling (`DetachedWorkId.value == AgentActivityId.value`, and for a
+// subagent that is its `AgentId` too), so every lookup matches all three, and
+// an empty id addresses nothing.
+func (row *agentRow) addressedBy(id string) bool {
+	return id != "" && (row.work == id || row.spawnUnit == id || row.createdAgent == id)
+}
+
+// subagentRow answers the live subagent row addressed by this id — under the
+// key it is held by or any identity it is addressed by — or nil. It is the ONE
+// lookup of a live row by id: the usage attribution, a transient's agent
+// label, a wait's row and the live-work reconciliation all ask it.
+func (s *wsState) subagentRow(id string) *agentRow {
+	if id == "" {
+		return nil
+	}
+	for unit, row := range s.agents {
+		if unit == id || row.addressedBy(id) {
+			return row
+		}
+	}
+	return nil
+}
+
+// rememberRetired keeps a DETACHED row's description after its run retired,
+// under every identity it is addressed by, so a network-resume wait that opens
+// after the failure terminal can still draw it (netresume.go). An in-turn row
+// is never waited on and is not kept.
+func (s *wsState) rememberRetired(row *agentRow) {
+	if row.work == "" {
+		return
+	}
+	for _, id := range []string{row.work, row.spawnUnit, row.createdAgent} {
+		if id != "" {
+			s.retiredRows[id] = row
 		}
 	}
 }
@@ -746,17 +799,22 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 // leaving the chip unset rather than by drawing a zero.
 func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	out := &frontendv1.FooterLiveWorkChips{}
-	if n := len(s.agents); n > 0 {
-		out.Agents = &frontendv1.FooterChipAgents{Count: uint32(n)}
-	}
-	if n := len(s.tasks); n > 0 {
-		done := 0
-		for _, row := range s.tasks {
-			if row.status == taskCompleted {
-				done++
+	// THE ⚙ CHIP COUNTS THE PANEL'S ROWS, waiting rows included, and carries
+	// the waiting-for-the-API glyph while any row waits (netresume.go).
+	if rows := s.agentRowsDrawn(); len(rows) > 0 {
+		out.Agents = &frontendv1.FooterChipAgents{Count: uint32(len(rows))}
+		waiting := 0
+		for _, d := range rows {
+			if d.wait != nil {
+				waiting++
 			}
 		}
-		out.Tasks = &frontendv1.FooterChipTasks{Done: uint32(done), Total: uint32(n)}
+		if waiting > 0 {
+			out.Agents.WaitingForApi = &frontendv1.FooterChipAgentsWaitingForApi{Count: uint32(waiting)}
+		}
+	}
+	if done, total := s.taskCounts(); total > 0 {
+		out.Tasks = &frontendv1.FooterChipTasks{Done: done, Total: total}
 	}
 	if n := len(s.shells); n > 0 {
 		out.Shells = &frontendv1.FooterChipShells{Count: uint32(n)}
@@ -790,15 +848,12 @@ func (r *resolver) expanded(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterEx
 	}
 }
 
-// agentsPanel renders the ⚙ panel: one jump-target row per live subagent.
+// agentsPanel renders the ⚙ panel: one jump-target row per live subagent, and
+// one per subagent waiting for the API to resume it.
 func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterExpandedAgents {
-	rows := make([]*agentRow, 0, len(s.agents))
-	for _, row := range s.agents {
-		rows = append(rows, row)
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedAgents{}
-	for _, row := range rows {
+	for _, d := range s.agentRowsDrawn() {
+		row := d.row
 		workID := row.work
 		if workID == "" {
 			workID = row.spawnUnit
@@ -813,6 +868,7 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 			"has_description": row.description != "",
 			"tokens":          row.tokens,
 			"retired_before":  retiredAny(s, row.spawnUnit, row.work),
+			"waiting_for_api": d.wait != nil,
 		})
 		drawn := &frontendv1.FooterAgentRow{
 			Work:    &frontendv1.FooterWorkId{Value: workID},
@@ -824,6 +880,7 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 		if row.description != "" {
 			drawn.Description = &frontendv1.FooterAgentRowDescription{Text: row.description}
 		}
+		agentRowState(d, drawn)
 		out.Rows = append(out.Rows, drawn)
 	}
 	return out

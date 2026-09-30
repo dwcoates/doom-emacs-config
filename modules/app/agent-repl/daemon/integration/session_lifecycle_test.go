@@ -494,6 +494,45 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	}
 }
 
+// A COMPACTION'S PROGRESS ON THE SESSION STREAM REACHES THE FOOTER through the
+// session watcher's own route, never the unrouted WARN (standing order: zero
+// warnings; the harness's warning sweep fails the test on any undeclared
+// WARN): the running phase stands as the salient compaction line, and the
+// conclusion is announced as the compaction_concluded transient.
+func TestACompactionsProgressReachesTheFooterWithNoWarning(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act: the compaction states a running phase on the session stream.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+		CompactionProgress: &conversationv1.SessionCompactionProgress{
+			Phase:        conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING,
+			TokensBefore: 101_600,
+		}}})
+
+	// Assert: it stands as the salient compaction line.
+	awaitFooter(t, f, footer, "the running compaction's salient line", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction().GetText() ==
+			"summarizing the conversation (101.6k)…"
+	})
+
+	// Act: the compaction concludes.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+		CompactionProgress: &conversationv1.SessionCompactionProgress{
+			Phase:        conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED,
+			TokensBefore: 101_600,
+			TokensAfter:  12_400,
+		}}})
+
+	// Assert: the salient line is gone and the conclusion is announced.
+	awaitFooter(t, f, footer, "the compaction_concluded transient", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient().GetCompactionConcluded().GetText() ==
+			"compacted and resumed (101.6k → 12.4k)"
+	})
+}
+
 func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1352,7 +1391,7 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	view := awaitFooter(t, f, footer, "footer closing.blocked naming the held prompt", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
 	})
-	text := view.GetStrip().GetStatus().GetClosing().GetActivity().GetCloseBlocked().GetText()
+	text := view.GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetCloseBlocked().GetText()
 	if !strings.Contains(text, "held prompt") {
 		t.Fatalf("closing.blocked activity text = %q, want it to name the held-prompt cause", text)
 	}

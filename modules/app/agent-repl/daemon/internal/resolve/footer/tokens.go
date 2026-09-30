@@ -120,12 +120,8 @@ type usageAgent struct {
 // handle, the spawn unit and the created agent are one value by contract (see
 // retireWork).
 func (s *wsState) usageAgent(id string) usageAgent {
-	if id != "" {
-		for _, row := range s.agents {
-			if row.createdAgent == id || row.work == id || row.spawnUnit == id {
-				return usageAgent{id: id, group: id, label: subagentUsageLabel(row)}
-			}
-		}
+	if row := s.subagentRow(id); row != nil {
+		return usageAgent{id: id, group: id, label: subagentUsageLabel(row)}
 	}
 	return usageAgent{id: id, group: mainGroup, label: mainAgentLabel}
 }
@@ -242,6 +238,7 @@ func (r *resolver) observeContextUsage(ws ids.WorkspaceID, s *wsState, usage *co
 			dlog.Context{"reason": "negative_total", "total_tokens": total})
 		return
 	}
+	r.observeContextWindow(ws, s, usage)
 	previousBaseline := s.tok.ctx.baseline
 	switch s.tok.observeContext(total) {
 	case contextBaselineTaken:
@@ -258,6 +255,21 @@ func (r *resolver) observeContextUsage(ws ids.WorkspaceID, s *wsState, usage *co
 			"the footer took a context reading",
 			dlog.Context{"total_tokens": total, "growth": growth, "growth_known": known})
 	}
+}
+
+// observeContextWindow files the report's window for the enduring line. A
+// report whose window the contract cannot hold — no usable window, or more
+// tokens held than the window allows — is a producer defect: it is recorded at
+// WARN and the enduring line keeps the last readable report.
+func (r *resolver) observeContextWindow(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionContextUsage) {
+	used, window := usage.GetTotalTokens(), usage.GetMaxTokens()
+	if window <= 0 || used > window {
+		r.logOf(ws, s).Warn("daemon.footer.context_window_unreadable",
+			"a context_usage update's window cannot be drawn; the enduring line keeps the last readable one",
+			dlog.Context{"total_tokens": used, "max_tokens": window})
+		return
+	}
+	s.contextWindow = &contextWindowState{used: used, window: window}
 }
 
 // reset clears the accounting for a new turn, EXCEPT the usage of units that a

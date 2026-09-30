@@ -436,6 +436,9 @@ func (s *testSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+// BindRecordTee implements dlog.Surfaces; this double tees nothing.
+func (s *testSurfaces) BindRecordTee(dlog.RecordTee) {}
+
 func (s *testSurfaces) DetachDir(dir string) error {
 	s.dirEvents = append(s.dirEvents, "detach "+dir)
 	return s.dirFailure

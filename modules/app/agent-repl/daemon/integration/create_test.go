@@ -852,7 +852,7 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	fv := awaitFooter(t, f, footer, "footer closing.blocked with the live-work reason", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
 	})
-	line := fv.GetStrip().GetStatus().GetClosing().GetActivity().GetCloseBlocked().GetText()
+	line := fv.GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetCloseBlocked().GetText()
 	if !strings.Contains(line, "detached") {
 		t.Fatalf("close-blocked activity text = %q, want it to name the live detached work, not a turn in flight", line)
 	}

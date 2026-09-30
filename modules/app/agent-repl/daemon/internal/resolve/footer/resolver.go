@@ -49,16 +49,20 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
 	}
 	o := options{
-		clock:         SystemClock{},
-		dwell:         DefaultMomentaryDwell,
-		alarmTokens:   DefaultTokenAlarmThreshold,
-		rateNewsworth: DefaultRateLimitNewsworthyThreshold,
+		clock:           SystemClock{},
+		dwell:           DefaultMomentaryDwell,
+		alarmTokens:     DefaultTokenAlarmThreshold,
+		rateNewsworth:   DefaultRateLimitNewsworthyThreshold,
+		transientWindow: DefaultTransientWindow,
 	}
 	for _, apply := range opts {
 		apply(&o)
 	}
 	if o.clock == nil {
 		return nil, fmt.Errorf("footer resolver needs a clock")
+	}
+	if o.transientWindow <= 0 {
+		return nil, fmt.Errorf("footer resolver needs a positive transient window, got %s", o.transientWindow)
 	}
 	return &resolver{
 		log:    log,
@@ -106,7 +110,10 @@ func (r *resolver) Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FooterVi
 func (r *resolver) topicLocked(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView] {
 	t, ok := r.topics[ws]
 	if !ok {
-		t = &publish.Topic[*frontendv1.FooterView]{}
+		// LATEST-ONLY: every view supersedes the last, and the activity cell
+		// republishes per line of streamed reasoning and prose, so a slow
+		// subscriber is handed the newest view rather than a backlog.
+		t = publish.NewLatestOnly[*frontendv1.FooterView]()
 		r.topics[ws] = t
 	}
 	return t
@@ -205,11 +212,21 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 // replaced or cleared — and only then. A line that stands longer than its act
 // is diagnosable from the log alone only if the log says when it began
 // standing, what put it there, and when (and by what) it went.
+//
+// A TRANSIENT LINE IS RECORDED AT DEBUG: it moves with every line of streamed
+// reasoning and prose, ends on the client's clock, and its raise is already
+// recorded (daemon.footer.transient_raised). Every other change — a salient
+// line standing or going, the cell falling back to the enduring line — is
+// INFO.
 func logLineChange(log dlog.Logger, operation, arm string, line activityLine, changed bool, previous activityLine) {
 	if !changed {
 		return
 	}
-	log.Info("daemon.footer.activity_line_changed", "the footer published a new activity line",
+	record := log.Info
+	if line.tier == "transient" {
+		record = log.Debug
+	}
+	record("daemon.footer.activity_line_changed", "the footer published a new activity line",
 		dlog.Context{
 			"arm":           arm,
 			"kind":          line.name(),
@@ -337,11 +354,15 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 		})
 }
 
-// SetTurn installs the accepted turn.
+// SetTurn installs the accepted turn, and raises the `submitting` transient
+// with the first line of what it delivers.
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
 			r.applyTurnStarted(s, turn)
+			if turn != nil {
+				r.raiseSubmitting(ws, s, turn.Prompt)
+			}
 		})
 }
 
@@ -389,6 +410,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	// ContextCut that ends the compaction, and the turn's terminal — never by
 	// a turn opening.
 	s.compacting = s.compacting || turn.Act == ActCompact
+	// A RETRY OF THE LAST TURN'S CALL IS OVER: the turn it held has ended.
 	s.retrying = nil
 	r.startTurnMotion(s)
 	s.tok.reset(liveDetachedAgents(s))
@@ -440,7 +462,14 @@ func (r *resolver) SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked) {
 		ctx["reason"] = blocked.Reason
 	}
 	r.mutate(ws, "daemon.footer.set_closing", "the footer took the close refusal", ctx,
-		func(s *wsState) { s.closing = blocked })
+		func(s *wsState) {
+			s.closing = blocked
+			// Each refusal is a line of its own, standing from when it was
+			// refused.
+			if blocked != nil {
+				s.closingAt = r.opts.clock.Now()
+			}
+		})
 }
 
 // SetStartFailed installs, or clears, the standing bring-up failure. A new
@@ -490,7 +519,14 @@ func (r *resolver) AddDroppedPrompts(ws ids.WorkspaceID, n uint32) {
 // SetColdGate installs the standing cold gate.
 func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
 	r.mutate(ws, "daemon.footer.set_cold_gate", "the footer took the cold gate",
-		dlog.Context{"standing": gate.Standing}, func(s *wsState) { s.coldGate = gate })
+		dlog.Context{"standing": gate.Standing}, func(s *wsState) {
+			// The gate's line stands from when the gate OPENED; restating a
+			// standing gate keeps that instant.
+			if gate.Standing && !s.coldGate.Standing {
+				s.coldGateAt = r.opts.clock.Now()
+			}
+			s.coldGate = gate
+		})
 }
 
 // SetColdGateAnswer installs the gate answer in flight, nil to clear it.
@@ -532,7 +568,12 @@ func lineOf(answer *ColdGateAnswer) string {
 // SetInterrupting fires waiting·interrupting the moment an interrupt registers.
 func (r *resolver) SetInterrupting(ws ids.WorkspaceID, on bool) {
 	r.mutate(ws, "daemon.footer.set_interrupting", "the footer took the interrupt registration",
-		dlog.Context{"interrupting": on}, func(s *wsState) { s.interrupting = on })
+		dlog.Context{"interrupting": on}, func(s *wsState) {
+			if on && !s.interrupting {
+				s.interruptingAt = r.opts.clock.Now()
+			}
+			s.interrupting = on
+		})
 }
 
 // ---- the R1 dwell ---------------------------------------------------------
@@ -560,24 +601,23 @@ func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 		nil, func(s *wsState) {
 			s.interrupted = nil
 			s.loading = nil
-			s.injected = nil
 			s.momentary = nil
 		})
 }
 
 // ---- FooterSink -----------------------------------------------------------
 
-// OnContextBudgetWarning installs the vendor's standing context-budget
-// warning. It is an AGENT-PLANE fact — a page line of the agent's book — but
-// the footer's activity line is session-scoped, so the warning stands for the
-// workspace whichever agent's transcript carried it.
+// OnContextBudgetWarning announces the vendor's context-budget warning as the
+// transient `context_budget` line. It is an AGENT-PLANE fact — a page line of
+// the agent's book — and a warning blocks nothing, so it is an event, never a
+// standing line; a subagent's warning carries that subagent's label.
 func (r *resolver) OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, warning *conversationv1.ContextBudgetWarning) {
 	if warning == nil {
 		return
 	}
 	r.mutate(ws, "daemon.footer.on_context_budget_warning", "the footer took a context-budget warning",
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
-			s.contextBudget = &standing{text: warning.GetText(), at: r.opts.clock.Now()}
+			r.raiseContextBudget(ws, s, s.agentLabel(agent.GetValue()), warning.GetText())
 		})
 }
 
@@ -658,6 +698,9 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 				s.turnFailed = true
 			}
 			s.turn = nil
+			// NO STREAM AND NO RETRY SURVIVES THE QUERY EITHER.
+			s.streams = map[string]*streamTail{}
+			s.retrying = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
 			s.compacting = false
 			r.endCompaction(ws, s, "daemon.footer.on_session_update.query_died")
@@ -700,32 +743,49 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "compaction_progress", func(s *wsState) {
 			r.logSessionArm(ws, s, "compaction_progress")
 			progress := u.CompactionProgress
-			r.standCompaction(ws, s, CompactionLine(progress), "daemon.footer.on_session_update.compaction_progress")
 			// A CONCLUDED PHASE IS THE END OF THE COMPACTION, not a
 			// compaction still running: `failed` cut nothing and `started`
 			// is the resumed session up. Every other phase is one still in
-			// flight. The concluded line stands one dwell and is retired.
-			concluded := concludedPhase(progress.GetPhase())
-			s.compacting = !concluded
-			if concluded {
-				r.concludeCompaction(ws, s)
+			// flight, and stands as the salient line.
+			if concludedPhase(progress.GetPhase()) {
+				s.compacting = false
+				r.concludeCompaction(ws, s, progress)
+				return
 			}
+			s.compacting = true
+			r.standCompaction(ws, s, CompactionLine(progress), "daemon.footer.on_session_update.compaction_progress")
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
 			r.logSessionArm(ws, s, "diagnostics")
 			s.degraded = anyWindowOpen(u.Diagnostics)
 		}
-	case *conversationv1.SessionUpdate_ModelChanged:
-		return "model_changed", func(s *wsState) { r.logSessionArm(ws, s, "model_changed") }
-	case *conversationv1.SessionUpdate_PermissionModeChanged:
-		return "permission_mode_changed", func(s *wsState) { r.logSessionArm(ws, s, "permission_mode_changed") }
+	case *conversationv1.SessionUpdate_ModelChanged,
+		*conversationv1.SessionUpdate_PermissionModeChanged,
+		*conversationv1.SessionUpdate_McpServer:
+		// A SESSION SETTING CHANGED: announced as the transient
+		// `session_change` line, composed here.
+		arm := sessionChangeArm(update)
+		return arm, func(s *wsState) {
+			r.logSessionArm(ws, s, arm)
+			if text, ok := sessionChangeText(update); ok {
+				r.raiseSessionChange(ws, s, text)
+			}
+		}
+	case *conversationv1.SessionUpdate_NetworkResumeWaits:
+		return "network_resume_waits", func(s *wsState) {
+			r.logSessionArm(ws, s, "network_resume_waits")
+			r.observeResumeWaits(ws, s, u.NetworkResumeWaits)
+		}
+	case *conversationv1.SessionUpdate_NetworkResumeOutcome:
+		return "network_resume_outcome", func(s *wsState) {
+			r.logSessionArm(ws, s, "network_resume_outcome")
+			r.observeResumeOutcome(ws, s, u.NetworkResumeOutcome)
+		}
 	case *conversationv1.SessionUpdate_IdentityRotated:
 		return "identity_rotated", func(s *wsState) { r.logSessionArm(ws, s, "identity_rotated") }
 	case *conversationv1.SessionUpdate_FastMode:
 		return "fast_mode", func(s *wsState) { r.logSessionArm(ws, s, "fast_mode") }
-	case *conversationv1.SessionUpdate_McpServer:
-		return "mcp_server", func(s *wsState) { r.logSessionArm(ws, s, "mcp_server") }
 	case *conversationv1.SessionUpdate_ContextUsage:
 		// THE CELL'S SOURCE. The same reading the topbar's context chip draws,
 		// delivered to both by one route, so the chip and the cell's growth
@@ -736,6 +796,18 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		}
 	default:
 		return "unset", func(s *wsState) { r.logSessionArm(ws, s, "unset") }
+	}
+}
+
+// sessionChangeArm names a session-setting arm for the record.
+func sessionChangeArm(update *conversationv1.SessionUpdate) string {
+	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_ModelChanged:
+		return "model_changed"
+	case *conversationv1.SessionUpdate_PermissionModeChanged:
+		return "permission_mode_changed"
+	default:
+		return "mcp_server"
 	}
 }
 
@@ -882,10 +954,13 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	case *conversationv1.AgentQuestion_Start:
 		r.mutate(ws, "daemon.footer.on_question", "the footer opened a question batch",
 			dlog.Context{"question_id": id}, func(s *wsState) {
-				if _, seen := s.questions[id]; !seen {
+				batch, seen := s.questions[id]
+				if !seen {
 					s.questionOrder = append(s.questionOrder, id)
+					batch.at = r.opts.clock.Now()
 				}
-				s.questions[id] = questionLead(res.Start.GetBatch())
+				batch.text = questionLead(res.Start.GetBatch())
+				s.questions[id] = batch
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_question", "the footer closed a question batch",
@@ -926,10 +1001,13 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	case *conversationv1.AgentPermission_Start:
 		r.mutate(ws, "daemon.footer.on_permission", "the footer opened a consent ask",
 			dlog.Context{"permission_id": id}, func(s *wsState) {
-				if _, seen := s.permissions[id]; !seen {
+				ask, seen := s.permissions[id]
+				if !seen {
 					s.permissionOrder = append(s.permissionOrder, id)
+					ask.at = r.opts.clock.Now()
 				}
-				s.permissions[id] = gatedCall(res.Start.GetPrompt())
+				ask.text = gatedCall(res.Start.GetPrompt())
+				s.permissions[id] = ask
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_permission", "the footer closed a consent ask",
@@ -959,23 +1037,46 @@ func gatedCall(prompt *conversationv1.AgentPermissionPrompt) string {
 	return "consent is needed to continue"
 }
 
-// OnApiError is mid-turn evidence the footer draws as a retry notice.
+// OnApiError is mid-turn evidence the footer draws as the salient `retrying`
+// line: the turn cannot advance while its call fails. It stands until the
+// retried call's response lands (clearRetry) or the next turn opens.
 func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed) {
 	if failed == nil {
 		return
 	}
 	r.mutate(ws, "daemon.footer.on_api_error", "the footer took mid-turn api failure evidence",
-		dlog.Context{"kind": apiErrorKind(failed)}, func(s *wsState) {
+		dlog.Context{"kind": apiErrorKind(failed), "agent_id": agent.GetValue()}, func(s *wsState) {
 			attempt := int32(2)
 			if s.retrying != nil {
 				attempt = s.retrying.attempt + 1
 			}
 			s.retrying = &retryState{
+				agent:   agent.GetValue(),
 				attempt: attempt,
 				status:  truncate(failed.GetMessage(), DefaultWarningRowWidth),
 				at:      r.opts.clock.Now(),
 			}
 		})
+}
+
+// clearRetry ends the `retrying` line at the FIRST SUCCESSFUL RESPONSE of the
+// agent whose call was being retried: a frame of its reasoning or prose, or
+// one that carries an API response's usage, is the vendor answering. Another
+// agent's frame says nothing about this call.
+func (r *resolver) clearRetry(ws ids.WorkspaceID, s *wsState, agent string, act *conversationv1.AgentActivity) {
+	if s.retrying == nil || s.retrying.agent != agent {
+		return
+	}
+	switch act.GetItem().(type) {
+	case *conversationv1.AgentActivity_Thinking, *conversationv1.AgentActivity_Response:
+	default:
+		if act.GetUsage() == nil {
+			return
+		}
+	}
+	r.logOf(ws, s).Debug("daemon.footer.retry_cleared", "the retried call's response landed; the retrying line ended",
+		dlog.Context{"agent_id": agent, "attempt": s.retrying.attempt})
+	s.retrying = nil
 }
 
 // without removes one id from an order slice, preserving the rest.
@@ -1017,7 +1118,7 @@ func linkName(link sessionwatcher.LinkState) string {
 //
 // A FAILED COMPACTION IS NOT SILENCE: nothing was cut and the context is still
 // too large, which is exactly what the context-budget line says, so the
-// producer's account rides there as the idle status's activity evidence and is
+// producer's account is announced as the transient `context_budget` line and
 // recorded at WARN.
 func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
 	if cut == nil {
@@ -1044,10 +1145,8 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			if failed == nil {
 				return
 			}
-			s.contextBudget = &standing{
-				text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
-				at:   r.opts.clock.Now(),
-			}
+			r.raiseContextBudget(ws, s, s.agentLabel(agent.GetValue()),
+				"compaction failed — "+truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth))
 			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
 				"a compaction failed, so nothing was cut and the context is still too large",
 				dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})

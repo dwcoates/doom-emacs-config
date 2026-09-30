@@ -15,17 +15,17 @@ import (
 func updateOf(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityUpdate {
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Idle:
-		return arm.Idle.GetActivity().GetUpdate()
+		return arm.Idle.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Working:
-		return arm.Working.GetActivity().GetUpdate()
+		return arm.Working.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Waiting:
-		return arm.Waiting.GetActivity().GetUpdate()
+		return arm.Waiting.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Background:
-		return arm.Background.GetActivity().GetUpdate()
+		return arm.Background.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Blocked:
-		return arm.Blocked.GetActivity().GetUpdate()
+		return arm.Blocked.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Disconnected:
-		return arm.Disconnected.GetActivity().GetUpdate()
+		return arm.Disconnected.GetActivity().GetSalient().GetUpdate()
 	default:
 		return nil
 	}
@@ -44,8 +44,6 @@ func updatePhase(status *frontendv1.FooterStatus) string {
 		return "handing_over"
 	case *frontendv1.FooterStatusActivityUpdate_Waiting:
 		return "waiting"
-	case *frontendv1.FooterStatusActivityUpdate_Updated:
-		return "updated"
 	default:
 		return ""
 	}
@@ -61,7 +59,6 @@ func TestEachDeployPhaseDrawsItsOwnArm(t *testing.T) {
 		{"the install", deployprogress.Installing, "installing"},
 		{"the service restarts", deployprogress.RestartingServices, "restarting_services"},
 		{"the handover", deployprogress.HandingOver, "handing_over"},
-		{"the end", deployprogress.Updated, "updated"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -209,77 +206,6 @@ func TestAForcedMoveNeverDrawsWaiting(t *testing.T) {
 	}
 }
 
-func TestTheNotesAreThisWorkspacesOwn(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	other := ids.WorkspaceID("ws-2")
-	if err := h.r.SetWorkspaceDir(other, t.TempDir()); err != nil {
-		t.Fatalf("SetWorkspaceDir: %v", err)
-	}
-	h.r.Prime(other)
-
-	// Act
-	h.r.SetDeployProgress(&deployprogress.Progress{
-		Phase: deployprogress.Updated,
-		Notes: map[ids.WorkspaceID][]deployprogress.Note{other: {deployprogress.ShimWhenIdle}},
-	})
-
-	// Assert
-	mine := updateOf(h.view(t).GetStrip().GetStatus()).GetNotes()
-	view, _ := h.r.Topic(other).Latest()
-	theirs := updateOf(view.GetStrip().GetStatus()).GetNotes()
-	if len(mine) != 0 || len(theirs) != 1 || theirs[0].GetShimWhenIdle() == nil {
-		t.Fatalf("notes = %+v here and %+v there, want shim_when_idle on the other workspace alone", mine, theirs)
-	}
-}
-
-func TestTheUpdatedLineIsRetiredByTheDwell(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
-
-	// Act
-	h.clock.Advance(DefaultMomentaryDwell)
-
-	// Assert
-	if got := updatePhase(h.view(t).GetStrip().GetStatus()); got != "" {
-		t.Fatalf("update phase = %q, want the updated line retired", got)
-	}
-}
-
-func TestTheUpdatedLineIsNotRetiredEarly(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
-
-	// Act
-	h.clock.Advance(DefaultMomentaryDwell / 2)
-
-	// Assert
-	if got := updatePhase(h.view(t).GetStrip().GetStatus()); got != "updated" {
-		t.Fatalf("update phase = %q, want updated still standing inside its dwell", got)
-	}
-}
-
-func TestAnEarlierUpdatedDwellDoesNotRetireALaterDeploy(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Building})
-
-	// Act
-	h.clock.Advance(DefaultMomentaryDwell)
-
-	// Assert
-	if got := updatePhase(h.view(t).GetStrip().GetStatus()); got != "building" {
-		t.Fatalf("update phase = %q, want the later deploy's building line", got)
-	}
-}
-
 func TestANilProgressClearsTheLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -323,46 +249,11 @@ func TestEveryUpdateLineChangeIsRecordedAtInfo(t *testing.T) {
 	// Assert
 	for _, rec := range h.log.Records() {
 		if rec.Operation == "daemon.footer.activity_line_changed" && rec.Level == "info" &&
-			rec.Context["kind"] == "update" && rec.Context["cause"] == opDeployProgress {
+			rec.Context["kind"] == "salient.update" && rec.Context["cause"] == opDeployProgress {
 			return
 		}
 	}
 	t.Fatalf("no INFO activity_line_changed record named the update line")
-}
-
-func TestAFaultOutranksTheUpdateLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.HandingOver})
-
-	// Act
-	h.r.OpenFault(testWS, faultOf(t, "fault-1", health.KindConversationAbandoned, false))
-
-	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetFault() == nil {
-		t.Fatalf("activity = %+v, want the fault over the update line",
-			h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetKind())
-	}
-}
-
-func TestAStandingDeployFaultStandsAboveTheNextDeploysUpdateLine(t *testing.T) {
-	// Arrange: an earlier deploy's failure stands on every strip.
-	h := newHarness(t)
-	connected(h)
-	h.r.OpenFault("", faultOf(t, "fault-1", health.KindDeployFailed, true))
-
-	// Act: the next deploy starts building.
-	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Building})
-
-	// Assert: the fault keeps the activity line, and the status stays idle.
-	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	if idle == nil {
-		t.Fatalf("status = %+v, want idle: a failed deploy does not escalate", h.view(t).GetStrip().GetStatus())
-	}
-	if got := idle.GetActivity().GetFault().GetKind(); got != health.KindDeployFailed {
-		t.Fatalf("activity = %+v, want the deploy_failed fault over the update line", idle.GetActivity().GetKind())
-	}
 }
 
 func TestTheUpdateLineOutranksANotification(t *testing.T) {
@@ -388,7 +279,6 @@ func TestTheUpdateLineRidesEveryStatusArm(t *testing.T) {
 	}{
 		{"idle", func(h *harness) {}, "idle"},
 		{"a turn in flight", func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant}) }, "working"},
-		{"a consent ask", func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf")) }, "waiting"},
 		{"detached work", func(h *harness) { h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil)) }, "background"},
 	}
 	for _, tt := range tests {
@@ -410,6 +300,22 @@ func TestTheUpdateLineRidesEveryStatusArm(t *testing.T) {
 	}
 }
 
+func TestTheGatedCallOutranksTheUpdateLineWhileWaiting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf"))
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Installing})
+
+	// Assert: the kind that explains the waiting step ranks first.
+	salient := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient()
+	if salient.GetGatedCall() == nil {
+		t.Fatalf("waiting salient = %+v, want the gated call over the update line", salient)
+	}
+}
+
 func TestEveryComponentDrawsAnArm(t *testing.T) {
 	for _, c := range []deployprogress.Component{
 		deployprogress.Store, deployprogress.Sidecar, deployprogress.Daemon,
@@ -427,5 +333,93 @@ func TestEveryComponentDrawsAnArm(t *testing.T) {
 				t.Fatalf("component %q drew no arm", component)
 			}
 		})
+	}
+}
+
+// updatedOf is the transient `updated` line the idle cell carries, nil when
+// none is live.
+func updatedOf(view *frontendv1.FooterView) *frontendv1.FooterActivityTransientUpdated {
+	return view.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient().GetUpdated()
+}
+
+func TestAFinishedDeployTakesTheUpdateLineDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.HandingOver})
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
+
+	// Assert
+	if got := updatePhase(h.view(t).GetStrip().GetStatus()); got != "" {
+		t.Fatalf("update phase = %q, want no salient update line once the deploy is done", got)
+	}
+}
+
+func TestAFinishedDeployIsAnnouncedAsTheUpdatedTransient(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
+
+	// Assert
+	if updatedOf(h.view(t)) == nil {
+		t.Fatalf("activity = %+v, want the transient updated line", h.view(t).GetStrip().GetStatus().GetIdle().GetActivity())
+	}
+}
+
+func TestAFinishedDeployArmsNoTimer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated})
+
+	// Assert: the transient's expiry is the client's; nothing is scheduled.
+	if n := len(h.clock.pending); n != 0 {
+		t.Fatalf("%d timers pending, want none: a transient is never retired by the daemon", n)
+	}
+}
+
+func TestTheUpdatedNotesAreThisWorkspacesOwn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	other := ids.WorkspaceID("ws-2")
+	if err := h.r.SetWorkspaceDir(other, t.TempDir()); err != nil {
+		t.Fatalf("SetWorkspaceDir: %v", err)
+	}
+	h.r.Prime(other)
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{
+		Phase: deployprogress.Updated,
+		Notes: map[ids.WorkspaceID][]deployprogress.Note{other: {deployprogress.ShimWhenIdle}},
+	})
+
+	// Assert
+	view, _ := h.r.Topic(other).Latest()
+	mine, theirs := updatedOf(h.view(t)).GetNotes(), updatedOf(view).GetNotes()
+	if len(mine) != 0 || len(theirs) != 1 || theirs[0].GetShimWhenIdle() == nil {
+		t.Fatalf("notes = %+v here and %+v there, want shim_when_idle on the other workspace alone", mine, theirs)
+	}
+}
+
+func TestTheUpdateLineOutranksANonEscalatingFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OpenFault(testWS, faultOf(t, "fault-1", health.KindConversationAbandoned, false))
+
+	// Act
+	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Building})
+
+	// Assert: the fault was a transient, and a salient line outranks it.
+	if got := updatePhase(h.view(t).GetStrip().GetStatus()); got != "building" {
+		t.Fatalf("update phase = %q, want the salient update line over the transient fault", got)
 	}
 }

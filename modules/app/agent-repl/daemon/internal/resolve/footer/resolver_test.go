@@ -313,7 +313,7 @@ func TestAFailedCompactionDrawsItsAccountAsEvidence(t *testing.T) {
 
 	// Assert
 	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	text := idle.GetActivity().GetContextBudget().GetText()
+	text := idle.GetActivity().GetUnpinned().GetTransient().GetContextBudget().GetText()
 	if text == "" || !contains(text, "summary model refused") {
 		t.Fatalf("activity text = %q, want the producer's account", text)
 	}
@@ -904,8 +904,8 @@ func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
 			name: "a line set",
 			act:  func(h *harness) { h.r.OnSessionUpdate(testWS, vendorCompacting()) },
 			want: map[string]any{
-				"arm": "working", "kind": "compaction", "text": "compacting the context…",
-				"previous_kind": "none", "previous_text": "",
+				"arm": "working", "kind": "salient.compaction", "text": "compacting the context…",
+				"previous_kind": "enduring", "previous_text": "",
 				"cause": "daemon.footer.on_session_update",
 			},
 		},
@@ -918,8 +918,8 @@ func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
 				})
 			},
 			want: map[string]any{
-				"arm": "idle", "kind": "none", "text": "",
-				"previous_kind": "compaction", "previous_text": "compacting the context…",
+				"arm": "idle", "kind": "enduring", "text": "",
+				"previous_kind": "salient.compaction", "previous_text": "compacting the context…",
 				"cause": "daemon.footer.on_context_cut",
 			},
 		},

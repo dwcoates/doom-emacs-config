@@ -5,6 +5,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -98,8 +99,11 @@ func CompactionRequestLine(choice, detail string) string {
 //     age, and the line is ended, because the terminal IS the end of the act —
 //     the record exposes the missing cut, the clearing is not a fallback;
 //   - a CONCLUDED PHASE (`started`, `failed`): the act is over, so its line
-//     stands one momentary dwell — long enough for a person to read
-//     "compacted and resumed" — and is then retired;
+//     ends at once and the conclusion is announced as a TRANSIENT —
+//     `compaction_concluded` ("compacted and resumed (…)"), or `context_budget`
+//     for a failure that left the context as large as it was. NO TIMER ends
+//     the salient line (owner ruling, 2026-09-28: a timer may end only a
+//     transient);
 //   - the vendor query DYING: no turn survives it, so no compaction does;
 //   - the COLD GATE'S ANSWER being cleared. While an answer is in flight the
 //     line is the answer's own (owner ruling, 2026-09-14): the answer's verb
@@ -116,10 +120,8 @@ func CompactionRequestLine(choice, detail string) string {
 // standing keeps the instant they began standing: the vendor re-sends its
 // `compacting` signal about every thirty seconds while it compacts, and the
 // strip's age — and a violation record's — is the age of the ACT, not of the
-// latest re-send. Any pending retirement is cancelled: the new words narrate
-// an act still being reported.
+// latest re-send.
 func (r *resolver) standCompaction(ws ids.WorkspaceID, s *wsState, text, cause string) {
-	r.cancelCompactionEnd(s)
 	if s.compaction != nil && s.compaction.text == text {
 		return
 	}
@@ -131,7 +133,6 @@ func (r *resolver) standCompaction(ws ids.WorkspaceID, s *wsState, text, cause s
 // endCompaction ends the standing compaction line, if any, and records which
 // edge ended it.
 func (r *resolver) endCompaction(ws ids.WorkspaceID, s *wsState, cause string) {
-	r.cancelCompactionEnd(s)
 	if s.compaction == nil {
 		return
 	}
@@ -140,30 +141,26 @@ func (r *resolver) endCompaction(ws ids.WorkspaceID, s *wsState, cause string) {
 	s.compaction = nil
 }
 
-// concludeCompaction schedules the retirement of a concluded phase's line. The
-// retirement ends THIS line only: a line stood since, or one a cold gate's
-// answer has taken over, is not this dwell's to end.
-func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState) {
-	r.cancelCompactionEnd(s)
-	concluded := s.compaction
-	s.compactionEnd = r.opts.clock.AfterFunc(r.opts.dwell, func() {
-		r.mutate(ws, "daemon.footer.retire_compaction_line",
-			"the concluded compaction's dwell elapsed and the footer retired its line",
-			nil, func(s *wsState) {
-				if s.compaction != concluded || s.coldAnswer != nil {
-					return
-				}
-				r.endCompaction(ws, s, "daemon.footer.retire_compaction_line")
-			})
-	})
-}
-
-// cancelCompactionEnd stops a pending retirement.
-func (r *resolver) cancelCompactionEnd(s *wsState) {
-	if s.compactionEnd != nil {
-		s.compactionEnd.Stop()
-		s.compactionEnd = nil
+// concludeCompaction ends a compaction at its CONCLUDED phase: the salient
+// line goes, and the outcome is announced as a transient — the composed
+// "compacted and resumed (…)" line as `compaction_concluded`, a failure as
+// `context_budget`, because the context is still as large as it was. While a
+// cold gate's answer is in flight the salient line is the ANSWER's, which its
+// verb ends; the transient is raised beneath it all the same.
+func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *conversationv1.SessionCompactionProgress) {
+	const cause = "daemon.footer.on_session_update.compaction_progress"
+	if s.coldAnswer == nil {
+		r.endCompaction(ws, s, cause)
 	}
+	line := CompactionLine(progress)
+	if progress.GetPhase() == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED {
+		r.raiseContextBudget(ws, s, "", line)
+		return
+	}
+	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
+		Kind: &frontendv1.FooterActivityTransient_CompactionConcluded{
+			CompactionConcluded: &frontendv1.FooterActivityTransientCompactionConcluded{Text: line}},
+	})
 }
 
 // endCompactionAtTerminal ends the line at the main turn's terminal, recording
@@ -176,10 +173,6 @@ func (r *resolver) endCompactionAtTerminal(ws ids.WorkspaceID, s *wsState, turn 
 		return
 	case s.coldAnswer != nil:
 		// The answer owns the line; its verb ends it.
-		return
-	case s.compactionEnd != nil:
-		// A concluded phase awaiting its dwell: the act already ended.
-		r.endCompaction(ws, s, cause)
 		return
 	}
 	r.logOf(ws, s).Error("daemon.footer.compaction_line_outlived_turn",

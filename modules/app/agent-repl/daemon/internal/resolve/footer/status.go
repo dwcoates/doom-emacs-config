@@ -435,28 +435,47 @@ func setMergingPhase(arm *frontendv1.FooterStatusMerging, tab string) {
 // construction.
 func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusWaiting{}
+	// EACH STEP AND THE SALIENT LINE THAT EXPLAINS IT ARE ONE DECISION, so a
+	// waiting step can never stand without its line.
 	switch {
 	case s.interrupting:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.interrupting"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Interrupting{
 			Interrupting: &frontendv1.FooterSubStatusWaitingInterrupting{}}
+		arm.Activity = waitingSalient(s.interruptingAt, func(w *frontendv1.FooterStatusWaitingSalient) {
+			w.Kind = &frontendv1.FooterStatusWaitingSalient_Interrupting{
+				Interrupting: &frontendv1.FooterStatusActivityInterrupting{Text: interruptingLine}}
+		})
 	case len(s.permissionOrder) > 0:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.permissionOrder) > 0"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Permission{
 			Permission: &frontendv1.FooterSubStatusWaitingPermission{}}
+		ask := s.permissions[s.permissionOrder[0]]
+		arm.Activity = waitingSalient(ask.at, func(w *frontendv1.FooterStatusWaitingSalient) {
+			w.Kind = &frontendv1.FooterStatusWaitingSalient_GatedCall{
+				GatedCall: &frontendv1.FooterStatusActivityGatedCall{Text: ask.text}}
+		})
 	case len(s.questionOrder) > 0:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.questionOrder) > 0"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Question{
 			Question: &frontendv1.FooterSubStatusWaitingQuestion{}}
+		batch := s.questions[s.questionOrder[0]]
+		arm.Activity = waitingSalient(batch.at, func(w *frontendv1.FooterStatusWaitingSalient) {
+			w.Kind = &frontendv1.FooterStatusWaitingSalient_QuestionLead{
+				QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{Text: batch.text}}
+		})
 	case s.coldGate.Standing:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.coldGate.Standing"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_ColdGate{
 			ColdGate: &frontendv1.FooterSubStatusWaitingColdGate{}}
+		arm.Activity = waitingSalient(s.coldGateAt, func(w *frontendv1.FooterStatusWaitingSalient) {
+			w.Kind = &frontendv1.FooterStatusWaitingSalient_ColdGateCost{
+				ColdGateCost: &frontendv1.FooterStatusActivityColdGateCost{Text: s.coldGate.Detail}}
+		})
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		return nil
 	}
-	arm.Activity = r.waitingActivity(s)
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: arm}}
 }
 
@@ -471,7 +490,7 @@ func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.Foote
 	if s.coldAnswer == nil {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
+	arm := &frontendv1.FooterStatusWorking{Activity: r.workingActivity(s)}
 	switch s.coldAnswer.Choice {
 	case ChoiceCompact:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with compact"})
@@ -498,16 +517,25 @@ func (r *resolver) wakeup(s *wsState) *frontendv1.FooterStatus {
 	if s.wakeup == nil {
 		return nil
 	}
+	wakeup := &frontendv1.FooterStatusActivityWakeup{WakeAtMs: epochMs(s.wakeup.wakeAt)}
+	if s.wakeup.reason != "" {
+		wakeup.Reason = &frontendv1.FooterStatusActivityWakeupReason{Text: s.wakeup.reason}
+	}
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_Waiting{
 			Waiting: &frontendv1.FooterStatusWaiting{
 				Substatus: &frontendv1.FooterStatusWaiting_Wakeup{
 					Wakeup: &frontendv1.FooterSubStatusWaitingWakeup{}},
-				Activity: r.waitingActivity(s),
+				Activity: waitingSalient(s.wakeup.at, func(w *frontendv1.FooterStatusWaitingSalient) {
+					w.Kind = &frontendv1.FooterStatusWaitingSalient_Wakeup{Wakeup: wakeup}
+				}),
 			},
 		},
 	}
 }
+
+// interruptingLine is the waiting · interrupting step's line.
+const interruptingLine = "stopping the current turn…"
 
 // thinking resolves the turn's step, or nil when no turn is in flight.
 //
@@ -519,8 +547,9 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 	if s.turn == nil && !s.compacting {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusWorking{Activity: r.thinkingActivity(s)}
-	arm.QuietStretchEnding = quietStretchEnding(s, arm.Activity != nil)
+	arm := &frontendv1.FooterStatusWorking{Activity: r.workingActivity(s)}
+	arm.QuietStretchEnding = quietStretchEnding(s,
+		coversEnduring(arm.Activity.GetSalient() != nil, arm.Activity.GetUnpinned()))
 	switch {
 	case s.turn == nil:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
@@ -560,8 +589,9 @@ func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_Background{
 			Background: &frontendv1.FooterStatusBackground{
-				Activity:           activity,
-				QuietStretchEnding: quietStretchEnding(s, activity != nil),
+				Activity: activity,
+				QuietStretchEnding: quietStretchEnding(s,
+					coversEnduring(activity.GetSalient() != nil, activity.GetUnpinned())),
 			}}}
 }
 
