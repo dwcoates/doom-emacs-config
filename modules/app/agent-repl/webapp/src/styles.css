@@ -85,7 +85,8 @@
      `.token-count` site (the subagent head's figure is the first) shares it. A
      readable amber-yellow on the light ground; the dark block lifts it. */
   --token-yellow: #ca8a04;
-  /* The footer tokens cell's heat gradient (FooterTokensCellInputHeat): four
+  /* The token figures' heat gradient (TokenHeat), shared by the footer tokens
+     cell and a response bubble's corner figure: four
      colors evenly spaced along one gradient, green → yellow → orange → red.
      The daemon states where on it a figure falls; these pick the palette. */
   --token-heat-0: var(--ok);
