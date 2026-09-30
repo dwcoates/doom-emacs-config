@@ -219,6 +219,60 @@ func TestReplacementArgv(t *testing.T) {
 	}
 }
 
+func TestWithoutRoleFlags(t *testing.T) {
+	tests := []struct {
+		name      string
+		incumbent []string
+		want      []string
+	}{
+		{name: "no flags is no flags", want: []string{}},
+		{name: "a non-role flag is carried through", incumbent: []string{"--prompts-dir", "/prompts"}, want: []string{"--prompts-dir", "/prompts"}},
+		{name: "a separated joining flag is dropped with its value", incumbent: []string{"--joining", "127.0.0.1:9", "--node", "node"}, want: []string{"--node", "node"}},
+		{name: "an attached joining flag is dropped alone", incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"}, want: []string{"--node", "node"}},
+		{name: "a trailing joining flag with no value is dropped", incumbent: []string{"--node", "node", "--joining"}, want: []string{"--node", "node"}},
+		{name: "a replacing flag is dropped", incumbent: []string{"--replacing", "--node", "node"}, want: []string{"--node", "node"}},
+		{name: "an attached replacing flag is dropped", incumbent: []string{"-replacing=true", "--node", "node"}, want: []string{"--node", "node"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := withoutRoleFlags(tt.incumbent)
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("argv = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEverySpawnArgvIsTheRolelessArgvPlusItsOwnRole pins that both argv
+// builders share withoutRoleFlags: a builder that strips its own way would
+// leave a role flag in one of them, and the daemon it spawns refuses to start.
+func TestEverySpawnArgvIsTheRolelessArgvPlusItsOwnRole(t *testing.T) {
+	incumbent := []string{"--default-config-dir", "/roots", "--replacing", "-joining=127.0.0.1:9", "--node", "node"}
+	roleless := withoutRoleFlags(incumbent)
+	tests := []struct {
+		name string
+		got  []string
+		role []string
+	}{
+		{name: "successor", got: successorArgv(incumbent, "127.0.0.1:1"), role: []string{JoiningFlag, "127.0.0.1:1"}},
+		{name: "replacement", got: replacementArgv(incumbent), role: []string{"--" + ReplacingFlagName}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			want := append(slices.Clone(roleless), tt.role...)
+
+			// Act / Assert
+			if !slices.Equal(tt.got, want) {
+				t.Fatalf("argv = %v, want %v", tt.got, want)
+			}
+		})
+	}
+}
+
 func TestARestartStandDownWaitsForFreeness(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

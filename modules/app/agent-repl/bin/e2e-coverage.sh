@@ -76,6 +76,10 @@ log "coverage root: $COVERAGE_ROOT"
 TEST_ARGS=(-count=1 -timeout "$TIMEOUT" -parallel "$PARALLEL")
 [ -n "${E2E_COVERAGE_RUN:-}" ] && TEST_ARGS+=(-run "$E2E_COVERAGE_RUN")
 
+# The suite bundles the real shim and drives the real webapp, and c8 below is
+# the shim's own devDependency, so their npm deps are provisioned first.
+"$THIS_DIR/ensure-e2e-deps.sh" || die "the e2e suite's npm deps could not be ensured"
+
 log "running the e2e suite with coverage collection on"
 (
     cd "$E2E_DIR" || { log "cannot enter the e2e directory $E2E_DIR"; exit 1; }

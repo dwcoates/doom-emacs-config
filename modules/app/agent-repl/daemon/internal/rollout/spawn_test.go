@@ -293,19 +293,84 @@ func TestSpawnPutsTheSuccessorInItsOwnSession(t *testing.T) {
 	}
 }
 
-func TestSpawnFailsWhenTheSuccessorNeverReports(t *testing.T) {
-	// Arrange
+// spawnScript writes a successor stand-in that runs body and nothing else.
+func spawnScript(t *testing.T, state, body string) string {
+	t.Helper()
+	script := filepath.Join(state, "successor.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	return script
+}
+
+// reportingBody is the stand-in's report of 127.0.0.1:7788, written the way a
+// successor writes it: to a temporary file renamed into place.
+func reportingBody(state string) string {
+	return "printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n"
+}
+
+func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
+	// Arrange: a successor that stays up and never reports.
 	state := t.TempDir()
-	spawner := NewProcessSpawner("/usr/bin/true", state)
+	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
+	spawner.StopGrace = 50 * time.Millisecond
 
 	// Act
-	_, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+	t.Cleanup(func() {
+		if err := successor.Stop(context.Background()); err != nil {
+			t.Errorf("stop the stand-in: %v", err)
+		}
+	})
 
 	// Assert
-	if err == nil {
-		t.Fatalf("Spawn succeeded with no address reported")
+	if err == nil || !strings.Contains(err.Error(), "did not report an address within") {
+		t.Fatalf("Spawn = %v, want the deadline", err)
+	}
+}
+
+// TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting is the 2026-09-30
+// successor: handed exclusive flags, it exited at once, and the incumbent
+// waited out its whole deadline and then blamed slowness.
+func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
+	// Arrange: a deadline no test run reaches, so only the exit can answer.
+	state := t.TempDir()
+	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state)
+	spawner.Poll = time.Hour
+	spawner.Timeout = time.Hour
+
+	// Act
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+
+	// Assert
+	var exited *SuccessorExitedError
+	if !errors.As(err, &exited) {
+		t.Fatalf("Spawn = %v, want *SuccessorExitedError", err)
+	}
+	if exited.PID != successor.PID() || exited.Exit != "exit status 2" {
+		t.Fatalf("exit = %+v, want pid %d and \"exit status 2\"", exited, successor.PID())
+	}
+}
+
+func TestSpawnAnswersTheAddressASuccessorReportedBeforeItExited(t *testing.T) {
+	// Arrange: the report lands, then the process ends, before any poll.
+	state := t.TempDir()
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state)
+	spawner.Poll = time.Hour
+	spawner.Timeout = time.Hour
+
+	// Act
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+
+	// Assert: the address is the answer, and Ready is left to name the exit.
+	if err != nil {
+		t.Fatalf("Spawn = %v, want the reported address", err)
+	}
+	if successor.Address() != "127.0.0.1:7788" {
+		t.Fatalf("address = %q, want 127.0.0.1:7788", successor.Address())
 	}
 }
 
@@ -363,6 +428,11 @@ func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
 			name:      "an attached joining flag is dropped",
 			incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"},
 			want:      []string{"--node", "node", JoiningFlag, "127.0.0.1:1"},
+		},
+		{
+			name:      "a replacing flag an incumbent booted with is dropped",
+			incumbent: []string{"--default-config-dir", "/roots/default", "--replacing"},
+			want:      []string{"--default-config-dir", "/roots/default", JoiningFlag, "127.0.0.1:1"},
 		},
 	}
 	for _, tc := range tests {
@@ -478,14 +548,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	t.Helper()
 	state := t.TempDir()
-	script := filepath.Join(state, "successor.sh")
-	body := "#!/bin/sh\n" +
-		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
-		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" + tail
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write the stand-in: %v", err)
-	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	spawner.StopGrace = 50 * time.Millisecond
