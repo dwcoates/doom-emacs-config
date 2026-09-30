@@ -48,6 +48,25 @@ message StartTurnRequest {
   // The newest entry the caller already holds. UNSET = repaint: a full first
   // page rides the response. SET = catch-up: only entries newer than this.
   optional conversation.v1.HistoryPointer known_through = 5;
+  // JOIN THE RUNNING TURN rather than wait for it to end: the daemon's
+  // `after_tool_call` verdict (2026-09-30). When a turn of the daemon's is
+  // open, the prompt is pushed into the vendor's input at once, with no
+  // interrupt, and its fate is the vendor's to decide:
+  //   - FOLDED: the vendor takes it into the running turn at that turn's next
+  //     tool boundary. Its prompt row is written at that point with
+  //     `AgentPrompt.folded_into` naming the running turn, and it opens no
+  //     turn of its own: its answer is the running turn's.
+  //   - NOT FOLDED: the running turn ended with no tool boundary left, so the
+  //     vendor runs the prompt as its next turn. Its prompt row is written the
+  //     moment the running turn closes, as this turn's first row, and the turn
+  //     runs under this request's id and origin like any other.
+  // The success answers the moment the prompt is pushed; its page is read
+  // then, before either fate. With no turn of the daemon's open, the flag
+  // changes nothing: the prompt starts its turn as any StartTurn does.
+  //
+  // ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
+  // is refused `turn_already_open`; the daemon holds it instead.
+  bool join_running_turn = 6;
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
@@ -91,7 +110,8 @@ message StartTurnFailure {
     // shim's own cache keep-alive never produces it either -- a StartTurn that
     // arrives while a keep-alive runs waits inside the shim for the keep-alive
     // to end and then opens its turn, so no keep-alive is ever visible on this
-    // wire.
+    // wire. A `join_running_turn` start while another prompt still waits to
+    // join the running turn is refused under this arm too.
     StartTurnTurnAlreadyOpen turn_already_open = 2;
     // No session is open on this shim.
     StartTurnNoSession no_session = 3;
