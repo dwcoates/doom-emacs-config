@@ -26,7 +26,6 @@ import (
 // harness's fake build (harness/deploybuild.go) stages exactly what runs
 // unless a test stages a change, so no test builds for real, and the
 // services' build reports are stated so no test reaches launchd.
-
 // deployOutcomes asks the daemon to deploy and answers its decisions by
 // component.
 func deployOutcomes(t *testing.T, d *harness.Daemon, force bool) map[agentreplv1.DeployComponent]*agentreplv1.DeployComponentOutcome {
@@ -163,9 +162,9 @@ func footerUpdatePhase(v *frontendv1.FooterView) string {
 	var update *frontendv1.FooterStatusActivityUpdate
 	switch arm := v.GetStrip().GetStatus().GetStatus().(type) {
 	case *frontendv1.FooterStatus_Idle:
-		update = arm.Idle.GetActivity().GetUpdate()
+		update = arm.Idle.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Working:
-		update = arm.Working.GetActivity().GetUpdate()
+		update = arm.Working.GetActivity().GetSalient().GetUpdate()
 	}
 	switch update.GetPhase().(type) {
 	case *frontendv1.FooterStatusActivityUpdate_Building:
@@ -178,14 +177,18 @@ func footerUpdatePhase(v *frontendv1.FooterView) string {
 		return "handing_over"
 	case *frontendv1.FooterStatusActivityUpdate_Waiting:
 		return "waiting"
-	case *frontendv1.FooterStatusActivityUpdate_Updated:
-		return "updated"
 	default:
 		return ""
 	}
 }
 
-func TestADeployShowsItsPhasesOnTheFooterAndRetiresUpdated(t *testing.T) {
+// footerUpdated answers the finished deploy's transient on an idle strip, nil
+// when none is live.
+func footerUpdated(v *frontendv1.FooterView) *frontendv1.FooterActivityTransientUpdated {
+	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient().GetUpdated()
+}
+
+func TestADeployShowsItsPhasesOnTheFooterAndAnnouncesUpdated(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -197,14 +200,15 @@ func TestADeployShowsItsPhasesOnTheFooterAndRetiresUpdated(t *testing.T) {
 	// Act
 	deployOutcomes(t, f.d, false)
 
-	// Assert: every phase arrives in order, then the momentary updated goes.
-	for _, want := range []string{"building", "installing", "updated"} {
+	// Assert: every phase arrives in order, then the finished deploy takes the
+	// salient line down and is announced as the transient updated.
+	for _, want := range []string{"building", "installing"} {
 		awaitFooter(t, f, footer, "the "+want+" line", func(v *frontendv1.FooterView) bool {
 			return footerUpdatePhase(v) == want
 		})
 	}
-	awaitFooter(t, f, footer, "the updated line retired", func(v *frontendv1.FooterView) bool {
-		return footerUpdatePhase(v) == ""
+	awaitFooter(t, f, footer, "the updated transient", func(v *frontendv1.FooterView) bool {
+		return footerUpdatePhase(v) == "" && footerUpdated(v) != nil
 	})
 }
 
@@ -232,7 +236,7 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	waiting := awaitFooter(t, f, footer, "the waiting line", func(v *frontendv1.FooterView) bool {
 		return footerUpdatePhase(v) == "waiting"
 	})
-	counts := waiting.GetStrip().GetStatus().GetWorking().GetActivity().GetUpdate().GetWaiting()
+	counts := waiting.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetUpdate().GetWaiting()
 	if counts.GetTurns() != 1 || counts.GetBackground() != 0 {
 		t.Fatalf("waiting = %+v, want the one turn in flight", counts)
 	}
@@ -263,22 +267,21 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	}
 
 	// Assert: the SUCCESSOR ends the story once the incumbent is gone: its
-	// footer takes the momentary updated line onto every strip.
+	// footer announces the transient updated on every strip.
 	d.AwaitRunLogRecordFromAnyProcess("the successor's updated line", func(r harness.LogRecord) bool {
 		return r.PID != d.PID() && r.Operation == "daemon.footer.deploy_progress" && r.Context["phase"] == "updated"
 	})
-	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the updated line on this workspace's strip", func(r harness.LogRecord) bool {
-		text, _ := r.Context["text"].(string)
-		return r.PID != d.PID() && r.Operation == "daemon.footer.activity_line_changed" &&
-			r.Context["kind"] == "update" && strings.Contains(text, "updated")
+	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the updated transient on this workspace's strip", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.footer.transient_raised" && r.Context["kind"] == "updated"
 	})
 }
 
 // ---- a failed deploy: the deploy_failed fault on the footer -----------------
 
-// footerFault answers the fault line on an idle strip, nil when none stands.
+// footerFault answers the transient fault line on an idle strip, nil when none
+// is live: deploy_failed does not escalate, so it is announced, never pinned.
 func footerFault(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityFault {
-	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetFault()
+	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient().GetFault()
 }
 
 func TestADeployWhoseBuildFailsStandsAsAFaultOnTheFooter(t *testing.T) {
@@ -570,25 +573,6 @@ func TestAFailedRollbackReachesEmacsAsItsOwnFault(t *testing.T) {
 		}
 		return step && rollback
 	})
-}
-
-func TestAWorkspaceOpenedAfterAFailedDeployDrawsItOnItsFooter(t *testing.T) {
-	t.Parallel()
-	// Arrange: the deploy failed while only the first workspace was open.
-	f := newOpened(t, harness.Opts{})
-	failDeploy(t, f.d)
-
-	// Act
-	later := secondWorkspaceOn(t, f.d)
-	footer := f.d.WatchFooter(later.ws)
-
-	// Assert
-	view := awaitFooter(t, later, footer, "the deploy_failed activity on the later workspace", func(v *frontendv1.FooterView) bool {
-		return footerFault(v).GetKind() == "deploy_failed"
-	})
-	if detail := footerFault(view).GetDetail(); detail != "build: "+harness.FakeDeployBuildRefusal {
-		t.Fatalf("fault detail = %q, want the step and the build's own words", detail)
-	}
 }
 
 func TestAWorkspaceOpenedAfterAFailedDeployDrawsItOnItsTopbar(t *testing.T) {

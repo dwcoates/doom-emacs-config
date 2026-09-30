@@ -469,13 +469,10 @@ func deliveredLine(act SessionAct) string {
 	}
 }
 
-// standQuietLine stands the quiet-stretch line. It REPLACES a standing
-// notification: a notification is shown until the next activity replaces it,
-// and a feed item landing is that activity.
+// standQuietLine stands the quiet-stretch line, the quiet tier's one line.
 func (r *resolver) standQuietLine(s *wsState, text string) {
 	s.motion.line = &standing{text: text, at: r.opts.clock.Now()}
 	s.motion.ending = nil
-	s.notification = nil
 }
 
 // startTurnMotion resets the motion for a turn the daemon accepted: nothing of

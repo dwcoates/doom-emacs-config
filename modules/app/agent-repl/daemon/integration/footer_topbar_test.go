@@ -22,7 +22,6 @@ import (
 // ---------------------------------------------------------------------------
 // Footer: whole-view push discipline and populated panels
 // ---------------------------------------------------------------------------
-
 func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -135,7 +134,7 @@ func TestFooterNamesTheRunningCallAndTheQuietStretch(t *testing.T) {
 	awaitFooter(t, f, footer, "the quiet-stretch line once the shell command lands", func(v *frontendv1.FooterView) bool {
 		working := v.GetStrip().GetStatus().GetWorking()
 		return working.GetThinking() != nil &&
-			working.GetActivity().GetQuietStretch().GetText() == "✅ Bash finished — handling result..."
+			working.GetActivity().GetUnpinned().GetQuietStretch().GetText() == "✅ Bash finished — handling result..."
 	})
 
 	// Act: the response's first frame surfaces.
@@ -148,7 +147,7 @@ func TestFooterNamesTheRunningCallAndTheQuietStretch(t *testing.T) {
 	// Assert
 	awaitFooter(t, f, footer, "the quiet-stretch line cleared by the next surfacing", func(v *frontendv1.FooterView) bool {
 		working := v.GetStrip().GetStatus().GetWorking()
-		return working != nil && working.GetActivity().GetQuietStretch() == nil
+		return working != nil && working.GetActivity().GetUnpinned().GetQuietStretch() == nil
 	})
 }
 
@@ -727,9 +726,9 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	// reset) from account_usage and the verdict (allowed_warning) from
 	// rate_limit_status -- one cell composed from two different facts.
 	got := awaitFooter(t, f, footer, "the session allowance composed from both facts", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession().GetAllowedWarning() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession().GetAllowedWarning() != nil
 	})
-	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
 	if allowance.GetUtilization() != 0.95 {
 		t.Fatalf("the session allowance's utilization = %v, want 0.95 (the account_usage figure, converted)", allowance.GetUtilization())
 	}
@@ -851,9 +850,9 @@ func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 	got := awaitFooter(t, f, footer, "waiting.wakeup with nothing else standing", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
 	})
-	if got.GetStrip().GetStatus().GetWaiting().GetActivity().GetWakeup().GetWakeAtMs() != 1_700_000_060_000 {
+	if got.GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetWakeup().GetWakeAtMs() != 1_700_000_060_000 {
 		t.Fatalf("waiting.activity.wakeup.wake_at_ms = %d, want exactly 1_700_000_060_000 (the scheduled instant)",
-			got.GetStrip().GetStatus().GetWaiting().GetActivity().GetWakeup().GetWakeAtMs())
+			got.GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetWakeup().GetWakeAtMs())
 	}
 }
 
@@ -878,60 +877,6 @@ func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
 		t.Fatalf("footer status = %v while a turn runs, want the wakeup fallback retired", got.GetStrip().GetStatus())
 	}
 }
-
-func TestFooterNotificationOutranksRateLimitedAndContextBudget(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "idle before any competing activity", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-
-	// Act: a context-budget warning, then a rate-limit report, then a
-	// notification — all while idle, all competing for the one activity slot.
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "context filling"}},
-	}))
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-			Status:             &conversationv1.SessionRateLimitStatus_AllowedWarning{AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}},
-			UtilizationPercent: f64Ptr(92),
-		}},
-	})
-	// THE MESSAGE RIDES THE START ARM — the success states only the vendor's
-	// delivery outcome — so the notification the footer draws is the start's.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("notify-1"),
-		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
-			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
-				Message:   "the branch is ready for review",
-				StartedAt: startedAt(1_700_000_000_000),
-			}},
-		}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("notify-1"),
-		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
-			State: &conversationv1.AgentPushNotification_Success{Success: &conversationv1.AgentPushNotificationSuccess{
-				Outcome: &conversationv1.AgentPushNotificationSuccess_Sent{Sent: &conversationv1.AgentPushNotificationSent{PushSent: true}},
-			}},
-		}},
-	}))
-
-	// Assert: the notification is the standing activity.
-	got := awaitFooter(t, f, footer, "the notification standing over rate-limit and context-budget", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetNotification() != nil
-	})
-	activity := got.GetStrip().GetStatus().GetIdle().GetActivity()
-	if activity.GetRateLimited() != nil || activity.GetContextBudget() != nil {
-		t.Fatalf("idle activity = %v, want ONLY the notification standing (outranks both)", activity)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Footer: mid-turn API error evidence
-// ---------------------------------------------------------------------------
 
 func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
 	t.Parallel()
@@ -1801,4 +1746,146 @@ func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
 	if rows[1].GetName() != "linear" || rows[1].GetFailed().GetDetail().GetText() != "connection refused" {
 		t.Fatalf("row 1 = %v, want linear failed with the stated error", rows[1])
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Footer: the activity cell's tiers
+// ---------------------------------------------------------------------------
+
+// ftTransient is the idle cell's live transient, nil when none is live.
+func ftTransient(v *frontendv1.FooterView) *frontendv1.FooterActivityTransient {
+	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient()
+}
+
+// A NEWER TRANSIENT REPLACES AN OLDER ONE, whatever their kinds: the transient
+// tier is ordered by recency alone (owner ruling, 2026-09-28).
+func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "context filling"}},
+	}))
+	awaitFooter(t, f, footer, "the context-budget transient", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetContextBudget() != nil
+	})
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("notify-1"),
+		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
+			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
+				Message:   "the branch is ready for review",
+				StartedAt: startedAt(1_700_000_000_000),
+			}},
+		}},
+	}))
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the notification replacing the budget warning", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetNotification() != nil
+	})
+	transient := ftTransient(got)
+	if transient.GetNotification().GetText() != "the branch is ready for review" || transient.GetContextBudget() != nil {
+		t.Fatalf("transient = %v, want the newer notification alone", transient)
+	}
+	if transient.GetExpiry().GetExpiresAtMs() <= transient.GetAt().GetAtMs() {
+		t.Fatalf("transient expiry = %d at %d, want an expiry after the event", transient.GetExpiry().GetExpiresAtMs(), transient.GetAt().GetAtMs())
+	}
+}
+
+// THE ENDURING LINE IS ALWAYS DRAWN: an idle session with no transient still
+// states how close the account is and how full the context window is, however
+// unremarkable the figures.
+func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act: an unremarkable sample.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
+			ObservedAtMs: 1_700_000_000_000,
+			Outcome: &conversationv1.SessionAccountUsage_Available{Available: &conversationv1.SessionAccountUsageAvailable{
+				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 12, ResetsAtMs: 1_700_010_000_000},
+			}},
+		}},
+	})
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession() != nil
+	})
+	enduring := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
+	if session := enduring.GetUsage().GetSession(); session.GetUtilization() != 0.12 || session.GetNewsworthy() {
+		t.Fatalf("session allowance = %v, want 0.12 drawn and not newsworthy", session)
+	}
+	if enduring.GetContextWindow().GetWindowTokens() == 0 {
+		t.Fatalf("context window = %v, want the fake shim's opening context usage drawn", enduring.GetContextWindow())
+	}
+}
+
+// A BACKGROUND SUBAGENT WAITING FOR THE API KEEPS ITS ROW (visibility only,
+// owner ruling 2026-09-28): the failed run's row is drawn waiting_for_api, the
+// agents chip counts it with the waiting glyph, and each edge of the wait is a
+// transient.
+func TestFooterANetworkResumeWaitKeepsTheAgentsRowAndMarksTheChip(t *testing.T) {
+	t.Parallel()
+	// Arrange: a detached run that has ended.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+	})
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
+	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents() == nil
+	})
+
+	// Act: the shim opens a wait for the failed run.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{
+		NetworkResumeWaits: &conversationv1.SessionNetworkResumeWaits{Waits: []*conversationv1.SessionNetworkResumeWait{{
+			Work:        &conversationv1.DetachedWorkId{Value: "toolu-1"},
+			FailedAtMs:  1_700_000_000_000,
+			GivesUpAtMs: 1_700_001_800_000,
+		}}},
+	}})
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the waiting row and chip glyph", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetWaitingForApi().GetCount() == 1
+	})
+	if chip := got.GetStrip().GetLiveWork().GetAgents(); chip.GetCount() != 1 {
+		t.Fatalf("agents chip = %v, want the waiting row counted", chip)
+	}
+	rows := got.GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetWaitingForApi().GetGivesUpAtMs() != 1_700_001_800_000 {
+		t.Fatalf("agent rows = %v, want the one row waiting with its give-up instant", rows)
+	}
+	if edge := ftTransient(got).GetNetworkResume().GetWaiting(); edge == nil {
+		t.Fatalf("transient = %v, want the waiting edge", ftTransient(got))
+	}
+	if got.GetStrip().GetStatus().GetIdle() == nil {
+		t.Fatalf("status = %v, want idle: a wait is not background work", got.GetStrip().GetStatus())
+	}
+
+	// Act: the wait ends, resumed.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeOutcome{
+		NetworkResumeOutcome: &conversationv1.SessionNetworkResumeOutcome{
+			Work:    &conversationv1.DetachedWorkId{Value: "toolu-1"},
+			Outcome: &conversationv1.SessionNetworkResumeOutcome_Resumed{Resumed: &conversationv1.SessionNetworkResumeResumed{}},
+		},
+	}})
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{
+		NetworkResumeWaits: &conversationv1.SessionNetworkResumeWaits{},
+	}})
+
+	// Assert
+	awaitFooter(t, f, footer, "the resumed edge with the row gone", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetNetworkResume().GetResumed() != nil && v.GetStrip().GetLiveWork().GetAgents() == nil
+	})
 }

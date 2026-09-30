@@ -72,7 +72,7 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 			// The turn's LAST view of the drive: accepted (working), then
 			// delivered, which stands the quiet-stretch line.
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking().GetActivity().GetQuietStretch() != nil
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetQuietStretch() != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))

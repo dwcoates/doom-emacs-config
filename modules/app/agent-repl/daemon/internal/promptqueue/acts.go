@@ -162,7 +162,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	// activity, by which time the status is already past `submitting` — so a
 	// /clear or a compaction draws as thinking·submitting rather than as
 	// clearing or compacting unless the daemon says which it is.
-	started := &footer.TurnStarted{At: q.deps.Now(), Act: footerAct(command)}
+	started := &footer.TurnStarted{At: q.deps.Now(), Act: footerAct(command), Prompt: text}
 	q.deps.Footer.SetTurn(ws, started)
 	q.deps.Sidebar.SetTurn(ws, started)
 

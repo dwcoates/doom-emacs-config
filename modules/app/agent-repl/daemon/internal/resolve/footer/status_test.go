@@ -175,7 +175,7 @@ func TestWaitingOnPermissionCarriesTheGatedCallLine(t *testing.T) {
 	if waiting.GetPermission() == nil {
 		t.Fatalf("substatus = %+v, want permission", waiting.GetSubstatus())
 	}
-	if got := waiting.GetActivity().GetGatedCall().GetText(); got == "" {
+	if got := waiting.GetActivity().GetSalient().GetGatedCall().GetText(); got == "" {
 		t.Fatalf("the required waiting activity carries no gated-call line")
 	}
 }
@@ -210,7 +210,7 @@ func TestWaitingOnQuestionComposesTheBatchLead(t *testing.T) {
 
 	// Assert
 	waiting := h.view(t).GetStrip().GetStatus().GetWaiting()
-	got := waiting.GetActivity().GetQuestionLead().GetText()
+	got := waiting.GetActivity().GetSalient().GetQuestionLead().GetText()
 	if got != "2 questions · Which approach?" {
 		t.Fatalf("lead = %q, want the count and the first question", got)
 	}
@@ -245,7 +245,7 @@ func TestInterruptingOutranksEveryOtherWaitingStep(t *testing.T) {
 	if waiting.GetInterrupting() == nil {
 		t.Fatalf("substatus = %+v, want interrupting", waiting.GetSubstatus())
 	}
-	if waiting.GetActivity().GetInterrupting().GetText() == "" {
+	if waiting.GetActivity().GetSalient().GetInterrupting().GetText() == "" {
 		t.Fatalf("the interrupting status carries no composed line")
 	}
 }
@@ -263,7 +263,7 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	if waiting.GetColdGate() == nil {
 		t.Fatalf("substatus = %+v, want cold_gate", waiting.GetSubstatus())
 	}
-	if waiting.GetActivity().GetColdGateCost().GetText() == "" {
+	if waiting.GetActivity().GetSalient().GetColdGateCost().GetText() == "" {
 		t.Fatalf("the cold gate's composed cost line is missing")
 	}
 }
@@ -296,7 +296,7 @@ func TestTheWakeupFallbackStandsWhereTheFooterWouldReadIdle(t *testing.T) {
 	if waiting.GetWakeup() == nil {
 		t.Fatalf("substatus = %+v, want the wakeup fallback", waiting.GetSubstatus())
 	}
-	if waiting.GetActivity().GetWakeup().GetWakeAtMs() == 0 {
+	if waiting.GetActivity().GetSalient().GetWakeup().GetWakeAtMs() == 0 {
 		t.Fatalf("the wakeup countdown carries no deadline")
 	}
 }
@@ -458,7 +458,7 @@ func TestAQueryDeathStandsItsLineUnderTheFailedTurn(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetTurnFailed().GetActivity().GetQueryDied().GetText() == "" {
+	if h.view(t).GetStrip().GetStatus().GetTurnFailed().GetActivity().GetSalient().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing")
 	}
 }
@@ -482,7 +482,7 @@ func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
 
 	// Assert
 	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
-	if failed.GetActivity().GetQueryDied().GetText() == "" {
+	if failed.GetActivity().GetSalient().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
 	}
 }
@@ -548,7 +548,7 @@ func TestAQueryDiedTerminalStandsTheDeadQueryLine(t *testing.T) {
 
 	// Assert
 	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
-	if failed.GetActivity().GetQueryDied().GetText() == "" {
+	if failed.GetActivity().GetSalient().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
 	}
 }
@@ -1055,7 +1055,7 @@ func TestABlockedCloseComposesItsReasons(t *testing.T) {
 	if closing.GetBlocked() == nil {
 		t.Fatalf("substatus = %+v, want blocked", closing.GetSubstatus())
 	}
-	got := closing.GetActivity().GetCloseBlocked().GetText()
+	got := closing.GetActivity().GetSalient().GetCloseBlocked().GetText()
 	if got != "a turn is in flight; 2 subagents and a shell are running" {
 		t.Fatalf("close-blocked text = %q, want the composed reasons", got)
 	}
@@ -1462,5 +1462,70 @@ func TestAnUnreportedStateOutranksAnObservationWindow(t *testing.T) {
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetDegraded().GetStateUnreported() == nil {
 		t.Fatalf("status = %q, want degraded · state_unreported", h.status(t))
+	}
+}
+
+// TestEveryWaitingLineStandsFromWhenItsConditionOpened: the salient line's
+// instant is the condition's, so a later render does not re-stamp it.
+func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(h *harness)
+	}{
+		{name: "a question batch", open: func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which?")) }},
+		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "cold"}) }},
+		{name: "an interrupt", open: func(h *harness) { h.r.SetInterrupting(testWS, true) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			tt.open(h)
+			h.clock.Advance(time.Minute)
+
+			// Act
+			h.r.SetParked(testWS, false)
+
+			// Assert
+			at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()
+			if at.GetAtMs() != instant.UnixMilli() {
+				t.Fatalf("at = %d, want the instant the condition opened", at.GetAtMs())
+			}
+		})
+	}
+}
+
+func TestARestatedColdGateKeepsItsInstant(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "cold"})
+	h.clock.Advance(time.Minute)
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "still cold"})
+
+	// Assert
+	at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()
+	if at.GetAtMs() != instant.UnixMilli() {
+		t.Fatalf("at = %d, want the instant the gate first opened", at.GetAtMs())
+	}
+}
+
+func TestTheCloseRefusalStandsFromWhenItWasRefused(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetClosing(testWS, &CloseBlocked{Reason: "turn_in_flight", Detail: "a turn is in flight"})
+	h.clock.Advance(time.Minute)
+
+	// Act
+	h.r.SetParked(testWS, false)
+
+	// Assert
+	at := h.view(t).GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetAt()
+	if at.GetAtMs() != instant.UnixMilli() {
+		t.Fatalf("at = %d, want the instant the close was refused", at.GetAtMs())
 	}
 }

@@ -122,19 +122,19 @@ func TestEveryFaultKindDrawsItsActivityLine(t *testing.T) {
 	}{
 		{"a resume the shim refused", health.KindResumeFailed, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetDisconnected().GetActivity().GetFault()
+				return s.GetDisconnected().GetActivity().GetSalient().GetFault()
 			}},
 		{"a state client that will not answer", health.KindStateUnreadable, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetBlocked().GetActivity().GetFault()
+				return s.GetBlocked().GetActivity().GetSalient().GetFault()
 			}},
 		{"an absent prompts directory", health.KindPromptsDirMissing, true,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetBlocked().GetActivity().GetFault()
+				return s.GetBlocked().GetActivity().GetSalient().GetFault()
 			}},
 		{"a conversation a fresh bring-up left behind", health.KindConversationAbandoned, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetIdle().GetActivity().GetFault()
+				return s.GetIdle().GetActivity().GetUnpinned().GetTransient().GetFault()
 			}},
 	}
 	for _, tt := range tests {
@@ -200,7 +200,7 @@ func TestClosingAFaultReturnsTheStripToTheSessionsOwnStatus(t *testing.T) {
 			if got := statusName(view.GetStrip().GetStatus()); got != "idle" {
 				t.Fatalf("status after the fault closed = %q, want idle", got)
 			}
-			if view.GetStrip().GetStatus().GetIdle().GetActivity().GetFault() != nil {
+			if view.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient() != nil {
 				t.Fatalf("a retracted fault is still drawn")
 			}
 		})
@@ -221,7 +221,7 @@ func TestTheStrongestStandingFaultIsTheOneDrawn(t *testing.T) {
 	if got := disconnectedStep(view.GetStrip().GetStatus()); got != "dead" {
 		t.Fatalf("substatus = %q, want dead: the stronger fault claims the strip", got)
 	}
-	if got := view.GetStrip().GetStatus().GetDisconnected().GetActivity().GetFault().GetKind(); got != health.KindShimDied {
+	if got := view.GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault().GetKind(); got != health.KindShimDied {
 		t.Fatalf("activity kind = %q, want %q", got, health.KindShimDied)
 	}
 }
@@ -239,7 +239,7 @@ func TestAmongEqualFaultsTheNewestIsDrawn(t *testing.T) {
 	h.r.OpenFault(testWS, newer)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetFault().GetKind()
+	got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault().GetKind()
 	if got != health.KindBounceDied {
 		t.Fatalf("activity kind = %q, want %q: the newest evidence is the live one", got, health.KindBounceDied)
 	}
@@ -298,11 +298,54 @@ func TestAFaultReopenedUnderTheSameIdRefreshesItsLine(t *testing.T) {
 	h.r.OpenFault(testWS, second)
 
 	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetFault()
+	line := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault()
 	if line.GetDetail() != second.Detail {
 		t.Fatalf("detail = %q, want %q", line.GetDetail(), second.Detail)
 	}
 	if n := len(h.r.states[testWS].faults); n != 1 {
 		t.Fatalf("%d faults stand, want 1: the same record must not stand twice", n)
+	}
+}
+
+func TestANonEscalatingFaultIsAnnouncedAndNeverStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OpenFault(testWS, faultOf(t, "fault-1", health.KindConversationAbandoned, false))
+
+	// Assert
+	if got := transientOf(t, h).GetFault().GetKind(); got != health.KindConversationAbandoned {
+		t.Fatalf("transient fault kind = %q, want %q", got, health.KindConversationAbandoned)
+	}
+	if n := len(h.r.states[testWS].faults); n != 0 {
+		t.Fatalf("%d faults stand, want none: a non-escalating fault is an event", n)
+	}
+}
+
+func TestADaemonScopedNonEscalatingFaultIsAnnouncedOnEveryStrip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	second := ids.WorkspaceID("ws-second")
+	if err := h.r.SetWorkspaceDir(second, t.TempDir()); err != nil {
+		t.Fatalf("SetWorkspaceDir: %v", err)
+	}
+	h.r.SetParticipants(second, true, true)
+	h.r.OnLink(second, shimclient.LinkConnected)
+
+	// Act
+	h.r.OpenFault("", faultOf(t, "fault-1", health.KindDeployFailed, true))
+
+	// Assert
+	for _, ws := range []ids.WorkspaceID{testWS, second} {
+		view, _ := h.r.Topic(ws).Latest()
+		if got := unpinnedOf(view.GetStrip().GetStatus()).GetTransient().GetFault().GetKind(); got != health.KindDeployFailed {
+			t.Fatalf("workspace %q transient fault = %q, want %q", ws, got, health.KindDeployFailed)
+		}
+	}
+	if n := len(h.r.daemonFaults); n != 0 {
+		t.Fatalf("%d daemon faults stand, want none", n)
 	}
 }

@@ -1823,6 +1823,27 @@ func permissionModeChangedUpdate() *conversationv1.SessionUpdate {
 	}}
 }
 
+func networkResumeWaitsUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{
+		NetworkResumeWaits: &conversationv1.SessionNetworkResumeWaits{
+			Waits: []*conversationv1.SessionNetworkResumeWait{{
+				Work:        &conversationv1.DetachedWorkId{Value: "w-1"},
+				FailedAtMs:  1700000000000,
+				GivesUpAtMs: 1700001800000,
+			}},
+		},
+	}}
+}
+
+func networkResumeOutcomeUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeOutcome{
+		NetworkResumeOutcome: &conversationv1.SessionNetworkResumeOutcome{
+			Work:    &conversationv1.DetachedWorkId{Value: "w-1"},
+			Outcome: &conversationv1.SessionNetworkResumeOutcome_Resumed{Resumed: &conversationv1.SessionNetworkResumeResumed{}},
+		},
+	}}
+}
+
 func accountUsageUpdate() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_AccountUsage{
 		AccountUsage: &conversationv1.SessionAccountUsage{ObservedAtMs: 1700000000000},
