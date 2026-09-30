@@ -82,8 +82,15 @@ type StartTurnRequest struct {
 	// ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
 	// is refused `turn_already_open`; the daemon holds it instead.
 	JoinRunningTurn bool `protobuf:"varint,6,opt,name=join_running_turn,json=joinRunningTurn,proto3" json:"join_running_turn,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// WORDS FOR THE AGENT ALONE, pushed to the vendor after what was said and
+	// never recorded: the prompt row carries `said` exactly, and the feed draws
+	// nothing of this. The daemon sets it on a prompt that interrupted the
+	// running turn, saying why the work was cut, so the agent reads the cut as
+	// this prompt changing its work rather than as a rejection of it. UNSET for
+	// every other prompt.
+	VendorNote    *string `protobuf:"bytes,7,opt,name=vendor_note,json=vendorNote,proto3,oneof" json:"vendor_note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StartTurnRequest) Reset() {
@@ -156,6 +163,13 @@ func (x *StartTurnRequest) GetJoinRunningTurn() bool {
 		return x.JoinRunningTurn
 	}
 	return false
+}
+
+func (x *StartTurnRequest) GetVendorNote() string {
+	if x != nil && x.VendorNote != nil {
+		return *x.VendorNote
+	}
+	return ""
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
@@ -595,15 +609,18 @@ var File_shim_v1_endpoint_start_turn_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\n" +
-	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\"\xcb\x02\n" +
+	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\"\x81\x03\n" +
 	"\x10StartTurnRequest\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
 	"\x04said\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x125\n" +
 	"\x06origin\x18\x03 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x12\x1b\n" +
 	"\tpage_size\x18\x04 \x01(\rR\bpageSize\x12I\n" +
 	"\rknown_through\x18\x05 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x88\x01\x01\x12*\n" +
-	"\x11join_running_turn\x18\x06 \x01(\bR\x0fjoinRunningTurnB\x10\n" +
-	"\x0e_known_through\"\x8b\x01\n" +
+	"\x11join_running_turn\x18\x06 \x01(\bR\x0fjoinRunningTurn\x12$\n" +
+	"\vvendor_note\x18\a \x01(\tH\x01R\n" +
+	"vendorNote\x88\x01\x01B\x10\n" +
+	"\x0e_known_throughB\x0e\n" +
+	"\f_vendor_note\"\x8b\x01\n" +
 	"\x11StartTurnResponse\x125\n" +
 	"\asuccess\x18\x01 \x01(\v2\x19.shim.v1.StartTurnSuccessH\x00R\asuccess\x125\n" +
 	"\afailure\x18\x02 \x01(\v2\x19.shim.v1.StartTurnFailureH\x00R\afailureB\b\n" +

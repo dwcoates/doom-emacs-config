@@ -67,6 +67,13 @@ message StartTurnRequest {
   // ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
   // is refused `turn_already_open`; the daemon holds it instead.
   bool join_running_turn = 6;
+  // WORDS FOR THE AGENT ALONE, pushed to the vendor after what was said and
+  // never recorded: the prompt row carries `said` exactly, and the feed draws
+  // nothing of this. The daemon sets it on a prompt that interrupted the
+  // running turn, saying why the work was cut, so the agent reads the cut as
+  // this prompt changing its work rather than as a rejection of it. UNSET for
+  // every other prompt.
+  optional string vendor_note = 7;
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
