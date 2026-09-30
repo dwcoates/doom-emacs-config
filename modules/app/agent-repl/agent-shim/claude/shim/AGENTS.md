@@ -1012,8 +1012,11 @@ forever, and the run's announcement stayed open in the record.
   remembered start is made DURABLE (`writeDurable` of the same entry — absorbed
   if it already landed, landed behind the original if not), so its first frame
   is `start` at once; a concluded run replays and closes on its terminal; a run
-  the store holds no row for is refused `NotFound` (`unknown_work`), which is
-  the contract's "not a live shell: refused". There is no recheck cadence and
+  THIS SHIM HOLDS LIVE with no stored row yet is opened with
+  `store.v1.WatchBashRunRequest.await_first_row`, waiting on its first row for
+  as long as the run lives (landed change 4, 2026-09-30); any other run the
+  store holds no row for is refused `NotFound` (`unknown_work`), which is the
+  contract's "not a live shell: refused". There is no recheck cadence and
   no standing predicate any more. A start that cannot be made durable refuses
   the watch rather than opening it.
 - **WHAT IT DOES NOT COVER.** A run whose call this fold never saw open has no
@@ -1022,6 +1025,47 @@ forever, and the run's announcement stayed open in the record.
   terminal key, exactly as `StopBash`'s own terminal already was: a shim
   terminal landing after a sidecar `EXIT=` row replaces the spool's evidence on
   that row (the tail row keeps the output).
+
+## A shell run's detachment is CLAIMED for the sidecar (2026-09-30)
+
+`convert/detached.ts` (`shellRunClaimEntry`); design record
+`docs/protobuf-design/footer-activity-tiers.md`, landed change 4.
+
+- **EVERY DETACHMENT FACT THE TASK STREAM STATES FOR A SHELL WRITES A CLAIM**
+  (`store.v1.EntryBatch.shell_run_claims`): `task_started` in the background,
+  and a `task_updated` patch that moves it. The sidecar reads the claims once
+  per rescan and attributes the run's spool to the book that owns it, so a
+  shell the vendor moved on its own is watched like one it announced.
+- **A PATCH STATES THAT WORK MOVED, NEVER WHY**, so a shell it moves is
+  announced `conversation.v1.DetachedCauseVendorMoved`; its own tool result
+  restates the row with the real cause when it reaches the shim. An agent
+  moved by a patch keeps `by_user`.
+
+## A prompt may JOIN the running turn (2026-09-30)
+
+`TurnEngine.joinRunningTurn` (`src/engine/turn.ts`), the session's `joining`
+slot (`src/engine/session.ts`); the contract is the comment on
+`StartTurnRequest.join_running_turn`.
+
+- **THE PROMPT IS PUSHED AT ONCE, WITH NO INTERRUPT**, as its own stamped
+  send, and its row waits: the check of the running turn and the push are one
+  synchronous step, so the join is registered before that turn can leave the
+  slot or never made. With no daemon turn running the flag changes nothing.
+- **THE VENDOR'S ECHO DECIDES ITS FATE.** A frame of the running turn naming
+  the join among the sends it consumed means the vendor FOLDED it in at a tool
+  boundary: its row is written there with `folded_into`, and it opens no turn.
+  The running turn leaving the send slot first, however it leaves (its result,
+  a kill, whose queued input the SDK still runs), makes the join the NEXT
+  turn: it takes the slot in the same step and its row is written as that
+  turn's first.
+- **A DEATH OR TEARDOWN ENDS IT WITH THE REST** (`turnsOwedAnEnd`): after the
+  running turn's terminal, the join is announced as its own turn and ended.
+- **ONE JOIN AT A TIME.** A second is refused `turn_already_open`; the daemon
+  holds the prompt instead.
+- **A `vendor_note` RIDES ONLY TO THE VENDOR** (`vendorSaid`): a closing
+  `<system-reminder>` block after what was said, never on the prompt row. The
+  sidecar withholds agent-repl's own prompts from the transcript plane, so the
+  feed never draws it.
 
 ## A resumed subagent is named by the store when this process never saw its spawn (2026-09-27)
 

@@ -374,7 +374,11 @@ rebuilt or rewritten, and a database carrying every index is left untouched.
   rows already stored keep every meaning they had, and the table's reader states
   what its absence means. `cursor_conversion` is one: nuking the database to add
   it would also throw away every stream-plane row the shim wrote live, which no
-  producer can rebuild. The shape check compares the table set with the
+  producer can rebuild. `shell_run_claim` (landed change 4, 2026-09-30) is
+  another: one row per (vendor task id, run), written from
+  `store.v1.EntryBatch.shell_run_claims` and answered by
+  `GetShellRunClaims`, whose `owner` names the book holding the run's own
+  `activity:` row and is unset while no producer has written it. The shape check compares the table set with the
   in-place tables taken out (`shapeTables`), because a database this binary
   created may still lack them.
 - **ADDING ONE.** Append to `lineageIndexes` (or a sibling list applied the same

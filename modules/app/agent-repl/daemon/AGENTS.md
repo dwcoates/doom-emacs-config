@@ -1498,7 +1498,75 @@ Owner rulings, 2026-09-27 (`internal/sessioncommand`, `internal/promptqueue/acts
 - **EVERY SPELLING THE VENDOR READS AS /clear IS A CUT.** `SessionCommandSpec.aliases` carries `/reset` and `/new` for `/clear`, and `sessioncommand.ContextCut` deliberately ignores `takes_args`, so `/clear <text>` and the aliases with any text are cuts too (owner ruling, 2026-09-27; the comment in `ContextCut` records it). They are sent to the vendor as `/clear`. The feed's directive recognition reads through the same predicate.
 - **A CONTEXT CUT'S TEXT IS NEVER CLASSIFIED.** `/compact [text]` and `/clear [text]` (and its aliases) are session acts whatever path they take: the handler sends them to `SubmitSessionAct`; a held prompt, an edit's commit, or a caller that skipped recognition is stamped `hold_for_turn_end` by `sessionActVerdict` in `hold`, `classifyHeld` and `verdictFor` (the classifier call site itself), recorded at INFO, and `deliver` runs it through `runContextCut`.
 - **THE QUEUE KNOWS THE RUNNING TURN IS A SESSION ACT.** `wsState.cut` (turn + command, under `q.mu`) is set by `runContextCut` before the watcher or shim hear of the turn, and retired by the turn-close door (`turnclose.go`, every close path) or a refused start.
-- **NOTHING INTERJECTS OR OVERTAKES A RUNNING CUT.** `interject` refuses under the same `q.mu` hold that installs the head, so a verdict or a Release cannot target it (INFO record: `session_act_turn`, `session_act`, `held_turn`); `popAndDeliver` delivers nothing while it runs; `drainActs` stops after a cut opens; `Submit` and `Release` treat a recorded cut as running before the watcher learns of it. Held prompts stay held rows and are delivered in order at the act's end. A user's explicit interrupt (`workspace/interrupt.go`) never goes through the queue and still ends the act.
+- **NOTHING INTERJECTS OR OVERTAKES A RUNNING CUT.** `interject` refuses under the same `q.mu` hold that installs the head, so a verdict or a Release cannot target it (INFO record: `session_act_turn`, `session_act`, `held_turn`); `popAndDeliver` delivers nothing while it runs, and stops after a cut it popped opens; `Submit` and `Release` treat a recorded cut as running before the watcher learns of it. Held prompts stay held rows and are delivered in order at the act's end. A user's explicit interrupt (`workspace/interrupt.go`) never goes through the queue and still ends the act.
+
+## The queue is ONE first-in, first-out line of prompts and session acts
+
+Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
+`join.go`, `classify.go`; design record
+`docs/protobuf-design/footer-activity-tiers.md`, "Held-queue").
+
+- **A SESSION ACT THAT MUST WAIT IS A DURABLE HELD ENTRY** (`wsm.HeldAct`,
+  layout 14): a model or permission-mode change submitted while anything is
+  ahead of it is held in order with the prompts, drawn on the tray as the
+  change it makes, never classified, and applied when what is ahead of it
+  ends; `popAndDeliver` applies every act at the head and goes on to the
+  prompt behind them. Nothing waits in process memory, so a restart or a
+  handover carries acts like prompts.
+- **A PROMPT IS JUDGED ONLY AGAINST THE ITEM IMMEDIATELY AHEAD OF IT**
+  (`itemAhead`): a held act ahead means it waits unjudged; a held prompt still
+  queued ahead is what it is judged against; nothing held ahead means the
+  running turn is.
+- **THE CLASSIFIER ROUTES THREE WAYS** (`classifier.Route`; brief
+  `prompts/queue-routing-classifier.md`): `queue` waits for the running turn;
+  `after_tool_call` (the common case, and the answer when unsure) joins it;
+  `interrupt` (the prompt makes the running work wrong or wasted) interrupts
+  it. The explicit-interrupt first word is `interrupt` without asking.
+- **AGAINST A QUEUED PROMPT, EITHER NON-QUEUE ROUTE COALESCES** (`coalesce`,
+  under the delivery lock, then the verdict lock): nothing ahead has started,
+  so the new prompt's content is folded into the queued one, which keeps its
+  place and is marked `coalesced`, and the new entry is retired. When the
+  prompt ahead started while the verdict was reached, the route is applied
+  against it as it runs.
+- **AN `after_tool_call` PROMPT JOINS THE RUNNING TURN** (`joinLocked`, under
+  the delivery lock): it is sent at once with
+  `shim.v1.StartTurnRequest.join_running_turn`, nothing interrupted, and the
+  session watcher stands it BEHIND the running turn (`OnTurnJoining`). The
+  vendor decides its fate: FOLDED at the running turn's next tool boundary,
+  its prompt row names that turn (`conversation.v1.AgentPrompt.folded_into`)
+  and its own turn closes unrun as `wsm.CloseFolded`, with no ending drawn and
+  no banner; NOT FOLDED, it stands in flight the moment the running turn ends,
+  so that end pops nothing into it. One prompt joins at a time: while it
+  waits, a prompt behind it waits unjudged. A join that cannot go (the running
+  turn ended first, a vendor-started turn runs, the shim refuses) leaves the
+  prompt held for the turn's end, with the reason on its verdict.
+- **A PROMPT THAT INTERRUPTED THE RUNNING TURN CARRIES A NOTE FOR THE AGENT**
+  (`interruptionNote`, `shim.v1.StartTurnRequest.vendor_note`): the vendor
+  records the cut as the user rejecting the work, and the note says the work
+  was cut because this message changes it. The shim sends it after what was
+  said and never records it; the prompt row and the feed carry the user's
+  words alone.
+
+## The footer's activity cell has four tiers, and the daemon picks the one line
+
+Design record `docs/protobuf-design/footer-activity-tiers.md` ("THE PLAN",
+landed changes 1-5; `internal/resolve/footer`).
+
+- **SALIENT, TRANSIENT, QUIET STRETCH, ENDURING.** A salient line stands while
+  a condition blocks the turn or the user, and only its own end signal clears
+  it (a timer never does); a transient carries its own expiry, which the
+  client applies; the quiet-stretch line stands under `working` and
+  `background` until the next feed item surfaces; the enduring line is the
+  one figure the daemon chose by the 80% rule (usage, or the context window
+  once it passes 80%). The salient kinds are shared across status arms.
+- **A PROMPT'S DELIVERY IS A `submitting` TRANSIENT PER STAGE**: held (its
+  place in the queue), classifying, interrupting the turn, after this tool
+  call, coalesced, sent.
+- **A RETRIED API CALL COUNTS AS THE VENDOR DOES** (landed change 5): the
+  `retrying` line carries the vendor's attempt, its limit and the instant of
+  its next try, which the client counts down and then shows overdue, so a
+  vendor that stalls reads as a stall. The retried call's first response ends
+  the line and raises `api_restored`.
 
 ## A deferred prompt is held for the turn's end, never classified, and durable
 
