@@ -14,8 +14,8 @@ func TestFakeJudgeInterjectsOnTheExplicitFastPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
-	if !got.Interject || !got.FastPath {
-		t.Fatalf("verdict = %+v, want an interjecting fast-path verdict", got)
+	if got.Route != RouteInterrupt || !got.FastPath {
+		t.Fatalf("verdict = %+v, want an interrupting fast-path verdict", got)
 	}
 }
 
@@ -28,11 +28,25 @@ func TestFakeJudgeInterjectsOnTheScriptedMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
-	if !got.Interject {
-		t.Fatalf("verdict = %+v, want an interjecting verdict", got)
+	if got.Route != RouteInterrupt {
+		t.Fatalf("verdict = %+v, want an interrupting verdict", got)
 	}
 	if got.FastPath {
 		t.Fatal("the marker is not the explicit-interrupt fast path")
+	}
+}
+
+func TestFakeJudgeJoinsTheRunningTurnOnTheAfterToolCallMarker(t *testing.T) {
+	// Arrange
+	j := NewFake()
+	// Act
+	got, err := j.Judge(context.Background(), "running", "also cover the edge case [after-tool-call]")
+	// Assert
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if got.Route != RouteAfterToolCall || got.FastPath {
+		t.Fatalf("verdict = %+v, want an after-tool-call verdict off the marker", got)
 	}
 }
 
@@ -45,7 +59,7 @@ func TestFakeJudgeHoldsEveryOtherPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
-	if got.Interject {
+	if got.Route != RouteQueue {
 		t.Fatalf("verdict = %+v, want a holding verdict", got)
 	}
 }

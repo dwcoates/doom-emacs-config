@@ -80,6 +80,13 @@ type wsState struct {
 	head         *ids.TurnID
 	interrupting bool
 
+	// joining is the prompt the queue sent to join the running turn after
+	// its current tool call (join.go), nil when none waits. While it stands,
+	// the vendor has not yet folded it in nor run it as its own turn, and no
+	// prompt behind it is classified. Guarded by q.mu; set under drain,
+	// cleared by the prompt's own turn ending, folded or run.
+	joining *joiningPrompt
+
 	// edit is the workspace's standing held-prompt edit, nil when none
 	// stands. It is WRITTEN only while `drain` is held — the lock every
 	// delivery of a standing hold is decided under — and under mu as well,

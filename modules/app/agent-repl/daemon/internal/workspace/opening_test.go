@@ -171,8 +171,9 @@ func TestFailedWatcherStartKeepsTheSelectionOwed(t *testing.T) {
 //   - A WatchAgentRequest is built in ONE place, the watcher's
 //     openAgentStreamLocked, which states the watch's known pointer whenever
 //     the watcher holds one.
-//   - A StartTurnRequest is built in ONE place, the sender's StartTurn, whose
-//     page is bounded to the turn's own row.
+//   - A StartTurnRequest is built in ONE place, the sender's startTurn (behind
+//     both StartTurn and JoinRunningTurn), whose page is bounded to the turn's
+//     own row.
 //   - Nothing in production asks ReadHistory for its newest page.
 func TestFirstPageRequestsHaveNamedSitesOnly(t *testing.T) {
 	// Arrange.
@@ -180,7 +181,7 @@ func TestFirstPageRequestsHaveNamedSitesOnly(t *testing.T) {
 		"sessionwatcher.WorkspaceOpened":    {"internal/workspace/opening.go:openingFor"},
 		"sessionwatcher.TranscriptSelected": {"internal/workspace/opening.go:openingFor"},
 		"shimv1.WatchAgentRequest":          {"internal/sessionwatcher/watcher.go:openAgentStreamLocked"},
-		"shimv1.StartTurnRequest":           {"internal/workspace/sender.go:StartTurn"},
+		"shimv1.StartTurnRequest":           {"internal/workspace/sender.go:startTurn"},
 		"shimv1.ReadHistoryFirst":           nil,
 		"shimv1.ReadHistoryRequest_First":   nil,
 	}

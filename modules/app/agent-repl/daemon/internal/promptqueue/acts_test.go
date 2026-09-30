@@ -104,7 +104,7 @@ func TestAHeldActWaitsBehindThePromptHeldBeforeIt(t *testing.T) {
 	// 2026-09-30): the prompt was held first, so it runs first.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestAHeldActIsAppliedAtTheEndOfThePromptAheadOfIt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestAHeldActIsOnTheTrayInOrder(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 
 	// Act
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
@@ -379,7 +379,7 @@ func cutRunsWithAnInterjectingPromptHeld(t *testing.T, h *harness, kind string) 
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
 	h.watcher.running("cut-1")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestAPromptQueuedBehindAHeldCompactIsNeverClassified(t *testing.T) {
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {

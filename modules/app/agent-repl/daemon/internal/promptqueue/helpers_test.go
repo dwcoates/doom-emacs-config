@@ -416,9 +416,31 @@ type fakeSender struct {
 	// attempts counts every StartTurn call, so a test can assert the queue
 	// delivered a prompt exactly once.
 	attempts int
+	// joins is every turn sent to join the running turn, in order.
+	joins []ids.TurnID
+	// joinErr, when set, refuses every JoinRunningTurn.
+	joinErr error
 }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
+
+func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.joinErr != nil {
+		return nil, s.joinErr
+	}
+	s.joins = append(s.joins, turn)
+	s.said = append(s.said, said)
+	return &shimv1.StartTurnSuccess{
+		Prompt: &conversationv1.AgentPrompt{
+			Id:    &conversationv1.TurnId{Value: string(turn)},
+			Agent: &conversationv1.AgentId{Value: s.mainAgent},
+			Said:  said,
+		},
+		Page: &conversationv1.HistoryPage{},
+	}, nil
+}
 
 func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
 	s.mu.Lock()
@@ -539,6 +561,11 @@ type fakeWatcher struct {
 	opened     []*conversationv1.AgentPrompt
 	opening    []ids.TurnID
 	openFailed []ids.TurnID
+	// joining is every turn recorded as joining the turn in flight.
+	joining []ids.TurnID
+	// refuseJoins makes OnTurnJoining report false, as a vendor-started turn
+	// in flight does.
+	refuseJoins bool
 	// departure is the watched shim's departure, nil while it runs.
 	departure *sessionwatcher.Departure
 }
@@ -589,6 +616,16 @@ func (w *fakeWatcher) OnTurnOpening(_ ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.opening = append(w.opening, turn)
+}
+
+func (w *fakeWatcher) OnTurnJoining(_ ids.WorkspaceID, turn ids.TurnID) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.refuseJoins {
+		return false
+	}
+	w.joining = append(w.joining, turn)
+	return true
 }
 
 func (w *fakeWatcher) OnTurnOpenFailed(_ ids.WorkspaceID, turn ids.TurnID) {
@@ -926,13 +963,19 @@ type scriptedJudge struct {
 	// so a test can act while a verdict is known to be IN the model's hands.
 	entered     chan struct{}
 	enteredOnce sync.Once
+	// onJudge, when set, runs as each verdict is reached, which is where a
+	// test changes the session under a verdict in flight.
+	onJudge func()
 }
 
 func (j *scriptedJudge) Judge(_ context.Context, running, incoming string) (classifier.Verdict, error) {
 	j.mu.Lock()
 	j.asked = append(j.asked, [2]string{running, incoming})
-	gate, entered := j.gate, j.entered
+	gate, entered, onJudge := j.gate, j.entered, j.onJudge
 	j.mu.Unlock()
+	if onJudge != nil {
+		onJudge()
+	}
 	if entered != nil {
 		j.enteredOnce.Do(func() { close(entered) })
 	}

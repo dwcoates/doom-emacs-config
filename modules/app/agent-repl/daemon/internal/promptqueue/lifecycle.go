@@ -29,6 +29,13 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "close": how.String()})
 
+	// A FOLDED PROMPT'S TURN NEVER RAN: the vendor took it into the running
+	// turn, which goes on. Nothing about that turn changes here.
+	if how == wsm.CloseFolded {
+		q.onFolded(ctx, ws, turn, log)
+		return
+	}
+
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
 	// and the handover's quiesce arrive together, and both deliver from the
 	// same standing holds: taken concurrently the intake leaves out of order.
@@ -37,12 +44,20 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	defer drain.Unlock()
 
 	q.mu.Lock()
+	var joined joiningPrompt
+	joinStood := false
 	if state, ok := q.states[ws]; ok {
 		state.interrupting = false
 		state.cut = nil
 		// A TURN ENDED, so whatever serves the workspace held a session long
 		// enough to finish one: a later death is not a crash loop.
 		state.unattendedRevival = false
+		// THE TURN A PROMPT WAS SENT TO JOIN ENDED WITHOUT FOLDING IT IN, so
+		// that prompt now runs as its own turn: its join is over.
+		if state.joining != nil && state.joining.into == turn {
+			joined, joinStood = *state.joining, true
+			state.joining = nil
+		}
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
@@ -59,8 +74,18 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
 				"turn_in_flight": string(*running),
 			})
+			if joinStood && *running == joined.turn {
+				q.onJoinedTurnStood(ws, joined, log)
+				return
+			}
+			if joinStood {
+				joinNotStood(log, joined)
+			}
 			return
 		}
+	}
+	if joinStood {
+		joinNotStood(log, joined)
 	}
 
 	// The roster's turn fact is the daemon's own, so its close is too.
@@ -463,5 +488,17 @@ func (q *queue) reconcileTurns(ctx context.Context, ws ids.WorkspaceID, global d
 	}
 	global.Warn(opRestore, "closed the in-flight turns of a workspace with no session", dlog.Context{
 		"workspace": string(ws), "orphans": len(report.Turns),
+	})
+}
+
+// joinNotStood records, at ERROR, a prompt sent to join a turn that ended
+// without it running in that turn's place. THE WATCHER STANDS THE JOINING
+// PROMPT IN FLIGHT the moment the turn it joined ends, before that end reaches
+// the queue, so the end always finds it running: anything else is a defect.
+func joinNotStood(log dlog.Logger, joined joiningPrompt) {
+	log.Error(opJoin, "the turn a prompt was sent to join ended, but the prompt does not run in its place", dlog.Context{
+		"joining_turn":        string(joined.turn),
+		"joined_turn":         string(joined.into),
+		"invariant_violation": "the watcher stands a joining prompt in flight when the turn it joined ends",
 	})
 }

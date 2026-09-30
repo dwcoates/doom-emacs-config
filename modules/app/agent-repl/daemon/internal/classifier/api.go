@@ -1,5 +1,6 @@
-// Package classifier judges whether an incoming prompt interrupts the running
-// turn.
+// Package classifier judges where an incoming prompt goes while a turn runs:
+// it waits for the turn, joins it after its current tool call, or interrupts
+// it.
 //
 // It is the daemon's OWN headless vendor run (R13), guarded by
 // envc.VendorGuard.Check("classifier"); `-fake` uses a scripted keyword
@@ -9,6 +10,7 @@ package classifier
 
 import (
 	"context"
+	"fmt"
 
 	"claude-repld/internal/envc"
 	"claude-repld/internal/headless"
@@ -19,11 +21,41 @@ import (
 // rule is first-word, not whole-prompt).
 var ExplicitInterrupts = []string{"stop", "abort", "cancel", "halt", "wait"}
 
+// Route is where the judge sends an incoming prompt relative to the running
+// turn (owner ruling, 2026-09-30).
+type Route int
+
+const (
+	// RouteQueue: the prompt is independent of the running turn and waits for
+	// it to end.
+	RouteQueue Route = iota
+	// RouteAfterToolCall: the prompt adds to the running turn's work without
+	// invalidating it, so it joins that turn after its current tool call and
+	// nothing is interrupted. The common case, and the answer when unsure.
+	RouteAfterToolCall
+	// RouteInterrupt: the prompt makes the running work wrong or wasted, so
+	// the turn is interrupted to deliver it.
+	RouteInterrupt
+)
+
+// String names the route as the logs and the tray's evidence spell it.
+func (r Route) String() string {
+	switch r {
+	case RouteQueue:
+		return "queue"
+	case RouteAfterToolCall:
+		return "after_tool_call"
+	case RouteInterrupt:
+		return "interrupt"
+	default:
+		panic(fmt.Sprintf("classifier: route %d is not one of the three", int(r)))
+	}
+}
+
 // Verdict is the judge's answer.
 type Verdict struct {
-	// Interject reports whether the incoming prompt interrupts the running
-	// turn.
-	Interject bool
+	// Route is where the incoming prompt goes.
+	Route Route
 	// Reason is the judge's stated reason, kept as evidence on the held
 	// prompt's record.
 	Reason string
@@ -32,7 +64,7 @@ type Verdict struct {
 	FastPath bool
 }
 
-// Judge decides whether incoming interrupts running. An error here is not a
+// Judge decides where incoming goes relative to running. An error here is not a
 // verdict: the caller holds the prompt with a classification_error rather than
 // guessing either way.
 type Judge interface {

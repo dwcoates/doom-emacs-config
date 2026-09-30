@@ -120,7 +120,7 @@ func TestSealMoveSupersedesAVerdictStillBeingJudged(t *testing.T) {
 	// flight, and then the move.
 	h := newHarness(t)
 	busy(t, h)
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "supersedes it"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "supersedes it"}
 	release := h.judge.hold()
 	if _, err := h.q.Submit(context.Background(), submission("t-held", "a follow-up")); err != nil {
 		t.Fatalf("Submit: %v", err)

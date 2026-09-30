@@ -66,7 +66,7 @@ func TestOnTurnEndedDeliversTheNextHeldPrompt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	// Act
 	h.watcher.idle()
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
@@ -80,7 +80,7 @@ func TestOnTurnEndedDeliversTheOldestHoldFirst(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	h.q.deps.Now = func() time.Time { return instant }
 	if _, err := h.q.Submit(context.Background(), submission("older", "first")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -119,7 +119,7 @@ func TestOnLeaseChangedStampsANewHoldOnEveryStandingPrompt(t *testing.T) {
 	// Arrange: a prompt held for the running turn, then a drain lease arrives.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
 	h.lease(wsm.HolderDrain, wsm.PolicyHold)
 	// Act
@@ -322,7 +322,7 @@ func TestNextDeliverablePrefersTheSemanticHead(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "first")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestTheTurnEndsDrainExcludesALeaseChangeForTheWholeDelivery(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	free := true
 	h.sender.startHook = func() { free = h.q.state(theWorkspace).drain.TryLock() }
 
@@ -406,7 +406,7 @@ func TestOnTurnsEndedUnobservedDeliversNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.watcher.idle()
 	// Act
 	h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"stale-turn"})
@@ -494,7 +494,7 @@ func TestOnTurnAdoptedDeliversNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "vendor-turn", "")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	// Act
 	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
 	// Assert
@@ -545,7 +545,7 @@ func TestOnTurnEndedWhileAnotherTurnRunsDeliversNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "earlier-turn", "the earlier work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.watcher.running("vendor-turn")
 	// Act
 	h.q.OnTurnEnded(theWorkspace, "earlier-turn", wsm.CloseCompleted)

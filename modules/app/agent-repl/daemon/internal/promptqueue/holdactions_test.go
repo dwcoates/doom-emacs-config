@@ -63,7 +63,7 @@ func TestReleaseInterruptsWhenDeliveryTakesOne(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	// Act
 	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
 		t.Fatalf("Release: %v", err)
@@ -170,7 +170,7 @@ func TestAcceptFlipsAHoldForTurnEndVerdict(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	// Act
 	if err := h.q.Accept(context.Background(), theWorkspace, "t1"); err != nil {
 		t.Fatalf("Accept: %v", err)
@@ -187,7 +187,7 @@ func TestAcceptRefusesAnyOtherVerdict(t *testing.T) {
 	// hold_for_turn_end.)
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: true, Reason: "it countermands the work"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"})
 	// Act
 	err := h.q.Accept(context.Background(), theWorkspace, "t1")
 	// Assert
@@ -215,7 +215,7 @@ func TestAcceptRepublishesTheTray(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	before := h.holds.pushCount()
 	// Act
 	if err := h.q.Accept(context.Background(), theWorkspace, "t1"); err != nil {
@@ -231,7 +231,7 @@ func TestAcceptSurfacesAFailedWrite(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.db.acceptErr = errors.New("the database is read-only")
 	// Act
 	err := h.q.Accept(context.Background(), theWorkspace, "t1")
@@ -319,7 +319,7 @@ func TestReleaseIsRefusedWhileASessionActRuns(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 	// Act
 	err := h.q.Release(context.Background(), theWorkspace, "t1")

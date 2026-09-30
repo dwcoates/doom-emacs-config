@@ -19,7 +19,7 @@ func queuedBehind(t *testing.T, h *harness, turns ...string) {
 	t.Helper()
 	running(t, h, "running-turn", "the running work")
 	for _, turn := range turns {
-		heldPrompt(t, h, turn, classifier.Verdict{Interject: false, Reason: "independent"})
+		heldPrompt(t, h, turn, classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	}
 }
 
@@ -266,7 +266,7 @@ func TestCommitEditThenAnInterjectVerdictInterruptsTheRunningTurn(t *testing.T) 
 	h := newHarness(t)
 	queuedBehind(t, h, "t1")
 	beginEdit(t, h, "t1")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "a correction"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "a correction"}
 	// Act
 	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("stop, do this instead")); err != nil {
 		t.Fatalf("CommitEdit: %v", err)
@@ -283,7 +283,7 @@ func TestCommitEditThenAnInterruptVerdictAgainstAQueuedPromptCoalesces(t *testin
 	h := newHarness(t)
 	queuedBehind(t, h, "t0", "t1")
 	beginEdit(t, h, "t1")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "a correction"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "a correction"}
 	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("stop, do this instead")); err != nil {
 		t.Fatalf("CommitEdit: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestAVerdictInFlightAcrossACommitIsDiscarded(t *testing.T) {
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	release := h.judge.hold()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "urgent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "urgent"}
 	if _, err := h.q.Submit(context.Background(), submission("t1", "the old words")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestCommitEditIntoASessionActNeverReachesTheClassifier(t *testing.T) {
 	queuedBehind(t, h, "t1")
 	beginEdit(t, h, "t1")
 	asked := len(h.judge.questions())
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "a correction"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "a correction"}
 	// Act
 	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("/compact keep the plan")); err != nil {
 		t.Fatalf("CommitEdit: %v", err)

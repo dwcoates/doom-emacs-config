@@ -15,21 +15,25 @@ import (
 // directory AT USE TIME so an edit takes effect without a daemon bounce.
 const BriefRouting = "queue-routing-classifier"
 
-// The two answer tokens the brief instructs the model to reply with, EXACTLY
+// The three answer tokens the brief instructs the model to reply with, EXACTLY
 // one of them and nothing else. They are spelled here because the brief's
-// {{token_jump}} / {{token_hold}} placeholders are spliced from these: the
-// question and the answer parser can never drift apart.
+// {{token_interrupt}} / {{token_after_tool_call}} / {{token_hold}}
+// placeholders are spliced from these: the question and the answer parser can
+// never drift apart.
 const (
-	// TokenJump is the interject answer.
-	TokenJump = "ROUTE_INTERJECT"
+	// TokenInterrupt is the interrupt answer.
+	TokenInterrupt = "ROUTE_INTERRUPT"
+	// TokenAfterToolCall is the join-after-the-current-tool-call answer.
+	TokenAfterToolCall = "ROUTE_AFTER_TOOL_CALL"
 	// TokenHold is the wait-for-turn-end answer.
 	TokenHold = "ROUTE_HOLD"
 )
 
 // The evidence a vendor verdict carries.
 const (
-	vendorInterjectReason = "the routing classifier answered interject"
-	vendorHoldReason      = "the routing classifier answered hold"
+	vendorInterruptReason     = "the routing classifier answered interrupt"
+	vendorAfterToolCallReason = "the routing classifier answered after this tool call"
+	vendorHoldReason          = "the routing classifier answered hold"
 )
 
 // VendorSite is the guard site name the classifier's run asks under. It is the
@@ -74,7 +78,7 @@ func newVendorJudge(guard envc.VendorGuard, runner headless.Runner, promptsDir s
 
 func (j *vendorJudge) Judge(ctx context.Context, running, incoming string) (Verdict, error) {
 	if ExplicitInterrupt(incoming) {
-		return Verdict{Interject: true, Reason: ExplicitInterruptReason, FastPath: true}, nil
+		return Verdict{Route: RouteInterrupt, Reason: ExplicitInterruptReason, FastPath: true}, nil
 	}
 	if err := j.guard.Check(VendorSite); err != nil {
 		return Verdict{}, fmt.Errorf("classify the incoming prompt: %w", err)
@@ -88,10 +92,11 @@ func (j *vendorJudge) Judge(ctx context.Context, running, incoming string) (Verd
 		return Verdict{}, fmt.Errorf("read the %s brief: %w", BriefRouting, err)
 	}
 	question, err := j.splice(brief, map[string]string{
-		"token_jump":   TokenJump,
-		"token_hold":   TokenHold,
-		"running_turn": running,
-		"new_message":  incoming,
+		"token_interrupt":       TokenInterrupt,
+		"token_after_tool_call": TokenAfterToolCall,
+		"token_hold":            TokenHold,
+		"running_turn":          running,
+		"new_message":           incoming,
 	})
 	if err != nil {
 		return Verdict{}, fmt.Errorf("splice the %s brief: %w", BriefRouting, err)
@@ -102,13 +107,15 @@ func (j *vendorJudge) Judge(ctx context.Context, running, incoming string) (Verd
 		return Verdict{}, fmt.Errorf("run the routing classifier: %w", err)
 	}
 	switch strings.TrimSpace(out) {
-	case TokenJump:
-		return Verdict{Interject: true, Reason: vendorInterjectReason}, nil
+	case TokenInterrupt:
+		return Verdict{Route: RouteInterrupt, Reason: vendorInterruptReason}, nil
+	case TokenAfterToolCall:
+		return Verdict{Route: RouteAfterToolCall, Reason: vendorAfterToolCallReason}, nil
 	case TokenHold:
-		return Verdict{Interject: false, Reason: vendorHoldReason}, nil
+		return Verdict{Route: RouteQueue, Reason: vendorHoldReason}, nil
 	default:
-		return Verdict{}, fmt.Errorf("the routing classifier answered %q, which is neither %s nor %s",
-			strings.TrimSpace(out), TokenJump, TokenHold)
+		return Verdict{}, fmt.Errorf("the routing classifier answered %q, which is none of %s, %s or %s",
+			strings.TrimSpace(out), TokenInterrupt, TokenAfterToolCall, TokenHold)
 	}
 }
 

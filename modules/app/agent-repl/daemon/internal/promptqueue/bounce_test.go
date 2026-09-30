@@ -228,7 +228,7 @@ func TestAQueuedPromptDoesNotBlockABounceAndGoesToTheNewShim(t *testing.T) {
 	// registered bounce.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "queued", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "queued", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	g := newGate()
 	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
 		t.Fatalf("RequestBounce: %v", err)
@@ -319,7 +319,7 @@ func TestADrainingWorkspaceDispatchesNothing(t *testing.T) {
 			// drained) that the test holds open.
 			h := newHarness(t)
 			running(t, h, "running-turn", "the running work")
-			heldPrompt(t, h, "queued", classifier.Verdict{Interject: false, Reason: "independent"})
+			heldPrompt(t, h, "queued", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 			h.watcher.idle()
 			g := newGate()
 			if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
@@ -381,7 +381,7 @@ func TestAFailedBounceResumesDispatchAndSaysSo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "queued", classifier.Verdict{Interject: false, Reason: "independent"})
+	heldPrompt(t, h, "queued", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	h.watcher.idle()
 	g := newGate()
 	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
