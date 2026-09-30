@@ -92,10 +92,25 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.reviving {
 		out.Reviving = &frontendv1.RosterRowReviving{}
 	}
+	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
+	// most-recently-selected first by it (the landing after a close, the
+	// editor's jump to the most recent workspace), and it survives a restart
+	// of every client because it is WSM's. Unset when never selected.
+	out.LastSelected = lastSelected(rec)
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))
 	}
 	return out
+}
+
+// lastSelected resolves the row's durable selection instant, or nil for a
+// workspace the user never selected. It is NOT the when-column (see when):
+// the column shows activity, and this field is never drawn.
+func lastSelected(rec wsm.Workspace) *frontendv1.RosterRowLastSelected {
+	if rec.LastSelectedAt == nil {
+		return nil
+	}
+	return &frontendv1.RosterRowLastSelected{AtMs: rec.LastSelectedAt.UnixMilli()}
 }
 
 // attention reports whether the row draws the attention marker.

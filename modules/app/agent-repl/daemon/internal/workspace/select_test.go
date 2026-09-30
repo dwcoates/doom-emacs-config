@@ -187,6 +187,35 @@ func TestSelectPublishesARegistryCarryingTheSelection(t *testing.T) {
 	}
 }
 
+// TestSelectPublishesARegistryCarryingTheSelectionInstant pins that the roster
+// push a selection makes carries the new durable last-selected instant, which
+// is what clients order most-recently-selected by.
+func TestSelectPublishesARegistryCarryingTheSelectionInstant(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	for _, ws := range f.sidebar.registries[0].Workspaces {
+		if ws.ID != "w1" {
+			continue
+		}
+		if ws.LastSelectedAt == nil || !ws.LastSelectedAt.Equal(fixedNow) {
+			t.Fatalf("the published last-selected instant = %v, want %v", ws.LastSelectedAt, fixedNow)
+		}
+		return
+	}
+	t.Fatalf("the published registry carries no w1")
+}
+
 // TestReselectingDoesNotRestampTheSelectionInstant pins the idempotence the
 // contract states: re-selecting the workspace already being looked at is a
 // success that CHANGES NO VIEW. The instant answers "when did the user last

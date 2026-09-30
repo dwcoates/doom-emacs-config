@@ -312,6 +312,13 @@ func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) e
 
 func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time) error {
 	d.current, d.currentAt = &id, at
+	// As WSM does: the selection stamps the durable last-selected instant
+	// the roster row carries.
+	if ws, ok := d.workspaces[id]; ok {
+		stamped := at
+		ws.LastSelectedAt = &stamped
+		d.workspaces[id] = ws
+	}
 	return nil
 }
 
