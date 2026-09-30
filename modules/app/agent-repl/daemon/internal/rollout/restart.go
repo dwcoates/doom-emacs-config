@@ -47,12 +47,22 @@ const (
 	ReplacementClaimWait = time.Minute
 )
 
-// replacementArgv is the incumbent's own argv with any joining or replacing
-// flag dropped and the replacing flag appended, for the reason successorArgv
-// inherits it: the replacement is this daemon's configuration, not a curated
-// copy of it.
+// replacementArgv is the incumbent's own argv with its role flags dropped
+// (withoutRoleFlags) and the replacing flag appended, for the reason
+// successorArgv inherits it: the replacement is this daemon's configuration,
+// not a curated copy of it.
 func replacementArgv(incumbent []string) []string {
-	out := make([]string, 0, len(incumbent)+1)
+	return append(withoutRoleFlags(incumbent), "--"+ReplacingFlagName)
+}
+
+// withoutRoleFlags is the incumbent's argv with every ROLE flag dropped: the
+// joining flag with its value, and the replacing flag. A role says how THIS
+// process booted, never how the daemon it spawns boots, so every spawn of a
+// daemon strips them all here and appends exactly its own. The two roles are
+// exclusive, so a role carried across a spawn is a daemon that refuses to
+// start.
+func withoutRoleFlags(incumbent []string) []string {
+	out := make([]string, 0, len(incumbent)+2)
 	for i := 0; i < len(incumbent); i++ {
 		arg := incumbent[i]
 		name, _, hasValue := cutFlag(arg)
@@ -67,7 +77,7 @@ func replacementArgv(incumbent []string) []string {
 		}
 		out = append(out, arg)
 	}
-	return append(out, "--"+ReplacingFlagName)
+	return out
 }
 
 // cutFlag splits a `-name[=value]` argument into its bare name.
