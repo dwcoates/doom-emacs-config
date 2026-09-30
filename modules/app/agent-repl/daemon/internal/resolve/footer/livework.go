@@ -139,15 +139,7 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		// the set carries. `startedAt` is the instant the footer learned of the
 		// run rather than a zero time, which would draw a runtime measured from
 		// the epoch; the run's own start frame installs the true instant.
-		s.agents[id] = &agentRow{
-			work:         id,
-			spawnUnit:    id,
-			createdAgent: id,
-			label:        subagentLabel(nil),
-			startedAt:    now,
-			order:        s.nextOrder(),
-			provenance:   provenanceLiveWorkSet,
-		}
+		s.agents[id] = s.minimalAgentRow(id, id, now, provenanceLiveWorkSet)
 		added = append(added, "agent:"+id)
 		if retiredAny(s, id) {
 			readded = append(readded, "agent:"+id)

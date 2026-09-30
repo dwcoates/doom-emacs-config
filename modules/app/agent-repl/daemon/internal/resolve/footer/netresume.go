@@ -103,11 +103,7 @@ func (r *resolver) describeUnknownWait(ws ids.WorkspaceID, s *wsState, wait resu
 	if s.waitingRow(wait.work) != nil {
 		return
 	}
-	s.retiredRows[wait.work] = &agentRow{
-		work: wait.work, spawnUnit: wait.work, createdAgent: wait.work,
-		label: subagentLabel(nil), startedAt: wait.failedAt,
-		order: s.nextOrder(), provenance: provenanceResumeWait,
-	}
+	s.retiredRows[wait.work] = s.minimalAgentRow(wait.work, wait.work, wait.failedAt, provenanceResumeWait)
 	r.logOf(ws, s).Info("daemon.footer.network_resume_row_minimal",
 		"a network-resume wait names work the footer never described; its row is described minimally",
 		dlog.Context{"work": wait.work})
