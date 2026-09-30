@@ -71,7 +71,7 @@ import {
 import { formatTickedElapsed } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
-import { MalformedView } from "../rpc/malformed.js";
+import { tokenHeatColor } from "../token-heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import type { FooterPanel } from "./expanded.js";
@@ -505,29 +505,9 @@ export function drawFooterTokensCellInput(u: FooterTokensCellInput): HTMLElement
   if (u.heat !== undefined) {
     const position = u.heat.position;
     input.setAttribute("data-heat", String(position));
-    input.style.color = footerTokensHeatColor(position, "FooterTokensCellInput.heat.position");
+    input.style.color = tokenHeatColor(position, "FooterTokensCellInput.heat.position");
   }
   return input;
-}
-
-/** How many colors the heat gradient runs through (`--token-heat-0` … `-3`). */
-const HEAT_COLORS = 4;
-
-/**
- * The color at POSITION on the heat gradient: the two theme colors bracketing
- * it, mixed by how far between them it sits. The daemon owns where a figure
- * falls (FooterTokensCellInputHeat); the stylesheet owns the four colors, so
- * this only interpolates. A position outside [0, 1] is a daemon contract
- * breach and is refused.
- */
-export function footerTokensHeatColor(position: number, path: string): string {
-  if (!Number.isFinite(position) || position < 0 || position > 1) {
-    throw new MalformedView(path, `heat position ${String(position)} is outside [0, 1]`);
-  }
-  const segments = HEAT_COLORS - 1;
-  const lower = Math.min(Math.floor(position * segments), segments - 1);
-  const upperShare = Math.round((position * segments - lower) * 100);
-  return `color-mix(in oklab, var(--token-heat-${String(lower)}), var(--token-heat-${String(lower + 1)}) ${String(upperShare)}%)`;
 }
 
 /**

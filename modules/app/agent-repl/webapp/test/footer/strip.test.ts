@@ -19,7 +19,6 @@ import {
   WAITING_FOR_API_GLYPH,
   chipGlyph,
   footerStatusActivity,
-  footerTokensHeatColor,
   subStatusWords,
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
@@ -766,22 +765,3 @@ describe("the footer status word's per-letter colour sweep", () => {
   });
 });
 
-describe("footerTokensHeatColor", () => {
-  it.each([
-    [0, 0, 1, 0],
-    [1 / 6, 0, 1, 50],
-    [1 / 3, 1, 2, 0],
-    [0.5, 1, 2, 50],
-    [2 / 3, 2, 3, 0],
-    [5 / 6, 2, 3, 50],
-    [1, 2, 3, 100],
-  ])("places %d between heat color %d and %d at %d%%", (position, lower, upper, share) => {
-    expect(footerTokensHeatColor(position, "p")).toBe(
-      `color-mix(in oklab, var(--token-heat-${String(lower)}), var(--token-heat-${String(upper)}) ${String(share)}%)`,
-    );
-  });
-
-  it.each([[-0.01], [1.01], [Number.NaN], [Number.POSITIVE_INFINITY]])("refuses %d", (position) => {
-    expect(() => footerTokensHeatColor(position, "p")).toThrow(MalformedView);
-  });
-});

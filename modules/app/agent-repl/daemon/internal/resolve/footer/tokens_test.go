@@ -572,7 +572,7 @@ func panelGrowth(t *testing.T, h *harness) string {
 }
 
 // cellHeat is the strip's tokens cell heat, nil while the cell is uncolored.
-func cellHeat(t *testing.T, h *harness) *frontendv1.FooterTokensCellInputHeat {
+func cellHeat(t *testing.T, h *harness) *frontendv1.TokenHeat {
 	t.Helper()
 	return h.view(t).GetStrip().GetTokens().GetInput().GetHeat()
 }
