@@ -554,3 +554,41 @@ func TestSenderJoinRunningTurnCarriesTheRefusalArm(t *testing.T) {
 		t.Fatalf("JoinRunningTurn = %v, want a typed turn_already_open refusal", err)
 	}
 }
+
+// TestSenderStartsAnInterjectionWithItsVendorNote covers the note a prompt
+// that interrupted the running turn carries to the shim, and that no other
+// start carries one.
+func TestSenderStartsAnInterjectionWithItsVendorNote(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     func(*sender) (*shimv1.StartTurnSuccess, error)
+		wantNote *string
+	}{
+		{name: "StartTurn carries no note", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		}},
+		{name: "StartInterjection carries its note", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.StartInterjection(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "why the work was cut")
+		}, wantNote: proto.String("why the work was cut")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+			}}
+			s := &sender{client: client}
+
+			// Act
+			if _, err := tt.call(s); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+
+			// Assert
+			got := client.startTurnReq.VendorNote
+			if (got == nil) != (tt.wantNote == nil) || (got != nil && *got != *tt.wantNote) {
+				t.Fatalf("vendor_note = %v, want %v", got, tt.wantNote)
+			}
+		})
+	}
+}

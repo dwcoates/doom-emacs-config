@@ -418,11 +418,20 @@ type fakeSender struct {
 	attempts int
 	// joins is every turn sent to join the running turn, in order.
 	joins []ids.TurnID
+	// notes is the vendor note of every StartInterjection, in order.
+	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
 }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
+
+func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
+	s.mu.Lock()
+	s.notes = append(s.notes, note)
+	s.mu.Unlock()
+	return s.StartTurn(ctx, turn, said, origin)
+}
 
 func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
 	s.mu.Lock()
