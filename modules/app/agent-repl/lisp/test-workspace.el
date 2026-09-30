@@ -2512,10 +2512,7 @@ it, not the first tab (owner ruling, 2026-09-30)."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "second" "first")))
-      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "second" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "second" "gone"))))
+      (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "second"))))))
 
@@ -2525,10 +2522,7 @@ most recent one still open is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "closed-earlier" "third" "first")))
-      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "gone" "third")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "gone" "third"))))
+      (agent-repl-test-ws--with-teardown "gone" '("first" "gone" "third")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "third"))))))
 
@@ -2538,13 +2532,10 @@ most recent one still open is the landing."
   (agent-repl-test--with-clean-state
     (let ((persp-nil-name "none")
           (agent-repl--workspace-history '("gone" "main" "second")))
-      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
-                ((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("main" "first" "second" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("main" "first" "second" "gone"))))
-        ;; Act / Assert
-        (should (equal (agent-repl--teardown-landing-target "gone") "second"))))))
+      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main")))
+        (agent-repl-test-ws--with-teardown "gone" '("main" "first" "second" "gone")
+          ;; Act / Assert
+          (should (equal (agent-repl--teardown-landing-target "gone") "second")))))))
 
 (ert-deftest agent-repl-test-teardown-landing-target-falls-back-to-tab-order-on-empty-history ()
   "With an empty history -- no workspace visited yet this session -- the
@@ -2552,10 +2543,7 @@ first open workspace in tab order is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "second" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "second" "gone"))))
+      (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
 
@@ -2565,10 +2553,7 @@ expected condition as an empty one: the first open tab is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "closed-earlier")))
-      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "second" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "second" "gone"))))
+      (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
 
@@ -2578,19 +2563,16 @@ expected condition as an empty one: the first open tab is the landing."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "second"))
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
-                ((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "second" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "second" "gone"))))
-        ;; Act
-        (agent-repl--teardown-landing-target "gone")
-        ;; Assert
-        (should (seq-some
-                 (lambda (l)
-                   (string-match-p
-                    "teardown-landing-target: ws=gone target=second source=history" l))
-                 (cadr info)))))))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+        (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
+          ;; Act
+          (agent-repl--teardown-landing-target "gone")
+          ;; Assert
+          (should (seq-some
+                   (lambda (l)
+                     (string-match-p
+                      "teardown-landing-target: ws=gone target=second source=history" l))
+                   (cadr info))))))))
 
 (ert-deftest agent-repl-test-teardown-landing-target-records-a-tab-order-fallback-at-info ()
   "Which source chose the landing is recorded at INFO: here, the tab order."
@@ -2598,19 +2580,16 @@ expected condition as an empty one: the first open tab is the landing."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil)
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
-                ((symbol-function 'agent-repl--ws-list-names)
-                 (lambda () '("first" "gone")))
-                ((symbol-function 'agent-repl--ws-all-names)
-                 (lambda () '("first" "gone"))))
-        ;; Act
-        (agent-repl--teardown-landing-target "gone")
-        ;; Assert
-        (should (seq-some
-                 (lambda (l)
-                   (string-match-p
-                    "teardown-landing-target: ws=gone target=first source=tab-order" l))
-                 (cadr info)))))))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+        (agent-repl-test-ws--with-teardown "gone" '("first" "gone")
+          ;; Act
+          (agent-repl--teardown-landing-target "gone")
+          ;; Assert
+          (should (seq-some
+                   (lambda (l)
+                     (string-match-p
+                      "teardown-landing-target: ws=gone target=first source=tab-order" l))
+                   (cadr info))))))))
 
 (ert-deftest agent-repl-test-land-before-teardown-lands-on-the-previously-selected-workspace ()
   "Standing on the departing workspace, the user lands where they were before."
