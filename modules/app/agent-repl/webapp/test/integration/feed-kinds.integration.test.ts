@@ -29,13 +29,17 @@ import {
   FeedColdGateSchema,
   FeedColdGateResolvedSchema,
   FeedMergeTabSchema,
+  FeedMergeUpdatingMainStepSchema,
   FeedCommandPanelSchema,
   FeedDiffLineSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
-import type { OpenInEditorRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import {
+  OpenInEditorRequestSchema,
+  type OpenInEditorRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { drawnPaintClass, expectedPaintClass } from "./vocab";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import {
@@ -50,6 +54,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
+  MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
   PLAN_STATES,
   QUESTION_ONE,
@@ -245,6 +250,20 @@ describe("arm coverage", () => {
 
   it("covers every merge tab kind", () => {
     assertCoversOneof(FeedMergeTabSchema, "kind", [...MERGE_TAB_KINDS]);
+  });
+
+  it.each(MERGE_TAB_KINDS)("covers every state arm of the %s merge tab", (kind) => {
+    const field = FeedMergeTabSchema.fields.find((f) => f.localName === kind);
+    if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
+    assertCoversOneof(field.message, "state", [...MERGE_TAB_STATES]);
+  });
+
+  it("covers every updating main step", () => {
+    assertCoversOneof(FeedMergeUpdatingMainStepSchema, "step", ["fetching", "fastForwarding"]);
+  });
+
+  it("covers every OpenInEditor target", () => {
+    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog"]);
   });
 
   it("covers every feed command panel arm", () => {
@@ -1389,7 +1408,7 @@ describe("merge tabs", () => {
   });
 
   it.each(
-    MERGE_TAB_KINDS.flatMap((kind) => MERGE_TAB_STATES[kind].map((state) => ({ kind, state }))),
+    MERGE_TAB_KINDS.flatMap((kind) => MERGE_TAB_STATES.map((state) => ({ kind, state }))),
   )("draws the $kind tab in its $state state", async ({ kind, state }) => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow(kind, state));
@@ -1411,11 +1430,78 @@ describe("merge tabs", () => {
     expect(row.textContent).toContain("ws-ahead");
   });
 
-  it("draws the merge tab's narration lines verbatim", async () => {
+  it("draws the rebasing tab's progress as the daemon's figures", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("merge"));
+    const row = await drawRow(mergeTabRow("rebasing"));
     // Assert
-    expect(row.textContent).toContain("cherry-picked 3 commits");
+    expect(row.querySelector("[data-merge-progress]")?.textContent).toBe("3/7");
+  });
+
+  it("draws the rebasing tab's narration lines verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("rebasing"));
+    // Assert
+    expect([...row.querySelectorAll(".merge-line")].map((el) => el.textContent)).toEqual([
+      "replaying 2/7 · tidy the queue",
+      "replaying 3/7 · fix the reconnect loop",
+    ]);
+  });
+
+  it("draws the committing tab's merge commit subject", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("committing"));
+    // Assert
+    expect(row.querySelector(".merge-commit-subject")?.textContent).toBe("Merge branch 'ws-1' into master");
+  });
+
+  it("draws the updating main tab's step", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("updatingMain"));
+    // Assert
+    expect(row.querySelector(".merge-updating-main")?.textContent).toBe("fast-forwarding to 4f2a1c9");
+  });
+
+  it("draws the fixes tab's attempt", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("fixes"));
+    // Assert
+    expect(row.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
+  });
+
+  it("draws the tests tab's log link with the daemon's label", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector("[data-merge-test-log]")?.textContent).toBe(MERGE_TEST_LOG.label);
+  });
+
+  it("wears the response bubble's link class on the test log link", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector("[data-merge-test-log]")?.classList.contains("merge-test-log-link")).toBe(true);
+  });
+
+  it("opens the test log in the editor by the token the bubble served", async () => {
+    // Arrange
+    await drawRow(mergeTabRow("tests", "live", { id: feedId("tab-tests") }));
+    // Act
+    await harness.click('[data-feed-row="tab-tests"] [data-merge-test-log]');
+    // Assert
+    const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
+    expect(request.target.case === "mergeTestLog" ? request.target.value.value : request.target.case).toBe(
+      MERGE_TEST_LOG.token,
+    );
+  });
+
+  it("echoes the workspace on the test log's editor call", async () => {
+    // Arrange
+    await drawRow(mergeTabRow("tests", "live", { id: feedId("tab-tests") }));
+    // Act
+    await harness.click('[data-feed-row="tab-tests"] [data-merge-test-log]');
+    // Assert
+    const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
   });
 
   it("draws the tests tab's suites", async () => {
@@ -1431,13 +1517,6 @@ describe("merge tabs", () => {
     const drawn = [...row.querySelectorAll("span")].find((el) => el.textContent === "PASS ");
     // Assert
     expect(drawn?.className).toBe(expectedPaintClass("ansi-fg-green"));
-  });
-
-  it("draws the parked line on a parked conflicts tab", async () => {
-    // Arrange / Act
-    const row = await drawRow(mergeTabRow("conflicts", "parked"));
-    // Assert
-    expect(row.textContent).toContain("paused for your answer");
   });
 });
 
