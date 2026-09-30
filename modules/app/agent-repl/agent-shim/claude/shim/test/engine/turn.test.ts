@@ -2314,16 +2314,6 @@ describe("DetachForeground", () => {
     ]);
   });
 
-  it("notes nothing for a request that names no unit", async () => {
-    // Arrange
-    const h = await harness();
-
-    // Act
-    await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {}));
-
-    // Assert
-    expect(h.userDetaches).toEqual([]);
-  });
 });
 
 describe("ReadHistory", () => {
@@ -3430,7 +3420,11 @@ describe("KillTurn and DetachForeground without a session", () => {
 
     expect(
       failureKind(
-        await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {})),
+        await h.turns.detachForeground(
+          create(shimv1.DetachForegroundRequestSchema, {
+            unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_1" }),
+          }),
+        ),
       ),
     ).toBe("noSession");
   });
@@ -3627,12 +3621,42 @@ describe("DetachForeground's kind-before-state answer", () => {
     expect(failureKind(response)).toBe("notDetachable");
   });
 
-  it("refuses unknown_unit for a request that addresses no unit at all", async () => {
+  it("refuses a request that addresses no unit at all as invalid input", async () => {
+    // Arrange
     const h = await harness();
 
-    expect(
-      failureKind(await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {}))),
-    ).toBe("unknownUnit");
+    // Act
+    const refused = h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {}));
+
+    // Assert
+    await expect(refused).rejects.toMatchObject({ code: Code.InvalidArgument });
+  });
+
+  it("never asks the vendor to move a unit when the request names none", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {})).catch(() => undefined);
+
+    // Assert
+    expect([h.query.calls.filter((call) => call.startsWith("backgroundTasks")), h.userDetaches]).toEqual([[], []]);
+  });
+
+  it("records the invalid request, as the validation layer records its own refusal", async () => {
+    // Arrange
+    const h = await harness();
+    const mark = logSinkMark();
+
+    // Act
+    await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {})).catch(() => undefined);
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.context.field === "detach_foreground.unit.value");
+    expect([record?.level, record?.message]).toEqual([
+      "debug",
+      "refused a DetachForeground naming no unit as invalid input; the vendor was not asked",
+    ]);
   });
 });
 
