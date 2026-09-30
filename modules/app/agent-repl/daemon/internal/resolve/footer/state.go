@@ -141,6 +141,12 @@ type retryState struct {
 	status string
 	// at is when the retry evidence arrived.
 	at time.Time
+	// nextAt is when the vendor said the next attempt starts, nil when it
+	// stated no schedule.
+	nextAt *time.Time
+	// maxAttempt is the last attempt the vendor will make, zero when it stated
+	// no schedule.
+	maxAttempt int32
 }
 
 // wakeupState is a pending self-scheduled wakeup.
