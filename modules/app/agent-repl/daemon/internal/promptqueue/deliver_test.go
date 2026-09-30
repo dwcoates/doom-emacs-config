@@ -608,3 +608,43 @@ func TestAPromptHeldDuringAnySpellingOfClearDoesNotInterruptIt(t *testing.T) {
 		})
 	}
 }
+
+func TestAPromptThatInterruptedTheTurnIsDeliveredWithTheInterruptionNote(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.watcher.idle()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseKilled)
+
+	// Assert
+	if started, notes := h.sender.started(), h.sender.notes; len(started) != 1 || started[0] != "t1" || len(notes) != 1 || notes[0] != interruptionNote {
+		t.Fatalf("started = %v, notes = %q; want t1 delivered with the interruption note", started, notes)
+	}
+}
+
+func TestAPromptThatWaitedForTheTurnIsDeliveredWithNoNote(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "an unrelated question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.watcher.idle()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if started, notes := h.sender.started(), h.sender.notes; len(started) != 1 || len(notes) != 0 {
+		t.Fatalf("started = %v, notes = %q; want t1 delivered with no note", started, notes)
+	}
+}
