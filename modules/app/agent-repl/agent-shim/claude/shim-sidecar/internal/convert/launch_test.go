@@ -103,6 +103,27 @@ func TestALaunchReportsWhetherTheSpawnWasBackgrounded(t *testing.T) {
 // the 2026-09-23 subagent transcript whose toolUseResult was absent.
 const backgroundSentenceText = `Command running in background with ID: bmo77o6cu. Output is being written to: /private/tmp/claude-501/p/s/tasks/bmo77o6cu.output. You will be notified when it completes.`
 
+// timeoutSentenceText is the vendor's sentence for a foreground shell its own
+// timeout moved to the background, verbatim from the 2026-09-28 subagent
+// transcript whose toolUseResult was absent.
+const timeoutSentenceText = `Command did not complete within its 600s timeout and was moved to the background (ID: b3e6urkt6). Output is being written to: /private/tmp/claude-501/p/s/tasks/b3e6urkt6.output.`
+
+// TestTheTimeoutSentenceRestatesTheLimitItExceeded pins the restated launch's
+// shape for a timeout: the task id and the limit, as the vendor's structured
+// result states them.
+func TestTheTimeoutSentenceRestatesTheLimitItExceeded(t *testing.T) {
+	// Arrange.
+	block := map[string]any{"content": timeoutSentenceText}
+
+	// Act.
+	launch, ok := backgroundLaunchFromProse(block)
+
+	// Assert.
+	if !ok || launch["backgroundTaskId"] != "b3e6urkt6" || launch["timedOutAfterMs"] != float64(600_000) {
+		t.Fatalf("launch = %v (ok %t), want b3e6urkt6 timed out after 600000ms", launch, ok)
+	}
+}
+
 // TestAShellLaunchIsReportedFromItsSentenceWhenTheStructuredResultIsAbsent
 // pins the file-plane half of a subagent's background shell: a subagent's
 // transcript can omit `toolUseResult` outright, and the sentence is then the
@@ -128,6 +149,12 @@ func TestAShellLaunchIsReportedFromItsSentenceWhenTheStructuredResultIsAbsent(t 
 			content:       `"` + backgroundSentenceText + `"`,
 			toolUseResult: "",
 			wantSpawns:    []spawnReport{{TaskID: "bmo77o6cu", ToolUseID: "toolu_bg", OwnerAgentID: "session-uuid"}},
+		},
+		{
+			name:          "the timeout sentence names the task the vendor's timeout moved",
+			content:       `[{"type":"text","text":"` + timeoutSentenceText + `"}]`,
+			toolUseResult: "",
+			wantSpawns:    []spawnReport{{TaskID: "b3e6urkt6", ToolUseID: "toolu_bg", OwnerAgentID: "session-uuid"}},
 		},
 		{
 			name:          "a result that states no launch reports nothing",

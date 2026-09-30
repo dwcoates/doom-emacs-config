@@ -991,9 +991,17 @@ func (p *proxyStore) GetSidecarCursors(ctx context.Context, req *connect.Request
 	return connect.NewResponse(resp.Msg), nil
 }
 
+func (p *proxyStore) GetShellRunClaims(ctx context.Context, req *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
+	resp, err := p.up.GetShellRunClaims(ctx, connect.NewRequest(req.Msg))
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp.Msg), nil
+}
+
 func (p *proxyStore) unexpected(verb string) error {
 	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("the sidecar called %s, which its two-verb store contract forbids", verb))
+		fmt.Errorf("the sidecar called %s, which its store contract forbids", verb))
 }
 
 func (p *proxyStore) OpenAgentSession(context.Context, *connect.Request[storev1.OpenAgentSessionRequest]) (*connect.Response[storev1.OpenAgentSessionResponse], error) {

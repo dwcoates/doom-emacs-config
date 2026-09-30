@@ -252,6 +252,7 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 	s.followRename(target)
 	if obs, ok := s.owners.resolve(target); ok {
 		s.held.release(target.Path)
+		delete(s.unclaimedShells, target.TaskID)
 		// AN a* SPOOL IS AN AGENT'S OWN TRANSCRIPT, so its book is that agent —
 		// which IS the spawning call under the cross-plane minting rule. Every
 		// other spool carries a RUN rather than an agent, and its frames are
@@ -276,6 +277,7 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 		}).Log("spool claimed by its spawning call: it is read as %s for the rows that call's run renders", target.Kind)
 		return target, true
 	}
+	s.noteUnclaimedShell(target)
 	if !s.held.hold(target.Path, now) {
 		return discover.Target{}, false
 	}
