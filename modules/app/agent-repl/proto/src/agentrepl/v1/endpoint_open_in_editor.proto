@@ -1,7 +1,8 @@
 // endpoint_open_in_editor.proto — OpenInEditor: a HOST-RAISED click. WEB LINK
-// section. The webview's shared link component calls this for the three
+// section. The webview's shared link component calls this for the
 // affordances that open something in the editor — the plan bubble's edit
-// button, a findings row's location, a worktree divider's path — and the
+// button, a findings row's location, a worktree divider's path, a merge's
+// test log — and the
 // daemon RELAYS the click as the workspace's WatchHostWorkspace push arm
 // `open_in_editor`, which Emacs answers with its ONE shared editor-popup
 // subroutine (a file at a line, or dired for a directory). No daemon→Emacs
@@ -13,17 +14,34 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message OpenInEditorRequest {
   workspace.v1.WorkspaceRef workspace = 1;
+  // Tags 2 and 3 (`path`, `line`) moved into the `workspace_file` target.
+  reserved 2, 3;
+  reserved "path", "line";
+  // WHAT is opened. THE ARM IS THE KIND OF TARGET, because each is
+  // validated differently: a workspace file must stay inside the worktree,
+  // while a merge's test log lives in the daemon's own state and is named
+  // only by the token the feed served.
+  oneof target {
+    // A file or directory inside the workspace's worktree.
+    OpenInEditorWorkspaceFile workspace_file = 4;
+    // A merge's test log, echoed back exactly as the merge bubble served it.
+    frontend.v1.FeedMergeTestLogToken merge_test_log = 5;
+  }
+}
+// A file or directory inside the workspace's worktree.
+message OpenInEditorWorkspaceFile {
   // The path on the daemon's host, exactly as the feed row carried it
   // (FeedPlanEditTarget.path, FeedFindingsLocation.path, FeedWorktreePath).
-  string path = 2;
+  string path = 1;
   // The 1-indexed line to land on. UNSET = the file's top (or a directory).
-  optional uint32 line = 3;
+  optional uint32 line = 2;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -51,6 +69,9 @@ message OpenInEditorError {
     OpenInEditorNotYetAdopted not_yet_adopted = 4;
     // The path resolves outside the workspace's worktree.
     OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
+    // The merge test log token names no log this daemon holds for the
+    // workspace: it was never served, or the log has since been removed.
+    OpenInEditorUnknownMergeTestLog unknown_merge_test_log = 6;
   }
 }
 message OpenInEditorUnknownWorkspace {}
@@ -64,3 +85,4 @@ message OpenInEditorTransferringAway {
 }
 message OpenInEditorNotYetAdopted {}
 message OpenInEditorPathEscapesWorkspace {}
+message OpenInEditorUnknownMergeTestLog {}

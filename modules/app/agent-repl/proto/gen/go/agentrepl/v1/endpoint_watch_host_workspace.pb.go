@@ -756,7 +756,6 @@ type HostSessionLive struct {
 	//	*HostSessionLive_Merging
 	//	*HostSessionLive_Draining
 	//	*HostSessionLive_Restarting
-	//	*HostSessionLive_MergeParked
 	Composer isHostSessionLive_Composer `protobuf_oneof:"composer"`
 	// Standing faults scoped to `generation`, for doctor output; a fault
 	// window dies with its generation, which is why these live on the LIVE
@@ -876,15 +875,6 @@ func (x *HostSessionLive) GetRestarting() *HostComposerRestarting {
 	return nil
 }
 
-func (x *HostSessionLive) GetMergeParked() *HostComposerMergeParked {
-	if x != nil {
-		if x, ok := x.Composer.(*HostSessionLive_MergeParked); ok {
-			return x.MergeParked
-		}
-	}
-	return nil
-}
-
 func (x *HostSessionLive) GetFaults() []*HostFault {
 	if x != nil {
 		return x.Faults
@@ -925,14 +915,6 @@ type HostSessionLive_Restarting struct {
 	Restarting *HostComposerRestarting `protobuf:"bytes,8,opt,name=restarting,proto3,oneof"`
 }
 
-type HostSessionLive_MergeParked struct {
-	// The merge PARKED for the user's guidance: the composer is OPEN with
-	// context — everything submitted while parked is delivered to the
-	// merge's resolution agent, never refused and never queued as the
-	// session's own turn.
-	MergeParked *HostComposerMergeParked `protobuf:"bytes,10,opt,name=merge_parked,json=mergeParked,proto3,oneof"`
-}
-
 func (*HostSessionLive_Open) isHostSessionLive_Composer() {}
 
 func (*HostSessionLive_Merging) isHostSessionLive_Composer() {}
@@ -940,8 +922,6 @@ func (*HostSessionLive_Merging) isHostSessionLive_Composer() {}
 func (*HostSessionLive_Draining) isHostSessionLive_Composer() {}
 
 func (*HostSessionLive_Restarting) isHostSessionLive_Composer() {}
-
-func (*HostSessionLive_MergeParked) isHostSessionLive_Composer() {}
 
 type HostSessionTerminal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1612,42 +1592,6 @@ func (*HostComposerRestarting) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{24}
 }
 
-type HostComposerMergeParked struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HostComposerMergeParked) Reset() {
-	*x = HostComposerMergeParked{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HostComposerMergeParked) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HostComposerMergeParked) ProtoMessage() {}
-
-func (x *HostComposerMergeParked) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HostComposerMergeParked.ProtoReflect.Descriptor instead.
-func (*HostComposerMergeParked) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{25}
-}
-
 // One standing fault — the same kinds SessionHealth's SessionFault carries,
 // the same messages: a session's fault classes do not change because the
 // host stream is what reports them. Kinds derived from the controller's real
@@ -1681,7 +1625,7 @@ type HostFault struct {
 
 func (x *HostFault) Reset() {
 	*x = HostFault{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1693,7 +1637,7 @@ func (x *HostFault) String() string {
 func (*HostFault) ProtoMessage() {}
 
 func (x *HostFault) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1706,7 +1650,7 @@ func (x *HostFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostFault.ProtoReflect.Descriptor instead.
 func (*HostFault) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *HostFault) GetDetail() string {
@@ -1997,7 +1941,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x04live\x18\x02 \x01(\v2\x1d.agentrepl.v1.HostSessionLiveH\x00R\x04live\x12?\n" +
 	"\bterminal\x18\x03 \x01(\v2!.agentrepl.v1.HostSessionTerminalH\x00R\bterminalB\n" +
 	"\n" +
-	"\bstanding\"\xff\x04\n" +
+	"\bstanding\"\xc7\x04\n" +
 	"\x0fHostSessionLive\x12>\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\v2\x1e.agentrepl.v1.HostGenerationIdR\n" +
@@ -2010,13 +1954,12 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\bdraining\x18\a \x01(\v2\".agentrepl.v1.HostComposerDrainingH\x01R\bdraining\x12F\n" +
 	"\n" +
 	"restarting\x18\b \x01(\v2$.agentrepl.v1.HostComposerRestartingH\x01R\n" +
-	"restarting\x12J\n" +
-	"\fmerge_parked\x18\n" +
-	" \x01(\v2%.agentrepl.v1.HostComposerMergeParkedH\x01R\vmergeParked\x12/\n" +
+	"restarting\x12/\n" +
 	"\x06faults\x18\t \x03(\v2\x17.agentrepl.v1.HostFaultR\x06faultsB\r\n" +
 	"\vvendor_infoB\n" +
 	"\n" +
-	"\bcomposer\"9\n" +
+	"\bcomposerJ\x04\b\n" +
+	"\x10\vR\fmerge_parked\"9\n" +
 	"\x13HostSessionTerminal\x12\"\n" +
 	"\frehydratable\x18\x01 \x01(\bR\frehydratable\"%\n" +
 	"\rHostSessionId\x12\x14\n" +
@@ -2047,8 +1990,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x10HostComposerOpen\"\x15\n" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
-	"\x16HostComposerRestarting\"\x19\n" +
-	"\x17HostComposerMergeParked\"\xa2\n" +
+	"\x16HostComposerRestarting\"\xa2\n" +
 	"\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
@@ -2084,7 +2026,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*WatchHostWorkspaceRequest)(nil),         // 0: agentrepl.v1.WatchHostWorkspaceRequest
 	(*WatchHostWorkspaceResponse)(nil),        // 1: agentrepl.v1.WatchHostWorkspaceResponse
@@ -2111,41 +2053,40 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*HostComposerMerging)(nil),               // 22: agentrepl.v1.HostComposerMerging
 	(*HostComposerDraining)(nil),              // 23: agentrepl.v1.HostComposerDraining
 	(*HostComposerRestarting)(nil),            // 24: agentrepl.v1.HostComposerRestarting
-	(*HostComposerMergeParked)(nil),           // 25: agentrepl.v1.HostComposerMergeParked
-	(*HostFault)(nil),                         // 26: agentrepl.v1.HostFault
-	(*v1.WorkspaceRef)(nil),                   // 27: workspace.v1.WorkspaceRef
-	(*DaemonStreamEnding)(nil),                // 28: agentrepl.v1.DaemonStreamEnding
-	(*v11.TurnId)(nil),                        // 29: conversation.v1.TurnId
-	(*v11.UserSaid)(nil),                      // 30: conversation.v1.UserSaid
-	(*SessionFaultShimStartFailed)(nil),       // 31: agentrepl.v1.SessionFaultShimStartFailed
-	(*SessionFaultShimDied)(nil),              // 32: agentrepl.v1.SessionFaultShimDied
-	(*SessionFaultLinkSevered)(nil),           // 33: agentrepl.v1.SessionFaultLinkSevered
-	(*SessionFaultResumeFailed)(nil),          // 34: agentrepl.v1.SessionFaultResumeFailed
-	(*SessionFaultBounceDied)(nil),            // 35: agentrepl.v1.SessionFaultBounceDied
-	(*SessionFaultBounceUnknown)(nil),         // 36: agentrepl.v1.SessionFaultBounceUnknown
-	(*SessionFaultClassifierFailed)(nil),      // 37: agentrepl.v1.SessionFaultClassifierFailed
-	(*SessionFaultShimReported)(nil),          // 38: agentrepl.v1.SessionFaultShimReported
-	(*SessionFaultConversationAbandoned)(nil), // 39: agentrepl.v1.SessionFaultConversationAbandoned
-	(*SessionFaultSessionAbsent)(nil),         // 40: agentrepl.v1.SessionFaultSessionAbsent
-	(*SessionFaultWatchOpenRefused)(nil),      // 41: agentrepl.v1.SessionFaultWatchOpenRefused
-	(*SessionFaultDaemonStateUnreadable)(nil), // 42: agentrepl.v1.SessionFaultDaemonStateUnreadable
-	(*SessionFaultAdoptionWindowExpired)(nil), // 43: agentrepl.v1.SessionFaultAdoptionWindowExpired
-	(*SessionFaultFinalAnswerUnresolved)(nil), // 44: agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	(*HostFault)(nil),                         // 25: agentrepl.v1.HostFault
+	(*v1.WorkspaceRef)(nil),                   // 26: workspace.v1.WorkspaceRef
+	(*DaemonStreamEnding)(nil),                // 27: agentrepl.v1.DaemonStreamEnding
+	(*v11.TurnId)(nil),                        // 28: conversation.v1.TurnId
+	(*v11.UserSaid)(nil),                      // 29: conversation.v1.UserSaid
+	(*SessionFaultShimStartFailed)(nil),       // 30: agentrepl.v1.SessionFaultShimStartFailed
+	(*SessionFaultShimDied)(nil),              // 31: agentrepl.v1.SessionFaultShimDied
+	(*SessionFaultLinkSevered)(nil),           // 32: agentrepl.v1.SessionFaultLinkSevered
+	(*SessionFaultResumeFailed)(nil),          // 33: agentrepl.v1.SessionFaultResumeFailed
+	(*SessionFaultBounceDied)(nil),            // 34: agentrepl.v1.SessionFaultBounceDied
+	(*SessionFaultBounceUnknown)(nil),         // 35: agentrepl.v1.SessionFaultBounceUnknown
+	(*SessionFaultClassifierFailed)(nil),      // 36: agentrepl.v1.SessionFaultClassifierFailed
+	(*SessionFaultShimReported)(nil),          // 37: agentrepl.v1.SessionFaultShimReported
+	(*SessionFaultConversationAbandoned)(nil), // 38: agentrepl.v1.SessionFaultConversationAbandoned
+	(*SessionFaultSessionAbsent)(nil),         // 39: agentrepl.v1.SessionFaultSessionAbsent
+	(*SessionFaultWatchOpenRefused)(nil),      // 40: agentrepl.v1.SessionFaultWatchOpenRefused
+	(*SessionFaultDaemonStateUnreadable)(nil), // 41: agentrepl.v1.SessionFaultDaemonStateUnreadable
+	(*SessionFaultAdoptionWindowExpired)(nil), // 42: agentrepl.v1.SessionFaultAdoptionWindowExpired
+	(*SessionFaultFinalAnswerUnresolved)(nil), // 43: agentrepl.v1.SessionFaultFinalAnswerUnresolved
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
-	27, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	26, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	6,  // 1: agentrepl.v1.WatchHostWorkspaceResponse.host:type_name -> agentrepl.v1.HostWorkspace
 	3,  // 2: agentrepl.v1.WatchHostWorkspaceResponse.transferred:type_name -> agentrepl.v1.HostWorkspaceTransferred
 	4,  // 3: agentrepl.v1.WatchHostWorkspaceResponse.reload_webapp:type_name -> agentrepl.v1.HostWorkspaceReloadWebapp
 	2,  // 4: agentrepl.v1.WatchHostWorkspaceResponse.open_in_editor:type_name -> agentrepl.v1.HostOpenInEditor
-	28, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	27, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	5,  // 6: agentrepl.v1.WatchHostWorkspaceResponse.notification_clicked:type_name -> agentrepl.v1.HostWorkspaceNotificationClicked
 	8,  // 7: agentrepl.v1.HostWorkspace.none:type_name -> agentrepl.v1.HostSessionNone
 	9,  // 8: agentrepl.v1.HostWorkspace.existing:type_name -> agentrepl.v1.HostSessionExisting
 	15, // 9: agentrepl.v1.HostWorkspace.naming:type_name -> agentrepl.v1.HostWorkspaceNaming
 	7,  // 10: agentrepl.v1.HostWorkspace.held_prompt_edit:type_name -> agentrepl.v1.HostHeldPromptEdit
-	29, // 11: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
-	30, // 12: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
+	28, // 11: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
+	29, // 12: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
 	12, // 13: agentrepl.v1.HostSessionExisting.id:type_name -> agentrepl.v1.HostSessionId
 	10, // 14: agentrepl.v1.HostSessionExisting.live:type_name -> agentrepl.v1.HostSessionLive
 	11, // 15: agentrepl.v1.HostSessionExisting.terminal:type_name -> agentrepl.v1.HostSessionTerminal
@@ -2156,31 +2097,30 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	22, // 20: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
 	23, // 21: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
 	24, // 22: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
-	25, // 23: agentrepl.v1.HostSessionLive.merge_parked:type_name -> agentrepl.v1.HostComposerMergeParked
-	26, // 24: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
-	17, // 25: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
-	18, // 26: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
-	19, // 27: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
-	20, // 28: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
-	31, // 29: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
-	32, // 30: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
-	33, // 31: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
-	34, // 32: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
-	35, // 33: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
-	36, // 34: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
-	37, // 35: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
-	38, // 36: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
-	39, // 37: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
-	40, // 38: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
-	41, // 39: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
-	42, // 40: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
-	43, // 41: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
-	44, // 42: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	25, // 23: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
+	17, // 24: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
+	18, // 25: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
+	19, // 26: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
+	20, // 27: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
+	30, // 28: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
+	31, // 29: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
+	32, // 30: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
+	33, // 31: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
+	34, // 32: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
+	35, // 33: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
+	36, // 34: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
+	37, // 35: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
+	38, // 36: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
+	39, // 37: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
+	40, // 38: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
+	41, // 39: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
+	42, // 40: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
+	43, // 41: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	42, // [42:42] is the sub-list for method output_type
+	42, // [42:42] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -2213,7 +2153,6 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostSessionLive_Merging)(nil),
 		(*HostSessionLive_Draining)(nil),
 		(*HostSessionLive_Restarting)(nil),
-		(*HostSessionLive_MergeParked)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16].OneofWrappers = []any{
@@ -2222,7 +2161,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostBackfill_Done)(nil),
 		(*HostBackfill_Failed)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25].OneofWrappers = []any{
 		(*HostFault_ShimStartFailed)(nil),
 		(*HostFault_ShimDied)(nil),
 		(*HostFault_LinkSevered)(nil),
@@ -2244,7 +2183,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

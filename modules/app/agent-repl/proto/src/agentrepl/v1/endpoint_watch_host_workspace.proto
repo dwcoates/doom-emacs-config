@@ -160,12 +160,12 @@ message HostSessionLive {
     HostComposerDraining draining = 7;
     // The workspace's shim is being restarted (graceful RestartWorkspace).
     HostComposerRestarting restarting = 8;
-    // The merge PARKED for the user's guidance: the composer is OPEN with
-    // context — everything submitted while parked is delivered to the
-    // merge's resolution agent, never refused and never queued as the
-    // session's own turn.
-    HostComposerMergeParked merge_parked = 10;
   }
+  // Tag 10 (`merge_parked`) is RETIRED: a merge never parks. A merge that
+  // gives up fails and hands the workspace back, and the composer is then
+  // simply open.
+  reserved 10;
+  reserved "merge_parked";
   // Standing faults scoped to `generation`, for doctor output; a fault
   // window dies with its generation, which is why these live on the LIVE
   // arm and nowhere else.
@@ -237,8 +237,6 @@ message HostComposerOpen {}
 message HostComposerMerging {}
 message HostComposerDraining {}
 message HostComposerRestarting {}
-message HostComposerMergeParked {}
-
 // One standing fault — the same kinds SessionHealth's SessionFault carries,
 // the same messages: a session's fault classes do not change because the
 // host stream is what reports them. Kinds derived from the controller's real
