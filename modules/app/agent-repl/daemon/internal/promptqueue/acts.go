@@ -283,10 +283,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	// and the cut's visible outcome is the separation row the feed resolver
 	// draws at EXECUTION time.
 	if watching {
-		if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
-			watcher.SetMainAgent(agent)
-		}
-		watcher.OnTurnOpened(ws, success.GetPrompt(), success.GetPage())
+		handOver(ws, success, watcher)
 	}
 	log.Debug(opAct, "the context cut is running and the turn is uninterruptible",
 		dlog.Context{"turn": string(turn), "command": command.String()})
