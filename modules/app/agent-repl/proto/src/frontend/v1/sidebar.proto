@@ -273,6 +273,11 @@ message RosterRow {
   // which carries the marker's whole contract.
   optional RosterRowReviving reviving = 35;
 
+  // When the user LAST SELECTED this workspace: the durable selection history
+  // the daemon keeps across restarts of every client. UNSET = never selected.
+  // See RosterRowLastSelected, which carries the field's whole contract.
+  optional RosterRowLastSelected last_selected = 37;
+
   // The row's display name.
   RosterRowName name = 2;
 
@@ -402,6 +407,25 @@ message RosterRowWorkspace {
 // A row's display name. Never an identity or a join key.
 message RosterRowName {
   string text = 1;
+}
+
+// When the user last selected the workspace, in epoch MILLISECONDS: the
+// instant the daemon stamped on the most recent SelectWorkspace naming it,
+// read from the durable workspace record, so it survives a restart of the
+// daemon and of every client.
+//
+// It is SELECTION RECENCY, and it exists so a client can order workspaces
+// most-recently-selected first -- which workspace to select when the selected
+// one closes, and the editor's jump to the most recent workspace. Clients
+// order by it and never derive it, and never draw it: the when-column is
+// RosterRowWhen, which deliberately shows activity, not viewing.
+//
+// A selection moves it (SelectWorkspace re-pushes the roster); re-selecting
+// the current workspace does not. It is set on closed rows too, so a client
+// that must skip closed workspaces does so by RosterRowClosed, not by absence.
+message RosterRowLastSelected {
+  // The selection instant, epoch milliseconds.
+  int64 at_ms = 1;
 }
 
 // The row's selected-workspace highlight.
