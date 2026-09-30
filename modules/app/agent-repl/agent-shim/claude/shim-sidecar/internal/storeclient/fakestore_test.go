@@ -36,6 +36,17 @@ type fakeStore struct {
 	writeErr       error
 	lastWrite      *storev1.WriteBatchRequest
 	writeCallCount int
+	claims         *storev1.GetShellRunClaimsResponse
+	claimsErr      error
+	lastClaimsReq  *storev1.GetShellRunClaimsRequest
+}
+
+func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
+	f.lastClaimsReq = request.Msg
+	if f.claimsErr != nil {
+		return nil, f.claimsErr
+	}
+	return connect.NewResponse(f.claims), nil
 }
 
 func (f *fakeStore) GetSidecarCursors(_ context.Context, request *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {

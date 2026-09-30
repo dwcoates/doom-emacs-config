@@ -65,6 +65,7 @@ type SkippedEntry struct {
 const (
 	rpcWriteBatch        = storev1connect.ShimStoreWriteBatchProcedure
 	rpcGetSidecarCursors = storev1connect.ShimStoreGetSidecarCursorsProcedure
+	rpcGetShellRunClaims = storev1connect.ShimStoreGetShellRunClaimsProcedure
 
 	// WriteBatchSite is the `refusal_site` a refused write is reported under.
 	// A caller that states the refusal itself — the cycle parking a file on an
@@ -229,6 +230,48 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 		// nor a refusal, so it is raised rather than read as an empty success.
 		bound.With(logging.Context{Level: "error"}).Log("cursor recovery answer carries neither success nor failure")
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetSidecarCursors)
+	}
+}
+
+// ShellRunClaims answers the shim's claims on record for the given spool task
+// ids, each with the book holding its run's launching call when that is on
+// record. An id with no claim is absent from the answer.
+//
+// A FAILURE IS NEVER SOFTENED INTO AN EMPTY ANSWER: "no claim yet" keeps a
+// spool held and asked again, while a store that could not answer is an
+// outage the caller must see.
+func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]*storev1.ShellRunClaimed, error) {
+	bound := c.log.With(logging.Context{
+		Operation: "storeclient-shell-run-claims", StoreSocket: c.socket, RPC: rpcGetShellRunClaims,
+	})
+	bound.LogVerbose("shell run claims requested for %d spool(s)", len(vendorTaskIDs))
+	response, err := c.rpc.GetShellRunClaims(ctx, connect.NewRequest(&storev1.GetShellRunClaimsRequest{VendorTaskIds: vendorTaskIDs}))
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			bound.LogVerbose("shell run claims abandoned: the caller cancelled the request, so no spool was claimed")
+			return nil, fmt.Errorf("storeclient: %s: %w", rpcGetShellRunClaims, err)
+		}
+		bound.With(logging.Context{Level: "error"}).Log("shell run claims transport failure: %v", err)
+		return nil, fmt.Errorf("storeclient: %s: %w", rpcGetShellRunClaims, err)
+	}
+	switch result := response.Msg.GetResult().(type) {
+	case *storev1.GetShellRunClaimsResponse_Success:
+		claims := result.Success.GetClaims()
+		bound.LogVerbose("shell run claims answered claims=%d", len(claims))
+		return claims, nil
+	case *storev1.GetShellRunClaimsResponse_Failure:
+		refusal := &RefusalError{RPC: rpcGetShellRunClaims, Detail: result.Failure.GetDetail()}
+		switch kind := result.Failure.GetKind().(type) {
+		case *storev1.GetShellRunClaimsFailure_InvalidRequest:
+			refusal.Kind, refusal.Field = RefusalInvalidRequest, kind.InvalidRequest.GetField()
+		case *storev1.GetShellRunClaimsFailure_StorageFailure:
+			refusal.Kind = RefusalStorageFailure
+		}
+		bound.With(logging.Context{Level: "error"}).Log("shell run claims refused: %s", refusal.Detail)
+		return nil, refusal
+	default:
+		bound.With(logging.Context{Level: "error"}).Log("shell run claims answer carries neither success nor failure")
+		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetShellRunClaims)
 	}
 }
 
