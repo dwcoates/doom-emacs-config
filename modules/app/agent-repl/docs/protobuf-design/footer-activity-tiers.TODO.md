@@ -112,3 +112,31 @@ not "stop".
   announced `by_user`; the patch states no cause for agents either.
 - The vendor hang of 2026-09-30 (a retry promised in 32s never came): the
   countdown makes it visible; nothing yet acts on an overdue retry.
+
+## Next, after this branch (owner, 2026-09-30 evening)
+
+A. **Merge queue analysis (no changes until reviewed with the owner).**
+   Compare three things and list the differences:
+   - how the daemon's merge queue works today;
+   - how it was specified recently (about 2026-09-29; find it in the
+     transcripts);
+   - the owner's statement now. Once popped from the head of the queue, a
+     merge runs: rebase onto master, conflict resolution, tests, test
+     remediation, then merge. If master moved since the process started, it
+     starts over. The footer shows a step for each, with activity updates.
+   - A merge runs IN THE WORKSPACE THAT ASKED FOR IT, never a new dedicated
+     workspace. Its item appears in that workspace's main feed, and its shim
+     and agent context are reused, because that context is what makes
+     conflict resolution and test remediation good. Several merges from one
+     workspace are handled by telling the daemon not to close the workspace
+     after the merge, not by making new workspaces.
+B. **After a workspace closes** (killed, closed or nuked by the user, or
+   implicitly, e.g. a completed merge), Emacs and the webapp select the LAST
+   selected workspace, not the first one in the tab bar or sidebar.
+C. **The merge bubble's test log link.** The test failure log's path rides
+   statically in the proto on the merge queue feed entry. The Tests tab draws
+   it as a link, in the same blue as links elsewhere in response bubbles.
+   Clicking it opens the file in Emacs in a horizontal split on the right,
+   beside the agent-repl panels and not replacing them, the way other
+   agent-repl file views open. Proto additions to the existing workspace rpc
+   are pre-approved. Check whether the right-side split already exists.
