@@ -157,8 +157,8 @@ environment's session state.")
 (defvar agent-repl--workspace-history nil
   "Workspace names ordered by most-recently-visited first.
 Maintained by `agent-repl--record-workspace-history' on every workspace
-activation.  Read by the rename and workspace-merge paths and by
-`agent-repl-open-most-recent-workspace'.")
+activation.  Read by `agent-repl--teardown-landing-target': closing the
+workspace the user stands on selects the one selected before it.")
 
 (defvar agent-repl--workspace-log-targets)
 
@@ -1736,8 +1736,21 @@ directly or guarding it themselves with `boundp'."
 (defun agent-repl--teardown-landing-target (ws)
   "Return the workspace a teardown of WS lands the user on, or nil.
 
-The first surviving agent-repl workspace, falling back to the first
-surviving perspective of any kind; WS itself is never a candidate.
+THE WORKSPACE SELECTED BEFORE WS (owner ruling, 2026-09-30): the most
+recently selected agent-repl workspace that is still open, read from
+`agent-repl--workspace-history'.  A history entry that has since closed
+is skipped, so the next most recent survivor is taken.  How WS closed does
+not matter -- the user's close, kill or nuke and an implicit close such as
+a landed merge all reach this one rule through
+`agent-repl--land-before-teardown' -- and it is only ever asked when the
+user stands on WS (the landing is not owed otherwise).
+
+When the history names no survivor -- the genuine, expected case of a
+session in which the user has not yet stood in any other open workspace,
+e.g. the first close after Emacs started -- the target is the first
+surviving agent-repl workspace in tab order, falling back to the first
+surviving perspective of any kind.  Which of the two sources decided is
+recorded at INFO.  WS itself is never a candidate.
 
 A BUILT-IN PERSPECTIVE IS NOT A LANDING.  \"none\" and Doom's startup
 \"main\" are persp-mode's own perspectives
@@ -1746,14 +1759,22 @@ and no panels, and Doom's \"main\" is auto-vivified into the registry by a
 persp hook, so it can lead `agent-repl--ws-list-names' and be picked ahead
 of every real workspace.  Landing there put the user on an EMPTY frame --
 the fallback buffer under a lone tab, observed as `*scratch*' in playbook
-B.16 after the merged child's tab was torn down.  So both candidate
-sources are filtered to workspaces this module actually owns."
-  (let ((landable-p (lambda (n)
-                      (and (stringp n)
-                           (not (equal n ws))
-                           (not (agent-repl--pseudo-workspace-name-p n))))))
-    (or (car (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
-        (car (cl-remove-if-not landable-p (agent-repl--ws-all-names))))))
+B.16 after the merged child's tab was torn down.  So every candidate
+source is filtered to workspaces this module actually owns."
+  (let* ((landable-p (lambda (n)
+                       (and (stringp n)
+                            (not (equal n ws))
+                            (not (agent-repl--pseudo-workspace-name-p n)))))
+         (open (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
+         (previous (cl-find-if (lambda (n) (member n open))
+                               agent-repl--workspace-history))
+         (target (or previous
+                     (car open)
+                     (car (cl-remove-if-not landable-p (agent-repl--ws-all-names))))))
+    (agent-repl--info ws "elisp.workspace.teardown-landing-target: ws=%s target=%s source=%s history=%S"
+                      ws target (if previous "history" "tab-order")
+                      agent-repl--workspace-history)
+    target))
 
 (defun agent-repl--land-before-teardown (ws)
   "Move the user off WS, which is about to be killed, onto a survivor.

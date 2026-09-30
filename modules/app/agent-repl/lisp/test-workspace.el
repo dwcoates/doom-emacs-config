@@ -2479,6 +2479,136 @@ the lines are kept most recent first."
       ;; Act / Assert
       (should-not (agent-repl--teardown-landing-target "gone")))))
 
+;;; --- The landing target is the workspace selected before the departing one
+
+(ert-deftest agent-repl-test-teardown-landing-target-is-the-previously-selected-workspace ()
+  "Closing the workspace the user stands on lands on the one selected before
+it, not the first tab (owner ruling, 2026-09-30)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone" "second" "first")))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "gone"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--teardown-landing-target "gone") "second"))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-skips-a-previous-workspace-since-closed ()
+  "A previously selected workspace that has itself closed is skipped: the next
+most recent one still open is the landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone" "closed-earlier" "third" "first")))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "gone" "third")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "gone" "third"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--teardown-landing-target "gone") "third"))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-skips-a-built-in-in-the-history ()
+  "A built-in perspective the user once stood in is never a history landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (agent-repl--workspace-history '("gone" "main" "second")))
+      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("main" "first" "second" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("main" "first" "second" "gone"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--teardown-landing-target "gone") "second"))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-falls-back-to-tab-order-on-empty-history ()
+  "With an empty history -- no workspace visited yet this session -- the
+first open workspace in tab order is the landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "gone"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-falls-back-when-no-history-entry-is-open ()
+  "A history naming only the departing workspace and closed ones is the same
+expected condition as an empty one: the first open tab is the landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone" "closed-earlier")))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "gone"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-records-a-history-decision-at-info ()
+  "Which source chose the landing is recorded at INFO: here, the history."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone" "second"))
+          (info (agent-repl-test-ws--recorder)))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "gone"))))
+        ;; Act
+        (agent-repl--teardown-landing-target "gone")
+        ;; Assert
+        (should (seq-some
+                 (lambda (l)
+                   (string-match-p
+                    "teardown-landing-target: ws=gone target=second source=history" l))
+                 (cadr info)))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-records-a-tab-order-fallback-at-info ()
+  "Which source chose the landing is recorded at INFO: here, the tab order."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (info (agent-repl-test-ws--recorder)))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "gone")))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "gone"))))
+        ;; Act
+        (agent-repl--teardown-landing-target "gone")
+        ;; Assert
+        (should (seq-some
+                 (lambda (l)
+                   (string-match-p
+                    "teardown-landing-target: ws=gone target=first source=tab-order" l))
+                 (cadr info)))))))
+
+(ert-deftest agent-repl-test-land-before-teardown-lands-on-the-previously-selected-workspace ()
+  "Standing on the departing workspace, the user lands where they were before."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone" "second" "first")))
+      (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
+        ;; Act
+        (should (equal (agent-repl--land-before-teardown "gone") "second"))
+        ;; Assert
+        (should (equal agent-repl-test-ws--events '((:switch "second"))))))))
+
+(ert-deftest agent-repl-test-land-before-teardown-ignores-the-history-when-standing-elsewhere ()
+  "Closing a workspace the user is NOT on moves nothing, whatever the history."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("mine" "other" "first")))
+      (agent-repl-test-ws--with-teardown "mine" '("first" "mine" "other")
+        ;; Act
+        (should-not (agent-repl--land-before-teardown "other"))
+        ;; Assert
+        (should-not agent-repl-test-ws--events)))))
+
 ;;; --- Landing before the kill
 
 (ert-deftest agent-repl-test-land-before-teardown-switches-off-the-departing-workspace ()
@@ -2856,6 +2986,24 @@ workspace, and killing it now is exactly the hazard the order exists for."
         (agent-repl--kill-one-workspace "ws")
         ;; Assert
         (should (equal torn-down "ws"))))))
+
+(ert-deftest agent-repl-test-kill-one-workspace-of-the-current-lands-on-the-previously-selected ()
+  "An EXPLICIT close, kill or nuke tears the tab down through
+`agent-repl--kill-one-workspace', and closing the workspace the user stands
+on lands them on the one selected before it, not the first tab."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (let ((agent-repl--workspace-history '("ws" "second" "first")))
+      (agent-repl-test-ws--with-teardown "ws" '("first" "second" "ws")
+        (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore)
+                  ((symbol-function 'agent-repl--kill-workspace-buffers) #'ignore)
+                  ((symbol-function 'agent-repl--ws-repaint-sidebar) #'ignore)
+                  ((symbol-function 'agent-repl--ws-persp-kill-refusal) #'ignore))
+          ;; Act
+          (agent-repl--kill-one-workspace "ws")
+          ;; Assert
+          (should (equal (car (last agent-repl-test-ws--events)) '(:switch "second"))))))))
 
 (ert-deftest agent-repl-test-kill-one-workspace-declares-the-departure ()
   "A teardown under way is what explains its own workspace's missing sink."
