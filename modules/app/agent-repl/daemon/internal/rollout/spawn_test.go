@@ -611,12 +611,8 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatalf("mkfifo: %v", err)
 	}
-	script := filepath.Join(state, "replacement.sh")
-	body := "#!/bin/sh\nfor last; do :; done\nprintf '%s' \"$last\" > " + fifo + "\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write the stand-in: %v", err)
-	}
-	spawner := NewProcessSpawner(script, state, nil)
+	body := "for last; do :; done\nprintf '%s' \"$last\" > " + fifo + "\n"
+	spawner := NewProcessSpawner(spawnScript(t, state, body), state, nil)
 
 	// Act
 	pid, err := spawner.SpawnReplacement(context.Background())
