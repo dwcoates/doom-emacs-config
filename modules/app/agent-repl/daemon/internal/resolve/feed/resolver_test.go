@@ -198,6 +198,7 @@ func newHarness(t *testing.T) *harness {
 		Log:          &fakeSurfaces{log: log},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,
+		Decode:       testDecode,
 		EncodeFeed:   testEncodeFeed,
 		Painter:      painter,
 		ResolveImage: func(block *conversationv1.ImageBlock) (string, string, error) {
@@ -306,6 +307,27 @@ func TestFeedDecisionsRecordTheirSelectedBranches(t *testing.T) {
 func testEncode(ref feedid.Ref) *frontendv1.FeedId {
 	return &frontendv1.FeedId{Value: fmt.Sprintf("row|%s|%s|%s|%s|%s",
 		ref.WS, testFeedValue(ref.Feed), ref.Row.Kind, ref.Row.ID, ref.Row.Sub)}
+}
+
+// testDecode is testEncode's inverse, the harness's feedid.Decode.
+func testDecode(id *frontendv1.FeedId) (feedid.Ref, error) {
+	parts := strings.Split(id.GetValue(), "|")
+	if len(parts) != 6 || parts[0] != "row" {
+		return feedid.Ref{}, fmt.Errorf("testDecode: %q is no test row id", id.GetValue())
+	}
+	ref := feedid.Ref{WS: ids.WorkspaceID(parts[1]), Row: feedid.RowKey{Kind: feedid.RowKind(parts[3]), ID: parts[4], Sub: parts[5]}}
+	switch kind, value, _ := strings.Cut(parts[2], ":"); kind {
+	case "merge":
+		lease := ids.LeaseID(value)
+		ref.Feed = feedid.Feed{Merge: &lease}
+	case "agent":
+		ref.Feed = feedid.Feed{Agent: &conversationv1.AgentId{Value: value}}
+	case "root":
+		ref.Feed = feedid.Feed{Root: true}
+	default:
+		return feedid.Ref{}, fmt.Errorf("testDecode: %q names no feed the harness encodes", parts[2])
+	}
+	return ref, nil
 }
 
 // testEncodeFeed is the same for feedid.EncodeFeed.
@@ -690,6 +712,135 @@ func TestOutputAddressPlacesEveryRowOnTheAddressedFeed(t *testing.T) {
 	row := h.only(feedid.Feed{Merge: &lease})
 	if row.GetParent().GetRow().GetValue() != testEncode(parent).GetValue() {
 		t.Fatalf("parent = %q, want the addressed row", row.GetParent().GetRow().GetValue())
+	}
+}
+
+// mirroredMergeAddress installs a MIRRORED output address at a merge tab, and
+// answers the tab's ref.
+func mirroredMergeAddress(h *harness, lease ids.LeaseID) feedid.Ref {
+	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+		Feed: feedid.Feed{Merge: &lease}, Parent: &parent, Mirror: true,
+	})
+	return parent
+}
+
+func TestAMirroredOutputAddressDrawsTheRowInTheTab(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	parent := mirroredMergeAddress(h, lease)
+
+	// Act
+	h.deliverPrompt("turn-1", "resolve the conflict")
+
+	// Assert
+	row := h.only(feedid.Feed{Merge: &lease})
+	if row.GetParent().GetRow().GetValue() != testEncode(parent).GetValue() {
+		t.Fatalf("tab row parent = %q, want the addressed tab", row.GetParent().GetRow().GetValue())
+	}
+}
+
+func TestAMirroredOutputAddressDrawsTheRowOnTheRootFeedTooAsAnOrdinaryRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+
+	// Act
+	h.deliverPrompt("turn-1", "resolve the conflict")
+
+	// Assert: the root copy is the same row key on the root feed, top level.
+	row := h.only(rootFeed())
+	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}})
+	if row.GetId().GetValue() != want.GetValue() {
+		t.Fatalf("root row id = %q, want %q", row.GetId().GetValue(), want.GetValue())
+	}
+	if row.GetParent() != nil {
+		t.Fatalf("root row parent = %v, want none: the copy is an ordinary row of the conversation", row.GetParent())
+	}
+}
+
+func TestAMirroredRowNestedUnderAnotherAddressedRowNestsUnderThatRowsRootCopy(t *testing.T) {
+	// Arrange: a row of the addressed feed nests under another of its rows.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+	mergeFeed := feedid.Feed{Merge: &lease}
+	outer := feedid.Ref{WS: testWorkspace, Feed: mergeFeed, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}
+	inner := &frontendv1.FeedRow{
+		Id:     testEncode(feedid.Ref{WS: testWorkspace, Feed: mergeFeed, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-2"}}),
+		Parent: &frontendv1.FeedRowParent{Row: testEncode(outer)},
+		Row:    &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
+	}
+
+	// Act
+	h.resolver.mu.Lock()
+	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: mergeFeed}, inner, true)
+	h.resolver.mu.Unlock()
+
+	// Assert
+	row := h.only(rootFeed())
+	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: outer.Row})
+	if row.GetParent().GetRow().GetValue() != want.GetValue() {
+		t.Fatalf("root copy parent = %v, want the outer row's root copy %q", row.GetParent(), want.GetValue())
+	}
+}
+
+func TestAnUnmirroredOutputAddressDrawsNothingOnTheRoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+
+	// Act
+	h.deliverPrompt("turn-1", "a merge prompt")
+
+	// Assert
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("root rows = %d, want 0 under an unmirrored address", len(rows))
+	}
+}
+
+func TestRetiringAMirroredRowRetiresItsRootCopy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+	h.deliverPrompt("turn-1", "resolve the conflict")
+	id := h.only(feedid.Feed{Merge: &lease}).GetId().GetValue()
+
+	// Act
+	h.resolver.mu.Lock()
+	h.resolver.retire(h.resolver.state(testWorkspace), feedid.Feed{Merge: &lease}, id)
+	h.resolver.mu.Unlock()
+
+	// Assert
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("root rows = %d after the retirement, want the copy retired too", len(rows))
+	}
+}
+
+func TestAMirroredRowThatCannotBeRekeyedIsRecordedAtErrorAndNotMirrored(t *testing.T) {
+	// Arrange: a row whose identity is no id the decoder reads.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+	row := &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "not-a-row-id"},
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}}
+
+	// Act
+	h.resolver.mu.Lock()
+	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: feedid.Feed{Merge: &lease}}, row, true)
+	h.resolver.mu.Unlock()
+
+	// Assert
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("root rows = %d, want none for a row that could not be re-keyed", len(rows))
+	}
+	if !h.hasRecord("error", "daemon.feed.mirror") {
+		t.Fatalf("the failed re-key was not recorded at ERROR: %+v", h.records())
 	}
 }
 

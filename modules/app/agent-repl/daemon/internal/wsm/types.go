@@ -364,6 +364,12 @@ type OutputAddress struct {
 	Feed feedid.Feed
 	// Parent is the row they nest under, nil for top-level rows.
 	Parent *feedid.Ref
+	// Mirror draws every row that lands at this address ALSO on the root feed,
+	// as an ordinary row of the conversation: a merge's repair turns are the
+	// workspace's own session's turns, shown in the merge bubble's tab AND in
+	// the main feed. The two are two resolved copies of one fact, one per
+	// component, never one row the client fans out.
+	Mirror bool
 }
 
 // HeldPrompt is one parked submission. WSM is the ONE durable hold store.
