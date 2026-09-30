@@ -52,6 +52,12 @@ message AgentPrompt {
   // with the prompt so REPLAY can route merge-born rows and label
   // restart re-drives instead of drawing them as fresh user turns.
   PromptOrigin origin = 4;
+  // THE TURN THIS PROMPT JOINED, when the vendor folded it into a running
+  // turn at a tool boundary (shim.v1.StartTurnRequest.join_running_turn).
+  // Such a prompt opens no turn of its own and never gets a terminal: what
+  // the agent does about it is the named turn's. UNSET for every prompt that
+  // opened its own turn.
+  optional TurnId folded_into = 5;
 }
 
 // The turn was killed. THE ARM IS HOW.
