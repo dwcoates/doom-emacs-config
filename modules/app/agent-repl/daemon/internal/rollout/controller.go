@@ -102,6 +102,13 @@ type controller struct {
 	// reported is the last build each live shim reported, "" for a shim that
 	// reported none.
 	reported map[ids.WorkspaceID]string
+	// bootOutgoing is the daemon a FRESH boot's reconciled manifest named:
+	// the one daemon whose carries that boot takes up (TakeUpCarries). Empty
+	// when the boot found no manifest.
+	bootOutgoing ids.InstanceID
+	// takenUp are the carries TakeUpCarries took up, keyed by workspace, for
+	// FinishCarries to finish once the boot has released the holds.
+	takenUp map[ids.WorkspaceID]Carry
 	// forcedTakeover is the handover the successor joined was FORCED, so the
 	// stale shims it adopts are bounced at once too.
 	forcedTakeover bool

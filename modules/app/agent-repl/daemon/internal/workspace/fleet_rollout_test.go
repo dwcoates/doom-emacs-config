@@ -1299,3 +1299,61 @@ func TestAPrelaunchBesideAnAdoptedRelaunchedShimTakesTheNextGeneration(t *testin
 		t.Fatalf("freshSocketPath = %q, want %q past the adopted shim's generation", got, want)
 	}
 }
+
+func TestRaiseCarriedColdGateRaisesTheGateOverTheAdoptedShim(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1"}
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Act.
+	err := f.fleet.RaiseCarriedColdGate(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 123456})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RaiseCarriedColdGate: %v", err)
+	}
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.VendorSessionID != "vendor-1" {
+		t.Fatalf("ColdGate = (%+v, %v), want the carried gate raised on the parked conversation", gate, standing)
+	}
+}
+
+func TestRaiseCarriedColdGateRefusesWithNoColdFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Act.
+	err := f.fleet.RaiseCarriedColdGate(context.Background(), ws.ID, nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RaiseCarriedColdGate accepted no cold facts")
+	}
+	if _, standing := f.fleet.ColdGate(ws.ID); standing {
+		t.Fatal("a gate was raised with no cold facts")
+	}
+}
+
+func TestRaiseCarriedColdGateRefusesAWorkspaceWithNoShim(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	err := f.fleet.RaiseCarriedColdGate(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 1})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RaiseCarriedColdGate raised a gate over no shim")
+	}
+	if _, standing := f.fleet.ColdGate(ws.ID); standing {
+		t.Fatal("a gate was raised over no shim")
+	}
+}

@@ -104,6 +104,12 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.restoreHolds(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// THE CARRIES ARE TAKEN UP BEFORE THE OUTGOING DAEMON'S HOLDS ARE
+		// RELEASED (releaseOrphanLeases): the release drains the intake, and the
+		// drain is what runs the carried queue memory ahead of the held prompts.
+		if err := s.takeUpCarries(ctx, log, &report); err != nil {
+			return Report{}, err
+		}
 		if err := s.closeOrphans(ctx, log, clientless, &report); err != nil {
 			return Report{}, err
 		}
@@ -115,6 +121,9 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.releaseOrphanLeases(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// What each taken-up carry leaves for after the drain: the re-judged
+		// verdicts and the carried shim replacements.
+		s.deps.Rollout.FinishCarries(ctx)
 		// THE BRING-UP IS ONLY NAMED HERE, and it is named LAST for the same
 		// reason it used to RUN last: the sessions it starts would race every
 		// reconciliation above it — the orphaned turns are closed, the holds
@@ -550,6 +559,21 @@ func (s *sequence) adoptedAttachedHealthy(ctx context.Context, log dlog.Logger, 
 		health.CloseOnEdge(ctx, s.deps.DB, log.With(dlog.Context{"workspace_id": string(ws)}),
 			health.EdgeHealthyAttach, health.EdgeScope{Workspace: &workspace}, s.now())
 	}
+}
+
+// takeUpCarries takes up every carry the outgoing daemon wrote for a shim
+// this boot adopted: a layout restart stood its workspaces down mid-work, and
+// the carry is the one record of what its queue held in memory. A carry that
+// cannot be read fails the boot, as every step does: the daemon would not know
+// what the queue held.
+func (s *sequence) takeUpCarries(ctx context.Context, log dlog.Logger, report *Report) error {
+	if err := s.deps.Rollout.TakeUpCarries(ctx, report.Adopted); err != nil {
+		log.Error("daemon.boot.take_up_carries", "the outgoing daemon's carries could not be taken up", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("boot: take up the outgoing daemon's carries: %w", err)
+	}
+	return nil
 }
 
 // restoreHolds reloads every standing hold. It is ALL-OR-NOTHING: a corrupt

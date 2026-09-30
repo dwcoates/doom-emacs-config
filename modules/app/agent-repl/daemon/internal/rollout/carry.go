@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -443,5 +444,131 @@ func (c *controller) runCarried(ctx context.Context, ws ids.WorkspaceID, carried
 			continue
 		}
 		c.log.Info(opCarry, "asked this daemon's registry for a replacement the move carried", rFields)
+	}
+}
+
+// THE FRESH BOOT'S HALF. A restart across a layout change stands each
+// workspace down mid-work and carries its queue memory exactly as a handover
+// does; with no successor listening, the carry is read by the replacement's
+// BOOT, which adopts the running shims (boot.adopt) and then takes each carry
+// up here. Any fresh boot whose reconciled manifest names the daemon that
+// wrote a carry takes it up the same way: that daemon released the serving
+// row and exited, so its carry is the only record of what its queue held.
+
+// carryWorkspace names the workspace a file in the carry directory carries,
+// false for a file that is no carry.
+func carryWorkspace(name string) (ids.WorkspaceID, bool) {
+	// A TEMPORARY FILE writeAtomically never renamed is a partial write, never
+	// a carry: its name carries the pattern's prefix.
+	if filepath.Ext(name) != ".json" || strings.HasPrefix(name, "carry-") {
+		return "", false
+	}
+	return ids.WorkspaceID(strings.TrimSuffix(name, ".json")), true
+}
+
+// TakeUpCarries implements Controller.
+func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceID) error {
+	c.mu.Lock()
+	outgoing := c.bootOutgoing
+	c.mu.Unlock()
+	fields := dlog.Context{"outgoing_daemon": string(outgoing), "adopted": len(adopted)}
+	entries, err := os.ReadDir(c.carryDir())
+	if errors.Is(err, os.ErrNotExist) {
+		c.log.Debug(opCarry, "no carry was ever written here; there is nothing to take up", fields)
+		return nil
+	}
+	if err != nil {
+		c.log.Error(opCarry, "could not list the carries the outgoing daemon wrote; the boot cannot know what its queue held", withCause(fields, err))
+		return fmt.Errorf("rollout: list the carries in %s: %w", c.carryDir(), err)
+	}
+	survived := make(map[ids.WorkspaceID]bool, len(adopted))
+	for _, ws := range adopted {
+		survived[ws] = true
+	}
+	var failures []error
+	takenUp := map[ids.WorkspaceID]Carry{}
+	for _, entry := range entries {
+		ws, ok := carryWorkspace(entry.Name())
+		if !ok {
+			continue
+		}
+		wsFields := merge(fields, dlog.Context{"workspace": string(ws)})
+		carry, carried, err := c.takeCarry(ws, outgoing, wsFields)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if !carried {
+			continue
+		}
+		if !survived[ws] {
+			// THE SHIM DID NOT SURVIVE, so there is no running turn the carried
+			// cut or head could be about: the workspace comes up through its
+			// ordinary bring-up, and its held prompts were restored from the
+			// store.
+			c.log.Info(opCarry, "the carried workspace's shim was not adopted; its carry is retired untaken", wsFields)
+			if err := c.removeCarry(ws); err != nil {
+				failures = append(failures, err)
+			}
+			continue
+		}
+		// A CARRY THAT DOES NOT LAND WHOLE STILL LEAVES A SERVED WORKSPACE:
+		// each part that failed is ERROR in takeUp, and the held prompts are
+		// drained without it, as the successor's adoption drains them.
+		c.takeUp(ctx, ws, carry, wsFields)
+		takenUp[ws] = carry
+	}
+	c.mu.Lock()
+	c.takenUp = takenUp
+	c.mu.Unlock()
+	if err := errors.Join(failures...); err != nil {
+		return err
+	}
+	c.log.Info(opCarry, "took up the carries the outgoing daemon wrote", merge(fields, dlog.Context{"taken_up": len(takenUp)}))
+	return nil
+}
+
+// takeUp installs one adopted workspace's carry: the queue memory, and the
+// cold gate over the parked shim the boot adopted. The carry is retired
+// whether or not both land, as the successor's adoption retires it: an
+// unretired carry would be taken up again by the next boot. Every part that
+// fails is recorded at ERROR here, and the answer joins them.
+func (c *controller) takeUp(ctx context.Context, ws ids.WorkspaceID, carry Carry, fields dlog.Context) error {
+	var failures []error
+	if err := c.deps.Bounces.AdoptHandoff(ctx, ws, carry.Queue); err != nil {
+		c.log.Error(opCarry, "could not install the carried queue memory; the held prompts are drained without it", withCause(fields, err))
+		failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: install the queue memory: %w", ws, err))
+	}
+	if len(carry.ColdGate) > 0 {
+		cold, err := decodeCold(carry.ColdGate)
+		switch {
+		case err != nil:
+			c.log.Error(opCarry, "could not decode the carried cold gate; it is not raised", withCause(fields, err))
+			failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: decode the cold gate: %w", ws, err))
+		default:
+			if err := c.deps.Shims.RaiseCarriedColdGate(ctx, ws, cold); err != nil {
+				c.log.Error(opCarry, "could not raise the carried cold gate over the adopted shim", withCause(fields, err))
+				failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: raise the cold gate: %w", ws, err))
+			}
+		}
+	}
+	if err := c.removeCarry(ws); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
+// FinishCarries implements Controller.
+func (c *controller) FinishCarries(ctx context.Context) {
+	c.mu.Lock()
+	takenUp := c.takenUp
+	c.takenUp = nil
+	c.mu.Unlock()
+	for ws, carry := range takenUp {
+		fields := dlog.Context{"workspace": string(ws), "outgoing_daemon": string(carry.Daemon)}
+		if err := c.deps.Bounces.RejudgeHeld(ctx, ws); err != nil {
+			c.log.Error(opCarry, "could not re-judge the held prompts whose verdicts the move superseded", withCause(fields, err))
+		}
+		c.runCarried(ctx, ws, carry.Replacements, fields)
 	}
 }
