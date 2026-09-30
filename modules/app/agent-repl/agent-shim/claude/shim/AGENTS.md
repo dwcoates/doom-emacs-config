@@ -1316,6 +1316,17 @@ serves one on every entry it hands out.
     not a reason to close anybody's run, so the two share only the pure
     description step (`announceLiveWork`). A record plane the shim cannot reach
     goes out as a session fault, never as a quietly empty membership.
+  - **A LIVE ITEM THE STORE HOLDS IS NEVER LEFT OUT FOR WANT OF A `start`
+    ROW** (2026-09-30, two live background subagents vanished from an adopting
+    daemon's footer). A unit's row is one upserted row, so a live background
+    unit's row has usually moved past its start. `announceLiveWork` rebuilds
+    the start from whatever arm the row holds: a spawn's prompt (every arm),
+    its created agent (the arm's own, else the minting rule), a shell's
+    command (its settle arms, else the run's own start row read from its
+    stored rows), a monitor's call, and the start instant from the row's first
+    place. What the record cannot state is announced by handle and kind and
+    recorded at ERROR. A handle no row describes at all has no kind to state:
+    it is recorded at ERROR and not announced. The vendor is never asked.
   - **EVERY LIVE-WORK READ IS SCOPED TO THIS SESSION.** One store serves every
     session on the host, and the `StartSession` reconciliation closes whatever
     the read answers that this vendor does not hold — so on 2026-09-23 an
