@@ -16,3 +16,20 @@ func expandInList(query string, n int) string {
 	}
 	return strings.Replace(query, "%s", strings.TrimSuffix(strings.Repeat("?,", n), ","), 1)
 }
+
+// idListArgs validates an unscoped id-set lookup's ids and returns them as the
+// statement's bound arguments. An empty list is refused naming `field`, and an
+// empty id naming `field[i]`, both as ErrInvalid, before any statement runs.
+func idListArgs(ids []string, field, noneDetail, emptyDetail string) ([]any, error) {
+	if len(ids) == 0 {
+		return nil, invalidFieldf(field, "%s", noneDetail)
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		if id == "" {
+			return nil, invalidFieldf(field+"["+itoa(i)+"]", "%s", emptyDetail)
+		}
+		args[i] = id
+	}
+	return args, nil
+}

@@ -671,3 +671,39 @@ func TestRefusalClassLogLevelPanicsForAClassItDoesNotKnow(t *testing.T) {
 	}()
 	_ = unmapped.logLevel()
 }
+
+func TestValidateIDListAcceptsNonEmptyIDs(t *testing.T) {
+	// Arrange
+	ids := []string{"a", "b"}
+
+	// Act
+	ref := validateIDList(ids, "site", "ids", "none", "empty")
+
+	// Assert
+	if ref != nil {
+		t.Fatalf("validateIDList = %v, want nil", ref)
+	}
+}
+
+func TestValidateIDListRefusesAMalformedList(t *testing.T) {
+	tests := []struct {
+		name   string
+		ids    []string
+		field  string
+		detail string
+	}{
+		{name: "no ids", ids: nil, field: "ids", detail: "none"},
+		{name: "an empty id", ids: []string{"a", ""}, field: "ids[1]", detail: "empty"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange / Act
+			ref := validateIDList(test.ids, "site", "ids", "none", "empty")
+
+			// Assert
+			if ref == nil || ref.site != "site" || ref.field != test.field || ref.detail != test.detail || ref.class != classInvalid {
+				t.Fatalf("validateIDList = %+v, want an invalid refusal at site naming %s with detail %q", ref, test.field, test.detail)
+			}
+		})
+	}
+}

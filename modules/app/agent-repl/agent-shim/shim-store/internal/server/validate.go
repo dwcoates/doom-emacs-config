@@ -471,13 +471,20 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 // purpose (the sidecar reads every session on the host), so the ids are the
 // whole request.
 func validateGetShellRunClaimsRequest(req *storev1.GetShellRunClaimsRequest) *refusal {
-	ids := req.GetVendorTaskIds()
+	return validateIDList(req.GetVendorTaskIds(), SiteVendorTaskEmpty, "vendor_task_ids",
+		"vendor_task_ids: the lookup names no spool's task id", "vendor_task_ids: an asked task id is empty")
+}
+
+// validateIDList is the one shape of an unscoped id-set lookup's request: at
+// least one id, and every one non-empty. An empty list is refused naming
+// `field`; an empty id is refused naming `field[i]`. Both refusals carry `site`.
+func validateIDList(ids []string, site, field, noneDetail, emptyDetail string) *refusal {
 	if len(ids) == 0 {
-		return refuse(SiteVendorTaskEmpty, "vendor_task_ids", "vendor_task_ids: the lookup names no spool's task id")
+		return refuse(site, field, "%s", noneDetail)
 	}
 	for i, id := range ids {
 		if id == "" {
-			return refuse(SiteVendorTaskEmpty, fmt.Sprintf("vendor_task_ids[%d]", i), "vendor_task_ids: an asked task id is empty")
+			return refuse(site, fmt.Sprintf("%s[%d]", field, i), "%s", emptyDetail)
 		}
 	}
 	return nil

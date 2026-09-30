@@ -83,15 +83,10 @@ ON CONFLICT(vendor_task_id, run_id) DO NOTHING`,
 // before any statement runs.
 func (d *DB) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]ClaimedRun, error) {
 	base := logging.Fields{Operation: "store.db.shell-run-claims", Table: "shell_run_claim"}
-	if len(vendorTaskIDs) == 0 {
-		return nil, d.refuse(base, invalidFieldf("vendor_task_ids", "vendor_task_ids is empty — the lookup names the spools it resolves"))
-	}
-	args := make([]any, len(vendorTaskIDs))
-	for i, id := range vendorTaskIDs {
-		if id == "" {
-			return nil, d.refuse(base, invalidFieldf("vendor_task_ids["+itoa(i)+"]", "a vendor task id is empty — every asked id names a spool"))
-		}
-		args[i] = id
+	args, err := idListArgs(vendorTaskIDs, "vendor_task_ids",
+		"vendor_task_ids is empty — the lookup names the spools it resolves", "a vendor task id is empty — every asked id names a spool")
+	if err != nil {
+		return nil, d.refuse(base, err)
 	}
 	started := d.mono()
 	query := expandInList(shellRunClaimsSQL, len(args))
