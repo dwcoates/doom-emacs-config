@@ -80,11 +80,8 @@ func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.Turn
 	state.drain.Lock()
 	defer state.drain.Unlock()
 	state.verdicts.Lock()
-	if now := state.epochs[sub.Turn]; now != epoch {
+	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
 		state.verdicts.Unlock()
-		log.Info(opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded", dlog.Context{
-			"turn": string(sub.Turn), "arm": c.Arm.String(), "judged_epoch": epoch, "content_epoch": now,
-		})
 		return
 	}
 	q.record(ctx, sub, c, log)
