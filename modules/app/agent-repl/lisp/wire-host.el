@@ -285,10 +285,6 @@ ready to show."
   "Decode VALUE as the empty message `HostComposerRestarting'."
   (agent-repl-wire--decode-empty "HostComposerRestarting" value))
 
-(defun agent-repl-wire-decode-host-composer-merge-parked (value)
-  "Decode VALUE as the empty message `HostComposerMergeParked'."
-  (agent-repl-wire--decode-empty "HostComposerMergeParked" value))
-
 (defun agent-repl-wire-decode-host-session-live-composer (value)
   "Decode `HostSessionLive''s `composer' oneof from VALUE.
 THE ARM IS THE GATE, and it exists only on the LIVE standing — the other
@@ -300,9 +296,7 @@ as a fixed treatment; it never maps a value."
      '((open :open agent-repl-wire-decode-host-composer-open)
        (merging :merging agent-repl-wire-decode-host-composer-merging)
        (draining :draining agent-repl-wire-decode-host-composer-draining)
-       (restarting :restarting agent-repl-wire-decode-host-composer-restarting)
-       (mergeParked :merge-parked
-                    agent-repl-wire-decode-host-composer-merge-parked)))))
+       (restarting :restarting agent-repl-wire-decode-host-composer-restarting)))))
 
 ;;;; ---- HostSessionLive and the session axis ----
 
@@ -339,7 +333,7 @@ treatment of its own."
     (agent-repl-wire--check-keys
      "HostSessionLive" object
      '(generation shimAttached claude backfill
-                  open merging draining restarting mergeParked faults))
+                  open merging draining restarting faults))
     (agent-repl-wire--decoded
      "HostSessionLive"
      (list :generation (agent-repl-wire--decode-message

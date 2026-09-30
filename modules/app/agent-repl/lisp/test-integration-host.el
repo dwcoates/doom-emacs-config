@@ -87,7 +87,7 @@
 (defun agent-repl-itest-host--live (composer &rest overrides)
   "Return a HostWorkspace protojson alist whose session is LIVE.
 COMPOSER is the composer arm's protojson key symbol (`open', `merging',
-`draining', `restarting', `mergeParked').  OVERRIDES replaces entries of
+`draining', `restarting').  OVERRIDES replaces entries of
 the live arm, so one test changes exactly one fact.
 
 Every non-optional field is populated: an unset one is ILLEGAL on this
@@ -230,31 +230,36 @@ merged would keep a fact the daemon has retracted."
          nil "the second push's gate")
         (should (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :merging))))))
 
-(ert-deftest agent-repl-itest-host-every-composer-arm-resolves-to-its-gate ()
-  "Each composer arm resolves to exactly one gate value.
+(defun agent-repl-itest-host--assert-arm-resolves (arm expected)
+  "Push a live session carrying composer ARM and assert it gates EXPECTED.
 The RESOLVED ARM IS THE GATE (elisp.md): Emacs renders a fixed treatment
-per arm and never maps values, which is why the old composed \"gate
-sentence\" died."
-  ;; Arrange: the five arms the LIVE standing declares.
-  (let ((cases '((open . :open)
-                 (merging . :merging)
-                 (draining . :draining)
-                 (restarting . :restarting)
-                 (mergeParked . :merge-parked))))
-    (agent-repl-itest--with-fake-daemon daemon
-      (agent-repl-itest-host--with-subscription daemon ref
-        (dolist (case cases)
-          (let ((arm (car case))
-                (expected (cdr case)))
-            ;; Act.
-            (agent-repl-itest-host--push-host
-             daemon (plist-get ref :id) (agent-repl-itest-host--live arm))
-            ;; Assert.
-            (agent-repl-itest--wait-until
-             (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) expected))
-             nil (format "the %s arm to resolve to %s" arm expected))
-            (should (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws)
-                        expected))))))))
+per arm and never maps values."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--push-host
+       daemon (plist-get ref :id) (agent-repl-itest-host--live arm))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) expected))
+       nil (format "the %s arm to resolve to %s" arm expected))
+      (should (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) expected)))))
+
+(ert-deftest agent-repl-itest-host-open-arm-resolves-to-its-gate ()
+  "The `open' composer arm resolves to the `:open' gate."
+  (agent-repl-itest-host--assert-arm-resolves 'open :open))
+
+(ert-deftest agent-repl-itest-host-merging-arm-resolves-to-its-gate ()
+  "The `merging' composer arm resolves to the `:merging' gate."
+  (agent-repl-itest-host--assert-arm-resolves 'merging :merging))
+
+(ert-deftest agent-repl-itest-host-draining-arm-resolves-to-its-gate ()
+  "The `draining' composer arm resolves to the `:draining' gate."
+  (agent-repl-itest-host--assert-arm-resolves 'draining :draining))
+
+(ert-deftest agent-repl-itest-host-restarting-arm-resolves-to-its-gate ()
+  "The `restarting' composer arm resolves to the `:restarting' gate."
+  (agent-repl-itest-host--assert-arm-resolves 'restarting :restarting))
 
 (ert-deftest agent-repl-itest-host-session-none-gates-as-no-session ()
   "A registered workspace with no session ever created gates `:no-session'.
