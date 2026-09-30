@@ -27,7 +27,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		q.endTurn(ctx, ws, turn, how, q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}))
 		return
 	}
-	log = log.With(dlog.Context{"turn": string(turn), "close": closeName(how)})
+	log = log.With(dlog.Context{"turn": string(turn), "close": how.String()})
 
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
 	// and the handover's quiesce arrive together, and both deliver from the
@@ -158,7 +158,7 @@ func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 		return
 	}
 	for _, turn := range turns {
-		fields := dlog.Context{"turn": string(turn), "close": closeName(wsm.CloseOrphaned)}
+		fields := dlog.Context{"turn": string(turn), "close": wsm.CloseOrphaned.String()}
 		if err := q.closeTurn(ctx, ws, turn, wsm.CloseOrphaned, log); err != nil {
 			continue
 		}
@@ -464,22 +464,4 @@ func (q *queue) reconcileTurns(ctx context.Context, ws ids.WorkspaceID, global d
 	global.Warn(opRestore, "closed the in-flight turns of a workspace with no session", dlog.Context{
 		"workspace": string(ws), "orphans": len(report.Turns),
 	})
-}
-
-// closeName renders a turn close for a log record.
-func closeName(how sessionwatcher.TurnClose) string {
-	switch how {
-	case wsm.CloseCompleted:
-		return "completed"
-	case wsm.CloseFailed:
-		return "failed"
-	case wsm.CloseKilled:
-		return "killed"
-	case wsm.CloseOrphaned:
-		return "orphaned"
-	case wsm.CloseAgentDied:
-		return "agent_died"
-	default:
-		return fmt.Sprintf("close(%d)", how)
-	}
 }

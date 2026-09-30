@@ -30,7 +30,7 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 	err := q.deps.DB.CloseTurn(ctx, turn, at, how)
 	if err != nil {
 		log.Error(opTurnEnded, "could not stamp the turn's close; its ending is drawn regardless", dlog.Context{
-			"turn": string(turn), "close": closeName(how), "cause": err.Error(),
+			"turn": string(turn), "close": how.String(), "cause": err.Error(),
 		})
 		err = fmt.Errorf("close turn %q on %q: %w", turn, ws, err)
 	} else {
@@ -38,7 +38,7 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 		// `turn_ended` is written when the terminal is routed, before this
 		// write, so it cannot say the row is closed; this one can.
 		log.Debug(opTurnEnded, "stamped the turn's close", dlog.Context{
-			"turn": string(turn), "close": closeName(how),
+			"turn": string(turn), "close": how.String(),
 		})
 	}
 	q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: how, At: at})

@@ -253,6 +253,25 @@ var ErrAcceptNotOffered = errors.New("wsm: accept is legal only on a hold_for_tu
 // valid reports whether the turn close is one of the declared arms.
 func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseAgentDied }
 
+// String names a turn close for a log record; an undeclared close is named by
+// its number.
+func (c TurnClose) String() string {
+	switch c {
+	case CloseCompleted:
+		return "completed"
+	case CloseFailed:
+		return "failed"
+	case CloseKilled:
+		return "killed"
+	case CloseOrphaned:
+		return "orphaned"
+	case CloseAgentDied:
+		return "agent_died"
+	default:
+		return fmt.Sprintf("close(%d)", int(c))
+	}
+}
+
 // String names a merge queue state, for logs and refusals.
 func (s MergeQueueState) String() string {
 	switch s {

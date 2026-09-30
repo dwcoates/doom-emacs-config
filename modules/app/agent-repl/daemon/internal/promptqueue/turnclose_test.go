@@ -24,7 +24,7 @@ func TestTheDoorTellsTheFeedTheCloseItRecorded(t *testing.T) {
 
 	// Assert
 	if got := h.db.closedTurns["turn-1"]; got != wsm.CloseAgentDied {
-		t.Fatalf("durable close = %s, want agent_died", closeName(got))
+		t.Fatalf("durable close = %s, want agent_died", got.String())
 	}
 	if got := h.feed.closedTells(); len(got) != 1 || got[0] != (closedTell{turn: "turn-1", how: wsm.CloseAgentDied}) {
 		t.Fatalf("feed tells = %+v, want the one agent_died close", got)
@@ -79,7 +79,7 @@ func TestATurnOfAnUnresolvableWorkspaceStillCloses(t *testing.T) {
 
 	// Assert
 	if got := h.db.closedTurns["turn-1"]; got != wsm.CloseCompleted {
-		t.Fatalf("durable close = %s, want completed", closeName(got))
+		t.Fatalf("durable close = %s, want completed", got.String())
 	}
 	if got := h.feed.closedTells(); len(got) != 1 {
 		t.Fatalf("feed tells = %+v, want the ending drawn", got)
