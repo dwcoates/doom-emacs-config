@@ -354,15 +354,36 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 		})
 }
 
-// SetTurn installs the accepted turn, and raises the `submitting` transient
-// with the first line of what it delivers.
+// SetTurn installs the accepted turn, and raises the `submitting` transient's
+// delivered stage with the first line of what it delivers. A delivered prompt
+// is a next prompt, so it ends the agent's push notification.
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
 			r.applyTurnStarted(s, turn)
 			if turn != nil {
-				r.raiseSubmitting(ws, s, turn.Prompt)
+				r.endNotification(ws, s, "daemon.footer.set_turn")
+				r.raiseSubmitting(ws, s, turn.Prompt, &frontendv1.FooterActivityTransientSubmitting{
+					Stage: &frontendv1.FooterActivityTransientSubmitting_Delivered{
+						Delivered: &frontendv1.FooterActivityTransientSubmittingDelivered{}}})
 			}
+		})
+}
+
+// OnSubmission raises the `submitting` transient for one move of a prompt's
+// delivery, and ends the agent's push notification: the prompt is the next
+// prompt the notification stood until.
+func (r *resolver) OnSubmission(ws ids.WorkspaceID, sub Submission) {
+	r.mutate(ws, "daemon.footer.on_submission", "the footer took a move of a prompt's delivery",
+		dlog.Context{"stage": stageName(sub.Stage), "position": sub.Position, "queued": sub.Queued}, func(s *wsState) {
+			r.endNotification(ws, s, "daemon.footer.on_submission")
+			line, ok := submittingStage(sub)
+			if !ok {
+				r.logOf(ws, s).Error("daemon.footer.on_submission", "a submission names no stage the footer draws",
+					dlog.Context{"stage": int(sub.Stage), "invariant_violation": "every submission names one of the declared stages"})
+				return
+			}
+			r.raiseSubmitting(ws, s, sub.Prompt, line)
 		})
 }
 
@@ -545,6 +566,12 @@ func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 				return
 			}
 			r.standCompaction(ws, s, answer.Text, "daemon.footer.set_cold_gate_answer")
+			// THE ANSWER'S COMPACTION CONCLUDING IS AN OUTCOME like the
+			// vendor's own: announced, and the context-budget line settled by
+			// it, beneath the answer's line that its verb ends.
+			if answer.Progress != nil && concludedPhase(answer.Progress.GetPhase()) {
+				r.concludeCompaction(ws, s, answer.Progress)
+			}
 		})
 }
 
@@ -607,17 +634,22 @@ func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 
 // ---- FooterSink -----------------------------------------------------------
 
-// OnContextBudgetWarning announces the vendor's context-budget warning as the
-// transient `context_budget` line. It is an AGENT-PLANE fact — a page line of
-// the agent's book — and a warning blocks nothing, so it is an event, never a
-// standing line; a subagent's warning carries that subagent's label.
+// OnContextBudgetWarning stands the vendor's context-budget warning as the
+// salient `context_budget` line (owner ruling, 2026-09-30). It is an
+// AGENT-PLANE fact — a page line of the agent's book — and it stands until a
+// cut shrinks the context; a SUBAGENT's warning also ends with that subagent's
+// run, whose context it was about.
 func (r *resolver) OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, warning *conversationv1.ContextBudgetWarning) {
 	if warning == nil {
 		return
 	}
 	r.mutate(ws, "daemon.footer.on_context_budget_warning", "the footer took a context-budget warning",
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
-			r.raiseContextBudget(ws, s, s.agentLabel(agent.GetValue()), warning.GetText())
+			owner := agent.GetValue()
+			if owner == s.mainAgent {
+				owner = ""
+			}
+			r.standContextBudget(ws, s, owner, warning.GetText())
 		})
 }
 
@@ -656,12 +688,22 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 // OnSessionStarted lifts a standing vendor or account block: a session that
 // has (re)started is one the vendor served, which is the roster's rule for its
 // vendor_blocked on the same event, so the strip and the dot lift together.
+//
+// A START NAMING ANOTHER VENDOR SESSION IS A SWITCH: the context the
+// context-budget line warned about is not this session's, so the line ends. A
+// restart of the same session keeps it, because its context is unchanged.
 func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
 	r.mutate(ws, "daemon.footer.on_session_started", "the footer took a session start",
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
 			s.stateUnreported = false
+			if id := started.GetVendorSessionId(); id != "" {
+				if s.vendorSession != "" && s.vendorSession != id {
+					r.endContextBudget(ws, s, "daemon.footer.on_session_started.switch")
+				}
+				s.vendorSession = id
+			}
 		})
 }
 
@@ -698,8 +740,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 				s.turnFailed = true
 			}
 			s.turn = nil
-			// NO STREAM AND NO RETRY SURVIVES THE QUERY EITHER.
-			s.streams = map[string]*streamTail{}
+			// NO RETRY SURVIVES THE QUERY EITHER.
 			s.retrying = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
 			s.compacting = false
@@ -718,6 +759,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
 			r.observeRateLimitStatus(s, u.RateLimitStatus)
+			r.observeRateLimitEvent(ws, s, u.RateLimitStatus)
 			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and any
 			// other verdict lifts the block — the same rule, on the same event,
 			// as the roster's vendor_blocked (ladder.RateLimitBlocks).
@@ -1118,8 +1160,9 @@ func linkName(link sessionwatcher.LinkState) string {
 //
 // A FAILED COMPACTION IS NOT SILENCE: nothing was cut and the context is still
 // too large, which is exactly what the context-budget line says, so the
-// producer's account is announced as the transient `context_budget` line and
-// recorded at WARN.
+// producer's account stands as the salient `context_budget` line and is
+// recorded at WARN. A cut that SUCCEEDED — a compaction or a /clear — shrank
+// the context, so it ends the context-budget line, whatever stood it.
 func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
 	if cut == nil {
 		return
@@ -1143,9 +1186,10 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			r.endCompaction(ws, s, "daemon.footer.on_context_cut")
 			s.tok.settled = true
 			if failed == nil {
+				r.endContextBudget(ws, s, "daemon.footer.on_context_cut."+arm)
 				return
 			}
-			r.raiseContextBudget(ws, s, s.agentLabel(agent.GetValue()),
+			r.standContextBudget(ws, s, "",
 				"compaction failed — "+truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth))
 			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
 				"a compaction failed, so nothing was cut and the context is still too large",

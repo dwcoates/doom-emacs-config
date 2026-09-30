@@ -12,9 +12,9 @@ import (
 	"claude-repld/internal/ids"
 )
 
-// THE TRANSIENT TIER (owner ruling, 2026-09-28; footer.proto "The transient
-// tier"; agent-repl AGENTS.md "Footer activity lines are salient, transient,
-// or enduring").
+// THE TRANSIENT TIER (owner rulings, 2026-09-28 and 2026-09-30; footer.proto
+// "The transient tier"; agent-repl AGENTS.md "Footer activity lines are
+// salient, transient, quiet, or enduring").
 //
 // A transient is an EVENT: something the session just did or just learned. It
 // ends when a newer transient replaces it or its expiry passes, and nothing
@@ -112,17 +112,57 @@ func rowAgentLabel(row *agentRow) string {
 
 // ---- the kinds each source raises ----------------------------------------
 
-// raiseSubmitting raises the `submitting` line for a prompt being delivered.
-// A turn with no text to state raises nothing.
-func (r *resolver) raiseSubmitting(ws ids.WorkspaceID, s *wsState, prompt string) {
+// raiseSubmitting raises the `submitting` line for one stage of a prompt's
+// delivery; LINE carries the stage, and the prompt's first line is filled in
+// here. A prompt with no text to state raises nothing.
+func (r *resolver) raiseSubmitting(ws ids.WorkspaceID, s *wsState, prompt string, line *frontendv1.FooterActivityTransientSubmitting) {
 	lead := firstLine(prompt)
 	if lead == "" {
 		return
 	}
+	line.PromptLead = truncate(lead, DefaultWarningRowWidth)
 	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
-		Kind: &frontendv1.FooterActivityTransient_Submitting{Submitting: &frontendv1.FooterActivityTransientSubmitting{
-			PromptLead: truncate(lead, DefaultWarningRowWidth)}},
+		Kind: &frontendv1.FooterActivityTransient_Submitting{Submitting: line},
 	})
+}
+
+// submittingStage builds the `submitting` line's stage for a submission's
+// move, and reports false for a stage the footer does not declare.
+func submittingStage(sub Submission) (*frontendv1.FooterActivityTransientSubmitting, bool) {
+	line := &frontendv1.FooterActivityTransientSubmitting{}
+	switch sub.Stage {
+	case StageHeld:
+		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Held{Held: &frontendv1.FooterActivityTransientSubmittingHeld{
+			Position: sub.Position, Queued: sub.Queued}}
+	case StageClassifying:
+		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Classifying{
+			Classifying: &frontendv1.FooterActivityTransientSubmittingClassifying{}}
+	case StageInterjecting:
+		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Interjecting{
+			Interjecting: &frontendv1.FooterActivityTransientSubmittingInterjecting{}}
+	case StageCoalesced:
+		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Coalesced{
+			Coalesced: &frontendv1.FooterActivityTransientSubmittingCoalesced{}}
+	default:
+		return nil, false
+	}
+	return line, true
+}
+
+// stageName names a submission stage for the record.
+func stageName(stage SubmissionStage) string {
+	switch stage {
+	case StageHeld:
+		return "held"
+	case StageClassifying:
+		return "classifying"
+	case StageInterjecting:
+		return "interjecting"
+	case StageCoalesced:
+		return "coalesced"
+	default:
+		return "unknown"
+	}
 }
 
 // raiseHook raises the `hook` line for a hook that started.
@@ -137,23 +177,6 @@ func (r *resolver) raiseContextInjected(ws ids.WorkspaceID, s *wsState, agent, t
 	r.raiseTransient(ws, s, agent, &frontendv1.FooterActivityTransient{
 		Kind: &frontendv1.FooterActivityTransient_ContextInjected{
 			ContextInjected: &frontendv1.FooterActivityTransientContextInjected{Text: text}},
-	})
-}
-
-// raiseNotification raises the agent's push notification.
-func (r *resolver) raiseNotification(ws ids.WorkspaceID, s *wsState, agent, text string) {
-	r.raiseTransient(ws, s, agent, &frontendv1.FooterActivityTransient{
-		Kind: &frontendv1.FooterActivityTransient_Notification{
-			Notification: &frontendv1.FooterActivityTransientNotification{Text: truncate(text, DefaultWarningRowWidth)}},
-	})
-}
-
-// raiseContextBudget raises a context-budget warning, or a failed compaction's
-// account.
-func (r *resolver) raiseContextBudget(ws ids.WorkspaceID, s *wsState, agent, text string) {
-	r.raiseTransient(ws, s, agent, &frontendv1.FooterActivityTransient{
-		Kind: &frontendv1.FooterActivityTransient_ContextBudget{
-			ContextBudget: &frontendv1.FooterActivityTransientContextBudget{Text: text}},
 	})
 }
 

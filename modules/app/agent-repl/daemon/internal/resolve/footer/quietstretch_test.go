@@ -843,7 +843,7 @@ func TestAnyNewerActivitySupersedesTheEnding(t *testing.T) {
 		{name: "a running hook's transient", arrange: func(t *testing.T, h *harness) {
 			h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 		}},
-		{name: "a push notification's transient", arrange: func(t *testing.T, h *harness) {
+		{name: "a push notification, which is salient", arrange: func(t *testing.T, h *harness) {
 			h.r.OnActivity(testWS, mainAgent, notificationFrame("look at this"))
 		}},
 	}
@@ -861,8 +861,8 @@ func TestAnyNewerActivitySupersedesTheEnding(t *testing.T) {
 			if got := endingOf(t, h); got != nil {
 				t.Fatalf("ending = %v, want none: a newer activity is drawn at once", got)
 			}
-			if working(t, h).GetActivity().GetUnpinned().GetTransient() == nil {
-				t.Fatal("transient = none, want the newer activity")
+			if activity := working(t, h).GetActivity(); activity.GetSalient() == nil && activity.GetUnpinned().GetTransient() == nil {
+				t.Fatalf("activity = %v, want the newer activity drawn", activity)
 			}
 		})
 	}

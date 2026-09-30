@@ -630,7 +630,7 @@ func TestACompletedCompactionIsAnnouncedAsCompactionConcluded(t *testing.T) {
 	}
 }
 
-func TestAFailedCompactionIsAnnouncedAsTheBudgetLine(t *testing.T) {
+func TestAFailedCompactionStandsTheSalientBudgetLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -641,9 +641,10 @@ func TestAFailedCompactionIsAnnouncedAsTheBudgetLine(t *testing.T) {
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED, 0, 0, "the summary was empty")))
 
 	// Assert
-	transient := transientOf(t, h)
-	if transient.GetContextBudget().GetText() != "compaction failed — the summary was empty" || transient.GetCompactionConcluded() != nil {
-		t.Fatalf("transient = %+v, want the failure as the context_budget line", transient)
+	got := activityLineOf(h.view(t).GetStrip().GetStatus())
+	want := activityLine{tier: "salient", kind: "context_budget", text: "compaction failed — the summary was empty"}
+	if got != want {
+		t.Fatalf("activity = %+v, want the failure standing as the salient context_budget line", got)
 	}
 }
 
