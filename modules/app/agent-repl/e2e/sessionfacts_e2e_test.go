@@ -12,13 +12,12 @@
 //     FIGURE WAS READ", with SessionAccountUsageUnavailable's four reason
 //     arms), and `rate_limit_status` (SessionRateLimitStatus, "a STREAM-ONLY
 //     event... the footer's allowance cell draws it").
-//   - proto/src/frontend/v1/footer.proto — FooterStatusActivityRateLimited
-//     ("The vendor bills TWO independent allowances (rolling five-hour
-//     session, seven-day weekly) reported through one event") and
-//     FooterAllowance (`newsworthy`, `resets_at_s`, `utilization`, and the
-//     typed status oneof allowed/allowed_warning/rejected whose comment says
-//     "UNSET IS LEGAL: no rate-limit event has been observed for the window
-//     yet").
+//   - proto/src/frontend/v1/footer.proto — the ENDURING usage line
+//     (FooterActivityEnduringUsage, always drawn when nothing covers it and
+//     the 80% rule chooses it) with its FooterAllowance cells (`newsworthy`,
+//     `resets_at_s`, `utilization`, the typed verdict), and the SALIENT
+//     vendor rate-limit line (FooterStatusActivityRateLimit: a warning or a
+//     refusal, standing until a later event reports the allowance allowed).
 //   - proto/src/frontend/v1/mcp_panel.proto — McpPanelView/McpPanelRow, the
 //     surface the MCP healths are drawn on (driven here through /mcp, the
 //     same synchronous command mcpmonitors_e2e_test.go reads).
@@ -38,35 +37,22 @@
 //     assertions below are on the DRAWN ARM and no longer on a daemon log
 //     record.
 //
-//  2. `!rate-limit-seven-day` NOW DRAWS ITS ALLOWANCE. The scenario's
-//     utilization was 0.61 while the footer only draws the rate line when
-//     an allowance reaches DefaultRateLimitNewsworthyThreshold = 0.8
-//     (daemon/internal/resolve/footer/api.go; activity.go's rateLine: "at
-//     least one allowance is newsworthy: an unremarkable allowance is not
-//     news"), which made the WEEKLY cell unreachable from this mock. The
-//     mock's figure is now 0.91 (session.ts RATE_LIMIT_SEVEN_DAY) — no
-//     capture in the corpus carries a seven-day window or a utilization of
-//     any kind, so there was no real figure to prefer — and the weekly cell
-//     is asserted on the drawn shape below.
+//  2. A VENDOR RATE-LIMIT EVENT THAT WARNS OR REFUSES IS SALIENT (owner
+//     ruling, 2026-09-30): the vendor speaking stands its own line on every
+//     status arm, whatever the figure, until a later event reports that
+//     allowance allowed. `!rate-limit-five-hour`, `!rate-limit-seven-day` and
+//     `!rate-limit` each send an `allowed_warning`, so each stands the line
+//     naming its allowance.
 //
-//  3. AN UNREAD SAMPLE NO LONGER DRAWS A CAVEAT (owner ruling, fc4917be4,
-//     2026-09-15). Landing 13 once drew the account-usage outcome BY NAME on
-//     the strip (`FooterStatusActivityRateLimited.sample`) and opened the
-//     rate line on an unread sample alone. The ruling retired both: the line
-//     draws on NEWSWORTHY figures only, carries `figures_read_at_ms` (stamped
-//     by a READABLE sample and never by an unread attempt or an event), and
-//     an unread sample's outcome — its reason, and a sampling failure's
-//     cause — is recorded on the daemon's `daemon.footer.usage_sample_
-//     unreadable` breadcrumb instead. The mock's figures (five_hour 41,
-//     seven_day 63 — catalogs.ts fakeAccountUsage) sit under the 0.8
-//     threshold, so the tests below open the line with `!rate-limit-seven-
-//     day`'s 0.91 weekly EVENT and read the sampled session figure beside it.
-//     The daemon files a fresh sample at every turn close (the shim
-//     reprobes: agent-shim/claude/shim/src/engine/session.ts
-//     `reprobeSessionFacts`, "A TURN CAN CHANGE WHAT THE PROBES ANSWER"), so
-//     a readable reprobe after the event would re-file the weekly figure at
-//     63% and close the line: every test switches the probe to an unread arm
-//     BEFORE the event.
+//  3. AN UNREAD SAMPLE DRAWS NO CAVEAT (owner ruling, fc4917be4,
+//     2026-09-15). The enduring usage line carries `figures_read_at_ms`
+//     (stamped by a READABLE sample and never by an unread attempt or an
+//     event), and an unread sample's outcome — its reason, and a sampling
+//     failure's cause — is recorded on the daemon's `daemon.footer.usage_
+//     sample_unreadable` breadcrumb instead. The enduring usage line is drawn
+//     whatever the figures (owner ruling, 2026-09-28), so the tests below
+//     read the sampled figures straight off it; they never open a rate-limit
+//     line first, because a standing warning would cover the enduring line.
 //
 // Every scenario here runs against the scripted fake git (harness.NewRepo)
 // and the fake-SDK vendor inside the real shim: no real git, no vendor
@@ -157,47 +143,6 @@ func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, a
 				want, arm, operation, sfSessionArmRecords(t, w, workspaceDir, operation, arm))
 			return
 		}
-	}
-}
-
-// sfRateLimited answers the standing FooterStatusActivityRateLimited under
-// whichever status arm is set, or nil when the standing activity is a
-// different kind (or none). The kind is STATUS-INDEPENDENT — footer.proto:
-// "THREE ACTIVITY KINDS ARE STATUS-INDEPENDENT and appear in EVERY status
-// arm's oneof (notification, rate_limited, context_budget)" — so a reader
-// that looked under one status only would miss it whenever the daemon's
-// status moved on.
-func sfRateLimited(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRateLimited {
-	status := v.GetStrip().GetStatus()
-	switch {
-	case status.GetIdle() != nil:
-		return status.GetIdle().GetActivity().GetRateLimited()
-	case status.GetWorking() != nil:
-		return status.GetWorking().GetActivity().GetRateLimited()
-	case status.GetWaiting() != nil:
-		return status.GetWaiting().GetActivity().GetRateLimited()
-	case status.GetInterrupted() != nil:
-		return status.GetInterrupted().GetActivity().GetRateLimited()
-	case status.GetMerging() != nil:
-		return status.GetMerging().GetActivity().GetRateLimited()
-	case status.GetBackground() != nil:
-		return status.GetBackground().GetActivity().GetRateLimited()
-	case status.GetBlocked() != nil:
-		return status.GetBlocked().GetActivity().GetRateLimited()
-	case status.GetDisconnected() != nil:
-		return status.GetDisconnected().GetActivity().GetRateLimited()
-	case status.GetClosing() != nil:
-		return status.GetClosing().GetActivity().GetRateLimited()
-	case status.GetLoading() != nil:
-		return status.GetLoading().GetActivity().GetRateLimited()
-	case status.GetMergeConflict() != nil:
-		return status.GetMergeConflict().GetActivity().GetRateLimited()
-	case status.GetMergeFailed() != nil:
-		return status.GetMergeFailed().GetActivity().GetRateLimited()
-	case status.GetMerged() != nil:
-		return status.GetMerged().GetActivity().GetRateLimited()
-	default:
-		return nil
 	}
 }
 
@@ -392,39 +337,14 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 // rate_limit_event naming the `five_hour` window at utilization 0.82,
 // resetting in an hour).
 //
-// This is the one rate-limit scenario whose figure clears the footer's
-// newsworthiness gate, so it is asserted on the DRAWN shape: the standing
-// FooterStatusActivityRateLimited's SESSION allowance, its typed
-// `allowed_warning` status arm (copied arm-for-arm from
-// SessionRateLimitStatus by daemon/internal/resolve/footer/activity.go's
-// `allowance`, which never defaults an arm), and the daemon's own
-// percent→fraction and seconds conversions
-// (state.go fileFigures: "the contract carries a 0..1 fraction and epoch
-// seconds, so the conversion is the daemon's and never the client's").
-//
-// The footer watch is opened BEFORE the prompt on purpose. The shim reprobes
-// account usage at every turn CLOSE (engine/session.ts
-// reprobeSessionFacts), that sample's five-hour figure is 41% — below the
-// newsworthiness gate — and the sample is the LAST figure sighting to reach
-// the footer, so it overwrites the event's 0.82 and the drawn line retires
-// with it (footer/state.go fileFigures: "THE LAST SIGHTING TO ARRIVE WINS",
-// arrival being the only valid order between a shim-stamped sample and an
-// event the contract gives no instant at all). MEASURED: the line is drawn
-// and then gone again, both inside one turn. So the line stands only between
-// the rate-limit event and the turn's own close, and publish.Topic's
-// subscription guarantee is what makes catching it a certainty rather than a
-// race: "Subscribe delivers the latest published value first... and then
-// every later value in publication order, skipping none", with an unbounded
-// per-subscriber queue.
-//
-// It did NOT always retire. While the footer ordered the two sightings by
-// comparing the shim's `observed_at_ms` against the daemon's own clock, the
-// reprobe's sample routinely lost to the event that preceded it and the
-// retired 0.82 kept being drawn after the close — the defect this window is
-// now free of.
+// THE VENDOR SPEAKING IS SALIENT (owner ruling, 2026-09-30): the event stands
+// the rate-limit line naming the SESSION allowance, its `allowed_warning`
+// verdict, and the daemon's percent→fraction and milliseconds→seconds
+// conversions (footer salient.go observeRateLimitEvent). It stands until a
+// later event reports the allowance allowed, whatever samples arrive between.
 // ===========================================================================
 
-func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
+func TestRateLimitFiveHourWindowStandsTheSessionRateLimitLine(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
@@ -437,26 +357,20 @@ func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the five-hour allowance's drawn rate-limit line", func(v *frontendv1.FooterView) bool {
-		return sfRateLimited(v).GetSession() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the session allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
+		return footerRateLimit(v).GetWindow().GetSession() != nil
 	})
 
 	// Assert
-	session := sfRateLimited(view).GetSession()
-	if got := session.GetUtilization(); got < 0.815 || got > 0.825 {
-		t.Errorf("FooterAllowance(session).utilization = %v, want the event's 0.82 as a 0..1 fraction", got)
+	line := footerRateLimit(view)
+	if got := line.GetUtilization(); got < 0.815 || got > 0.825 {
+		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.82 as a 0..1 fraction", got)
 	}
-	if !session.GetNewsworthy() {
-		t.Errorf("FooterAllowance(session).newsworthy = false at utilization %v, want true (the drawn line exists only because it is)", session.GetUtilization())
+	if line.GetAllowedWarning() == nil {
+		t.Errorf("FooterStatusActivityRateLimit.verdict = %v, want the allowed_warning arm the event carried", line.GetVerdict())
 	}
-	if session.GetAllowedWarning() == nil {
-		t.Errorf("FooterAllowance(session).status = %v, want the allowed_warning arm the event carried", session.GetStatus())
-	}
-	if session.GetAllowed() != nil || session.GetRejected() != nil {
-		t.Errorf("FooterAllowance(session) carries a second status arm: %v", session.GetStatus())
-	}
-	if session.GetResetsAtS() == 0 {
-		t.Errorf("FooterAllowance(session).resets_at_s = 0, want the event's reset instant in epoch SECONDS")
+	if line.GetResetsAtS() == 0 {
+		t.Errorf("FooterStatusActivityRateLimit.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
 }
 
@@ -464,23 +378,13 @@ func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
 // The seven-day rate-limit window — `!rate-limit-seven-day` (the same
 // scenario factory naming the `seven_day` window at utilization 0.91).
 //
-// The figure clears the footer's newsworthiness gate (0.8), so this window
-// is asserted on the DRAWN shape: footer.proto's WEEKLY allowance cell,
-// which observeRateLimitStatus fills from seven_day and its per-model
-// aliases. Both hops are asserted — the drawn cell and the session-arm
-// record behind it — because the cell alone would not say the event's own
-// window reached the store.
-//
-// The footer watch opens BEFORE the prompt for the same reason as the
-// five-hour test: the turn's close reprobes account usage with figures below
-// the gate (seven_day is 63%), that sample is the last figure sighting to
-// arrive and so overwrites the event's 0.91, and the drawn line retires with
-// it. It therefore stands only between the rate-limit event and that close,
-// and publish.Topic's subscription guarantee makes catching it a certainty
-// rather than a race.
+// The event stands the rate-limit line naming the WEEKLY allowance. Both hops
+// are asserted — the drawn line and the session-arm record behind it —
+// because the line alone would not say the event's own window reached the
+// store.
 // ===========================================================================
 
-func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
+func TestRateLimitSevenDayWindowStandsTheWeeklyRateLimitLine(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, workspaceDir := sfNewWorkspace(t)
@@ -494,26 +398,20 @@ func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the seven-day allowance's drawn rate-limit line", func(v *frontendv1.FooterView) bool {
-		return sfRateLimited(v).GetWeekly() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the weekly allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
+		return footerRateLimit(v).GetWindow().GetWeekly() != nil
 	})
 
 	// Assert
-	weekly := sfRateLimited(view).GetWeekly()
-	if got := weekly.GetUtilization(); got < 0.905 || got > 0.915 {
-		t.Errorf("FooterAllowance(weekly).utilization = %v, want the event's 0.91 as a 0..1 fraction", got)
+	line := footerRateLimit(view)
+	if got := line.GetUtilization(); got < 0.905 || got > 0.915 {
+		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.91 as a 0..1 fraction", got)
 	}
-	if !weekly.GetNewsworthy() {
-		t.Errorf("FooterAllowance(weekly).newsworthy = false at utilization %v, want true (the drawn line exists only because it is)", weekly.GetUtilization())
+	if line.GetAllowedWarning() == nil {
+		t.Errorf("FooterStatusActivityRateLimit.verdict = %v, want the allowed_warning arm the event carried", line.GetVerdict())
 	}
-	if weekly.GetAllowedWarning() == nil {
-		t.Errorf("FooterAllowance(weekly).status = %v, want the allowed_warning arm the event carried", weekly.GetStatus())
-	}
-	if weekly.GetAllowed() != nil || weekly.GetRejected() != nil {
-		t.Errorf("FooterAllowance(weekly) carries a second status arm: %v", weekly.GetStatus())
-	}
-	if weekly.GetResetsAtS() == 0 {
-		t.Errorf("FooterAllowance(weekly).resets_at_s = 0, want the event's reset instant in epoch SECONDS")
+	if line.GetResetsAtS() == 0 {
+		t.Errorf("FooterStatusActivityRateLimit.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
 	sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status", before+1)
 }
@@ -523,44 +421,33 @@ func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 // `allowed_warning` event on the `overage` window at utilization 0.79 with a
 // surpassed threshold).
 //
-// footer.proto gives the strip THREE allowance cells:
-// FooterStatusActivityRateLimited carries `session`, `weekly` and, since
-// 2026-09-13, `overage`. The overage window is no longer dropped — it files
-// onto its own cell like the other two — so this scenario is now about the
-// NEWSWORTHINESS GATE alone: at utilization 0.79 the overage allowance is
-// below the gate (0.8) and no rate-limit line is drawn, exactly as an
-// unremarkable session or weekly figure would not be.
-//
-// THE SILENCE IS PART OF THE CONTRACT. The daemon used to warn
-// `daemon.footer.rate_limit_overage` here, and that warning was this
-// scenario's observable; the cell it complained about now exists, so the
-// warning is gone and the harness's own warning sweep — which fails on any
-// warn record this test does not declare — is what asserts it stays gone.
+// THE VENDOR'S WARNING STANDS WHATEVER THE FIGURE (owner ruling, 2026-09-30):
+// the old newsworthiness gate decided whether a rate line was drawn at all;
+// now the vendor speaking is the salient line, and 0.79 is the figure it
+// carries. The harness's warning sweep — which fails on any warn record this
+// test does not declare — still asserts the retired
+// `daemon.footer.rate_limit_overage` warning stays gone.
 // ===========================================================================
 
-func TestRateLimitOverageWindowIsBelowTheNewsworthyGate(t *testing.T) {
+func TestRateLimitOverageWindowStandsTheOverageRateLimitLine(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit")
-
-	// Assert
 	sfAwaitConclusion(t, w, ws, turn, "The account is approaching its overage threshold.")
 
-	// Assert: nothing is drawn, because 0.79 is not news. The overage figure
-	// itself landing on its own allowance is the daemon resolver suite's
-	// table case (TestEveryRateLimitWindowMatchesItsAllowance); what this
-	// scenario holds is that a below-gate overage draws no line and files no
-	// warning.
+	// Assert
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footerOf(t, w, ws), "the footer after the overage event", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the overage allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
+		return footerRateLimit(v).GetWindow().GetOverage() != nil
 	})
-	if line := sfRateLimited(view); line != nil {
-		t.Errorf("the footer drew a rate-limit line for an overage figure below the gate: %v", line)
+	if got := footerRateLimit(view).GetUtilization(); got < 0.785 || got > 0.795 {
+		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.79 as a 0..1 fraction", got)
 	}
 }
 
@@ -591,13 +478,9 @@ func footerOf(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Str
 // the strip. These tests assert all three through the real stack.
 // ===========================================================================
 
-// The five-hour and seven-day utilizations catalogs.ts's available shape
-// files, and the weekly figure `!rate-limit-seven-day`'s EVENT files, as the
-// footer draws them (percent on the wire, fraction on the contract).
-const (
-	sfFiveHourUtilization      = 0.41
-	sfSevenDayEventUtilization = 0.91
-)
+// The five-hour utilization catalogs.ts's available shape files, as the
+// footer draws it (percent on the wire, fraction on the contract).
+const sfFiveHourUtilization = 0.41
 
 // sfUnreadableOperation is the daemon's breadcrumb for a sample that read no
 // figure (daemon/internal/resolve/footer/resolver.go logUnreadableSample).
@@ -613,21 +496,19 @@ func sfAwaitUnreadable(t *testing.T, w *World, workspaceDir, reason string) harn
 		})
 }
 
-// sfOpenTheRateLine drives `!rate-limit-seven-day`, whose 0.91 weekly EVENT
-// is the one thing in this mock that makes the rate line newsworthy, and
-// answers the line it draws. The caller has already switched the probe to an
-// unread arm, so the turn-close reprobe cannot re-file the weekly figure.
-func sfOpenTheRateLine(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *frontendv1.FooterStatusActivityRateLimited {
+// sfAwaitUsage waits for the enduring usage line to draw the sampled
+// five-hour figure, and answers the line. The enduring line is drawn whatever
+// the figures (owner ruling, 2026-09-28), and nothing here stands a salient
+// line over it.
+func sfAwaitUsage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *frontendv1.FooterActivityEnduringUsage {
 	t.Helper()
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
-	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 91% used.")
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
-	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the rate line the weekly event opens",
+	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the enduring usage line with the sampled figures",
 		func(v *frontendv1.FooterView) bool {
-			return sfRateLimited(v).GetWeekly().GetUtilization() == sfSevenDayEventUtilization
+			return footerEnduringUsage(v).GetSession().GetUtilization() == sfFiveHourUtilization
 		})
-	return sfRateLimited(view)
+	return footerEnduringUsage(view)
 }
 
 // sfSwitchedToUnread waits for a driven unread-arm scenario's conclusion and
@@ -643,10 +524,10 @@ func sfSwitchedToUnread(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, tu
 // sfAssertNoCaveat fails if the line carries an account-usage outcome: the
 // ruling retired the unread caveat, and a daemon that still filled it would
 // draw a warning the owner removed.
-func sfAssertNoCaveat(t *testing.T, line *frontendv1.FooterStatusActivityRateLimited) {
+func sfAssertNoCaveat(t *testing.T, line *frontendv1.FooterActivityEnduringUsage) {
 	t.Helper()
 	if line.GetSample() != nil {
-		t.Errorf("FooterStatusActivityRateLimited.sample = %v, want UNSET: an unread sample draws no caveat (owner ruling, fc4917be4)", line.GetSample())
+		t.Errorf("FooterActivityEnduringUsage.sample = %v, want UNSET: an unread sample draws no caveat (owner ruling, fc4917be4)", line.GetSample())
 	}
 }
 
@@ -670,7 +551,7 @@ func TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding(t *testing.T) {
 
 			// Act
 			sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario), tc.reason)
-			line := sfOpenTheRateLine(t, w, ws)
+			line := sfAwaitUsage(t, w, ws)
 
 			// Assert: ALONGSIDE, never instead of. The five-hour figure the
 			// last readable sample filed is still drawn, with the age of THAT
@@ -698,11 +579,8 @@ func TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding(t *testing.T) {
 // the fake's own clock, and this asserts the ordering the countdown needs:
 // the drawn reset is AFTER the moment the footer was read.
 //
-// THE SESSION CELL IS THE SAMPLED ONE. The ruling of 2026-09-15 (fc4917be4)
-// draws the line on newsworthy figures only, so the weekly EVENT (0.91) opens
-// it; the weekly cell then carries the event's own reset, and the SESSION
-// cell — 41%, filed by the start-time probe — is the sample's. The unread arm
-// ahead of the event keeps the turn-close reprobes from re-filing either.
+// THE SESSION CELL IS THE SAMPLED ONE: 41%, filed by the start-time probe.
+// The unread arm ahead keeps the turn-close reprobes from re-filing it.
 func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -710,7 +588,7 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
 
 	// Act
-	line := sfOpenTheRateLine(t, w, ws)
+	line := sfAwaitUsage(t, w, ws)
 	readAt := time.Now().Unix()
 
 	// Assert
@@ -737,10 +615,10 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 // footer's first sighting of any account usage was the turn-close reprobe
 // 41ms later.
 //
-// BOTH TURNS HERE READ NOTHING on purpose: the probe is switched to an unread
-// arm by the first, so neither turn-close reprobe files a figure, and the
-// session's 41% on the line the second turn's event opens cannot have come
-// from anything but the start-time probe.
+// THE TURN HERE READS NOTHING on purpose: the probe is switched to an unread
+// arm by it, so its turn-close reprobe files no figure, and the session's 41%
+// on the enduring line cannot have come from anything but the start-time
+// probe.
 func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -748,7 +626,7 @@ func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
 
 	// Act: the workspace's very first turn, and it reads nothing.
 	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
-	line := sfOpenTheRateLine(t, w, ws)
+	line := sfAwaitUsage(t, w, ws)
 
 	// Assert
 	if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
@@ -786,25 +664,24 @@ func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
 // scenario: the service answered in full and this account simply has no opus
 // window (catalogs.ts: "An ABSENT OPTIONAL WINDOW, which is NOT an
 // unavailability"). So the sample READS: its turn-close reprobe re-files the
-// weekly figure at the sample's 63%, which replaces the event's 91% and — the
-// figures being unremarkable — retires the line. An unread arm in its place
-// would have left the line standing, exactly as the tests above assert.
-func TestAccountUsageOpusAbsentIsReadAndRetiresTheLine(t *testing.T) {
+// figures and stamps a fresh read instant, where an unread arm in its place
+// would have left the start-time probe's instant standing, exactly as the
+// tests above assert.
+func TestAccountUsageOpusAbsentIsReadAndRestampsTheFigures(t *testing.T) {
 	t.Parallel()
-	// Arrange: a line standing on the event's figure, over an unread probe.
+	// Arrange: figures standing from the start-time probe, over an unread probe.
 	w, ws, _ := sfNewWorkspace(t)
 	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
-	sfOpenTheRateLine(t, w, ws)
+	before := sfAwaitUsage(t, w, ws).GetFiguresReadAtMs()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-opus-absent")
 	sfAwaitConclusion(t, w, ws, turn,
 		"The account-usage probe now answers with the opus_absent shape.")
 
-	// Assert: the sample reads again, so the weekly figure is the sample's and
-	// the line it rode on is gone.
+	// Assert: the sample read again, so the figures carry a newer read instant.
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
-	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to retire the line an absent optional window re-read",
-		func(v *frontendv1.FooterView) bool { return sfRateLimited(v) == nil })
+	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to re-stamp the figures an absent optional window re-read",
+		func(v *frontendv1.FooterView) bool { return footerEnduringUsage(v).GetFiguresReadAtMs() > before })
 }
