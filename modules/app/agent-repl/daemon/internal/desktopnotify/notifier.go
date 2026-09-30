@@ -126,7 +126,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	})
 	clicked, err := n.deps.Backend.Post(n.ctx, ws, banner)
 	switch {
-	case err != nil && n.ctx.Err() != nil:
+	case stoodDown(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})
 	case err != nil:
 		log.Error(opPost, "the desktop banner program failed", dlog.Context{
@@ -147,4 +147,10 @@ func (n *Notifier) Close() {
 	n.mu.Unlock()
 	n.cancel()
 	n.wg.Wait()
+}
+
+// stoodDown reports whether err is a call the daemon's stand-down cut short:
+// the call failed under a ctx (the notifier's lifetime) that has ended.
+func stoodDown(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() != nil
 }

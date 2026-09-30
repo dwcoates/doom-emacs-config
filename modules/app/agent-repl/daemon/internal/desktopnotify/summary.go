@@ -108,7 +108,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		Prompt:    question,
 		Timeout:   timeout,
 	})
-	if err != nil && ctx.Err() != nil {
+	if stoodDown(ctx, err) {
 		// ctx is the notifier's lifetime: the daemon stood down mid-call and
 		// killed the child, which is the stand-down working, not a failure.
 		log.Info(opSummary, "the daemon stood down during the turn-summary call", dlog.Context{
