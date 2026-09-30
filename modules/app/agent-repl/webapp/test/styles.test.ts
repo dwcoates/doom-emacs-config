@@ -1800,21 +1800,23 @@ describe("the card-level tool fold", () => {
     expect(rule).toMatch(/display:\s*none/);
   });
 
-  it("reveals the section, scrolling at 50vh, once the card is expanded", () => {
+  it("reveals the section, which gives way and scrolls, once the card is expanded", () => {
     // Arrange / Act
     const rule = declarationsOf(".tool-fold.expanded > .tool-output");
 
-    // Assert
-    expect(rule).toMatch(/max-height:\s*50vh/);
+    // Assert — the card's ceiling bounds it, not a cap of its own.
+    expect(rule).toMatch(/max-height:\s*none/);
+    expect(rule).toMatch(/min-height:\s*0/);
     expect(rule).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("never caps the card itself, so only the section scrolls at 50vh", () => {
+  it("caps the expanded card itself at the expanded-item ceiling", () => {
     // Arrange / Act
     const rule = declarationsOf(".tool-fold.expanded");
 
-    // Assert — the card grows to hold its 50vh section rather than clipping.
-    expect(rule).toMatch(/max-height:\s*none/);
+    // Assert
+    expect(rule).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
+    expect(rule).toMatch(/flex-direction:\s*column/);
   });
 
   it("scopes the whole fold model to tool cards, never to a bubble", () => {
@@ -3209,5 +3211,31 @@ describe("the footer's status and substatus size", () => {
   it("gives that size the substatus's own value", () => {
     // Arrange / Act / Assert
     expect(stylesheet).toMatch(/\.pfooter \{ --footer-status-font-size: 0\.74rem; \}/);
+  });
+});
+
+describe("the expanded-item ceiling", () => {
+  it("is 80% of the feed's own visible height, declared once on the feed's size container", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#feed-scroll");
+
+    // Assert
+    expect(rule).toMatch(/container-type:\s*size/);
+    expect(rule).toMatch(/--feed-item-max-h:\s*80cqh/);
+    expect(stylesheet.match(/--feed-item-max-h:/g)).toHaveLength(1);
+  });
+
+  it.each([
+    ".tool-fold.expanded",
+    ".tool-card.bubble-fold[data-expanded=\"true\"]",
+    ".shell-bubble:has(.shell-tail.expanded)",
+    ".tool-card:has(> .hook-output.expanded)",
+    ".title-fold-standalone.expanded",
+  ])("caps %s at the ceiling", (selector) => {
+    expect(declarationsOf(selector)).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
+  });
+
+  it("never caps a response or prompt bubble's scroll box at the item ceiling", () => {
+    expect(declarationsOf(".bubble > .bubble-scroll.expanded")).not.toMatch(/--feed-item-max-h/);
   });
 });

@@ -156,7 +156,7 @@ describe("drawFeedSkill", () => {
     }
   });
 
-  it("reveals the document, scrolling at 50vh, once the card is expanded", () => {
+  it("reveals the document, bounded by the card's ceiling alone, once the card is expanded", () => {
     const remove = installStylesheet();
     try {
       const el = drawFeedSkill(skill(loaded("# heading")), rc());
@@ -164,7 +164,7 @@ describe("drawFeedSkill", () => {
       document.body.replaceChildren(el);
       const doc = el.querySelector(".skill-content") as Element;
       expect(cascadedValue(doc, "display")).toBe("block");
-      expect(cascadedValue(doc, "max-height")).toBe("50vh");
+      expect(cascadedValue(doc, "max-height")).toBe("none");
     } finally {
       remove();
     }
