@@ -311,6 +311,26 @@ export function buildPrompt(
   return create(conversationv1.AgentPromptSchema, { id: turn, agent, said, origin });
 }
 
+/**
+ * What the vendor is sent for a prompt: what was said, then the daemon's note
+ * for the agent alone (`StartTurnRequest.vendor_note`) as a closing block the
+ * harness marks as its own. The prompt row keeps `said` exactly; only the
+ * vendor reads the note. No note, or an empty one, sends `said` untouched.
+ */
+export function vendorSaid(said: conversationv1.UserSaid, note: string | undefined): conversationv1.UserSaid {
+  if (note === undefined || note === "") return said;
+  const blocks = [
+    ...(said.content?.blocks ?? []),
+    create(conversationv1.UserContentBlockSchema, {
+      block: {
+        case: "text",
+        value: create(conversationv1.TextBlockSchema, { text: `<system-reminder>${note}</system-reminder>` }),
+      },
+    }),
+  ];
+  return create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, { blocks }) });
+}
+
 /** The one served prompt row (R15). */
 export function promptEntry(
   prompt: conversationv1.AgentPrompt,
@@ -684,7 +704,7 @@ export class TurnEngine {
     const opened: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
     this.session.setOpenTurn(opened);
     try {
-      await this.session.submit(said, opened);
+      await this.session.submit(vendorSaid(said, request.vendorNote), opened);
     } catch (err) {
       this.session.releaseTurn(opened);
       const detail = err instanceof Error ? err.message : String(err);
