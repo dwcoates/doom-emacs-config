@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -31,30 +32,27 @@ func JoiningAddrPath(stateDir string) string {
 	return filepath.Join(stateDir, JoiningAddrFile)
 }
 
-// successorArgv is the incumbent's OWN command line with the joining flag
-// re-pointed at it.
+// successorArgv is the incumbent's CONFIGURATION argv with the joining flag
+// pointed at it.
 //
-// The successor inherits the incumbent's ARGV as well as its environment, for
-// the reason the environment is inherited whole: a successor assembled from a
-// curated list would differ from its incumbent in exactly the ways nobody
-// thought to list. Emacs launches the daemon with no argv at all, so in
-// production this is just the joining flag -- but every flag the operator or a
-// test did pass (the account roots, the shim entry, the webapp dist, the
-// prompts directory) is the incumbent's configuration, and a successor
-// without it is a different daemon.
+// The successor inherits the incumbent's configuration as well as its
+// environment, for the reason the environment is inherited whole: a successor
+// assembled from a curated list would differ from its incumbent in exactly the
+// ways nobody thought to list. Every flag the operator or a test did pass (the
+// account roots, the shim entry, the webapp dist, the prompts directory) is
+// the incumbent's configuration, and a successor without it is a different
+// daemon.
 //
-// An existing joining flag is DROPPED, value and all: this successor joins the
-// daemon that spawned it, not the one its parent joined. A replacing flag is
-// dropped too: an incumbent that was itself booted as a replacement carries
-// it, and a successor handed `--replacing --joining` refuses the pair and
-// exits before it binds, so every handover that incumbent attempted failed as
-// a successor that never reported an address (2026-09-30).
-func successorArgv(incumbent []string, address string) []string {
-	return append(withoutRoleFlags(incumbent), JoiningFlag, address)
+// It is built from the configuration (ProcessSpawner.Argv), NEVER from
+// os.Args: os.Args also carries the flags that said how THIS process booted
+// (`--joining`, `--replacing`), and a successor that inherited one refused the
+// exclusive pair and exited before it bound, so every handover an incumbent
+// booted as a replacement attempted failed (2026-09-30). Stripping the boot
+// flags back out of os.Args is a list someone must remember to extend; an
+// argv that never held them cannot carry one.
+func successorArgv(config []string, address string) []string {
+	return append(slices.Clone(config), JoiningFlag, address)
 }
-
-// joiningName is JoiningFlag without its dashes, for argv matching.
-const joiningName = "joining"
 
 // ReportJoiningAddr is the SUCCESSOR's half: write this daemon's bound address
 // where the incumbent that spawned it is waiting. It writes atomically, because
@@ -108,6 +106,11 @@ type ProcessSpawner struct {
 	Exe string
 	// StateDir is the shared state root the report travels through.
 	StateDir string
+	// Argv is the incumbent's CONFIGURATION argv: the flags every daemon it
+	// spawns inherits, and none of the flags that said how it booted. The
+	// daemon's own flag parse builds it (claude-repld's parseFlags), so a
+	// boot flag is excluded by where it is declared, not by a strip list.
+	Argv []string
 	// Poll is how often the report file is checked. It is a field so a test
 	// drives it, and it is a POLL rather than a watch because the report is a
 	// single file written once: a filesystem watch would be more machinery for
@@ -140,10 +143,11 @@ const (
 )
 
 // NewProcessSpawner builds the production spawner.
-func NewProcessSpawner(exe, stateDir string) *ProcessSpawner {
+func NewProcessSpawner(exe, stateDir string, argv []string) *ProcessSpawner {
 	return &ProcessSpawner{
 		Exe:       exe,
 		StateDir:  stateDir,
+		Argv:      argv,
 		Poll:      50 * time.Millisecond,
 		Timeout:   30 * time.Second,
 		StopGrace: DefaultSuccessorStopGrace,
@@ -187,7 +191,7 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// just been handed refusing connections. ctx still bounds the WAIT below,
 	// which is this call's own work; it must not bound the process this call
 	// exists to leave running.
-	cmd := exec.Command(s.Exe, successorArgv(os.Args[1:], incumbentAddress)...)
+	cmd := exec.Command(s.Exe, successorArgv(s.Argv, incumbentAddress)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	// ITS OWN SESSION, WHICH IS WHAT "OUTLIVES" ACTUALLY TAKES.
@@ -279,7 +283,7 @@ func (s *ProcessSpawner) SpawnReplacement(_ context.Context) (int, error) {
 	if strings.TrimSpace(s.Exe) == "" {
 		return 0, fmt.Errorf("rollout: no daemon binary to spawn the replacement from")
 	}
-	cmd := exec.Command(s.Exe, replacementArgv(os.Args[1:])...)
+	cmd := exec.Command(s.Exe, replacementArgv(s.Argv)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -201,6 +203,103 @@ func TestAReplacementIsNeverAlsoJoining(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseFlags accepted a daemon that both replaces and joins")
 	}
+}
+
+// sampleFlagValue is a set, non-default value for flag f, by its value type.
+func sampleFlagValue(t *testing.T, f *flag.Flag) string {
+	t.Helper()
+	if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+		return "true"
+	}
+	switch f.DefValue {
+	case "0":
+		return "7"
+	case "0s":
+		return "1m0s"
+	}
+	return "/sample/" + f.Name
+}
+
+func TestParseFlagsInheritsOnlyTheConfigurationFlagsThatWereSet(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want []string
+	}{
+		{name: "nothing set inherits nothing", want: []string{}},
+		{name: "a set bool is inherited and an unset default is not", argv: []string{"--fake"}, want: []string{"--fake=true"}},
+		{name: "a separated value is inherited as parsed", argv: []string{"--default-config-dir", "/roots/default"}, want: []string{"--default-config-dir=/roots/default"}},
+		{name: "a replacement's role is not inherited", argv: []string{"--replacing", "--default-config-dir", "/roots/default"}, want: []string{"--default-config-dir=/roots/default"}},
+		{name: "a successor's role is not inherited", argv: []string{"--joining", "127.0.0.1:9", "--node", "/bin/node"}, want: []string{"--node=/bin/node"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			opts, err := parseFlags("claude-repld", tt.argv)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			if !slices.Equal(opts.inherited, tt.want) {
+				t.Fatalf("inherited = %v, want %v", opts.inherited, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryConfigurationFlagRoundTripsThroughItsInheritedArgv pins that a
+// spawned daemon parses the inherited argv back to the same configuration,
+// for EVERY configuration flag, so a new flag of a new value type cannot be
+// inherited in a spelling its own parse would read differently.
+func TestEveryConfigurationFlagRoundTripsThroughItsInheritedArgv(t *testing.T) {
+	var scratch options
+	config, _ := newFlagSets("claude-repld", &scratch)
+	config.VisitAll(func(f *flag.Flag) {
+		t.Run(f.Name, func(t *testing.T) {
+			// Arrange
+			argv := []string{"--" + f.Name + "=" + sampleFlagValue(t, f)}
+			first, err := parseFlags("claude-repld", argv)
+			if err != nil {
+				t.Fatalf("parseFlags(%v): %v", argv, err)
+			}
+
+			// Act
+			second, err := parseFlags("claude-repld", first.inherited)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("parseFlags(%v): %v", first.inherited, err)
+			}
+			if len(first.inherited) != 1 || !slices.Equal(second.inherited, first.inherited) {
+				t.Fatalf("inherited %v re-parsed to %v, want one flag that round-trips", first.inherited, second.inherited)
+			}
+		})
+	})
+}
+
+// TestNoBootFlagIsEverInherited pins the split itself: set on its own, every
+// boot flag leaves the inherited argv empty.
+func TestNoBootFlagIsEverInherited(t *testing.T) {
+	var scratch options
+	_, boot := newFlagSets("claude-repld", &scratch)
+	boot.VisitAll(func(f *flag.Flag) {
+		t.Run(f.Name, func(t *testing.T) {
+			// Arrange
+			argv := []string{"--" + f.Name + "=" + sampleFlagValue(t, f)}
+
+			// Act
+			opts, err := parseFlags("claude-repld", argv)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("parseFlags(%v): %v", argv, err)
+			}
+			if len(opts.inherited) != 0 {
+				t.Fatalf("inherited = %v, want no flag from boot flag %s", opts.inherited, f.Name)
+			}
+		})
+	})
 }
 
 // TestTheGraphNamesEveryUnwiredCollaborator pins that a graph which cannot be

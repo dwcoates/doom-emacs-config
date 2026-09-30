@@ -628,7 +628,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StateDir:         p.Layout.Dir(),
 		IntentManifest:   p.Layout.IntentManifest(),
 		DB:               p.DB,
-		Spawner:          rollout.NewProcessSpawner(selfExe, p.Layout.Dir()),
+		Spawner:          rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited),
 		Announcer:        pushes,
 		Pusher:           pushes,
 		Participants:     pushes,

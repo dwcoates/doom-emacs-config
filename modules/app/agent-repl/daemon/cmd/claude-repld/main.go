@@ -134,6 +134,10 @@ type options struct {
 	// streams closed, loops joined, the state handle released -- is what
 	// frees the claim.
 	replacing bool
+	// inherited is the CONFIGURATION argv every daemon this one spawns
+	// inherits (newFlagSets): each configuration flag that was set, as parsed,
+	// and no boot flag.
+	inherited []string
 }
 
 // envStoreSocket is the store socket's environment contract, which the
@@ -203,33 +207,68 @@ func main() {
 	}
 }
 
+// newFlagSets declares every flag the daemon takes, bound to opts, in exactly
+// one of two sets.
+//
+// CONFIGURATION is what this daemon IS: every daemon it spawns (a handover's
+// successor, a layout restart's replacement) inherits each one that was set,
+// because a spawn assembled from a curated list would differ from its
+// incumbent in exactly the ways nobody thought to list.
+//
+// BOOT flags say how THIS process starts -- the role it boots in, or the one
+// question it answers before exiting -- and no spawned daemon inherits one:
+// the spawn appends its own role. A new flag is sorted by where it is
+// declared, so a boot flag cannot leak into a spawn by being left off a strip
+// list (the 2026-09-30 handover failure: `--replacing` inherited beside
+// `--joining`).
+func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
+	config = flag.NewFlagSet(program, flag.ContinueOnError)
+	config.StringVar(&opts.stateDir, "state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
+	config.BoolVar(&opts.fake, "fake", false, "run without a real vendor: shims spawn with --fake and the classifier is scripted")
+	config.StringVar(&opts.pprof, "pprof", "", "opt-in profiling surface: a unix socket path or a loopback host:port (empty is off)")
+	config.StringVar(&opts.webapp, "webapp-dist", "", "webapp dist directory to serve")
+	config.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
+	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
+	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
+	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
+	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
+	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
+	config.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
+	config.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
+	config.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")
+	config.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
+	config.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
+
+	boot = flag.NewFlagSet(program, flag.ContinueOnError)
+	boot.StringVar(&opts.joining, "joining", "", "address of the incumbent daemon to take over from")
+	boot.BoolVar(&opts.probeBootClaim, "probe-boot-claim", false, "report whether this state root's boot claim is held and exit: 0 free, 3 held, 2 undecided")
+	boot.BoolVar(&opts.layoutVersion, rollout.LayoutVersionFlagName, false, "print the state layout version this binary writes and exit")
+	boot.BoolVar(&opts.replacing, rollout.ReplacingFlagName, false, "this daemon replaces an incumbent restarting across a state layout change: wait longer for its boot claim")
+	return config, boot
+}
+
 // parseFlags parses the command line. It is separate from main so the flag set
 // is testable without running the daemon.
+//
+// Both sets of newFlagSets parse as ONE command line, and opts.inherited is
+// what a spawned daemon inherits: every CONFIGURATION flag that was set, as
+// `--name=value` from its parsed value, and never a boot flag.
 func parseFlags(program string, args []string) (options, error) {
 	var opts options
+	config, boot := newFlagSets(program, &opts)
 	fs := flag.NewFlagSet(program, flag.ContinueOnError)
-	fs.StringVar(&opts.stateDir, "state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
-	fs.BoolVar(&opts.fake, "fake", false, "run without a real vendor: shims spawn with --fake and the classifier is scripted")
-	fs.StringVar(&opts.joining, "joining", "", "address of the incumbent daemon to take over from")
-	fs.StringVar(&opts.pprof, "pprof", "", "opt-in profiling surface: a unix socket path or a loopback host:port (empty is off)")
-	fs.StringVar(&opts.webapp, "webapp-dist", "", "webapp dist directory to serve")
-	fs.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
-	fs.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
-	fs.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
-	fs.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
-	fs.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
-	fs.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
-	fs.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
-	fs.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
-	fs.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")
-	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
-	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
-	fs.BoolVar(&opts.probeBootClaim, "probe-boot-claim", false, "report whether this state root's boot claim is held and exit: 0 free, 3 held, 2 undecided")
-	fs.BoolVar(&opts.layoutVersion, rollout.LayoutVersionFlagName, false, "print the state layout version this binary writes and exit")
-	fs.BoolVar(&opts.replacing, rollout.ReplacingFlagName, false, "this daemon replaces an incumbent restarting across a state layout change: wait longer for its boot claim")
+	for _, set := range []*flag.FlagSet{config, boot} {
+		set.VisitAll(func(f *flag.Flag) { fs.Var(f.Value, f.Name, f.Usage) })
+	}
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
+	opts.inherited = []string{}
+	fs.Visit(func(f *flag.Flag) {
+		if config.Lookup(f.Name) != nil {
+			opts.inherited = append(opts.inherited, "--"+f.Name+"="+f.Value.String())
+		}
+	})
 	if opts.replacing && opts.joining != "" {
 		return options{}, fmt.Errorf("%s: -%s and -joining are exclusive: a replacement boots as the incumbent, a successor joins one", program, rollout.ReplacingFlagName)
 	}
