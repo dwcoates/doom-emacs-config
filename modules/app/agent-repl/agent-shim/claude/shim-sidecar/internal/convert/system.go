@@ -61,7 +61,7 @@ func (c *Converter) apiError(record map[string]any, at Attribution, env envelope
 	detail := obj(record["error"])
 	message := firstNonEmpty(str(detail["formatted"]), str(detail["message"]), str(record["content"]))
 
-	failed := &conversationv1.ApiRequestFailed{Message: message}
+	failed := &conversationv1.ApiRequestFailed{Message: message, Retry: apiRetry(record, env.timestampMs)}
 	setAPIKind(failed, apiErrorKind(detail, record))
 
 	// AN OBSERVED FAULT IS NOT AN OWNED ONE — info, not warn. This branch is the
@@ -170,6 +170,25 @@ func inferKindFromStatus(detail map[string]any) string {
 		return "overloaded_error"
 	default:
 		return ""
+	}
+}
+
+// apiRetry reads the vendor's retry schedule off a recorded failure: the retry
+// it makes next, how many it allows, and when the next starts (the failure's
+// own instant plus the delay it stated). Nil when the record states no
+// schedule; a record stating only part of one is stated whole or not at all,
+// because a countdown to a guessed instant would be a guess drawn as a fact.
+func apiRetry(record map[string]any, atMs int64) *conversationv1.ApiRetry {
+	delay := retryAfterMs(record)
+	attempt, hasAttempt := record["retryAttempt"].(float64)
+	limit, hasLimit := record["maxRetries"].(float64)
+	if delay == nil || !hasAttempt || !hasLimit || atMs == 0 {
+		return nil
+	}
+	return &conversationv1.ApiRetry{
+		Attempt:         uint32(attempt),
+		MaxRetries:      uint32(limit),
+		NextAttemptAtMs: atMs + *delay,
 	}
 }
 

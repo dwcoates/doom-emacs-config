@@ -2,7 +2,10 @@ package convert
 
 // system_test.go — the api_error taxonomy, and the withholding classes.
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func apiErrorLine(uuid, detail, extra string) string {
 	line := `{"type":"system","subtype":"api_error","uuid":"` + uuid + `","isSidechain":false,` +
@@ -140,6 +143,38 @@ func TestConnectionFailureNamesTheVendorsConnectionCode(t *testing.T) {
 	unmodeled := frameOf(entryByKey(t, entries, SessionKey("api_error", "e1"))).GetUpdate().GetApiError().GetUnmodeled()
 	if got := unmodeled.GetType(); got != "connection/StreamSuspended" {
 		t.Fatalf("type = %q, want the connection code named", got)
+	}
+}
+
+func TestApiErrorCarriesTheVendorsRetrySchedule(t *testing.T) {
+	// Arrange. A connection failure, as the 2026-09-30 outage recorded it.
+	c := newTestConverter(t)
+	detail := `{"message":"Connection error.","connection":{"code":"ENOTFOUND"}}`
+
+	// Act.
+	entries := convertLines(t, c, apiErrorLine("e1", detail, `"retryInMs":32234.5,"retryAttempt":8,"maxRetries":10`))
+
+	// Assert: the next attempt is the failure's own instant plus the delay.
+	retry := frameOf(entryByKey(t, entries, SessionKey("api_error", "e1"))).GetUpdate().GetApiError().GetRetry()
+	at, err := time.Parse(time.RFC3339Nano, ts1)
+	if err != nil {
+		t.Fatalf("parse ts1: %v", err)
+	}
+	if retry.GetAttempt() != 8 || retry.GetMaxRetries() != 10 || retry.GetNextAttemptAtMs() != at.UnixMilli()+32234 {
+		t.Fatalf("retry = %v, want attempt 8 of 10, next at ts1 + 32234ms", retry)
+	}
+}
+
+func TestApiErrorWithAPartialRetryScheduleCarriesNone(t *testing.T) {
+	// Arrange: a delay with no attempt count.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, apiErrorLine("e1", `{"type":"rate_limit_error","message":"slow"}`, `"retryInMs":549`))
+
+	// Assert.
+	if retry := frameOf(entryByKey(t, entries, SessionKey("api_error", "e1"))).GetUpdate().GetApiError().GetRetry(); retry != nil {
+		t.Fatalf("retry = %v, want none from a partial schedule", retry)
 	}
 }
 
