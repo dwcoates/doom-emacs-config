@@ -17,6 +17,7 @@ import {
   closingMonitorTerminal,
   findMonitorCall,
   announceLiveWork,
+  bashUnitsWithoutCommand,
   createReconciler,
   findBashStart,
   findUnit,
@@ -1118,16 +1119,229 @@ describe("announceLiveWork for the non-shell kinds", () => {
     );
   });
 
-  it("omits a subagent the record holds no start for, rather than inventing one", () => {
-    // An announcement with an invented description is worse than a missing one.
+  it("announces a spawn whose row states no prompt by its handle and kind, at ERROR", () => {
     // Arrange.
     const entry = recorded({
       case: "subagent",
       value: create(conversationv1.AgentSubagentSchema, {}),
     });
+    const mark = logSinkMark();
 
-    // Act, Assert.
-    expect(announceLiveWork([entry], [HANDLE], BOOK)).toEqual([]);
+    // Act.
+    const announced = announceLiveWork([entry], [HANDLE], BOOK);
+
+    // Assert.
+    const record = logRecordsSince(mark).find((r) => r.context.detail === "the spawn unit's row states no prompt");
+    expect([announced.map((a) => a.kind?.kind.case), record?.level]).toEqual([["subagent"], "error"]);
+  });
+});
+
+/**
+ * A LIVE UNIT'S ROW HAS USUALLY MOVED PAST ITS START (2026-09-30: two live
+ * background subagents vanished from an adopting daemon's footer). The start is
+ * rebuilt from whatever arm the row holds.
+ */
+describe("announceLiveWork for a unit whose row moved past its start", () => {
+  const PROMPT = create(conversationv1.AgentSubagentPromptSchema, { text: "sweep the logs" });
+  const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
+
+  /** One recorded unit keyed `run-1`, first placed at `atMs`. */
+  function recordedAt(item: conversationv1.AgentActivity["item"], atMs?: bigint): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      ...(atMs === undefined
+        ? {}
+        : { place: { case: "recordedPlace", value: create(conversationv1.ConversationPlaceSchema, { atMs }) } }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            agentId: BOOK,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, { activityId: RUN, item }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  const RUNNING_SPAWN: conversationv1.AgentActivity["item"] = {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: { case: "update", value: create(conversationv1.AgentSubagentUpdateSchema, { prompt: PROMPT }) },
+    }),
+  };
+
+  const PROGRESSING_SHELL: conversationv1.AgentActivity["item"] = {
+    case: "bash",
+    value: create(conversationv1.AgentBashSchema, {
+      result: { case: "progress", value: create(conversationv1.AgentToolCallProgressSchema, { lastProgressAtMs: 9n }) },
+    }),
+  };
+
+  /** The start arm the one announcement describes. */
+  function startOf(announced: conversationv1.AgentDetachedWork[]): conversationv1.DetachableWork["work"] | undefined {
+    const origin = announced[0]?.origin;
+    return origin?.case === "created" ? origin.value.workCreated?.work : undefined;
+  }
+
+  it("describes a running subagent from its beat, naming the agent by the minting rule", () => {
+    // Arrange, Act.
+    const work = startOf(announceLiveWork([recordedAt(RUNNING_SPAWN)], [HANDLE], BOOK));
+
+    // Assert.
+    const start = work?.case === "subagent" && work.value.result.case === "start" ? work.value.result.value : undefined;
+    expect([start?.createdAgentId?.value, start?.prompt?.text]).toEqual(["run-1", "sweep the logs"]);
+  });
+
+  it("states the running subagent's subagent kind", () => {
+    // Arrange, Act.
+    const announced = announceLiveWork([recordedAt(RUNNING_SPAWN)], [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced[0]?.kind?.kind.case).toBe("subagent");
+  });
+
+  it("dates the rebuilt start from the row's first place", () => {
+    // Arrange, Act.
+    const work = startOf(announceLiveWork([recordedAt(RUNNING_SPAWN, 1234n)], [HANDLE], BOOK));
+
+    // Assert.
+    const start = work?.case === "subagent" && work.value.result.case === "start" ? work.value.result.value : undefined;
+    expect(start?.startedAt?.atMs).toBe(1234n);
+  });
+
+  it("states no start instant when the store stated no place", () => {
+    // Arrange, Act.
+    const work = startOf(announceLiveWork([recordedAt(RUNNING_SPAWN)], [HANDLE], BOOK));
+
+    // Assert.
+    const start = work?.case === "subagent" && work.value.result.case === "start" ? work.value.result.value : undefined;
+    expect(start?.startedAt).toBeUndefined();
+  });
+
+  it("takes the created agent a settle arm states over the minting rule", () => {
+    // Arrange.
+    const settled: conversationv1.AgentActivity["item"] = {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSubagentSuccessSchema, { prompt: PROMPT, createdAgentId: agent("stated") }),
+        },
+      }),
+    };
+
+    // Act.
+    const work = startOf(announceLiveWork([recordedAt(settled)], [HANDLE], BOOK));
+
+    // Assert.
+    const start = work?.case === "subagent" && work.value.result.case === "start" ? work.value.result.value : undefined;
+    expect(start?.createdAgentId?.value).toBe("stated");
+  });
+
+  it("describes a shell from the command its settle arm restates", () => {
+    // Arrange.
+    const settled: conversationv1.AgentActivity["item"] = {
+      case: "bash",
+      value: create(conversationv1.AgentBashSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentBashSuccessSchema, {
+            command: create(conversationv1.AgentBashCommandSchema, { line: "make test" }),
+          }),
+        },
+      }),
+    };
+
+    // Act.
+    const work = startOf(announceLiveWork([recordedAt(settled)], [HANDLE], BOOK));
+
+    // Assert.
+    expect(work?.case === "bash" && work.value.result.case === "start" ? work.value.result.value.command?.line : undefined).toBe(
+      "make test",
+    );
+  });
+
+  it("describes a progressing shell from the run's own start row", () => {
+    // Arrange.
+    const runStart = create(conversationv1.AgentBashStartSchema, {
+      command: create(conversationv1.AgentBashCommandSchema, { line: "sleep 600" }),
+      startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: 77n }),
+    });
+
+    // Act.
+    const work = startOf(
+      announceLiveWork([recordedAt(PROGRESSING_SHELL)], [HANDLE], BOOK, undefined, new Map([["run-1", runStart]])),
+    );
+
+    // Assert.
+    const start = work?.case === "bash" && work.value.result.case === "start" ? work.value.result.value : undefined;
+    expect([start?.command?.line, start?.startedAt?.atMs]).toEqual(["sleep 600", 77n]);
+  });
+
+  it("announces a progressing shell with no start row anywhere by handle and kind, with an empty command", () => {
+    // Arrange, Act.
+    const announced = announceLiveWork([recordedAt(PROGRESSING_SHELL)], [HANDLE], BOOK);
+
+    // Assert.
+    const work = startOf(announced);
+    expect([
+      announced[0]?.kind?.kind.case,
+      work?.case === "bash" && work.value.result.case === "start" ? work.value.result.value.command?.line : undefined,
+    ]).toEqual(["bash", ""]);
+  });
+
+  it("records the shell's missing command at ERROR", () => {
+    // Arrange.
+    const mark = logSinkMark();
+
+    // Act.
+    announceLiveWork([recordedAt(PROGRESSING_SHELL)], [HANDLE], BOOK);
+
+    // Assert.
+    const record = logRecordsSince(mark).find((r) => r.context.kind === "bash" && r.context.detail !== undefined);
+    expect([record?.level, record?.context.work]).toEqual(["error", "run-1"]);
+  });
+
+  it("describes a monitor from the call its ended arm restates", () => {
+    // Arrange.
+    const ended: conversationv1.AgentActivity["item"] = {
+      case: "monitor",
+      value: create(conversationv1.AgentMonitorSchema, {
+        result: {
+          case: "ended",
+          value: create(conversationv1.AgentMonitorEndedSchema, {
+            call: create(conversationv1.AgentMonitorStartSchema, { description: "watch the build" }),
+          }),
+        },
+      }),
+    };
+
+    // Act.
+    const work = startOf(announceLiveWork([recordedAt(ended)], [HANDLE], BOOK));
+
+    // Assert.
+    expect(work?.case === "monitor" && work.value.result.case === "start" ? work.value.result.value.description : undefined).toBe(
+      "watch the build",
+    );
+  });
+
+  it("names a progressing shell as needing its run's start row", () => {
+    // Arrange, Act, Assert.
+    expect(bashUnitsWithoutCommand([recordedAt(PROGRESSING_SHELL)], [HANDLE]).map((h) => h.value)).toEqual(["run-1"]);
+  });
+
+  it("does not name a running subagent as needing a shell start row", () => {
+    // Arrange, Act, Assert.
+    expect(bashUnitsWithoutCommand([recordedAt(RUNNING_SPAWN)], [HANDLE])).toEqual([]);
   });
 });
 
@@ -1246,6 +1460,46 @@ describe("the restore of a subagent resumed by a send", () => {
       announcement?.kind?.kind.case === "subagent" ? announcement.kind.kind.value.agentId?.value : "",
       announcement?.origin.case,
     ]).toEqual(["toolu_send", "main", "toolu_spawn", "created"]);
+  });
+
+  it("announces a resumed agent whose spawn row already settled, described from its settle", () => {
+    // Arrange: a resumed agent's spawn concluded before the send woke it.
+    const settledSpawn = unit("1", "toolu_spawn", {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSubagentSuccessSchema, {
+            prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "count" }),
+            createdAgentId: SPAWN,
+          }),
+        },
+      }),
+    });
+
+    // Act.
+    const announcement = resumedAgentAnnouncement([send(reached("a5583")), settledSpawn], HANDLE, OWNER, SPAWN);
+
+    // Assert.
+    expect(announcement?.kind?.kind.case === "subagent" ? announcement.kind.kind.value.agentId?.value : "").toBe("toolu_spawn");
+  });
+
+  it("records at ERROR a resumed agent whose spawn row states no prompt, and still announces it", () => {
+    // Arrange.
+    const bareSpawn = unit("1", "toolu_spawn", {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: { case: "update", value: create(conversationv1.AgentSubagentUpdateSchema, {}) },
+      }),
+    });
+    const mark = logSinkMark();
+
+    // Act.
+    const announcement = resumedAgentAnnouncement([send(reached("a5583")), bareSpawn], HANDLE, OWNER, SPAWN);
+
+    // Assert.
+    const record = logRecordsSince(mark).find((r) => r.context.agent === "toolu_spawn" && r.context.detail !== undefined);
+    expect([announcement?.origin.case, record?.level]).toEqual(["created", "error"]);
   });
 
   it("announces nothing when the book holds no spawn of the agent", () => {

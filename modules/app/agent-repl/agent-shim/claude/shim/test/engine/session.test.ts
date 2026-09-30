@@ -10063,23 +10063,18 @@ describe("a component that recovers", () => {
 });
 
 /**
- * LIVE WORK THIS SESSION HAS NO START FOR, and which of two states it is in.
+ * LIVE WORK NO ROW OF THE MAIN BOOK DESCRIBES.
  *
- * WHAT THIS GUARDS: `GetLiveWork` is scoped to this session's LINEAGE — the
- * main agent and every agent it spawned. So a handle with no start in THIS main
- * book is either work a subagent of this session announced (its start lives in
- * that subagent's book) or work whose start the record lost. The vendor is the
- * authority that separates the two: work it no longer holds is not a defect of
- * the re-announcement, and the StartSession reconciliation owns its terminal.
+ * `GetLiveWork` is scoped to this session's lineage, so such a handle IS this
+ * conversation's work, and its absence from the announcement is a record-plane
+ * loss: stated at ERROR, never judged by asking the vendor (`backgroundTasks`
+ * MOVES foreground work, and answers `false` for work already in the
+ * background, so it is no observation).
  */
 describe("re-announcing live work the record cannot describe", () => {
-  /** A session whose store holds one live handle with no start in this book. */
-  async function sessionWithForeignHandle(holdsIt: boolean): Promise<Harness> {
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.backgroundTasks = (): Promise<boolean> => Promise.resolve(holdsIt);
-      },
-    });
+  /** A session whose store holds one live handle with no row in this book. */
+  async function sessionWithForeignHandle(): Promise<Harness> {
+    const h = harness();
     await started(h);
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_foreign" })],
@@ -10096,125 +10091,33 @@ describe("re-announcing live work the record cannot describe", () => {
     await watch.return?.();
   }
 
-  it("says the work is not held by this vendor process when the vendor does not hold it", async () => {
+  it("records the undescribable handle at ERROR", async () => {
     // Arrange.
-    const h = await sessionWithForeignHandle(false);
+    const h = await sessionWithForeignHandle();
     const before = logSinkMark();
 
     // Act.
     await reannounce(h);
 
     // Assert.
-    expect(logContextFor(before, "is not held by this vendor process")?.work_id).toBe(
-      "toolu_foreign",
-    );
+    const message = "live work of this session has no describable record, so its kind is unknown and it cannot be announced";
+    expect([logLevelFor(before, message), logContextFor(before, message)?.work_id]).toEqual(["error", "toolu_foreign"]);
   });
 
-  // NOT A DEFECT OF THE RE-ANNOUNCEMENT, SO NOT A WARNING: work the vendor no
-  // longer holds is closed by the StartSession reconciliation.
-  it("states unheld work with no start in the main book below warning level", async () => {
+  it("never asks the vendor about it", async () => {
     // Arrange.
-    const h = await sessionWithForeignHandle(false);
-    const before = logSinkMark();
+    const h = await sessionWithForeignHandle();
 
     // Act.
     await reannounce(h);
 
     // Assert.
-    expect(logLevelFor(before, "is not held by this vendor process")).toBe("debug");
-  });
-
-  it("reports a defect when the vendor DOES still hold the undescribable work", async () => {
-    // Arrange.
-    const h = await sessionWithForeignHandle(true);
-    const before = logSinkMark();
-
-    // Act.
-    await reannounce(h);
-
-    // Assert.
-    expect(logLevelFor(before, "work the vendor still has")).toBe("warn");
-  });
-
-  // A VENDOR THAT CANNOT ANSWER IS NOT A VENDOR THAT SAID "NOT MINE": the
-  // handle might be this conversation's, so it is reported as the defect it
-  // might be rather than dismissed.
-  it("treats an unanswerable probe as this conversation's work", async () => {
-    // Arrange.
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.backgroundTasks = (): Promise<boolean> =>
-          Promise.reject(new Error("the vendor is not answering"));
-      },
-    });
-    await started(h);
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_unknown" })],
-    });
-    const before = logSinkMark();
-
-    // Act.
-    await reannounce(h);
-
-    // Assert.
-    expect(
-      logContextFor(before, "could not be asked whether it holds this undescribable live work")
-        ?.work_id,
-    ).toBe("toolu_unknown");
-  });
-
-  // NO VENDOR LEFT TO ASK IS NOT AN ANSWER EITHER. A shim whose query died
-  // still serves WatchSession, and the handle might well be this
-  // conversation's, so it is reported as the defect it might be.
-  it("treats a handle as this conversation's when there is no query left to ask", async () => {
-    // Arrange.
-    const h = harness();
-    await started(h);
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_orphan" })],
-    });
-    h.queries[0]?.query.fail(new Error("the vendor process is gone"));
-    await vi.waitFor(() => {
-      expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
-    });
-    const before = logSinkMark();
-
-    // Act.
-    await reannounce(h);
-
-    // Assert.
-    expect(logContextFor(before, "work the vendor still has")?.work_id).toBe("toolu_orphan");
-  });
-
-  // THE SDK IS A FOREIGN BOUNDARY, so a rejection that is not an `Error` is
-  // exactly what the cause's `String(...)` arm exists for.
-  it("records a non-Error probe rejection with the words it used", async () => {
-    // Arrange.
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.backgroundTasks = (): Promise<boolean> =>
-          Promise.reject("the vendor is not answering");
-      },
-    });
-    await started(h);
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_bare" })],
-    });
-    const before = logSinkMark();
-
-    // Act.
-    await reannounce(h);
-
-    // Assert.
-    expect(
-      logContextFor(before, "could not be asked whether it holds this undescribable live work")
-        ?.cause,
-    ).toBe("the vendor is not answering");
+    expect(h.queries[0]?.query.calls.filter((call) => call.startsWith("backgroundTasks"))).toEqual([]);
   });
 
   it("announces nothing for a handle it cannot describe", async () => {
     // Arrange.
-    const h = await sessionWithForeignHandle(false);
+    const h = await sessionWithForeignHandle();
 
     // Act.
     const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
@@ -10227,6 +10130,179 @@ describe("re-announcing live work the record cannot describe", () => {
     const response = second.value as shimv1.WatchSessionResponse | undefined;
     const frame = response?.frame;
     expect(frame?.case === "sessionStarted" ? frame.value.liveWork : undefined).toEqual([]);
+  });
+});
+
+/**
+ * THE 2026-09-30 ADOPTION: a deploy handed the workspace to a new daemon, which
+ * adopted the running shim, and the re-announced `live_work` was EMPTY while
+ * the store held two live background subagents. Each unit's row had moved past
+ * its start (a background unit's call returns at once, and its beats restate
+ * the row), and only a row still at `start` was described.
+ */
+describe("re-announcing live background work whose row moved past its start", () => {
+  /** One unit row of the main book, keyed `id`, holding `item`. */
+  function unitRow(id: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: id }),
+      place: { case: "recordedPlace", value: create(conversationv1.ConversationPlaceSchema, { atMs: 1_000n }) },
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: id }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** A started session whose store holds `id` live and whose book holds `row`. */
+  async function adoptedWith(id: string, row: conversationv1.HistoryEntryAt): Promise<Harness> {
+    const h = harness();
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: id })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [row],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    return h;
+  }
+
+  /** The `live_work` an adopting daemon's WatchSession is told. */
+  async function reannounced(h: Harness): Promise<conversationv1.AgentDetachedWork[]> {
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    const second = await watch.next();
+    await watch.return?.();
+    const frame = (second.value as shimv1.WatchSessionResponse | undefined)?.frame;
+    return frame?.case === "sessionStarted" ? frame.value.liveWork : [];
+  }
+
+  const BACKGROUND_AGENT = unitRow("toolu_01G8D89ityjVCxRTfqUFCzPR", {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: {
+        case: "update",
+        value: create(conversationv1.AgentSubagentUpdateSchema, {
+          prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "audit the footer" }),
+        }),
+      },
+    }),
+  });
+
+  const BACKGROUND_SHELL = unitRow("toolu_bg_shell", {
+    case: "bash",
+    value: create(conversationv1.AgentBashSchema, {
+      result: { case: "progress", value: create(conversationv1.AgentToolCallProgressSchema, { lastProgressAtMs: 2_000n }) },
+    }),
+  });
+
+  const SHELL_START = create(conversationv1.AgentBashSchema, {
+    result: {
+      case: "start",
+      value: create(conversationv1.AgentBashStartSchema, {
+        command: create(conversationv1.AgentBashCommandSchema, { line: "npm run test:integration" }),
+      }),
+    },
+  });
+
+  it("re-announces a live background agent whose row carries its launch-time beat", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT);
+
+    // Act.
+    const live = await reannounced(h);
+
+    // Assert.
+    expect(live.map((work) => [work.work?.value, work.kind?.kind.case === "subagent" ? work.kind.kind.value.agentId?.value : ""])).toEqual([
+      ["toolu_01G8D89ityjVCxRTfqUFCzPR", "toolu_01G8D89ityjVCxRTfqUFCzPR"],
+    ]);
+  });
+
+  it("re-announces a live background shell described from its run's own start row", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
+    h.persistence.bashFrames = [SHELL_START];
+
+    // Act.
+    const live = await reannounced(h);
+
+    // Assert.
+    const origin = live[0]?.origin;
+    const work = origin?.case === "created" ? origin.value.workCreated?.work : undefined;
+    expect(work?.case === "bash" && work.value.result.case === "start" ? work.value.result.value.command?.line : undefined).toBe(
+      "npm run test:integration",
+    );
+  });
+
+  it("reads the shell's start row without waiting for a first row", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
+    h.persistence.bashFrames = [SHELL_START];
+
+    // Act.
+    await reannounced(h);
+
+    // Assert.
+    expect([h.persistence.bashRunCalls, h.persistence.bashRunAwaits]).toEqual([["open:toolu_bg_shell"], [false]]);
+  });
+
+  it("still re-announces the shell when its start row cannot be read, recording the failure at ERROR", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
+    h.persistence.openBashRun = () => Promise.reject(new Error("the store is restarting"));
+    const before = logSinkMark();
+
+    // Act.
+    const live = await reannounced(h);
+
+    // Assert.
+    const message = "the live shell run's own start row could not be read; its announcement states no command";
+    expect([live.map((work) => work.kind?.kind.case), logLevelFor(before, message), logContextFor(before, message)?.cause]).toEqual([
+      ["bash"],
+      "error",
+      "the store is restarting",
+    ]);
+  });
+
+  it("states a shell whose store holds no rows at debug, and announces it by handle and kind", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
+    h.persistence.openBashRun = () => Promise.reject(new PersistenceError("unknown_work", "no rows"));
+    const before = logSinkMark();
+
+    // Act.
+    const live = await reannounced(h);
+
+    // Assert.
+    const message = "the store holds no rows for this live shell run; its announcement states no command";
+    expect([live.map((work) => work.kind?.kind.case), logLevelFor(before, message)]).toEqual([["bash"], "debug"]);
+  });
+
+  it("never asks the vendor while re-announcing", async () => {
+    // Arrange.
+    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT);
+
+    // Act.
+    await reannounced(h);
+
+    // Assert.
+    expect(h.queries[0]?.query.calls.filter((call) => call.startsWith("backgroundTasks"))).toEqual([]);
   });
 });
 
