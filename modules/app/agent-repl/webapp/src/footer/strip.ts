@@ -47,7 +47,6 @@ import type {
   FooterStatusIdle,
   FooterStatusInterrupted,
   FooterStatusLoading,
-  FooterStatusMergeConflict,
   FooterStatusMergeFailed,
   FooterStatusTurnFailed,
   FooterStatusDegraded,
@@ -76,7 +75,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import type { FooterPanel } from "./expanded.js";
 import { grabber, statusWords, textLine } from "./parts.js";
-import { activityDatumClass, statusArmClass } from "./tones.js";
+import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
@@ -202,7 +201,7 @@ type SubStatusOneof =
   | FooterStatusDisconnected["substatus"]
   | FooterStatusClosing["substatus"]
   | FooterStatusLoading["substatus"]
-  | FooterStatusMergeConflict["substatus"]
+  | FooterStatusMergeFailed["substatus"]
   | FooterStatusDegraded["substatus"];
 
 /**
@@ -226,6 +225,11 @@ export interface StatusParts {
   activity: FooterActivity | undefined;
   /** Set when the arm declares no substatus oneof at all (background). */
   substatusless: boolean;
+  /**
+   * Set when the contract says the substatus is ALWAYS set (merge failed's
+   * area), so an unset one is malformed rather than a merged cell.
+   */
+  substatusRequired: boolean;
 }
 
 /**
@@ -253,6 +257,7 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
   drawStatusWord(word, status.case);
 
   const cells: HTMLElement[] = [word];
+  if (parts.substatusRequired) requireCase(parts.substatus ?? {}, `${path}.${status.case}.substatus`);
   const sub =
     parts.substatus === undefined || parts.substatus.case === undefined
       ? null
@@ -336,7 +341,6 @@ function statusParts(
     case "working":
     case "interrupted":
     case "merging":
-    case "mergeConflict":
     case "blocked":
     case "disconnected":
     case "closing":
@@ -347,6 +351,7 @@ function statusParts(
         substatus: status.value.substatus,
         activity: status.value.activity,
         substatusless: false,
+        substatusRequired: false,
       };
     case "background": {
       // An arm with NO substatus oneof: the chips and panels carry the
@@ -356,17 +361,30 @@ function statusParts(
         substatus: undefined,
         activity: background.activity,
         substatusless: true,
+        substatusRequired: false,
       };
     }
-    case "mergeFailed":
+    case "mergeFailed": {
+      // WHERE THE MERGE FAILED is the substatus, and footer.proto says exactly
+      // one area is set: an unset one is a malformed push, never a merged
+      // cell that would hide the area from the reader.
+      const failed: FooterStatusMergeFailed = status.value;
+      return {
+        substatus: failed.substatus,
+        activity: failed.activity,
+        substatusless: false,
+        substatusRequired: true,
+      };
+    }
     case "merged": {
-      // A STOPPED merge's terminal arms declare no substatus oneof either: the
-      // merge bubble carries the account, so the cell merges the same way.
-      const settled: FooterStatusMergeFailed | FooterStatusMerged = status.value;
+      // A LANDED merge declares no substatus oneof: the merge bubble carries
+      // the account, so the cell merges the same way.
+      const settled: FooterStatusMerged = status.value;
       return {
         substatus: undefined,
         activity: settled.activity,
         substatusless: true,
+        substatusRequired: false,
       };
     }
     case "turnFailed": {
@@ -377,6 +395,7 @@ function statusParts(
         substatus: undefined,
         activity: failed.activity,
         substatusless: true,
+        substatusRequired: false,
       };
     }
     default: {
@@ -389,11 +408,13 @@ function statusParts(
 /**
  * The substatus cell.
  *
- * TWO ARMS CARRY A PAYLOAD and the rest are empty messages whose NAME is the
- * whole fact. The default branch is therefore not a fallback: drawing an empty
- * arm's name is exactly what footer.proto's rendering rule prescribes, so an
- * arm this build has never heard of still draws correctly rather than
- * refusing a frame over a step it can already spell.
+ * THREE ARMS CARRY A FIGURE and the rest are empty messages whose NAME is the
+ * whole fact: a merge's queue place ("enqueued 2/5"), its replay progress
+ * ("rebasing 3/7") and its fixing attempt ("fixing attempt 2/3"). The default
+ * branch is therefore not a fallback: drawing an empty arm's name is exactly
+ * what footer.proto's rendering rule prescribes, so an arm this build has
+ * never heard of still draws correctly rather than refusing a frame over a
+ * step it can already spell.
  */
 export function drawFooterSubStatus(
   sub: SubStatusOneof & { case: string },
@@ -405,28 +426,33 @@ export function drawFooterSubStatus(
   cell.appendChild(document.createTextNode(subStatusWords(statusCase, sub.case)));
 
   switch (sub.case) {
-    case "queued": {
-      // The queue place: 1-based position within its repo's depth.
-      const place = document.createElement("span");
-      place.className = `footer-substatus-place ${activityDatumClass("position")}`;
-      place.setAttribute("data-datum", "position");
-      place.textContent = `${sub.value.position}/${sub.value.depth}`;
+    case "enqueued":
+      // The merge's 1-based place among the merges waiting in its repository.
       cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(place);
+      cell.appendChild(substatusFigure("position", `${sub.value.place}/${sub.value.waiting}`));
       return cell;
-    }
-    case "parked": {
-      // The daemon's composed standing line, drawn verbatim.
-      const line = document.createElement("span");
-      line.className = "footer-substatus-line";
-      line.textContent = sub.value.line;
+    case "rebasing":
+      // How many of the branch's commits have been replayed onto the tip.
       cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(line);
+      cell.appendChild(substatusFigure("count", `${sub.value.replayed}/${sub.value.total}`));
       return cell;
-    }
+    case "fixing":
+      // This attempt among the most the merge makes before it fails.
+      cell.appendChild(document.createTextNode(" attempt "));
+      cell.appendChild(substatusFigure("attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`));
+      return cell;
     default:
       return cell;
   }
+}
+
+/** A substatus figure, coloured as the typed datum it is. */
+function substatusFigure(datum: ActivityDatum, text: string): HTMLElement {
+  const figure = document.createElement("span");
+  figure.className = `footer-substatus-place ${activityDatumClass(datum)}`;
+  figure.setAttribute("data-datum", datum);
+  figure.textContent = text;
+  return figure;
 }
 
 
@@ -648,16 +674,19 @@ export function chipGlyph(name: string, character: string): HTMLElement {
 
 // ---- shared helpers -------------------------------------------------------
 /**
- * The substatus word, with the ONE arm whose bare name would lie.
+ * The substatus word, with the TWO arms whose bare name would lie or say
+ * nothing.
  *
  * `FooterStatusClosing`'s step is spelled `blocked`, which is also a whole
  * STATUS in this same strip — a close that cannot proceed would read exactly
  * like a session the vendor has blocked. The message's own name
  * (`FooterSubStatusCloseBlocked`) is what the schema calls it, so the cell
- * draws that. It is a declared exception, not a per-arm label table: every
- * other arm's name is already its label.
+ * draws that. `FooterStatusMergeFailed`'s catch-all area is spelled `other`,
+ * and footer.proto draws it "merge". Both are declared exceptions, not a
+ * per-arm label table: every other arm's name is already its label.
  */
 export function subStatusWords(statusCase: string, subCase: string): string {
   if (statusCase === "closing" && subCase === "blocked") return "close blocked";
+  if (statusCase === "mergeFailed" && subCase === "other") return "merge";
   return statusWords(subCase);
 }

@@ -64,7 +64,6 @@ import type {
   FooterStatusActivityFault,
   FooterStatusActivityGatedCall,
   FooterStatusActivityInterrupting,
-  FooterStatusActivityMergingCommit,
   FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
@@ -105,6 +104,7 @@ import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
+import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { grabber, statusWords, textLine } from "./parts.js";
 import { activityDatumClass, allowanceStatusClass, footerPercentColor } from "./tones.js";
 
@@ -396,8 +396,8 @@ function drawSalientKind(
       return drawFooterStatusActivityColdGateCost(kind.value);
     case "interrupting":
       return drawFooterStatusActivityInterrupting(kind.value);
-    case "mergingCommit":
-      return drawFooterStatusActivityMergingCommit(kind.value);
+    case "mergeStep":
+      return drawFooterStatusActivityMergeStep(kind.value, path);
     case "authenticating":
       return drawFooterStatusActivityAuthenticating(kind.value);
     case "fault":
@@ -1133,24 +1133,6 @@ function drawNextAttempt(u: FooterStatusActivityAt, deps: AllowanceDeps, path: s
       ? `next try overdue by ${formatAge(nowMs - atMs)}`
       : `next try in ${remainingLabel(atMs - nowMs)}`;
   });
-}
-
-/**
- * The commit a merge is landing: "4f2a1c: fold tokens into api", with the SHA
- * coloured as the identity it is.
- */
-export function drawFooterStatusActivityMergingCommit(
-  u: FooterStatusActivityMergingCommit,
-): HTMLElement {
-  const line = document.createElement("span");
-  line.className = "footer-activity-merging-commit";
-  const sha = document.createElement("span");
-  sha.className = activityDatumClass("sha");
-  sha.setAttribute("data-datum", "sha");
-  sha.textContent = u.sha;
-  line.appendChild(sha);
-  line.appendChild(document.createTextNode(`: ${u.subject}`));
-  return line;
 }
 
 /**

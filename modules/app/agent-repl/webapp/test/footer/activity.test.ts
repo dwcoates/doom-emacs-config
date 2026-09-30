@@ -507,14 +507,22 @@ describe("the salient kinds", () => {
     expect(cell.querySelector("[data-countdown]")?.hasAttribute("data-overdue")).toBe(false);
   });
 
-  it("colours the landing commit's SHA as its own datum", () => {
-    const cell = salientCell("mergingCommit", { sha: "4f2a1c", subject: "fold tokens" }, "merging");
-    expect(cell.querySelector('[data-datum="sha"]')?.textContent).toBe("4f2a1c");
+  it("draws a merge's step line as the salient line under merging", () => {
+    const cell = salientCell(
+      "mergeStep",
+      { step: { case: "committing", value: { subject: "Merge branch 'fix-reconnect'" } } },
+      "merging",
+    );
+    expect(cell.querySelector(".footer-activity-merge-step")?.textContent).toBe("Merge branch 'fix-reconnect'");
   });
 
-  it("draws the commit's subject after its sha", () => {
-    const cell = salientCell("mergingCommit", { sha: "4f2a1c", subject: "fold tokens" }, "merging");
-    expect(cell.querySelector(".footer-activity-merging-commit")?.textContent).toBe("4f2a1c: fold tokens");
+  it("names the merge step line's arm on the cell", () => {
+    const cell = salientCell(
+      "mergeStep",
+      { step: { case: "committing", value: { subject: "Merge branch 'fix-reconnect'" } } },
+      "merging",
+    );
+    expect(cell.getAttribute("data-arm")).toBe("mergeStep");
   });
 
   it("counts a wakeup down at second resolution", () => {
