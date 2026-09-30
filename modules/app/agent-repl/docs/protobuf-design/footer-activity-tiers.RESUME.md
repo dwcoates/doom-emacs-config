@@ -53,7 +53,11 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
 
 ## Remaining, in order
 
-1. Finish the e2e step above.
+0. DONE since: e2e committed (`7fa4407c0`), landed change 3 recorded
+   (`70aa479c3`), footer percent gradient (owner request: green <40 →
+   yellow 70 → orange 90, red >=90; `7239864e0` extraction, `66f672507`).
+1. (done) Finish the e2e step above.
+2. (done) landed change 3.
 2. Record the combined model's contract decisions in
    `footer-activity-tiers.md` "Landed changes" (a new "3. The combined model"
    entry: quiet tier message + container, shared salient kinds, enduring
@@ -85,7 +89,8 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    salient kinds, 80% rule, submitting stages); prompt-queue act handling;
    one line per landed fix in `docs/REMEDIATION-CHANGELOG.md` (combined model,
    compaction-failed clearing, cold-gate flash, composer height, toggle style,
-   item centering, expanded ceiling, liveness fix, held-queue fix).
+   item centering, expanded ceiling, footer percent gradient, liveness fix,
+   held-queue fix).
 6. Green everywhere, CHECK EXIT CODES (`make test` hides a gofmt failure
    behind a 2-line output): daemon `make test`, `make integration`; shim
    typecheck/lint/test/test:integration (AGENT_REPL_FORBID_VENDOR_CALLS=1,
