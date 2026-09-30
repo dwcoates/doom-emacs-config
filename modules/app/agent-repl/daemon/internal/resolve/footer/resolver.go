@@ -1088,17 +1088,40 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	r.mutate(ws, "daemon.footer.on_api_error", "the footer took mid-turn api failure evidence",
 		dlog.Context{"kind": apiErrorKind(failed), "agent_id": agent.GetValue()}, func(s *wsState) {
-			attempt := int32(2)
-			if s.retrying != nil {
-				attempt = s.retrying.attempt + 1
+			next := &retryState{
+				agent:  agent.GetValue(),
+				status: truncate(failed.GetMessage(), DefaultWarningRowWidth),
+				at:     r.opts.clock.Now(),
 			}
-			s.retrying = &retryState{
-				agent:   agent.GetValue(),
-				attempt: attempt,
-				status:  truncate(failed.GetMessage(), DefaultWarningRowWidth),
-				at:      r.opts.clock.Now(),
+			// THE VENDOR'S OWN SCHEDULE WHEN IT STATED ONE: its retry count,
+			// its limit and the instant its next try starts. Counting failures
+			// here instead ran one ahead of the vendor's own count (2026-09-30).
+			if retry := failed.GetRetry(); retry != nil {
+				nextAt := time.UnixMilli(retry.GetNextAttemptAtMs())
+				next.attempt = int32(retry.GetAttempt()) + 1
+				next.maxAttempt = int32(retry.GetMaxRetries()) + 1
+				next.nextAt = &nextAt
+			} else {
+				next.attempt = 2
+				if s.retrying != nil {
+					next.attempt = s.retrying.attempt + 1
+				}
 			}
+			s.retrying = next
 		})
+}
+
+// line is the retrying state as the footer's salient line.
+func (rs *retryState) line() *frontendv1.FooterStatusActivityRetrying {
+	out := &frontendv1.FooterStatusActivityRetrying{Attempt: rs.attempt, Status: rs.status}
+	if rs.nextAt != nil {
+		out.NextAttempt = &frontendv1.FooterStatusActivityAt{AtMs: rs.nextAt.UnixMilli()}
+	}
+	if rs.maxAttempt > 0 {
+		max := rs.maxAttempt
+		out.MaxAttempt = &max
+	}
+	return out
 }
 
 // clearRetry ends the `retrying` line at the FIRST SUCCESSFUL RESPONSE of the
@@ -1118,7 +1141,14 @@ func (r *resolver) clearRetry(ws ids.WorkspaceID, s *wsState, agent string, act 
 	}
 	r.logOf(ws, s).Debug("daemon.footer.retry_cleared", "the retried call's response landed; the retrying line ended",
 		dlog.Context{"agent_id": agent, "attempt": s.retrying.attempt})
+	failed := s.retrying.attempt - 1
 	s.retrying = nil
+	// RECOVERY IS ANNOUNCED, not only the failure: the line that stood while
+	// the API was unreachable gives way to a transient saying it answered.
+	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
+		Kind: &frontendv1.FooterActivityTransient_ApiRestored{
+			ApiRestored: &frontendv1.FooterActivityTransientApiRestored{FailedAttempts: failed}},
+	})
 }
 
 // without removes one id from an order slice, preserving the rest.

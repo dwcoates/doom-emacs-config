@@ -662,3 +662,99 @@ func TestCoversEnduringReadsEveryTierAboveTheEnduringLine(t *testing.T) {
 		})
 	}
 }
+
+// scheduledFailure is a connection failure carrying the vendor's retry
+// schedule: retry ATTEMPT of MAX next, starting at NEXT.
+func scheduledFailure(attempt, max uint32, next time.Time) *conversationv1.ApiRequestFailed {
+	return &conversationv1.ApiRequestFailed{
+		Message: "Can't reach the API server",
+		Kind:    &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: "connection/ENOTFOUND"}},
+		Retry:   &conversationv1.ApiRetry{Attempt: attempt, MaxRetries: max, NextAttemptAtMs: next.UnixMilli()},
+	}
+}
+
+func TestTheRetryLineCountsAttemptsAsTheVendorDoes(t *testing.T) {
+	// Arrange: the vendor's eighth retry is next, of ten.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, instant.Add(32*time.Second)))
+
+	// Assert: attempt 9 of 11, as the request's own count runs.
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 {
+		t.Fatalf("retry = %+v, want attempt 9 of 11", retry)
+	}
+}
+
+func TestTheRetryLineCarriesTheNextAttemptsInstant(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	next := instant.Add(32 * time.Second)
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, next))
+
+	// Assert
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if retry.GetNextAttempt().GetAtMs() != next.UnixMilli() {
+		t.Fatalf("next attempt = %v, want the vendor's stated instant", retry.GetNextAttempt())
+	}
+}
+
+func TestAFurtherFailureMovesTheNextAttempt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, scheduledFailure(1, 10, instant.Add(time.Second)))
+	later := instant.Add(10 * time.Second)
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, scheduledFailure(2, 10, later))
+
+	// Assert
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if retry.GetAttempt() != 3 || retry.GetNextAttempt().GetAtMs() != later.UnixMilli() {
+		t.Fatalf("retry = %+v, want attempt 3 due at the later instant", retry)
+	}
+}
+
+func TestAnUnscheduledFailureCarriesNoNextAttempt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
+
+	// Assert
+	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if retry.NextAttempt != nil || retry.MaxAttempt != nil {
+		t.Fatalf("retry = %+v, want no schedule the vendor never stated", retry)
+	}
+}
+
+func TestTheRetriedCallsResponseAnnouncesTheRestoredAPI(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, instant.Add(32*time.Second)))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, thinkingActivity("th-1"))
+
+	// Assert: the salient line ended, and a transient says the API answered.
+	if got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying(); got != nil {
+		t.Fatalf("retrying = %+v, want it ended", got)
+	}
+	if restored := transientOf(t, h).GetApiRestored(); restored.GetFailedAttempts() != 8 {
+		t.Fatalf("transient = %v, want api_restored after 8 failed attempts", transientOf(t, h))
+	}
+}
