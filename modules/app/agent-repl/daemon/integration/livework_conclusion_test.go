@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/integration/harness"
 
@@ -67,4 +68,32 @@ func TestAHungShellsConclusionFiresTheRegisteredBounce(t *testing.T) {
 	if resume.GetResume() == nil {
 		t.Fatalf("StartSession on the relaunched shim = %v, want a resume source", resume)
 	}
+}
+
+// TestAShellWhoseRowsAreAllTheSidecarsIsRetiredAtItsSpoolsTerminal is the
+// 2026-09-28 phantom shells, end to end on the daemon's side. A subagent's
+// shell the vendor's timeout moved to the background has no `start` the shim
+// could write (it never saw the call), so its WatchBash waits for the rows the
+// sidecar reads from its spool, instead of being refused. The daemon holds that
+// watch, and the spool's terminal retires the shell from the live set.
+func TestAShellWhoseRowsAreAllTheSidecarsIsRetiredAtItsSpoolsTerminal(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: an announced shell whose watch opens with no `start`.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.shim.AwaitBash("work-claimed-1")
+	pushDetachedShell(f.shim, "work-claimed-1", "npm test")
+	f.shim.ExpectWatchBash()
+
+	// Act: the sidecar reads the spool's `[killed]` terminal.
+	f.shim.PushBash("work-claimed-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
+		Failure: &conversationv1.AgentBashFailure{},
+	}})
+
+	// Assert: the daemon retires the shell at its terminal.
+	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the shell retired at its terminal", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.sessionwatcher.live_work_retired" &&
+			r.Context["work_id"] == "work-claimed-1" && r.Context["conclusion"] == "bash_terminal"
+	})
 }

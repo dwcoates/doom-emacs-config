@@ -99,6 +99,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			line: `{"op":"silence_bash","work":"w-1"}`,
 			want: Command{Op: OpSilenceBash, Work: "w-1"},
 		},
+		{
+			name: "await_bash addresses a detached work id",
+			line: `{"op":"await_bash","work":"w-1"}`,
+			want: Command{Op: OpAwaitBash, Work: "w-1"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -138,6 +143,7 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "drop an unknown stream", line: `{"op":"drop_stream","stream":"webapp"}`, wantSub: "unknown stream"},
 		{name: "exit out of range", line: `{"op":"exit","code":900}`, wantSub: "out of range"},
 		{name: "silence_bash without work", line: `{"op":"silence_bash"}`, wantSub: "work is required"},
+		{name: "await_bash without work", line: `{"op":"await_bash"}`, wantSub: "work is required"},
 	}
 
 	for _, tc := range tests {

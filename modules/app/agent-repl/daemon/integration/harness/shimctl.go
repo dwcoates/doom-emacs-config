@@ -615,6 +615,14 @@ func (s *ShimControl) SilenceBash(work string) {
 	s.send(controlCommand{Op: "silence_bash", Work: work})
 }
 
+// AwaitBash makes every later WatchBash open for work send no `start` and wait
+// for the first frame pushed, as the real shim's WatchBash does for a live run
+// whose rows are all the sidecar's.
+func (s *ShimControl) AwaitBash(work string) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "await_bash", Work: work})
+}
+
 // SilenceNextReannouncement makes the next WatchSession open send no
 // SessionStarted re-announcement, as a shim from before the re-announcement
 // would: the successor adopting it mid-work never learns its facts.

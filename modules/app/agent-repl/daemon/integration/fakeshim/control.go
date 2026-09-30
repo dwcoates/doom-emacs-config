@@ -32,6 +32,10 @@ const (
 	OpSetLiveWork = "set_live_work"
 	// OpSilenceBash makes every later WatchBash open for Work go unanswered.
 	OpSilenceBash = "silence_bash"
+	// OpAwaitBash makes every later WatchBash open for Work send no `start`:
+	// the stream waits for the first frame pushed, as the real shim's does for
+	// a live run whose rows are all the sidecar's.
+	OpAwaitBash = "await_bash"
 	// OpSilenceReannouncement makes the NEXT WatchSession open send no
 	// SessionStarted re-announcement: a shim from before the re-announcement.
 	OpSilenceReannouncement = "silence_reannouncement"
@@ -183,7 +187,7 @@ func ParseCommand(line []byte) (Command, error) {
 	case OpSetLiveWork:
 		// An EMPTY payload is a well-formed SessionStarted naming nothing
 		// live, which is exactly what stating an empty membership encodes to.
-	case OpSilenceBash:
+	case OpSilenceBash, OpAwaitBash:
 		if c.Work == "" {
 			return Command{}, fmt.Errorf("%s: work is required", c.Op)
 		}

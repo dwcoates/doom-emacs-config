@@ -213,6 +213,10 @@ type server struct {
 	// It is the real shim's WatchBash on a run the store holds no row for,
 	// which waits for a first row that never comes.
 	silencedBash map[string]bool
+	// awaitedBash are the handles whose WatchBash opens send no `start` and
+	// wait for the first frame pushed: a live run the shim never saw the call
+	// of, whose rows are all the sidecar's, read from its spool.
+	awaitedBash map[string]bool
 	// silentReannouncements counts the next WatchSession opens that send no
 	// SessionStarted re-announcement.
 	silentReannouncements int
@@ -247,6 +251,7 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 		bashStarts:      map[string]*conversationv1.AgentBash{},
 		openPermissions: map[string]openPermission{},
 		silencedBash:    map[string]bool{},
+		awaitedBash:     map[string]bool{},
 		unhang:          make(chan struct{}),
 	}
 }
@@ -264,6 +269,21 @@ func (s *server) silenceBash(work string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.silencedBash[work] = true
+}
+
+// awaitBash makes every later WatchBash open for work wait for its first
+// pushed frame instead of opening with a `start`.
+func (s *server) awaitBash(work string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.awaitedBash[work] = true
+}
+
+// bashAwaited reports whether WatchBash opens for work send no `start`.
+func (s *server) bashAwaited(work string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.awaitedBash[work]
 }
 
 // silenceReannouncement makes the next WatchSession open re-announce nothing.
@@ -809,8 +829,12 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 	// shell's `start`. It is also what makes the open observable — the daemon's
 	// client takes the first frame as the open's answer — so a stream that
 	// sent nothing until the next delta would stall every caller.
-	if err := stream.Send(&shimv1.WatchBashResponse{Bash: s.bashStart(work)}); err != nil {
-		return err
+	// A RUN WHOSE ROWS ARE ALL THE SIDECAR'S has no `start`: its first frame is
+	// whatever the spool produced first.
+	if !s.bashAwaited(work) {
+		if err := stream.Send(&shimv1.WatchBashResponse{Bash: s.bashStart(work)}); err != nil {
+			return err
+		}
 	}
 	// THE BACKLOG COMES FIRST, in publication order: it is the frames that
 	// were pushed before this subscription existed. Nothing in it can also
