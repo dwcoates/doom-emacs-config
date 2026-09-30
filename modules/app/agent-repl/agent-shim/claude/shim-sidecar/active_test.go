@@ -289,13 +289,101 @@ func TestAnEndedWorkspaceIsRetiredOnceDrained(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	endedWorkspace(t, h)
 
-	// Act.
+	// Act: the transcript drains, and a full scan since the end has found
+	// every file the conversation could own.
 	h.advance(h.sc.tracker.Windows().AgentSilence + time.Minute)
+	h.sc.rescan()
 	h.tick()
 
 	// Assert.
 	if _, draining := h.sc.draining["sess-ending"]; draining {
 		t.Fatalf("a drained workspace is still draining; draining=%v", h.sc.draining)
+	}
+}
+
+// endedBeforeDiscovery activates a workspace, runs a cycle and a tick while it
+// has written nothing, then releases its lock.
+func endedBeforeDiscovery(t *testing.T, h *harness) {
+	t.Helper()
+	key := h.activate(t, "sess-fast")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.tick()
+	h.release(t, key)
+}
+
+func TestAnEndedWorkspaceWithNoWatchedFileStaysDrainingUntilAFullScan(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	endedBeforeDiscovery(t, h)
+
+	// Act: ticks observe the end, but no full scan has run since.
+	h.tick()
+	h.tick()
+
+	// Assert.
+	if _, draining := h.sc.draining["sess-fast"]; !draining {
+		t.Fatalf("an ended workspace no full scan has covered was retired; draining=%v", h.sc.draining)
+	}
+}
+
+func TestAnEndedWorkspaceWithNoFileIsRetiredAfterAFullScan(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	endedBeforeDiscovery(t, h)
+	h.tick()
+
+	// Act.
+	h.sc.rescan()
+	h.tick()
+
+	// Assert.
+	if _, draining := h.sc.draining["sess-fast"]; draining {
+		t.Fatalf("an ended workspace a full scan found no file for is still draining; draining=%v", h.sc.draining)
+	}
+}
+
+func TestATranscriptDiscoveredOnTheTickItsWorkspaceEndedIsWatched(t *testing.T) {
+	// Arrange: the session wrote its transcript and ended before any discovery
+	// pass found it (a fast turn, then the idle sweep's stand-down).
+	// The project directory predates the session, so the change probe is
+	// already stating it.
+	h := newHarness(t, &fakeStore{})
+	if err := os.MkdirAll(filepath.Join(h.rootA, "projects", "proj"), 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	key := h.activate(t, "sess-fast")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.tick()
+	path := h.inactiveTranscript(t, "sess-fast", promptLine, assistantLine)
+	h.release(t, key)
+
+	// Act: one tick observes the end, then discovers the transcript.
+	h.tick()
+
+	// Assert.
+	if _, watched := h.sc.watchers[path]; !watched {
+		t.Fatal("a transcript its ended workspace wrote before discovery found it was gated out unread")
+	}
+}
+
+func TestATranscriptOnlyTheFullScanFindsIsWatched(t *testing.T) {
+	// Arrange: the change probe has already observed the end, so only the
+	// full scan's enumeration can find the transcript.
+	h := newHarness(t, &fakeStore{})
+	endedBeforeDiscovery(t, h)
+	h.sc.refreshActive(h.clock)
+	path := h.inactiveTranscript(t, "sess-fast", promptLine, assistantLine)
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	if _, watched := h.sc.watchers[path]; !watched {
+		t.Fatal("the full scan gated out a transcript of a workspace still draining")
 	}
 }
 

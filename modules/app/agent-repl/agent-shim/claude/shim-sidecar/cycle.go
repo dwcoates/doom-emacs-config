@@ -192,10 +192,15 @@ type sidecar struct {
 	// Only files of an active or draining conversation are watched (active.go).
 	// Process-scoped: a store outage does not change which shims are alive.
 	active map[string]string
-	// draining holds the conversations whose lock was released while one of
-	// their watched files was still owed something; they stay watched until
-	// the LOST policy's bounds say nothing more is owed.
-	draining map[string]string
+	// draining holds the conversations whose lock was released and which are
+	// not yet known to be owed nothing: a watched file still owed something by
+	// the LOST policy's bounds, or a full scan not yet completed since the end
+	// that could still discover one (active.go's dropDrained).
+	draining map[string]drainingConversation
+	// fullScans counts the full rescans whose discovery pass completed, so a
+	// draining conversation can tell whether every file it owned when it ended
+	// has since been enumerated.
+	fullScans uint64
 	// dormant is every discovered file no active or draining conversation
 	// owns, by resolved path: kept UNREAD so an activation can read it from its
 	// cursor without a per-file walk of the disk.
@@ -433,7 +438,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		rotationHeld:       map[string]discover.Target{},
 		lockHeld:           livelock.Held,
 		active:             map[string]string{},
-		draining:           map[string]string{},
+		draining:           map[string]drainingConversation{},
 		dormant:            map[string]discover.Target{},
 		lockFailures:       map[string]string{},
 		drainFailures:      map[string]string{},
@@ -876,6 +881,7 @@ func (s *sidecar) rescan() {
 	if _, ok := s.watchTargets(scanned, now); !ok {
 		return
 	}
+	s.fullScans++
 	s.reportRescan()
 }
 

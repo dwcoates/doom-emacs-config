@@ -50,6 +50,15 @@ package main
 // vanishing: its files stay watched until nothing is owed, by the LOST policy's
 // own bounds (drained, below). Only then are they dropped back to dormant.
 //
+// A DRAINING CONVERSATION OUTLIVES ITS UNDISCOVERED FILES. A session can end
+// before discovery has found the transcript it wrote (a fast turn, then the
+// idle sweep's stand-down, inside one change-probe tick). Retiring it for
+// having no watched file would gate that transcript out when it is found, and
+// its answer would go unread until the workspace is next active. So it is
+// retired only once a full scan that began after it ended has completed: every
+// file it owned is then either watched, and drains by the bounds above, or
+// does not exist.
+//
 // DISCOVERY IS NOT PER-FILE. The probe is one readdir of `<state>/shim`, two
 // stats and one lock query per workspace, a constant per tick; files are found
 // by the directory-level discovery that already exists (Scan and ScanChanged).
@@ -67,6 +76,13 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+// drainingConversation is a conversation whose lock was released: its
+// workspace key, and the full-scan count when it ended.
+type drainingConversation struct {
+	key        string
+	scansAtEnd uint64
+}
 
 // liveProbe answers, for each workspace lock path, whether a live shim holds
 // it; a path it could not answer is in the error map instead. It is
@@ -158,7 +174,7 @@ func (s *sidecar) applyActive(now time.Time, recordsMoved bool) {
 	for original, key := range s.active {
 		if _, still := next[original]; !still {
 			ended++
-			s.draining[original] = key
+			s.draining[original] = drainingConversation{key: key, scansAtEnd: s.fullScans}
 		}
 	}
 	for original := range next {
@@ -263,8 +279,8 @@ func (s *sidecar) admitDormant(now time.Time) (int, bool) {
 
 // dropDrained drops every watched file whose conversation is no longer active
 // and which the file plane owes nothing more, and retires a draining
-// conversation once none of its files is still watched. It answers how many
-// files it dropped.
+// conversation once none of its files is still watched and a full scan has
+// completed since it ended. It answers how many files it dropped.
 func (s *sidecar) dropDrained(now time.Time) int {
 	owed := map[string]bool{}
 	dropped := 0
@@ -289,8 +305,8 @@ func (s *sidecar) dropDrained(now time.Time) int {
 		s.drop(path, w)
 		dropped++
 	}
-	for original := range s.draining {
-		if !owed[original] {
+	for original, ended := range s.draining {
+		if !owed[original] && s.fullScans > ended.scansAtEnd {
 			delete(s.draining, original)
 		}
 	}
