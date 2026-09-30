@@ -85,6 +85,21 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    one drawer entry marked `coalesced` — needs a daemon_hold.proto/tray
    field; emit footer `StageCoalesced`); explicit interrupts still stop an
    act. Integration test of the owner's worked example.
+4a. OWNER REQUESTS QUEUED 2026-09-30 (implement when convenient, before the
+    docs and green pass so they land in the same cherry-pick):
+    - Response bubble's top-right token figure (`webapp/src/feed/cards/
+      response.ts` `drawFeedResponseUsageStamp`, `.usage-stamp`) colored by
+      the SAME subroutine/gradient spec the footer's token count uses
+      (`footer/strip.ts` `footerTokensHeatColor`, `--token-heat-0..3`,
+      position shipped by the daemon as `FooterTokensCellInputHeat`). Needs
+      the heat position on the response stamp (`FeedResponseUsageStamp`
+      proto field, daemon computes it with the footer's rule) — one shared
+      daemon rule and one shared client color function, no re-derivation.
+    - Scroll auto-collapse of an expanded feed item fires ONLY once no part
+      of the item is visible in the feed viewport (today it fires earlier).
+      Find the auto-collapse-on-scroll owner in `webapp/src/feed/` /
+      `scroll.ts`; test with the item partly visible (stays open) and fully
+      scrolled out (collapses), both directions.
 5. Docs: `AGENTS.md` footer section matches what is built (four tiers, shared
    salient kinds, 80% rule, submitting stages); prompt-queue act handling;
    one line per landed fix in `docs/REMEDIATION-CHANGELOG.md` (combined model,
