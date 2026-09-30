@@ -792,19 +792,15 @@ body::after {
 }
 
 /* Merge lifecycle: the recycle glyph — spinning while the run is the queue's
-   active one (a clean apply in flight, or a conflict being resolved under the
-   same lease), still while merely queued or once the run has failed. Its ink
+   active one, still while merely queued or once the run has failed. Its ink
    is the arm's shared tone (the rules under THE TONE WINS below): purple in
-   progress, GREEN on a conflict (an expected state ready for the user) and
-   TURQUOISE on a failure (something went wrong, but the workspace is usable)
-   — owner rulings, 2026-09-28.  `merged` is NOT here: a settled merge has left the pipeline and
+   progress and TURQUOISE on a failure (something went wrong, but the
+   workspace is usable) — owner rulings, 2026-09-28 and 2026-09-29.  `merged` is NOT here: a settled merge has left the pipeline and
    renders in the Recently Merged section, where the recycle mark would
    misread as still-queued, so it takes the green disc below instead (owner
    ruling, 2026-09-28: a merge in progress is purple, a landed one green). */
-#ws-sidebar .st-merge-enqueuing,
 #ws-sidebar .st-merging,
 #ws-sidebar .st-merge-queued,
-#ws-sidebar .st-merge-conflict,
 #ws-sidebar .st-merge-failed {
   /* The recycle glyph's ink sits off-center in its line box, so ws-spin
      rotating it about the default box center (transform-origin 50% 50%) made it
@@ -826,14 +822,10 @@ body::after {
   font-size: 1.3rem;
   line-height: 1;
 }
-/* SPINNING: the workspace is the merge queue's ACTIVE one. `merging` is the
-   daemon driving the cherry-pick; `merge-conflict` is the same run still in
-   hand, holding the same lease, with the resolution now the work in flight —
-   so it turns exactly like `merging` does, and only the red says the work is a
-   conflict rather than a clean apply. `merge-failed` stays still: that run is
-   over. */
-#ws-sidebar .st-merging,
-#ws-sidebar .st-merge-conflict { animation: ws-spin 1.4s linear infinite; }
+/* SPINNING: the workspace is the merge queue's ACTIVE one, `merging`, the
+   whole run from its rebase to its merge commit. `merge-failed` stays still:
+   that run is over. */
+#ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
 
 /* Recently Merged: settled history rather than live work, so it is set off
    from the by-repo list above by a light rule and carries a purple header
