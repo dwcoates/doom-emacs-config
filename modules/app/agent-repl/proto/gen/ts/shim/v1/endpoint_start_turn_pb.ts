@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQibAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQSKgoEcGFnZRgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZSKLAgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPgoRdHVybl9hbHJlYWR5X29wZW4YAiABKAsyIS5zaGltLnYxLlN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkgAEjEKCm5vX3Nlc3Npb24YAyABKAsyGy5zaGltLnYxLlN0YXJ0VHVybk5vU2Vzc2lvbkgAEjkKDnZlbmRvcl9yZWZ1c2VkGAQgASgLMh8uc2hpbS52MS5TdGFydFR1cm5WZW5kb3JSZWZ1c2VkSAASMQoKcXVlcnlfZGVhZBgFIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuUXVlcnlEZWFkSABCBgoEa2luZCIrChhTdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5KBAgBEAJSCWtlZXBhbGl2ZSIUChJTdGFydFR1cm5Ob1Nlc3Npb24iGAoWU3RhcnRUdXJuVmVuZG9yUmVmdXNlZCIUChJTdGFydFR1cm5RdWVyeURlYWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEijgIKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQESGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAhCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQibAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQSKgoEcGFnZRgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZSKLAgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPgoRdHVybl9hbHJlYWR5X29wZW4YAiABKAsyIS5zaGltLnYxLlN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkgAEjEKCm5vX3Nlc3Npb24YAyABKAsyGy5zaGltLnYxLlN0YXJ0VHVybk5vU2Vzc2lvbkgAEjkKDnZlbmRvcl9yZWZ1c2VkGAQgASgLMh8uc2hpbS52MS5TdGFydFR1cm5WZW5kb3JSZWZ1c2VkSAASMQoKcXVlcnlfZGVhZBgFIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuUXVlcnlEZWFkSABCBgoEa2luZCIrChhTdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5KBAgBEAJSCWtlZXBhbGl2ZSIUChJTdGFydFR1cm5Ob1Nlc3Npb24iGAoWU3RhcnRUdXJuVmVuZG9yUmVmdXNlZCIUChJTdGFydFR1cm5RdWVyeURlYWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -87,6 +87,30 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    * @generated from field: optional conversation.v1.HistoryPointer known_through = 5;
    */
   knownThrough?: HistoryPointer | undefined;
+
+  /**
+   * JOIN THE RUNNING TURN rather than wait for it to end: the daemon's
+   * `after_tool_call` verdict (2026-09-30). When a turn of the daemon's is
+   * open, the prompt is pushed into the vendor's input at once, with no
+   * interrupt, and its fate is the vendor's to decide:
+   *   - FOLDED: the vendor takes it into the running turn at that turn's next
+   *     tool boundary. Its prompt row is written at that point with
+   *     `AgentPrompt.folded_into` naming the running turn, and it opens no
+   *     turn of its own: its answer is the running turn's.
+   *   - NOT FOLDED: the running turn ended with no tool boundary left, so the
+   *     vendor runs the prompt as its next turn. Its prompt row is written the
+   *     moment the running turn closes, as this turn's first row, and the turn
+   *     runs under this request's id and origin like any other.
+   * The success answers the moment the prompt is pushed; its page is read
+   * then, before either fate. With no turn of the daemon's open, the flag
+   * changes nothing: the prompt starts its turn as any StartTurn does.
+   *
+   * ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
+   * is refused `turn_already_open`; the daemon holds it instead.
+   *
+   * @generated from field: bool join_running_turn = 6;
+   */
+  joinRunningTurn: boolean;
 };
 
 /**
@@ -193,7 +217,8 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
      * shim's own cache keep-alive never produces it either -- a StartTurn that
      * arrives while a keep-alive runs waits inside the shim for the keep-alive
      * to end and then opens its turn, so no keep-alive is ever visible on this
-     * wire.
+     * wire. A `join_running_turn` start while another prompt still waits to
+     * join the running turn is refused under this arm too.
      *
      * @generated from field: shim.v1.StartTurnTurnAlreadyOpen turn_already_open = 2;
      */

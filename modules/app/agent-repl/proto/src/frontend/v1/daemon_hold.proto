@@ -86,6 +86,10 @@ message HeldPrompt {
     HeldPromptInterject interject = 5;
     // The verdict is that this prompt waits for the running turn to end.
     HeldPromptHoldForTurnEnd hold_for_turn_end = 6;
+    // The verdict is that this prompt adds to the running turn's work: it is
+    // sent at once to join that turn after its current tool call, with no
+    // interrupt, and leaves the tray the moment the session takes it.
+    HeldPromptAfterToolCall after_tool_call = 17;
     // No classifier ran and none will: the turn in front of this entry is a
     // context cut, which is never interrupted. Delivery is the ordinary
     // turn-end drain's, so this arm changes WHO decided rather than WHEN the
@@ -218,6 +222,13 @@ message HeldPromptClassifying {}
 
 // Deliver NOW: interrupt the running turn and submit once it has ended.
 message HeldPromptInterject {
+  // The classifier's stated reason. Free text for display; never parsed.
+  string rationale = 1;
+}
+
+// Deliver NOW into the running turn, which takes it after its current tool
+// call; nothing is interrupted.
+message HeldPromptAfterToolCall {
   // The classifier's stated reason. Free text for display; never parsed.
   string rationale = 1;
 }

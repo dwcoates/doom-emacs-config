@@ -1735,6 +1735,9 @@ message FooterActivityTransientSubmitting {
     // The classifier ruled that the prompt interrupts the running turn, and
     // the turn is being interrupted to deliver it.
     FooterActivityTransientSubmittingInterjecting interjecting = 4;
+    // The classifier ruled that the prompt adds to the running turn's work,
+    // and it was sent to join that turn after its current tool call.
+    FooterActivityTransientSubmittingAfterToolCall after_tool_call = 7;
     // The classifier ruled that the prompt interrupts the prompt ahead of it,
     // which had not started, so the two were folded into one queued entry.
     FooterActivityTransientSubmittingCoalesced coalesced = 5;
@@ -1754,6 +1757,8 @@ message FooterActivityTransientSubmittingHeld {
 message FooterActivityTransientSubmittingClassifying {}
 // The running turn is being interrupted for the prompt.
 message FooterActivityTransientSubmittingInterjecting {}
+// The prompt was sent to join the running turn after its current tool call.
+message FooterActivityTransientSubmittingAfterToolCall {}
 // The prompt was folded into the queued prompt ahead of it.
 message FooterActivityTransientSubmittingCoalesced {}
 // The prompt was sent to the session.

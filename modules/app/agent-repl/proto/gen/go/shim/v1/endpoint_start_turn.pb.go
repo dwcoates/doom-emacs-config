@@ -61,9 +61,29 @@ type StartTurnRequest struct {
 	PageSize uint32 `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The newest entry the caller already holds. UNSET = repaint: a full first
 	// page rides the response. SET = catch-up: only entries newer than this.
-	KnownThrough  *v1.HistoryPointer `protobuf:"bytes,5,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	KnownThrough *v1.HistoryPointer `protobuf:"bytes,5,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
+	// JOIN THE RUNNING TURN rather than wait for it to end: the daemon's
+	// `after_tool_call` verdict (2026-09-30). When a turn of the daemon's is
+	// open, the prompt is pushed into the vendor's input at once, with no
+	// interrupt, and its fate is the vendor's to decide:
+	//   - FOLDED: the vendor takes it into the running turn at that turn's next
+	//     tool boundary. Its prompt row is written at that point with
+	//     `AgentPrompt.folded_into` naming the running turn, and it opens no
+	//     turn of its own: its answer is the running turn's.
+	//   - NOT FOLDED: the running turn ended with no tool boundary left, so the
+	//     vendor runs the prompt as its next turn. Its prompt row is written the
+	//     moment the running turn closes, as this turn's first row, and the turn
+	//     runs under this request's id and origin like any other.
+	//
+	// The success answers the moment the prompt is pushed; its page is read
+	// then, before either fate. With no turn of the daemon's open, the flag
+	// changes nothing: the prompt starts its turn as any StartTurn does.
+	//
+	// ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
+	// is refused `turn_already_open`; the daemon holds it instead.
+	JoinRunningTurn bool `protobuf:"varint,6,opt,name=join_running_turn,json=joinRunningTurn,proto3" json:"join_running_turn,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StartTurnRequest) Reset() {
@@ -129,6 +149,13 @@ func (x *StartTurnRequest) GetKnownThrough() *v1.HistoryPointer {
 		return x.KnownThrough
 	}
 	return nil
+}
+
+func (x *StartTurnRequest) GetJoinRunningTurn() bool {
+	if x != nil {
+		return x.JoinRunningTurn
+	}
+	return false
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
@@ -390,7 +417,8 @@ type StartTurnFailure_TurnAlreadyOpen struct {
 	// shim's own cache keep-alive never produces it either -- a StartTurn that
 	// arrives while a keep-alive runs waits inside the shim for the keep-alive
 	// to end and then opens its turn, so no keep-alive is ever visible on this
-	// wire.
+	// wire. A `join_running_turn` start while another prompt still waits to
+	// join the running turn is refused under this arm too.
 	TurnAlreadyOpen *StartTurnTurnAlreadyOpen `protobuf:"bytes,2,opt,name=turn_already_open,json=turnAlreadyOpen,proto3,oneof"`
 }
 
@@ -567,13 +595,14 @@ var File_shim_v1_endpoint_start_turn_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\n" +
-	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\"\x9f\x02\n" +
+	"!shim/v1/endpoint_start_turn.proto\x12\ashim.v1\x1a\x1dconversation/v1/history.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\"\xcb\x02\n" +
 	"\x10StartTurnRequest\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
 	"\x04said\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x125\n" +
 	"\x06origin\x18\x03 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x12\x1b\n" +
 	"\tpage_size\x18\x04 \x01(\rR\bpageSize\x12I\n" +
-	"\rknown_through\x18\x05 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x88\x01\x01B\x10\n" +
+	"\rknown_through\x18\x05 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x88\x01\x01\x12*\n" +
+	"\x11join_running_turn\x18\x06 \x01(\bR\x0fjoinRunningTurnB\x10\n" +
 	"\x0e_known_through\"\x8b\x01\n" +
 	"\x11StartTurnResponse\x125\n" +
 	"\asuccess\x18\x01 \x01(\v2\x19.shim.v1.StartTurnSuccessH\x00R\asuccess\x125\n" +
