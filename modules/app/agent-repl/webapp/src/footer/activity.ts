@@ -39,6 +39,7 @@ import type {
   FooterActivityEnduringUsage,
   FooterActivityQuietStretch,
   FooterActivityTransient,
+  FooterActivityTransientApiRestored,
   FooterActivityTransientCompactionConcluded,
   FooterActivityTransientContextInjected,
   FooterActivityTransientDaemonError,
@@ -382,7 +383,7 @@ function drawSalientKind(
     case "compaction":
       return drawFooterStatusActivityCompaction(kind.value);
     case "retrying":
-      return drawFooterStatusActivityRetrying(kind.value);
+      return drawFooterStatusActivityRetrying(kind.value, deps, path);
     case "wakeup":
       return drawFooterStatusActivityWakeup(kind.value, deps, path);
     case "gatedCall":
@@ -556,6 +557,8 @@ function drawTransientKind(
       return drawFooterActivityTransientNetworkResume(kind.value, deps, path);
     case "compactionConcluded":
       return drawFooterActivityTransientCompactionConcluded(kind.value);
+    case "apiRestored":
+      return drawFooterActivityTransientApiRestored(kind.value);
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
@@ -699,6 +702,20 @@ export function drawFooterActivityTransientUpdated(
   line.appendChild(document.createTextNode(statusWords("updated")));
   appendUpdateNotes(line, u.notes, path);
   return line;
+}
+
+/**
+ * The retried vendor call answering: "API answering again after 8 failed
+ * attempts", the count the retrying line last stood at.
+ */
+export function drawFooterActivityTransientApiRestored(
+  u: FooterActivityTransientApiRestored,
+): HTMLElement {
+  const noun = u.failedAttempts === 1 ? "attempt" : "attempts";
+  return textLine(
+    "footer-activity-api-restored",
+    `API answering again after ${u.failedAttempts} failed ${noun}`,
+  );
 }
 
 /**
@@ -1119,10 +1136,20 @@ export function drawFooterStatusActivityAuthenticating(
 }
 
 /**
- * The retry line: "retry #2 · rate limited", with the ATTEMPT coloured — the
- * one figure in the line that changes as the retries mount.
+ * The vendor call being retried: "retry #9 of 11 · next try in 12s ·
+ * overloaded". The attempt is the vendor's own count and the limit its own,
+ * drawn only when it stated them.
+ *
+ * THE NEXT ATTEMPT IS SHIPPED AS AN INSTANT and counts down here on the shared
+ * ticker. Once it passes with no newer attempt pushed, the line says so,
+ * "next try overdue by 2m", rather than floor at zero: a vendor that promised
+ * a retry and never made one reads as the stall it is.
  */
-export function drawFooterStatusActivityRetrying(u: FooterStatusActivityRetrying): HTMLElement {
+export function drawFooterStatusActivityRetrying(
+  u: FooterStatusActivityRetrying,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-retrying";
   line.appendChild(document.createTextNode("retry "));
@@ -1131,8 +1158,34 @@ export function drawFooterStatusActivityRetrying(u: FooterStatusActivityRetrying
   attempt.setAttribute("data-datum", "attempt");
   attempt.textContent = `#${u.attempt}`;
   line.appendChild(attempt);
+  if (u.maxAttempt !== undefined) {
+    line.appendChild(document.createTextNode(` of ${u.maxAttempt}`));
+  }
+  if (u.nextAttempt !== undefined) {
+    line.appendChild(document.createTextNode(" · "));
+    line.appendChild(drawNextAttempt(u.nextAttempt, deps, `${path}.next_attempt`));
+  }
   line.appendChild(document.createTextNode(` · ${u.status}`));
   return line;
+}
+
+/**
+ * "next try in 12s" ticking down to the vendor's promised instant at second
+ * resolution, then "next try overdue by 2m" counting up once it has passed.
+ */
+function drawNextAttempt(u: FooterStatusActivityAt, deps: AllowanceDeps, path: string): HTMLElement {
+  const atMs = msOf(u.atMs, `${path}.at_ms`);
+  const countdown = document.createElement("span");
+  countdown.className = "footer-next-attempt";
+  countdown.setAttribute("data-countdown", "");
+  tick(countdown, deps.ctx.ticker, (nowMs) => {
+    const overdue = nowMs >= atMs;
+    countdown.toggleAttribute("data-overdue", overdue);
+    countdown.textContent = overdue
+      ? `next try overdue by ${formatAge(nowMs - atMs)}`
+      : `next try in ${remainingLabel(atMs - nowMs)}`;
+  });
+  return countdown;
 }
 
 /**
