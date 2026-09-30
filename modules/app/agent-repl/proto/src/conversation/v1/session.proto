@@ -168,9 +168,9 @@ enum SessionCompactScope {
 // One frame of the session's standing stream: a session-level fact that
 // changed, AS IT MANIFESTS upstream. No terminal arm — the stream ends only
 // with the session. Every arm is a fact ABOUT the session; nothing about any
-// turn or unit rides here, because each of those has a stream of its own, and
-// nothing synthetic rides here either — the shim's own health is PULLED, not
-// pushed.
+// turn or unit rides here while that turn or unit has a stream of its own.
+// The one kind of unit fact that does ride here is work the SESSION does
+// about a unit whose own stream has already ended — the network-resume waits.
 message SessionUpdate {
   oneof update {
     // The vendor gave the session a new identity mid-session.
@@ -233,7 +233,88 @@ message SessionUpdate {
     // the cold gate's compaction ran for a minute with nothing anywhere
     // saying so.
     SessionCompactionProgress compaction_progress = 30;
+    // The DETACHED AGENTS the shim is waiting to resume after a network
+    // outage killed them, as a STANDING SET: every statement is the whole set,
+    // and the last statement is the truth. It rides the session stream,
+    // although each wait is about one unit, because the unit's own stream has
+    // already ended with the failure the vendor reported; the wait is the
+    // session's own work — one probe loop per session — and outlives that
+    // stream.
+    SessionNetworkResumeWaits network_resume_waits = 31;
+    // One wait ENDED, and how. An EVENT, stated once, live: it is what tells a
+    // consumer why a wait left the standing set, which the set alone cannot.
+    SessionNetworkResumeOutcome network_resume_outcome = 32;
   }
+}
+
+// ---- Detached agents waiting to be resumed after a network outage ----
+//
+// A background subagent whose run the vendor ended BECAUSE THE API WAS
+// UNREACHABLE is resumed by the shim once the API answers again: the vendor's
+// failure is reported on the agent's own stream as the terminal it is, and the
+// shim then waits, probing reachability, until it can ask the main agent to
+// continue that agent, or until a bounded window runs out. Failures the API
+// ANSWERED (auth, billing, quota, overload, rate limits, invalid requests) are
+// never waited on and never appear here.
+
+// Every detached agent the shim is waiting to resume, whole.
+//
+// PRODUCER OBLIGATIONS: the shim states the set on every change (a wait
+// opens, a window restarts after the resumed run made progress, a wait ends),
+// and states it once on every WatchSession open before any live frame, so a
+// consumer that (re)connects learns the standing waits from its own stream
+// rather than from history. An EMPTY set is stated when the last wait ends.
+message SessionNetworkResumeWaits {
+  // The waits, in the order they opened. Empty when nothing waits.
+  repeated SessionNetworkResumeWait waits = 1;
+}
+
+// One detached agent waiting for the API to be reachable again.
+message SessionNetworkResumeWait {
+  // The work whose run failed: the handle its failure terminal retired, so a
+  // consumer joins the wait to the agent it already drew.
+  DetachedWorkId work = 1;
+  // When the vendor reported the network failure that opened this wait, epoch
+  // ms.
+  int64 failed_at_ms = 2;
+  // When the shim will GIVE UP waiting, epoch ms: the end of the current
+  // window. The window runs from the failure and restarts only when a resumed
+  // run made progress (the model answered) before failing again, so this
+  // instant moves only then; a resume that fails again with no progress keeps
+  // the original deadline.
+  int64 gives_up_at_ms = 3;
+  // How many resumes the shim has already delivered for this agent in the
+  // current chain of failures. Zero on the first wait.
+  uint32 resumes_delivered = 4;
+}
+
+// How one wait ended.
+message SessionNetworkResumeOutcome {
+  // The work whose wait ended, as SessionNetworkResumeWait.work named it.
+  DetachedWorkId work = 1;
+  // THE ARM IS HOW IT ENDED. Exactly one is set; an outcome with none is
+  // malformed.
+  oneof outcome {
+    // The API answered and the shim asked the main agent to continue the
+    // agent; the vendor resumes it from its own transcript.
+    SessionNetworkResumeResumed resumed = 2;
+    // The window ran out with the API still unreachable; the agent keeps the
+    // failure its terminal reported.
+    SessionNetworkResumeGaveUp gave_up = 3;
+    // The shim stood down while the agent waited; the agent keeps its
+    // failure.
+    SessionNetworkResumeAbandoned abandoned = 4;
+  }
+}
+// The resume was delivered. The resumed run arrives as the vendor's own
+// continuation of the agent, through the ordinary adoption path.
+message SessionNetworkResumeResumed {}
+// The shim gave up waiting.
+message SessionNetworkResumeGaveUp {}
+// The shim stood down while the agent waited.
+message SessionNetworkResumeAbandoned {
+  // Why the shim stood down, verbatim from the shim ("session closing").
+  string reason = 1;
 }
 
 // WHERE A COMPACTION HAS GOT TO. The phases are the edges the shim can
