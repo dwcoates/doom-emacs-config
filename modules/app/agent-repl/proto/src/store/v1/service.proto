@@ -14,6 +14,7 @@ package store.v1;
 
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_live_work.proto";
+import "store/v1/endpoint_get_run_settlements.proto";
 import "store/v1/endpoint_get_shell_run_claims.proto";
 import "store/v1/endpoint_get_sidecar_cursors.proto";
 import "store/v1/endpoint_get_workflow.proto";
@@ -77,6 +78,12 @@ service ShimStore {
   // (EntryBatch.shell_run_claims), with the book that holds each run's
   // launching call. The sidecar asks for the spools no transcript line claimed.
   rpc GetShellRunClaims(GetShellRunClaimsRequest) returns (GetShellRunClaimsResponse);
+
+  // WHICH of a set of detached runs the record already holds as ENDED, by the
+  // spawning call's activity id. The sidecar asks before its LOST policy tracks
+  // a run's file, so a run that settled before this process started is never
+  // tracked again and never concluded LOST. Absent from the answer = not settled.
+  rpc GetRunSettlements(GetRunSettlementsRequest) returns (GetRunSettlementsResponse);
 
   // ---- Writes: how a producer hands records to the store ----
 

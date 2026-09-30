@@ -68,6 +68,9 @@ const (
 	// ShimStoreGetShellRunClaimsProcedure is the fully-qualified name of the ShimStore's
 	// GetShellRunClaims RPC.
 	ShimStoreGetShellRunClaimsProcedure = "/store.v1.ShimStore/GetShellRunClaims"
+	// ShimStoreGetRunSettlementsProcedure is the fully-qualified name of the ShimStore's
+	// GetRunSettlements RPC.
+	ShimStoreGetRunSettlementsProcedure = "/store.v1.ShimStore/GetRunSettlements"
 	// ShimStoreWriteBatchProcedure is the fully-qualified name of the ShimStore's WriteBatch RPC.
 	ShimStoreWriteBatchProcedure = "/store.v1.ShimStore/WriteBatch"
 )
@@ -85,6 +88,7 @@ var (
 	shimStoreGetLiveWorkMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
 	shimStoreGetAgentByVendorTaskMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
 	shimStoreGetShellRunClaimsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
+	shimStoreGetRunSettlementsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
 	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
@@ -127,6 +131,11 @@ type ShimStoreClient interface {
 	// (EntryBatch.shell_run_claims), with the book that holds each run's
 	// launching call. The sidecar asks for the spools no transcript line claimed.
 	GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error)
+	// WHICH of a set of detached runs the record already holds as ENDED, by the
+	// spawning call's activity id. The sidecar asks before its LOST policy tracks
+	// a run's file, so a run that settled before this process started is never
+	// tracked again and never concluded LOST. Absent from the answer = not settled.
+	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -201,6 +210,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetShellRunClaimsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getRunSettlements: connect.NewClient[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse](
+			httpClient,
+			baseURL+ShimStoreGetRunSettlementsProcedure,
+			connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		writeBatch: connect.NewClient[v1.WriteBatchRequest, v1.WriteBatchResponse](
 			httpClient,
 			baseURL+ShimStoreWriteBatchProcedure,
@@ -222,6 +237,7 @@ type shimStoreClient struct {
 	getLiveWork          *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
 	getAgentByVendorTask *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
 	getShellRunClaims    *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
+	getRunSettlements    *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
 	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
@@ -275,6 +291,11 @@ func (c *shimStoreClient) GetShellRunClaims(ctx context.Context, req *connect.Re
 	return c.getShellRunClaims.CallUnary(ctx, req)
 }
 
+// GetRunSettlements calls store.v1.ShimStore.GetRunSettlements.
+func (c *shimStoreClient) GetRunSettlements(ctx context.Context, req *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error) {
+	return c.getRunSettlements.CallUnary(ctx, req)
+}
+
 // WriteBatch calls store.v1.ShimStore.WriteBatch.
 func (c *shimStoreClient) WriteBatch(ctx context.Context, req *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
 	return c.writeBatch.CallUnary(ctx, req)
@@ -319,6 +340,11 @@ type ShimStoreHandler interface {
 	// (EntryBatch.shell_run_claims), with the book that holds each run's
 	// launching call. The sidecar asks for the spools no transcript line claimed.
 	GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error)
+	// WHICH of a set of detached runs the record already holds as ENDED, by the
+	// spawning call's activity id. The sidecar asks before its LOST policy tracks
+	// a run's file, so a run that settled before this process started is never
+	// tracked again and never concluded LOST. Absent from the answer = not settled.
+	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -389,6 +415,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetShellRunClaimsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetRunSettlementsHandler := connect.NewUnaryHandler(
+		ShimStoreGetRunSettlementsProcedure,
+		svc.GetRunSettlements,
+		connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreWriteBatchHandler := connect.NewUnaryHandler(
 		ShimStoreWriteBatchProcedure,
 		svc.WriteBatch,
@@ -417,6 +449,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetAgentByVendorTaskHandler.ServeHTTP(w, r)
 		case ShimStoreGetShellRunClaimsProcedure:
 			shimStoreGetShellRunClaimsHandler.ServeHTTP(w, r)
+		case ShimStoreGetRunSettlementsProcedure:
+			shimStoreGetRunSettlementsHandler.ServeHTTP(w, r)
 		case ShimStoreWriteBatchProcedure:
 			shimStoreWriteBatchHandler.ServeHTTP(w, r)
 		default:
@@ -466,6 +500,10 @@ func (UnimplementedShimStoreHandler) GetAgentByVendorTask(context.Context, *conn
 
 func (UnimplementedShimStoreHandler) GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetShellRunClaims is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetRunSettlements is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
