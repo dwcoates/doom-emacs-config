@@ -1476,8 +1476,9 @@ describe("a newer failure of an agent whose wait still stands", () => {
 
     // Assert
     const replaced = logRecordsSince(mark).find((r) => r.context.next_wait_id !== undefined);
-    expect([replaced?.level, replaced?.context]).toEqual([
+    expect([replaced?.level, replaced?.message, replaced?.context]).toEqual([
       "info",
+      "the agent failed again while a wait for it stood; the new waiting edge for the same agent ends that wait, as the restated waiting set expresses, with no outcome of its own",
       expect.objectContaining({ task_id: "a1", wait_id: 1, work: "toolu_spawn", next_wait_id: 2 }),
     ]);
   });

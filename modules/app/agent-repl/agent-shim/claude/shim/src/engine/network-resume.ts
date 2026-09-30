@@ -759,8 +759,9 @@ export class NetworkResume {
    * the same agent is opening its own: the agent ran again while it waited (a
    * resume someone else delivered) and failed again. The old wait is marked
    * ended, so a delivery still out for it answers for it alone and never for
-   * the newer one; the session stream has no outcome arm for it, and the
-   * restated set drops it.
+   * the newer one. ON THE WIRE IT IS ENDED BY THE NEW WAITING EDGE for the
+   * same agent, which the restated set already expresses (ruled 2026-09-30:
+   * no outcome arm, no proto change).
    */
   private supersede(taskId: string): void {
     const standing = this.waiting.get(taskId);
@@ -769,7 +770,7 @@ export class NetworkResume {
     standing.ended = "superseded";
     LOGGER.info(
       { task_id: taskId, wait_id: standing.id, work: standing.work, next_wait_id: this.nextWaitId },
-      "the agent failed again while a wait for it stood; the newer failure's wait replaces it",
+      "the agent failed again while a wait for it stood; the new waiting edge for the same agent ends that wait, as the restated waiting set expresses, with no outcome of its own",
     );
   }
 
