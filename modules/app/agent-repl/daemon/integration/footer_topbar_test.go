@@ -917,6 +917,54 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	})
 }
 
+func TestFooterScheduledApiRetryCountsLikeTheVendorAndItsResponseAnnouncesTheRestoredAPI(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared record is the vendor failure the test feeds, stated once by its owner.
+	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
+	footer := f.d.WatchFooter(f.ws)
+	f.submit("go", "k-api-retry", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking() != nil
+	})
+	const nextAt = int64(1_790_000_032_000)
+
+	// Act: the vendor's eighth retry is scheduled, of ten it allows.
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
+			Message: "connection refused",
+			Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}},
+			Retry:   &conversationv1.ApiRetry{Attempt: 8, MaxRetries: 10, NextAttemptAtMs: nextAt},
+		}},
+	}))
+
+	// Assert: the retrying line counts attempts as the vendor does and carries
+	// its schedule.
+	got := awaitFooter(t, f, footer, "the retrying line with the vendor's schedule", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying() != nil
+	})
+	retry := got.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 || retry.GetNextAttempt().GetAtMs() != nextAt {
+		t.Fatalf("retrying = %v, want attempt 9 of 11 next at %d", retry, nextAt)
+	}
+
+	// Act: the retried call answers.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("think-restored"),
+		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
+	}))
+
+	// Assert: the retrying line ends and the restored API is announced.
+	got = awaitFooter(t, f, footer, "the api_restored transient", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetTransient().GetApiRestored() != nil
+	})
+	restored := got.GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetTransient().GetApiRestored()
+	if restored.GetFailedAttempts() != 8 {
+		t.Fatalf("api_restored = %v, want 8 failed attempts", restored)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Footer: link death
 // ---------------------------------------------------------------------------
