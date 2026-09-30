@@ -43,6 +43,7 @@ import {
   FooterViewSchema,
   FooterStatusSchema,
   FooterExpandedSchema,
+  FooterMergeTestRowSchema,
   FooterAllowanceSchema,
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -1132,40 +1133,31 @@ export const commandRefusedRow = (
 export const MERGE_TAB_KINDS = [
   "queue",
   "prePrompt",
-  "merge",
+  "rebasing",
   "conflicts",
   "tests",
   "fixes",
+  "committing",
+  "updatingMain",
   "postPrompt",
 ] as const;
 export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
-/** Which state arms each tab kind legally carries; `parked` only on two. */
-export const MERGE_TAB_STATES: Record<MergeTabKind, readonly ("live" | "parked" | "settled")[]> = {
-  queue: ["live", "settled"],
-  prePrompt: ["live", "settled"],
-  merge: ["live", "settled"],
-  conflicts: ["live", "parked", "settled"],
-  tests: ["live", "settled"],
-  fixes: ["live", "parked", "settled"],
-  postPrompt: ["live", "settled"],
-};
+/** The state arms every tab kind carries: nothing parks, so live or settled. */
+export const MERGE_TAB_STATES = ["live", "settled"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number];
 
 const liveState = () => ({ case: "live" as const, value: {} });
 const settledState = () => ({
   case: "settled" as const,
   value: { endedAtMs: 9_000n, outcome: { case: "succeeded" as const, value: {} } },
 });
-const parkedState = () => ({
-  case: "parked" as const,
-  value: { line: { text: "paused for your answer" } },
-});
 
-/** The state arms every tab carries; `parked` is legal on conflicts/fixes only. */
-const plainState = (state: "live" | "parked" | "settled") =>
-  state === "settled" ? settledState() : liveState();
-const parkableState = (state: "live" | "parked" | "settled") =>
-  state === "settled" ? settledState() : state === "parked" ? parkedState() : liveState();
+/** The state arm a tab carries. */
+const plainState = (state: MergeTabState) => (state === "settled" ? settledState() : liveState());
+
+/** The token and label the tests tab's log link is served with. */
+export const MERGE_TEST_LOG = { token: "merge-log-7f3a", label: "~/.claude-emacs/merge-logs/ws-1-tests-2.log" };
 
 /** The tests tab's suites: one passed, one failed, one running, painted spans. */
 export const MERGE_TEST_SPANS = [
@@ -1178,7 +1170,7 @@ type MergeTabKindInit = NonNullable<MergeTabValue["kind"]>;
 
 const mergeTabKindValue = (
   kind: MergeTabKind,
-  state: "live" | "parked" | "settled",
+  state: MergeTabState,
 ): MergeTabKindInit => {
   switch (kind) {
     case "queue":
@@ -1209,12 +1201,26 @@ const mergeTabKindValue = (
           },
         },
       };
-    case "merge":
+    case "rebasing":
       return {
-        case: "merge",
+        case: "rebasing",
         value: {
           state: plainState(state),
-          lines: [{ text: "cherry-picked 3 commits" }, { text: "no conflicts" }],
+          progress: { replayed: 3, total: 7 },
+          lines: [{ text: "replaying 2/7 · tidy the queue" }, { text: "replaying 3/7 · fix the reconnect loop" }],
+        },
+      };
+    case "committing":
+      return {
+        case: "committing",
+        value: { state: plainState(state), subject: { text: "Merge branch 'ws-1' into master" } },
+      };
+    case "updatingMain":
+      return {
+        case: "updatingMain",
+        value: {
+          state: plainState(state),
+          step: { step: { case: "fastForwarding", value: { commit: "4f2a1c9" } } },
         },
       };
     case "tests":
@@ -1239,12 +1245,16 @@ const mergeTabKindValue = (
               output: [{ text: "running", paintClass: "ansi-dim" }],
             },
           ],
+          log: { token: { value: MERGE_TEST_LOG.token }, label: { text: MERGE_TEST_LOG.label } },
         },
       };
     case "conflicts":
-      return { case: "conflicts", value: { state: parkableState(state) } };
+      return { case: "conflicts", value: { state: plainState(state) } };
     case "fixes":
-      return { case: "fixes", value: { state: parkableState(state) } };
+      return {
+        case: "fixes",
+        value: { state: plainState(state), attempt: { attempt: 2, maxAttempts: 3 } },
+      };
     case "prePrompt":
       return { case: "prePrompt", value: { state: plainState(state) } };
     case "postPrompt":
@@ -1254,7 +1264,7 @@ const mergeTabKindValue = (
 
 export const mergeTabRow = (
   kind: MergeTabKind,
-  state: "live" | "parked" | "settled" = "live",
+  state: MergeTabState = "live",
   overrides?: Partial<RowInit>,
 ): FeedRow =>
   feedRow(
@@ -1367,27 +1377,24 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   waiting: ["wakeup", "permission", "question", "coldGate", "interrupting"],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
-    "enqueuing",
-    "queued",
-    "prePrompt",
-    "merge",
+    "enqueued",
+    "preprocessing",
+    "rebasing",
+    "conflictResolution",
     "testing",
-    "parked",
-    "postPrompt",
-    "failed",
-    "merged",
-    "fixes",
-    "conflicts",
+    "fixing",
+    "committing",
+    "updatingMain",
+    "postprocessing",
   ],
   background: [],
   blocked: ["auth", "usageLimit", "vendorError", "billing", "queryDied"],
   disconnected: ["starting", "degraded", "severed", "dead", "startFailed"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
-  // A merge that STOPPED is its own arm (owner ruling, 2026-09-28): a
-  // conflict awaiting the user (its one step is parked), a failure, a landing.
-  mergeConflict: ["parked"],
-  mergeFailed: [],
+  // A merge that STOPPED is its own arm: a failure, whose substatus is the
+  // area it failed in, and a landing.
+  mergeFailed: ["conflicts", "tests", "other"],
   merged: [],
   // A failed turn and a degraded view are usable faults (owner ruling,
   // 2026-09-28): each its own turquoise arm.
@@ -1402,9 +1409,58 @@ export const FOOTER_STATUS_WITHOUT_SUBSTATUS = "background";
 
 /** The substatus arms that carry payload; everything else is empty. */
 const substatusValue = (substatus: string): object => {
-  if (substatus === "queued") return { position: 2, depth: 5 };
-  if (substatus === "parked") return { line: "waiting on your answer" };
+  if (substatus === "enqueued") return { place: 2, waiting: 5 };
+  if (substatus === "rebasing") return { replayed: 3, total: 7 };
+  if (substatus === "fixing") return { attempt: 2, maxAttempts: 3 };
   return {};
+};
+
+/**
+ * The words each merge substatus draws, as the reader sees them: the arm's
+ * name, plus the figures the three counted steps carry (substatusValue).
+ */
+export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
+  merging: {
+    enqueued: "enqueued 2/5",
+    preprocessing: "preprocessing",
+    rebasing: "rebasing 3/7",
+    conflictResolution: "conflict resolution",
+    testing: "testing",
+    fixing: "fixing attempt 2/3",
+    committing: "committing",
+    updatingMain: "updating main",
+    postprocessing: "postprocessing",
+  },
+  mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge" },
+};
+
+/** Every merge step line arm, with a complete payload and the words it draws. */
+export const MERGE_STEP_LINES: Record<string, { value: object; words: string }> = {
+  enqueued: { value: { workspaceName: "fix-reconnect", step: "testing" }, words: "fix-reconnect: testing" },
+  preprocessing: { value: { text: "update the changelog" }, words: "update the changelog" },
+  rebasing: {
+    value: { line: { case: "running", value: { text: "git rebase --continue" } } },
+    words: "git rebase --continue",
+  },
+  conflictResolution: {
+    value: { commitSubject: "fix the reconnect loop", files: 3 },
+    words: "fix the reconnect loop: 3 files",
+  },
+  testing: { value: { name: "webapp", edge: { case: "passed", value: {} } }, words: "✓ webapp" },
+  fixing: { value: { suites: ["daemon unit", "webapp"] }, words: "daemon unit, webapp" },
+  committing: { value: { subject: "Merge branch 'ws-1' into master" }, words: "Merge branch 'ws-1' into master" },
+  updatingMain: {
+    value: { step: { case: "fastForwarding", value: { commit: "4f2a1c9" } } },
+    words: "fast-forwarding to 4f2a1c9",
+  },
+  postprocessing: { value: { text: "deploy it" }, words: "deploy it" },
+};
+
+/** The suite edges a testing line draws, with the words and tone each takes. */
+export const MERGE_SUITE_EDGES: Record<string, { words: string; tone: string | null }> = {
+  started: { words: "▶ webapp", tone: null },
+  passed: { words: "✓ webapp", tone: "tone-green" },
+  failed: { words: "✗ webapp", tone: "tone-red" },
 };
 
 /** The allowance verdicts; the free-text status string was retired. */
@@ -1450,7 +1506,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   blockedOnUser: { detail: "answer the permission card" },
   coldGateCost: { text: "184k tokens uncached" },
   interrupting: { text: "stopping 3 agents" },
-  mergingCommit: { sha: "abc1234", subject: "port the transport" },
+  mergeStep: { step: { case: "testing", value: MERGE_STEP_LINES.testing.value } },
   authenticating: { line: "opening the login terminal" },
   fault: { kind: "link_severed", detail: "the socket closed" },
   startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
@@ -1487,10 +1543,9 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
     ...SHARED_SALIENTS,
   ],
   interrupted: ["update", ...SHARED_SALIENTS],
-  merging: ["mergingCommit", "update", ...SHARED_SALIENTS],
-  mergeConflict: ["mergingCommit", "update", ...SHARED_SALIENTS],
-  mergeFailed: ["mergingCommit", "update", ...SHARED_SALIENTS],
-  merged: ["mergingCommit", "update", ...SHARED_SALIENTS],
+  merging: ["mergeStep", "update", ...SHARED_SALIENTS],
+  mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
+  merged: ["mergeStep", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
   blocked: ["authenticating", "fault", "update", ...SHARED_SALIENTS],
   disconnected: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
@@ -1609,7 +1664,7 @@ export function footerStatus(
   return { case: status, value } as StatusArm;
 }
 
-export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons"] as const;
+export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons", "mergeTests"] as const;
 export type FooterChip = (typeof FOOTER_CHIPS)[number];
 
 export const FOOTER_PANELS = ["tokens", ...FOOTER_CHIPS] as const;
@@ -1637,10 +1692,33 @@ type FooterInit = {
   verdict?: (typeof FOOTER_TOKENS_VERDICTS)[number];
   chips?: Partial<Record<FooterChip, boolean>>;
   expanded?: boolean;
+  /** The daemon's focus edge: the panel and the generation it is minted under. */
+  focus?: { panel: (typeof FOOTER_FOCUS_PANELS)[number]; generation: bigint };
 };
 
+/** The panels the daemon's focus can name. */
+export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors", "mergeTests"] as const;
+
+/** The merge tests panel's rows: one suite in each state, in the gate's order. */
+export const MERGE_TEST_ROWS: readonly MessageInitShape<typeof FooterMergeTestRowSchema>[] = [
+  { name: { text: "daemon unit" }, state: { state: { case: "passed", value: { durationMs: 95_000n } } } },
+  { name: { text: "elisp" }, state: { state: { case: "failed", value: { durationMs: 7_000n } } } },
+  { name: { text: "webapp" }, state: { state: { case: "running", value: { startedAtMs: 1_000n } } } },
+  { name: { text: "webkit" }, state: { state: { case: "waiting", value: {} } } },
+];
+
+/** The state arms the merge tests panel's rows carry, as MERGE_TEST_ROWS orders them. */
+export const MERGE_TEST_ROW_STATES = ["passed", "failed", "running", "waiting"] as const;
+
 export function footerView(init?: FooterInit): FooterView {
-  const chips = init?.chips ?? { agents: true, tasks: true, shells: true, monitors: true, crons: true };
+  const chips = init?.chips ?? {
+    agents: true,
+    tasks: true,
+    shells: true,
+    monitors: true,
+    crons: true,
+    mergeTests: true,
+  };
   return create(FooterViewSchema, {
     strip: {
       status: { status: footerStatus(init?.status ?? "working", init) },
@@ -1667,15 +1745,23 @@ export function footerView(init?: FooterInit): FooterView {
         shells: chips.shells ? { count: 1 } : undefined,
         monitors: chips.monitors ? { count: 4 } : undefined,
         crons: chips.crons ? { count: 2 } : undefined,
+        mergeTests: chips.mergeTests ? { finished: 8, total: 12 } : undefined,
       },
     },
-    expanded: init?.expanded === false ? undefined : footerExpandedInit(),
+    expanded: init?.expanded === false ? undefined : footerExpandedInit(chips.mergeTests === true),
+    focus:
+      init?.focus === undefined
+        ? undefined
+        : { panel: { case: init.focus.panel, value: {} }, generation: init.focus.generation },
   });
 }
 
 /** Every expanded panel, fully resolved, exactly as the daemon ships them. */
-function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
+function footerExpandedInit(testing: boolean): MessageInitShape<typeof FooterExpandedSchema> {
   return {
+    // The merge's suites while it is testing; empty (and the chip unset)
+    // otherwise, exactly as the daemon ships the panel.
+    mergeTests: { rows: testing ? [...MERGE_TEST_ROWS] : [] },
     tokens: {
       contextGrowth: { value: "18.2k" },
       input: { value: "42.1k" },

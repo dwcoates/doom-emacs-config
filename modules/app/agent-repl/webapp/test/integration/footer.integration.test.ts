@@ -19,6 +19,10 @@ import {
   FooterActivityTransientSchema,
   FooterAgentRowWaitingForApiSchema,
   FooterAllowanceSchema,
+  FooterExpandedFocusSchema,
+  FooterMergeStepSuiteSchema,
+  FooterMergeTestRowStateSchema,
+  FooterStatusActivityMergeStepSchema,
   FooterStatusSchema,
   FooterTokensCellVerdictSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -45,6 +49,12 @@ import {
   FOOTER_SHELL_TARGET,
   FOOTER_MONITOR_TARGET,
   FOOTER_TOKENS_VERDICTS,
+  FOOTER_FOCUS_PANELS,
+  MERGE_STEP_LINES,
+  MERGE_SUBSTATUS_WORDS,
+  MERGE_SUITE_EDGES,
+  MERGE_TEST_ROWS,
+  MERGE_TEST_ROW_STATES,
   WORKSPACE_ID,
   activityRow,
   detachedShellRow,
@@ -126,7 +136,7 @@ describe("the status cell", () => {
 
   it("reads a single-word arm lowercase", async () => {
     // Arrange / Act
-    await withFooter({ status: "merging", substatus: "merge" });
+    await withFooter({ status: "merging", substatus: "testing" });
     // Assert
     expect(harness.text(".footer-status")).toContain("merging");
   });
@@ -138,11 +148,11 @@ describe("the status cell", () => {
     expect(harness.$('[data-component="footer"]')?.textContent).toContain("close blocked");
   });
 
-  it("reads the pre-prompt merging substatus as two words", async () => {
+  it("reads the conflict resolution merging substatus as two words", async () => {
     // Arrange / Act
-    await withFooter({ status: "merging", substatus: "prePrompt" });
+    await withFooter({ status: "merging", substatus: "conflictResolution" });
     // Assert
-    expect(harness.$('[data-component="footer"]')?.textContent).toContain("pre prompt");
+    expect(harness.text(".footer-substatus")).toBe("conflict resolution");
   });
 
   it("reads the host-shutdown interrupt substatus as words", async () => {
@@ -179,20 +189,220 @@ describe("substatuses", () => {
     expect(harness.text(".footer-status")).toContain(FOOTER_STATUS_WITHOUT_SUBSTATUS);
   });
 
-  it("draws the queued substatus's served position and depth", async () => {
+  it.each(
+    Object.entries(MERGE_SUBSTATUS_WORDS).flatMap(([status, words]) =>
+      Object.entries(words).map(([substatus, drawn]) => ({ status, substatus, drawn })),
+    ),
+  )("reads $status/$substatus as '$drawn'", async ({ status, substatus, drawn }) => {
     // Arrange / Act
-    await withFooter({ status: "merging", substatus: "queued" });
+    await withFooter({ status, substatus });
     // Assert
-    const drawn = harness.$('[data-component="footer"]')?.textContent ?? "";
-    expect(drawn).toContain("2");
-    expect(drawn).toContain("5");
+    expect(harness.text(".footer-substatus")).toBe(drawn);
   });
 
-  it("draws the parked substatus's composed line verbatim", async () => {
+  it("gives every merge substatus its words", () => {
+    // Assert: the words table names exactly the substatuses the contract has.
+    expect(
+      Object.entries(MERGE_SUBSTATUS_WORDS).map(([status, words]) => [status, Object.keys(words).sort()]),
+    ).toEqual(
+      Object.keys(MERGE_SUBSTATUS_WORDS).map((status) => [status, [...FOOTER_STATUS_SUBSTATUSES[status]].sort()]),
+    );
+  });
+
+  it("reads merge failed as its status word", async () => {
     // Arrange / Act
-    await withFooter({ status: "merging", substatus: "parked" });
+    await withFooter({ status: "mergeFailed", substatus: "tests" });
     // Assert
-    expect(harness.$('[data-component="footer"]')?.textContent).toContain("waiting on your answer");
+    expect(harness.text(".footer-status")).toBe("merge failed");
+  });
+
+  it("paints merge failed turquoise", async () => {
+    // Arrange / Act
+    await withFooter({ status: "mergeFailed", substatus: "conflicts" });
+    // Assert
+    expect(harness.$(".footer-status")?.classList.contains("tone-turquoise")).toBe(true);
+  });
+});
+
+describe("the merge step line", () => {
+  it("covers every merge step arm", () => {
+    assertCoversOneof(FooterStatusActivityMergeStepSchema, "step", Object.keys(MERGE_STEP_LINES));
+  });
+
+  it("covers every suite edge", () => {
+    assertCoversOneof(FooterMergeStepSuiteSchema, "edge", Object.keys(MERGE_SUITE_EDGES));
+  });
+
+  it.each(Object.entries(MERGE_STEP_LINES).map(([step, line]) => ({ step, ...line })))(
+    "draws the $step step's line as '$words'",
+    async ({ step, value, words }) => {
+      // Arrange / Act
+      await withFooter({
+        status: "merging",
+        substatus: "testing",
+        activity: "mergeStep",
+        activityOverride: { step: { case: step, value } },
+      });
+      // Assert
+      expect(harness.text(".footer-activity-merge-step")).toBe(words);
+    },
+  );
+
+  it.each(Object.entries(MERGE_SUITE_EDGES).map(([edge, drawn]) => ({ edge, ...drawn })))(
+    "draws a suite's $edge edge as '$words'",
+    async ({ edge, words }) => {
+      // Arrange / Act
+      await withFooter({
+        status: "merging",
+        substatus: "testing",
+        activity: "mergeStep",
+        activityOverride: { step: { case: "testing", value: { name: "webapp", edge: { case: edge, value: {} } } } },
+      });
+      // Assert
+      expect(harness.text(".footer-activity-merge-step")).toBe(words);
+    },
+  );
+
+  it.each(
+    Object.entries(MERGE_SUITE_EDGES)
+      .filter(([, drawn]) => drawn.tone !== null)
+      .map(([edge, drawn]) => ({ edge, tone: drawn.tone as string })),
+  )("paints a suite's $edge edge $tone", async ({ edge, tone }) => {
+    // Arrange / Act
+    await withFooter({
+      status: "merging",
+      substatus: "testing",
+      activity: "mergeStep",
+      activityOverride: { step: { case: "testing", value: { name: "webapp", edge: { case: edge, value: {} } } } },
+    });
+    // Assert
+    expect(harness.$(".footer-activity-merge-step")?.classList.contains(tone)).toBe(true);
+  });
+
+  it("stands under merge failed, which carries the merge's own cell", async () => {
+    // Arrange / Act
+    await withFooter({ status: "mergeFailed", substatus: "tests", activity: "mergeStep" });
+    // Assert
+    expect(harness.$(".footer-activity")?.dataset.arm).toBe("mergeStep");
+  });
+});
+
+describe("the merge tests chip and panel", () => {
+  it("covers every suite state the panel draws", () => {
+    assertCoversOneof(FooterMergeTestRowStateSchema, "state", [...MERGE_TEST_ROW_STATES]);
+  });
+
+  it("covers every panel the daemon's focus can name", () => {
+    assertCoversOneof(FooterExpandedFocusSchema, "panel", [...FOOTER_FOCUS_PANELS]);
+  });
+
+  it("draws the 🧪 chip as the gate's served fraction", async () => {
+    // Arrange / Act
+    await withFooter({ status: "merging", substatus: "testing" });
+    // Assert
+    expect(harness.text('.footer-chip[data-chip="mergeTests"]')).toBe("🧪 8/12");
+  });
+
+  it("draws one panel row per suite, in the gate's order", async () => {
+    // Arrange
+    await withFooter({ status: "merging", substatus: "testing" });
+    // Act
+    await harness.click('.footer-chip[data-chip="mergeTests"]');
+    // Assert
+    expect(
+      harness.$$('.footer-expanded[data-panel="mergeTests"] .footer-row-label').map((el) => el.textContent),
+    ).toEqual(MERGE_TEST_ROWS.map((row) => row.name?.text));
+  });
+
+  it("stamps each row with its suite's state", async () => {
+    // Arrange
+    await withFooter({ status: "merging", substatus: "testing" });
+    // Act
+    await harness.click('.footer-chip[data-chip="mergeTests"]');
+    // Assert
+    expect(
+      harness.$$('.footer-expanded[data-panel="mergeTests"] [data-suite-state]').map((el) => el.dataset.suiteState),
+    ).toEqual([...MERGE_TEST_ROW_STATES]);
+  });
+
+  it("shows a finished suite's run time", async () => {
+    // Arrange
+    await withFooter({ status: "merging", substatus: "testing" });
+    // Act
+    await harness.click('.footer-chip[data-chip="mergeTests"]');
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="mergeTests"] [data-suite-state="passed"] [data-duration]')).toBe(
+      "1m 35s",
+    );
+  });
+
+  it("ticks a running suite's clock", async () => {
+    // Arrange
+    await withFooter({ status: "merging", substatus: "testing" });
+    // Act
+    await harness.click('.footer-chip[data-chip="mergeTests"]');
+    // Assert
+    expect(harness.$('.footer-expanded[data-panel="mergeTests"] [data-suite-state="running"] .footer-row-clock')).not.toBeNull();
+  });
+
+  it("opens and selects the merge tests panel when the daemon focuses it", async () => {
+    // Arrange / Act
+    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
+    // Assert
+    expect(harness.$$(".footer-expanded[data-panel]").map((el) => el.dataset.panel)).toEqual(["mergeTests"]);
+  });
+
+  it("marks the 🧪 chip selected when the focus opens its panel", async () => {
+    // Arrange / Act
+    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
+    // Assert
+    expect(harness.$('.footer-chip[data-chip="mergeTests"]')?.dataset.selected).toBe("true");
+  });
+
+  it("moves the reader's open panel onto the merge tests when testing begins", async () => {
+    // Arrange: the reader has the agents panel open.
+    await withFooter({ status: "working" });
+    await harness.click('.footer-chip[data-chip="agents"]');
+    // Act: the merge begins testing and the daemon mints a focus.
+    harness.fake.setFooter(
+      WORKSPACE_ID,
+      footerView({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.$$(".footer-expanded[data-panel]").map((el) => el.dataset.panel)).toEqual(["mergeTests"]);
+  });
+
+  it("closes the section when testing ends and the panel empties", async () => {
+    // Arrange
+    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
+    // Act: testing ended — the chip is unset and the panel empty.
+    harness.fake.setFooter(
+      WORKSPACE_ID,
+      footerView({
+        status: "merging",
+        substatus: "committing",
+        focus: { panel: "mergeTests", generation: 1n },
+        chips: { agents: true, tasks: true, shells: true, monitors: true, crons: true, mergeTests: false },
+      }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.$(".footer-expanded")).toBeNull();
+  });
+
+  it("does not reopen the panel on a push repeating an applied focus", async () => {
+    // Arrange: focused, then the reader closes the section with the chip.
+    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
+    await harness.click('.footer-chip[data-chip="mergeTests"]');
+    // Act
+    harness.fake.setFooter(
+      WORKSPACE_ID,
+      footerView({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.$(".footer-expanded")).toBeNull();
   });
 });
 
@@ -302,18 +512,28 @@ describe("the activity cell", () => {
     expect(harness.text(".footer-activity")).toContain("PreToolUse");
   });
 
-  it("colors the merging commit's sha as a typed datum", async () => {
+  it("colors the commit updating main fast-forwards to as a typed datum", async () => {
     // Arrange / Act
-    await withFooter({ status: "merging", activity: "mergingCommit" });
+    await withFooter({
+      status: "merging",
+      substatus: "updatingMain",
+      activity: "mergeStep",
+      activityOverride: { step: { case: "updatingMain", value: MERGE_STEP_LINES.updatingMain.value } },
+    });
     // Assert
-    expect(harness.$(".footer-activity [data-datum='sha']")?.textContent).toBe("abc1234");
+    expect(harness.$(".footer-activity [data-datum='sha']")?.textContent).toBe("4f2a1c9");
   });
 
-  it("draws the merging commit's subject beside its sha", async () => {
+  it("colors a conflict's file count as a typed datum", async () => {
     // Arrange / Act
-    await withFooter({ status: "merging", activity: "mergingCommit" });
+    await withFooter({
+      status: "merging",
+      substatus: "conflictResolution",
+      activity: "mergeStep",
+      activityOverride: { step: { case: "conflictResolution", value: MERGE_STEP_LINES.conflictResolution.value } },
+    });
     // Assert
-    expect(harness.text(".footer-activity")).toContain("port the transport");
+    expect(harness.$(".footer-activity [data-datum='count']")?.textContent).toBe("3");
   });
 
   it("colors the retry attempt as a typed datum", async () => {
@@ -657,8 +877,8 @@ describe("the expanded panels", () => {
   });
 
   it("names every panel the strip can open", () => {
-    // Assert: tokens plus the five chips.
-    expect(FOOTER_PANELS).toHaveLength(6);
+    // Assert: tokens plus the six chips.
+    expect(FOOTER_PANELS).toHaveLength(7);
   });
 
   it("draws every tokens line verbatim", async () => {
