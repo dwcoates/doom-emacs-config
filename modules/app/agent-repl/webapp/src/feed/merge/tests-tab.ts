@@ -10,6 +10,10 @@
  *
  * THE OUTPUT IS ALREADY CAPPED by the daemon; the client scrolls what it was
  * given inside the block rather than growing the bubble without bound.
+ *
+ * THE ROUND'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
+ * once the daemon has written it: the shared editor-link verb with the log's
+ * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
 import { requireCase } from "../../rpc/strict.js";
@@ -17,9 +21,13 @@ import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
 import { unreachableArm } from "../../rpc/strict.js";
 import type {
+  FeedMergeTabTests,
+  FeedMergeTestLog,
   FeedMergeTestSpan,
   FeedMergeTestSuite,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { renderMergeTestLogLink } from "../../link.js";
+import type { AppContext } from "../../rpc/context.js";
 
 const PATH = "FeedMergeTestSuite";
 
@@ -29,6 +37,25 @@ const SUITE_GLYPHS = {
   passed: "✓",
   failed: "✗",
 } as const satisfies Record<string, string>;
+
+/** A tests tab: its suites, then its log link once the daemon has written it. */
+export function drawFeedMergeTabTests(
+  u: FeedMergeTabTests,
+  ctx: AppContext,
+  path: string,
+): HTMLElement[] {
+  const parts = [drawTestSuites(u.suites)];
+  if (u.log !== undefined) parts.push(drawFeedMergeTestLog(u.log, ctx, `${path}.log`));
+  return parts;
+}
+
+/** The log line: "log:" and the link, whose text is the daemon's label. */
+export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-test-log";
+  el.append(document.createTextNode("log: "), renderMergeTestLogLink(ctx, u, path));
+  return el;
+}
 
 /** Every suite of a tests tab, in served order. */
 export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLElement {

@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeTabSchema,
-  FeedMergeTabConflictsSchema,
-  FeedMergeTabQueueSchema,
   FeedMergeTabSettledSchema,
   FeedRowSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -25,10 +23,10 @@ import { orderFor } from "../../feed-order.js";
 describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", () => {
   it("keeps the served order rather than sorting by kind", () => {
     const tabs = mergeTabsOf([
-      tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "merge", state: "live" }),
+      tabRow("t1", { kind: "tests", state: "settled", outcome: "failed" }),
+      tabRow("t2", { kind: "rebasing", state: "live" }),
     ]);
-    expect(tabs.map((t) => t.kind)).toEqual(["queue", "merge"]);
+    expect(tabs.map((t) => t.kind)).toEqual(["tests", "rebasing"]);
   });
 
   it("ignores every row that is not a tab", () => {
@@ -47,10 +45,13 @@ describe("readMergeTab: the arms are read from the contract", () => {
     );
   });
 
-  it("holds to the schema: parked is legal only on conflicts and fixes", () => {
-    expect([...oneofArms(FeedMergeTabConflictsSchema, "state")]).toContain("parked");
-    expect([...oneofArms(FeedMergeTabQueueSchema, "state")]).not.toContain("parked");
-  });
+  it.each(FeedMergeTabSchema.oneofs.find((o) => o.name === "kind")?.fields.map((f) => [f.localName, f]) ?? [])(
+    "holds to the schema: the %s tab is live or settled, since nothing parks",
+    (_kind, field) => {
+      const message = field.fieldKind === "message" ? field.message : undefined;
+      expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(["live", "settled"]);
+    },
+  );
 
   it("holds to the schema: a settled tab's outcome arms are succeeded and failed", () => {
     expect([...oneofArms(FeedMergeTabSettledSchema, "outcome")].sort()).toEqual([
@@ -120,12 +121,16 @@ describe("drawFeedMergeTabLabel: rounds beyond the first", () => {
 });
 
 describe("drawFeedMergeTab: the badge says label, round and state — no counts (R5)", () => {
-  it("marks the kind and the state as the hooks the suite targets", () => {
-    const row = tabRow("t1", { kind: "fixes", state: "parked" });
+  it("marks the kind as the hook the suite targets", () => {
+    const row = tabRow("t1", { kind: "updatingMain", state: "live" });
     const tab = readMergeTab(row, row.row.value as never);
-    const el = drawFeedMergeTab(tab, { active: true });
-    expect(el.getAttribute("data-merge-tab")).toBe("fixes");
-    expect(el.getAttribute("data-tab-state")).toBe("parked");
+    expect(drawFeedMergeTab(tab, { active: true }).getAttribute("data-merge-tab")).toBe("updatingMain");
+  });
+
+  it("marks the state as the hook the suite targets", () => {
+    const row = tabRow("t1", { kind: "committing", state: "live" });
+    const tab = readMergeTab(row, row.row.value as never);
+    expect(drawFeedMergeTab(tab, { active: true }).getAttribute("data-tab-state")).toBe("live");
   });
 
   it("carries no count of any kind in its text", () => {
@@ -149,19 +154,11 @@ describe("drawFeedMergeTab: the badge says label, round and state — no counts 
   });
 });
 
-describe("autoSelectedTab: the last live-or-parked tab, else the last tab", () => {
+describe("autoSelectedTab: the last live tab, else the last tab", () => {
   it("picks the live tab even when a settled one follows nothing", () => {
     const tabs = mergeTabsOf([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "merge", state: "live" }),
-    ]);
-    expect(autoSelectedTab(tabs)?.id).toBe("t2");
-  });
-
-  it("picks a parked tab, because it is waiting on the user", () => {
-    const tabs = mergeTabsOf([
-      tabRow("t1", { kind: "merge", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "conflicts", state: "parked" }),
+      tabRow("t2", { kind: "rebasing", state: "live" }),
     ]);
     expect(autoSelectedTab(tabs)?.id).toBe("t2");
   });
@@ -177,7 +174,7 @@ describe("autoSelectedTab: the last live-or-parked tab, else the last tab", () =
   it("falls back to the last tab on a wholly settled run", () => {
     const tabs = mergeTabsOf([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "merge", state: "settled", outcome: "succeeded" }),
+      tabRow("t2", { kind: "committing", state: "settled", outcome: "succeeded" }),
     ]);
     expect(autoSelectedTab(tabs)?.id).toBe("t2");
   });

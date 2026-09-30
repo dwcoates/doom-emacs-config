@@ -8,9 +8,8 @@
  * a second round of a phase is a SECOND TAB ("tests (2)"), never a reopened
  * one — so the strip is a history of the run, read left to right.
  *
- * EACH KIND OWNS ITS STATE ONEOF. `parked` is legal only on conflicts and
- * fixes (the two loops with a give-up-to-human path), and the type system on
- * the wire says so; this module therefore reads the state generically (every
+ * EACH KIND OWNS ITS STATE ONEOF, and since nothing parks every one of them is
+ * live or settled; this module therefore reads the state generically (every
  * kind's oneof selects from the SAME leaf messages) while the kind stays the
  * arm it was served as. An unset kind or an unset state is a malformed view.
  *
@@ -29,7 +28,13 @@ import type {
 const PATH = "FeedMergeTab";
 
 /** The kinds whose content the row itself carries. */
-export const RESOLVED_KINDS: readonly string[] = ["queue", "merge", "tests"];
+export const RESOLVED_KINDS: readonly string[] = [
+  "queue",
+  "rebasing",
+  "tests",
+  "committing",
+  "updatingMain",
+];
 
 /** The kinds whose content is the sub-feed rows parented to them. */
 export const AGENTIC_KINDS: readonly string[] = [
@@ -42,7 +47,6 @@ export const AGENTIC_KINDS: readonly string[] = [
 /** The glyph each tab state reports itself with. Glyphs, never emojis. */
 const STATE_GLYPHS = {
   live: "●",
-  parked: "‖",
   succeeded: "✓",
   failed: "✗",
 } as const satisfies Record<string, string>;
@@ -56,7 +60,7 @@ export interface MergeTab {
   tab: FeedMergeTab;
   /** The `kind` oneof arm ("queue", "prePrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("live", "parked", "settled"). */
+  /** The `state` oneof arm within that kind ("live", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
@@ -134,7 +138,7 @@ export function drawFeedMergeTabLabel(label: FeedMergeTabLabel): HTMLElement {
   return el;
 }
 
-/** The state glyph: filled dot live, paused bars parked, check or cross settled. */
+/** The state glyph: filled dot live, check or cross settled. */
 export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
   const el = document.createElement("span");
   el.className = "merge-tab-glyph";
@@ -143,10 +147,6 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
     case "live":
       el.classList.add("is-live");
       el.textContent = STATE_GLYPHS.live;
-      return el;
-    case "parked":
-      el.classList.add("is-parked");
-      el.textContent = STATE_GLYPHS.parked;
       return el;
     case "settled":
       if (tab.outcome === "failed") {
@@ -170,15 +170,15 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
 /**
  * Which tab the bubble shows when the reader has not chosen one.
  *
- * THE LAST TAB THAT IS STILL RUNNING OR STILL WAITING ON THE USER, because that
- * is where the merge actually is; failing that the last tab, which on a settled
+ * THE LAST TAB THAT IS STILL RUNNING, because that is where the merge actually
+ * is; failing that the last tab, which on a settled
  * run is where it ended. Never a "most interesting" heuristic — the strip is
  * chronological and the rule is positional.
  */
 export function autoSelectedTab(tabs: readonly MergeTab[]): MergeTab | undefined {
   for (let i = tabs.length - 1; i >= 0; i -= 1) {
     const tab = tabs[i];
-    if (tab.state === "live" || tab.state === "parked") return tab;
+    if (tab.state === "live") return tab;
   }
   return tabs[tabs.length - 1];
 }

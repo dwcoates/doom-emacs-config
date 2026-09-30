@@ -44,23 +44,23 @@ describe("a merge tab drawn as its own row", () => {
 
   it("carries the tab's state as the card's own state", () => {
     // Arrange / Act
-    const el = draw({ kind: "merge", state: "settled", outcome: "succeeded" });
+    const el = draw({ kind: "committing", state: "settled", outcome: "succeeded" });
     // Assert
     expect(el.getAttribute("data-state")).toBe("settled");
   });
 
   it("marks the lone badge active, there being nothing to select between", () => {
     // Arrange / Act
-    const el = draw({ kind: "merge", state: "live" });
+    const el = draw({ kind: "rebasing", state: "live" });
     // Assert
     expect(el.querySelector(".merge-tab")?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("draws the tab's own body", () => {
     // Arrange / Act
-    const el = draw({ kind: "merge", state: "live", payload: { lines: [{ text: "landed it" }] } });
+    const el = draw({ kind: "rebasing", state: "live", payload: { lines: [{ text: "replaying 1/1" }] } });
     // Assert
-    expect(el.textContent).toContain("landed it");
+    expect(el.textContent).toContain("replaying 1/1");
   });
 
   it("draws a settled failure's summary line", () => {
@@ -73,12 +73,5 @@ describe("a merge tab drawn as its own row", () => {
     });
     // Assert
     expect(el.textContent).toContain("two suites are red");
-  });
-
-  it("draws a parked tab's standing line", () => {
-    // Arrange / Act
-    const el = draw({ kind: "conflicts", state: "parked", line: "paused for your answer" });
-    // Assert
-    expect(el.textContent).toContain("paused for your answer");
   });
 });

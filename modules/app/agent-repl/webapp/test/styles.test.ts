@@ -1711,7 +1711,7 @@ describe("the thinking bubble", () => {
  * it"). A settled final response goes GREEN unconditionally; no bubble ever
  * wears the amber `--async` border while background/detached work is still
  * running. The `--async` token itself stays — the async-catalog badge, the
- * topbar/sidebar monitoring rows, and the parked-merge glyphs still use it.
+ * topbar/sidebar monitoring rows still use it.
  */
 describe("the removed amber async border", () => {
   it("paints the amber async token on no bubble", () => {

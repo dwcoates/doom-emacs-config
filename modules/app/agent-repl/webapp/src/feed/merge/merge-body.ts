@@ -8,28 +8,26 @@
  * tabs instead of as a list. It fetches nothing, opens nothing, and keeps no
  * copy of the rows; everything it draws comes out of `view`.
  *
- * TWO TAB SHAPES, ONE STRIP. RESOLVED tabs (queue, merge, tests) carry their
- * content in the tab row itself, replaced whole per push. AGENTIC tabs
- * (pre-prompt, conflicts, fixes, post-prompt) are CONTAINERS: their content is
- * the sub-feed rows parented to the tab row, drawn through `view.drawRow` —
- * the ordinary row path, chrome included — which is what keeps a merge agent's
- * conversation identical to any other agent's.
+ * TWO TAB SHAPES, ONE STRIP. RESOLVED tabs (queue, rebasing, tests,
+ * committing, updating main) carry their content in the tab row itself,
+ * replaced whole per push. AGENTIC tabs (pre-prompt, conflicts, fixes,
+ * post-prompt) are CONTAINERS: their content is the sub-feed rows parented to
+ * the tab row, drawn through `view.drawRow` — the ordinary row path, chrome
+ * included — which is what keeps a merge agent's conversation identical to
+ * any other agent's. A fixes tab also names its attempt above its rows.
  *
- * SELECTION IS LOCAL AND THE READER'S. The auto rule (the last live-or-parked
- * tab, else the last tab) decides until the reader clicks, and their choice
+ * SELECTION IS LOCAL AND THE READER'S. The auto rule (the last live tab, else
+ * the last tab) decides until the reader clicks, and their choice
  * then stands — a re-push must never yank the tab out from under someone
  * reading it. It is released only when a NEW tab appears, because a new tab is
  * the run moving on and the reader asked to follow the run, not to be pinned to
  * a phase that is over.
  *
- * PARKED IS WHERE THE USER TYPES. A parked tab draws the daemon's standing line
- * with a paused badge and hosts the bubble's composer slot INSIDE it, so a
- * prompt typed while the merge is parked visibly lands in the tab whose agent
- * will receive it. Where the host composer is Emacs's there is no slot and the
- * line stands alone.
+ * NOTHING PARKS. A merge that gives up fails and hands the workspace back, so
+ * no tab waits on the user and no tab hosts a composer.
  */
 import { log } from "../../log.js";
-import { requireMessage } from "../../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { Handle } from "../../failure/local.js";
 import type { FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
@@ -48,8 +46,13 @@ import {
 } from "./tab-strip.js";
 import { replaceTicking, stopTicking } from "../ticking.js";
 import { drawFeedMergeQueue } from "./queue.js";
-import { drawTestSuites } from "./tests-tab.js";
-import type { FeedMergeMergeLine } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { drawFeedMergeTabTests } from "./tests-tab.js";
+import {
+  drawFeedMergeTabCommitting,
+  drawFeedMergeTabFixesAttempt,
+  drawFeedMergeTabRebasing,
+  drawFeedMergeTabUpdatingMain,
+} from "./step-tabs.js";
 
 /** The merge bubble's body renderer. */
 export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => {
@@ -195,54 +198,38 @@ export function drawTabBody(
   if (tab === undefined) return;
   host.setAttribute("data-merge-tab-body", tab.kind);
 
-  if (tab.state === "parked") host.append(drawParked(tab, view));
-
-  switch (tab.kind) {
+  const path = "FeedMergeTab.kind";
+  const kind = requireCase(tab.tab.kind, path);
+  switch (kind.case) {
     case "queue":
-      host.append(
-        drawFeedMergeQueue(
-          requireMessage(
-            (tab.value as { queue?: Parameters<typeof drawFeedMergeQueue>[0] }).queue,
-            "FeedMergeTabQueue.queue",
-          ),
-          rc,
-        ),
-      );
+      host.append(drawFeedMergeQueue(requireMessage(kind.value.queue, "FeedMergeTabQueue.queue"), rc));
       return;
-    case "merge":
-      host.append(
-        drawMergeLines((tab.value as { lines: readonly FeedMergeMergeLine[] }).lines),
-      );
+    case "rebasing":
+      host.append(drawFeedMergeTabRebasing(kind.value, `${path}.rebasing`));
       return;
     case "tests":
-      host.append(
-        drawTestSuites(
-          (tab.value as { suites: readonly Parameters<typeof drawTestSuites>[0][number][] })
-            .suites,
-        ),
-      );
+      host.append(...drawFeedMergeTabTests(kind.value, rc.ctx, `${path}.tests`));
       return;
-    default:
-      // Every remaining kind is AGENTIC: a container for sub-feed rows.
+    case "committing":
+      host.append(drawFeedMergeTabCommitting(kind.value, `${path}.committing`));
+      return;
+    case "updatingMain":
+      host.append(drawFeedMergeTabUpdatingMain(kind.value, `${path}.updating_main`));
+      return;
+    case "fixes":
+      // AGENTIC, and it names which attempt it is above the rows it holds.
+      host.append(drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), drawAgenticRows(tab, view));
+      return;
+    case "prePrompt":
+    case "conflicts":
+    case "postPrompt":
       host.append(drawAgenticRows(tab, view));
       return;
+    default: {
+      const other: { case: string } = kind;
+      return unreachableArm(path, other.case);
+    }
   }
-}
-
-/** The narration of the landing itself, drawn verbatim, line per line. */
-export function drawMergeLines(lines: readonly FeedMergeMergeLine[]): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "merge-lines list-rows";
-  for (const line of lines) el.append(drawFeedMergeMergeLine(line));
-  return el;
-}
-
-/** One daemon-composed narration line. */
-export function drawFeedMergeMergeLine(line: FeedMergeMergeLine): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "merge-line";
-  el.textContent = line.text;
-  return el;
 }
 
 /**
@@ -267,33 +254,6 @@ export function drawAgenticRows(tab: MergeTab, view: SubfeedView): HTMLElement {
 /** The container a row names, or undefined for a top-level row. */
 function parentOf(row: FeedRow): string | undefined {
   return row.parent?.row?.value;
-}
-
-/**
- * A parked tab's header: the standing line, the paused badge, the composer.
- *
- * The composer slot is MOVED here (appending an element that is already
- * somewhere moves it), so there is one composer per bubble and it sits where
- * the prompt will land.
- */
-export function drawParked(tab: MergeTab, view: SubfeedView): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "merge-parked";
-  el.setAttribute("data-parked", "");
-
-  const badge = document.createElement("span");
-  badge.className = "merge-parked-badge";
-  badge.textContent = "paused";
-  el.append(badge);
-
-  const parked = (tab.value["state"] as { value: { line?: { text: string } } }).value;
-  const line = document.createElement("span");
-  line.className = "merge-parked-line";
-  line.textContent = requireMessage(parked.line, "FeedMergeTabParked.line").text;
-  el.append(line);
-
-  if (view.composerSlot !== undefined) el.append(view.composerSlot);
-  return el;
 }
 
 /** The agentic kinds, re-exported so a suite can hold this file to the schema. */
