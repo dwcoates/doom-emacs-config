@@ -165,6 +165,17 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
     CONTEXT FOR ME: the owner's interrupts in this session were additions,
     never rejections; the vendor's "tool use was rejected" text on an
     interjection is exactly what this item removes.
+4c. NETWORK-INTERRUPTION FOOTER (owner, 2026-09-30, after a real outage
+    during this session). (1) The salient API/network-error line states the
+    time until the next retry attempt, ticking (ship the instant, client
+    counts down), and updates after each failed attempt. (2) A successful
+    recovery CLEARS that salient line and raises a transient "restored"
+    line. (3) Diagnose why the footer kept showing the interruption for
+    minutes after the network came back (owner's read: a false alarm, the
+    salient line not cleared on recovery). Start from the daemon + shim logs
+    for 2026-09-30 around the outage (`retrying` salient kind, api_retry /
+    fault end signals in resolve/footer); find the missing end signal and
+    make recovery the structural end of the line. Tests for each.
 5. Docs: `AGENTS.md` footer section matches what is built (four tiers, shared
    salient kinds, 80% rule, submitting stages); prompt-queue act handling;
    one line per landed fix in `docs/REMEDIATION-CHANGELOG.md` (combined model,
