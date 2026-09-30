@@ -732,6 +732,49 @@ unchanged.
   - An expanded non-prompt, non-response item never exceeds
     `--feed-item-max-h: 80cqh` on the `#feed-scroll` size container.
 
+### 4. Detached-work liveness (2026-09-30)
+
+- **Decided by** this design, implementing "Detached-work liveness" above.
+- **What changed, on the wire** (`store.v1`):
+  - `store.v1.EntryBatch.shell_run_claims` (tag 5) carries
+    `store.v1.ShellRunClaim{vendor_task_id, run}`.
+    - The shim writes one at every detachment fact the task stream states
+      for a shell: `task_started` in the background, and a
+      `task_updated` patch that moves it.
+    - The store keeps one row per (task id, run) in the in-place table
+      `shell_run_claim`, so the owner's database is not rebuilt.
+  - `store.v1.ShimStore.GetShellRunClaims` answers the claims for a set of
+    task ids.
+    - Each answer carries `owner`, the book holding the run's own
+      `activity:` row, unset while no producer has written it.
+    - The claim carries no book because the shim often does not know it: a
+      backgrounded subagent's calls never reach its stream.
+  - `store.v1.WatchBashRunRequest.await_first_row`: when set, a run with no
+    stored row is waited on instead of refused.
+    - The shim sets it exactly for a run in its own live set, so the wait is
+      bounded by the run's life.
+- **What changed, on the wire** (`conversation.v1`):
+  - `conversation.v1.DetachedWorkDetached.cause` gains `vendor_moved`
+    (`conversation.v1.DetachedCauseVendorMoved`).
+    - A `task_updated` patch states that work moved to the background, never
+      why. The shim had called every such shell "backgrounded by hand"; the
+      incident's shells were moved by their own timeout.
+    - A shell is now announced `vendor_moved` at the patch, and its own tool
+      result restates the row with the real cause when it reaches the shim.
+    - An agent moved by a patch keeps `by_user`, unchanged.
+- **What changed, in the systems:**
+  - The sidecar asks the store for the claims of its held shell spools once
+    per rescan, and claims each one whose owning book's transcript it has
+    attributed, through the same `TaskSpawned` observation a launch uses.
+  - The sidecar's prose matcher also reads the timeout sentence ("did not
+    complete within its 600s timeout and was moved to the background (ID:
+    X)"), with its limit, for runs the shim never saw.
+  - The daemon needed no change: it holds a shell watch's pending open with
+    no deadline and retires the run at its terminal. A daemon integration
+    test pins that for a watch that opens with no `start`.
+  - `shim.v1.WatchBashResponse`'s doc says a run claimed only by task id has
+    no `start` and opens on its output.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.
