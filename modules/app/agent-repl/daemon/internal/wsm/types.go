@@ -744,7 +744,46 @@ const (
 	MergeQueued MergeQueueState = iota
 	// MergeAdmitted is the entry the orchestrator is running now.
 	MergeAdmitted
+	// MergeRequested is a merge RECORDED but not yet in line: the turn that
+	// asked for it has not ended. It is durable so a daemon exit before that
+	// turn's end does not lose the request, and it is in nobody's line and on
+	// no client until it is queued.
+	MergeRequested
 )
+
+// MergeSourceKind is WHAT a merge lands (agentrepl.v1.MergeWorkspaceSource's
+// arm): the requesting workspace's own branch, another workspace's, a branch
+// that is no workspace, or the requester's own branch already merged
+// upstream.
+type MergeSourceKind int
+
+// The merge sources. The zero value is the requester's own branch, which is
+// what every row a build before sources existed recorded.
+const (
+	// MergeSourceOwnBranch is the requesting workspace's own branch.
+	MergeSourceOwnBranch MergeSourceKind = iota
+	// MergeSourceWorkspace is another open workspace's branch.
+	MergeSourceWorkspace
+	// MergeSourceBranch is a branch that is no workspace.
+	MergeSourceBranch
+	// MergeSourceMergedUpstream is the requester's own branch, already merged
+	// upstream.
+	MergeSourceMergedUpstream
+)
+
+// MergeSource is one merge's source, stored with its queue entry so a restart
+// runs the merge that was asked for.
+type MergeSource struct {
+	// Kind is the source's arm.
+	Kind MergeSourceKind
+	// KeepOpen keeps the requester open once its own branch lands. Only the
+	// own-branch source carries it.
+	KeepOpen bool
+	// Workspace is the other workspace, for MergeSourceWorkspace only.
+	Workspace WorkspaceID
+	// Branch is the branch's name, for MergeSourceBranch only.
+	Branch string
+}
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The
 // queue is DURABLE so a restart re-enqueues exactly what was waiting, in the
@@ -758,6 +797,8 @@ type MergeQueueEntry struct {
 	Position int
 	// State is where the entry stands.
 	State MergeQueueState
+	// Source is what the merge lands.
+	Source MergeSource
 	// EnqueuedAt is when it joined the queue.
 	EnqueuedAt time.Time
 }
