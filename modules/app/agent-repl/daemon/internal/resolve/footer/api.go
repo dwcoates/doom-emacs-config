@@ -215,6 +215,9 @@ const (
 	StageInterjecting
 	// StageCoalesced is the prompt folded into the queued prompt ahead of it.
 	StageCoalesced
+	// StageAfterToolCall is the prompt sent to join the running turn after its
+	// current tool call, with nothing interrupted.
+	StageAfterToolCall
 )
 
 // Submission is one move of a prompt's delivery, as the prompt queue reports

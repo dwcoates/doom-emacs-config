@@ -36,6 +36,11 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 			want: "interject",
 		},
 		{
+			name: "after this tool call",
+			held: verdict(hold("t1", "also cover the edge case"), wsm.ArmAfterToolCall, "adds to the running work"),
+			want: "after_tool_call",
+		},
+		{
 			name: "hold for turn end",
 			held: verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency"),
 			want: "hold_for_turn_end",
@@ -64,6 +69,20 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 				t.Fatalf("classification arm = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTrayCarriesTheAfterToolCallRationale(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	held := verdict(hold("t1", "also cover the edge case"), wsm.ArmAfterToolCall, "adds to the running work")
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	if got := onlyPrompt(t, latest(t, r)).GetAfterToolCall().GetRationale(); got != "adds to the running work" {
+		t.Fatalf("rationale = %q, want the classifier's reason", got)
 	}
 }
 
@@ -329,6 +348,8 @@ func classificationName(p *frontendv1.HeldPrompt) string {
 		return "classifying"
 	case *frontendv1.HeldPrompt_Interject:
 		return "interject"
+	case *frontendv1.HeldPrompt_AfterToolCall:
+		return "after_tool_call"
 	case *frontendv1.HeldPrompt_HoldForTurnEnd:
 		return "hold_for_turn_end"
 	case *frontendv1.HeldPrompt_UninterruptibleTurn:
@@ -396,6 +417,11 @@ func TestHeldBadgesComposeEveryStatus(t *testing.T) {
 			name: "interject",
 			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: &frontendv1.HeldPrompt_Interject{Interject: &frontendv1.HeldPromptInterject{}}},
 			want: []wantBadge{{"interrupting", "interjects"}},
+		},
+		{
+			name: "after this tool call",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: &frontendv1.HeldPrompt_AfterToolCall{AfterToolCall: &frontendv1.HeldPromptAfterToolCall{}}},
+			want: []wantBadge{{"after this tool call", "joins the running turn after its current tool call"}},
 		},
 		{
 			name: "hold for turn end",
