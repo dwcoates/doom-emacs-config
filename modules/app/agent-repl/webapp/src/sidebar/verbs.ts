@@ -697,6 +697,10 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "this workspace is already in the merge queue";
     case "alreadyMerging":
       return "this workspace is already merging";
+    case "unknownSourceWorkspace":
+      return "the workspace to merge is not open in this repository";
+    case "unknownBranch":
+      return "that branch does not exist in this repository";
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
   }
@@ -793,9 +797,19 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
   return create(NukeWorkspaceRequestSchema, { workspace });
 }
 
-/** MergeWorkspace: enqueue; the merge's life thereafter is the feed's. */
+/**
+ * MergeWorkspace: enqueue; the merge's life thereafter is the feed's.
+ *
+ * The rail's Merge verb is "merge this workspace": the row's workspace asks to
+ * merge ITS OWN branch, and is closed once it lands (`keep_open` false), which
+ * is what the verb has always done. The other sources are for callers that
+ * name another workspace or a branch; the rail has no such affordance.
+ */
 export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
-  return create(MergeWorkspaceRequestSchema, { workspace });
+  return create(MergeWorkspaceRequestSchema, {
+    workspace,
+    source: { source: { case: "ownBranch", value: { keepOpen: false } } },
+  });
 }
 
 /** RestartWorkspace: graceful (force false) or forced (force true). */

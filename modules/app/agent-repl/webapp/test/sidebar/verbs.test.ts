@@ -111,6 +111,15 @@ describe("the requests each verb is", () => {
     expect(buildMergeWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
 
+  it("asks MergeWorkspace to merge the row's own branch", () => {
+    expect(buildMergeWorkspaceRequest(TARGET_WS).source?.source.case).toBe("ownBranch");
+  });
+
+  it("asks MergeWorkspace to close the workspace once its branch lands", () => {
+    const source = buildMergeWorkspaceRequest(TARGET_WS).source?.source;
+    expect(source?.case === "ownBranch" ? source.value.keepOpen : "not own branch").toBe(false);
+  });
+
   it("asks for a graceful restart with force false", () => {
     expect(buildRestartWorkspaceRequest(TARGET_WS, false).force).toBe(false);
   });
