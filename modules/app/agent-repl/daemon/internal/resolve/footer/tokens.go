@@ -505,27 +505,6 @@ func (t *tokenState) mainFresh() uint64 {
 	return sums.misses
 }
 
-// heatStops are the fresh-input figures the cell's four gradient colors sit at
-// — green, yellow, orange, red — evenly spaced along the gradient, so stop i is
-// position i/3 (FooterTokensCellInputHeat).
-var heatStops = [...]uint64{0, 30_000, 50_000, 100_000}
-
-// heatPosition maps a fresh-input figure onto the cell's gradient,
-// piecewise-linearly between the stops bracketing it, and holds every figure
-// at or past the last stop at red.
-func heatPosition(fresh uint64) float64 {
-	last := len(heatStops) - 1
-	for i := 1; i <= last; i++ {
-		if fresh >= heatStops[i] {
-			continue
-		}
-		lo, hi := heatStops[i-1], heatStops[i]
-		within := float64(fresh-lo) / float64(hi-lo)
-		return (float64(i-1) + within) / float64(last)
-	}
-	return 1
-}
-
 // cell renders the strip's tokens cell: the main agent's fresh input this turn,
 // with its heat, while a turn is in flight, and the uncolored idle figure
 // otherwise. The glyphs keep their own lifetimes, so an idle cell still carries
@@ -535,7 +514,7 @@ func (t *tokenState) cell(inFlight bool) *frontendv1.FooterTokensCell {
 	if inFlight {
 		fresh := t.mainFresh()
 		input.Text = figures.Tokens(fresh) + " in"
-		input.Heat = &frontendv1.FooterTokensCellInputHeat{Position: heatPosition(fresh)}
+		input.Heat = &frontendv1.TokenHeat{Position: figures.TokenHeat(fresh)}
 	}
 	out := &frontendv1.FooterTokensCell{Input: input}
 	if t.alarmTripped {
