@@ -13,6 +13,12 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;;;; ---- Tests: Input panel height ----
+
+(ert-deftest agent-repl-test-panels-input-height-fraction-default ()
+  "The composer defaults to 18.4% of the frame's main area, leaving the webview the rest."
+  (should (= (default-value 'agent-repl-input-height-fraction) 0.184)))
+
 ;;;; ---- Tests: Panel visibility predicates ----
 
 (ert-deftest agent-repl-test-panels-input-visible-p-with-visible-buffer ()
