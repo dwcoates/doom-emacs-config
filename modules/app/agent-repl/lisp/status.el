@@ -651,10 +651,8 @@ sits flush on the bar with no ground of its own.  See
     (:interrupted     . "green")
     (:permission      . "green")
 
-    (:merge-enqueuing . "purple")
     (:merging         . "purple")
     (:merge-queued    . "purple")
-    (:merge-conflict  . "green")
     (:merge-failed    . "turquoise")
     (:merged          . "green"))
   "Which of the six colors each ROSTER STATUS ARM takes, BY NAME.
@@ -688,8 +686,10 @@ the workspace is usable (`:turn-failed\=', `:merge-failed\=',
 
 EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
 2026-09-28), as the fixture\='s `colored_merge_arms\=' declares: purple in
-progress, green on a conflict (a parked merge included) or a landing,
-turquoise on a failure.
+progress, green on a landing, turquoise on a failure.  A merge never
+parks and no merge fact is shown before the requesting turn ends
+\(merge-landing.md, Landed change 1), so there is no conflict arm and no
+enqueuing arm.
 A surface that needs to diverge declares it in
 `agent-repl-status-tab-bar-color-overrides\='; none does today.
 
@@ -726,25 +726,22 @@ the shared one about which arms EXIST — only about the four colors it
 explicitly overrides.")
 
 (defconst agent-repl-status-merge-glyphs
-  '((:merge-enqueuing . "⧖")
-    (:merge-queued    . "⧖")
+  '((:merge-queued    . "⧖")
     (:merging         . "↻")
-    (:merge-conflict  . "≠")
     (:merge-failed    . "✗")
     (:merged          . "✓"))
   "The character each merge arm draws, keyed by the fixture\='s glyph NAMES.
 
 proto/vocab/render-colors.json\='s `merge_glyphs\=' section names WHICH
-glyph a merge state gets (queue, recycle, conflict, failed, check) and
+glyph a merge state gets (queue, recycle, failed, check) and
 deliberately not which character: each renderer maps those names to
 whatever its surface can draw.  This is the tab bar\='s mapping, and the
 assertion test checks that every named glyph has a character here.
 
-The merge arms take no color on the shared assignment precisely so the
-glyph can be the whole report; on the tab bar the three in-flight arms
-ALSO take purple, and the glyph then says which of the three it is.
-`:merge-conflict\=', `:merge-failed\=' and `:merged\=' take their shared
-green, blue and green, and draw their glyph over it.")
+Every merge arm takes a color as well: the two in-flight arms purple,
+with the glyph saying which of the two it is, and `:merge-failed\=' and
+`:merged\=' their shared turquoise and green, each drawing its glyph over
+it.")
 
 (defconst agent-repl-status-inactive-glyph "?"
   "The glyph an `inactive\=' row draws.
@@ -920,13 +917,6 @@ in `agent-repl--color-default-bracket'."
                        'agent-repl-tab-usable-fault
                        agent-repl--color-usable-fault-turquoise
                        agent-repl--color-light))
-    ;; MERGE-CONFLICT is GREEN and keeps its ≠ (owner ruling, 2026-09-28): a
-    ;; conflict, a parked merge included, is an EXPECTED state ready for a
-    ;; human response.  Blue is reserved for what is unexpected or wrong.
-    (:merge-conflict . ,(agent-repl--tab-palette-row
-                         'agent-repl-tab-ready
-                         agent-repl--color-done-green
-                         agent-repl--color-dark))
     ;; MERGED is GREEN and keeps its ✓ (owner ruling, 2026-09-28): a merge in
     ;; progress is purple, and one that landed successfully is green.
     (:merged . ,(agent-repl--tab-palette-row
@@ -952,7 +942,7 @@ in `agent-repl--color-default-bracket'."
                    'agent-repl-tab-usable-fault
                    agent-repl--color-usable-fault-turquoise
                    agent-repl--color-light))
-    ;; The three IN-FLIGHT merge states take PURPLE, and it is theirs alone on
+    ;; The two IN-FLIGHT merge states take PURPLE, and it is theirs alone on
     ;; this surface.  They took no color at all until recently, which rendered
     ;; a workspace whose merge was running identically to one nobody had
     ;; touched; they then borrowed thinking's red, which said "a turn is
@@ -961,10 +951,6 @@ in `agent-repl--color-default-bracket'."
     ;; than the agent's, and the user cannot act on the workspace while it
     ;; runs.  `:vendor-blocked' moved to blue above so purple means this and
     ;; nothing else here.
-    (:merge-enqueuing . ,(agent-repl--tab-palette-row
-                          'agent-repl-tab-merging
-                          agent-repl--color-merging-purple
-                          agent-repl--color-light))
     (:merge-queued . ,(agent-repl--tab-palette-row
                        'agent-repl-tab-merging
                        agent-repl--color-merging-purple
@@ -986,15 +972,15 @@ and an entry is always ONE color end to end.
 Two kinds of row answer to `agent-repl-status-tab-bar-color-table'
 rather than to the shared `agent-repl-status-color-table', and both
 divergences are declared in
-`agent-repl-status-tab-bar-color-overrides'.  The three IN-FLIGHT merge
+`agent-repl-status-tab-bar-color-overrides'.  The two IN-FLIGHT merge
 arms have rows at all because of the override that gives them purple;
 `:vendor-blocked' has a row whose color is BLUE here and purple on every
 badge-bearing surface.
 
 The arms taking `none' have NO entry and fall through to
 `agent-repl--tab-default': `:none' and `:inactive' have no lifecycle
-to report at all.  `:merge-conflict' (green), `:merge-failed' (blue)
-and `:merged' (green) have rows, and draw their glyph over them.")
+to report at all.  `:merge-failed' (turquoise) and `:merged' (green)
+have rows, and draw their glyph over them.")
 
 
 ;;; The roster is the state -----------------------------------------------
@@ -1033,10 +1019,9 @@ at ERROR rather than painted."
 
 (defun agent-repl-status-tab-glyph (ws arm)
   "Return the glyph WS draws for ARM, or nil when it draws none.
-Three glyphs exist, in precedence order: the merge pipeline's (most
-merge arms carry no lifecycle color, so the glyph is their whole
-report, and `:merge-conflict', `:merge-failed' and `:merged' draw
-theirs over their green, blue and green), the inactive question mark,
+Three glyphs exist, in precedence order: the merge pipeline's (every
+merge arm draws its glyph over its color: purple in flight, turquoise
+for `:merge-failed', green for `:merged'), the inactive question mark,
 and the attention marker."
   (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)

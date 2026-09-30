@@ -343,10 +343,6 @@ BOTH the idle and ready render states resolve here."
   "Decode VALUE as the empty `RosterRowStatusDead'."
   (agent-repl-wire--decode-empty "RosterRowStatusDead" value))
 
-(defun agent-repl-wire-decode-roster-row-status-merge-enqueuing (value)
-  "Decode VALUE as the empty `RosterRowStatusMergeEnqueuing'."
-  (agent-repl-wire--decode-empty "RosterRowStatusMergeEnqueuing" value))
-
 (defun agent-repl-wire-decode-roster-row-status-merging (value)
   "Decode VALUE as the empty `RosterRowStatusMerging'."
   (agent-repl-wire--decode-empty "RosterRowStatusMerging" value))
@@ -354,10 +350,6 @@ BOTH the idle and ready render states resolve here."
 (defun agent-repl-wire-decode-roster-row-status-merge-queued (value)
   "Decode VALUE as the empty `RosterRowStatusMergeQueued'."
   (agent-repl-wire--decode-empty "RosterRowStatusMergeQueued" value))
-
-(defun agent-repl-wire-decode-roster-row-status-merge-conflict (value)
-  "Decode VALUE as the empty `RosterRowStatusMergeConflict'."
-  (agent-repl-wire--decode-empty "RosterRowStatusMergeConflict" value))
 
 (defun agent-repl-wire-decode-roster-row-status-merge-failed (value)
   "Decode VALUE as the empty `RosterRowStatusMergeFailed'."
@@ -395,12 +387,8 @@ an assertion, where an unset oneof is the absence of one."
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
     (degraded :degraded agent-repl-wire-decode-roster-row-status-degraded)
     (dead :dead agent-repl-wire-decode-roster-row-status-dead)
-    (mergeEnqueuing :merge-enqueuing
-                    agent-repl-wire-decode-roster-row-status-merge-enqueuing)
     (merging :merging agent-repl-wire-decode-roster-row-status-merging)
     (mergeQueued :merge-queued agent-repl-wire-decode-roster-row-status-merge-queued)
-    (mergeConflict :merge-conflict
-                   agent-repl-wire-decode-roster-row-status-merge-conflict)
     (mergeFailed :merge-failed agent-repl-wire-decode-roster-row-status-merge-failed)
     (merged :merged agent-repl-wire-decode-roster-row-status-merged)
     (none :none agent-repl-wire-decode-roster-row-status-none)
@@ -450,7 +438,7 @@ Nested workspaces — a spawned family under its parent — in render order."
 (defconst agent-repl-wire--roster-row-keys
   (append '(workspace attention priority viewed reviving lastSelected name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
-  "Every key `RosterRow' may carry: its own fields plus the 23 status arms.")
+  "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
