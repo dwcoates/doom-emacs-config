@@ -141,6 +141,20 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowReviving" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-last-selected (value)
+  "Decode VALUE as `RosterRowLastSelected', a plist `(:at-ms)'.
+The DURABLE instant the user last selected the workspace, epoch
+MILLISECONDS, read from the daemon's record so it survives an Emacs
+restart.  Emacs orders by it and never draws it
+\(`agent-repl-roster-selection-recency-order'); the when-column is
+`RosterRowWhen'."
+  (let ((object (agent-repl-wire--object "RosterRowLastSelected" value)))
+    (agent-repl-wire--check-keys "RosterRowLastSelected" object '(atMs))
+    (agent-repl-wire--decoded
+     "RosterRowLastSelected"
+     (list :at-ms (agent-repl-wire--decode-int64
+                   "RosterRowLastSelected" 'atMs object)))))
+
 ;;;; ---- The when column ----
 ;;
 ;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
@@ -434,14 +448,14 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving name current children when detail closed)
+  (append '(workspace attention priority viewed reviving lastSelected name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 23 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:name N :status
+:last-selected L :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
@@ -463,6 +477,9 @@ the message tree preserved as the contract spells it."
            :reviving (agent-repl-wire--decode-optional-message
                       "RosterRow" 'reviving object
                       #'agent-repl-wire-decode-roster-row-reviving)
+           :last-selected (agent-repl-wire--decode-optional-message
+                           "RosterRow" 'lastSelected object
+                           #'agent-repl-wire-decode-roster-row-last-selected)
            :name (agent-repl-wire--decode-message
                   "RosterRow" 'name object
                   #'agent-repl-wire-decode-roster-row-name)
