@@ -118,6 +118,29 @@ func TestSummarizeSurfacesAFailedCall(t *testing.T) {
 	}
 }
 
+func TestSummarizeRecordsAStandDownAsInfoNotError(t *testing.T) {
+	// Arrange
+	h := &fakeHeadless{err: &headless.Error{Cause: headless.CauseExitStatus, Detail: "signal: killed"}}
+	s, log := newSummarizer(t, h, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	got := s.Summarize(ctx, "ws1", "answer")
+
+	// Assert
+	if got != "Summary unavailable: "+StoodDownCause {
+		t.Fatalf("summary = %q, want the stand-down named", got)
+	}
+	r, ok := hasRecord(log, "info", "the daemon stood down during the turn-summary call")
+	if !ok || r.Context["workspace"] != "ws1" || r.Context["detail"] != "exit_status: signal: killed" {
+		t.Fatalf("record = %+v (found %v), want the workspace and the call's detail", r, ok)
+	}
+	if _, bad := hasRecord(log, "error", "the turn-summary model call failed"); bad {
+		t.Fatal("a stand-down was recorded as a failed call")
+	}
+}
+
 func TestSummarizeSurfacesAnEmptyAnswerFromTheModel(t *testing.T) {
 	// Arrange
 	h := &fakeHeadless{text: "\n  \n"}
