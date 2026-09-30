@@ -2,12 +2,17 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FeedMergeTabTestsSchema,
+  FeedMergeTestLogSchema,
   FeedMergeTestSuiteSchema,
   type FeedMergeTestSuite,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { harness } from "../harness.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { PAINT_CLASS_NAMES } from "../../../src/vocab.js";
 import {
+  drawFeedMergeTabTests,
+  drawFeedMergeTestLog,
   drawFeedMergeTestSpan,
   drawFeedMergeTestSuite,
   drawTestSuites,
@@ -136,5 +141,47 @@ describe("a suite state this build cannot draw is a refusal, never a default", (
     expect((thrown as MalformedView).detail).toBe(
       "arm 'skipped' is not one this build can draw",
     );
+  });
+});
+
+describe("drawFeedMergeTabTests: the suites, then the round's log", () => {
+  /** A tests tab carrying SUITES and, when given, LOG. */
+  function testsTab(log?: { token: string; label: string }) {
+    return create(FeedMergeTabTestsSchema, {
+      state: { case: "live", value: {} },
+      suites: [{ name: "unit", state: { case: "running", value: {} }, output: [] }],
+      ...(log === undefined ? {} : { log: { token: { value: log.token }, label: { text: log.label } } }),
+    });
+  }
+
+  it("draws the suites first", () => {
+    const parts = drawFeedMergeTabTests(testsTab(), harness().ctx, "FeedMergeTabTests");
+    expect(parts[0]?.classList.contains("merge-suites")).toBe(true);
+  });
+
+  it("draws no log line before the daemon has written the log", () => {
+    expect(drawFeedMergeTabTests(testsTab(), harness().ctx, "FeedMergeTabTests")).toHaveLength(1);
+  });
+
+  it("draws the log line after the suites once the log is written", () => {
+    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    expect(parts[1]?.classList.contains("merge-test-log")).toBe(true);
+  });
+
+  it("draws the log's link with the daemon's label", () => {
+    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    expect(parts[1]?.querySelector("[data-merge-test-log]")?.textContent).toBe("~/x.log");
+  });
+
+  it("introduces the link as the log", () => {
+    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    expect(parts[1]?.textContent).toBe("log: ~/x.log");
+  });
+});
+
+describe("drawFeedMergeTestLog", () => {
+  it("refuses a log with no token", () => {
+    const u = create(FeedMergeTestLogSchema, { label: { text: "~/x.log" } });
+    expect(() => drawFeedMergeTestLog(u, harness().ctx, "log")).toThrow(MalformedView);
   });
 });

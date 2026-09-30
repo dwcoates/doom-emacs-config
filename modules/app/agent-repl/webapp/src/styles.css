@@ -6652,7 +6652,6 @@ bubble-body.bubble-body { display: block; }
   background: rgba(128, 128, 128, 0.16);
 }
 .merge-tab-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
-.merge-tab-glyph.is-parked { color: var(--async); }
 /* HOLLOWED OUT FOR DONE: a settled success should recede, not compete with
    the live tab for attention. */
 .merge-tab-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
@@ -6662,18 +6661,6 @@ bubble-body.bubble-body { display: block; }
   color: var(--err);
 }
 .merge-tab-panel { padding-top: 0.3rem; }
-
-/* The parked header: the standing line, the paused badge, the composer slot. */
-.merge-parked {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.3rem 0;
-}
-.merge-parked-badge { color: var(--async); font-size: 0.85em; }
-.merge-parked-line { color: var(--muted); }
-.merge-parked .bubble-composer { flex-basis: 100%; }
 
 /* The queue snapshot. Rows are delimited by the ONE shared `.list-rows` rule. */
 .merge-queue-entry { padding: 0.15rem 0; }
@@ -6927,3 +6914,14 @@ bubble-body.bubble-body { display: block; }
 /* A merge's test log is drawn in the SAME link blue a response bubble's
    markdown links wear (`.md a`), so it reads as the link it is. */
 .merge-test-log-link { color: var(--accent); }
+
+/* ---- merge step tabs (src/feed/merge/step-tabs.ts, tests-tab.ts) ---- */
+
+/* The figure over a rebasing tab's narration ("3/7") and the attempt over a
+   fixes tab's rows ("attempt 2/3") read as the tab's heading line. */
+.merge-rebase-progress,
+.merge-fix-attempt { padding: 0.15rem 0; color: var(--muted); }
+.merge-commit-subject,
+.merge-updating-main { padding: 0.15rem 0; }
+/* The tests tab's log line sits under its suites. */
+.merge-test-log { padding-top: 0.3rem; color: var(--muted); }
