@@ -825,9 +825,10 @@ export function createFakeQuery(
       emitBlockStream(block, index, options.interleave?.get(index));
       const uuid = opts.newUuid();
       uuids.push(uuid);
-      // A SCENARIO MAY LIE ABOUT WHEN, and about nothing else: see
-      // AssistantOptions.timestamp.
-      const timestamp = options.timestamp ?? nowIso();
+      // EVERY ASSISTANT LINE IS STAMPED AT THE MOCK'S OWN NOW. A back-dated
+      // line would precede the prompt the live stream stamped now, and the
+      // book would order the answer by whichever producer wrote it first.
+      const timestamp = nowIso();
       const message = {
         model: reportedModel,
         id: messageId,
