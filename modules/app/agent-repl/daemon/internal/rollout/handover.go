@@ -277,8 +277,15 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 // delivery is mid-flight, turn and detached work notwithstanding: the transfer
 // detaches the shim without stopping anything, and the successor adopts it
 // mid-turn. Only a transfer the successor REFUSED to adopt mid-work (an old
-// shim) is asked again at freeness (fallBackToFreeness). The layout restart's
-// stand-down is not a handover, and keeps the freeness gate.
+// shim) is asked again at freeness (fallBackToFreeness).
+//
+// THE LAYOUT RESTART ASKS FOR THE SAME GATE (owner ruling, 2026-09-30: a
+// restart moves each workspace the moment it is available, and only a shim
+// replacement waits for work). Its stand-down detaches the running shim and
+// seals the carry exactly as a transfer does, and the replacement's boot
+// adopts the shim mid-turn and takes the carry up (TakeUpRestartCarries).
+// Waiting for freeness bought nothing, because every shim keeps running, and
+// one busy workspace held every other one down with it.
 //
 // ONE goroutine follows the handover to its end — the transfers, the adoption
 // windows, the stand-down of what cannot be transferred, the exit — and it
@@ -289,17 +296,13 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 	var windows sync.WaitGroup
 	outcomes := make(chan transferOutcome, len(plan.workspaces))
 	requested := 0
-	gate := bounce.GateDispatchQuiet
-	if plan.restart {
-		gate = bounce.GateFreeness
-	}
 	for _, ws := range plan.workspaces {
 		ws := ws
 		req := bounce.Request{
 			Reason:       string(ReasonHandoverTransfer),
 			Force:        plan.forced,
 			KeepDraining: true,
-			WaitFor:      gate,
+			WaitFor:      bounce.GateDispatchQuiet,
 			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
 				return c.transfer(runCtx, ws, plan, plan.snapshot[id], &windows)
 			},
@@ -440,13 +443,11 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// standing cold gate are written into the workspace's carry here, while
 	// this daemon still owns the serving row: the successor reads the carry
 	// only after the release below, which is the durable edge proving it was
-	// written. A restart has no successor to carry to.
-	var move *sealedMove
-	if !plan.restart {
-		move, err = c.seal(ctx, ws.ID, fields)
-		if err != nil {
-			return errors.Join(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
-		}
+	// written. A restart carries too: its replacement's boot reads the carry
+	// once this process has exited.
+	move, err := c.seal(ctx, ws.ID, fields)
+	if err != nil {
+		return errors.Join(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
 	}
 
 	// DETACH, NEVER KILL. The shim keeps running and KEEPS its kernel lock
@@ -477,7 +478,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 		// daemon's, its intake held, until the process exits and the
 		// replacement adopts its shim at boot.
 		plan.mu.Lock()
-		plan.moved[ws.ID] = movedWorkspace{lease: lease, detached: handed}
+		plan.moved[ws.ID] = movedWorkspace{lease: lease, detached: handed, move: move}
 		plan.mu.Unlock()
 		c.log.Info(opTransfer, "stood the workspace's serving down for the restart; its shim keeps running for the replacement", fields)
 		return nil

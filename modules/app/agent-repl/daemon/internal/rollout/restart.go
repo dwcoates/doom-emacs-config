@@ -23,13 +23,15 @@ import (
 // No arbitration lets the successor migrate while the incumbent writes -- the
 // incumbent may keep serving a busy workspace for an hour -- so a layout
 // change is rolled out the one way that makes the migration a SOLE WRITER's:
-// the incumbent stands every workspace's serving down at its own freeness
-// (exactly as a transfer does, the shims detached and left running), spawns
+// the incumbent stands every workspace's serving down the moment no prompt is
+// mid-delivery (exactly as a transfer does: the shims detached and left
+// running mid-turn, the queue's memory sealed into each carry), spawns
 // the fresh binary as an ordinary daemon that waits on the boot claim, and
 // exits. The kernel releases the claim only when this process ends, so the
 // replacement opens -- and migrates -- the state only once nothing else can
-// write it; its boot then adopts the shims, restores the held prompts and
-// releases nothing it does not own (this process's close released its holds).
+// write it; its boot then adopts the shims, restores the held prompts, takes
+// each carry up (TakeUpRestartCarries) and releases nothing it does not own
+// (this process's close released its holds).
 
 // The replacement's command line and its claim wait.
 const (
@@ -137,10 +139,11 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 }
 
 // movedWorkspace is what a restart's stand-down of one workspace took: the
-// hold, and whether its shim was detached.
+// hold, whether its shim was detached, and the move it sealed and carried.
 type movedWorkspace struct {
 	lease    ids.LeaseID
 	detached bool
+	move     *sealedMove
 }
 
 // finishRestart is the restart's end once every stand-down has run: spawn the
@@ -159,6 +162,14 @@ func (c *controller) finishRestart(ctx context.Context, plan *handoverPlan, fail
 		c.abandonRestart(ctx, plan, fmt.Errorf("rollout: restart: spawn the replacement: %w", err))
 		return
 	}
+	// THE CARRIED REPLACEMENTS ARE THE REPLACEMENT'S NOW: it runs them once
+	// its boot has taken each carry up, so their requesters here are told they
+	// were handed across rather than left waiting on a daemon that exits.
+	plan.mu.Lock()
+	for _, m := range plan.moved {
+		handedAcross(m.move)
+	}
+	plan.mu.Unlock()
 	c.log.Info(opHandover, "every workspace stood down and the replacement is waiting on the boot claim; exiting",
 		merge(fields, dlog.Context{"replacement_pid": pid}))
 	if err := c.deps.Exit(ctx); err != nil {
@@ -180,7 +191,7 @@ func (c *controller) abandonRestart(ctx context.Context, plan *handoverPlan, cau
 	var failures []error
 	for ws, m := range moved {
 		wsFields := merge(fields, dlog.Context{"workspace": string(ws), "lease": string(m.lease)})
-		if _, err := c.reclaim(ctx, ws, m.lease, m.detached, true, nil, wsFields); err != nil {
+		if _, err := c.reclaim(ctx, ws, m.lease, m.detached, true, m.move, wsFields); err != nil {
 			failures = append(failures, err)
 		}
 	}
