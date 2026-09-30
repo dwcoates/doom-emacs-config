@@ -127,7 +127,6 @@ function rateLimited(): FooterActivity {
   return unpinned({
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
-    figuresReadAtMs: BigInt(NOW - 630_000),
   });
 }
 
@@ -137,7 +136,6 @@ function rateLimitedWithOverage(): FooterActivity {
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
     overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
-    figuresReadAtMs: BigInt(NOW - 630_000),
   });
 }
 

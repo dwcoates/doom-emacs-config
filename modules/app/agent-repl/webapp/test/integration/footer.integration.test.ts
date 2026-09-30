@@ -28,7 +28,6 @@ import { panelStorageKey } from "../../src/footer/footer";
 import {
   assertVocabCoversArms,
   RENDER_COLORS,
-  footerAllowanceColor,
   footerStatusColor,
 } from "./vocab";
 import {
@@ -324,7 +323,7 @@ describe("the activity cell", () => {
     expect(harness.$(".footer-activity [data-datum='attempt']")?.textContent).toContain("3");
   });
 
-  it.each(FOOTER_ALLOWANCE_ARMS)("paints the %s verdict the vocabulary's color", async (arm) => {
+  it.each(FOOTER_ALLOWANCE_ARMS)("paints no tone on the %s allowance, whose percentage alone is colored", async (arm) => {
     // Arrange
     harness = await startHarness({
       arrange: (fake) =>
@@ -338,9 +337,7 @@ describe("the activity cell", () => {
         ),
     });
     // Assert
-    expect(harness.$(`.footer-activity [data-allowance][data-arm="${arm}"]`)?.className).toContain(
-      `tone-${footerAllowanceColor(arm)}`,
-    );
+    expect(harness.$(`.footer-activity [data-allowance][data-arm="${arm}"]`)?.className).not.toContain("tone-");
   });
 
   it.each(FOOTER_ALLOWANCE_ARMS)("draws the %s allowance verdict as its own arm", async (arm) => {
@@ -1389,7 +1386,6 @@ describe("the usage line the strip cannot fit", () => {
       resetsAtS: 9_000n,
       status: { case: "allowed", value: {} },
     },
-    figuresReadAtMs: 1_000n,
   };
 
   /** Boot with that line standing. */
@@ -1401,21 +1397,11 @@ describe("the usage line the strip cannot fit", () => {
     });
   }
 
-  it("renders the age of the last usage reading on the strip", async () => {
+  it("draws no reading age on the enduring line", async () => {
     // Arrange / Act
     await withFiguredRateLine();
-    // Assert: read at 1 s, drawn at the 10 s epoch, so nine seconds ago.
-    // (harness.text trims the leading separator space.)
-    expect(harness.text(".footer-strip .footer-rate-age")).toBe("· 9s ago");
-  });
-
-  it("ticks the usage read-age on the shared clock", async () => {
-    // Arrange
-    await withFiguredRateLine();
-    // Act
-    await harness.tick(1_000);
     // Assert
-    expect(harness.text(".footer-strip .footer-rate-age")).toBe("· 10s ago");
+    expect(harness.$(".footer-strip .footer-activity-enduring [data-age]")).toBeNull();
   });
 
   it("draws no usage-unread cell any more", async () => {

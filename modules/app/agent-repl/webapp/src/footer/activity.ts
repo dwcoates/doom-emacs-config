@@ -35,7 +35,6 @@
  */
 import type {
   FooterActivityEnduring,
-  FooterActivityEnduringContextWindow,
   FooterActivityEnduringUsage,
   FooterActivityQuietStretch,
   FooterActivityTransient,
@@ -777,18 +776,13 @@ export function drawGivesUpCountdown(
 // ---- the enduring tier ------------------------------------------------------
 
 /**
- * THE ENDURING LINE: the account's usage allowances with the age of their
- * reading, then how full the context window is — "session 41% · resets in
- * 2h 5m | weekly 12% · resets in 3d · 10m 30s ago | context 42%".
+ * THE ENDURING LINE: the account's usage allowances, "session 41% · resets in
+ * 2h 5m | weekly 12% · resets in 3d". It is always true while it stands, so it
+ * carries no age.
  *
- * Each half is drawn only when the daemon has observed it; a line with
- * neither is an empty line, which the grow cell still holds open.
- *
- * THE FIGURES ARE THE ELASTIC PART. The line lays itself out as the old rate
- * line did: an inline flex box no wider than the cell, the allowance figures
- * ellipsizing (newsworthy window first) and the read-age and the context fill
- * rigid beside them, so a narrow strip cuts the figures a reader can reopen in
- * the tokens sheet rather than the caveat about them.
+ * An unobserved line is an empty line, which the grow cell still holds open.
+ * The figures ellipsize (newsworthy window first) inside an inline flex box no
+ * wider than the cell.
  */
 export function drawFooterActivityEnduring(
   u: FooterActivityEnduring,
@@ -805,9 +799,6 @@ export function drawFooterActivityEnduring(
         line.appendChild(part);
       }
       break;
-    case "contextWindow":
-      line.appendChild(drawFooterActivityEnduringContextWindow(chosen.value));
-      break;
     case "unobserved":
       break;
     default: {
@@ -819,8 +810,7 @@ export function drawFooterActivityEnduring(
 }
 
 /**
- * The usage half: EVERY window the vendor figured, newsworthy first, plus the
- * AGE of the last successful reading, "· 10m 30s ago".
+ * The usage line: EVERY window the vendor figured, newsworthy first.
  *
  * AN ALLOWANCE THE PRODUCER LEFT UNSET IS DRAWN ABSENT, never required: a
  * figure nobody reported is never drawn. The overage window is drawn beside
@@ -847,23 +837,7 @@ export function drawFooterActivityEnduringUsage(
     });
     parts.push(figures);
   }
-  const age = drawFiguresReadAge(u, deps, path);
-  if (age !== null) parts.push(age);
   return parts;
-}
-
-/**
- * The context window's fill, "context 42%": the daemon's resolved fraction
- * drawn as a percentage, the one figure on it.
- */
-export function drawFooterActivityEnduringContextWindow(
-  u: FooterActivityEnduringContextWindow,
-): HTMLElement {
-  const span = document.createElement("span");
-  span.className = "footer-context-window";
-  span.appendChild(document.createTextNode("context "));
-  span.appendChild(drawFooterPercent(u.fill));
-  return span;
 }
 
 /**
@@ -879,31 +853,6 @@ export function drawFooterPercent(fraction: number): HTMLElement {
   percent.textContent = `${String(figure)}%`;
   percent.style.color = footerPercentColor(figure);
   return percent;
-}
-
-/**
- * The age of the last successful usage READING, "· 10m 30s ago", ticking from
- * the shipped instant — the same live-duration mechanism the turn clock and
- * the activity age already use (`tick` + `formatTickedAge`), so how stale the
- * figures look never depends on push cadence.
- *
- * NULL when the figures carry no read instant: they came from a rate-limit
- * EVENT rather than a sample, or none was ever read, so there is no reading to
- * date. The line then draws the figures with no age rather than inventing one.
- * An unreadable sample that leaves the figures standing leaves this instant
- * standing too (the daemon never re-stamps it), so the age stays anchored to
- * the last read rather than jumping to the failed attempt.
- */
-export function drawFiguresReadAge(
-  u: FooterActivityEnduringUsage,
-  deps: AllowanceDeps,
-  path: string,
-): HTMLElement | null {
-  if (u.figuresReadAtMs === undefined) return null;
-  const readAtMs = msOf(u.figuresReadAtMs, `${path}.figures_read_at_ms`);
-  return footerClockSpan(deps.ctx.ticker, "age", "footer-rate-age", (span, nowMs) => {
-    span.textContent = ` · ${formatTickedAge(nowMs - readAtMs)} ago`;
-  });
 }
 
 /** One drawable allowance, under the label the strip and the sheet both use. */
@@ -1224,18 +1173,14 @@ export function drawFooterStatusActivityWakeup(
  * formatting of one shipped figure, not a derivation of a second one — and
  * `resets_at_s` is the vendor's own SECONDS, converted once here.
  *
- * THE VENDOR'S STATUS IS AN ARM NOW, not the free string it used to be, so the
- * cell PAINTS it (`tones.ts`) instead of parking a word in a title nobody
- * reads: green while there is headroom, yellow on the vendor's own warning, red
- * once a call would be rejected. The arm rides as `data-arm` and its sentence
- * as the title.
+ * ONLY THE PERCENTAGE IS COLORED (owner ruling, 2026-09-30), by how full it
+ * is (`drawFooterPercent`); the label and the reset countdown are plain text.
+ * The vendor's verdict rides as `data-arm` and its sentence as the title.
  *
- * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET". The figures are sampled
- * from the account's usage and are true the moment they are pushed; the vendor's
- * verdict arrives later, on its own rate-limit event. So an allowance with no
- * arm draws its percentage and its reset countdown UNPAINTED and untitled —
- * absence of a verdict, not a verdict of its own — and gains the colour, the
- * title and the `data-arm` on the push that carries one.
+ * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET": the figures are sampled
+ * from the account's usage before the vendor's own rate-limit event arrives,
+ * so an allowance with no arm draws untitled, and gains the title and the
+ * `data-arm` on the push that carries one.
  */
 export function drawFooterAllowance(
   u: FooterAllowance,
@@ -1245,10 +1190,7 @@ export function drawFooterAllowance(
 ): HTMLElement {
   const status = u.status.case === undefined ? null : u.status;
   const span = document.createElement("span");
-  span.className =
-    status === null
-      ? "footer-allowance"
-      : `footer-allowance arm-${status.case} ${allowanceStatusClass(status.case)}`;
+  span.className = status === null ? "footer-allowance" : `footer-allowance arm-${status.case}`;
   span.setAttribute("data-allowance", label);
   if (status !== null) {
     span.setAttribute("data-arm", status.case);

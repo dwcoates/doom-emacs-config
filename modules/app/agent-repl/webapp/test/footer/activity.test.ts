@@ -819,29 +819,12 @@ describe("the enduring line", () => {
     expect(cell.querySelector('[data-allowance="overage"]')?.textContent).toBe("overage 10% · resets in 2h");
   });
 
-  it("draws the context window's fill alone when no usage has been read", () => {
-    const cell = enduringCell({ contextWindow: { usedTokens: 84_000n, windowTokens: 200_000n, fill: 0.42 } });
-    expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe("context 42%");
-  });
-
-  it("stamps the chosen line on the enduring line", () => {
-    const cell = enduringCell({ contextWindow: { usedTokens: 1n, windowTokens: 2n, fill: 0.5 } });
-    expect(cell.querySelector(".footer-activity-enduring")?.getAttribute("data-line")).toBe("contextWindow");
-  });
-
   it("refuses an enduring line that sets no line", () => {
     const activity = activityOf("idle", unpinnedInit());
     const pair = (activity as unknown as { tier: { value: { enduring: { line: unknown } } } }).tier.value;
     pair.enduring.line = { case: undefined };
     expect(() => draw(activity)).toThrow(MalformedView);
   });
-  it("colours the context fill by how full it is", () => {
-    const cell = enduringCell({ contextWindow: { usedTokens: 1n, windowTokens: 2n, fill: 0.5 } });
-    const percent = cell.querySelector<HTMLElement>('.footer-context-window [data-datum="percent"]');
-    expect(percent?.textContent).toBe("50%");
-    expect(percent?.style.color).toBe(paintedAs(50));
-  });
-
   it("colours an allowance's percent by how full it is", () => {
     const cell = enduringCell({ usage: { session: allowance(0.85, true, 60_000) } });
     const percent = cell.querySelector<HTMLElement>('[data-allowance="session"] [data-datum="percent"]');
@@ -876,24 +859,25 @@ describe("the enduring line", () => {
     );
   });
 
-  it("renders the age of the last usage reading beside the figures", () => {
-    const cell = enduringCell({
-      usage: { session: allowance(0.41, false, 60_000), figuresReadAtMs: BigInt(NOW - 630_000) },
-    });
-    expect(cell.querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 30s ago");
+  it.each([
+    ["usage", { usage: { session: allowance(0.2, false, 60_000) } }],
+    ["unobserved", {}],
+  ] as const)("stamps the %s line on the enduring line", (line, figures) => {
+    expect(enduringCell(figures).querySelector(".footer-activity-enduring")?.getAttribute("data-line")).toBe(line);
   });
 
-  it("re-reads the usage read-age on the shared tick", () => {
-    const cell = enduringCell({
-      usage: { session: allowance(0.41, false, 60_000), figuresReadAtMs: BigInt(NOW - 630_000) },
-    });
-    vi.advanceTimersByTime(1000);
-    expect(cell.querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 31s ago");
-  });
-
-  it("draws no read-age when the figures carry no read instant", () => {
+  it("draws no reading age beside the usage figures", () => {
     const cell = enduringCell({ usage: { session: allowance(0.41, false, 60_000) } });
-    expect(cell.querySelector(".footer-rate-age")).toBeNull();
+    expect(cell.querySelector("[data-age]")).toBeNull();
+  });
+
+  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("colours nothing of a %s allowance but its percentage", (arm) => {
+    const cell = armCell(arm) as HTMLElement | null;
+    expect([cell?.className, cell?.style.color, cell?.querySelector<HTMLElement>("[data-countdown]")?.style.color]).toEqual([
+      `footer-allowance arm-${arm} footer-allowance-newsworthy`,
+      "",
+      "",
+    ]);
   });
 
   it("draws no age for the enduring line itself", () => {
@@ -908,10 +892,6 @@ describe("the enduring line", () => {
 
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the allowance", (arm) => {
     expect(armCell(arm)?.getAttribute("data-arm")).toBe(arm);
-  });
-
-  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("paints the %s arm its own colour", (arm) => {
-    expect(armCell(arm)?.className).toContain(allowanceStatusClass(arm));
   });
 
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)("titles the %s arm with its own sentence", (arm) => {
