@@ -11,30 +11,28 @@ import (
 
 // rosterArmClaims places every RosterRow.status arm, by its proto name.
 var rosterArmClaims = map[string]Claim{
-	"merge_enqueuing": Merging,
-	"merge_queued":    Merging,
-	"merging":         Merging,
-	"merge_conflict":  MergeConflict,
-	"init":            Disconnected,
-	"severed":         Disconnected,
-	"dead":            Disconnected,
-	"start_failed":    Disconnected,
-	"degraded":        Degraded,
-	"merge_failed":    MergeFailed,
-	"merged":          Merged,
-	"vendor_blocked":  Blocked,
-	"permission":      Waiting,
-	"submitting":      Thinking,
-	"thinking":        Thinking,
-	"clearing":        Thinking,
-	"compacting":      Thinking,
-	"done":            Idle,
-	"interrupted":     Idle,
-	"turn_failed":     Idle,
-	"idle_async":      Idle,
-	"ready":           Idle,
-	"none":            Idle,
-	"inactive":        Inactive,
+	"merge_queued":   Merging,
+	"merging":        Merging,
+	"init":           Disconnected,
+	"severed":        Disconnected,
+	"dead":           Disconnected,
+	"start_failed":   Disconnected,
+	"degraded":       Degraded,
+	"merge_failed":   MergeFailed,
+	"merged":         Merged,
+	"vendor_blocked": Blocked,
+	"permission":     Waiting,
+	"submitting":     Thinking,
+	"thinking":       Thinking,
+	"clearing":       Thinking,
+	"compacting":     Thinking,
+	"done":           Idle,
+	"interrupted":    Idle,
+	"turn_failed":    Idle,
+	"idle_async":     Idle,
+	"ready":          Idle,
+	"none":           Idle,
+	"inactive":       Inactive,
 }
 
 // RosterArmClaim names the claim a roster status arm makes, and false for an
@@ -65,8 +63,6 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Merging:
 		return Merging, true
-	case *frontendv1.FooterStatus_MergeConflict:
-		return MergeConflict, true
 	case *frontendv1.FooterStatus_Disconnected:
 		return Disconnected, true
 	case *frontendv1.FooterStatus_Closing:
