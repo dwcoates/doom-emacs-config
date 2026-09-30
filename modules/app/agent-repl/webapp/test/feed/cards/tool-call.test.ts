@@ -1197,7 +1197,7 @@ describe("the card-level fold", () => {
     expect(el.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("reveals the section, scrolling at 50vh, once expanded", () => {
+  it("reveals the section, bounded by the card's ceiling alone, once expanded", () => {
     // Arrange
     const remove = installStylesheet();
     try {
@@ -1207,7 +1207,7 @@ describe("the card-level fold", () => {
       const out = el.querySelector(".tool-output") as Element;
       // Act / Assert
       expect(cascadedValue(out, "display")).toBe("block");
-      expect(cascadedValue(out, "max-height")).toBe("50vh");
+      expect(cascadedValue(out, "max-height")).toBe("none");
     } finally {
       remove();
     }
