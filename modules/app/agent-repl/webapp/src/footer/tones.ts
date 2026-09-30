@@ -28,6 +28,7 @@ import {
   FooterAllowanceSchema,
   FooterStatusSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { HUE_GREEN, HUE_ORANGE, HUE_RED, HUE_YELLOW, percentGradientColor, type PercentStop } from "../percent-gradient.js";
 import { footerAllowanceColor, footerStatusColor, toneClass, type Color } from "../vocab.js";
 
 /**
@@ -94,16 +95,17 @@ export function allowanceStatusClass(arm: string): string {
 }
 
 /** The typed datums an activity line colours. */
-export type ActivityDatum = "sha" | "agent" | "attempt" | "count" | "position" | "percent";
+export type ActivityDatum = "sha" | "agent" | "attempt" | "count" | "position";
 
 /**
  * The colour a typed datum takes inside an activity line.
  *
  * A sha and a transient's subagent label NAME something and take the identity
  * blue; every other datum is a FIGURE the reader is watching move (a retry's
- * attempt, a queue place, an allowance percentage) and takes the figure
- * yellow, so the line reads as one kind of thing with one exception rather
- * than as six competing colours.
+ * attempt, a queue place) and takes the figure yellow, so the line reads as
+ * one kind of thing with one exception rather than as five competing colours.
+ * A percentage is the exception to the table: its colour says how full it is
+ * (`footerPercentColor`).
  */
 const ACTIVITY_DATUM_COLOR: Readonly<Record<ActivityDatum, Color>> = Object.freeze({
   sha: "blue",
@@ -111,10 +113,31 @@ const ACTIVITY_DATUM_COLOR: Readonly<Record<ActivityDatum, Color>> = Object.free
   attempt: "yellow",
   count: "yellow",
   position: "yellow",
-  percent: "yellow",
 });
 
 /** The CSS class a typed datum wears. */
 export function activityDatumClass(datum: ActivityDatum): string {
   return toneClass(ACTIVITY_DATUM_COLOR[datum]);
+}
+
+/**
+ * Where a footer percentage's colors sit (owner, 2026-09-30): green below 40,
+ * yellow by 70, orange by 90, red at 90 and above. Between 40 and 90 the hue
+ * runs continuously, so 55 sits halfway between green and yellow and 80
+ * halfway between yellow and orange; 90 is a hard step to red.
+ */
+const FOOTER_PERCENT_STOPS: readonly PercentStop[] = [
+  { at: 40, hue: HUE_GREEN },
+  { at: 70, hue: HUE_YELLOW },
+  { at: 90, hue: HUE_ORANGE },
+  { at: 90, hue: HUE_RED },
+];
+
+/**
+ * The colour a footer percentage takes: an allowance's use, the context
+ * window's fill, a rate-limit line's utilization. PERCENT is the figure as
+ * drawn, 0..100.
+ */
+export function footerPercentColor(percent: number): string {
+  return percentGradientColor(percent, FOOTER_PERCENT_STOPS);
 }
