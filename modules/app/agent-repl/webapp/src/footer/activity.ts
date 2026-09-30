@@ -37,22 +37,20 @@ import type {
   FooterActivityEnduring,
   FooterActivityEnduringContextWindow,
   FooterActivityEnduringUsage,
+  FooterActivityQuietStretch,
   FooterActivityTransient,
   FooterActivityTransientCompactionConcluded,
-  FooterActivityTransientContextBudget,
   FooterActivityTransientContextInjected,
   FooterActivityTransientDaemonError,
   FooterActivityTransientDaemonWarning,
   FooterActivityTransientHook,
   FooterActivityTransientNetworkResume,
-  FooterActivityTransientNotification,
   FooterActivityTransientOverEnduring,
   FooterActivityTransientOverQuietOverEnduring,
-  FooterActivityTransientResponse,
   FooterActivityTransientSessionChange,
   FooterActivityTransientSubmitting,
+  FooterActivityTransientSubmittingHeld,
   FooterActivityTransientTask,
-  FooterActivityTransientThinking,
   FooterActivityTransientToolCall,
   FooterActivityTransientUpdated,
   FooterAllowance,
@@ -62,13 +60,16 @@ import type {
   FooterStatusActivityCloseBlocked,
   FooterStatusActivityColdGateCost,
   FooterStatusActivityCompaction,
+  FooterStatusActivityContextBudget,
   FooterStatusActivityFault,
   FooterStatusActivityGatedCall,
   FooterStatusActivityInterrupting,
   FooterStatusActivityMergingCommit,
+  FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
-  FooterStatusActivityQuietStretch,
+  FooterStatusActivityRateLimit,
+  FooterStatusActivityRateLimitWindow,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
   FooterStatusActivityUpdate,
@@ -206,8 +207,9 @@ export function salientKind(
 /**
  * The enduring usage a cell carries, or undefined.
  *
- * Set only while the cell is unpinned and the account's usage has been read:
- * a standing salient line ships no enduring line at all.
+ * Set only while the cell is unpinned and the daemon chose the usage line by
+ * the 80% rule: a standing salient line ships no enduring line at all, and an
+ * enduring line the context window claimed carries no usage.
  */
 export function enduringUsage(
   activity: FooterActivity,
@@ -215,7 +217,8 @@ export function enduringUsage(
 ): FooterActivityEnduringUsage | undefined {
   const tier = activityTier(activity, path);
   if (tier.case !== "unpinned") return undefined;
-  return requireMessage(tier.value.enduring, `${path}.unpinned.enduring`).usage;
+  const line = requireMessage(tier.value.enduring, `${path}.unpinned.enduring`).line;
+  return line.case === "usage" ? line.value : undefined;
 }
 
 // ---- the cell ---------------------------------------------------------------
@@ -331,8 +334,12 @@ function drawUnpinned(
     return {
       tier: "quiet",
       arm: "quietStretch",
-      line: drawFooterStatusActivityQuietStretch(quiet),
-      age: null,
+      line: drawFooterActivityQuietStretch(quiet),
+      age: drawFooterStatusActivityAt(
+        requireMessage(quiet.at, `${path}.quiet_stretch.at`),
+        deps,
+        `${path}.quiet_stretch.at`,
+      ),
     };
   }
   return {
@@ -344,7 +351,7 @@ function drawUnpinned(
 }
 
 /** The quiet-stretch line an unpinned container carries, if its status admits one. */
-function quietStretchOf(u: FooterUnpinned): FooterStatusActivityQuietStretch | undefined {
+function quietStretchOf(u: FooterUnpinned): FooterActivityQuietStretch | undefined {
   return u.$typeName === "frontend.v1.FooterActivityTransientOverQuietOverEnduring"
     ? u.quietStretch
     : undefined;
@@ -355,9 +362,7 @@ function quietStretchOf(u: FooterUnpinned): FooterStatusActivityQuietStretch | u
  * turn does next, standing until the next feed item surfaces. The daemon
  * words it; this end adds no word of its own.
  */
-export function drawFooterStatusActivityQuietStretch(
-  u: FooterStatusActivityQuietStretch,
-): HTMLElement {
+export function drawFooterActivityQuietStretch(u: FooterActivityQuietStretch): HTMLElement {
   return textLine("footer-activity-quiet-stretch", u.text);
 }
 
@@ -400,10 +405,100 @@ function drawSalientKind(
       return drawFooterStatusActivityStartFailed(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
+    case "rateLimit":
+      return drawFooterStatusActivityRateLimit(kind.value, deps, path);
+    case "notification":
+      return drawFooterStatusActivityNotification(kind.value);
+    case "contextBudget":
+      return drawFooterStatusActivityContextBudget(kind.value);
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
     }
+  }
+}
+
+/** The agent's push notification, verbatim. */
+export function drawFooterStatusActivityNotification(
+  u: FooterStatusActivityNotification,
+): HTMLElement {
+  return textLine("footer-activity-notification", u.text);
+}
+
+/** The context-budget warning, or a failed compaction's account, verbatim. */
+export function drawFooterStatusActivityContextBudget(
+  u: FooterStatusActivityContextBudget,
+): HTMLElement {
+  return textLine("footer-activity-context-budget", u.text);
+}
+
+/**
+ * The vendor's rate-limit event: which allowance, what the vendor said, and
+ * the figures it carried, "weekly nearly spent 85% · resets in 2h". The line
+ * wears the allowance verdict's own colour, the enduring allowance cell's
+ * palette, so a warning reads yellow and a refusal red wherever it appears.
+ */
+export function drawFooterStatusActivityRateLimit(
+  u: FooterStatusActivityRateLimit,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const verdict = requireCase(u.verdict, `${path}.verdict`);
+  const line = document.createElement("span");
+  line.className = `footer-activity-rate-limit ${allowanceStatusClass(verdict.case)}`;
+  line.setAttribute("data-arm", verdict.case);
+  const window = u.window === undefined ? "usage" : rateLimitWindowWords(u.window, `${path}.window`);
+  line.appendChild(document.createTextNode(`${window} ${rateLimitVerdictWords(verdict.case, `${path}.verdict`)}`));
+  if (u.utilization !== undefined) {
+    line.appendChild(document.createTextNode(" "));
+    const percent = document.createElement("span");
+    percent.className = activityDatumClass("percent");
+    percent.setAttribute("data-datum", "percent");
+    percent.textContent = `${Math.round(u.utilization * 100)}%`;
+    line.appendChild(percent);
+  }
+  if (u.resetsAtS !== undefined) {
+    const resets = document.createElement("span");
+    resets.setAttribute("data-countdown", "");
+    const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
+    tick(resets, deps.ctx.ticker, (nowMs) => {
+      resets.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
+    });
+    line.appendChild(resets);
+  }
+  return line;
+}
+
+/** The allowance a rate-limit event names, lowercase with spaces. */
+function rateLimitWindowWords(u: FooterStatusActivityRateLimitWindow, path: string): string {
+  const window = requireCase(u.window, `${path}.window`);
+  switch (window.case) {
+    case "session":
+    case "weekly":
+    case "overage":
+      return window.case;
+    case "weeklyOpus":
+      return "weekly opus";
+    case "weeklySonnet":
+      return "weekly sonnet";
+    case "weeklyOverageIncluded":
+      return "weekly overage included";
+    default: {
+      const other: { case: string } = window;
+      return unreachableArm(`${path}.window`, other.case);
+    }
+  }
+}
+
+/** What the vendor's verdict says about the allowance. */
+function rateLimitVerdictWords(verdict: string, path: string): string {
+  switch (verdict) {
+    case "allowedWarning":
+      return "nearly spent";
+    case "rejected":
+      return "spent";
+    default:
+      return unreachableArm(path, verdict);
   }
 }
 
@@ -441,24 +536,16 @@ function drawTransientKind(
   path: string,
 ): HTMLElement {
   switch (kind.case) {
-    case "thinking":
-      return drawFooterActivityTransientThinking(kind.value, path);
-    case "response":
-      return drawFooterActivityTransientResponse(kind.value);
     case "toolCall":
       return drawFooterActivityTransientToolCall(kind.value);
     case "task":
       return drawFooterActivityTransientTask(kind.value);
     case "submitting":
-      return drawFooterActivityTransientSubmitting(kind.value);
+      return drawFooterActivityTransientSubmitting(kind.value, path);
     case "hook":
       return drawFooterActivityTransientHook(kind.value);
     case "contextInjected":
       return drawFooterActivityTransientContextInjected(kind.value);
-    case "notification":
-      return drawFooterActivityTransientNotification(kind.value);
-    case "contextBudget":
-      return drawFooterActivityTransientContextBudget(kind.value);
     case "fault":
       return drawFooterStatusActivityFault(kind.value);
     case "daemonWarning":
@@ -478,38 +565,6 @@ function drawTransientKind(
       return unreachableArm(path, other.case);
     }
   }
-}
-
-/**
- * The newest reasoning: its last line when the vendor let it through, and the
- * arm's own word, "thinking", when it withheld it — the line still says the
- * agent is reasoning.
- */
-export function drawFooterActivityTransientThinking(
-  u: FooterActivityTransientThinking,
-  path: string,
-): HTMLElement {
-  const reasoning = requireCase(u.reasoning, `${path}.reasoning`);
-  switch (reasoning.case) {
-    case "text":
-      return textLine("footer-activity-thinking", reasoning.value.tail);
-    case "withheld": {
-      const line = textLine("footer-activity-thinking", statusWords("thinking"));
-      line.setAttribute("data-withheld", "true");
-      return line;
-    }
-    default: {
-      const other: { case: string } = reasoning;
-      return unreachableArm(`${path}.reasoning`, other.case);
-    }
-  }
-}
-
-/** The newest prose's last line, verbatim. */
-export function drawFooterActivityTransientResponse(
-  u: FooterActivityTransientResponse,
-): HTMLElement {
-  return textLine("footer-activity-response", u.tail);
 }
 
 /**
@@ -540,11 +595,52 @@ export function drawFooterActivityTransientTask(u: FooterActivityTransientTask):
   return line;
 }
 
-/** The prompt being delivered: its first line, verbatim. */
+/**
+ * A prompt's delivery moving: the stage it reached, then the prompt's first
+ * line, "queued 2/3 · fix the flaky test". The stage leads, because it is what
+ * changed and the line ellipsizes from its end.
+ */
 export function drawFooterActivityTransientSubmitting(
   u: FooterActivityTransientSubmitting,
+  path: string,
 ): HTMLElement {
-  return textLine("footer-activity-submitting", u.promptLead);
+  const stage = requireCase(u.stage, `${path}.stage`);
+  const line = document.createElement("span");
+  line.className = "footer-activity-submitting";
+  line.setAttribute("data-stage", stage.case);
+  switch (stage.case) {
+    case "held":
+      appendHeldPlace(line, stage.value);
+      break;
+    case "classifying":
+      line.appendChild(document.createTextNode("classifying"));
+      break;
+    case "interjecting":
+      line.appendChild(document.createTextNode("interrupting the turn"));
+      break;
+    case "coalesced":
+      line.appendChild(document.createTextNode("coalesced"));
+      break;
+    case "delivered":
+      line.appendChild(document.createTextNode("sent"));
+      break;
+    default: {
+      const other: { case: string } = stage;
+      return unreachableArm(`${path}.stage`, other.case);
+    }
+  }
+  line.appendChild(document.createTextNode(` · ${u.promptLead}`));
+  return line;
+}
+
+/** "queued 2/3": the prompt's place in the queue, as the figure it is. */
+function appendHeldPlace(line: HTMLElement, held: FooterActivityTransientSubmittingHeld): void {
+  line.appendChild(document.createTextNode("queued "));
+  const place = document.createElement("span");
+  place.className = activityDatumClass("position");
+  place.setAttribute("data-datum", "position");
+  place.textContent = `${held.position}/${held.queued}`;
+  line.appendChild(place);
 }
 
 /** The running hook's name. */
@@ -557,20 +653,6 @@ export function drawFooterActivityTransientContextInjected(
   u: FooterActivityTransientContextInjected,
 ): HTMLElement {
   return textLine("footer-activity-context-injected", u.text);
-}
-
-/** The agent's push notification, verbatim. */
-export function drawFooterActivityTransientNotification(
-  u: FooterActivityTransientNotification,
-): HTMLElement {
-  return textLine("footer-activity-notification", u.text);
-}
-
-/** The vendor's context-budget warning, verbatim. */
-export function drawFooterActivityTransientContextBudget(
-  u: FooterActivityTransientContextBudget,
-): HTMLElement {
-  return textLine("footer-activity-context-budget", u.text);
 }
 
 /** A daemon warning: the operation its record names, then its message. */
@@ -708,13 +790,23 @@ export function drawFooterActivityEnduring(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-enduring";
-  if (u.usage !== undefined) {
-    for (const part of drawFooterActivityEnduringUsage(u.usage, deps, `${path}.usage`)) {
-      line.appendChild(part);
+  const chosen = requireCase(u.line, `${path}.line`);
+  line.setAttribute("data-line", chosen.case);
+  switch (chosen.case) {
+    case "usage":
+      for (const part of drawFooterActivityEnduringUsage(chosen.value, deps, `${path}.usage`)) {
+        line.appendChild(part);
+      }
+      break;
+    case "contextWindow":
+      line.appendChild(drawFooterActivityEnduringContextWindow(chosen.value));
+      break;
+    case "unobserved":
+      break;
+    default: {
+      const other: { case: string } = chosen;
+      return unreachableArm(`${path}.line`, other.case);
     }
-  }
-  if (u.contextWindow !== undefined) {
-    line.appendChild(drawFooterActivityEnduringContextWindow(u.contextWindow, line.hasChildNodes()));
   }
   return line;
 }
@@ -755,17 +847,14 @@ export function drawFooterActivityEnduringUsage(
 
 /**
  * The context window's fill, "context 42%": the daemon's resolved fraction
- * drawn as a percentage, the one figure on it. AFTER marks a line that already
- * holds the usage half, which the fill is set apart from by the figures' own
- * separator.
+ * drawn as a percentage, the one figure on it.
  */
 export function drawFooterActivityEnduringContextWindow(
   u: FooterActivityEnduringContextWindow,
-  after: boolean,
 ): HTMLElement {
   const span = document.createElement("span");
   span.className = "footer-context-window";
-  span.appendChild(document.createTextNode(`${after ? " | " : ""}context `));
+  span.appendChild(document.createTextNode("context "));
   const percent = document.createElement("span");
   percent.className = activityDatumClass("percent");
   percent.setAttribute("data-datum", "percent");
