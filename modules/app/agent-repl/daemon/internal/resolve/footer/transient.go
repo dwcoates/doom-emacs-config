@@ -143,6 +143,9 @@ func submittingStage(sub Submission) (*frontendv1.FooterActivityTransientSubmitt
 	case StageCoalesced:
 		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Coalesced{
 			Coalesced: &frontendv1.FooterActivityTransientSubmittingCoalesced{}}
+	case StageAfterToolCall:
+		line.Stage = &frontendv1.FooterActivityTransientSubmitting_AfterToolCall{
+			AfterToolCall: &frontendv1.FooterActivityTransientSubmittingAfterToolCall{}}
 	default:
 		return nil, false
 	}
@@ -160,6 +163,8 @@ func stageName(stage SubmissionStage) string {
 		return "interjecting"
 	case StageCoalesced:
 		return "coalesced"
+	case StageAfterToolCall:
+		return "after_tool_call"
 	default:
 		return "unknown"
 	}

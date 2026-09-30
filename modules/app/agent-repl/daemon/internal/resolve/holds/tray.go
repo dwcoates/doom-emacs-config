@@ -122,6 +122,11 @@ func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Lo
 		log.Debug("daemon.holds.classification", "the hold interjects", ctx)
 		out.Classification = &frontendv1.HeldPrompt_Interject{
 			Interject: &frontendv1.HeldPromptInterject{Rationale: h.Classification.Reason}}
+	case wsm.ArmAfterToolCall:
+		ctx["arm"] = "after_tool_call"
+		log.Debug("daemon.holds.classification", "the hold joins the running turn after its current tool call", ctx)
+		out.Classification = &frontendv1.HeldPrompt_AfterToolCall{
+			AfterToolCall: &frontendv1.HeldPromptAfterToolCall{Rationale: h.Classification.Reason}}
 	case wsm.ArmHoldForTurnEnd:
 		ctx["arm"] = "hold_for_turn_end"
 		ctx["accepted"] = h.Accepted
@@ -221,6 +226,8 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		out = append(out, badge("classifying", "queued — classifying"))
 	case *frontendv1.HeldPrompt_Interject:
 		out = append(out, badge("interrupting", "interjects"))
+	case *frontendv1.HeldPrompt_AfterToolCall:
+		out = append(out, badge("after this tool call", "joins the running turn after its current tool call"))
 	case *frontendv1.HeldPrompt_HoldForTurnEnd:
 		// A refused interrupt is returned to this arm, so it reads the same.
 		out = append(out, badge("after this turn", "after this turn"))

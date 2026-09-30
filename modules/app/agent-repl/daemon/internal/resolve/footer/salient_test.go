@@ -504,6 +504,8 @@ func TestEachSubmissionStageRaisesItsSubmittingLine(t *testing.T) {
 			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetInterjecting() != nil }},
 		{"coalesced", Submission{Prompt: "fix it", Stage: StageCoalesced},
 			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetCoalesced() != nil }},
+		{"after this tool call", Submission{Prompt: "fix it", Stage: StageAfterToolCall},
+			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetAfterToolCall() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
