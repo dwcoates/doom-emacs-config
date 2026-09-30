@@ -366,7 +366,7 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 	defer state.verdicts.Unlock()
 	if now := state.epochs[sub.Turn]; now != epoch {
 		log.Info(opClassify, "the verdict is about content an edit has since replaced or a move has since superseded; it is discarded", dlog.Context{
-			"turn": string(sub.Turn), "arm": armName(c.Arm), "judged_epoch": epoch, "content_epoch": now,
+			"turn": string(sub.Turn), "arm": c.Arm.String(), "judged_epoch": epoch, "content_epoch": now,
 		})
 		return
 	}
@@ -471,7 +471,7 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 	// the first question a stuck tray raises, and a debug record answers it
 	// nowhere the daemon keeps.
 	log.Info(opClassify, "recorded the verdict", dlog.Context{
-		"turn": string(sub.Turn), "arm": armName(c.Arm), "reason": c.Reason,
+		"turn": string(sub.Turn), "arm": c.Arm.String(), "reason": c.Reason,
 	})
 	if err := q.pushTray(ctx, sub.WS, log); err != nil {
 		log.Error(opClassify, "the verdict was recorded but the tray was not republished",
@@ -598,22 +598,4 @@ func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnI
 		Reason: "the running turn could not be interrupted, so the prompt waits for it to end",
 		At:     q.deps.Now(),
 	}, log)
-}
-
-// armName renders a classification arm for a log record.
-func armName(a wsm.ClassificationArm) string {
-	switch a {
-	case wsm.ArmClassifying:
-		return "classifying"
-	case wsm.ArmInterject:
-		return "interject"
-	case wsm.ArmHoldForTurnEnd:
-		return "hold_for_turn_end"
-	case wsm.ArmUninterruptibleTurn:
-		return "uninterruptible_turn"
-	case wsm.ArmClassificationError:
-		return "classification_error"
-	default:
-		return fmt.Sprintf("arm(%d)", a)
-	}
 }
