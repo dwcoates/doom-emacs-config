@@ -19,7 +19,9 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   HeldPromptBadgeSchema,
   HeldPromptEditingSchema,
+  HeldPromptCoalescedSchema,
   HeldPromptSchema,
+  HeldSessionActSchema,
   type HeldPrompt,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
@@ -164,6 +166,14 @@ function markEditing(u: HeldPrompt): void {
   );
 }
 
+/** Mark U as coalesced, and serve the badges the daemon then sends. */
+function markCoalesced(u: HeldPrompt): void {
+  u.coalesced = create(HeldPromptCoalescedSchema, {});
+  u.badges = standingStatuses(u).map((status) =>
+    create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+  );
+}
+
 /** The label the test daemon sends for STATUS. */
 const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 /** The detail the test daemon sends for STATUS. */
@@ -176,6 +186,7 @@ function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
   if (classification.case !== undefined) {
     statuses.push(classification.case);
     if (prompt.editing !== undefined) statuses.push("editing");
+    if (prompt.coalesced !== undefined) statuses.push("coalesced");
     if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true) {
       statuses.push("accepted");
     }
@@ -966,6 +977,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   buildRefresh: "amber",
   sessionStarting: "teal",
   editing: "run",
+  coalesced: "muted",
 };
 
 describe("the daemon's badge words", () => {
@@ -990,6 +1002,14 @@ describe("the daemon's badge words", () => {
       () => {
         const u = heldPrompt();
         markEditing(u);
+        return u;
+      },
+    ],
+    [
+      "coalesced",
+      () => {
+        const u = heldPrompt();
+        markCoalesced(u);
         return u;
       },
     ],
@@ -1729,5 +1749,53 @@ describe("a held prompt's one collapsed line", () => {
     head?.click();
     // Assert
     expect(ellipsized(box, body)).toBe(true);
+  });
+});
+
+describe("a held session act", () => {
+  it.each([
+    ["model", { case: "model" as const, value: { model: "claude-opus-5-5" } }, "model → claude-opus-5-5"],
+    ["permissionMode", { case: "permissionMode" as const, value: { mode: "plan" } }, "permission mode → plan"],
+  ])("draws a %s change as what it does", (arm, act, text) => {
+    // Arrange
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    u.act = create(HeldSessionActSchema, { act });
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(card.querySelector(".queued-act")?.textContent).toBe(text);
+    expect(card.getAttribute("data-act")).toBe(arm);
+  });
+
+  it("draws a prompt with no act attribute", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.hasAttribute("data-act")).toBe(false);
+  });
+
+  it("refuses an act that sets no arm", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    u.act = create(HeldSessionActSchema, {});
+    // Act / Assert
+    expect(() => drawHeldPrompt(u, tc)).toThrow(MalformedView);
+  });
+});
+
+describe("a coalesced hold", () => {
+  it("marks the card coalesced", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    markCoalesced(u);
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(card.getAttribute("data-coalesced")).toBe("true");
   });
 });

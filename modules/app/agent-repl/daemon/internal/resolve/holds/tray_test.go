@@ -689,3 +689,19 @@ func TestTrayMarksACoalescedHold(t *testing.T) {
 		t.Fatal("the coalesced mark did not reach the tray")
 	}
 }
+
+func TestTrayComposesTheCoalescedBadgeAfterEditing(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	held := hold("t1", "a\nb")
+	held.Coalesced = true
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	badges := onlyPrompt(t, latest(t, r)).GetBadges()
+	if len(badges) != 2 || badges[1].GetLabel() != "coalesced" {
+		t.Fatalf("badges = %v, want the arm's badge then the coalesced badge", badges)
+	}
+}
