@@ -22,7 +22,7 @@ var wantStandingEdges = map[string][]Edge{
 	KindAdoptionWindowExpired: {EdgeHealthyAttach, EdgeSessionStarted, EdgeSuccessorServing},
 	KindLogSinkPoisoned:       {EdgeDaemonBoot},
 	KindWsmReadOnly:           {EdgeDaemonBoot},
-	KindSuccessorSpawnFailed:  {EdgeSuccessorServing},
+	KindSuccessorSpawnFailed:  {EdgeSuccessorServing, EdgeSuperseded, EdgeDaemonBoot},
 	KindPromptsDirMissing:     {EdgePromptsDirServed},
 	KindDeployFailed:          {EdgeDeployStepSucceeded, EdgeSuperseded, EdgeDaemonBoot},
 	KindShimStartFailed:       {EdgeHealthyAttach},
