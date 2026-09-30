@@ -330,12 +330,28 @@ answers a bare success, which is what almost every verb's success is."
       ;; Assert
       (should (agent-repl-test-verbs--messaged-p "nuke refused: blocked")))))
 
-(ert-deftest agent-repl-verbs-merge-echoes-the-ref ()
-  "MergeWorkspace carries the ref and nothing else."
+(ert-deftest agent-repl-verbs-merge-sends-its-own-branch-closing-on-landing ()
+  "MergeWorkspace from Emacs merges the workspace's OWN branch and closes it.
+The requesting workspace is the ref; the source is `own_branch' with
+`keep_open' false (merge-landing.md, Landed change 1)."
+  ;; Arrange
   (agent-repl-test-verbs--with nil
+    ;; Act
     (agent-repl-verb-merge "ws-one")
+    ;; Assert
     (should (equal (agent-repl-test-verbs--request :merge)
-                   (list :workspace (agent-repl-test-verbs--ref))))))
+                   (list :workspace (agent-repl-test-verbs--ref)
+                         :source '(:arm :own-branch :value (:keep-open nil)))))))
+
+(ert-deftest agent-repl-verbs-merge-keep-open-sends-keep-open ()
+  "KEEP-OPEN asks the daemon to leave the workspace open once it lands."
+  ;; Arrange
+  (agent-repl-test-verbs--with nil
+    ;; Act
+    (agent-repl-verb-merge "ws-one" 'keep)
+    ;; Assert
+    (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
+                   '(:arm :own-branch :value (:keep-open t))))))
 
 (ert-deftest agent-repl-verbs-open-echoes-the-given-ref ()
   "OpenWorkspace carries the closed row's own ref, not the current one's."
@@ -2531,6 +2547,30 @@ persp-mode perspective such as \"main\" appears in the registry."
       (should (equal (should-error (agent-repl-restart-workspace) :type 'user-error)
                      '(user-error "No agent-repl workspaces registered")))
       (should (null agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-merge-command-without-prefix-closes-on-landing ()
+  "`SPC TAB M' with no prefix merges the current workspace and closes it."
+  ;; Arrange
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      ;; Act
+      (let ((current-prefix-arg nil))
+        (call-interactively #'agent-repl-merge-workspace))
+      ;; Assert
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
+                     '(:arm :own-branch :value (:keep-open nil)))))))
+
+(ert-deftest agent-repl-verbs-merge-command-with-prefix-keeps-open ()
+  "`C-u SPC TAB M' merges the current workspace and keeps it open."
+  ;; Arrange
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      ;; Act
+      (let ((current-prefix-arg '(4)))
+        (call-interactively #'agent-repl-merge-workspace))
+      ;; Assert
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
+                     '(:arm :own-branch :value (:keep-open t)))))))
 
 (ert-deftest agent-repl-verbs-merge-with-an-empty-registry-refuses ()
   "And merge, which shares the same current-perspective default."
