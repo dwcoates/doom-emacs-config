@@ -578,17 +578,17 @@ describe("detached work", () => {
     expect(frame?.result.case).toBe("detachedWork");
   });
 
-  it("announces NOTHING for a shell task's start", () => {
-    // A FOREGROUND shell is tracked as a task from the moment it starts — that
-    // is what makes Ctrl-B addressable — so `task_started` says neither that
-    // the work left the turn nor why. The Bash result is the only record that
-    // states the cause, and announcing `requested` here put a wrong-cause
-    // announcement on the stream ahead of the right one.
+  it("announces NOTHING for a shell task's start, and only claims its spool", () => {
+    // `task_started` says neither why the work left the turn nor anything the
+    // announcement needs: the Bash result is the only record that states the
+    // cause, and announcing `requested` here put a wrong-cause announcement on
+    // the stream ahead of the right one. It does state the spool's task id and
+    // the run, which is the claim the sidecar reads the spool by.
     const fold = createFold();
 
     const output = fold.onSdkMessage(streamMessage("task_started"), foldContext());
 
-    expect(output.entries).toHaveLength(0);
+    expect(output.entries.map((entry) => entry.item.kind)).toEqual(["shell_run_claim"]);
   });
 
   it("consumes the background-task LEVEL without recording it", () => {

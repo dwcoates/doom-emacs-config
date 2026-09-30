@@ -269,6 +269,14 @@ export function toWriteBatchRequest(
   producer: string,
   entries: readonly PlacedEntry[],
 ): storev1.WriteBatchRequest {
+  // A CLAIM IS NOT A ROW: it joins a spool's task id to its run and lands in
+  // the batch's own claim list, never as a StoreEntry.
+  const rows: PlacedEntry[] = [];
+  const shellRunClaims: storev1.ShellRunClaim[] = [];
+  for (const placed of entries) {
+    if (placed.entry.item.kind === "shell_run_claim") shellRunClaims.push(placed.entry.item.claim);
+    else rows.push(placed);
+  }
   return create(storev1.WriteBatchRequestSchema, {
     producer,
     // EVERY SHIM WRITE IS INTERACTIVE: it is live turn content somebody is
@@ -278,7 +286,8 @@ export function toWriteBatchRequest(
       writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
     }),
     batch: create(storev1.EntryBatchSchema, {
-      entries: entries.map((entry) => toStoreEntry(producer, entry)),
+      entries: rows.map((entry) => toStoreEntry(producer, entry)),
+      shellRunClaims,
       // A STREAM-PLANE PRODUCER HAS NO FILE to be positioned in, so no cursor
       // rides with its records. Only the sidecar advances one.
     }),
@@ -348,6 +357,8 @@ function payloadBytes(entry: PersistEntry): number {
       return toBinary(conversationv1.AgentBashSchema, entry.item.frame).length;
     case "residue":
       return toBinary(storev1.StoreUnservedItemSchema, entry.item.residue).length;
+    case "shell_run_claim":
+      return toBinary(storev1.ShellRunClaimSchema, entry.item.claim).length;
     default:
       // A kind the router does not know is refused when its batch is built,
       // loudly and as a converter defect; sizing it as nothing here keeps that
@@ -1143,8 +1154,11 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       return lookupAgentByVendorTask({ client: options.client, retry, sleep }, session, vendorTaskId);
     },
 
-    openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>> {
-      return reader.openBashRun(work);
+    openBashRun(
+      work: conversationv1.DetachedWorkId,
+      options: { readonly awaitFirstRow: boolean },
+    ): Promise<AsyncIterable<conversationv1.AgentBash>> {
+      return reader.openBashRun(work, options);
     },
 
     onFault(listener: (fault: conversationv1.SessionFault) => void): () => void {

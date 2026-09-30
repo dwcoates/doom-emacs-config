@@ -1511,12 +1511,15 @@ export class TurnEngine {
       // same write identity, absorbed by the store if it already landed and
       // landed behind the original if not. After it the store holds the run's
       // first row, so the open below is answered with `start` — and a run the
-      // store still holds no row for is refused, as the contract says of
-      // anything that is not a live shell. The silent wait this replaces stood
-      // a stream open forever on a shell the sidecar never tailed (2026-09-27).
+      // store still holds no row for is WAITED on when this shim holds it live
+      // (the sidecar writes its rows from its spool), and refused otherwise,
+      // as the contract says of anything that is not a live shell.
       const start = this.session.shellRunStart(work);
       if (start !== undefined) await this.session.persistence.writeDurable([start]);
-      const run = await this.session.persistence.openBashRun(work);
+      // THE STORE WAITS FOR A RUN THIS SHIM HOLDS LIVE: its rows may all be
+      // the sidecar's, still to be read from its spool.
+      const awaitFirstRow = this.session.live.byToolUseId(work.value) !== undefined;
+      const run = await this.session.persistence.openBashRun(work, { awaitFirstRow });
       for await (const frame of run) {
         yield create(shimv1.WatchBashResponseSchema, { bash: frame });
       }

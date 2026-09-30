@@ -5,9 +5,9 @@
  *
  * A detachment is learned in pieces: `task_started` says a handle exists and
  * which call it came from, the BASH TOOL RESULT says WHY it detached (the task
- * stream carries no cause on any frame), `task_updated` says a person
- * backgrounded it by hand, and `task_notification` says where its output is and
- * that it ended. All four write the SAME row under the same upsert key, so the
+ * stream carries no cause on any frame), `task_updated` says the work moved
+ * to the background (for a shell, the vendor's own timeout), and
+ * `task_notification` says where its output is and that it ended. All four write the SAME row under the same upsert key, so the
  * announcement improves in place rather than appearing four times. That is what
  * upsert-by-identity is for, and it is why nothing here has to accumulate.
  *
@@ -25,7 +25,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
-import { conversationv1 } from "../proto.js";
+import { conversationv1, storev1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import {
   activityUpsertKey,
@@ -48,7 +48,7 @@ import { activityEntry, agentActivity } from "./entries.js";
 const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
 
 /** Why a unit left the turn. */
-export type DetachCause = "requested" | "by_user" | "timed_out";
+export type DetachCause = "requested" | "by_user" | "timed_out" | "vendor_moved";
 
 // ---------------------------------------------------------------------------
 // FOREGROUND WORK IS NEVER DETACHED WORK — the one rule, shared.
@@ -107,6 +107,8 @@ function detachCause(
   switch (cause) {
     case "by_user":
       return { case: "byUser", value: create(conversationv1.DetachedCauseByUserSchema, {}) };
+    case "vendor_moved":
+      return { case: "vendorMoved", value: create(conversationv1.DetachedCauseVendorMovedSchema, {}) };
     case "timed_out":
       return {
         case: "timedOut",
@@ -589,6 +591,36 @@ export function shellRunStartEntry(
   };
 }
 
+/**
+ * A detached shell run's CLAIM on its spool: the vendor's task id (the spool's
+ * name) paired with the run (store.v1 ShellRunClaim).
+ *
+ * WHY THE SHIM STATES IT. The sidecar reads a spool only once a spawning call
+ * claims it, and the transcript states that claim in a structured field for
+ * most launches — but a shell the vendor moved to the background on its own
+ * timeout inside a subagent is stated only in prose, so its spool went
+ * unread, its terminal was never seen, and the run stayed live for good
+ * (2026-09-28). The task stream states the pairing for every run whatever the
+ * transcript's wording, and this shim is the one producer that reads it.
+ *
+ * Restated at every detachment fact; the store absorbs a repeat.
+ */
+export function shellRunClaimEntry(context: FoldContext, taskId: string, toolUseId: string): PersistEntry {
+  const run = toolCallActivityId(toolUseId);
+  LOGGER.debug({ task_id: taskId, run: run.value }, "a detached shell run claims its spool by task id");
+  return {
+    agentId: context.mainAgentId,
+    upsertKey: `shell-run-claim:${taskId}`,
+    source: { vendorUuid: `${shellRunCoordinate(run)}:claim:${taskId}`, discriminator: "shell_run_claim" },
+    keepalive: context.keepalive,
+    turn: context.turnId,
+    item: {
+      kind: "shell_run_claim",
+      claim: create(storev1.ShellRunClaimSchema, { vendorTaskId: taskId, run }),
+    },
+  };
+}
+
 /** The vendor's task-stream messages, read loosely for their optional fields. */
 interface RawTask {
   readonly subtype?: string;
@@ -1027,9 +1059,11 @@ export function convertDetached(
       if (taskKindOf(raw.task_type) === "bash") {
         LOGGER.debug(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
-          "a shell task started; its own tool result announces the detachment and states the cause",
+          "a shell task started in the background; its own tool result announces the detachment and states the cause",
         );
-        return [];
+        // THE CLAIM NEEDS NO CAUSE: the run left its turn, so its spool is
+        // read whatever the result later says.
+        return [shellRunClaimEntry(context, taskId, toolUseId)];
       }
       // REFUSED, NOT RESIDUE: the refusal is already recorded at ERROR with
       // the task's whole context, and a residue row would record it twice.
@@ -1073,20 +1107,36 @@ export function convertDetached(
         );
         return [];
       }
-      // THE CANDIDATE PRODUCER FOR A BACKGROUNDED AGENT, confirmed at this wave:
-      // a person backgrounded running work by hand, which the shell path
-      // harvests from its tool result and the agent path only states here.
-      LOGGER.info({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
+      // WHY IT MOVED IS NOT STATED HERE. The patch says only that the work is
+      // now in the background. For a SHELL the vendor states the cause on the
+      // call's own tool result (`backgroundedByUser`, `timedOutAfterMs`),
+      // which restates this row with it — but a shell launched inside a
+      // backgrounded subagent never has its result reach this stream, and
+      // calling that one "backgrounded by hand" when its own timeout moved it
+      // was false (2026-09-28). So a shell is announced `vendor_moved` until
+      // its result says more. An agent keeps `by_user`, the one cause its
+      // path has ever stated.
+      const shell = taskKindOf(taskType) === "bash";
+      const cause: DetachCause = shell ? "vendor_moved" : "by_user";
+      LOGGER.info(
+        { uuid, task_id: taskId, tool_use_id: toolUseId, cause },
+        shell
+          ? "the vendor moved a running shell to the background; its tool result states why"
+          : "running work was moved to the background",
+      );
       calls.detach(toolUseId);
-      taskKinds.rememberCause(taskId, "by_user");
+      taskKinds.rememberCause(taskId, cause);
+      // THE SPOOL IS CLAIMED FIRST, before anything that can be refused: the
+      // run left its turn whether or not its kind can be announced.
+      const claim = shell ? [shellRunClaimEntry(context, taskId, toolUseId)] : [];
       // THE WORK STILL LEFT THE TURN when its kind cannot be named: the call is
       // handed off and the cause kept above. Only the announcement is refused.
       const kind = announcedKind(taskFacts(toolUseId), taskKinds);
-      if (kind === undefined) return [];
+      if (kind === undefined) return claim;
       const announcement = detachmentEntry(context, agentId, uuid, {
         kind,
         detachedFromToolUseId: toolUseId,
-        cause: "by_user",
+        cause,
         owner,
       });
       // A HAND-BACKGROUNDED SHELL'S START RIDES AHEAD OF ITS ANNOUNCEMENT, so
@@ -1095,7 +1145,7 @@ export function convertDetached(
       // else before it concluded.
       const start =
         kind.kind === "bash" ? shellRunStartEntry(context, agentId, toolUseId, spawnCall) : undefined;
-      return start === undefined ? [announcement] : [start, announcement];
+      return start === undefined ? [...claim, announcement] : [...claim, start, announcement];
     }
 
     case "task_progress": {

@@ -1668,7 +1668,24 @@ describe("DetachForeground", () => {
     if (announced.origin.case !== "detached") {
       throw new Error("the confirmed detachment was not announced with a detached origin");
     }
-    expect(announced.origin.value.cause.case).toBe("byUser");
+    // THE PATCH STATES NO CAUSE, so the first announcement says only that the
+    // vendor moved it; the call's own result states `backgroundedByUser` and
+    // restates the row with it.
+    expect(announced.origin.value.cause.case).toBe("vendorMoved");
+    const restated = await stream.until((f) => {
+      if (f.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(f))?.result;
+      return (
+        result?.case === "detachedWork" &&
+        result.value.origin.case === "detached" &&
+        result.value.origin.value.cause.case !== "vendorMoved"
+      );
+    });
+    const restatedFrame = entryFrame(watchAgentEntry(restated));
+    if (restatedFrame?.result.case !== "detachedWork" || restatedFrame.result.value.origin.case !== "detached") {
+      throw new Error("the restated detachment was not announced with a detached origin");
+    }
+    expect(restatedFrame.result.value.origin.value.cause.case).toBe("byUser");
     // AND THE TURN ITSELF COMPLETES. `AgentSuccess.backgrounded` is the
     // WHOLE-TURN arm — the vendor's `background_requested` terminal reason,
     // where the agent's own run moved to the background — and this is not
@@ -1687,9 +1704,9 @@ describe("DetachForeground", () => {
     stream.close();
   });
 
-  test("a hand-backgrounded shell's WatchBash opens with `start` at once", async () => {
-    // THE INCIDENT'S PATH: a shell a person backgrounded by hand is announced
-    // from the vendor's patch, and the sidecar has written nothing for it. The
+  test("a vendor-moved shell's WatchBash opens with `start` at once", async () => {
+    // THE INCIDENT'S PATH: a shell the vendor moved to the background is
+    // announced from its patch, and the sidecar has written nothing for it. The
     // shim wrote its start ahead of that announcement, so the first frame is
     // owed immediately.
     const shim = await spawnShim();

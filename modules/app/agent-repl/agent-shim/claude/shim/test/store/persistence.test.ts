@@ -53,7 +53,7 @@ describe("unavailablePersistence", () => {
   });
 
   it("openBashRun rejects with store_unavailable", async () => {
-    await expect(persistence.openBashRun({} as never)).rejects.toMatchObject({
+    await expect(persistence.openBashRun({} as never, { awaitFirstRow: false })).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });

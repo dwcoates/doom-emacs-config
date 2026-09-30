@@ -662,12 +662,15 @@ describe("failure translation", () => {
   });
 });
 
+/** An open for a run the caller does not hold live: refused if unstored. */
+const NO_WAIT = { awaitFirstRow: false } as const;
+
 describe("openBashRun", () => {
   it("refuses an empty handle, which names no run at all", async () => {
     const { plane } = await seeded("bash-unknown", 0);
 
     await expect(
-      plane.openBashRun(create(conversationv1.DetachedWorkIdSchema, { value: "" })),
+      plane.openBashRun(create(conversationv1.DetachedWorkIdSchema, { value: "" }), NO_WAIT),
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
@@ -679,6 +682,7 @@ describe("openBashRun", () => {
 
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      NO_WAIT,
     );
     const seen: string[] = [];
     for await (const frame of run) {
@@ -696,6 +700,7 @@ describe("openBashRun", () => {
 
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      NO_WAIT,
     );
     const arms: string[] = [];
     for await (const frame of run) arms.push(String(frame.result.case));
@@ -708,6 +713,7 @@ describe("openBashRun", () => {
 
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      NO_WAIT,
     );
 
     await expect(
@@ -717,12 +723,52 @@ describe("openBashRun", () => {
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
+  it("waits for the first row of a run the caller holds live", async () => {
+    // Arrange: the run is announced, and its rows are the sidecar's, still to come.
+    const { plane } = await seeded("bash-await", 0);
+    const run = await plane.openBashRun(create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }), {
+      awaitFirstRow: true,
+    });
+    const first = run[Symbol.asyncIterator]().next();
+
+    // Act.
+    plane.write([bashStartEntry()]);
+    await plane.flush();
+
+    // Assert.
+    const next = await first;
+    if (next.done === true) throw new Error("the waiting run ended without a row");
+    expect(next.value.result.case).toBe("start");
+  });
+
+  it("asks the store to wait exactly when the caller holds the run live", async () => {
+    // Arrange.
+    const asked: boolean[] = [];
+    const reader = readerOver({
+      watchBashRun: (request) => ({
+        async *[Symbol.asyncIterator]() {
+          asked.push(request.awaitFirstRow);
+          yield* [];
+        },
+      }),
+    });
+    const work = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
+
+    // Act.
+    for await (const frame of await reader.openBashRun(work, { awaitFirstRow: true })) void frame;
+    for await (const frame of await reader.openBashRun(work, NO_WAIT)) void frame;
+
+    // Assert.
+    expect(asked).toEqual([true, false]);
+  });
+
   it("does not wait for a first row: a run refused at the open stays refused when a row lands later", async () => {
     // NEVER A SILENT WAIT (2026-09-27). The shim writes an announced run's
     // start before announcing it, so a refusal is the answer and not a race.
     const { plane } = await seeded("bash-no-wait", 0);
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      NO_WAIT,
     );
     // THE EXPECTATION IS ATTACHED BEFORE THE WRITE. The refusal lands while the
     // flush below is awaited, and a rejection with no handler yet attached is
@@ -1506,7 +1552,7 @@ describe("openBashRun against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK))).rejects.toMatchObject({
+    await expect(drain(await reader.openBashRun(WORK, NO_WAIT))).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1522,7 +1568,7 @@ describe("openBashRun against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK))).rejects.toMatchObject({
+    await expect(drain(await reader.openBashRun(WORK, NO_WAIT))).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1540,7 +1586,7 @@ describe("openBashRun against a store that misbehaves", () => {
     });
 
     // Act.
-    await drain(await reader.openBashRun(WORK)).catch(() => undefined);
+    await drain(await reader.openBashRun(WORK, NO_WAIT)).catch(() => undefined);
 
     // Assert.
     expect(asks).toBe(1);
@@ -1561,7 +1607,7 @@ describe("openBashRun against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK))).rejects.toMatchObject({
+    await expect(drain(await reader.openBashRun(WORK, NO_WAIT))).rejects.toMatchObject({
       kind: "unknown_work",
     });
   });
