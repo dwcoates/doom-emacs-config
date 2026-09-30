@@ -113,8 +113,12 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    test:webkit; proto `make validate`; the touched e2e scenarios.
 7. Consolidation sweep over `git diff master..HEAD`; extractions as their own
    behavior-preserving commits with tests.
-8. Cherry-pick every branch commit onto LOCAL master (NOT the merge queue, NOT
-   a merge commit): `git -C ~/.config/doom cherry-pick master..footer-activity-updates`.
+8. LAND THROUGH THE MERGE QUEUE (owner, 2026-09-30, supersedes the
+   cherry-pick plan): the daemon's merge-queue handling is fixed, so the
+   finished branch merges via the merge-queue skill (`/merge-queue`,
+   `.claude/skills/merge-queue/SKILL.md`), NOT by cherry-pick. Run the final
+   consolidation sweep first. On a parked, failed or refused merge, report
+   the reason and stop.
 9. Bounce all systems: `bin/build-frontend.sh` + restart claude-repld; build
    shim-store and shim-claude-sidecar into `~/.cache/agent-repl/bin` and
    `launchctl kickstart`; verify `bin/readiness-report.sh` and
