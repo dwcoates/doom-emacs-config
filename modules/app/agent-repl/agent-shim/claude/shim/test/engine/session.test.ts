@@ -9268,6 +9268,39 @@ describe("the fold rows the engine walks past", () => {
   });
 });
 
+describe("a DetachForeground reaches the fold as the user's request", () => {
+  const detachUnit = (unit: string): shimv1.DetachForegroundRequest =>
+    create(shimv1.DetachForegroundRequestSchema, {
+      unit: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+    });
+
+  it("notes the unit with the fold when the vendor moved it", async () => {
+    // Arrange
+    const h = harness({ backgroundTasks: true });
+    await started(h);
+
+    // Act
+    await h.engine.detachForeground(detachUnit("toolu_moved"));
+
+    // Assert
+    expect([h.fold.userDetaches, h.fold.retiredUserDetaches]).toEqual([["toolu_moved"], []]);
+  });
+
+  it("retires the unit with the fold when the vendor moved nothing", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.detachForeground(detachUnit("toolu_unmoved"));
+
+    // Assert
+    expect(h.fold.retiredUserDetaches).toEqual([
+      { toolUseId: "toolu_unmoved", why: "the vendor moved nothing for the request" },
+    ]);
+  });
+});
+
 describe("the session's own beats once the vendor query is gone", () => {
   /** Bring a session up and then lose its query the way a broken stream does. */
   const withDeadQuery = async (): Promise<Harness> => {

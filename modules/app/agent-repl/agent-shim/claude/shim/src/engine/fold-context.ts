@@ -192,6 +192,14 @@ export interface EngineFold {
    * this process never saw — or `undefined`. A read: it records nothing.
    */
   taskAwaitingAgent(message: SdkMessage, context: FoldContext): string | undefined;
+  /**
+   * The shim is about to ask the vendor to move the unit whose spawning call is
+   * `toolUseId` to the background, at the user's request (`DetachForeground`):
+   * the patch that moves it is announced `by_user` (convert/detached.ts).
+   */
+  noteUserDetach(toolUseId: string): void;
+  /** The vendor answered that request moved nothing, so no patch will consume it. */
+  retireUserDetach(toolUseId: string, why: string): void;
   /** Hand the fold the store's answer for a task {@link EngineFold.taskAwaitingAgent} named. */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
   /** Which agent a vendor task is running, as the fold knows it. */
@@ -236,6 +244,9 @@ export function turnBoundaryOnlyFold(): EngineFold {
     // knows none.
     taskAwaitingAgent: (): undefined => undefined,
     learnTaskAgent: (): void => undefined,
+    // CONVERTS NO PATCH, so a request has nothing to name.
+    noteUserDetach: (): void => undefined,
+    retireUserDetach: (): void => undefined,
     taskAgent: (): TaskAgentKnowledge => ({ kind: "unknown" }),
     // THE BOUNDARY IS STILL A BOUNDARY: an absorbed turn ends here, and the
     // engine needs that end exactly as it needs a result's.

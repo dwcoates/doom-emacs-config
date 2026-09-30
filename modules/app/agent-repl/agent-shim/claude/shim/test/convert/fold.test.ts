@@ -2318,6 +2318,35 @@ function turnEnd(stopped: boolean): SdkMessage {
 /** An async spawn's launch receipt. */
 const LAUNCH_RECEIPT = { isAsync: true, status: "async_launched", agentId: "a-bg", description: "sweep" };
 
+/** A patch moving the agent spawned by `toolu_spawn` (task `a-moved`) to the background. */
+const MOVE_PATCH = {
+  type: "system",
+  subtype: "task_updated",
+  uuid: "uuid-patch",
+  session_id: "session-1",
+  task_id: "a-moved",
+  tool_use_id: "toolu_spawn",
+  patch: { is_backgrounded: true },
+} as unknown as SdkMessage;
+
+/** A fold that saw `toolu_spawn` spawn agent task `a-moved` in the foreground. */
+function spawnedInForeground(): ReturnType<typeof createFold> {
+  return foldEach([
+    assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "count" })]),
+    {
+      type: "system",
+      subtype: "task_started",
+      uuid: "uuid-start",
+      session_id: "session-1",
+      task_id: "a-moved",
+      tool_use_id: "toolu_spawn",
+      task_type: "local_agent",
+      description: "count",
+      is_backgrounded: false,
+    } as unknown as SdkMessage,
+  ]);
+}
+
 /** A backgrounded shell's receipt. */
 const SHELL_RECEIPT = { stdout: "", stderr: "", interrupted: false, backgroundTaskId: "b-bg" };
 
@@ -2426,31 +2455,8 @@ describe("the calls in flight", () => {
 
   it("keeps a patch-moved agent `vendor_moved` through its launch receipt, which states no cause", () => {
     // Arrange
-    const fold = createFold();
-    const messages = [
-      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "count" })]),
-      {
-        type: "system",
-        subtype: "task_started",
-        uuid: "uuid-start",
-        session_id: "session-1",
-        task_id: "a-moved",
-        tool_use_id: "toolu_spawn",
-        task_type: "local_agent",
-        description: "count",
-        is_backgrounded: false,
-      } as unknown as SdkMessage,
-      {
-        type: "system",
-        subtype: "task_updated",
-        uuid: "uuid-patch",
-        session_id: "session-1",
-        task_id: "a-moved",
-        tool_use_id: "toolu_spawn",
-        patch: { is_backgrounded: true },
-      } as unknown as SdkMessage,
-      toolResult("toolu_spawn", { ...LAUNCH_RECEIPT, agentId: "a-moved" }),
-    ];
+    const fold = spawnedInForeground();
+    const messages = [MOVE_PATCH, toolResult("toolu_spawn", { ...LAUNCH_RECEIPT, agentId: "a-moved" })];
 
     // Act
     const discriminators = messages.flatMap((message) =>
@@ -2461,6 +2467,50 @@ describe("the calls in flight", () => {
     expect(discriminators.filter((d) => d.startsWith("agent_frame.detached_work.detached"))).toEqual([
       "agent_frame.detached_work.detached.vendor_moved",
     ]);
+  });
+
+  it("announces a move the engine noted as the user's `by_user`", () => {
+    // Arrange
+    const fold = spawnedInForeground();
+    fold.noteUserDetach("toolu_spawn");
+
+    // Act
+    const output = fold.onSdkMessage(MOVE_PATCH, foldContext());
+
+    // Assert
+    expect(output.entries.map((entry) => entry.source.discriminator)).toContain(
+      "agent_frame.detached_work.detached.by_user",
+    );
+  });
+
+  it("a request the engine retired leaves the move `vendor_moved`", () => {
+    // Arrange
+    const fold = spawnedInForeground();
+    fold.noteUserDetach("toolu_spawn");
+    fold.retireUserDetach("toolu_spawn", "the vendor moved nothing for the request");
+
+    // Act
+    const output = fold.onSdkMessage(MOVE_PATCH, foldContext());
+
+    // Assert
+    expect(output.entries.map((entry) => entry.source.discriminator)).toContain(
+      "agent_frame.detached_work.detached.vendor_moved",
+    );
+  });
+
+  it("the query's end retires every request", () => {
+    // Arrange
+    const fold = spawnedInForeground();
+    fold.noteUserDetach("toolu_spawn");
+    fold.endQuery("the query was replaced");
+
+    // Act
+    const output = fold.onSdkMessage(MOVE_PATCH, foldContext());
+
+    // Assert
+    expect(output.entries.map((entry) => entry.source.discriminator)).toContain(
+      "agent_frame.detached_work.detached.vendor_moved",
+    );
   });
 
   it("holds nothing after a turn that ended on its own", () => {

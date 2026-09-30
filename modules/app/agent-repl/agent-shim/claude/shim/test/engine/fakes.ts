@@ -623,6 +623,19 @@ export class RecordingFold implements EngineFold {
     return this.awaitingFor(message);
   }
 
+  /** Every unit the engine said it asked the vendor to move, in order. */
+  readonly userDetaches: string[] = [];
+  /** Every request the engine retired, with why, in order. */
+  readonly retiredUserDetaches: { toolUseId: string; why: string }[] = [];
+
+  noteUserDetach(toolUseId: string): void {
+    this.userDetaches.push(toolUseId);
+  }
+
+  retireUserDetach(toolUseId: string, why: string): void {
+    this.retiredUserDetaches.push({ toolUseId, why });
+  }
+
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void {
     this.learned.push({ taskId, answer });
     if (answer.kind === "found") this.knowledge.set(taskId, { kind: "named", agent: answer.agent });

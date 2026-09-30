@@ -1668,18 +1668,15 @@ describe("DetachForeground", () => {
     if (announced.origin.case !== "detached") {
       throw new Error("the confirmed detachment was not announced with a detached origin");
     }
-    // THE PATCH STATES NO CAUSE, so the first announcement says only that the
-    // vendor moved it; the call's own result states `backgroundedByUser` and
-    // restates the row with it.
-    expect(announced.origin.value.cause.case).toBe("vendorMoved");
+    // THE SHIM ASKED FOR THIS MOVE (DetachForeground noted the unit before
+    // `backgroundTasks`), so the patch's announcement is already the user's
+    // (ruled 2026-09-30); the call's own result states `backgroundedByUser`
+    // and restates the row with the same cause.
+    expect(announced.origin.value.cause.case).toBe("byUser");
     const restated = await stream.until((f) => {
       if (f.frame.case !== "entry") return false;
       const result = entryFrame(watchAgentEntry(f))?.result;
-      return (
-        result?.case === "detachedWork" &&
-        result.value.origin.case === "detached" &&
-        result.value.origin.value.cause.case !== "vendorMoved"
-      );
+      return result?.case === "detachedWork" && result.value.origin.case === "detached";
     });
     const restatedFrame = entryFrame(watchAgentEntry(restated));
     if (restatedFrame?.result.case !== "detachedWork" || restatedFrame.result.value.origin.case !== "detached") {
