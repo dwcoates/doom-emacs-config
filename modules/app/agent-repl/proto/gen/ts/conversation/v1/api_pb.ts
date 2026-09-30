@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/api.proto.
  */
 export const file_conversation_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("Chljb252ZXJzYXRpb24vdjEvYXBpLnByb3RvEg9jb252ZXJzYXRpb24udjEijQYKEEFwaVJlcXVlc3RGYWlsZWQSDwoHbWVzc2FnZRgBIAEoCRI3CgxyYXRlX2xpbWl0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuQXBpUmF0ZUxpbWl0ZWRIABI0CgpvdmVybG9hZGVkGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLkFwaU92ZXJsb2FkZWRIABJJChVhdXRoZW50aWNhdGlvbl9mYWlsZWQYBCABKAsyKC5jb252ZXJzYXRpb24udjEuQXBpQXV0aGVudGljYXRpb25GYWlsZWRIABJBChFwZXJtaXNzaW9uX2RlbmllZBgFIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BcGlQZXJtaXNzaW9uRGVuaWVkSAASPQoPaW52YWxpZF9yZXF1ZXN0GAYgASgLMiIuY29udmVyc2F0aW9uLnYxLkFwaUludmFsaWRSZXF1ZXN0SAASQAoRcmVxdWVzdF90b29fbGFyZ2UYByABKAsyIy5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdFRvb0xhcmdlSAASMQoJbm90X2ZvdW5kGAggASgLMhwuY29udmVyc2F0aW9uLnYxLkFwaU5vdEZvdW5kSAASMAoIaW50ZXJuYWwYCSABKAsyHC5jb252ZXJzYXRpb24udjEuQXBpSW50ZXJuYWxIABI5Cg1iaWxsaW5nX2Vycm9yGAsgASgLMiAuY29udmVyc2F0aW9uLnYxLkFwaUJpbGxpbmdFcnJvckgAEkcKFW9hdXRoX29yZ19ub3RfYWxsb3dlZBgMIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BcGlPYXV0aE9yZ05vdEFsbG93ZWRIABJAChFtYXhfb3V0cHV0X3Rva2VucxgNIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BcGlNYXhPdXRwdXRUb2tlbnNIABI3Cgl1bm1vZGVsZWQYCiABKAsyIi5jb252ZXJzYXRpb24udjEuQXBpVW5tb2RlbGVkRXJyb3JIAEIGCgRraW5kIkAKDkFwaVJhdGVMaW1pdGVkEhsKDnJldHJ5X2FmdGVyX21zGAEgASgDSACIAQFCEQoPX3JldHJ5X2FmdGVyX21zIj8KDUFwaU92ZXJsb2FkZWQSGwoOcmV0cnlfYWZ0ZXJfbXMYASABKANIAIgBAUIRCg9fcmV0cnlfYWZ0ZXJfbXMiGQoXQXBpQXV0aGVudGljYXRpb25GYWlsZWQiFQoTQXBpUGVybWlzc2lvbkRlbmllZCITChFBcGlJbnZhbGlkUmVxdWVzdCIUChJBcGlSZXF1ZXN0VG9vTGFyZ2UiDQoLQXBpTm90Rm91bmQiDQoLQXBpSW50ZXJuYWwiEQoPQXBpQmlsbGluZ0Vycm9yIhcKFUFwaU9hdXRoT3JnTm90QWxsb3dlZCIUChJBcGlNYXhPdXRwdXRUb2tlbnMiIQoRQXBpVW5tb2RlbGVkRXJyb3ISDAoEdHlwZRgBIAEoCSIaCgpBZ2VudE1vZGVsEgwKBG5hbWUYASABKAkitAEKC01vZGVsT3B0aW9uEioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSFAoMZGlzcGxheV9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEj0KDGNhcGFiaWxpdGllcxgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Nb2RlbENhcGFiaWxpdGllc0gAiAEBQg8KDV9jYXBhYmlsaXRpZXMi2AIKEU1vZGVsQ2FwYWJpbGl0aWVzEjgKDnJlc29sdmVkX21vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAYgBARJFChJlZmZvcnRfdW5zdXBwb3J0ZWQYAiABKAsyJy5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRVbnN1cHBvcnRlZEgAEkEKEGVmZm9ydF9zdXBwb3J0ZWQYAyABKAsyJS5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRTdXBwb3J0ZWRIABIiChpzdXBwb3J0c19hZGFwdGl2ZV90aGlua2luZxgEIAEoCBIaChJzdXBwb3J0c19mYXN0X21vZGUYBSABKAgSGgoSc3VwcG9ydHNfYXV0b19tb2RlGAYgASgIQhAKDmVmZm9ydF9zdXBwb3J0QhEKD19yZXNvbHZlZF9tb2RlbCIYChZNb2RlbEVmZm9ydFVuc3VwcG9ydGVkIkkKFE1vZGVsRWZmb3J0U3VwcG9ydGVkEjEKBmxldmVscxgBIAMoDjIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEVmZm9ydExldmVsIrEBCgpUb2tlblVzYWdlEjMKCmlucHV0X2hpdHMYASABKAsyHy5jb252ZXJzYXRpb24udjEuVG9rZW5DYWNoZUhpdHMSNwoMaW5wdXRfbWlzc2VzGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlRva2VuQ2FjaGVNaXNzZXMSFQoNb3V0cHV0X3Rva2VucxgDIAEoBBIeChZvdXRwdXRfdGhpbmtpbmdfdG9rZW5zGAQgASgEIh4KDlRva2VuQ2FjaGVIaXRzEgwKBHJlYWQYASABKAQiNgoQVG9rZW5DYWNoZU1pc3NlcxIPCgd3cml0dGVuGAEgASgEEhEKCXVud3JpdHRlbhgCIAEoBCrIAQoQQWdlbnRFZmZvcnRMZXZlbBIiCh5BR0VOVF9FRkZPUlRfTEVWRUxfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9FRkZPUlRfTEVWRUxfTE9XEAESHQoZQUdFTlRfRUZGT1JUX0xFVkVMX01FRElVTRACEhsKF0FHRU5UX0VGRk9SVF9MRVZFTF9ISUdIEAMSHAoYQUdFTlRfRUZGT1JUX0xFVkVMX1hISUdIEAQSGgoWQUdFTlRfRUZGT1JUX0xFVkVMX01BWBAFKlgKC01vZGVsTWFya2VyEhwKGE1PREVMX01BUktFUl9VTlNQRUNJRklFRBAAEisKFk1PREVMX01BUktFUl9TWU5USEVUSUMQARoPiqYdCzxzeW50aGV0aWM+OlUKFG1vZGVsX21hcmtlcl9saXRlcmFsEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4dQDIAEoCVISbW9kZWxNYXJrZXJMaXRlcmFsQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
+  fileDesc("Chljb252ZXJzYXRpb24vdjEvYXBpLnByb3RvEg9jb252ZXJzYXRpb24udjEixgYKEEFwaVJlcXVlc3RGYWlsZWQSDwoHbWVzc2FnZRgBIAEoCRI3CgxyYXRlX2xpbWl0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuQXBpUmF0ZUxpbWl0ZWRIABI0CgpvdmVybG9hZGVkGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLkFwaU92ZXJsb2FkZWRIABJJChVhdXRoZW50aWNhdGlvbl9mYWlsZWQYBCABKAsyKC5jb252ZXJzYXRpb24udjEuQXBpQXV0aGVudGljYXRpb25GYWlsZWRIABJBChFwZXJtaXNzaW9uX2RlbmllZBgFIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BcGlQZXJtaXNzaW9uRGVuaWVkSAASPQoPaW52YWxpZF9yZXF1ZXN0GAYgASgLMiIuY29udmVyc2F0aW9uLnYxLkFwaUludmFsaWRSZXF1ZXN0SAASQAoRcmVxdWVzdF90b29fbGFyZ2UYByABKAsyIy5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdFRvb0xhcmdlSAASMQoJbm90X2ZvdW5kGAggASgLMhwuY29udmVyc2F0aW9uLnYxLkFwaU5vdEZvdW5kSAASMAoIaW50ZXJuYWwYCSABKAsyHC5jb252ZXJzYXRpb24udjEuQXBpSW50ZXJuYWxIABI5Cg1iaWxsaW5nX2Vycm9yGAsgASgLMiAuY29udmVyc2F0aW9uLnYxLkFwaUJpbGxpbmdFcnJvckgAEkcKFW9hdXRoX29yZ19ub3RfYWxsb3dlZBgMIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BcGlPYXV0aE9yZ05vdEFsbG93ZWRIABJAChFtYXhfb3V0cHV0X3Rva2VucxgNIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BcGlNYXhPdXRwdXRUb2tlbnNIABI3Cgl1bm1vZGVsZWQYCiABKAsyIi5jb252ZXJzYXRpb24udjEuQXBpVW5tb2RlbGVkRXJyb3JIABItCgVyZXRyeRgOIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5BcGlSZXRyeUgBiAEBQgYKBGtpbmRCCAoGX3JldHJ5IkwKCEFwaVJldHJ5Eg8KB2F0dGVtcHQYASABKA0SEwoLbWF4X3JldHJpZXMYAiABKA0SGgoSbmV4dF9hdHRlbXB0X2F0X21zGAMgASgDIkAKDkFwaVJhdGVMaW1pdGVkEhsKDnJldHJ5X2FmdGVyX21zGAEgASgDSACIAQFCEQoPX3JldHJ5X2FmdGVyX21zIj8KDUFwaU92ZXJsb2FkZWQSGwoOcmV0cnlfYWZ0ZXJfbXMYASABKANIAIgBAUIRCg9fcmV0cnlfYWZ0ZXJfbXMiGQoXQXBpQXV0aGVudGljYXRpb25GYWlsZWQiFQoTQXBpUGVybWlzc2lvbkRlbmllZCITChFBcGlJbnZhbGlkUmVxdWVzdCIUChJBcGlSZXF1ZXN0VG9vTGFyZ2UiDQoLQXBpTm90Rm91bmQiDQoLQXBpSW50ZXJuYWwiEQoPQXBpQmlsbGluZ0Vycm9yIhcKFUFwaU9hdXRoT3JnTm90QWxsb3dlZCIUChJBcGlNYXhPdXRwdXRUb2tlbnMiIQoRQXBpVW5tb2RlbGVkRXJyb3ISDAoEdHlwZRgBIAEoCSIaCgpBZ2VudE1vZGVsEgwKBG5hbWUYASABKAkitAEKC01vZGVsT3B0aW9uEioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSFAoMZGlzcGxheV9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEj0KDGNhcGFiaWxpdGllcxgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Nb2RlbENhcGFiaWxpdGllc0gAiAEBQg8KDV9jYXBhYmlsaXRpZXMi2AIKEU1vZGVsQ2FwYWJpbGl0aWVzEjgKDnJlc29sdmVkX21vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAYgBARJFChJlZmZvcnRfdW5zdXBwb3J0ZWQYAiABKAsyJy5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRVbnN1cHBvcnRlZEgAEkEKEGVmZm9ydF9zdXBwb3J0ZWQYAyABKAsyJS5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRTdXBwb3J0ZWRIABIiChpzdXBwb3J0c19hZGFwdGl2ZV90aGlua2luZxgEIAEoCBIaChJzdXBwb3J0c19mYXN0X21vZGUYBSABKAgSGgoSc3VwcG9ydHNfYXV0b19tb2RlGAYgASgIQhAKDmVmZm9ydF9zdXBwb3J0QhEKD19yZXNvbHZlZF9tb2RlbCIYChZNb2RlbEVmZm9ydFVuc3VwcG9ydGVkIkkKFE1vZGVsRWZmb3J0U3VwcG9ydGVkEjEKBmxldmVscxgBIAMoDjIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEVmZm9ydExldmVsIrEBCgpUb2tlblVzYWdlEjMKCmlucHV0X2hpdHMYASABKAsyHy5jb252ZXJzYXRpb24udjEuVG9rZW5DYWNoZUhpdHMSNwoMaW5wdXRfbWlzc2VzGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlRva2VuQ2FjaGVNaXNzZXMSFQoNb3V0cHV0X3Rva2VucxgDIAEoBBIeChZvdXRwdXRfdGhpbmtpbmdfdG9rZW5zGAQgASgEIh4KDlRva2VuQ2FjaGVIaXRzEgwKBHJlYWQYASABKAQiNgoQVG9rZW5DYWNoZU1pc3NlcxIPCgd3cml0dGVuGAEgASgEEhEKCXVud3JpdHRlbhgCIAEoBCrIAQoQQWdlbnRFZmZvcnRMZXZlbBIiCh5BR0VOVF9FRkZPUlRfTEVWRUxfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9FRkZPUlRfTEVWRUxfTE9XEAESHQoZQUdFTlRfRUZGT1JUX0xFVkVMX01FRElVTRACEhsKF0FHRU5UX0VGRk9SVF9MRVZFTF9ISUdIEAMSHAoYQUdFTlRfRUZGT1JUX0xFVkVMX1hISUdIEAQSGgoWQUdFTlRfRUZGT1JUX0xFVkVMX01BWBAFKlgKC01vZGVsTWFya2VyEhwKGE1PREVMX01BUktFUl9VTlNQRUNJRklFRBAAEisKFk1PREVMX01BUktFUl9TWU5USEVUSUMQARoPiqYdCzxzeW50aGV0aWM+OlUKFG1vZGVsX21hcmtlcl9saXRlcmFsEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4dQDIAEoCVISbW9kZWxNYXJrZXJMaXRlcmFsQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * A request to the vendor API failed, and the vendor RECORDED that it did.
@@ -157,6 +157,18 @@ export type ApiRequestFailed = Message<"conversation.v1.ApiRequestFailed"> & {
     value: ApiUnmodeledError;
     case: "unmodeled";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * THE VENDOR'S RETRY SCHEDULE, when it will retry this request: which
+   * attempt failed, how many retries it allows, and when it said the next
+   * attempt starts. Unset when the vendor stated no retry. Carried for EVERY
+   * kind -- a connection failure is retried on the same schedule as a rate
+   * limit -- so a consumer can say when the next try is due and see one that
+   * never came.
+   *
+   * @generated from field: optional conversation.v1.ApiRetry retry = 14;
+   */
+  retry?: ApiRetry | undefined;
 };
 
 /**
@@ -165,6 +177,43 @@ export type ApiRequestFailed = Message<"conversation.v1.ApiRequestFailed"> & {
  */
 export const ApiRequestFailedSchema: GenMessage<ApiRequestFailed> = /*@__PURE__*/
   messageDesc(file_conversation_v1_api, 0);
+
+/**
+ * The vendor's schedule for retrying a failed request.
+ *
+ * @generated from message conversation.v1.ApiRetry
+ */
+export type ApiRetry = Message<"conversation.v1.ApiRetry"> & {
+  /**
+   * The retry the vendor makes next, as it counts them (its `retryAttempt`):
+   * 1 when the first request failed and its first retry is coming.
+   *
+   * @generated from field: uint32 attempt = 1;
+   */
+  attempt: number;
+
+  /**
+   * How many retries the vendor allows before it gives up.
+   *
+   * @generated from field: uint32 max_retries = 2;
+   */
+  maxRetries: number;
+
+  /**
+   * When the vendor said the next attempt starts, epoch ms: the failure's own
+   * instant plus the delay it stated.
+   *
+   * @generated from field: int64 next_attempt_at_ms = 3;
+   */
+  nextAttemptAtMs: bigint;
+};
+
+/**
+ * Describes the message conversation.v1.ApiRetry.
+ * Use `create(ApiRetrySchema)` to create a new message.
+ */
+export const ApiRetrySchema: GenMessage<ApiRetry> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_api, 1);
 
 /**
  * The API rate-limited the request.
@@ -186,7 +235,7 @@ export type ApiRateLimited = Message<"conversation.v1.ApiRateLimited"> & {
  * Use `create(ApiRateLimitedSchema)` to create a new message.
  */
 export const ApiRateLimitedSchema: GenMessage<ApiRateLimited> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 1);
+  messageDesc(file_conversation_v1_api, 2);
 
 /**
  * The API was overloaded.
@@ -207,7 +256,7 @@ export type ApiOverloaded = Message<"conversation.v1.ApiOverloaded"> & {
  * Use `create(ApiOverloadedSchema)` to create a new message.
  */
 export const ApiOverloadedSchema: GenMessage<ApiOverloaded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 2);
+  messageDesc(file_conversation_v1_api, 3);
 
 /**
  * The credential was rejected.
@@ -222,7 +271,7 @@ export type ApiAuthenticationFailed = Message<"conversation.v1.ApiAuthentication
  * Use `create(ApiAuthenticationFailedSchema)` to create a new message.
  */
 export const ApiAuthenticationFailedSchema: GenMessage<ApiAuthenticationFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 3);
+  messageDesc(file_conversation_v1_api, 4);
 
 /**
  * The credential lacks permission for this request.
@@ -237,7 +286,7 @@ export type ApiPermissionDenied = Message<"conversation.v1.ApiPermissionDenied">
  * Use `create(ApiPermissionDeniedSchema)` to create a new message.
  */
 export const ApiPermissionDeniedSchema: GenMessage<ApiPermissionDenied> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 4);
+  messageDesc(file_conversation_v1_api, 5);
 
 /**
  * The request itself was malformed or refused.
@@ -252,7 +301,7 @@ export type ApiInvalidRequest = Message<"conversation.v1.ApiInvalidRequest"> & {
  * Use `create(ApiInvalidRequestSchema)` to create a new message.
  */
 export const ApiInvalidRequestSchema: GenMessage<ApiInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 5);
+  messageDesc(file_conversation_v1_api, 6);
 
 /**
  * The request exceeded the size limit.
@@ -267,7 +316,7 @@ export type ApiRequestTooLarge = Message<"conversation.v1.ApiRequestTooLarge"> &
  * Use `create(ApiRequestTooLargeSchema)` to create a new message.
  */
 export const ApiRequestTooLargeSchema: GenMessage<ApiRequestTooLarge> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 6);
+  messageDesc(file_conversation_v1_api, 7);
 
 /**
  * The model or resource does not exist.
@@ -282,7 +331,7 @@ export type ApiNotFound = Message<"conversation.v1.ApiNotFound"> & {
  * Use `create(ApiNotFoundSchema)` to create a new message.
  */
 export const ApiNotFoundSchema: GenMessage<ApiNotFound> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 7);
+  messageDesc(file_conversation_v1_api, 8);
 
 /**
  * The API's own internal error.
@@ -297,7 +346,7 @@ export type ApiInternal = Message<"conversation.v1.ApiInternal"> & {
  * Use `create(ApiInternalSchema)` to create a new message.
  */
 export const ApiInternalSchema: GenMessage<ApiInternal> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 8);
+  messageDesc(file_conversation_v1_api, 9);
 
 /**
  * The account cannot be charged for this request.
@@ -312,7 +361,7 @@ export type ApiBillingError = Message<"conversation.v1.ApiBillingError"> & {
  * Use `create(ApiBillingErrorSchema)` to create a new message.
  */
 export const ApiBillingErrorSchema: GenMessage<ApiBillingError> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 9);
+  messageDesc(file_conversation_v1_api, 10);
 
 /**
  * The credential's organization is not permitted to use this deployment.
@@ -327,7 +376,7 @@ export type ApiOauthOrgNotAllowed = Message<"conversation.v1.ApiOauthOrgNotAllow
  * Use `create(ApiOauthOrgNotAllowedSchema)` to create a new message.
  */
 export const ApiOauthOrgNotAllowedSchema: GenMessage<ApiOauthOrgNotAllowed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 10);
+  messageDesc(file_conversation_v1_api, 11);
 
 /**
  * The request asked for more output than the model will produce.
@@ -342,7 +391,7 @@ export type ApiMaxOutputTokens = Message<"conversation.v1.ApiMaxOutputTokens"> &
  * Use `create(ApiMaxOutputTokensSchema)` to create a new message.
  */
 export const ApiMaxOutputTokensSchema: GenMessage<ApiMaxOutputTokens> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 11);
+  messageDesc(file_conversation_v1_api, 12);
 
 /**
  * An error type this schema does not model.
@@ -363,7 +412,7 @@ export type ApiUnmodeledError = Message<"conversation.v1.ApiUnmodeledError"> & {
  * Use `create(ApiUnmodeledErrorSchema)` to create a new message.
  */
 export const ApiUnmodeledErrorSchema: GenMessage<ApiUnmodeledError> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 12);
+  messageDesc(file_conversation_v1_api, 13);
 
 /**
  * A model the vendor API offers for selection.
@@ -394,7 +443,7 @@ export type AgentModel = Message<"conversation.v1.AgentModel"> & {
  * Use `create(AgentModelSchema)` to create a new message.
  */
 export const AgentModelSchema: GenMessage<AgentModel> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 13);
+  messageDesc(file_conversation_v1_api, 14);
 
 /**
  * One model a session may run under, as offered by the vendor for this account.
@@ -445,7 +494,7 @@ export type ModelOption = Message<"conversation.v1.ModelOption"> & {
  * Use `create(ModelOptionSchema)` to create a new message.
  */
 export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 14);
+  messageDesc(file_conversation_v1_api, 15);
 
 /**
  * What one model can do, as the vendor declares it.
@@ -516,7 +565,7 @@ export type ModelCapabilities = Message<"conversation.v1.ModelCapabilities"> & {
  * Use `create(ModelCapabilitiesSchema)` to create a new message.
  */
 export const ModelCapabilitiesSchema: GenMessage<ModelCapabilities> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 15);
+  messageDesc(file_conversation_v1_api, 16);
 
 /**
  * The model takes no reasoning-effort level.
@@ -531,7 +580,7 @@ export type ModelEffortUnsupported = Message<"conversation.v1.ModelEffortUnsuppo
  * Use `create(ModelEffortUnsupportedSchema)` to create a new message.
  */
 export const ModelEffortUnsupportedSchema: GenMessage<ModelEffortUnsupported> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 16);
+  messageDesc(file_conversation_v1_api, 17);
 
 /**
  * The model takes a reasoning-effort level.
@@ -553,7 +602,7 @@ export type ModelEffortSupported = Message<"conversation.v1.ModelEffortSupported
  * Use `create(ModelEffortSupportedSchema)` to create a new message.
  */
 export const ModelEffortSupportedSchema: GenMessage<ModelEffortSupported> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 17);
+  messageDesc(file_conversation_v1_api, 18);
 
 /**
  * THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
@@ -637,7 +686,7 @@ export type TokenUsage = Message<"conversation.v1.TokenUsage"> & {
  * Use `create(TokenUsageSchema)` to create a new message.
  */
 export const TokenUsageSchema: GenMessage<TokenUsage> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 18);
+  messageDesc(file_conversation_v1_api, 19);
 
 /**
  * The prompt input this request did not have to process, because the prompt
@@ -660,7 +709,7 @@ export type TokenCacheHits = Message<"conversation.v1.TokenCacheHits"> & {
  * Use `create(TokenCacheHitsSchema)` to create a new message.
  */
 export const TokenCacheHitsSchema: GenMessage<TokenCacheHits> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 19);
+  messageDesc(file_conversation_v1_api, 20);
 
 /**
  * The prompt input this request processed fresh, split by whether processing it
@@ -693,7 +742,7 @@ export type TokenCacheMisses = Message<"conversation.v1.TokenCacheMisses"> & {
  * Use `create(TokenCacheMissesSchema)` to create a new message.
  */
 export const TokenCacheMissesSchema: GenMessage<TokenCacheMisses> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 20);
+  messageDesc(file_conversation_v1_api, 21);
 
 /**
  * How much reasoning a response was asked to spend before answering.
