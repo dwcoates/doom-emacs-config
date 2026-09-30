@@ -38,7 +38,7 @@ func (r *resolver) OnTurnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.R
 		// from this same recorded close.
 		r.logger(ws).Debug("daemon.feed.turn_closed_unseen",
 			"a turn closed that this feed never saw opened; its replay draws the ending from the recorded close",
-			dlog.Context{"turn": string(turn), "close": closeWord(close.How)})
+			dlog.Context{"turn": string(turn), "close": close.How.String()})
 		return
 	}
 	r.endClosedTurn(s, turn, close)
@@ -53,7 +53,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 	if s.endedTurns[turn] {
 		log.Debug("daemon.feed.turn_closed_already_ended",
 			"a turn's close found its ending already drawn",
-			dlog.Context{"turn": string(turn), "close": closeWord(close.How)})
+			dlog.Context{"turn": string(turn), "close": close.How.String()})
 		return
 	}
 	at := r.outputPlacement(s)
@@ -70,7 +70,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 	}
 	log.Info("daemon.feed.turn_closed",
 		"a turn closed with no terminal of its own; its ending row was drawn from its recorded close",
-		dlog.Context{"turn": string(turn), "close": closeWord(close.How), "outcome": terminalArm(ended), "plane": s.plane.String()})
+		dlog.Context{"turn": string(turn), "close": close.How.String(), "outcome": terminalArm(ended), "plane": s.plane.String()})
 	r.upsert(s, at, row, true)
 	r.fileLiveEnding(s, turn, ended, nil)
 	r.settleTurnPrompts(s, turn)
@@ -126,23 +126,6 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 		errored(failed(fmt.Sprintf("closed:%d", int(close.How))), "the turn ended in a way this daemon does not know how to describe")
 	}
 	return ended
-}
-
-// closeWord names a recorded close for a log record.
-func closeWord(how wsm.TurnClose) string {
-	switch how {
-	case wsm.CloseCompleted:
-		return "completed"
-	case wsm.CloseFailed:
-		return "failed"
-	case wsm.CloseKilled:
-		return "killed"
-	case wsm.CloseOrphaned:
-		return "orphaned"
-	case wsm.CloseAgentDied:
-		return "agent_died"
-	}
-	return fmt.Sprintf("close(%d)", int(how))
 }
 
 // recordedCloses reads the durable close of every turn a history page opens,
