@@ -193,7 +193,14 @@ type ApiRequestFailed struct {
 	//	*ApiRequestFailed_OauthOrgNotAllowed
 	//	*ApiRequestFailed_MaxOutputTokens
 	//	*ApiRequestFailed_Unmodeled
-	Kind          isApiRequestFailed_Kind `protobuf_oneof:"kind"`
+	Kind isApiRequestFailed_Kind `protobuf_oneof:"kind"`
+	// THE VENDOR'S RETRY SCHEDULE, when it will retry this request: which
+	// attempt failed, how many retries it allows, and when it said the next
+	// attempt starts. Unset when the vendor stated no retry. Carried for EVERY
+	// kind -- a connection failure is retried on the same schedule as a rate
+	// limit -- so a consumer can say when the next try is due and see one that
+	// never came.
+	Retry         *ApiRetry `protobuf:"bytes,14,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -350,6 +357,13 @@ func (x *ApiRequestFailed) GetUnmodeled() *ApiUnmodeledError {
 	return nil
 }
 
+func (x *ApiRequestFailed) GetRetry() *ApiRetry {
+	if x != nil {
+		return x.Retry
+	}
+	return nil
+}
+
 type isApiRequestFailed_Kind interface {
 	isApiRequestFailed_Kind()
 }
@@ -444,6 +458,72 @@ func (*ApiRequestFailed_MaxOutputTokens) isApiRequestFailed_Kind() {}
 
 func (*ApiRequestFailed_Unmodeled) isApiRequestFailed_Kind() {}
 
+// The vendor's schedule for retrying a failed request.
+type ApiRetry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The retry the vendor makes next, as it counts them (its `retryAttempt`):
+	// 1 when the first request failed and its first retry is coming.
+	Attempt uint32 `protobuf:"varint,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	// How many retries the vendor allows before it gives up.
+	MaxRetries uint32 `protobuf:"varint,2,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	// When the vendor said the next attempt starts, epoch ms: the failure's own
+	// instant plus the delay it stated.
+	NextAttemptAtMs int64 `protobuf:"varint,3,opt,name=next_attempt_at_ms,json=nextAttemptAtMs,proto3" json:"next_attempt_at_ms,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ApiRetry) Reset() {
+	*x = ApiRetry{}
+	mi := &file_conversation_v1_api_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApiRetry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApiRetry) ProtoMessage() {}
+
+func (x *ApiRetry) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_api_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApiRetry.ProtoReflect.Descriptor instead.
+func (*ApiRetry) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ApiRetry) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetMaxRetries() uint32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetNextAttemptAtMs() int64 {
+	if x != nil {
+		return x.NextAttemptAtMs
+	}
+	return 0
+}
+
 // The API rate-limited the request.
 type ApiRateLimited struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -456,7 +536,7 @@ type ApiRateLimited struct {
 
 func (x *ApiRateLimited) Reset() {
 	*x = ApiRateLimited{}
-	mi := &file_conversation_v1_api_proto_msgTypes[1]
+	mi := &file_conversation_v1_api_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -468,7 +548,7 @@ func (x *ApiRateLimited) String() string {
 func (*ApiRateLimited) ProtoMessage() {}
 
 func (x *ApiRateLimited) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[1]
+	mi := &file_conversation_v1_api_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -481,7 +561,7 @@ func (x *ApiRateLimited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiRateLimited.ProtoReflect.Descriptor instead.
 func (*ApiRateLimited) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{1}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ApiRateLimited) GetRetryAfterMs() int64 {
@@ -502,7 +582,7 @@ type ApiOverloaded struct {
 
 func (x *ApiOverloaded) Reset() {
 	*x = ApiOverloaded{}
-	mi := &file_conversation_v1_api_proto_msgTypes[2]
+	mi := &file_conversation_v1_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -514,7 +594,7 @@ func (x *ApiOverloaded) String() string {
 func (*ApiOverloaded) ProtoMessage() {}
 
 func (x *ApiOverloaded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[2]
+	mi := &file_conversation_v1_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -527,7 +607,7 @@ func (x *ApiOverloaded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiOverloaded.ProtoReflect.Descriptor instead.
 func (*ApiOverloaded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ApiOverloaded) GetRetryAfterMs() int64 {
@@ -546,7 +626,7 @@ type ApiAuthenticationFailed struct {
 
 func (x *ApiAuthenticationFailed) Reset() {
 	*x = ApiAuthenticationFailed{}
-	mi := &file_conversation_v1_api_proto_msgTypes[3]
+	mi := &file_conversation_v1_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -558,7 +638,7 @@ func (x *ApiAuthenticationFailed) String() string {
 func (*ApiAuthenticationFailed) ProtoMessage() {}
 
 func (x *ApiAuthenticationFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[3]
+	mi := &file_conversation_v1_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -571,7 +651,7 @@ func (x *ApiAuthenticationFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiAuthenticationFailed.ProtoReflect.Descriptor instead.
 func (*ApiAuthenticationFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{3}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{4}
 }
 
 // The credential lacks permission for this request.
@@ -583,7 +663,7 @@ type ApiPermissionDenied struct {
 
 func (x *ApiPermissionDenied) Reset() {
 	*x = ApiPermissionDenied{}
-	mi := &file_conversation_v1_api_proto_msgTypes[4]
+	mi := &file_conversation_v1_api_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -595,7 +675,7 @@ func (x *ApiPermissionDenied) String() string {
 func (*ApiPermissionDenied) ProtoMessage() {}
 
 func (x *ApiPermissionDenied) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[4]
+	mi := &file_conversation_v1_api_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -608,7 +688,7 @@ func (x *ApiPermissionDenied) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiPermissionDenied.ProtoReflect.Descriptor instead.
 func (*ApiPermissionDenied) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{5}
 }
 
 // The request itself was malformed or refused.
@@ -620,7 +700,7 @@ type ApiInvalidRequest struct {
 
 func (x *ApiInvalidRequest) Reset() {
 	*x = ApiInvalidRequest{}
-	mi := &file_conversation_v1_api_proto_msgTypes[5]
+	mi := &file_conversation_v1_api_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -632,7 +712,7 @@ func (x *ApiInvalidRequest) String() string {
 func (*ApiInvalidRequest) ProtoMessage() {}
 
 func (x *ApiInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[5]
+	mi := &file_conversation_v1_api_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -645,7 +725,7 @@ func (x *ApiInvalidRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiInvalidRequest.ProtoReflect.Descriptor instead.
 func (*ApiInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{6}
 }
 
 // The request exceeded the size limit.
@@ -657,7 +737,7 @@ type ApiRequestTooLarge struct {
 
 func (x *ApiRequestTooLarge) Reset() {
 	*x = ApiRequestTooLarge{}
-	mi := &file_conversation_v1_api_proto_msgTypes[6]
+	mi := &file_conversation_v1_api_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -669,7 +749,7 @@ func (x *ApiRequestTooLarge) String() string {
 func (*ApiRequestTooLarge) ProtoMessage() {}
 
 func (x *ApiRequestTooLarge) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[6]
+	mi := &file_conversation_v1_api_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -682,7 +762,7 @@ func (x *ApiRequestTooLarge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiRequestTooLarge.ProtoReflect.Descriptor instead.
 func (*ApiRequestTooLarge) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{7}
 }
 
 // The model or resource does not exist.
@@ -694,7 +774,7 @@ type ApiNotFound struct {
 
 func (x *ApiNotFound) Reset() {
 	*x = ApiNotFound{}
-	mi := &file_conversation_v1_api_proto_msgTypes[7]
+	mi := &file_conversation_v1_api_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +786,7 @@ func (x *ApiNotFound) String() string {
 func (*ApiNotFound) ProtoMessage() {}
 
 func (x *ApiNotFound) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[7]
+	mi := &file_conversation_v1_api_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +799,7 @@ func (x *ApiNotFound) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiNotFound.ProtoReflect.Descriptor instead.
 func (*ApiNotFound) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{8}
 }
 
 // The API's own internal error.
@@ -731,7 +811,7 @@ type ApiInternal struct {
 
 func (x *ApiInternal) Reset() {
 	*x = ApiInternal{}
-	mi := &file_conversation_v1_api_proto_msgTypes[8]
+	mi := &file_conversation_v1_api_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +823,7 @@ func (x *ApiInternal) String() string {
 func (*ApiInternal) ProtoMessage() {}
 
 func (x *ApiInternal) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[8]
+	mi := &file_conversation_v1_api_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +836,7 @@ func (x *ApiInternal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiInternal.ProtoReflect.Descriptor instead.
 func (*ApiInternal) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{8}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{9}
 }
 
 // The account cannot be charged for this request.
@@ -768,7 +848,7 @@ type ApiBillingError struct {
 
 func (x *ApiBillingError) Reset() {
 	*x = ApiBillingError{}
-	mi := &file_conversation_v1_api_proto_msgTypes[9]
+	mi := &file_conversation_v1_api_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -780,7 +860,7 @@ func (x *ApiBillingError) String() string {
 func (*ApiBillingError) ProtoMessage() {}
 
 func (x *ApiBillingError) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[9]
+	mi := &file_conversation_v1_api_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -793,7 +873,7 @@ func (x *ApiBillingError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiBillingError.ProtoReflect.Descriptor instead.
 func (*ApiBillingError) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{9}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{10}
 }
 
 // The credential's organization is not permitted to use this deployment.
@@ -805,7 +885,7 @@ type ApiOauthOrgNotAllowed struct {
 
 func (x *ApiOauthOrgNotAllowed) Reset() {
 	*x = ApiOauthOrgNotAllowed{}
-	mi := &file_conversation_v1_api_proto_msgTypes[10]
+	mi := &file_conversation_v1_api_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -817,7 +897,7 @@ func (x *ApiOauthOrgNotAllowed) String() string {
 func (*ApiOauthOrgNotAllowed) ProtoMessage() {}
 
 func (x *ApiOauthOrgNotAllowed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[10]
+	mi := &file_conversation_v1_api_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -830,7 +910,7 @@ func (x *ApiOauthOrgNotAllowed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiOauthOrgNotAllowed.ProtoReflect.Descriptor instead.
 func (*ApiOauthOrgNotAllowed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{10}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{11}
 }
 
 // The request asked for more output than the model will produce.
@@ -842,7 +922,7 @@ type ApiMaxOutputTokens struct {
 
 func (x *ApiMaxOutputTokens) Reset() {
 	*x = ApiMaxOutputTokens{}
-	mi := &file_conversation_v1_api_proto_msgTypes[11]
+	mi := &file_conversation_v1_api_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -854,7 +934,7 @@ func (x *ApiMaxOutputTokens) String() string {
 func (*ApiMaxOutputTokens) ProtoMessage() {}
 
 func (x *ApiMaxOutputTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[11]
+	mi := &file_conversation_v1_api_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -867,7 +947,7 @@ func (x *ApiMaxOutputTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiMaxOutputTokens.ProtoReflect.Descriptor instead.
 func (*ApiMaxOutputTokens) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{11}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{12}
 }
 
 // An error type this schema does not model.
@@ -881,7 +961,7 @@ type ApiUnmodeledError struct {
 
 func (x *ApiUnmodeledError) Reset() {
 	*x = ApiUnmodeledError{}
-	mi := &file_conversation_v1_api_proto_msgTypes[12]
+	mi := &file_conversation_v1_api_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -893,7 +973,7 @@ func (x *ApiUnmodeledError) String() string {
 func (*ApiUnmodeledError) ProtoMessage() {}
 
 func (x *ApiUnmodeledError) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[12]
+	mi := &file_conversation_v1_api_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -906,7 +986,7 @@ func (x *ApiUnmodeledError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiUnmodeledError.ProtoReflect.Descriptor instead.
 func (*ApiUnmodeledError) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{12}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ApiUnmodeledError) GetType() string {
@@ -937,7 +1017,7 @@ type AgentModel struct {
 
 func (x *AgentModel) Reset() {
 	*x = AgentModel{}
-	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	mi := &file_conversation_v1_api_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1029,7 @@ func (x *AgentModel) String() string {
 func (*AgentModel) ProtoMessage() {}
 
 func (x *AgentModel) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	mi := &file_conversation_v1_api_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1042,7 @@ func (x *AgentModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentModel.ProtoReflect.Descriptor instead.
 func (*AgentModel) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{13}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AgentModel) GetName() string {
@@ -998,7 +1078,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_conversation_v1_api_proto_msgTypes[14]
+	mi := &file_conversation_v1_api_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1090,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[14]
+	mi := &file_conversation_v1_api_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1103,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{14}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ModelOption) GetModel() *AgentModel {
@@ -1083,7 +1163,7 @@ type ModelCapabilities struct {
 
 func (x *ModelCapabilities) Reset() {
 	*x = ModelCapabilities{}
-	mi := &file_conversation_v1_api_proto_msgTypes[15]
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1175,7 @@ func (x *ModelCapabilities) String() string {
 func (*ModelCapabilities) ProtoMessage() {}
 
 func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[15]
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1188,7 @@ func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCapabilities.ProtoReflect.Descriptor instead.
 func (*ModelCapabilities) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{15}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ModelCapabilities) GetResolvedModel() *AgentModel {
@@ -1192,7 +1272,7 @@ type ModelEffortUnsupported struct {
 
 func (x *ModelEffortUnsupported) Reset() {
 	*x = ModelEffortUnsupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1204,7 +1284,7 @@ func (x *ModelEffortUnsupported) String() string {
 func (*ModelEffortUnsupported) ProtoMessage() {}
 
 func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1217,7 +1297,7 @@ func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortUnsupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortUnsupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
 }
 
 // The model takes a reasoning-effort level.
@@ -1232,7 +1312,7 @@ type ModelEffortSupported struct {
 
 func (x *ModelEffortSupported) Reset() {
 	*x = ModelEffortSupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1244,7 +1324,7 @@ func (x *ModelEffortSupported) String() string {
 func (*ModelEffortSupported) ProtoMessage() {}
 
 func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1257,7 +1337,7 @@ func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortSupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortSupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ModelEffortSupported) GetLevels() []AgentEffortLevel {
@@ -1326,7 +1406,7 @@ type TokenUsage struct {
 
 func (x *TokenUsage) Reset() {
 	*x = TokenUsage{}
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1338,7 +1418,7 @@ func (x *TokenUsage) String() string {
 func (*TokenUsage) ProtoMessage() {}
 
 func (x *TokenUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1351,7 +1431,7 @@ func (x *TokenUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenUsage.ProtoReflect.Descriptor instead.
 func (*TokenUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TokenUsage) GetInputHits() *TokenCacheHits {
@@ -1395,7 +1475,7 @@ type TokenCacheHits struct {
 
 func (x *TokenCacheHits) Reset() {
 	*x = TokenCacheHits{}
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1407,7 +1487,7 @@ func (x *TokenCacheHits) String() string {
 func (*TokenCacheHits) ProtoMessage() {}
 
 func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1420,7 +1500,7 @@ func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheHits.ProtoReflect.Descriptor instead.
 func (*TokenCacheHits) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TokenCacheHits) GetRead() uint64 {
@@ -1448,7 +1528,7 @@ type TokenCacheMisses struct {
 
 func (x *TokenCacheMisses) Reset() {
 	*x = TokenCacheMisses{}
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1540,7 @@ func (x *TokenCacheMisses) String() string {
 func (*TokenCacheMisses) ProtoMessage() {}
 
 func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1553,7 @@ func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheMisses.ProtoReflect.Descriptor instead.
 func (*TokenCacheMisses) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TokenCacheMisses) GetWritten() uint64 {
@@ -1511,7 +1591,7 @@ var File_conversation_v1_api_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x19conversation/v1/api.proto\x12\x0fconversation.v1\x1a google/protobuf/descriptor.proto\"\xca\a\n" +
+	"\x19conversation/v1/api.proto\x12\x0fconversation.v1\x1a google/protobuf/descriptor.proto\"\x8a\b\n" +
 	"\x10ApiRequestFailed\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12D\n" +
 	"\frate_limited\x18\x02 \x01(\v2\x1f.conversation.v1.ApiRateLimitedH\x00R\vrateLimited\x12@\n" +
@@ -1528,8 +1608,15 @@ const file_conversation_v1_api_proto_rawDesc = "" +
 	"\x15oauth_org_not_allowed\x18\f \x01(\v2&.conversation.v1.ApiOauthOrgNotAllowedH\x00R\x12oauthOrgNotAllowed\x12Q\n" +
 	"\x11max_output_tokens\x18\r \x01(\v2#.conversation.v1.ApiMaxOutputTokensH\x00R\x0fmaxOutputTokens\x12B\n" +
 	"\tunmodeled\x18\n" +
-	" \x01(\v2\".conversation.v1.ApiUnmodeledErrorH\x00R\tunmodeledB\x06\n" +
-	"\x04kind\"N\n" +
+	" \x01(\v2\".conversation.v1.ApiUnmodeledErrorH\x00R\tunmodeled\x124\n" +
+	"\x05retry\x18\x0e \x01(\v2\x19.conversation.v1.ApiRetryH\x01R\x05retry\x88\x01\x01B\x06\n" +
+	"\x04kindB\b\n" +
+	"\x06_retry\"r\n" +
+	"\bApiRetry\x12\x18\n" +
+	"\aattempt\x18\x01 \x01(\rR\aattempt\x12\x1f\n" +
+	"\vmax_retries\x18\x02 \x01(\rR\n" +
+	"maxRetries\x12+\n" +
+	"\x12next_attempt_at_ms\x18\x03 \x01(\x03R\x0fnextAttemptAtMs\"N\n" +
 	"\x0eApiRateLimited\x12)\n" +
 	"\x0eretry_after_ms\x18\x01 \x01(\x03H\x00R\fretryAfterMs\x88\x01\x01B\x11\n" +
 	"\x0f_retry_after_ms\"M\n" +
@@ -1605,60 +1692,62 @@ func file_conversation_v1_api_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_api_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_conversation_v1_api_proto_goTypes = []any{
 	(AgentEffortLevel)(0),                 // 0: conversation.v1.AgentEffortLevel
 	(ModelMarker)(0),                      // 1: conversation.v1.ModelMarker
 	(*ApiRequestFailed)(nil),              // 2: conversation.v1.ApiRequestFailed
-	(*ApiRateLimited)(nil),                // 3: conversation.v1.ApiRateLimited
-	(*ApiOverloaded)(nil),                 // 4: conversation.v1.ApiOverloaded
-	(*ApiAuthenticationFailed)(nil),       // 5: conversation.v1.ApiAuthenticationFailed
-	(*ApiPermissionDenied)(nil),           // 6: conversation.v1.ApiPermissionDenied
-	(*ApiInvalidRequest)(nil),             // 7: conversation.v1.ApiInvalidRequest
-	(*ApiRequestTooLarge)(nil),            // 8: conversation.v1.ApiRequestTooLarge
-	(*ApiNotFound)(nil),                   // 9: conversation.v1.ApiNotFound
-	(*ApiInternal)(nil),                   // 10: conversation.v1.ApiInternal
-	(*ApiBillingError)(nil),               // 11: conversation.v1.ApiBillingError
-	(*ApiOauthOrgNotAllowed)(nil),         // 12: conversation.v1.ApiOauthOrgNotAllowed
-	(*ApiMaxOutputTokens)(nil),            // 13: conversation.v1.ApiMaxOutputTokens
-	(*ApiUnmodeledError)(nil),             // 14: conversation.v1.ApiUnmodeledError
-	(*AgentModel)(nil),                    // 15: conversation.v1.AgentModel
-	(*ModelOption)(nil),                   // 16: conversation.v1.ModelOption
-	(*ModelCapabilities)(nil),             // 17: conversation.v1.ModelCapabilities
-	(*ModelEffortUnsupported)(nil),        // 18: conversation.v1.ModelEffortUnsupported
-	(*ModelEffortSupported)(nil),          // 19: conversation.v1.ModelEffortSupported
-	(*TokenUsage)(nil),                    // 20: conversation.v1.TokenUsage
-	(*TokenCacheHits)(nil),                // 21: conversation.v1.TokenCacheHits
-	(*TokenCacheMisses)(nil),              // 22: conversation.v1.TokenCacheMisses
-	(*descriptorpb.EnumValueOptions)(nil), // 23: google.protobuf.EnumValueOptions
+	(*ApiRetry)(nil),                      // 3: conversation.v1.ApiRetry
+	(*ApiRateLimited)(nil),                // 4: conversation.v1.ApiRateLimited
+	(*ApiOverloaded)(nil),                 // 5: conversation.v1.ApiOverloaded
+	(*ApiAuthenticationFailed)(nil),       // 6: conversation.v1.ApiAuthenticationFailed
+	(*ApiPermissionDenied)(nil),           // 7: conversation.v1.ApiPermissionDenied
+	(*ApiInvalidRequest)(nil),             // 8: conversation.v1.ApiInvalidRequest
+	(*ApiRequestTooLarge)(nil),            // 9: conversation.v1.ApiRequestTooLarge
+	(*ApiNotFound)(nil),                   // 10: conversation.v1.ApiNotFound
+	(*ApiInternal)(nil),                   // 11: conversation.v1.ApiInternal
+	(*ApiBillingError)(nil),               // 12: conversation.v1.ApiBillingError
+	(*ApiOauthOrgNotAllowed)(nil),         // 13: conversation.v1.ApiOauthOrgNotAllowed
+	(*ApiMaxOutputTokens)(nil),            // 14: conversation.v1.ApiMaxOutputTokens
+	(*ApiUnmodeledError)(nil),             // 15: conversation.v1.ApiUnmodeledError
+	(*AgentModel)(nil),                    // 16: conversation.v1.AgentModel
+	(*ModelOption)(nil),                   // 17: conversation.v1.ModelOption
+	(*ModelCapabilities)(nil),             // 18: conversation.v1.ModelCapabilities
+	(*ModelEffortUnsupported)(nil),        // 19: conversation.v1.ModelEffortUnsupported
+	(*ModelEffortSupported)(nil),          // 20: conversation.v1.ModelEffortSupported
+	(*TokenUsage)(nil),                    // 21: conversation.v1.TokenUsage
+	(*TokenCacheHits)(nil),                // 22: conversation.v1.TokenCacheHits
+	(*TokenCacheMisses)(nil),              // 23: conversation.v1.TokenCacheMisses
+	(*descriptorpb.EnumValueOptions)(nil), // 24: google.protobuf.EnumValueOptions
 }
 var file_conversation_v1_api_proto_depIdxs = []int32{
-	3,  // 0: conversation.v1.ApiRequestFailed.rate_limited:type_name -> conversation.v1.ApiRateLimited
-	4,  // 1: conversation.v1.ApiRequestFailed.overloaded:type_name -> conversation.v1.ApiOverloaded
-	5,  // 2: conversation.v1.ApiRequestFailed.authentication_failed:type_name -> conversation.v1.ApiAuthenticationFailed
-	6,  // 3: conversation.v1.ApiRequestFailed.permission_denied:type_name -> conversation.v1.ApiPermissionDenied
-	7,  // 4: conversation.v1.ApiRequestFailed.invalid_request:type_name -> conversation.v1.ApiInvalidRequest
-	8,  // 5: conversation.v1.ApiRequestFailed.request_too_large:type_name -> conversation.v1.ApiRequestTooLarge
-	9,  // 6: conversation.v1.ApiRequestFailed.not_found:type_name -> conversation.v1.ApiNotFound
-	10, // 7: conversation.v1.ApiRequestFailed.internal:type_name -> conversation.v1.ApiInternal
-	11, // 8: conversation.v1.ApiRequestFailed.billing_error:type_name -> conversation.v1.ApiBillingError
-	12, // 9: conversation.v1.ApiRequestFailed.oauth_org_not_allowed:type_name -> conversation.v1.ApiOauthOrgNotAllowed
-	13, // 10: conversation.v1.ApiRequestFailed.max_output_tokens:type_name -> conversation.v1.ApiMaxOutputTokens
-	14, // 11: conversation.v1.ApiRequestFailed.unmodeled:type_name -> conversation.v1.ApiUnmodeledError
-	15, // 12: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
-	17, // 13: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
-	15, // 14: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
-	18, // 15: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
-	19, // 16: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
-	0,  // 17: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
-	21, // 18: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
-	22, // 19: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
-	23, // 20: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	20, // [20:21] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	4,  // 0: conversation.v1.ApiRequestFailed.rate_limited:type_name -> conversation.v1.ApiRateLimited
+	5,  // 1: conversation.v1.ApiRequestFailed.overloaded:type_name -> conversation.v1.ApiOverloaded
+	6,  // 2: conversation.v1.ApiRequestFailed.authentication_failed:type_name -> conversation.v1.ApiAuthenticationFailed
+	7,  // 3: conversation.v1.ApiRequestFailed.permission_denied:type_name -> conversation.v1.ApiPermissionDenied
+	8,  // 4: conversation.v1.ApiRequestFailed.invalid_request:type_name -> conversation.v1.ApiInvalidRequest
+	9,  // 5: conversation.v1.ApiRequestFailed.request_too_large:type_name -> conversation.v1.ApiRequestTooLarge
+	10, // 6: conversation.v1.ApiRequestFailed.not_found:type_name -> conversation.v1.ApiNotFound
+	11, // 7: conversation.v1.ApiRequestFailed.internal:type_name -> conversation.v1.ApiInternal
+	12, // 8: conversation.v1.ApiRequestFailed.billing_error:type_name -> conversation.v1.ApiBillingError
+	13, // 9: conversation.v1.ApiRequestFailed.oauth_org_not_allowed:type_name -> conversation.v1.ApiOauthOrgNotAllowed
+	14, // 10: conversation.v1.ApiRequestFailed.max_output_tokens:type_name -> conversation.v1.ApiMaxOutputTokens
+	15, // 11: conversation.v1.ApiRequestFailed.unmodeled:type_name -> conversation.v1.ApiUnmodeledError
+	3,  // 12: conversation.v1.ApiRequestFailed.retry:type_name -> conversation.v1.ApiRetry
+	16, // 13: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
+	18, // 14: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
+	16, // 15: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
+	19, // 16: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
+	20, // 17: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
+	0,  // 18: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
+	22, // 19: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
+	23, // 20: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
+	24, // 21: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	21, // [21:22] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_api_proto_init() }
@@ -1680,10 +1769,10 @@ func file_conversation_v1_api_proto_init() {
 		(*ApiRequestFailed_MaxOutputTokens)(nil),
 		(*ApiRequestFailed_Unmodeled)(nil),
 	}
-	file_conversation_v1_api_proto_msgTypes[1].OneofWrappers = []any{}
 	file_conversation_v1_api_proto_msgTypes[2].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[14].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[15].OneofWrappers = []any{
+	file_conversation_v1_api_proto_msgTypes[3].OneofWrappers = []any{}
+	file_conversation_v1_api_proto_msgTypes[15].OneofWrappers = []any{}
+	file_conversation_v1_api_proto_msgTypes[16].OneofWrappers = []any{
 		(*ModelCapabilities_EffortUnsupported)(nil),
 		(*ModelCapabilities_EffortSupported)(nil),
 	}
@@ -1693,7 +1782,7 @@ func file_conversation_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_api_proto_rawDesc), len(file_conversation_v1_api_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   21,
+			NumMessages:   22,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
