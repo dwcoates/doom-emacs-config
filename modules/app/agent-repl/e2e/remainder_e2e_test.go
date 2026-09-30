@@ -680,21 +680,11 @@ func TestPushNotificationSent(t *testing.T) {
 // the whole path from the tool result to the footer copies it unchanged.
 const rmPushMessage = "The offline run finished."
 
-// rmNotificationText answers the footer's standing notification line whichever
-// status arm is in effect, since the notification outlives the turn that raised
-// it and the status underneath it therefore changes (footer.proto declares the
-// same FooterStatusActivityNotification under idle, thinking and waiting).
+// rmNotificationText answers the footer's standing push notification,
+// whichever status arm is in effect: the notification is salient on every arm
+// and outlives the turn that raised it, so the status underneath it changes.
 func rmNotificationText(v *frontendv1.FooterView) string {
-	status := v.GetStrip().GetStatus()
-	switch {
-	case status.GetIdle().GetActivity().GetNotification() != nil:
-		return status.GetIdle().GetActivity().GetNotification().GetText()
-	case status.GetWorking().GetActivity().GetNotification() != nil:
-		return status.GetWorking().GetActivity().GetNotification().GetText()
-	case status.GetWaiting().GetActivity().GetNotification() != nil:
-		return status.GetWaiting().GetActivity().GetNotification().GetText()
-	}
-	return ""
+	return footerNotification(v)
 }
 
 // rmAssertNoRowCarriesText fails if any row of ws's materialized root feed

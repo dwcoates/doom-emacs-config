@@ -244,7 +244,7 @@ func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 		return v.GetStrip().GetStatus().GetTurnFailed() != nil
 	})
 	failed := view.GetStrip().GetStatus().GetTurnFailed()
-	if got := failed.GetActivity().GetQueryDied().GetText(); got == "" {
+	if got := failed.GetActivity().GetSalient().GetQueryDied().GetText(); got == "" {
 		t.Errorf("footer turn_failed activity query_died text = %q, want the daemon's composed dead-query line", got)
 	}
 }
@@ -569,14 +569,13 @@ func TestContextTipDrawsNoRow(t *testing.T) {
 	}
 	pfAssertOnlyProseRows(t, rows, turn)
 
-	// The footer's context-budget line is only ever drawn under a BLOCKED
-	// status (footer.proto: FooterStatusBlockedActivity.context_budget); the
-	// tip must not have blocked this session at all.
+	// The footer's context-budget line rides every status arm's salient oneof;
+	// a generic tip must stand none, under any status.
 	view := pfAwaitView(t, w, footer.Stream, "the footer after the tip turn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus() != nil
 	})
-	if got := view.GetStrip().GetStatus().GetBlocked().GetActivity().GetContextBudget(); got != nil {
-		t.Errorf("footer drew a context-budget line %v from a GENERIC context tip, want none", got)
+	if got := footerContextBudget(view); got != "" {
+		t.Errorf("footer drew a context-budget line %q from a GENERIC context tip, want none", got)
 	}
 }
 
@@ -606,8 +605,8 @@ func TestTokensReminderDrawsNoRow(t *testing.T) {
 	view := pfAwaitView(t, w, footer.Stream, "the footer after the token-reminder turn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus() != nil
 	})
-	if got := view.GetStrip().GetStatus().GetBlocked().GetActivity().GetContextBudget(); got != nil {
-		t.Errorf("footer drew a context-budget line %v from a TOKEN-COUNT reminder, want none", got)
+	if got := footerContextBudget(view); got != "" {
+		t.Errorf("footer drew a context-budget line %q from a TOKEN-COUNT reminder, want none", got)
 	}
 }
 

@@ -157,23 +157,14 @@ func TestAccountUsage(t *testing.T) {
 		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "account_usage"
 	})
 
-	// Assert the FRONTEND consequence, which for these figures is a SPECIFIC
-	// NEGATIVE rather than a drawn line — the one account arm frontend/v1
-	// names at all.
-	//
-	// footer.proto:721-730's FooterStatusActivityRateLimited is "the
-	// rate-limit rung… both figures are shown so a reader can tell WHICH
-	// allowance the NEWSWORTHY percentage belongs to": the line's whole
-	// premise is that something is newsworthy. The resolver enforces exactly
-	// that ("an unremarkable allowance is not news and would crowd out the
-	// lines that are" — daemon/internal/resolve/footer/activity.go rateLine),
-	// and `usage-full`'s five_hour window is 41%
-	// (agent-shim/claude/shim/src/fake/catalogs.ts fakeAccountUsage), well
-	// under DefaultRateLimitNewsworthyThreshold. So a filed-but-unremarkable
-	// sample must draw NO rate-limited activity line, which is a stronger
-	// statement than the log record alone: it says the sample landed AND the
-	// newsworthiness gate held.
-	assertNoRateLimitedLine(t, w, ws)
+	// Assert the FRONTEND consequence. A SAMPLE is the account's figures, never
+	// the vendor speaking, so it stands no salient rate-limit line (owner
+	// ruling, 2026-09-30: only a rate-limit EVENT that warns or refuses does);
+	// its figures are the enduring usage line's, drawn whatever they are.
+	// `usage-full`'s five_hour window is 41% (agent-shim/claude/shim/src/fake/
+	// catalogs.ts fakeAccountUsage), which is also under the 80% rule's
+	// threshold, so the enduring line is the usage one.
+	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
 }
 
 // TestAccountUsageAvailableArm drives `!usage-available` — the OTHER
@@ -199,31 +190,28 @@ func TestAccountUsageAvailableArm(t *testing.T) {
 	w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "daemon"), "the footer resolver to file an account_usage session update", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "account_usage"
 	})
-	assertNoRateLimitedLine(t, w, ws)
+	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
 }
 
-// assertNoRateLimitedLine fails if the footer draws a rate-limited activity
-// line. It opens a FRESH footer stream and reads its FIRST view: a newly
+// assertTheSampleDrawsOnlyTheEnduringUsage fails if the footer draws a
+// rate-limit line, or draws the sample's figures anywhere but the enduring
+// usage line. It opens a FRESH footer stream and reads its FIRST view: a newly
 // opened stream is served the CURRENT resolved state, so — called after the
 // resolver's own account_usage log record has been observed — the view it
 // answers necessarily already carries the filed sample. No sleep, and no
 // waiting for the absence of something.
-func assertNoRateLimitedLine(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func assertTheSampleDrawsOnlyTheEnduringUsage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
 	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's current view after the usage sample was filed", func(*frontendv1.FooterView) bool {
 		return true
 	})
-	status := view.GetStrip().GetStatus()
-	for _, line := range []*frontendv1.FooterStatusActivityRateLimited{
-		status.GetIdle().GetActivity().GetRateLimited(),
-		status.GetWorking().GetActivity().GetRateLimited(),
-		status.GetWaiting().GetActivity().GetRateLimited(),
-	} {
-		if line != nil {
-			t.Errorf("footer draws a rate-limited activity line %v, want none at this sample's sub-threshold utilizations", line)
-		}
+	if line := footerRateLimit(view); line != nil {
+		t.Errorf("footer draws a rate-limit line %v from a sample, want none: only the vendor's event stands one", line)
+	}
+	if footerEnduringUsage(view).GetSession() == nil {
+		t.Errorf("footer view %v, want the sample's session figure on the enduring usage line", view.GetStrip().GetStatus())
 	}
 }
 
