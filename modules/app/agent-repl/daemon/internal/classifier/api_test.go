@@ -53,3 +53,36 @@ func TestNewWiresTheProductionRunSeam(t *testing.T) {
 		t.Fatal("Judge() = nil error, want the guard's refusal")
 	}
 }
+
+func TestRouteNamesEachRoute(t *testing.T) {
+	tests := []struct {
+		route Route
+		want  string
+	}{
+		{route: RouteQueue, want: "queue"},
+		{route: RouteAfterToolCall, want: "after_tool_call"},
+		{route: RouteInterrupt, want: "interrupt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act
+			got := tt.route.String()
+			// Assert
+			if got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRouteRefusesToNameAnUndeclaredRoute(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("String() on an undeclared route must panic, never name it")
+		}
+	}()
+	// Act
+	_ = Route(7).String()
+}

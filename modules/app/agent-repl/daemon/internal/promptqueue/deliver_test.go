@@ -595,7 +595,7 @@ func TestAPromptHeldDuringAnySpellingOfClearDoesNotInterruptIt(t *testing.T) {
 				t.Fatalf("Submit: %v", err)
 			}
 			h.watcher.running("cut-1")
-			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 			// Act
 			if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 				t.Fatalf("Submit: %v", err)

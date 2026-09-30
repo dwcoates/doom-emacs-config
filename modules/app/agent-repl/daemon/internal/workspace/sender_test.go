@@ -494,3 +494,63 @@ func TestBothKillTurnCallersSendTheSharedRequest(t *testing.T) {
 		})
 	}
 }
+
+// TestSenderJoinsOrStartsTheTurnAsItsVerbSays covers the one flag that tells
+// the two verbs apart on the wire: JoinRunningTurn asks the shim to join the
+// running turn, and StartTurn never does.
+func TestSenderJoinsOrStartsTheTurnAsItsVerbSays(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*sender) (*shimv1.StartTurnSuccess, error)
+		want bool
+	}{
+		{name: "StartTurn waits for no running turn", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		}, want: false},
+		{name: "JoinRunningTurn joins it", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.JoinRunningTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+			}}
+			s := &sender{client: client}
+
+			// Act
+			if _, err := tt.call(s); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+
+			// Assert
+			if got := client.startTurnReq.GetJoinRunningTurn(); got != tt.want {
+				t.Fatalf("join_running_turn = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSenderJoinRunningTurnCarriesTheRefusalArm covers a join the shim
+// refused: the caller learns which refusal, as it does for StartTurn.
+func TestSenderJoinRunningTurnCarriesTheRefusalArm(t *testing.T) {
+	// Arrange
+	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
+			Detail: "turn t-2 already waits to join turn t-1",
+			Kind: &shimv1.StartTurnFailure_TurnAlreadyOpen{
+				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{},
+			},
+		}},
+	}}}
+
+	// Act
+	_, err := s.JoinRunningTurn(context.Background(), "turn-3", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != "turn_already_open" {
+		t.Fatalf("JoinRunningTurn = %v, want a typed turn_already_open refusal", err)
+	}
+}

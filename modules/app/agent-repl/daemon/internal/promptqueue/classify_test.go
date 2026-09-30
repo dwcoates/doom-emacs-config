@@ -79,7 +79,7 @@ func TestEveryVerdictIsLoggedAtInfoWithItsReason(t *testing.T) {
 		reason   string
 	}{
 		{name: "a holding verdict", verdict: classifier.Verdict{Reason: "independent"}, arm: "hold_for_turn_end", reason: "independent"},
-		{name: "an interjecting verdict", verdict: classifier.Verdict{Interject: true, Reason: "it countermands the work"}, arm: "interject", reason: "it countermands the work"},
+		{name: "an interjecting verdict", verdict: classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}, arm: "interject", reason: "it countermands the work"},
 		{name: "a failed classifier's verdict", judgeErr: errors.New("the vendor run failed"), arm: "hold_for_turn_end", reason: "the classifier could not decide, so the prompt waits for the running turn to end"},
 	}
 	for _, tt := range tests {
@@ -136,7 +136,7 @@ func TestJudgeStampsHoldForTurnEndOnAHoldingVerdict(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "an unrelated question")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -152,7 +152,7 @@ func TestJudgeKeepsTheJudgesReasonAsEvidence(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "genuinely independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "genuinely independent"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "a question")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -300,7 +300,7 @@ func TestInterjectFiresTheInterruptingStatusAtOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -316,7 +316,7 @@ func TestInterjectSendsTheInterruptToTheShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -335,7 +335,7 @@ func TestInterjectStatesTheStopAsAnInterjection(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -352,7 +352,7 @@ func TestInterjectWaitsForTheTurnsRealEndBeforeDelivering(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -370,12 +370,12 @@ func TestAnInterruptVerdictAgainstAQueuedPromptCoalescesTheTwo(t *testing.T) {
 	// are folded into one.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
@@ -400,7 +400,7 @@ func TestAPromptJudgedAgainstAQueuedPromptIsJudgedAgainstThatPromptsText(t *test
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -423,12 +423,12 @@ func TestACoalescedPromptIsDeliveredAsOneTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
 	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -448,12 +448,12 @@ func TestACoalescedPromptTellsTheFooter(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
@@ -481,7 +481,7 @@ func TestARefusedInterruptReturnsThePromptToHeld(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			running(t, h, "running-turn", "the running work")
-			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 			release := h.judge.hold()
 			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
 				t.Fatalf("Submit: %v", err)
@@ -502,7 +502,7 @@ func TestARefusedInterruptClearsTheInterruptingStatus(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	h.sender.killErr = errors.New("the turn is not the open one")
 	// Act.
 	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
@@ -561,7 +561,7 @@ func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			running(t, h, "running-turn", "the running work")
-			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 			h.sender.killErr = tt.cause
 			// Act.
 			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
@@ -586,7 +586,7 @@ func TestAPromptWhoseInterruptWasRefusedDeliversAtTheTurnsEnd(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	h.sender.killErr = liveRefusal{}
 	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -605,12 +605,12 @@ func TestAFailedInterruptLeavesNoQueueJumpBehind(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	h.sender.killErr = errors.New("the turn is not the open one")
 	if _, err := h.q.Submit(context.Background(), submission("jumper", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -723,7 +723,7 @@ func TestDrainReportsFalseWhenAVerdictOutlivesTheBound(t *testing.T) {
 func verdictSettlesUnderACut(t *testing.T, h *harness, command conversationv1.SessionCommand) {
 	t.Helper()
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	release := h.judge.hold()
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -804,7 +804,7 @@ func TestAnInterjectingVerdictStillInterruptsAnOrdinaryTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -837,7 +837,7 @@ func TestASessionActPromptNeverReachesTheClassifierWhileATurnRuns(t *testing.T) 
 			// Arrange
 			h := newHarness(t)
 			running(t, h, "running-turn", "the running work")
-			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 			// Act
 			if _, err := h.q.Submit(context.Background(), submission("t1", tt.text)); err != nil {
 				t.Fatalf("Submit: %v", err)
@@ -870,7 +870,7 @@ func TestASessionActPromptNeverInterruptsTheRunningTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "/compact")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -955,7 +955,7 @@ func TestADeferredPromptBehindARunningTurnIsHeldForItsEndUnjudged(t *testing.T) 
 	// Arrange: a verdict that would interject, were the model ever asked.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "urgent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "urgent"}
 
 	// Act
 	got, err := h.q.Submit(context.Background(), deferredSubmission("t1", "after this, run the tests"))
@@ -1054,15 +1054,15 @@ func TestTheJudgeRefusesADeferredPromptAtItsOwnCallSite(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "urgent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "urgent"}
 	log := dlog.NewTestLogger()
 
 	// Act
-	verdict, interject := h.q.verdictFor(context.Background(), deferredSubmission("t1", "later"), "running-turn", log)
+	verdict, route := h.q.verdictFor(context.Background(), deferredSubmission("t1", "later"), "running-turn", log)
 
 	// Assert
-	if interject || verdict.Arm != wsm.ArmHoldForTurnEnd || askedCount(h) != 0 {
-		t.Fatalf("verdictFor = (%+v, %v) after %d asks, want hold_for_turn_end and the model never asked", verdict, interject, askedCount(h))
+	if route != classifier.RouteQueue || verdict.Arm != wsm.ArmHoldForTurnEnd || askedCount(h) != 0 {
+		t.Fatalf("verdictFor = (%+v, %s) after %d asks, want hold_for_turn_end and the model never asked", verdict, route, askedCount(h))
 	}
 }
 
@@ -1134,7 +1134,7 @@ func TestAJudgedPromptReportsClassifyingThenItsPlaceInTheQueue(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "it can wait"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "it can wait"}
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "and then this")); err != nil {
@@ -1157,7 +1157,7 @@ func TestAnInterjectingPromptReportsClassifyingThenInterjecting(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {

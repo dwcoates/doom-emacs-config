@@ -112,12 +112,25 @@ type shimclientSender interface {
 // needs the prompt's agent for SetMainAgent and the opening page for the
 // watcher's turn handover, and neither is recoverable from an error.
 func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, false)
+}
+
+// JoinRunningTurn sends the prompt to join the daemon's turn in flight after
+// its current tool call (StartTurnRequest.join_running_turn), answered exactly
+// as StartTurn is.
+func (s *sender) JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, true)
+}
+
+// startTurn is the one StartTurn call both verbs make.
+func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, join bool) (*shimv1.StartTurnSuccess, error) {
 	response, err := s.client.StartTurn(ctx, &shimv1.StartTurnRequest{
-		Turn:         &conversationv1.TurnId{Value: string(turn)},
-		Said:         said,
-		Origin:       origin,
-		PageSize:     turnPageSize,
-		KnownThrough: s.knownThrough(),
+		Turn:            &conversationv1.TurnId{Value: string(turn)},
+		Said:            said,
+		Origin:          origin,
+		PageSize:        turnPageSize,
+		KnownThrough:    s.knownThrough(),
+		JoinRunningTurn: join,
 	})
 	if err != nil {
 		return nil, err
