@@ -15,6 +15,7 @@ import {
 } from "../../src/footer/quiet-hold.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { enduringLine } from "./enduring-line.js";
 
 /** An ending held until ROW is painted. */
 function ending(row: string, text = "✅ Bash finished — handling result..."): FooterStatusQuietStretchEnding {
@@ -187,7 +188,7 @@ describe("quietStretchEndingOf", () => {
 
 describe("withHeldLine", () => {
   /** An unpinned cell drawing only its enduring line. */
-  const enduringOnly = { tier: { case: "unpinned" as const, value: { enduring: {} } } };
+  const enduringOnly = { tier: { case: "unpinned" as const, value: { enduring: enduringLine() as never } } };
 
   it("draws the held line as the working arm's quiet-stretch line", () => {
     const strip = create(FooterStripSchema, {
@@ -217,6 +218,18 @@ describe("withHeldLine", () => {
     expect(tier?.case === "unpinned" ? tier.value.quietStretch?.text : undefined).toBe(
       "✅ Subagent finished",
     );
+  });
+
+  it("gives the held line the instant the ended line began standing", () => {
+    const strip = create(FooterStripSchema, {
+      status: { status: { case: "working", value: { activity: enduringOnly } } },
+    });
+
+    const out = withHeldLine(strip, ending("row-2"));
+
+    const status = out.status?.status;
+    const tier = status?.case === "working" ? status.value.activity?.tier : undefined;
+    expect(tier?.case === "unpinned" ? tier.value.quietStretch?.at?.atMs : undefined).toBe(1_000n);
   });
 
   it("keeps the pushed enduring line beneath the held line", () => {

@@ -47,6 +47,7 @@ import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
+import { enduringLine } from "./enduring-line.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
@@ -205,7 +206,7 @@ export function quietActivity(statusCase: string): Record<string, unknown> {
   if (statusCase === "waiting") {
     return { salient: { at: { atMs: 0n }, kind: { case: "gatedCall", value: { text: "Bash: ls" } } } };
   }
-  return { tier: { case: "unpinned", value: { enduring: {} } } };
+  return { tier: { case: "unpinned", value: { enduring: enduringLine() } } };
 }
 
 /** An expiry schedule for draws whose re-render no test watches. */

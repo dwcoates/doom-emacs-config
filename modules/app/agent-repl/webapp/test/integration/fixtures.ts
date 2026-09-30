@@ -89,6 +89,7 @@ import {
   type SubmitPromptCommandPanel,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { orderFor } from "../feed-order.js";
+import { enduringLine } from "../footer/enduring-line.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -1431,7 +1432,7 @@ export function allowance(
   };
 }
 
-/** An enduring line whose usage's two allowances carry the given verdicts. */
+/** The enduring figures of a usage line whose two allowances carry the given verdicts. */
 export const enduringUsage = (
   session?: FooterAllowanceArm,
   weekly?: FooterAllowanceArm,
@@ -1454,17 +1455,27 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   fault: { kind: "link_severed", detail: "the socket closed" },
   startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
   closeBlocked: { text: "a turn is live" },
+  rateLimit: {
+    window: { window: { case: "weekly", value: {} } },
+    verdict: { case: "allowedWarning", value: {} },
+    utilization: 0.85,
+  },
+  notification: { text: "the agent addressed you" },
+  contextBudget: { text: "84% of the window" },
 };
+
+/** The salient kinds every status arm carries after its own and `update`. */
+const SHARED_SALIENTS = ["rateLimit", "notification", "contextBudget"] as const;
 
 /**
  * Which salient kinds each status arm's cell legally carries (footer.proto;
  * the arms that share a cell share its row).
  */
 export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
-  idle: ["update", "queryDied"],
-  turnFailed: ["update", "queryDied"],
-  degraded: ["update", "queryDied"],
-  working: ["compaction", "retrying", "update"],
+  idle: ["queryDied", "update", ...SHARED_SALIENTS],
+  turnFailed: ["queryDied", "update", ...SHARED_SALIENTS],
+  degraded: ["queryDied", "update", ...SHARED_SALIENTS],
+  working: ["compaction", "retrying", "update", ...SHARED_SALIENTS],
   waiting: [
     "wakeup",
     "gatedCall",
@@ -1473,30 +1484,27 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
     "coldGateCost",
     "interrupting",
     "update",
+    ...SHARED_SALIENTS,
   ],
-  interrupted: ["update"],
-  merging: ["mergingCommit", "update"],
-  mergeConflict: ["mergingCommit", "update"],
-  mergeFailed: ["mergingCommit", "update"],
-  merged: ["mergingCommit", "update"],
-  background: ["update"],
-  blocked: ["authenticating", "fault", "update"],
-  disconnected: ["startFailed", "fault", "update"],
-  closing: ["closeBlocked", "update"],
-  loading: ["update"],
+  interrupted: ["update", ...SHARED_SALIENTS],
+  merging: ["mergingCommit", "update", ...SHARED_SALIENTS],
+  mergeConflict: ["mergingCommit", "update", ...SHARED_SALIENTS],
+  mergeFailed: ["mergingCommit", "update", ...SHARED_SALIENTS],
+  merged: ["mergingCommit", "update", ...SHARED_SALIENTS],
+  background: ["update", ...SHARED_SALIENTS],
+  blocked: ["authenticating", "fault", "update", ...SHARED_SALIENTS],
+  disconnected: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
+  closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
+  loading: ["update", ...SHARED_SALIENTS],
 };
 
 /** Every TRANSIENT kind arm, with a complete payload for each. */
 export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
-  thinking: { reasoning: { case: "text", value: { tail: "weighing the port" } } },
-  response: { tail: "the port is done" },
   toolCall: { tool: "Bash", summary: "npm test" },
   task: { subject: "write the harness", completed: 2, total: 5 },
-  submitting: { promptLead: "port the footer" },
+  submitting: { promptLead: "port the footer", stage: { case: "delivered", value: {} } },
   hook: { name: "PreToolUse" },
   contextInjected: { text: "CLAUDE.md loaded" },
-  notification: { text: "the agent addressed you" },
-  contextBudget: { text: "84% of the window" },
   fault: { kind: "shim_reported", detail: "the shim said so" },
   daemonWarning: { operation: "feed.row-order-changed", message: "kept in place" },
   daemonError: { operation: "store.write", message: "disk full" },
@@ -1546,7 +1554,7 @@ function footerActivity(
     return status === "waiting" ? { salient } : { tier: { case: "salient", value: salient } };
   }
   if (kind === FOOTER_ENDURING) {
-    return { tier: { case: "unpinned", value: { enduring: init?.activityOverride ?? {} } } };
+    return { tier: { case: "unpinned", value: { enduring: enduringLine(init?.activityOverride ?? {}) } } };
   }
   const payload = FOOTER_TRANSIENT_KINDS[kind];
   if (payload === undefined) throw new Error(`no activity kind ${JSON.stringify(kind)} under ${status}`);
@@ -1560,7 +1568,7 @@ function footerActivity(
           ...(init?.agent === undefined ? {} : { agent: { label: init.agent } }),
           kind: { case: kind, value: init?.activityOverride ?? payload },
         },
-        enduring: {},
+        enduring: enduringLine(),
       },
     },
   };

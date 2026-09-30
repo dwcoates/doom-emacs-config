@@ -20,7 +20,7 @@
  */
 import { clone, create } from "@bufbuild/protobuf";
 import {
-  FooterStatusActivityQuietStretchSchema,
+  FooterActivityQuietStretchSchema,
   FooterStripSchema,
   type FooterStatus,
   type FooterStatusQuietStretchEnding,
@@ -70,7 +70,10 @@ export function quietStretchEndingOf(
 export function withHeldLine(strip: FooterStrip, ending: FooterStatusQuietStretchEnding): FooterStrip {
   const out = clone(FooterStripSchema, strip);
   const status = requireMessage(out.status, "FooterStrip.status");
-  const line = create(FooterStatusActivityQuietStretchSchema, { text: ending.text });
+  const line = create(FooterActivityQuietStretchSchema, {
+    at: requireMessage(ending.at, "FooterStatusQuietStretchEnding.at"),
+    text: ending.text,
+  });
   switch (status.status.case) {
     case "working":
     case "background": {

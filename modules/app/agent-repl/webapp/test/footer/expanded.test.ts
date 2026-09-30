@@ -91,7 +91,12 @@ function unpinned(usage?: Record<string, unknown>): FooterActivity {
   return create(FooterStatusIdleActivitySchema, {
     tier: {
       case: "unpinned",
-      value: { enduring: usage === undefined ? {} : { usage: usage as never } },
+      value: {
+        enduring:
+          usage === undefined
+            ? { line: { case: "unobserved", value: {} } }
+            : { line: { case: "usage", value: usage as never } },
+      },
     },
   });
 }

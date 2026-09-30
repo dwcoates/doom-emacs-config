@@ -18,6 +18,7 @@ import {
   allowanceStatusClass,
 } from "../../src/footer/tones.js";
 import { harness } from "./harness.js";
+import { enduringLine } from "./enduring-line.js";
 
 /** Every test's clock reads from here, so a countdown's arithmetic is exact. */
 const NOW = 1_800_000_000_000;
@@ -87,7 +88,7 @@ function unpinnedInit(
   return {
     tier: {
       case: "unpinned",
-      value: { ...(transient === undefined ? {} : { transient }), enduring },
+      value: { ...(transient === undefined ? {} : { transient }), enduring: enduringLine(enduring) },
     },
   };
 }
@@ -168,13 +169,13 @@ describe("drawFooterStatusActivity: the tier the daemon resolved", () => {
   });
 
   it("draws a live transient as the transient tier", () => {
-    const cell = transientCell("response", { tail: "done." });
+    const cell = transientCell("hook", { name: "done." });
     expect(cell.getAttribute("data-tier")).toBe("transient");
   });
 
   it("names the transient kind on the cell", () => {
-    const cell = transientCell("response", { tail: "done." });
-    expect(cell.getAttribute("data-arm")).toBe("response");
+    const cell = transientCell("hook", { name: "done." });
+    expect(cell.getAttribute("data-arm")).toBe("hook");
   });
 
   it("draws the enduring line when no transient was raised", () => {
@@ -229,7 +230,7 @@ describe("drawFooterStatusActivity: the tier the daemon resolved", () => {
   });
 
   it("titles the cell with the whole drawn line", () => {
-    const cell = transientCell("response", { tail: "a long line the cell may cut" }, { agent: "Explore" });
+    const cell = transientCell("hook", { name: "a long line the cell may cut" }, { agent: "Explore" });
     expect(cell.title).toBe("Explore · a long line the cell may cut");
   });
 });
@@ -238,24 +239,24 @@ describe("drawFooterStatusActivity: the tier the daemon resolved", () => {
 
 describe("the transient's expiry: the client's one clock decision", () => {
   it("draws the transient while the clock is before its expiry", () => {
-    const cell = transientCell("response", { tail: "still here" }, { expiresAtMs: BigInt(NOW + 1) });
-    expect(cell.querySelector(".footer-activity-response")?.textContent).toBe("still here");
+    const cell = transientCell("hook", { name: "still here" }, { expiresAtMs: BigInt(NOW + 1) });
+    expect(cell.querySelector(".footer-activity-hook")?.textContent).toBe("still here");
   });
 
   it("draws the enduring line once the clock reaches the expiry", () => {
-    const cell = transientCell("response", { tail: "gone" }, { expiresAtMs: BigInt(NOW) });
+    const cell = transientCell("hook", { name: "gone" }, { expiresAtMs: BigInt(NOW) });
     expect(cell.getAttribute("data-tier")).toBe("enduring");
   });
 
   it("draws nothing of a lapsed transient", () => {
-    const cell = transientCell("response", { tail: "gone" }, { expiresAtMs: BigInt(NOW - 1) });
+    const cell = transientCell("hook", { name: "gone" }, { expiresAtMs: BigInt(NOW - 1) });
     expect(cell.textContent).not.toContain("gone");
   });
 
   it("schedules exactly one re-render at a drawn transient's expiry", () => {
     const { scheduled } = drawCell(
       "idle",
-      unpinnedInit(transientInit("response", { tail: "x" }, { expiresAtMs: BigInt(NOW + 7_000) })),
+      unpinnedInit(transientInit("hook", { name: "x" }, { expiresAtMs: BigInt(NOW + 7_000) })),
     );
     expect(scheduled).toEqual([NOW + 7_000]);
   });
@@ -263,7 +264,7 @@ describe("the transient's expiry: the client's one clock decision", () => {
   it("schedules nothing for a lapsed transient", () => {
     const { scheduled } = drawCell(
       "idle",
-      unpinnedInit(transientInit("response", { tail: "x" }, { expiresAtMs: BigInt(NOW - 1) })),
+      unpinnedInit(transientInit("hook", { name: "x" }, { expiresAtMs: BigInt(NOW - 1) })),
     );
     expect(scheduled).toEqual([]);
   });
@@ -277,19 +278,19 @@ describe("the transient's expiry: the client's one clock decision", () => {
   });
 
   it("refuses a lapsed transient whose kind sets no arm, drawn or not", () => {
-    const transient = transientInit("response", { tail: "x" }, { expiresAtMs: BigInt(NOW - 1) });
+    const transient = transientInit("hook", { name: "x" }, { expiresAtMs: BigInt(NOW - 1) });
     delete transient.kind;
     expect(() => drawCell("idle", unpinnedInit(transient))).toThrow(MalformedView);
   });
 
   it("refuses a transient with no expiry", () => {
-    const transient = transientInit("response", { tail: "x" });
+    const transient = transientInit("hook", { name: "x" });
     delete transient.expiry;
     expect(() => drawCell("idle", unpinnedInit(transient))).toThrow(MalformedView);
   });
 
   it("refuses a transient with no event instant", () => {
-    const transient = transientInit("response", { tail: "x" });
+    const transient = transientInit("hook", { name: "x" });
     delete transient.at;
     expect(() => drawCell("idle", unpinnedInit(transient))).toThrow(MalformedView);
   });
@@ -313,8 +314,8 @@ describe("the quiet tier: the quiet-stretch line under working and background", 
         case: "unpinned",
         value: {
           ...(transient === undefined ? {} : { transient }),
-          quietStretch: { text: quiet },
-          enduring: {},
+          quietStretch: { at: { atMs: BigInt(NOW - 4000) }, text: quiet },
+          enduring: enduringLine(),
         },
       },
     };
@@ -327,6 +328,19 @@ describe("the quiet tier: the quiet-stretch line under working and background", 
     const { cell } = drawCell(statusCase, quietInit(text));
     expect(cell.getAttribute("data-tier")).toBe("quiet");
     expect(cell.querySelector(".footer-activity-quiet-stretch")?.textContent).toBe(text);
+  });
+
+  it("ticks the quiet-stretch line's age from when it began standing", () => {
+    const { cell } = drawCell("working", quietInit("✅ Bash finished — handling result..."));
+    expect(cell.querySelector("[data-age]")?.textContent).toBe(" · 4s ago");
+  });
+
+  it("refuses a quiet-stretch line with no instant", () => {
+    const init = quietInit("✅ Bash finished — handling result...") as {
+      tier: { value: { quietStretch: { at?: unknown } } };
+    };
+    delete init.tier.value.quietStretch.at;
+    expect(() => drawCell("working", init)).toThrow(MalformedView);
   });
 
   it("draws a live transient over the quiet-stretch line", () => {
@@ -369,8 +383,32 @@ describe("the salient kinds", () => {
     ["closing", "closeBlocked", { text: "a turn is in flight" }, "a turn is in flight"],
     ["disconnected", "fault", { kind: "resume_failed", detail: "the shim refused" }, "resume failed · the shim refused"],
     ["blocked", "fault", { kind: "prompts_dir_missing", detail: "no prompts" }, "prompts dir missing · no prompts"],
+    ["idle", "notification", { text: "the agent addressed you" }, "the agent addressed you"],
+    ["working", "contextBudget", { text: "compaction failed — the summary was empty" }, "compaction failed — the summary was empty"],
+    ["background", "rateLimit", { window: { window: { case: "weekly", value: {} } }, verdict: { case: "allowedWarning", value: {} }, utilization: 0.85 }, "weekly nearly spent 85%"],
+    ["blocked", "rateLimit", { window: { window: { case: "session", value: {} } }, verdict: { case: "rejected", value: {} } }, "session spent"],
+    ["merging", "rateLimit", { verdict: { case: "rejected", value: {} } }, "usage spent"],
+    ["loading", "rateLimit", { window: { window: { case: "weeklyOverageIncluded", value: {} } }, verdict: { case: "allowedWarning", value: {} } }, "weekly overage included nearly spent"],
   ])("draws the %s cell's %s line", (statusCase, kindCase, value, expected) => {
     expect(salientCell(kindCase, value, statusCase).textContent).toContain(expected);
+  });
+
+  it("counts a rate-limit event's reset down on the shared clock", () => {
+    const cell = salientCell(
+      "rateLimit",
+      { verdict: { case: "rejected", value: {} }, resetsAtS: BigInt(Math.floor(NOW / 1000) + 3600) },
+      "idle",
+    );
+    expect(cell.querySelector("[data-countdown]")?.textContent).toBe(" · resets in 1h");
+  });
+
+  it("colours a rate-limit event by its verdict", () => {
+    const cell = salientCell("rateLimit", { verdict: { case: "rejected", value: {} } }, "idle");
+    expect(cell.querySelector(".footer-activity-rate-limit")?.className).toContain(allowanceStatusClass("rejected"));
+  });
+
+  it("refuses a rate-limit event with no verdict", () => {
+    expect(() => salientCell("rateLimit", {}, "idle")).toThrow(MalformedView);
   });
 
   it("draws the bring-up failure's cause verbatim", () => {
@@ -563,17 +601,16 @@ describe("the update line: a deploy's progress", () => {
 
 describe("the transient kinds", () => {
   it.each([
-    ["response", { tail: "and that is the fix." }, ".footer-activity-response", "and that is the fix."],
-    ["thinking", { reasoning: { case: "text", value: { tail: "weighing the two" } } }, ".footer-activity-thinking", "weighing the two"],
-    ["thinking", { reasoning: { case: "withheld", value: {} } }, ".footer-activity-thinking", "thinking"],
     ["toolCall", { tool: "Bash", summary: "npm test" }, ".footer-activity-tool-call", "Bash: npm test"],
     ["toolCall", { tool: "TodoWrite" }, ".footer-activity-tool-call", "TodoWrite"],
     ["task", { subject: "port the footer", completed: 3, total: 7 }, ".footer-activity-task", "port the footer · 3/7"],
-    ["submitting", { promptLead: "fix the footer" }, ".footer-activity-submitting", "fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "held", value: { position: 2, queued: 3 } } }, ".footer-activity-submitting", "queued 2/3 · fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "classifying", value: {} } }, ".footer-activity-submitting", "classifying · fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "interjecting", value: {} } }, ".footer-activity-submitting", "interrupting the turn · fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "coalesced", value: {} } }, ".footer-activity-submitting", "coalesced · fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "delivered", value: {} } }, ".footer-activity-submitting", "sent · fix the footer"],
     ["hook", { name: "protect-master" }, ".footer-activity-hook", "protect-master"],
     ["contextInjected", { text: "webapp/CLAUDE.md" }, ".footer-activity-context-injected", "webapp/CLAUDE.md"],
-    ["notification", { text: "the agent addressed you" }, ".footer-activity-notification", "the agent addressed you"],
-    ["contextBudget", { text: "context is 80% spent" }, ".footer-activity-context-budget", "context is 80% spent"],
     ["daemonWarning", { operation: "feed.row-order-changed", message: "kept in place" }, ".footer-activity-daemon-warning", "feed.row-order-changed · kept in place"],
     ["daemonError", { operation: "store.write", message: "disk full" }, ".footer-activity-daemon-error", "store.write · disk full"],
     ["sessionChange", { text: "model → opus" }, ".footer-activity-session-change", "model → opus"],
@@ -592,13 +629,21 @@ describe("the transient kinds", () => {
     expect(cell.getAttribute("data-arm")).toBe("compactionConcluded");
   });
 
-  it("marks withheld reasoning as withheld", () => {
-    const cell = transientCell("thinking", { reasoning: { case: "withheld", value: {} } });
-    expect(cell.querySelector(".footer-activity-thinking")?.getAttribute("data-withheld")).toBe("true");
+  it("refuses a submitting transient whose stage sets no arm", () => {
+    expect(() => transientCell("submitting", { promptLead: "x" })).toThrow(MalformedView);
   });
 
-  it("refuses a thinking transient whose reasoning sets no arm", () => {
-    expect(() => transientCell("thinking", {})).toThrow(MalformedView);
+  it("colours a held prompt's place in the queue as a figure", () => {
+    const cell = transientCell("submitting", {
+      promptLead: "x",
+      stage: { case: "held", value: { position: 1, queued: 2 } },
+    });
+    expect(cell.querySelector('[data-datum="position"]')?.className).toBe(activityDatumClass("position"));
+  });
+
+  it("stamps the submitting line with its stage", () => {
+    const cell = transientCell("submitting", { promptLead: "x", stage: { case: "classifying", value: {} } });
+    expect(cell.querySelector(".footer-activity-submitting")?.getAttribute("data-stage")).toBe("classifying");
   });
 
   it("colours the task tracker's progress as a figure", () => {
@@ -659,9 +704,9 @@ describe("the transient kinds", () => {
     expect(cell.querySelector('[data-datum="agent"]')).toBeNull();
   });
 
-  it("draws a long tail whole, leaving the cut to the stylesheet", () => {
-    const tail = "x".repeat(500);
-    expect(transientCell("response", { tail }).querySelector(".footer-activity-response")?.textContent).toBe(tail);
+  it("draws a long line whole, leaving the cut to the stylesheet", () => {
+    const name = "x".repeat(500);
+    expect(transientCell("hook", { name }).querySelector(".footer-activity-hook")?.textContent).toBe(name);
   });
 
   it("ticks the transient's relative age", () => {
@@ -705,16 +750,17 @@ describe("the enduring line", () => {
     expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe("context 42%");
   });
 
-  it("draws the context window's fill after the usage figures", () => {
-    const cell = enduringCell({
-      usage: { session: allowance(0.41, false, 3_900_000) },
-      contextWindow: { usedTokens: 84_000n, windowTokens: 200_000n, fill: 0.42 },
-    });
-    expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe(
-      "session 41% · resets in 1h 5m | context 42%",
-    );
+  it("stamps the chosen line on the enduring line", () => {
+    const cell = enduringCell({ contextWindow: { usedTokens: 1n, windowTokens: 2n, fill: 0.5 } });
+    expect(cell.querySelector(".footer-activity-enduring")?.getAttribute("data-line")).toBe("contextWindow");
   });
 
+  it("refuses an enduring line that sets no line", () => {
+    const activity = activityOf("idle", unpinnedInit());
+    const pair = (activity as unknown as { tier: { value: { enduring: { line: unknown } } } }).tier.value;
+    pair.enduring.line = { case: undefined };
+    expect(() => draw(activity)).toThrow(MalformedView);
+  });
   it("colours the context fill as a figure", () => {
     const cell = enduringCell({ contextWindow: { usedTokens: 1n, windowTokens: 2n, fill: 0.5 } });
     expect(cell.querySelector('.footer-context-window [data-datum="percent"]')?.className).toBe(

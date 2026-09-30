@@ -37,6 +37,7 @@ import {
 } from "../../src/rpc/link.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
+import { enduringLine } from "./enduring-line.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -1074,7 +1075,7 @@ describe("mountFooter: the ended quiet-stretch line", () => {
             case: "working",
             value: {
               substatus: { case: "thinking", value: {} },
-              activity: { tier: { case: "unpinned", value: { enduring: {} } } },
+              activity: { tier: { case: "unpinned", value: { enduring: enduringLine() } } },
               quietStretchEnding: {
                 text: "✅ Bash finished — handling result...",
                 untilPainted: { value: row },
@@ -1137,7 +1138,7 @@ function transientView(
                   expiry: { expiresAtMs: BigInt(expiresAtMs) },
                   kind: { case: "hook", value: { name } },
                 },
-                enduring,
+                enduring: enduringLine(enduring),
               },
             },
           },

@@ -381,7 +381,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    * the compaction runs, and the daemon's own phase line is already arriving
    * here. Publishing it is what lets that card draw the daemon's sentence
    * instead of composing one of its own or saying nothing at all. Any other
-   * line — another salient kind, or the unpinned transient-over-enduring pair
+   * line — another salient kind, or the unpinned tiers beneath the salient one
    * — publishes `null`: the subscriber then shows nothing.
    *
    * Called AFTER `draw()`, which has already walked the same view, so a
