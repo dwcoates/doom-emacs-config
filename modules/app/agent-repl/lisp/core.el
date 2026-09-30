@@ -2853,8 +2853,6 @@ use, so a routed line is indistinguishable from the ones it replaces.")
      . "%s refused — this workspace is queued for a merge; wait for the merge to finish or interrupt it")
     ("RENDER_STATE_MERGE_RUNNING"
      . "%s refused — a merge is running in this workspace; wait for it to finish or interrupt it")
-    ("RENDER_STATE_MERGE_CONFLICTED"
-     . "%s refused — this workspace has a merge conflict to resolve first")
     ("merge exclusivity lease"
      . "%s refused — a merge run owns this session; wait for the merge to finish or interrupt it")
     ("merge lease"
