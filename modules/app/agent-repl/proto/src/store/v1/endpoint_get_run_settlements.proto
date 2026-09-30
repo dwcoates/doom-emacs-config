@@ -1,0 +1,75 @@
+// endpoint_get_run_settlements.proto — GetRunSettlements: WHICH of a set of
+// detached runs the record already holds as ENDED.
+//
+// WHY THE SIDECAR ASKS. The sidecar's LOST policy tracks every detached run
+// whose file it reads, and a run it saw settle (its spool's own terminator, the
+// transcript's task notification, a person's stop, or a LOST conclusion) must
+// never be tracked again. Knowing that a run settled used to live only in the
+// sidecar's memory, so a restarted sidecar — which resumes each file at its
+// committed cursor, PAST the terminator it already converted — re-tracked a
+// finished run from its quiet file and later concluded it LOST, superseding
+// the real terminal (2026-09-30, docs/protobuf-design/run-settlements.md). The
+// settle is durable in exactly one place, the run's `detached_work` row, so
+// that is what answers.
+//
+// UNSCOPED ON PURPOSE. The sidecar reads every session on the host; a run id is
+// the spawning call's activity id and is compared for equality only.
+syntax = "proto3";
+
+package store.v1;
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask which runs have ended.
+message GetRunSettlementsRequest {
+  // REQUIRED, at least one. Each is a spawning call's activity id — the
+  // identity a run's `detached_work` row is located by (its origin unit). Each
+  // non-empty; an empty id is refused with `invalid_request`.
+  repeated string run_ids = 1;
+}
+
+// The settlements, or why they could not be read. THE ARM IS THE ANSWER.
+message GetRunSettlementsResponse {
+  oneof result {
+    GetRunSettlementsSuccess success = 1;
+    GetRunSettlementsFailure failure = 2;
+  }
+}
+
+// Every asked run the record holds as ended.
+message GetRunSettlementsSuccess {
+  // One per asked run whose row has ended. A run ABSENT from this list is NOT
+  // settled: either the store holds no row for it yet, or its row is still
+  // live. Absence is never an error and never a guess that the run ended.
+  repeated RunSettlement settled = 1;
+}
+
+// One run the record holds as ended.
+message RunSettlement {
+  // The asked run id, exactly as asked.
+  string run_id = 1;
+  // When the record says the run ended (its row's ended_at). Always set.
+  int64 ended_at_ms = 2;
+}
+
+// The settlements could not be read. THE ARM IS WHY.
+message GetRunSettlementsFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // No ids, or an empty id.
+    GetRunSettlementsInvalidRequest invalid_request = 2;
+    // The database failed; `detail` carries the driver's text.
+    GetRunSettlementsStorageFailure storage_failure = 3;
+  }
+}
+
+// The request was malformed.
+message GetRunSettlementsInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+
+// The database failed.
+message GetRunSettlementsStorageFailure {}
