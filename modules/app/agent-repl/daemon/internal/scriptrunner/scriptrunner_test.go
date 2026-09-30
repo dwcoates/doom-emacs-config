@@ -195,3 +195,74 @@ func TestNewRequiresALogger(t *testing.T) {
 		t.Fatalf("New: %+v, want nil runner alongside the error", r)
 	}
 }
+
+func TestRunLinesHandsOverEveryLineInOrder(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "lines.sh", "echo one\necho two >&2\necho three\n")
+	r := newRunner(t)
+	var got []string
+
+	// Act.
+	_, _, err := r.RunLines(context.Background(), dir, []string{script}, func(line string) { got = append(got, line) })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLines: %v", err)
+	}
+	if want := []string{"one", "two", "three"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+}
+
+func TestRunLinesHandsOverALastLineWithNoNewline(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "tail.sh", "printf 'first\\nlast'\n")
+	r := newRunner(t)
+	var got []string
+
+	// Act.
+	_, _, err := r.RunLines(context.Background(), dir, []string{script}, func(line string) { got = append(got, line) })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLines: %v", err)
+	}
+	if want := []string{"first", "last"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+}
+
+func TestRunLinesStillAnswersTheWholeOutput(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "whole.sh", "echo one\necho two\n")
+	r := newRunner(t)
+
+	// Act.
+	output, _, err := r.RunLines(context.Background(), dir, []string{script}, func(string) {})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLines: %v", err)
+	}
+	if output != "one\ntwo\n" {
+		t.Fatalf("output = %q, want the whole run", output)
+	}
+}
+
+func TestLineWriterHandsOverALineSplitAcrossWrites(t *testing.T) {
+	// Arrange.
+	var got []string
+	w := &lineWriter{onLine: func(line string) { got = append(got, line) }}
+
+	// Act.
+	w.Write([]byte("hal"))
+	w.Write([]byte("f\nwhole\n"))
+
+	// Assert.
+	if want := []string{"half", "whole"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+}
