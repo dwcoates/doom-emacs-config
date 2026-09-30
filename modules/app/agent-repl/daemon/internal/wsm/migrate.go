@@ -58,7 +58,25 @@ var migrations = []migration{
 	{To: 12, Name: "held_prompts_delivery", DDL: heldPromptsDeliveryDDL},
 	{To: 13, Name: "workspaces_turn_result", DDL: turnResultDDL},
 	{To: 14, Name: "held_prompts_act_and_coalesced", DDL: heldPromptsActDDL},
+	{To: 15, Name: "merge_queue_source", DDL: mergeQueueSourceDDL},
 }
+
+// mergeQueueSourceDDL adds WHAT a queued merge lands (agentrepl.v1
+// MergeWorkspaceSource): its arm, the own-branch arm's keep_open, and the
+// other workspace or the branch the arm names. Every existing row is the
+// requester's own branch closed on landing (0, 0, NULL, NULL), which is
+// exactly right: no build before this one merged anything else. The
+// `requested` state it also introduces is a new VALUE of the existing state
+// column and needs no DDL.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the columns inline in schema.go.
+const mergeQueueSourceDDL = `
+ALTER TABLE merge_queue ADD COLUMN source_kind INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE merge_queue ADD COLUMN source_keep_open INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE merge_queue ADD COLUMN source_workspace TEXT;
+ALTER TABLE merge_queue ADD COLUMN source_branch TEXT;
+`
 
 // heldPromptsActDDL adds a held entry's SESSION ACT (a model or
 // permission-mode change queued in order with the prompts around it) and

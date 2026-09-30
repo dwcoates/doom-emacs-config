@@ -281,13 +281,54 @@ func (s MergeQueueState) String() string {
 		return "queued"
 	case MergeAdmitted:
 		return "admitted"
+	case MergeRequested:
+		return "requested"
 	default:
 		return fmt.Sprintf("merge_queue_state(%d)", int(s))
 	}
 }
 
 // valid reports whether the merge queue state is one of the declared arms.
-func (s MergeQueueState) valid() bool { return s >= MergeQueued && s <= MergeAdmitted }
+func (s MergeQueueState) valid() bool { return s >= MergeQueued && s <= MergeRequested }
+
+// String names a merge source kind, for logs and refusals.
+func (k MergeSourceKind) String() string {
+	switch k {
+	case MergeSourceOwnBranch:
+		return "own_branch"
+	case MergeSourceWorkspace:
+		return "workspace"
+	case MergeSourceBranch:
+		return "branch"
+	case MergeSourceMergedUpstream:
+		return "merged_upstream"
+	default:
+		return fmt.Sprintf("merge_source(%d)", int(k))
+	}
+}
+
+// valid reports whether the source kind is one of the declared arms.
+func (k MergeSourceKind) valid() bool {
+	return k >= MergeSourceOwnBranch && k <= MergeSourceMergedUpstream
+}
+
+// validate refuses a source whose fields contradict its arm: each arm carries
+// exactly its own field, so a stored row cannot name a merge nobody asked for.
+func (m MergeSource) validate() error {
+	if !m.Kind.valid() {
+		return fmt.Errorf("unknown merge source kind %d", int(m.Kind))
+	}
+	if m.KeepOpen && m.Kind != MergeSourceOwnBranch {
+		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
+	}
+	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
+		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
+	}
+	if (m.Branch != "") != (m.Kind == MergeSourceBranch) {
+		return fmt.Errorf("a %s source names branch %q", m.Kind, m.Branch)
+	}
+	return nil
+}
 
 // MergeQueuedError refuses a duplicate enqueue, carrying the place the
 // workspace already holds so the caller reports it rather than queueing twice.

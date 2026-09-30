@@ -21,22 +21,25 @@ func normalizeRepoKey(repo RepoKey) (RepoKey, error) {
 	return RepoKey(normalized), nil
 }
 
-// EnqueueMerge puts a workspace in its target repository's durable merge queue
-// and returns its one-based position. A workspace already in that queue is
-// REFUSED with the place it already holds: a merge is queued once.
-//
-// The position is derived from the monotonic sequence rather than stored, so
-// removing an earlier entry renumbers the rest without a rewrite.
-func (s *store) EnqueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) (int, error) {
-	const op = "daemon.wsm.enqueue_merge"
+// RequestMerge RECORDS a workspace's merge in its target repository's durable
+// queue, in the REQUESTED state: in nobody's line and reported to nobody. A
+// merge is recorded the moment it is asked for, so a daemon exit before the
+// turn that asked for it ends does not lose it; it takes its place in line
+// only at QueueMerge. A workspace already in that queue in ANY state is
+// REFUSED with the place it holds: a merge is asked for once.
+func (s *store) RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
+	const op = "daemon.wsm.request_merge"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
-		return 0, err
+		return err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id), "enqueued_at": at}
-	var position int
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "source": source.Kind.String(), "requested_at": at}
+	if err := source.validate(); err != nil {
+		s.log.Error(op, "refused a merge request whose source contradicts itself", withError(fields, err))
+		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var (
 			seq   int64
 			state int64
@@ -52,23 +55,63 @@ func (s *store) EnqueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, 
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		var next sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT max(seq) FROM merge_queue WHERE repo_key = ?`, key).Scan(&next); err != nil {
+		next, err := nextSeq(ctx, tx, key)
+		if err != nil {
 			return err
 		}
-		seq = next.Int64 + 1
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at) VALUES (?, ?, ?, ?, ?)`,
-			key, id, seq, int(MergeQueued), nanos(at)); err != nil {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			key, id, next, int(MergeRequested), nanos(at),
+			int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch))
+		return err
+	})
+}
+
+// QueueMerge moves a REQUESTED merge into line, AT THE BACK: its place is
+// decided when it is queued, not when it was asked for, because a merge in line
+// is one every client may see and the requesting turn's end is what lets it be
+// seen. It answers the merge's one-based place among the entries in line. A
+// merge that is not requested is refused: the caller lost track of it.
+func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (int, error) {
+	const op = "daemon.wsm.queue_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return 0, err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	var position int
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		next, err := nextSeq(ctx, tx, key)
+		if err != nil {
 			return err
 		}
-		position, err = positionOf(ctx, tx, key, seq)
+		res, err := tx.ExecContext(ctx,
+			`UPDATE merge_queue SET state = ?, seq = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+			int(MergeQueued), next, key, id, int(MergeRequested))
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: requested merge of workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		position, err = inLinePositionOf(ctx, tx, key, next)
 		return err
 	})
 	if err != nil {
 		return 0, err
 	}
 	return position, nil
+}
+
+// nextSeq answers the sequence number one past a queue's last.
+func nextSeq(ctx context.Context, tx *sql.Tx, key RepoKey) (int64, error) {
+	var last sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT max(seq) FROM merge_queue WHERE repo_key = ?`, key).Scan(&last); err != nil {
+		return 0, err
+	}
+	return last.Int64 + 1, nil
 }
 
 // positionOf reports the one-based place a sequence number holds in its queue.
@@ -78,6 +121,26 @@ func positionOf(ctx context.Context, tx *sql.Tx, key RepoKey, seq int64) (int, e
 		return 0, err
 	}
 	return ahead + 1, nil
+}
+
+// inLinePositionOf reports the one-based place a sequence number holds among
+// the entries IN LINE: a requested entry is in nobody's line.
+func inLinePositionOf(ctx context.Context, tx *sql.Tx, key RepoKey, seq int64) (int, error) {
+	var ahead int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM merge_queue WHERE repo_key = ? AND seq < ? AND state != ?`,
+		key, seq, int(MergeRequested)).Scan(&ahead); err != nil {
+		return 0, err
+	}
+	return ahead + 1, nil
+}
+
+// nullableText stores an empty field as NULL, so a source arm that carries no
+// such field has none on its row.
+func nullableText(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
 }
 
 // setMergeQueueState is the one state-write path for a queue entry, refusing an
@@ -141,7 +204,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 	var out []MergeQueueEntry
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
 		loaded, err := s.scanMergeQueue(ctx,
-			`SELECT repo_key, workspace_id, state, enqueued_at FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+			`SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
 		if err != nil {
 			return err
 		}
@@ -159,7 +222,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error) {
 	var out map[RepoKey][]MergeQueueEntry
 	err := s.read(ctx, "daemon.wsm.all_merge_queues", dlog.Context{}, func(ctx context.Context) error {
-		loaded, err := s.scanMergeQueue(ctx, `SELECT repo_key, workspace_id, state, enqueued_at FROM merge_queue ORDER BY repo_key, seq`)
+		loaded, err := s.scanMergeQueue(ctx, `SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch FROM merge_queue ORDER BY repo_key, seq`)
 		if err != nil {
 			return err
 		}
@@ -184,16 +247,25 @@ func (s *store) scanMergeQueue(ctx context.Context, query string, args ...any) (
 	loaded := map[RepoKey][]MergeQueueEntry{}
 	for rows.Next() {
 		var (
-			entry    MergeQueueEntry
-			state    int64
-			enqueued int64
+			entry     MergeQueueEntry
+			state     int64
+			enqueued  int64
+			kind      int64
+			keepOpen  bool
+			sourceWS  sql.NullString
+			sourceRef sql.NullString
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef); err != nil {
 			return nil, err
 		}
+		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
 		entry.State = MergeQueueState(state)
 		if !entry.State.valid() {
-			return nil, &DecodeError{Table: "merge_queue", Row: fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace), Field: "state", Err: fmt.Errorf("unknown merge queue state %d", state)}
+			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "state", Err: fmt.Errorf("unknown merge queue state %d", state)}
+		}
+		entry.Source = MergeSource{Kind: MergeSourceKind(kind), KeepOpen: keepOpen, Workspace: WorkspaceID(sourceWS.String), Branch: sourceRef.String}
+		if err := entry.Source.validate(); err != nil {
+			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "source", Err: err}
 		}
 		entry.EnqueuedAt = fromNanos(enqueued)
 		entry.Position = len(loaded[entry.Repo]) + 1
