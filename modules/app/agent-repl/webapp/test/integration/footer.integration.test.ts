@@ -9,13 +9,15 @@
  * panel costs no round trip because the panels already arrived.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type DescMessage } from "@bufbuild/protobuf";
 
 import {
   InterruptResponseSchema,
   InterruptSuccessSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import {
+  FooterActivityTransientSchema,
+  FooterAgentRowWaitingForApiSchema,
   FooterAllowanceSchema,
   FooterStatusSchema,
   FooterTokensCellVerdictSchema,
@@ -30,11 +32,13 @@ import {
   footerStatusColor,
 } from "./vocab";
 import {
-  FOOTER_ACTIVITY_KINDS,
+  FOOTER_ENDURING,
+  FOOTER_SALIENT_KINDS,
   FOOTER_ALLOWANCE_ARMS,
   FOOTER_CHIPS,
   FOOTER_PANELS,
-  FOOTER_STATUS_ACTIVITIES,
+  FOOTER_STATUS_SALIENTS,
+  FOOTER_TRANSIENT_KINDS,
   FOOTER_STATUS_ARMS,
   FOOTER_STATUS_SUBSTATUSES,
   FOOTER_STATUS_WITHOUT_SUBSTATUS,
@@ -49,7 +53,7 @@ import {
   feedId,
   feedPageSuccess,
   footerView,
-  rateLimitedActivity,
+  enduringUsage,
   subagentUnit,
   assertCoversOneof,
 } from "./fixtures";
@@ -70,6 +74,18 @@ const FAILED_DEPLOY = { kind: "deploy_failed", detail: "build webapp: error TS23
 async function withFooter(init: Parameters<typeof footerView>[0]): Promise<Harness> {
   harness = await startHarness({ arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView(init)) });
   return harness;
+}
+
+/**
+ * The salient message STATUS's activity cell holds, read off the descriptors:
+ * the cell's `salient` field, directly or under its `tier` oneof.
+ */
+function salientSchemaOf(status: string): DescMessage {
+  const arm = FooterStatusSchema.fields.find((f) => f.localName === status);
+  const cell = arm?.message?.fields.find((f) => f.localName === "activity")?.message;
+  const salient = cell?.fields.find((f) => f.localName === "salient")?.message;
+  if (salient === undefined) throw new Error(`no salient message under ${status}`);
+  return salient;
 }
 
 describe("arm coverage", () => {
@@ -184,20 +200,63 @@ describe("substatuses", () => {
 describe("the activity cell", () => {
   it.each(
     FOOTER_STATUS_ARMS.flatMap((status) =>
-      FOOTER_STATUS_ACTIVITIES[status].map((activity) => ({ status, activity })),
+      FOOTER_STATUS_SALIENTS[status].map((activity) => ({ status, activity })),
     ),
-  )("draws the $activity activity under $status", async ({ status, activity }) => {
+  )("draws the $activity salient line under $status", async ({ status, activity }) => {
     // Arrange / Act
     await withFooter({ status, activity });
     // Assert
     expect(harness.$(".footer-activity")?.dataset.arm).toBe(activity);
   });
 
-  it("draws no activity cell when the view carries none", async () => {
-    // Arrange / Act: activity is `optional` — absent means draw nothing.
-    await withFooter({ status: "idle" });
+  it.each(Object.keys(FOOTER_TRANSIENT_KINDS))(
+    "draws the %s transient over the enduring line",
+    async (activity) => {
+      // Arrange / Act
+      await withFooter({ status: "working", activity });
+      // Assert
+      expect(harness.$(".footer-activity")?.dataset.arm).toBe(activity);
+    },
+  );
+
+  it.each(FOOTER_STATUS_ARMS.filter((status) => status !== "waiting"))(
+    "draws the enduring line under %s when nothing else stands",
+    async (status) => {
+      // Arrange / Act
+      await withFooter({ status });
+      // Assert
+      expect(harness.$(".footer-activity")?.dataset.tier).toBe("enduring");
+    },
+  );
+
+  it("marks a salient line's tier on the cell", async () => {
+    await withFooter({ status: "working", activity: "retrying" });
+    expect(harness.$(".footer-activity")?.dataset.tier).toBe("salient");
+  });
+
+  it("marks a live transient's tier on the cell", async () => {
+    await withFooter({ status: "working", activity: "hook" });
+    expect(harness.$(".footer-activity")?.dataset.tier).toBe("transient");
+  });
+
+  // THE CLIENT'S ONE CLOCK DECISION: the daemon pushes nothing at the lapse.
+  it("gives way to the enduring line when the transient's expiry passes", async () => {
+    // Arrange: live for five seconds past the suite's epoch.
+    await withFooter({ status: "working", activity: "hook", expiresAtMs: 15_000n });
+    // Act
+    await harness.tick(5_000);
     // Assert
-    expect(harness.$(".footer-activity")).toBeNull();
+    expect(harness.$(".footer-activity")?.dataset.tier).toBe("enduring");
+  });
+
+  it("draws a transient that already lapsed as the enduring line", async () => {
+    await withFooter({ status: "working", activity: "hook", expiresAtMs: 5_000n });
+    expect(harness.$(".footer-activity")?.dataset.tier).toBe("enduring");
+  });
+
+  it("prefixes a subagent's transient with its label", async () => {
+    await withFooter({ status: "working", activity: "toolCall", agent: "Explore" });
+    expect(harness.text(".footer-activity-transient")).toBe("Explore · Bash: npm test");
   });
 
   // A FAILED DEPLOY (owner request, 2026-09-28) stands on every strip's
@@ -216,7 +275,7 @@ describe("the activity cell", () => {
     harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
     await harness.settle();
     // Assert
-    expect(harness.$(".footer-activity")).toBeNull();
+    expect(harness.$(".footer-activity-fault")).toBeNull();
   });
 
   it("draws the notification's composed text verbatim", async () => {
@@ -228,13 +287,11 @@ describe("the activity cell", () => {
 
   // THE SENTENCE, NOT MERELY THE ARM. The table above pins `data-arm` for every
   // status/activity pair, which a build that drew an empty cell would still
-  // satisfy. This is the dead-query line specifically, and it is drawn under
-  // `vendorError` on purpose: the death is a SESSION fact and the daemon draws
-  // it under whichever blocked step is standing, so the client must not tie the
-  // sentence to the query_died STEP either.
-  it("draws the dead-query sentence under a blocked step that is not query_died", async () => {
+  // satisfy. A dead query is a FAILED TURN (owner ruling, 2026-09-28), so its
+  // salient line stands under `turn_failed`.
+  it("draws the dead-query sentence under the turn_failed arm", async () => {
     // Arrange / Act
-    await withFooter({ status: "blocked", substatus: "vendorError", activity: "queryDied" });
+    await withFooter({ status: "turnFailed", activity: "queryDied" });
     // Assert
     expect(harness.text(".footer-activity")).toContain("the vendor query died");
   });
@@ -275,8 +332,8 @@ describe("the activity cell", () => {
           WORKSPACE_ID,
           footerView({
             status: "idle",
-            activity: "rateLimited",
-            activityOverride: rateLimitedActivity(arm),
+            activity: FOOTER_ENDURING,
+            activityOverride: enduringUsage(arm),
           }),
         ),
     });
@@ -295,8 +352,8 @@ describe("the activity cell", () => {
           WORKSPACE_ID,
           footerView({
             status: "idle",
-            activity: "rateLimited",
-            activityOverride: rateLimitedActivity(arm),
+            activity: FOOTER_ENDURING,
+            activityOverride: enduringUsage(arm),
           }),
         ),
     });
@@ -313,8 +370,8 @@ describe("the activity cell", () => {
           WORKSPACE_ID,
           footerView({
             status: "idle",
-            activity: "rateLimited",
-            activityOverride: rateLimitedActivity(undefined),
+            activity: FOOTER_ENDURING,
+            activityOverride: enduringUsage(undefined),
           }),
         ),
     });
@@ -330,8 +387,8 @@ describe("the activity cell", () => {
           WORKSPACE_ID,
           footerView({
             status: "idle",
-            activity: "rateLimited",
-            activityOverride: rateLimitedActivity(undefined),
+            activity: FOOTER_ENDURING,
+            activityOverride: enduringUsage(undefined),
           }),
         ),
     });
@@ -347,8 +404,8 @@ describe("the activity cell", () => {
           WORKSPACE_ID,
           footerView({
             status: "idle",
-            activity: "rateLimited",
-            activityOverride: rateLimitedActivity(undefined),
+            activity: FOOTER_ENDURING,
+            activityOverride: enduringUsage(undefined),
           }),
         ),
     });
@@ -358,14 +415,22 @@ describe("the activity cell", () => {
 
   it("draws both the session and the weekly allowance", async () => {
     // Arrange / Act
-    await withFooter({ status: "idle", activity: "rateLimited" });
+    await withFooter({
+      status: "idle",
+      activity: FOOTER_ENDURING,
+      activityOverride: enduringUsage("allowedWarning"),
+    });
     // Assert
     expect(harness.$$(".footer-activity [data-allowance]")).toHaveLength(2);
   });
 
   it("marks the session allowance apart from the weekly one", async () => {
     // Arrange / Act
-    await withFooter({ status: "idle", activity: "rateLimited" });
+    await withFooter({
+      status: "idle",
+      activity: FOOTER_ENDURING,
+      activityOverride: enduringUsage("allowedWarning"),
+    });
     // Assert
     expect(
       harness.$$(".footer-activity [data-allowance]").map((el) => el.dataset.allowance),
@@ -389,10 +454,52 @@ describe("the activity cell", () => {
     expect(harness.text(".footer-activity")).toContain("the cron fires");
   });
 
-  it("covers every activity kind the fixtures declare", () => {
-    // Assert: the union of the per-status tables is the whole kind vocabulary.
-    const used = new Set(Object.values(FOOTER_STATUS_ACTIVITIES).flat());
-    expect([...used].sort()).toEqual(Object.keys(FOOTER_ACTIVITY_KINDS).sort());
+  it("covers every salient kind the fixtures declare", () => {
+    // Assert: the union of the per-status tables is the whole salient vocabulary.
+    const used = new Set(Object.values(FOOTER_STATUS_SALIENTS).flat());
+    expect([...used].sort()).toEqual(Object.keys(FOOTER_SALIENT_KINDS).sort());
+  });
+
+  it.each(FOOTER_STATUS_ARMS)("covers every salient kind the %s arm declares", (status) => {
+    assertCoversOneof(salientSchemaOf(status), "kind", FOOTER_STATUS_SALIENTS[status]);
+  });
+
+  it("covers every transient kind", () => {
+    assertCoversOneof(FooterActivityTransientSchema, "kind", Object.keys(FOOTER_TRANSIENT_KINDS));
+  });
+});
+
+describe("the agents chip's waiting-for-the-API glyph", () => {
+  it("draws the glyph with the daemon's waiting count", async () => {
+    await withFooter({ status: "background", agentsWaitingForApi: 2 });
+    expect(harness.$(".footer-chip-waiting")?.dataset.waitingForApi).toBe("2");
+  });
+
+  it("draws no glyph while no agent waits", async () => {
+    await withFooter({ status: "background" });
+    expect(harness.$(".footer-chip-waiting")).toBeNull();
+  });
+});
+
+describe("the agents panel's waiting row", () => {
+  it("draws an agent waiting for the API with its give-up countdown", async () => {
+    // Arrange: the fixture's one agent, waiting until 24m 30s past the epoch (the countdown truncates to 24m).
+    const view = footerView({ status: "background", agentsWaitingForApi: 1 });
+    const row = view.expanded?.agents?.rows[0];
+    if (row === undefined) throw new Error("the fixture carries no agent row");
+    row.state = {
+      case: "waitingForApi",
+      value: create(FooterAgentRowWaitingForApiSchema, {
+        failedAtMs: 1_000n,
+        givesUpAtMs: 10_000n + 24n * 60_000n + 30_000n,
+        resumesDelivered: 0,
+      }),
+    };
+    harness = await startHarness({ arrange: (fake) => fake.setFooter(WORKSPACE_ID, view) });
+    // Act
+    await harness.click('[data-chip="agents"]');
+    // Assert
+    expect(harness.text(".footer-row-state")).toBe("waiting for the API · gives up in 24m");
   });
 });
 
@@ -1289,8 +1396,8 @@ describe("the usage line the strip cannot fit", () => {
   async function withFiguredRateLine(): Promise<void> {
     await withFooter({
       status: "idle",
-      activity: "rateLimited",
-      activityOverride: FIGURED_RATE_LIMITED,
+      activity: FOOTER_ENDURING,
+      activityOverride: { usage: FIGURED_RATE_LIMITED },
     });
   }
 
@@ -1330,7 +1437,7 @@ describe("the usage line the strip cannot fit", () => {
     await withFiguredRateLine();
     // Assert
     expect(harness.$(".footer-activity")?.title).toBe(
-      harness.text(".footer-activity-rate-limited"),
+      harness.text(".footer-activity-enduring"),
     );
   });
 
@@ -1343,19 +1450,5 @@ describe("the usage line the strip cannot fit", () => {
     expect(
       harness.text('.footer-expanded[data-panel="tokens"] [data-usage-allowance="weekly"]'),
     ).toContain("weekly 63%");
-  });
-  it("carries the context-budget sentence into the tokens sheet in full", async () => {
-    // Arrange
-    await withFooter({
-      status: "idle",
-      activity: "contextBudget",
-      activityOverride: { text: "84% of the window" },
-    });
-    // Act
-    await harness.click(".footer-tokens");
-    // Assert
-    expect(
-      harness.text('.footer-expanded[data-panel="tokens"] [data-usage="context-budget"]'),
-    ).toBe("84% of the window");
   });
 });

@@ -13,6 +13,7 @@ import {
   withHeldLine,
   type QuietHoldDeps,
 } from "../../src/footer/quiet-hold.js";
+import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 /** An ending held until ROW is painted. */
@@ -185,42 +186,89 @@ describe("quietStretchEndingOf", () => {
 });
 
 describe("withHeldLine", () => {
-  it("draws the held line in the working arm's activity, with its own instant", () => {
+  /** An unpinned cell drawing only its enduring line. */
+  const enduringOnly = { tier: { case: "unpinned" as const, value: { enduring: {} } } };
+
+  it("draws the held line as the working arm's quiet-stretch line", () => {
     const strip = create(FooterStripSchema, {
-      status: { status: { case: "working", value: { activity: undefined } } },
+      status: { status: { case: "working", value: { activity: enduringOnly } } },
     });
 
     const out = withHeldLine(strip, ending("row-2"));
 
     const status = out.status?.status;
     expect(status?.case).toBe("working");
-    const activity = status?.case === "working" ? status.value.activity : undefined;
-    expect(activity?.kind.case).toBe("quietStretch");
-    expect(activity?.kind.value).toMatchObject({ text: "✅ Bash finished — handling result..." });
-    expect(activity?.at?.atMs).toBe(1_000n);
+    const tier = status?.case === "working" ? status.value.activity?.tier : undefined;
+    expect(tier?.case).toBe("unpinned");
+    expect(tier?.case === "unpinned" ? tier.value.quietStretch?.text : undefined).toBe(
+      "✅ Bash finished — handling result...",
+    );
   });
 
-  it("draws the held line in the background arm's activity", () => {
+  it("draws the held line as the background arm's quiet-stretch line", () => {
     const strip = create(FooterStripSchema, {
-      status: { status: { case: "background", value: {} } },
+      status: { status: { case: "background", value: { activity: enduringOnly } } },
     });
 
     const out = withHeldLine(strip, ending("row-2", "✅ Subagent finished"));
 
     const status = out.status?.status;
-    const activity = status?.case === "background" ? status.value.activity : undefined;
-    expect(activity?.kind.case).toBe("quietStretch");
+    const tier = status?.case === "background" ? status.value.activity?.tier : undefined;
+    expect(tier?.case === "unpinned" ? tier.value.quietStretch?.text : undefined).toBe(
+      "✅ Subagent finished",
+    );
+  });
+
+  it("keeps the pushed enduring line beneath the held line", () => {
+    const strip = create(FooterStripSchema, {
+      status: { status: { case: "working", value: { activity: enduringOnly } } },
+    });
+
+    const out = withHeldLine(strip, ending("row-2"));
+
+    const status = out.status?.status;
+    const tier = status?.case === "working" ? status.value.activity?.tier : undefined;
+    expect(tier?.case === "unpinned" ? tier.value.enduring : undefined).toBeDefined();
   });
 
   it("leaves the pushed strip itself untouched", () => {
     const strip = create(FooterStripSchema, {
-      status: { status: { case: "working", value: {} } },
+      status: { status: { case: "working", value: { activity: enduringOnly } } },
     });
 
     withHeldLine(strip, ending("row-2"));
 
     const status = strip.status?.status;
-    expect(status?.case === "working" ? status.value.activity : "unset").toBeUndefined();
+    const tier = status?.case === "working" ? status.value.activity?.tier : undefined;
+    expect(tier?.case === "unpinned" ? tier.value.quietStretch : "salient").toBeUndefined();
+  });
+
+  it("refuses an ending stated beside a salient line", () => {
+    const strip = create(FooterStripSchema, {
+      status: {
+        status: {
+          case: "working",
+          value: {
+            activity: {
+              tier: {
+                case: "salient",
+                value: { at: { atMs: 1_000n }, kind: { case: "compaction", value: { text: "x" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(() => withHeldLine(strip, ending("row-2"))).toThrow(MalformedView);
+  });
+
+  it("refuses a working arm with no activity cell", () => {
+    const strip = create(FooterStripSchema, {
+      status: { status: { case: "working", value: {} } },
+    });
+
+    expect(() => withHeldLine(strip, ending("row-2"))).toThrow(MalformedView);
   });
 
   it("leaves an arm that carries no ending as pushed", () => {

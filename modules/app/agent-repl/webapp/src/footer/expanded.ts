@@ -37,6 +37,7 @@ import type {
   FooterAgentRowLabel,
   FooterAgentRowRuntime,
   FooterAgentRowTokens,
+  FooterAgentRowWaitingForApi,
   FooterCronRow,
   FooterCronRowNextFire,
   FooterCronRowPrompt,
@@ -75,10 +76,12 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
   drawFooterAllowance,
-  orderedSheetAllowances,
+  drawGivesUpCountdown,
+  enduringUsage,
+  orderedAllowances,
   remainingLabel,
   type FooterActivity,
-} from "./strip.js";
+} from "./activity.js";
 
 /** The selectable panels, named by the strip element that opens each. */
 export type FooterPanel = "tokens" | "agents" | "tasks" | "shells" | "monitors" | "crons";
@@ -151,11 +154,12 @@ export interface ExpandedDeps {
   /** Redraw the footer from its last view, so a click's outcome is drawn. */
   readonly redraw: () => void;
   /**
-   * The activity line the strip is drawing right now, when there is one.
+   * The activity cell the strip is drawing right now.
    *
    * NOT A SECOND RESOLUTION OF IT — the same message, handed across — so the
-   * tokens sheet's usage rows and the strip's line can never disagree about a
-   * figure. The sheet expands the strip's line; the strip is where it lives.
+   * tokens sheet's usage rows and the strip's enduring line can never disagree
+   * about a figure. The sheet expands the strip's line; the strip is where it
+   * lives.
    */
   readonly activity?: FooterActivity;
   /**
@@ -440,24 +444,22 @@ export function drawFooterTokensLineVerdict(
 /**
  * THE USAGE CONTENT THE STRIP CANNOT FIT, drawn in full.
  *
- * The strip is one line capped at the response bubble's width and its rate
- * line is routinely wider than that, so the second allowance window and the
- * tail of a context-budget warning were in the DOM and never on the glass.
- * They belong somewhere a reader can reach them,
- * and this sheet -- the one the tokens cell opens, already the sheet about
- * what the account is spending -- is that place.
+ * The strip is one line capped at the response bubble's width and its
+ * enduring line is routinely wider than that, so an allowance window was in
+ * the DOM and never on the glass. It belongs somewhere a reader can reach it,
+ * and this sheet -- the one the tokens cell opens, already the sheet about what
+ * the account is spending -- is that place.
  *
- * IT IS THE STRIP'S OWN LINE, not a second resolution of it: the same
- * `FooterActivity` the strip drew, drawn again without a width to fight. The
- * allowance cells are the strip's own drawing (`drawFooterAllowance`) in the
- * strip's own order, so a reader who opens the sheet finds the line they were
- * reading rather than a rearranged one — plus the OVERAGE window, the one
- * allowance the strip has no room for (`orderedSheetAllowances`), drawn as
- * one more row of exactly that kind when the vendor reported it.
+ * IT IS THE STRIP'S OWN ENDURING USAGE, not a second resolution of it: the
+ * same message the strip's cell carries, drawn again without a width to fight.
+ * The allowance cells are the strip's own drawing (`drawFooterAllowance`) in
+ * the strip's own order (`orderedAllowances`), so a reader who opens the sheet
+ * finds the figures they were reading rather than a rearranged list.
  *
- * TWO ARMS ONLY. `rate_limited` and `context_budget` are the activity oneof's
- * usage arms; every other arm is about the turn rather than the account and
- * draws nothing here, as does an absent activity.
+ * THE UNPINNED CELL ONLY. The enduring line is shipped beneath the transient
+ * whenever no salient line stands, and not at all while one does; a cell with
+ * no usage read yet, or none shipped, draws nothing here, as does an absent
+ * activity.
  */
 export function drawFooterUsageRows(
   activity: FooterActivity | undefined,
@@ -465,25 +467,19 @@ export function drawFooterUsageRows(
   path: string,
 ): HTMLElement[] {
   if (activity === undefined) return [];
-  const kind = activity.kind;
-  if (kind.case === "rateLimited") {
-    const rows: HTMLElement[] = [usageHeader("account usage")];
-    for (const allowance of orderedSheetAllowances(kind.value)) {
-      const row = usageRow("allowance");
-      row.setAttribute("data-usage-allowance", allowance.label);
-      row.appendChild(
-        drawFooterAllowance(allowance.value, allowance.label, { ctx }, `${path}.${allowance.label}`),
-      );
-      rows.push(row);
-    }
-    return rows;
+  const usage = enduringUsage(activity, path);
+  if (usage === undefined) return [];
+  const usagePath = `${path}.unpinned.enduring.usage`;
+  const rows: HTMLElement[] = [usageHeader("account usage")];
+  for (const allowance of orderedAllowances(usage)) {
+    const row = usageRow("allowance");
+    row.setAttribute("data-usage-allowance", allowance.label);
+    row.appendChild(
+      drawFooterAllowance(allowance.value, allowance.label, { ctx }, `${usagePath}.${allowance.label}`),
+    );
+    rows.push(row);
   }
-  if (kind.case === "contextBudget") {
-    const row = usageRow("context-budget");
-    row.textContent = kind.value.text;
-    return [usageHeader("context budget"), row];
-  }
-  return [];
+  return rows;
 }
 
 /** The usage block's own header, so its rows are not read as token figures. */
@@ -536,7 +532,11 @@ export function drawFooterExpandedAgents(
   ];
 }
 
-/** One live subagent: ⚙ · label · description · tokens · clock · ▸. */
+/**
+ * One subagent with work ahead of it: ⚙ · label · description · [its wait for
+ * the API] · tokens · clock · ▸. The row's STATE is stamped as `data-state`;
+ * a running agent draws nothing more, a waiting one its wait.
+ */
 export function drawFooterAgentRow(
   u: FooterAgentRow,
   deps: ExpandedDeps,
@@ -548,6 +548,19 @@ export function drawFooterAgentRow(
   if (u.description !== undefined) {
     row.appendChild(drawFooterAgentRowDescription(u.description));
   }
+  const state = requireCase(u.state, `${path}.state`);
+  row.setAttribute("data-state", state.case);
+  switch (state.case) {
+    case "running":
+      break;
+    case "waitingForApi":
+      row.appendChild(drawFooterAgentRowWaitingForApi(state.value, deps, `${path}.waiting_for_api`));
+      break;
+    default: {
+      const other: { case: string } = state;
+      return unreachableArm(`${path}.state`, other.case);
+    }
+  }
   const figures = document.createElement("span");
   figures.className = "footer-row-figures";
   figures.appendChild(drawFooterAgentRowTokens(requireMessage(u.tokens, `${path}.tokens`)));
@@ -557,6 +570,23 @@ export function drawFooterAgentRow(
   figures.appendChild(caret());
   row.appendChild(figures);
   return finishJumpRow(row);
+}
+
+/**
+ * An agent waiting for the API: "waiting for the API · gives up in 24m",
+ * the deadline ticking down from the shim's shipped instant through the same
+ * countdown the network-resume transient draws.
+ */
+export function drawFooterAgentRowWaitingForApi(
+  u: FooterAgentRowWaitingForApi,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  const state = document.createElement("span");
+  state.className = "footer-row-state";
+  state.appendChild(document.createTextNode("waiting for the API · "));
+  state.appendChild(drawGivesUpCountdown(u.givesUpAtMs, deps, `${path}.gives_up_at_ms`));
+  return state;
 }
 
 /** The subagent's type label, verbatim. */

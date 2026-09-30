@@ -111,6 +111,8 @@ describe("activityDatumClass", () => {
   it.each<[ActivityDatum, string]>([
     // A sha NAMES something, so it takes the identity blue.
     ["sha", "tone-blue"],
+    // So does the subagent label a transient carries.
+    ["agent", "tone-blue"],
     // Everything else is a figure the reader watches move.
     ["attempt", "tone-yellow"],
     ["count", "tone-yellow"],

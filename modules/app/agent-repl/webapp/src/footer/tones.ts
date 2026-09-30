@@ -94,18 +94,20 @@ export function allowanceStatusClass(arm: string): string {
 }
 
 /** The typed datums an activity line colours. */
-export type ActivityDatum = "sha" | "attempt" | "count" | "position" | "percent";
+export type ActivityDatum = "sha" | "agent" | "attempt" | "count" | "position" | "percent";
 
 /**
  * The colour a typed datum takes inside an activity line.
  *
- * A sha NAMES something and takes the identity blue; every other datum is a
- * FIGURE the reader is watching move (a retry's attempt, a queue place, an
- * allowance percentage) and takes the figure yellow, so the line reads as one
- * kind of thing with one exception rather than as five competing colours.
+ * A sha and a transient's subagent label NAME something and take the identity
+ * blue; every other datum is a FIGURE the reader is watching move (a retry's
+ * attempt, a queue place, an allowance percentage) and takes the figure
+ * yellow, so the line reads as one kind of thing with one exception rather
+ * than as six competing colours.
  */
 const ACTIVITY_DATUM_COLOR: Readonly<Record<ActivityDatum, Color>> = Object.freeze({
   sha: "blue",
+  agent: "blue",
   attempt: "yellow",
   count: "yellow",
   position: "yellow",
