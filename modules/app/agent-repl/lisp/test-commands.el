@@ -474,14 +474,15 @@ is indistinguishable from a success that did not move the user."
 ;;;; ---- Navigation over roster order ----
 
 (defun agent-repl-test-commands--row (name id at-ms &optional closed)
-  "Return a decoded roster row for NAME with a last-selected instant."
+  "Return a decoded roster row for NAME carrying the last-selected AT-MS."
   (list :workspace (list :workspace (list :id id :dir (concat "/tmp/" name)))
         :attention nil :priority nil
+        :last-selected (when at-ms (list :at-ms at-ms))
         :name (list :text name)
         :status (list :arm :ready :value nil)
         :current (list :current nil)
         :children nil
-        :when (when at-ms (list :arm :last-selected :value (list :at-ms at-ms)))
+        :when nil
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
@@ -496,35 +497,59 @@ is indistinguishable from a success that did not move the user."
                                :rows (list :rows nil))
         :current nil))
 
-(ert-deftest agent-repl-test-commands-recent-names-order-by-the-when-column ()
-  "Recency comes from the roster's when-column, not a local history ring."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-commands--roster
-          (list (agent-repl-test-commands--row "old" "id-old" 100)
-                (agent-repl-test-commands--row "new" "id-new" 900)))))
-    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
-               (lambda (id) (if (equal id "id-old") "old" "new"))))
-      (should (equal (agent-repl--roster-recent-names) '("new" "old"))))))
+(defmacro agent-repl-test-commands--with-rows (rows history &rest body)
+  "Run BODY over a roster of ROWS, with HISTORY as this session's switches.
+Each row's name is its workspace, and its durable instant is read from
+the row itself, as the roster's own lookup would."
+  (declare (indent 2))
+  `(let* ((rows ,rows)
+          (agent-repl-roster-view (agent-repl-test-commands--roster rows))
+          (agent-repl--workspace-history ,history))
+     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id)
+                  (cl-loop for row in rows
+                           when (equal (plist-get (plist-get (plist-get row :workspace) :workspace) :id) id)
+                           return (plist-get (plist-get row :name) :text))))
+               ((symbol-function 'agent-repl-roster-last-selected-ms)
+                (lambda (ws)
+                  (cl-loop for row in rows
+                           when (equal (plist-get (plist-get row :name) :text) ws)
+                           return (plist-get (plist-get row :last-selected) :at-ms)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-recent-names-order-by-the-durable-instant ()
+  "Without session history, recency is the roster's durable last-selected
+instant, so a fresh Emacs still knows the order."
+  (agent-repl-test-commands--with-rows
+      (list (agent-repl-test-commands--row "old" "id-old" 100)
+            (agent-repl-test-commands--row "new" "id-new" 900))
+      nil
+    (should (equal (agent-repl--roster-recent-names) '("new" "old")))))
+
+(ert-deftest agent-repl-test-commands-recent-names-put-session-history-first ()
+  "This session's switches come before the durable instant: the same
+order a close lands by."
+  (agent-repl-test-commands--with-rows
+      (list (agent-repl-test-commands--row "old" "id-old" 100)
+            (agent-repl-test-commands--row "new" "id-new" 900))
+      '("old")
+    (should (equal (agent-repl--roster-recent-names) '("old" "new")))))
 
 (ert-deftest agent-repl-test-commands-recent-names-skip-closed-rows ()
   "A closed workspace is not somewhere to switch to."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-commands--roster
-          (list (agent-repl-test-commands--row "open" "id-open" 100)
-                (agent-repl-test-commands--row "shut" "id-shut" 900 t)))))
-    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
-               (lambda (id) (if (equal id "id-open") "open" "shut"))))
-      (should (equal (agent-repl--roster-recent-names) '("open"))))))
+  (agent-repl-test-commands--with-rows
+      (list (agent-repl-test-commands--row "open" "id-open" 100)
+            (agent-repl-test-commands--row "shut" "id-shut" 900 t))
+      nil
+    (should (equal (agent-repl--roster-recent-names) '("open")))))
 
 (ert-deftest agent-repl-test-commands-recent-names-sink-the-never-selected ()
   "A never-selected workspace sorts last rather than being dropped."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-commands--roster
-          (list (agent-repl-test-commands--row "never" "id-never" nil)
-                (agent-repl-test-commands--row "seen" "id-seen" 500)))))
-    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
-               (lambda (id) (if (equal id "id-seen") "seen" "never"))))
-      (should (equal (agent-repl--roster-recent-names) '("seen" "never"))))))
+  (agent-repl-test-commands--with-rows
+      (list (agent-repl-test-commands--row "never" "id-never" nil)
+            (agent-repl-test-commands--row "seen" "id-seen" 500))
+      nil
+    (should (equal (agent-repl--roster-recent-names) '("seen" "never")))))
 
 (ert-deftest agent-repl-test-commands-open-most-recent-skips-the-current ()
   "The command lands somewhere else: switching to where you are is a no-op."

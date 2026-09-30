@@ -2538,8 +2538,8 @@ most recent one still open is the landing."
           (should (equal (agent-repl--teardown-landing-target "gone") "second")))))))
 
 (ert-deftest agent-repl-test-teardown-landing-target-falls-back-to-tab-order-on-empty-history ()
-  "With an empty history -- no workspace visited yet this session -- the
-first open workspace in tab order is the landing."
+  "With an empty history and no durable instant -- no workspace ever
+selected -- the first open workspace in tab order is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil))
@@ -2548,8 +2548,9 @@ first open workspace in tab order is the landing."
         (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
 
 (ert-deftest agent-repl-test-teardown-landing-target-falls-back-when-no-history-entry-is-open ()
-  "A history naming only the departing workspace and closed ones is the same
-expected condition as an empty one: the first open tab is the landing."
+  "A history naming only the departing workspace and closed ones, with no
+durable instant either, is the same expected condition as an empty one:
+the first open tab is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "closed-earlier")))
@@ -2590,6 +2591,55 @@ expected condition as an empty one: the first open tab is the landing."
                      (string-match-p
                       "teardown-landing-target: ws=gone target=first source=tab-order" l))
                    (cadr info))))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-uses-the-durable-instant-without-history ()
+  "With no session history naming a survivor (a fresh Emacs), the landing is
+the survivor the roster's durable instant says was selected most recently."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("gone")))
+      (cl-letf (((symbol-function 'agent-repl-roster-last-selected-ms)
+                 (lambda (ws) (cdr (assoc ws '(("first" . 100) ("second" . 900)))))))
+        (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
+          ;; Act / Assert
+          (should (equal (agent-repl--teardown-landing-target "gone") "second")))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-records-a-roster-decision-at-info ()
+  "Which source chose the landing is recorded at INFO: here, the roster."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (info (agent-repl-test-ws--recorder)))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+                ((symbol-function 'agent-repl-roster-last-selected-ms)
+                 (lambda (ws) (and (equal ws "second") 900))))
+        (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
+          ;; Act
+          (agent-repl--teardown-landing-target "gone")
+          ;; Assert
+          (should (seq-some
+                   (lambda (l)
+                     (string-match-p
+                      "teardown-landing-target: ws=gone target=second source=roster" l))
+                   (cadr info))))))))
+
+(ert-deftest agent-repl-test-teardown-landing-target-records-a-foreign-persp-fallback-at-info ()
+  "Which source chose the landing is recorded at INFO: here, a foreign persp."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (info (agent-repl-test-ws--recorder)))
+      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("foreign"))))
+        ;; Act
+        (agent-repl--teardown-landing-target "gone")
+        ;; Assert
+        (should (seq-some
+                 (lambda (l)
+                   (string-match-p
+                    "teardown-landing-target: ws=gone target=foreign source=foreign-persp" l))
+                 (cadr info)))))))
 
 (ert-deftest agent-repl-test-land-before-teardown-lands-on-the-previously-selected-workspace ()
   "Standing on the departing workspace, the user lands where they were before."

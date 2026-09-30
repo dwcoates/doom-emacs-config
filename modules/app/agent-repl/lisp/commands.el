@@ -78,6 +78,7 @@
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-name "agent-repl-verbs" (row))
@@ -851,20 +852,17 @@ rather than sticking on the second-most-recent workspace.")
 
 (defun agent-repl--roster-recent-names ()
   "Return open workspace names, most recently selected first.
-Ordered from the roster's WHEN COLUMN -- the daemon's own
-`last_selected' instant -- rather than from a local history ring: the
-roster is the source of which workspaces exist, so it is also the source
-of which one was last looked at."
-  (let (scored)
+The open rows of the roster, ordered by the ONE selection-recency order
+\(`agent-repl-roster-selection-recency-order'): this session's switches,
+then the daemon's durable last-selected instant, then never-selected
+rows in roster order -- the same order a close lands by."
+  (let (names)
     (dolist (row (agent-repl-verbs--all-rows))
       (unless (agent-repl-verbs--row-closed-p row)
         (let* ((ref (agent-repl-verbs--row-ref row))
-               (ws (and ref (agent-repl--ws-by-ref-id (plist-get ref :id))))
-               (shown (plist-get row :when))
-               (at (when (eq (plist-get shown :arm) :last-selected)
-                     (plist-get (plist-get shown :value) :at-ms))))
-          (when ws (push (cons ws (or at 0)) scored)))))
-    (mapcar #'car (sort (nreverse scored) (lambda (a b) (> (cdr a) (cdr b)))))))
+               (ws (and ref (agent-repl--ws-by-ref-id (plist-get ref :id)))))
+          (when ws (push ws names)))))
+    (agent-repl-roster-selection-recency-order (nreverse names))))
 
 (defun agent-repl-open-most-recent-workspace ()
   "Switch to the most recently selected workspace not yet visited this cycle.
