@@ -1337,6 +1337,14 @@ body::after {
      flex leftover of the 100vh column and its width is the stretched column's,
      so neither ever came from its content. */
   container-type: size;
+  /* THE EXPANDED-ITEM CEILING (owner request, 2026-09-30): an expanded feed
+     item that is neither a response nor a prompt -- a tool or skill card, a
+     subagent's or detached work's bubble, a detached shell, a hook card -- is
+     never taller than 80% of the feed's visible height. ONE variable every
+     such rule caps against, in `cqh` against this container, so the ceiling
+     follows the feed's height whatever changes it; it is resolved where it is
+     used, and every use sits inside this box. */
+  --feed-item-max-h: 80cqh;
   /* THE BOTTOM GAP, HELD AT EVERY SCROLL POSITION. The mask fades whatever
      crosses the viewport's last `--feed-bottom-gap` out to nothing at its
      edge, so no card ever reads as abutting the dock, scrolled anywhere. A
@@ -2080,17 +2088,24 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   flex-direction: column;
   align-items: stretch;
 }
-/* AN EXPANDED ASYNC BUBBLE STOPS AT THREE QUARTERS OF THE FEED (owner ruling,
-   2026-09-23). Every expandable bubble -- subagent, detached subagent and merge
-   alike -- is built by `bubble.ts` with this one sub-feed panel, so this one
-   rule caps them all. `75cqh` is three quarters of `#feed-scroll`'s visible
-   height (the size container above), so the cap tracks window resizes. It is a
-   `max-height`, so a sub-feed shorter than the cap still sizes to its content,
-   and the rest is reached by scrolling inside the panel; the feed's intent-arm
-   wheel routing (scroll.ts) treats the panel like any other inner scroll box.
-   Keyed on the expanded state, so a collapsed bubble is untouched. */
+/* AN EXPANDED ASYNC BUBBLE STAYS UNDER THE EXPANDED-ITEM CEILING (owner
+   ruling, 2026-09-23; the whole bubble rather than its panel since the owner
+   request of 2026-09-30). Every expandable bubble -- subagent, detached
+   subagent and merge alike -- is built by `bubble.ts` with this one head and
+   sub-feed panel, so these rules cap them all: the bubble stops at
+   `--feed-item-max-h` (80% of `#feed-scroll`'s visible height, tracking every
+   resize), its head keeps its height, and the panel takes what is left,
+   scrolling the rest. A sub-feed shorter than that sizes to its content; the
+   feed's intent-arm wheel routing (scroll.ts) treats the panel like any other
+   inner scroll box. Keyed on the expanded state, so a collapsed bubble is
+   untouched. */
+.tool-card.bubble-fold[data-expanded="true"] {
+  max-height: var(--feed-item-max-h);
+}
+.bubble-fold[data-expanded="true"] > .bubble-head { flex: 0 0 auto; }
 .bubble-fold[data-expanded="true"] > .bubble-subfeed {
-  max-height: 75cqh;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 /* The fixed panel a teal card's fold drops (see .fold-fixed above), capped at
@@ -2374,7 +2389,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    scrolls at 50vh, the card grows to hold it — so the (0,2,0) `.tool-fold.expanded`
    outranks the (0,1,0) `.expanded` and turns the card's own cap back off. */
 .tool-fold { cursor: zoom-in; }
-.tool-fold.expanded { max-height: none; overflow: visible; cursor: zoom-out; }
+/* AN EXPANDED CARD STAYS UNDER THE EXPANDED-ITEM CEILING (--feed-item-max-h,
+   on #feed-scroll): the card is a column whose header and diagnostics keep
+   their height and whose output section alone gives way, scrolling what does
+   not fit, so the card as a whole never outgrows 80% of the feed. */
+.tool-fold.expanded {
+  max-height: var(--feed-item-max-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: zoom-out;
+}
+.tool-fold.expanded > * { flex: 0 0 auto; }
 
 /* COLLAPSED = NO SECTION PREVIEW. A collapsed card hides its output section
    entirely rather than showing a height-capped peek of it — collapsed is the
@@ -2383,12 +2409,14 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-fold:not(.expanded) > .tool-diagnostics {
   display: none;
 }
-/* EXPANDED reveals the section, scrolling at 50vh — the same ceiling every
-   expanded box caps at. Outranks each output's own single-class preview cap
-   (`.tool-read-output`, `.skill-content`, …, all 0,1,0) so the reveal is 50vh,
-   not the old 10-line budget. */
+/* EXPANDED reveals the section, which takes what the card's ceiling leaves
+   after its header and scrolls the rest. Outranks each output's own
+   single-class preview cap (`.tool-read-output`, `.skill-content`, …, all
+   0,1,0), so the reveal is bounded by the card alone. */
 .tool-fold.expanded > .tool-output {
-  max-height: 50vh;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -2422,6 +2450,13 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   -webkit-line-clamp: none;
   overflow: visible;
   max-height: none;
+}
+/* A STANDALONE TITLE IS ITS OWN EXPANDED ITEM, so it stays under the
+   expanded-item ceiling (--feed-item-max-h, on #feed-scroll) and scrolls the
+   rest. */
+.title-fold-standalone.expanded {
+  max-height: var(--feed-item-max-h);
+  overflow-y: auto;
 }
 /* A standalone title is its own click-to-expand fold (CAPPED_CLASSES); the
    cursor offers the click only while there is more to reveal. */
@@ -5645,6 +5680,48 @@ bubble-body.bubble-body { display: block; }
 }
 .shell-spool {
   margin-top: 0.3rem;
+}
+/* A DETACHED SHELL WITH ITS TAIL OPEN STAYS UNDER THE EXPANDED-ITEM CEILING
+   (--feed-item-max-h, on #feed-scroll): the bubble is a column down to the
+   tail, everything above the tail keeps its height, and the tail alone gives
+   way and scrolls. */
+.shell-bubble:has(.shell-tail.expanded) {
+  max-height: var(--feed-item-max-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.shell-bubble:has(.shell-tail.expanded) > *,
+.shell-bubble:has(.shell-tail.expanded) .shell-bubble-body > *,
+.shell-bubble:has(.shell-tail.expanded) .shell-spool > * {
+  flex: 0 0 auto;
+}
+.shell-bubble:has(.shell-tail.expanded) > .shell-bubble-body,
+.shell-bubble:has(.shell-tail.expanded) .shell-bubble-body > .shell-spool {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.shell-bubble .shell-tail.expanded {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+/* A HOOK CARD WITH A BOX OPEN STAYS UNDER THE SAME CEILING: the card is a
+   column, its head keeps its height, and its open reason or output box gives
+   way and scrolls. */
+.tool-card:has(> .hook-output.expanded) {
+  max-height: var(--feed-item-max-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tool-card:has(> .hook-output.expanded) > * { flex: 0 0 auto; }
+.tool-card > .hook-output.expanded {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 /* The truncation count sits ABOVE the box and outside it, so it stays put while
    the box scrolls. */

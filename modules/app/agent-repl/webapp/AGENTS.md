@@ -414,7 +414,7 @@ hand any more:
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
-  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `bubbleExpanded`, `initialPlacement`,
+  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `itemExpanded`, `initialPlacement`,
   `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
   bubble wholly above the reader collapsing when its own final text lands,
   i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
@@ -437,10 +437,24 @@ hand any more:
   `detachedWorkSelected` CENTERS the picked card in the feed's viewport
   (`revealCenterDelta`: midpoint onto midpoint, a card taller than the
   viewport top-aligned, clamped at the feed's edges), and a reveal opens only
-  the containers selecting the row requires. `bubbleExpanded` (owner ruling,
-  2026-09-29) CENTERS a bubble the reader clicks open to its expanded view,
-  through the same `TailFollow.centerReveal`; a collapse, and a tool card's
-  fold, move nothing. `prependCompensation` also covers
+  the containers selecting the row requires. `itemExpanded` (owner request,
+  2026-09-30, widening the bubble-only ruling of 2026-09-29) puts the vertical
+  middle of ANY feed item the reader expands on the feed viewport's vertical
+  middle at once (`expandCenterDelta`: midpoint onto midpoint whatever the
+  item's height, clamped at the feed's edges), through the same
+  `TailFollow.centerReveal`. The item is the expanded element's nearest feed
+  row. A capped section the click owner toggles centers through its callback;
+  an item owning its own fold (a sub-feed bubble, a compaction's summary)
+  dispatches `ITEM_EXPANDED_EVENT` (`announceItemExpanded`, src/expand.ts) on
+  the reader's toggle only — a reveal opening bubbles never announces. A
+  collapse moves nothing.
+  THE EXPANDED-ITEM CEILING (owner request, 2026-09-30): an expanded item that
+  is neither a response nor a prompt (a tool or skill card, a subagent's,
+  detached work's or merge bubble, a detached shell, a hook card, a standalone
+  title) is never taller than `--feed-item-max-h`, 80% of `#feed-scroll`'s
+  visible height (`80cqh` on its size container), declared ONCE there; its
+  header keeps its height and its inner section gives way and scrolls.
+  test/webkit/expanded-ceiling.webkit.test.ts measures it in real WebKit. `prependCompensation` also covers
   a bubble whose sub-feed lies wholly above the viewport collapsing (a
   negative shift). THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27): WebKit has
   no native CSS scroll anchoring, and every `.feed-item` is
