@@ -1149,7 +1149,16 @@ owns the rule, `src/engine/api-reachability.ts` the probe, and
   completes after `expire()` gave its wait up is still delivered and logged
   but states nothing on the wire (an INFO record names the suppressed and
   the standing outcome), and a refail past its window, which opens no wait,
-  states no `gave_up`. A wait's `work` is the FAILED RUN's
+  states no `gave_up`. **A FINISHED DELIVERY ENDS ONLY THE WAIT IT WAS
+  STARTED FOR** (ruled 2026-09-30): each wait has its own identity (`wait_id`,
+  a per-process generation, in every record), and a wait leaves the standing
+  set only by that identity (`removeWait`, which throws at ERROR on any other).
+  A delivery finishing after its wait ended (expired, or superseded by a newer
+  failure of the same agent while it stood) is logged `resumed` with
+  `late: true` plus one INFO naming the ended and the standing wait, and it
+  moves no history, removes no wait and gives nothing up, so a newer wait of
+  the same agent keeps its own lifecycle and its own outcome. A superseded
+  wait has no outcome arm on the wire; the restated set drops it. A wait's `work` is the FAILED RUN's
   `DetachedWorkId`: the notification's `tool_use_id`, else the agent's latest
   run, so after a resume it is the resuming `SendMessage`'s handle, the one the
   fold's failure terminal retired. A seam failure is recorded at ERROR and the
