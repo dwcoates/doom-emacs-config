@@ -135,7 +135,7 @@ the module."
        :desc "Fork workspace, named (no prompt)" "F" #'agent-repl-fork-workspace-static
        :desc "New one-shot workspace" "o" #'agent-repl-create-oneshot
        :desc "Re-open a closed workspace" "O" #'agent-repl-open-workspace
-       :desc "Merge current workspace (enqueue)" "M" #'agent-repl-merge-workspace
+       :desc "Merge current workspace (enqueue; C-u keeps it open)" "M" #'agent-repl-merge-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace))
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority
