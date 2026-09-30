@@ -1460,6 +1460,106 @@ t_ensure_deps_fails_when_the_install_fails() {
     rm -rf "$root"
 }
 
+# ---------------------------------------------------------------------------
+# ensure-e2e-deps.sh — the e2e suite provisions its own npm deps.
+#
+# The fixture is a copy of the agent-repl bin/ beside a stub ensure-deps.sh
+# that logs the package it was handed and exits EED_FAIL_STATUS for the
+# package named by EED_FAIL_PACKAGE.
+eed_fixture() {
+    local root; root="$(mktemp -d)"
+    mkdir -p "$root/bin" "$root/agent-shim/claude/shim" "$root/webapp" "$root/e2e"
+    cp "$THIS_DIR/ensure-e2e-deps.sh" "$THIS_DIR/test-e2e.sh" "$root/bin/"
+    cat > "$root/bin/ensure-deps.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "ensure-deps ${1#"$EED_ROOT"/}" >> "$EED_LOG"
+[ "${1#"$EED_ROOT"/}" = "${EED_FAIL_PACKAGE:-}" ] && exit "$EED_FAIL_STATUS"
+exit 0
+EOF
+    mkdir -p "$root/stubs"
+    cat > "$root/stubs/go" <<'EOF'
+#!/usr/bin/env bash
+echo "go $* in ${PWD##*/}" >> "$EED_LOG"
+EOF
+    chmod +x "$root/bin/ensure-deps.sh" "$root/stubs/go"
+    echo "$root"
+}
+
+eed_run() {
+    local root="$1"; shift
+    EED_ROOT="$root" EED_LOG="$root/log" AGENT_REPL_BACKGROUND_PRIORITY=1 \
+        PATH="$root/stubs:$PATH" "$@" 2>"$root/stderr"
+}
+
+t_ensure_e2e_deps_ensures_every_e2e_package() {
+    local root; root="$(eed_fixture)"
+    local rc=0
+    eed_run "$root" bash "$root/bin/ensure-e2e-deps.sh" || rc=$?
+    if [ "$rc" -eq 0 ] &&
+        [ "$(cat "$root/log")" = "$(printf 'ensure-deps agent-shim/claude/shim\nensure-deps webapp')" ]; then
+        pass "ensure-e2e-deps: the shim and the webapp are both ensured through ensure-deps.sh"
+    else
+        fail "ensure-e2e-deps: the shim and the webapp are both ensured through ensure-deps.sh" "rc=$rc log=$(cat "$root/log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_e2e_deps_fails_naming_the_package() {
+    local root; root="$(eed_fixture)"
+    local rc=0
+    EED_FAIL_PACKAGE=agent-shim/claude/shim EED_FAIL_STATUS=5 \
+        eed_run "$root" bash "$root/bin/ensure-e2e-deps.sh" || rc=$?
+    if [ "$rc" -eq 5 ] &&
+        grep -q 'ERROR: ensuring the npm deps of agent-shim/claude/shim .* failed with exit 5' "$root/stderr" &&
+        ! grep -q 'ensure-deps webapp' "$root/log"; then
+        pass "ensure-e2e-deps: a failed package fails with its status, named, and stops there"
+    else
+        fail "ensure-e2e-deps: a failed package fails with its status, named, and stops there" "rc=$rc stderr=$(cat "$root/stderr")"
+    fi
+    rm -rf "$root"
+}
+
+t_test_e2e_ensures_deps_before_the_suite() {
+    local root; root="$(eed_fixture)"
+    local rc=0
+    eed_run "$root" bash "$root/bin/test-e2e.sh" >/dev/null || rc=$?
+    if [ "$rc" -eq 0 ] &&
+        [ "$(cat "$root/log")" = "$(printf 'ensure-deps agent-shim/claude/shim\nensure-deps webapp\ngo test ./... in e2e')" ]; then
+        pass "test-e2e: the suite's npm deps are ensured before go test runs"
+    else
+        fail "test-e2e: the suite's npm deps are ensured before go test runs" "rc=$rc log=$(cat "$root/log")"
+    fi
+    rm -rf "$root"
+}
+
+t_test_e2e_never_runs_the_suite_without_its_deps() {
+    local root; root="$(eed_fixture)"
+    local rc=0
+    EED_FAIL_PACKAGE=webapp EED_FAIL_STATUS=4 \
+        eed_run "$root" bash "$root/bin/test-e2e.sh" >/dev/null || rc=$?
+    if [ "$rc" -eq 4 ] && ! grep -q '^go ' "$root/log"; then
+        pass "test-e2e: deps that cannot be ensured fail the suite before go test runs"
+    else
+        fail "test-e2e: deps that cannot be ensured fail the suite before go test runs" "rc=$rc log=$(cat "$root/log")"
+    fi
+    rm -rf "$root"
+}
+
+# Every unsandboxed e2e runner provisions deps through the one helper, never
+# by hand-rolling its own package list.
+t_e2e_runners_share_ensure_e2e_deps() {
+    local runner bad=""
+    for runner in test-e2e.sh e2e-coverage.sh; do
+        grep -q '"\$THIS_DIR/ensure-e2e-deps.sh"' "$THIS_DIR/$runner" || bad="$bad $runner(no helper)"
+        grep -Eq '/ensure-deps\.sh"|^[[:space:]]*npm[[:space:]]' "$THIS_DIR/$runner" && bad="$bad $runner(hand-rolled)"
+    done
+    if [ -z "$bad" ]; then
+        pass "e2e runners: every runner provisions npm deps through ensure-e2e-deps.sh"
+    else
+        fail "e2e runners: every runner provisions npm deps through ensure-e2e-deps.sh" "$bad"
+    fi
+}
+
 # --- the self-healing store ---------------------------------------------------
 #
 # A store entry that EXISTS but does not satisfy its lockfile (emptied through a
@@ -1738,6 +1838,12 @@ t_ensure_deps_never_empties_the_store_through_a_link
 t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
 t_ensure_deps_installs_an_absent_tree
 t_ensure_deps_fails_when_the_install_fails
+
+t_ensure_e2e_deps_ensures_every_e2e_package
+t_ensure_e2e_deps_fails_naming_the_package
+t_test_e2e_ensures_deps_before_the_suite
+t_test_e2e_never_runs_the_suite_without_its_deps
+t_e2e_runners_share_ensure_e2e_deps
 
 t_out_stages_the_shim
 t_out_stages_the_webapp

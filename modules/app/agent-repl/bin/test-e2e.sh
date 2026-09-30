@@ -26,6 +26,10 @@ command -v go >/dev/null 2>&1 || {
     exit 1
 }
 
+# The suite bundles the real shim and drives the real webapp, so their npm
+# deps are provisioned here rather than left to whichever suite ran before.
+"$THIS_DIR/ensure-e2e-deps.sh"
+
 printf '[e2e] running the cross-system suite in %s\n' "$E2E_DIR"
 cd "$E2E_DIR"
 exec go test ./... "$@"
