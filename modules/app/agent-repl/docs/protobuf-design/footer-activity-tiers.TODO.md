@@ -107,7 +107,6 @@ not "stop".
 
 - `/tmp` CEE worktree directory left behind; CEE `test-skill.sh` 14 failures.
 - Shim latent late-resume bug (a late delivery can clear a newer wait).
-- Light theme: the compaction toggle is white, invisible on white.
 - An agent moved to the background by a `task_updated` patch is still
   announced `by_user`; the patch states no cause for agents either.
 - The vendor hang of 2026-09-30 (a retry promised in 32s never came): the
@@ -147,3 +146,53 @@ C. **The merge bubble's test log link.** The test failure log's path rides
    beside the agent-repl panels and not replacing them, the way other
    agent-repl file views open. Proto additions to the existing workspace rpc
    are pre-approved. Check whether the right-side split already exists.
+D. **Find why this workspace's session context was lost on restart
+   (owner, 2026-09-30).** After the session restart that came before the
+   implementation work, the workspace came back as a new, empty Claude
+   session instead of resuming the old one.
+   - The old session is `403ca066-6122-4ade-8733-f9766cd5ee94`. Its cwd is
+     `~/.config/doom-worktrees/footer-activity-updates`, and its transcript
+     is under `~/.claude/projects/-Users-dodgecoates--config-doom-worktrees-footer-activity-updates/`.
+   - The new session is `69a42c9f-c293-418b-b561-f0a7c7a911c6`. Its cwd is
+     `~/.config/doom`, the master checkout, so its transcript is under a
+     different project directory (`-Users-dodgecoates--config-doom`).
+   - The old session wrote its last reply at 22:41:41Z, eight seconds AFTER
+     the new session's first prompt (22:41:33Z). The two ran side by side for
+     a moment, so the restart started a fresh session rather than resuming
+     the one that was still running.
+   - First suspicion: the restart relaunched the workspace with the master
+     checkout as its cwd (perhaps because the branch had been landed on
+     master), and a resume looked up the session id under the project
+     directory for that cwd, where the old transcript is not. Confirm from the
+     daemon and shim logs for the restart (session id handed to the shim,
+     cwd, resume vs fresh start) before designing a fix.
+   - The fix must make this impossible, not unlikely: a restart resumes the
+     workspace's recorded session id and cwd, or fails loudly.
+
+## Rulings and decisions, 2026-09-30 late evening
+
+The owner: "everything else you can implement as you see fit (with whatever
+orchestration you like)"; the light theme is not to be worried about. The
+lead's decisions on the open merge-queue questions (recorded here so they can
+be revisited):
+
+- **The rebase runs in a worktree checked out on the branch being merged**:
+  the requesting workspace's own worktree when it merges its own branch; the
+  branch's existing worktree when it has one (another workspace, a subagent's
+  Agent-tool worktree); otherwise a worktree the daemon makes for that branch.
+  The repair agent is ALWAYS the requesting workspace's own session, told
+  which directory to work in. No workspace is ever created for a merge.
+- **"merge workspace <dir>" means "merge that workspace's branch from here"**:
+  the requesting workspace runs it and shows it; the workspace whose branch
+  landed is closed once it lands, as its work is done.
+- **"keep open after merge" is a flag on each merge request.** Without it, a
+  workspace that merged its own branch closes on landing; a workspace that
+  merged another branch is never closed by that merge.
+- **Nothing acts on an overdue retry, by design** (metaprompt: never work
+  around a broken mechanism with a fallback). The sad path is reported
+  loudly: the footer shows "overdue", and the daemon records one WARN when a
+  promised retry passes with no attempt.
+- Orchestration: the lead does the merge queue rework (items A and C);
+  opus-medium agents take item B, the shim's late-resume bug and the agent
+  moved-by-patch cause, and the master duplication plus the overdue WARN; the
+  explanation-engine test-skill failures go through /explanation-engine-skill.
