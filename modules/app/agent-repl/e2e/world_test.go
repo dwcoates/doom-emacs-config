@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -247,7 +248,8 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// the sidecar write their build reports into it, and the daemon's deploy
 	// reads them from it.
 	lockDir := harness.LockDirFor(stateRoot)
-	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"), filepath.Join(logsDir, "store.log"), lockDir)
+	storeDB := filepath.Join(t.TempDir(), "store.db")
+	store := startStore(t, shortSocketPath(t, "store"), storeDB, filepath.Join(logsDir, "store.log"), lockDir)
 
 	// ONE spool root for the whole world. The fake SDK inside every shim
 	// this daemon spawns writes its task spools here (via
@@ -281,7 +283,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// over the variable rather than the value is what lets it be armed before
 	// there is a daemon to name.
 	var d *harness.Daemon
-	preserveLogsOnFailure(t, &d)
+	preserveLogsOnFailure(t, &d, storeDB)
 	d = harness.StartDaemon(t, daemonOpts)
 	resolveConfigRoots(t, d)
 
@@ -405,7 +407,13 @@ const artifactTailBytes = 64 << 10
 // directory (they otherwise landed in anonymous t.TempDir()s that vanished
 // with the test, leaving a failed run with no store or sidecar log at all),
 // so the one sweep below collects them alongside the daemon's sinks.
-func preserveLogsOnFailure(t *testing.T, daemon **harness.Daemon) {
+//
+// WITH AN ARTIFACTS DIRECTORY THE STORE'S DATABASE IS KEPT TOO (storeDB and
+// its WAL files): the logs say what each writer did, but only the rows say
+// what a book held when a page was read from it. It is copied while the store
+// still runs -- this cleanup is registered after the store's, so it runs
+// first -- which is safe once the test has stopped writing.
+func preserveLogsOnFailure(t *testing.T, daemon **harness.Daemon, storeDB string) {
 	t.Helper()
 	t.Cleanup(func() {
 		if !t.Failed() {
@@ -449,7 +457,21 @@ func preserveLogsOnFailure(t *testing.T, daemon **harness.Daemon) {
 			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
 		}
 		if dest != "" {
-			t.Logf("e2e artifacts: structured logs preserved under %s", dest)
+			for _, suffix := range []string{"", "-wal", "-shm"} {
+				src := storeDB + suffix
+				body, err := os.ReadFile(src)
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					t.Logf("e2e artifacts: read %s: %v", src, err)
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(dest, filepath.Base(src)), body, 0o644); err != nil {
+					t.Logf("e2e artifacts: write %s: %v", filepath.Join(dest, filepath.Base(src)), err)
+				}
+			}
+			t.Logf("e2e artifacts: structured logs and the store database preserved under %s", dest)
 		}
 	})
 }
