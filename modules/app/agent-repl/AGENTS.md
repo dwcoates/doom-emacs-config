@@ -1189,8 +1189,8 @@ against it), and this table is what it means.
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `thinking`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
-| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge stopped awaiting you (`merge_conflict`, a parked merge included); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
-| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_enqueuing`, `merge_queued`, `merging` |
+| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
+| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded` (a shim component dropping or delaying observations, or a shim taken back after a failed handover that never re-reported its state) |
 | Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected`, `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved) |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
@@ -1199,7 +1199,8 @@ The rules that keep this true:
 
 - **Blue is only "unusable".** Something that went wrong while the workspace
   stays usable is turquoise, never blue. An expected state that awaits you (a
-  merge conflict, a permission ask) is green, never blue.
+  permission ask) is green, never blue. A merge never parks: one that gives up
+  is `merge_failed`, turquoise, and the workspace is back with you.
 - **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
   every turn-ending agent failure into a vendor or account block (blue), the
   turn's own failure (turquoise) or an expected stop (green), and both the
