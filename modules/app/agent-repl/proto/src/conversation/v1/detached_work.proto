@@ -123,7 +123,7 @@ message DetachedWorkDetached {
   // HOW it came to be detached. Each arm is drawn differently and one carries a
   // figure, so the set arm is the cause rather than a flag beside it.
   //
-  // ALL THREE ARRIVE ON THIS ARM RATHER THAN ON `created`, INCLUDING work that
+  // EVERY CAUSE ARRIVES ON THIS ARM RATHER THAN ON `created`, INCLUDING work that
   // asked for the background up front: such a call is streamed as a progress
   // item before it backgrounds, so it always has an item it detached FROM — it
   // simply never has a foreground running phase.
@@ -139,6 +139,14 @@ message DetachedWorkDetached {
     // The work outlived its own timeout and was backgrounded rather than
     // killed.
     DetachedCauseTimedOut timed_out = 4;
+    // The vendor moved the running work to the background and has not said
+    // why. Its task stream states the move with no cause; the work's own tool
+    // result states the cause and restates this row with it, when that result
+    // reaches the producer. A call made inside a backgrounded subagent never
+    // reaches the producer that reads the task stream, so its row keeps this
+    // arm: saying a person backgrounded it, or that it timed out, would be a
+    // guess.
+    DetachedCauseVendorMoved vendor_moved = 5;
   }
 }
 
@@ -147,6 +155,9 @@ message DetachedCauseRequested {}
 
 // A person backgrounded the running work by hand.
 message DetachedCauseByUser {}
+
+// The vendor moved the running work to the background without saying why.
+message DetachedCauseVendorMoved {}
 
 // The work exceeded its own timeout and was moved to the background instead of
 // being killed.
