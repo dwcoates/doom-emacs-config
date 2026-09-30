@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"claude-repld/internal/figures"
+
 	"strings"
 	"testing"
 
@@ -280,6 +282,38 @@ func TestTheUsageStampIsFreshInputAndExcludesCacheReadsAndOutput(t *testing.T) {
 	// and output are not fresh input.
 	if got := h.response().GetUsage().GetText(); got != "18.2k" {
 		t.Fatalf("usage stamp = %q, want the fresh 18_000+240 = 18.2k", got)
+	}
+}
+
+func TestTheUsageStampIsColoredByTheSharedTokenHeatOfItsFigure(t *testing.T) {
+	// Arrange: 40k fresh input sits halfway between yellow and orange.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 40_000}}
+
+	// Act.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
+
+	// Assert: the SAME rule the footer's tokens cell colors by.
+	if got, want := h.response().GetUsage().GetHeat().GetPosition(), figures.TokenHeat(40_000); got != want {
+		t.Fatalf("usage heat = %v, want the shared token heat %v", got, want)
+	}
+}
+
+func TestTheUsageStampKeepsItsHeatWhenItSettles(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 40_000}}
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), nil, nil, noAddress())
+
+	// Act: a fragment with no usage of its own.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "hi"}, nil), nil, nil, noAddress())
+
+	// Assert
+	if got := h.response().GetUsage().GetHeat().GetPosition(); got != figures.TokenHeat(40_000) {
+		t.Fatalf("usage heat after a later frame = %v, want it kept", got)
 	}
 }
 

@@ -79,6 +79,7 @@ import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
 import { tickWhileShown } from "../ticking.js";
+import { tokenHeatColor } from "../../token-heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
@@ -508,6 +509,9 @@ export function drawFeedResponseUsageStamp(
   const stamp = document.createElement("span");
   stamp.className = "usage-stamp";
   stamp.textContent = u.text;
+  // THE FIGURE WEARS ITS HEAT, by the one rule the footer's tokens cell uses.
+  const heat = requireMessage(u.heat, `${path}.heat`);
+  stamp.style.color = tokenHeatColor(heat.position, `${path}.heat.position`);
   slider.appendChild(stamp);
 
   // The reserve is drawn either way; an arriving corner marks itself so its

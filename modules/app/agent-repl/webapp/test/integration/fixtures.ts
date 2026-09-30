@@ -237,7 +237,7 @@ export const responseUnit = (
 ): ActivityUnit => ({
   case: "response",
   value: {
-    usage: { text: usageText },
+    usage: { text: usageText, heat: { position: 0.5 } },
     result: { case: state, value: { prose: { markdown } } },
     notice: notice === undefined ? undefined : { heading: notice },
   },

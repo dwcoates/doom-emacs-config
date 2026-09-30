@@ -79,27 +79,37 @@ func (r *resolver) recordUsage(s *wsState, unit string, agent *conversationv1.Ag
 // has stated no usage — absence draws no stamp, never a zero. A tally below
 // the base (a unit that restated a smaller figure, already recorded by
 // recordUsage) draws zero rather than wrapping.
-func (s *wsState) accountStamp(account string, base uint64) string {
+func (s *wsState) accountStamp(account string, base uint64) (string, uint64) {
 	if !s.accountStated[account] {
-		return ""
+		return "", 0
 	}
 	tally := s.accountTally[account]
 	if tally < base {
-		return figures.Tokens(0)
+		return figures.Tokens(0), 0
 	}
-	return figures.Tokens(tally - base)
+	return figures.Tokens(tally - base), tally - base
+}
+
+// usageStamp is a fold's drawn cost corner: its figure, colored by the one
+// token-heat rule, and the settled instant AT (zero while arriving).
+func usageStamp(fold *proseState, at int64) *frontendv1.FeedResponseUsageStamp {
+	return &frontendv1.FeedResponseUsageStamp{
+		Text: fold.usage,
+		AtMs: at,
+		Heat: &frontendv1.TokenHeat{Position: figures.TokenHeat(fold.fresh)},
+	}
 }
 
 // openStamp answers the stamp a response fold draws now. A fold learns its
 // account and its base on its first draw; a frozen fold keeps the figure it
 // landed with.
-func (s *wsState) openStamp(fold *proseState, agent *conversationv1.AgentId) string {
+func (s *wsState) openStamp(fold *proseState, agent *conversationv1.AgentId) (string, uint64) {
 	if fold.account == "" {
 		fold.account = s.usageAccount(agent)
 		fold.base = s.accountLanded[fold.account]
 	}
 	if fold.frozen {
-		return fold.usage
+		return fold.usage, fold.fresh
 	}
 	return s.accountStamp(fold.account, fold.base)
 }
@@ -126,12 +136,12 @@ func (r *resolver) restampOpenBubbles(s *wsState, account string) {
 		if fold.frozen || fold.account != account || fold.row == nil {
 			continue
 		}
-		stamp := s.accountStamp(account, fold.base)
+		stamp, fresh := s.accountStamp(account, fold.base)
 		if stamp == "" || stamp == fold.usage {
 			continue
 		}
-		fold.usage = stamp
-		r.restampResponseRow(s, fold, unit, stamp)
+		fold.usage, fold.fresh = stamp, fresh
+		r.restampResponseRow(s, fold, unit)
 	}
 }
 
@@ -140,18 +150,18 @@ func (r *resolver) restampOpenBubbles(s *wsState, account string) {
 // stamp, reporting whether the turn stated any usage to stamp. It is the one
 // change a landed bubble's figure ever sees.
 func (s *wsState) stampFinalAnswerTotal(fold *proseState) bool {
-	total := s.accountStamp(fold.account, 0)
+	total, fresh := s.accountStamp(fold.account, 0)
 	if total == "" {
 		return false
 	}
 	fold.frozen = true
-	fold.usage = total
+	fold.usage, fold.fresh = total, fresh
 	return true
 }
 
-// restampResponseRow re-publishes a fold's drawn row with STAMP as its figure,
+// restampResponseRow re-publishes a fold's drawn row with its current figure,
 // keeping the settled instant. A row that left its feed is not re-published.
-func (r *resolver) restampResponseRow(s *wsState, fold *proseState, unit, stamp string) {
+func (r *resolver) restampResponseRow(s *wsState, fold *proseState, unit string) {
 	f := r.feed(s, fold.feed)
 	row, ok := f.rows[fold.row.GetValue()]
 	if !ok || row.GetActivity().GetResponse() == nil {
@@ -163,7 +173,7 @@ func (r *resolver) restampResponseRow(s *wsState, fold *proseState, unit, stamp 
 		context:   dlog.Context{"feed": f.key, "row": fold.row.GetValue(), "unit": unit},
 	}, func(restamped *frontendv1.FeedRow) {
 		bubble := restamped.GetActivity().GetResponse()
-		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: stamp, AtMs: bubble.GetUsage().GetAtMs()}
+		bubble.Usage = usageStamp(fold, bubble.GetUsage().GetAtMs())
 	})
 }
 
@@ -173,7 +183,7 @@ func (s *wsState) subagentFigure(created *conversationv1.AgentId) *frontendv1.Fe
 	if created.GetValue() == "" {
 		return nil
 	}
-	stamp := s.accountStamp(s.usageAccount(created), 0)
+	stamp, _ := s.accountStamp(s.usageAccount(created), 0)
 	if stamp == "" {
 		return nil
 	}

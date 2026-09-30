@@ -26,7 +26,7 @@ describe("tokenHeatColor", () => {
     expect(() => tokenHeatColor(position, "p")).toThrow(MalformedView);
   });
 
-  it.each(["src/footer/strip.ts"])(
+  it.each(["src/footer/strip.ts", "src/feed/cards/response.ts"])(
     "%s colors its token figure through the shared helper",
     (file) => {
       // Arrange

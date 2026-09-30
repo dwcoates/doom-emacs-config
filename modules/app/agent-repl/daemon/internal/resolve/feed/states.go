@@ -152,6 +152,8 @@ type proseState struct {
 	// usage is the formatted cost corner, kept across pushes because usage is
 	// stated when the response opens and restated as it grows.
 	usage string
+	// fresh is the figure the stamp formats, which its heat colors.
+	fresh uint64
 	// account is the fresh-input account the bubble's stamp is read off (the
 	// main agent's turn, or a subagent's lifetime), learned on the first draw;
 	// base is that account's landed mark then, which the delta counts from.

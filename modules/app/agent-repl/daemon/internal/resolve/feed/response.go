@@ -55,15 +55,15 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// THE STAMP IS THE FRESH INPUT THIS BUBBLE'S AGENT ADDED SINCE ITS PREVIOUS
 	// BUBBLE LANDED (usage.go): growing while the bubble arrives, frozen once it
 	// settles. The sink tallied this frame's usage before the draw.
-	if stamp := s.openStamp(fold, agent); stamp != "" {
+	if stamp, fresh := s.openStamp(fold, agent); stamp != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.openStamp(fold, agent); stamp != \"\""})
-		fold.usage = stamp
+		fold.usage, fold.fresh = stamp, fresh
 	}
 
 	bubble := &frontendv1.FeedResponse{}
 	if fold.usage != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "fold.usage != \"\""})
-		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage}
+		bubble.Usage = usageStamp(fold, 0)
 	}
 
 	switch state := response.GetResult().(type) {

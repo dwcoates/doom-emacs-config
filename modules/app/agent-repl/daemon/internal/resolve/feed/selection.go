@@ -109,7 +109,7 @@ func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit st
 		// landed with its own frozen delta; turning green re-stamps it ONCE with
 		// the main agent's turn tally (usage.go), keeping its settled instant.
 		if s.stampFinalAnswerTotal(fold) {
-			bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage, AtMs: bubble.GetUsage().GetAtMs()}
+			bubble.Usage = usageStamp(fold, bubble.GetUsage().GetAtMs())
 		}
 	})
 }

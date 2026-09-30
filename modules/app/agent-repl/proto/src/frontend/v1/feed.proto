@@ -55,6 +55,7 @@ import "conversation/v1/turn.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
+import "frontend/v1/token_heat.proto";
 import "frontend/v1/mcp_panel.proto";
 import "frontend/v1/context_panel.proto";
 import "workspace/v1/workspace.proto";
@@ -771,6 +772,10 @@ message FeedResponseUsageStamp {
   // instant. UNSET (zero) while the response is still arriving: there is no
   // settled instant yet, and the client reveals no timestamp for a zero.
   int64 at_ms = 2;
+
+  // How hot the figure is, which colors it: the SAME rule the footer's tokens
+  // cell colors its figure by, over the same kind of figure (fresh input).
+  TokenHeat heat = 3;
 }
 
 // The grey tool-call bubble: one shared shell — head (name + badge), the
