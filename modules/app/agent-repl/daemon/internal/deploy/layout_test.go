@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/wsm"
@@ -73,5 +74,55 @@ func TestBinaryMigrationKind(t *testing.T) {
 				t.Fatalf("BinaryMigrationKind = (%v, %v), want (%v, error %v)", got, err, tt.want, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAskBinary(t *testing.T) {
+	tests := []struct {
+		name    string
+		script  string
+		want    string
+		wantErr string
+	}{
+		{name: "the answer is the trimmed stdout, asked with the question", script: "echo \"  $1  \"\n", want: "-the-question"},
+		{name: "a failure carries the question and the stderr", script: "echo nope >&2; exit 2\n", wantErr: "nope"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bin := standInDaemon(t, tt.script)
+
+			// Act
+			got, err := askBinary(context.Background(), bin, "-the-question")
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "-the-question") {
+					t.Fatalf("askBinary error = %v, want it to carry %q and the question", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("askBinary = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// EVERY QUESTION TO THE STAGED BINARY GOES THROUGH askBinary: a question
+// spelled with its own exec would drift from the bound and the error shape.
+func TestTheBinaryQuestionsShareAskBinary(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("layout.go")
+	if err != nil {
+		t.Fatalf("read layout.go: %v", err)
+	}
+
+	// Act
+	execs := strings.Count(string(src), "exec.CommandContext(")
+
+	// Assert
+	if execs != 1 {
+		t.Fatalf("layout.go runs %d processes by hand, want the one inside askBinary", execs)
 	}
 }
