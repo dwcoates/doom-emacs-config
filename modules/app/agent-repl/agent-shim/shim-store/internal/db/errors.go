@@ -101,6 +101,12 @@ const (
 	// SiteThroughNotPositive is a page read bounded by a ConversationThrough
 	// whose at_ms is not positive, which names no instant.
 	SiteThroughNotPositive = "through_not_positive"
+	// SiteLostOverSettled is a file-plane LOST terminal for a detached run the
+	// record already holds as ended. LOST means "we stopped seeing it", which
+	// is never true of a run whose ending is on record, and applying it would
+	// supersede the real terminal. The sidecar asks GetRunSettlements before it
+	// tracks a run, so this is an invariant violation, not a race.
+	SiteLostOverSettled = "lost_over_settled"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name

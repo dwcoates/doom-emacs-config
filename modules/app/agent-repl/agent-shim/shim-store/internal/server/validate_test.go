@@ -707,3 +707,25 @@ func TestValidateIDListRefusesAMalformedList(t *testing.T) {
 		})
 	}
 }
+
+func TestRefusalLogLevelIsErrorOnlyForALostOverASettledRun(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *refusal
+		want string
+	}{
+		{name: "lost over settled", ref: &refusal{site: SiteLostOverSettled, class: classInvalid}, want: "error"},
+		{name: "any other invalid site", ref: &refusal{site: SiteBashTailOverCap, class: classInvalid}, want: "warn"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange / Act
+			got := test.ref.logLevel()
+
+			// Assert
+			if got != test.want {
+				t.Fatalf("logLevel = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

@@ -76,6 +76,8 @@ const (
 	// must each name a positive instant.
 	SitePlaceNotPositive   = db.SitePlaceNotPositive
 	SiteThroughNotPositive = db.SiteThroughNotPositive
+	// A file-plane LOST terminal over a run the record holds as ended.
+	SiteLostOverSettled = db.SiteLostOverSettled
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.
@@ -202,6 +204,18 @@ type refusal struct {
 }
 
 func (r *refusal) Error() string { return r.detail }
+
+// logLevel is the level this refusal is recorded at: its class's, except for a
+// refusal that can only mean one of the system's own invariants broke. A LOST
+// terminal over a run the record holds as ended is one — the sidecar asks
+// GetRunSettlements before it tracks a run, so no correct producer can send it
+// — and it is recorded at ERROR rather than as an ordinary malformed request.
+func (r *refusal) logLevel() string {
+	if r.site == SiteLostOverSettled {
+		return "error"
+	}
+	return r.class.logLevel()
+}
 
 // refuse builds a VALIDATION refusal. Every call names the field, because the
 // failure arm carries it and an unnamed invalid_request tells the producer
