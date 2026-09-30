@@ -506,46 +506,6 @@ func TestAnUnreadableSampleWithNoPriorFiguresDrawsNoLine(t *testing.T) {
 	}
 }
 
-// A readable sample stamps the instant the figures were READ, which the strip
-// ticks the reading's age from.
-func TestAReadableSampleStampsTheFiguresReadInstant(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	readAt := h.clock.Now()
-
-	// Act: a newsworthy sample, so the line draws and exposes the instant.
-	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
-
-	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-	if line.GetFiguresReadAtMs() != readAt.UnixMilli() {
-		t.Fatalf("figures_read_at_ms = %d, want the readable sample's read instant %d",
-			line.GetFiguresReadAtMs(), readAt.UnixMilli())
-	}
-}
-
-// An unreadable sample leaves the read instant standing — the age stays
-// anchored to the last SUCCESSFUL read, never the failed attempt.
-func TestAnUnreadableSampleDoesNotRestampTheFiguresReadInstant(t *testing.T) {
-	// Arrange: a readable sample fixes the read instant.
-	h := newHarness(t)
-	connected(h)
-	readAt := h.clock.Now()
-	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
-
-	// Act: the clock moves on and a later sample reads nothing.
-	h.clock.Advance(time.Minute)
-	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
-
-	// Assert: the instant is still the readable sample's, not the failed one's.
-	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-	if line.GetFiguresReadAtMs() != readAt.UnixMilli() {
-		t.Fatalf("figures_read_at_ms = %d, want the last successful read %d left standing",
-			line.GetFiguresReadAtMs(), readAt.UnixMilli())
-	}
-}
-
 // THE STANDING CONTRACT, restated at the drawn surface: an unreadable sample
 // leaves the figures on hand standing, it never clears them. (Regression lock.)
 func TestAnUnreadableSampleKeepsTheStandingFiguresDrawn(t *testing.T) {
@@ -678,7 +638,7 @@ func TestAnUnremarkableAllowanceIsStillDrawn(t *testing.T) {
 	}
 }
 
-func TestTheEnduringLineIsDrawnWithNoFigures(t *testing.T) {
+func TestTheEnduringLineIsUnobservedBeforeAnyUsageFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -686,113 +646,34 @@ func TestTheEnduringLineIsDrawnWithNoFigures(t *testing.T) {
 	connected(h)
 
 	// Assert
-	enduring := enduringOf(t, h)
-	if enduring == nil {
-		t.Fatalf("the enduring line is unset; it is always drawn")
-	}
-	if enduring.GetUsage() != nil || enduring.GetContextWindow() != nil {
-		t.Fatalf("enduring = %+v, want both parts unset before any figure", enduring)
+	if enduringOf(t, h).GetUnobserved() == nil {
+		t.Fatalf("enduring = %+v, want unobserved before any usage figure", enduringOf(t, h))
 	}
 }
 
-func TestTheContextWindowIsDrawnWithItsFill(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, contextUsage(50_000, 200_000))
-
-	// Assert
-	window := enduringOf(t, h).GetContextWindow()
-	if window.GetUsedTokens() != 50_000 || window.GetWindowTokens() != 200_000 || window.GetFill() != 0.25 {
-		t.Fatalf("context window = %+v, want 50000 of 200000 at 0.25", window)
-	}
-}
-
-func TestTheEightyPercentRuleChoosesTheEnduringLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		fiveHour float64
-		weekly   float64
-		used     int64
-		want     string
-	}{
-		{"both under 80%: usage", 50, 30, 100_000, "usage"},
-		{"only the context at or above 80%: the context", 50, 90, 166_000, "context_window"},
-		{"only the five-hour allowance at or above 80%: usage", 86, 30, 166_000, "usage"},
-		{"both at or above 80%, the context higher: the context", 81, 30, 180_000, "context_window"},
-		{"both at or above 80%, usage higher: usage", 95, 30, 166_000, "usage"},
-		{"both at 80% exactly: usage wins the tie", 80, 30, 160_000, "usage"},
-		{"the weekly allowance never enters the choice", 50, 99, 100_000, "usage"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-			bothAllowances(h, tt.fiveHour, tt.weekly)
-
-			// Act
-			h.r.OnSessionUpdate(testWS, contextUsage(tt.used, 200_000))
-
-			// Assert
-			enduring := enduringOf(t, h)
-			if got := string(enduring.ProtoReflect().WhichOneof(enduring.ProtoReflect().Descriptor().Oneofs().ByName("line")).Name()); got != tt.want {
-				t.Fatalf("enduring line = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAnEnduringLineWithOneFigureObservedDrawsThatFigure(t *testing.T) {
+func TestAContextReportNeverClaimsTheEnduringLine(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
 		want    string
 	}{
-		{"usage alone", func(h *harness) { bothAllowances(h, 10, 5) }, "usage"},
-		{"the context window alone, however low", func(h *harness) { h.r.OnSessionUpdate(testWS, contextUsage(10_000, 200_000)) }, "context_window"},
-		{"neither", func(h *harness) {}, "unobserved"},
+		{name: "no usage figure: still unobserved", arrange: func(*harness) {}, want: "unobserved"},
+		{name: "a usage figure: still usage", arrange: func(h *harness) { bothAllowances(h, 10, 5) }, want: "usage"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			connected(h)
-
-			// Act
 			tt.arrange(h)
+
+			// Act: a context window nearly full.
+			h.r.OnSessionUpdate(testWS, contextUsage(190_000, 200_000))
 
 			// Assert
 			enduring := enduringOf(t, h)
 			if got := string(enduring.ProtoReflect().WhichOneof(enduring.ProtoReflect().Descriptor().Oneofs().ByName("line")).Name()); got != tt.want {
 				t.Fatalf("enduring line = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestContextClaimsEnduring(t *testing.T) {
-	tests := []struct {
-		name           string
-		fiveHour, fill float64
-		want           bool
-	}{
-		{"context below the threshold", 0.1, 0.79, false},
-		{"context at the threshold, five-hour below it", 0.5, 0.8, true},
-		{"both at the threshold: usage wins the tie", 0.8, 0.8, false},
-		{"both above, context higher", 0.85, 0.9, true},
-		{"both above, five-hour higher", 0.95, 0.9, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := contextClaimsEnduring(tt.fiveHour, tt.fill)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("contextClaimsEnduring(%v, %v) = %v, want %v", tt.fiveHour, tt.fill, got, tt.want)
 			}
 		})
 	}
