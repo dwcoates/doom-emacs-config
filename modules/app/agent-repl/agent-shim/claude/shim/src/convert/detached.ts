@@ -696,7 +696,7 @@ export interface TaskKindRegistry {
    *
    * THE CAUSE IS STATED ONCE AND RESTATED NEVER. A shell's cause rides its own
    * tool result (`backgroundedByUser`, `timedOutAfterMs`); an agent's rides
-   * `task_started` or, for a hand-backgrounded one, `task_updated`. The
+   * `task_started` or, for a moved one, `task_updated` (`vendor_moved`). The
    * `task_notification` that later supplies the output path upserts THE SAME
    * ROW, so a notification that restated a hard-coded `requested` would
    * silently overwrite a `by_user` or `timed_out` cause with the wrong one.
@@ -1108,21 +1108,24 @@ export function convertDetached(
         return [];
       }
       // WHY IT MOVED IS NOT STATED HERE. The patch says only that the work is
-      // now in the background. For a SHELL the vendor states the cause on the
-      // call's own tool result (`backgroundedByUser`, `timedOutAfterMs`),
+      // now in the background, for a shell and an agent alike, so either is
+      // announced `vendor_moved`. For a SHELL the vendor states the cause on
+      // the call's own tool result (`backgroundedByUser`, `timedOutAfterMs`),
       // which restates this row with it — but a shell launched inside a
       // backgrounded subagent never has its result reach this stream, and
       // calling that one "backgrounded by hand" when its own timeout moved it
-      // was false (2026-09-28). So a shell is announced `vendor_moved` until
-      // its result says more. An agent keeps `by_user`, the one cause its
-      // path has ever stated.
+      // was false (2026-09-28). For an AGENT no frame ever states a cause: its
+      // own tool result is the `async_launched` launch receipt, whose declared
+      // shape (`AgentOutput`, sdk-tools.d.ts) carries no cause field, and the
+      // vendor also moves agents on its own (`CLAUDE_AUTO_BACKGROUND_TASKS`),
+      // so `by_user` would assert a cause the stream never stated (2026-09-30).
       const shell = taskKindOf(taskType) === "bash";
-      const cause: DetachCause = shell ? "vendor_moved" : "by_user";
+      const cause: DetachCause = "vendor_moved";
       LOGGER.info(
         { uuid, task_id: taskId, tool_use_id: toolUseId, cause },
         shell
           ? "the vendor moved a running shell to the background; its tool result states why"
-          : "running work was moved to the background",
+          : "the vendor moved running work to the background; no frame states why",
       );
       calls.detach(toolUseId);
       taskKinds.rememberCause(taskId, cause);

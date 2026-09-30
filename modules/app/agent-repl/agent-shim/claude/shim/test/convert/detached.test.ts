@@ -588,7 +588,7 @@ describe("convertDetached: task_updated", () => {
     ).toEqual([]);
   });
 
-  it("announces `by_user` when a person backgrounded running work by hand", () => {
+  it("announces a moved agent `vendor_moved`: the patch states no cause", () => {
     // The patch states no kind; the task's start did.
     const registry = createTaskKindRegistry();
     registry.remember("t1", "local_agent");
@@ -598,10 +598,32 @@ describe("convertDetached: task_updated", () => {
       registry,
     );
 
-    expect(detachedOrigin(entries[0]).cause.case).toBe("byUser");
+    expect(detachedOrigin(entries[0]).cause.case).toBe("vendorMoved");
   });
 
-  it("remembers `by_user`, so the notification does not restate it as requested", () => {
+  it("records a moved agent at INFO with the `vendor_moved` cause", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+    const mark = logSinkMark();
+
+    // Act
+    convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.context.task_id === "t1" && r.context.cause !== undefined);
+    expect([record?.level, record?.message, record?.context.cause]).toEqual([
+      "info",
+      "the vendor moved running work to the background; no frame states why",
+      "vendor_moved",
+    ]);
+  });
+
+  it("remembers `vendor_moved`, so the notification does not restate it as requested", () => {
     const registry = createTaskKindRegistry();
     convert(
       { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
@@ -609,7 +631,7 @@ describe("convertDetached: task_updated", () => {
       registry,
     );
 
-    expect(registry.causeOf("t1")).toBe("by_user");
+    expect(registry.causeOf("t1")).toBe("vendor_moved");
   });
 });
 
@@ -1091,7 +1113,7 @@ describe("convertDetached: foreground work", () => {
     expect(entries).toEqual([]);
   });
 
-  it("announces `by_user` when a patch moves a foreground spawn", () => {
+  it("announces `vendor_moved` when a patch moves a foreground spawn", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     convert(foregroundStart("local_agent"), {}, registry);
@@ -1104,7 +1126,7 @@ describe("convertDetached: foreground work", () => {
     );
 
     // Assert.
-    expect(detachedOrigin(entries[0]).cause.case).toBe("byUser");
+    expect(detachedOrigin(entries[0]).cause.case).toBe("vendorMoved");
   });
 
   it("settles a foreground spawn that a patch moved, at its notification", () => {
@@ -1122,7 +1144,7 @@ describe("convertDetached: foreground work", () => {
 
     // Assert.
     expect(entries.map((entry) => entry.source.discriminator)).toEqual([
-      "agent_frame.detached_work.detached.by_user",
+      "agent_frame.detached_work.detached.vendor_moved",
       "activity.subagent.success",
     ]);
   });
