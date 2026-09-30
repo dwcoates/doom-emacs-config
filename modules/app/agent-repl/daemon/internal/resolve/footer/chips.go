@@ -210,6 +210,23 @@ func (row *agentRow) takeUpdate(update *conversationv1.AgentSubagentUpdate) {
 	}
 }
 
+// minimalAgentRow is a row for a subagent the footer has not described: the
+// generic label, no description, no tokens, addressed by the run's handle and
+// by its agent (which, by the minting rule, is also its spawn unit). The ONE
+// shape every row opened ahead of its description takes -- the live set's, a
+// network-resume wait's, and a resume's -- so the three cannot drift.
+func (s *wsState) minimalAgentRow(work, agent string, startedAt time.Time, provenance rowProvenance) *agentRow {
+	return &agentRow{
+		work:         work,
+		spawnUnit:    agent,
+		createdAgent: agent,
+		label:        subagentLabel(nil),
+		startedAt:    startedAt,
+		order:        s.nextOrder(),
+		provenance:   provenance,
+	}
+}
+
 // subagentLabel is the row's leading label: the subagent type when the caller
 // named one, and the description's opening otherwise — never a blank label.
 func subagentLabel(prompt *conversationv1.AgentSubagentPrompt) string {
@@ -677,15 +694,7 @@ func (r *resolver) bindDetachedAgent(ws ids.WorkspaceID, s *wsState, work, unit,
 			"a detached run was bound to its agent's row by the run's own handle", ctx)
 		return
 	}
-	row := &agentRow{
-		work:         work,
-		spawnUnit:    agent,
-		createdAgent: agent,
-		label:        subagentLabel(nil),
-		startedAt:    r.opts.clock.Now(),
-		order:        s.nextOrder(),
-		provenance:   provenanceDetachedAnnouncement,
-	}
+	row := s.minimalAgentRow(work, agent, r.opts.clock.Now(), provenanceDetachedAnnouncement)
 	ctx["identity"] = "undescribed"
 	if retired, ok := s.retiredRows[agent]; ok {
 		row.spawnUnit = retired.spawnUnit
