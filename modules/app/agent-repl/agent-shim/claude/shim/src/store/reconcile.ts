@@ -441,6 +441,25 @@ export function findUnit(
   entries: readonly conversationv1.HistoryEntryAt[],
   unit: conversationv1.AgentActivityId,
 ): conversationv1.AgentActivity["item"] | undefined {
+  return findUnitEntry(entries, unit)?.item;
+}
+
+/** One unit's row in a book: its latest item, and the place the row first took. */
+interface UnitEntry {
+  readonly item: conversationv1.AgentActivity["item"];
+  /**
+   * When the conversation reached the unit: the row's FIRST stated place,
+   * which never moves across later writes (`ConversationPlace`), so it is the
+   * instant the unit's call opened. Undefined when the store stated none.
+   */
+  readonly openedAtMs: bigint | undefined;
+}
+
+/** {@link findUnit}, with the place its row first took. */
+function findUnitEntry(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  unit: conversationv1.AgentActivityId,
+): UnitEntry | undefined {
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
@@ -449,7 +468,8 @@ export function findUnit(
     const update = result.value.update;
     if (update.case !== "activity") continue;
     if (update.value.activityId?.value !== unit.value) continue;
-    return update.value.item;
+    const place = at.place.case === undefined ? undefined : at.place.value.atMs;
+    return { item: update.value.item, openedAtMs: place === undefined || place <= 0n ? undefined : place };
   }
   return undefined;
 }
@@ -488,36 +508,119 @@ export function findBashStart(
 }
 
 /**
- * WHAT THE WORK IS, for a consumer that has never seen it.
+ * WHAT THE WORK IS, for a consumer that has never seen it: the unit's START,
+ * rebuilt from whichever arm its row holds now.
  *
- * `DetachableWork` names the UNIT TYPES themselves, each carrying the `start`
- * arm that describes the work — so a stored unit is exactly what an
- * announcement needs, with no separate description type and no second copy able
- * to disagree with the first.
+ * `DetachableWork` names the UNIT TYPES themselves, and every consumer reads
+ * the announced unit's `start` arm. A unit's row is ONE upserted row, so a
+ * live background unit's row has usually moved past its start: a running
+ * beat (`update`) for a subagent, a progress or tail arm for a shell that ran
+ * in the foreground first. Describing only a row still at `start` left every
+ * such item out of a re-announcement (2026-09-30: two live background
+ * subagents vanished from the footer after an adoption). So the start is
+ * rebuilt from what the row restates, and every field comes from the record:
  *
- * Answers nothing for a unit whose kind cannot detach, or for one the record
- * holds no `start` for: a kind absent from `DetachableWork` cannot claim to be
- * detached, and an announcement with an invented description is worse than one
- * that is missing.
+ * - a subagent's prompt rides every arm, and its created agent is the arm's
+ *   own statement or the minting rule (the spawn's id IS the agent's);
+ * - a shell's command rides its settle arms, else `bashStart` (the run's own
+ *   start row, which the caller reads from the run's stored rows);
+ * - a monitor's call rides its settle arms;
+ * - the start instant is the row's first place, which never moves.
+ *
+ * Answers `missing` for a detachable kind whose description the record does
+ * not hold (the caller announces it by handle and kind and records the loss),
+ * and undefined for a unit whose kind cannot detach at all.
  */
+type Description =
+  | { readonly kind: "described"; readonly work: conversationv1.DetachableWork }
+  | { readonly kind: "missing"; readonly work: conversationv1.DetachableWork; readonly detail: string };
+
 function describeDetachable(
-  item: conversationv1.AgentActivity["item"] | undefined,
-): conversationv1.DetachableWork | undefined {
-  if (item === undefined) return undefined;
-  if (item.case === "bash" && item.value.result.case === "start") {
-    return create(conversationv1.DetachableWorkSchema, { work: { case: "bash", value: item.value } });
+  unit: conversationv1.AgentActivityId,
+  found: UnitEntry | undefined,
+  bashStart?: conversationv1.AgentBashStart,
+): Description | undefined {
+  if (found === undefined) return undefined;
+  const { item, openedAtMs } = found;
+  const startedAt =
+    openedAtMs === undefined ? undefined : create(conversationv1.AgentActivityStartedAtSchema, { atMs: openedAtMs });
+  switch (item.case) {
+    case "bash": {
+      const result = item.value.result;
+      if (result.case === "start") return described({ case: "bash", value: item.value });
+      const command =
+        result.case === "success" || result.case === "failure" ? result.value.command : bashStart?.command;
+      const start = create(conversationv1.AgentBashStartSchema, {
+        // AN EMPTY LINE IS THE RECORD SAYING IT NEVER SAW ONE, the same
+        // convention the closing terminal keeps: the work is still announced
+        // by its handle and kind, and the loss is recorded by the caller.
+        command: command ?? create(conversationv1.AgentBashCommandSchema, { line: "" }),
+        ...(bashStart?.startedAt !== undefined
+          ? { startedAt: bashStart.startedAt }
+          : startedAt === undefined
+            ? {}
+            : { startedAt }),
+      });
+      const work = detachable({
+        case: "bash",
+        value: create(conversationv1.AgentBashSchema, { result: { case: "start", value: start } }),
+      });
+      return command === undefined
+        ? { kind: "missing", work, detail: "neither the unit's row nor the run's own start row states its command" }
+        : { kind: "described", work };
+    }
+    case "subagent": {
+      if (item.value.result.case === "start") return described({ case: "subagent", value: item.value });
+      const prompt = recordedPrompt(item.value);
+      const start = create(conversationv1.AgentSubagentStartSchema, {
+        createdAgentId: recordedCreatedAgent(item.value, unit),
+        ...(prompt === undefined ? {} : { prompt }),
+        ...(startedAt === undefined ? {} : { startedAt }),
+      });
+      const work = detachable({
+        case: "subagent",
+        value: create(conversationv1.AgentSubagentSchema, { result: { case: "start", value: start } }),
+      });
+      return prompt === undefined
+        ? { kind: "missing", work, detail: "the spawn unit's row states no prompt" }
+        : { kind: "described", work };
+    }
+    case "monitor": {
+      const result = item.value.result;
+      if (result.case === "start") return described({ case: "monitor", value: item.value });
+      const call = result.case === "ended" || result.case === "failure" ? result.value.call : undefined;
+      if (call === undefined) return undefined;
+      return described({
+        case: "monitor",
+        value: create(conversationv1.AgentMonitorSchema, { result: { case: "start", value: call } }),
+      });
+    }
+    default:
+      return undefined;
   }
-  if (item.case === "subagent" && item.value.result.case === "start") {
-    return create(conversationv1.DetachableWorkSchema, {
-      work: { case: "subagent", value: item.value },
-    });
-  }
-  if (item.case === "monitor" && item.value.result.case === "start") {
-    return create(conversationv1.DetachableWorkSchema, {
-      work: { case: "monitor", value: item.value },
-    });
-  }
-  return undefined;
+}
+
+function detachable(work: conversationv1.DetachableWork["work"]): conversationv1.DetachableWork {
+  return create(conversationv1.DetachableWorkSchema, { work });
+}
+
+function described(work: conversationv1.DetachableWork["work"]): Description {
+  return { kind: "described", work: detachable(work) };
+}
+
+/**
+ * The live shell handles whose unit row states no command (it moved past its
+ * start without a settle): the caller reads each run's own start row and
+ * hands it to {@link announceLiveWork}.
+ */
+export function bashUnitsWithoutCommand(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  work: readonly conversationv1.DetachedWorkId[],
+): conversationv1.DetachedWorkId[] {
+  return work.filter((handle) => {
+    const item = findUnit(entries, create(conversationv1.AgentActivityIdSchema, { value: handle.value }));
+    return item?.case === "bash" && (item.value.result.case === "tail" || item.value.result.case === "progress");
+  });
 }
 
 /**
@@ -542,12 +645,22 @@ export function announceLiveWork(
   work: readonly conversationv1.DetachedWorkId[],
   owner: conversationv1.AgentId,
   onUndescribed?: (handle: conversationv1.DetachedWorkId) => void,
+  bashStarts: ReadonlyMap<string, conversationv1.AgentBashStart> = new Map(),
 ): conversationv1.AgentDetachedWork[] {
   const announcements: conversationv1.AgentDetachedWork[] = [];
   for (const handle of work) {
     // THE HANDLE IS THE UNIT (ruling, landing 3), so the lookup is equality.
     const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
-    const described = describeDetachable(findUnit(entries, unit));
+    const description = describeDetachable(unit, findUnitEntry(entries, unit), bashStarts.get(handle.value));
+    if (description?.kind === "missing") {
+      // A LIVE ITEM IS NEVER DROPPED FOR WANT OF ITS DESCRIPTION: it is
+      // announced by its handle and kind, and the record's loss is an error.
+      LOGGER.error(
+        { work: handle.value, kind: description.work.work.case ?? "", detail: description.detail },
+        "the record holds only part of this live work's description; it is announced by its handle and kind",
+      );
+    }
+    const described = description?.work;
     if (described === undefined) {
       // WHO OWNS THE RECORD DEPENDS ON WHO CAN TELL THE TWO CASES APART, and
       // this function cannot. `GetLiveWork` is scoped to this session's
@@ -651,9 +764,15 @@ export function resumedAgentAnnouncement(
   owner: conversationv1.AgentId,
   agent: conversationv1.AgentId,
 ): conversationv1.AgentDetachedWork | undefined {
-  const described = describeDetachable(
-    findUnit(entries, create(conversationv1.AgentActivityIdSchema, { value: agent.value })),
-  );
+  const spawn = create(conversationv1.AgentActivityIdSchema, { value: agent.value });
+  const description = describeDetachable(spawn, findUnitEntry(entries, spawn));
+  if (description?.kind === "missing") {
+    LOGGER.error(
+      { work: handle.value, agent: agent.value, detail: description.detail },
+      "the record holds only part of this resumed subagent's description; it is announced by its handle and kind",
+    );
+  }
+  const described = description?.work;
   if (described?.work.case !== "subagent") return undefined;
   const start = described.work.value.result;
   if (start.case !== "start" || start.value.createdAgentId?.value !== agent.value) return undefined;

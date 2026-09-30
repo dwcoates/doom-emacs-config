@@ -50,6 +50,7 @@ import { describeVendorTaskAnswer } from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
+  bashUnitsWithoutCommand,
   closingAgentTerminal,
   closingBashTerminal,
   closingMonitorTerminal,
@@ -4415,9 +4416,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // invented description is worse than a missing one -- but it is stated as
     // the record-plane loss it is.
     const undescribedSurvivors: conversationv1.DetachedWorkId[] = [];
-    const readopted = announceLiveWork(book, open.liveDetached.filter(survives), agentId, (handle) => {
-      undescribedSurvivors.push(handle);
-    });
+    const survivingWork = open.liveDetached.filter(survives);
+    const readopted = announceLiveWork(
+      book,
+      survivingWork,
+      agentId,
+      (handle) => {
+        undescribedSurvivors.push(handle);
+      },
+      await bashStartsFor(bashUnitsWithoutCommand(book, survivingWork)),
+    );
     // A SURVIVING SUBAGENT RESUMED BY A SEND is described from its spawn, named
     // by the store; only what is not a send is the record-plane loss.
     const resumed = await announceResumedAgents(agentId, book, undescribedSurvivors);
@@ -4910,13 +4918,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         handles.map((handle) => handle.value),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
-      const announcements = announceLiveWork(book, handles, agentId, (handle) => {
-        undescribed.push(handle);
-      });
+      const announcements = announceLiveWork(
+        book,
+        handles,
+        agentId,
+        (handle) => {
+          undescribed.push(handle);
+        },
+        await bashStartsFor(bashUnitsWithoutCommand(book, handles)),
+      );
       // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
       // store; only a handle that is not a send takes the undescribed path.
       const resumed = await announceResumedAgents(agentId, book, undescribed);
-      for (const handle of resumed.notResumes) await recordUndescribedHandle(handle);
+      for (const handle of resumed.notResumes) reportUndescribableWork(handle);
       return [...announcements, ...resumed.announced];
     } catch (err) {
       // NO BOOK YET IS NOT AN UNREACHABLE STORE. A workspace created moments
@@ -4952,62 +4966,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * Work this conversation owns whose own start the record cannot describe.
+   * A live handle of this session's lineage that no row of the main book
+   * describes, and that no send resumed: it cannot be announced, because an
+   * announcement must state its kind and nothing the record holds names one.
    *
-   * ONE SITE FOR ONE FACT, so the two callers that reach this conclusion by
-   * different routes -- StartSession, which has already asked the vendor about
-   * every handle, and a re-announcement, which asks about this one -- cannot
-   * drift into saying it differently.
+   * ONE SITE FOR ONE FACT, shared by StartSession and a re-announcement. The
+   * store's live set is scoped to this session's lineage, so the handle IS
+   * this conversation's work; its absence from the announcement is a
+   * record-plane loss, stated at ERROR and never judged by asking the vendor.
    */
   function reportUndescribableWork(handle: conversationv1.DetachedWorkId): void {
-    // warn: a defect because the vendor still holds work whose start the record cannot describe.
-    LOGGER.warn(
-      { work_id: handle.value, detail: "the vendor confirmed it holds this work" },
-      "the record holds no describable start for work the vendor still has; it cannot be announced",
+    LOGGER.error(
+      { work_id: handle.value, detail: "no row of the main book describes this live handle and no send resumed it" },
+      "live work of this session has no describable record, so its kind is unknown and it cannot be announced",
     );
   }
 
   /**
-   * Say WHICH STATE an undescribable live handle is in, and never guess.
+   * The run's own START ROW for each live shell whose unit row states no
+   * command, read from the run's stored rows (`WatchBashRun` replays them in
+   * first-insert order, and the start is written ahead of every other row of
+   * the run), so the announcement describes the run from its launch record.
    *
-   * THE OBLIGATION SET IS THIS SESSION'S LINEAGE. `GetLiveWork` names this
-   * conversation's main agent and answers every started thing the record holds
-   * no terminal for among it and the agents it spawned -- so a handle with no
-   * start in THIS main book is either work a subagent of this session
-   * announced (its start lives in that subagent's book) or work whose start the
-   * record lost.
-   *
-   * The vendor is the authority that separates the two, exactly as it is at
-   * StartSession: if this vendor process still holds the handle then its
-   * missing start is a real loss; if it does not, the work is not this
-   * process's to announce, and the StartSession reconciliation owns its
-   * terminal. A vendor that cannot answer is not a vendor that said "not
-   * held", so an unanswerable probe is reported as the defect it might be.
+   * Only the first replayed row is read, and the stream is ended at once: it
+   * would otherwise stand and follow the run.
    */
-  async function recordUndescribedHandle(
-    handle: conversationv1.DetachedWorkId,
-  ): Promise<void> {
-    const active = query;
-    let held = true;
-    if (active !== undefined) {
+  async function bashStartsFor(
+    handles: readonly conversationv1.DetachedWorkId[],
+  ): Promise<Map<string, conversationv1.AgentBashStart>> {
+    const starts = new Map<string, conversationv1.AgentBashStart>();
+    for (const handle of handles) {
       try {
-        held = await active.backgroundTasks(handle.value);
+        const rows = await deps.persistence.openBashRun(handle, { awaitFirstRow: false });
+        for await (const frame of rows) {
+          if (frame.result.case === "start") starts.set(handle.value, frame.result.value);
+          break;
+        }
       } catch (err) {
-        // warn: a defect because the vendor could not say whether it holds work the record cannot describe.
-        LOGGER.warn(
+        if (err instanceof PersistenceError && err.kind === "unknown_work") {
+          LOGGER.debug(
+            { work_id: handle.value },
+            "the store holds no rows for this live shell run; its announcement states no command",
+          );
+          continue;
+        }
+        LOGGER.error(
           { work_id: handle.value, cause: err instanceof Error ? err.message : String(err) },
-          "the vendor could not be asked whether it holds this undescribable live work; treating it as this conversation's",
+          "the live shell run's own start row could not be read; its announcement states no command",
         );
       }
     }
-    if (!held) {
-      LOGGER.debug(
-        { work_id: handle.value },
-        "this session's live work is not held by this vendor process and has no start in the main book; it is not announced to the new watch",
-      );
-      return;
-    }
-    reportUndescribableWork(handle);
+    return starts;
   }
 
   /**
