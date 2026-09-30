@@ -575,6 +575,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deliver: (prompt) => deliverNetworkResume(prompt),
     nowMs: deps.nowMs,
     scheduler: deps.networkResumeScheduler ?? REAL_SCHEDULER,
+    // THE WAITS RIDE THE SESSION STREAM: the set is a replayed level
+    // (engine/pushes.ts), each outcome an event.
+    emit: (update) => {
+      pushes.push(update);
+    },
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
   });
