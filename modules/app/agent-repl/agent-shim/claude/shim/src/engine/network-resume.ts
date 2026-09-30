@@ -240,6 +240,12 @@ interface Chain {
 
 /** One agent waiting for the API. */
 interface Waiting {
+  /**
+   * This wait's own identity: a per-process generation, minted when the wait
+   * opens. Two waits of the same agent (one given up, a later one opened for a
+   * new failure) are different waits, and every record names which.
+   */
+  readonly id: number;
   readonly chain: Chain;
   readonly failedAtMs: number;
   /** The failed run's `DetachedWorkId` value: the handle its failure terminal retired. */
@@ -248,9 +254,11 @@ interface Waiting {
    * How this wait ended, once it has: set by {@link NetworkResume.endWait}, the
    * ONE place a wait leaves the standing set on the wire, so a second ending
    * (a delivery that completes after `expire()` already gave the wait up) is
-   * seen and never stated.
+   * seen and never stated. `superseded` is a wait a newer failure of the same
+   * agent replaced while it stood (see {@link NetworkResume.enqueue}); the
+   * session stream has no arm for it, so it is recorded and never stated.
    */
-  ended?: WaitEnd["case"];
+  ended?: WaitEnd["case"] | "superseded";
 }
 
 /** How one wait ended, as the session stream states it. */
@@ -272,7 +280,13 @@ export class NetworkResume {
   /** The last error each agent's own messages stated. */
   private readonly evidence = new Map<string, FailureEvidence>();
   private readonly chains = new Map<string, Chain>();
+  /**
+   * The standing waits, at most one per agent, keyed by the agent's task id.
+   * A wait leaves it only through {@link removeWait}, which removes THAT wait
+   * and never whichever wait the agent holds now.
+   */
   private readonly waiting = new Map<string, Waiting>();
+  private nextWaitId = 1;
   private handle: unknown;
   private probing = false;
   private stopped = false;
@@ -470,10 +484,13 @@ export class NetworkResume {
       this.giveUp(chain, now, now, "its window had already run out when it failed again");
       return;
     }
-    this.waiting.set(run.taskId, { chain, failedAtMs: now, work: failed.toolUseId });
+    this.supersede(run.taskId);
+    const wait: Waiting = { id: this.nextWaitId++, chain, failedAtMs: now, work: failed.toolUseId };
+    this.waiting.set(run.taskId, wait);
     LOGGER.info(
       {
         task_id: run.taskId,
+        wait_id: wait.id,
         description: run.description,
         basis: verdict.basis,
         detail: verdict.detail,
@@ -545,7 +562,7 @@ export class NetworkResume {
     let expired = 0;
     for (const entry of [...this.waiting.values()]) {
       if (now < entry.chain.windowStartMs + this.windowMs) continue;
-      this.waiting.delete(entry.chain.taskId);
+      this.removeWait(entry);
       this.giveUp(entry.chain, entry.failedAtMs, now, "the API stayed unreachable for the whole window");
       this.endWait(entry, gaveUp());
       expired += 1;
@@ -589,40 +606,53 @@ export class NetworkResume {
           "the API is reachable but the main agent is working; the resume waits for it to be idle",
         );
         return;
-      case "unavailable":
+      case "unavailable": {
+        let ended = 0;
         for (const entry of due) {
-          this.waiting.delete(entry.chain.taskId);
+          if (this.endedMeanwhile(entry, delivery.kind)) continue;
+          this.removeWait(entry);
           this.giveUp(entry.chain, entry.failedAtMs, now, `the resume could not be delivered: ${delivery.detail}`);
           this.endWait(entry, gaveUp());
+          ended += 1;
         }
-        this.stateWaits();
+        if (ended > 0) this.stateWaits();
         this.cancelLoopIfIdle();
         return;
-      case "delivered":
+      }
+      case "delivered": {
+        let ended = 0;
         for (const entry of due) {
-          this.waiting.delete(entry.chain.taskId);
-          entry.chain.resumes += 1;
-          entry.chain.resumedAtMs = now;
-          entry.chain.progressSinceResume = false;
+          // A wait that ended while the delivery was out is answered alone: its
+          // resume went out, so it is still logged as delivered, but it moves no
+          // history and removes no wait, since the agent's standing wait (if one
+          // opened meanwhile) belongs to a newer failure.
+          const late = this.endedMeanwhile(entry, delivery.kind);
+          if (!late) {
+            this.removeWait(entry);
+            entry.chain.resumes += 1;
+            entry.chain.resumedAtMs = now;
+            entry.chain.progressSinceResume = false;
+            ended += 1;
+          }
           LOGGER.info(
             {
               task_id: entry.chain.taskId,
+              wait_id: entry.id,
               description: entry.chain.description,
               waited_ms: now - entry.failedAtMs,
               resumes: entry.chain.resumes,
               probe: answer.detail,
+              late,
               outcome: "resumed",
             },
             "the API is reachable again; asked the main agent to continue the background agent a network outage cut off",
           );
-          this.endWait(entry, {
-            case: "resumed",
-            value: create(conversationv1.SessionNetworkResumeResumedSchema, {}),
-          });
+          this.endWait(entry, resumed());
         }
-        this.stateWaits();
+        if (ended > 0) this.stateWaits();
         this.cancelLoopIfIdle();
         return;
+      }
     }
   }
 
@@ -666,7 +696,7 @@ export class NetworkResume {
   private endWait(entry: Waiting, end: WaitEnd): void {
     if (entry.ended !== undefined) {
       LOGGER.info(
-        { task_id: entry.chain.taskId, work: entry.work, suppressed: end.case, already: entry.ended },
+        { task_id: entry.chain.taskId, wait_id: entry.id, work: entry.work, suppressed: end.case, already: entry.ended },
         "a network-resume wait that had already ended is not stated ended again on the session stream",
       );
       return;
@@ -702,6 +732,69 @@ export class NetworkResume {
     }
   }
 
+  /**
+   * Remove ONE wait from the standing set: this wait, by its own identity.
+   *
+   * THE AGENT'S TASK ID IS NOT THE WAIT. A wait already gone (given up while
+   * its delivery was out) may have been followed by a NEWER wait of the same
+   * agent, and removing by task id would silently take that one instead, which
+   * then never states an outcome and is never resumed. A removal of a wait
+   * that is not the one standing is a defect in the caller, so it throws.
+   */
+  private removeWait(entry: Waiting): void {
+    const standing = this.waiting.get(entry.chain.taskId);
+    if (standing !== entry) {
+      const detail = `wait ${String(entry.id)} of agent ${entry.chain.taskId} is not the standing wait (${standing === undefined ? "none stands" : `wait ${String(standing.id)} stands`})`;
+      LOGGER.error(
+        { task_id: entry.chain.taskId, wait_id: entry.id, standing_wait_id: standing?.id, cause: detail },
+        "a network-resume wait was removed that is not the one standing",
+      );
+      throw new Error(detail);
+    }
+    this.waiting.delete(entry.chain.taskId);
+  }
+
+  /**
+   * Retire the agent's standing wait, if one stands, because a NEWER failure of
+   * the same agent is opening its own: the agent ran again while it waited (a
+   * resume someone else delivered) and failed again. The old wait is marked
+   * ended, so a delivery still out for it answers for it alone and never for
+   * the newer one; the session stream has no outcome arm for it, and the
+   * restated set drops it.
+   */
+  private supersede(taskId: string): void {
+    const standing = this.waiting.get(taskId);
+    if (standing === undefined) return;
+    this.removeWait(standing);
+    standing.ended = "superseded";
+    LOGGER.info(
+      { task_id: taskId, wait_id: standing.id, work: standing.work, next_wait_id: this.nextWaitId },
+      "the agent failed again while a wait for it stood; the newer failure's wait replaces it",
+    );
+  }
+
+  /**
+   * Whether a wait a delivery was started for ENDED while the delivery was
+   * out (its window ran out meanwhile). Such a delivery answers for its own
+   * wait only: whatever the agent holds now (a newer wait, a newer history)
+   * belongs to a later failure and keeps its own lifecycle.
+   */
+  private endedMeanwhile(entry: Waiting, delivery: ResumeDelivery["kind"]): boolean {
+    if (entry.ended === undefined) return false;
+    const standing = this.waiting.get(entry.chain.taskId);
+    LOGGER.info(
+      {
+        task_id: entry.chain.taskId,
+        wait_id: entry.id,
+        ended: entry.ended,
+        delivery,
+        standing_wait_id: standing?.id,
+      },
+      "a resume delivery finished after the wait it was started for had ended; it ends only that wait and never a newer one",
+    );
+    return true;
+  }
+
   private cancelLoopIfIdle(): void {
     if (this.waiting.size === 0) this.cancelLoop();
   }
@@ -731,6 +824,11 @@ function noticeText(message: unknown): string | undefined {
         : "";
   const trimmed = text.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/** The resumed arm of an outcome. */
+function resumed(): WaitEnd {
+  return { case: "resumed", value: create(conversationv1.SessionNetworkResumeResumedSchema, {}) };
 }
 
 /** The give-up arm of an outcome. */
