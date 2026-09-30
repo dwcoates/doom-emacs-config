@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ITEM_EXPANDED_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
@@ -406,6 +407,41 @@ describe("mountBubble: clicking the head is the toggle", () => {
     headOf(bubble).click();
     await settle();
     expect(h.calls.openFeed[0]?.feed?.value).toBe("b1");
+  });
+
+  /** Count the expansions ELEMENT announces. */
+  function countAnnouncements(element: HTMLElement): { count: number } {
+    const seen = { count: 0 };
+    element.addEventListener(ITEM_EXPANDED_EVENT, () => {
+      seen.count++;
+    });
+    return seen;
+  }
+
+  it("announces itself expanded once the reader's head click opened it", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    const seen = countAnnouncements(bubble.element);
+    headOf(bubble).click();
+    await settle();
+    expect(seen.count).toBe(1);
+  });
+
+  it("announces nothing when a reveal opens it, which never scrolls", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    const seen = countAnnouncements(bubble.element);
+    await bubble.expand();
+    await settle();
+    expect(seen.count).toBe(0);
+  });
+
+  it("announces nothing when the head click collapses it", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).click();
+    await settle();
+    const seen = countAnnouncements(bubble.element);
+    headOf(bubble).click();
+    await settle();
+    expect(seen.count).toBe(0);
   });
 
   it("collapses again on a second head click", async () => {
@@ -1012,7 +1048,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
   // THE EXPANDED CAP (owner ruling, 2026-09-23): an expanded bubble's sub-feed
   // stops at three quarters of the feed's visible height (`75cqh` against the
   // `#feed-scroll` size container) and scrolls inside past that.
-  it("caps an expanded sub-feed at three quarters of the feed's height", async () => {
+  it("caps an expanded sub-feed bubble at the expanded-item ceiling", async () => {
     // Arrange
     const remove = installStylesheet();
     try {
@@ -1021,7 +1057,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
       await bubble.expand();
       await settle();
       // Assert
-      expect(window.getComputedStyle(panelOf(bubble)).maxHeight).toBe("75cqh");
+      expect(window.getComputedStyle(bubble.element).maxHeight).toBe("var(--feed-item-max-h)");
     } finally {
       remove();
     }
@@ -1055,7 +1091,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     }
   });
 
-  it("caps an expanded merge bubble through the same rule", async () => {
+  it("caps an expanded merge bubble at the same ceiling", async () => {
     // Arrange
     const remove = installStylesheet();
     try {
@@ -1064,7 +1100,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
       await bubble.expand();
       await settle();
       // Assert
-      expect(window.getComputedStyle(panelOf(bubble)).maxHeight).toBe("75cqh");
+      expect(window.getComputedStyle(bubble.element).maxHeight).toBe("var(--feed-item-max-h)");
     } finally {
       remove();
     }

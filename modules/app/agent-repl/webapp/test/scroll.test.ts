@@ -22,6 +22,7 @@ import {
   sectionTakesWheel,
   wheelDeltaPx,
   revealCenterDelta,
+  expandCenterDelta,
   revealGeometry,
   centerDelta,
   collapseDelta,
@@ -397,7 +398,7 @@ describe("SCROLL_CAUSES", () => {
       "promptHeld",
       "selectionMoved",
       "detachedWorkSelected",
-      "bubbleExpanded",
+      "itemExpanded",
       "initialPlacement",
       "replaceRestore",
       "prependCompensation",
@@ -949,13 +950,13 @@ describe("TailFollow.detachedWorkSelected", () => {
   });
 });
 
-describe("TailFollow.bubbleExpanded", () => {
-  it("centers an expanded bubble below the fold in the viewport", () => {
+describe("TailFollow.itemExpanded", () => {
+  it("centers an expanded item below the fold in the viewport", () => {
     // Arrange: a 200px bubble whose top is 250px down a 300px viewport.
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
-    a.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
     expect(box.scrollTop).toBe(300);
   });
@@ -964,28 +965,40 @@ describe("TailFollow.bubbleExpanded", () => {
     // Arrange
     const f = following();
     // Act
-    f.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
     // Assert
     expect(f.tail.isFollowing()).toBe(false);
   });
 
-  it("is recorded at DEBUG as bubbleExpanded", async () => {
+  it("puts a TALLER-than-viewport item's middle on the viewport's middle", () => {
+    // Arrange: a 600px item whose top is 50px down a 300px viewport.
+    const box = { scrollTop: 100, scrollHeight: 2000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 600 });
+    // Assert: its midpoint (350) moves to the viewport's (150): 200px down,
+    // where a detached-work reveal would have aligned its top instead.
+    expect(box.scrollTop).toBe(300);
+  });
+
+  it("is recorded at DEBUG as itemExpanded", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
     const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
     // Act
-    a.tail.bubbleExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert
     expect(await moves(capture)).toEqual([
-      { cause: "bubbleExpanded", from: 100, to: 300, follow: false },
+      { cause: "itemExpanded", from: 100, to: 300, follow: false },
     ]);
   });
 });
 
-describe("TailFollow's centering reveals share one shape", () => {
-  const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void]> = [
-    ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g)],
-    ["bubbleExpanded", (tail, g) => tail.bubbleExpanded(g)],
+describe("TailFollow's centering reveals land where their arithmetic says", () => {
+  type Delta = (g: RevealGeometry, box: { scrollTop: number; scrollHeight: number; clientHeight: number }) => number;
+  const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void, Delta]> = [
+    ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g), revealCenterDelta],
+    ["itemExpanded", (tail, g) => tail.itemExpanded(g), expandCenterDelta],
   ];
   const geometries: RevealGeometry[] = [
     { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 },
@@ -994,7 +1007,7 @@ describe("TailFollow's centering reveals share one shape", () => {
     { boxTop: 0, boxHeight: 300, nodeTop: 900, nodeHeight: 50 },
   ];
 
-  it.each(reveals)("%s lands exactly where revealCenterDelta says", (_name, reveal) => {
+  it.each(reveals)("%s lands exactly where its delta says", (_name, reveal, delta) => {
     // Arrange
     const landed = geometries.map((g) => {
       const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
@@ -1005,7 +1018,7 @@ describe("TailFollow's centering reveals share one shape", () => {
     });
     // Assert
     const expected = geometries.map(
-      (g) => 100 + revealCenterDelta(g, { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 }),
+      (g) => 100 + delta(g, { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 }),
     );
     expect(landed).toEqual(expected);
   });
@@ -2671,5 +2684,17 @@ describe("feedAnchorRows", () => {
     const top = feedAnchorRows(box, document.createElement("div")).viewportTop();
     // Assert
     expect(top).toBe(12);
+  });
+});
+
+describe("expandCenterDelta", () => {
+  const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+  it.each([
+    ["an item that fits", { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }, 200],
+    ["an item taller than the viewport", { boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 600 }, 200],
+    ["an item near the start, clamped at the top", { boxTop: 0, boxHeight: 300, nodeTop: -900, nodeHeight: 50 }, -100],
+    ["an item near the end, clamped at the last position", { boxTop: 0, boxHeight: 300, nodeTop: 900, nodeHeight: 50 }, 600],
+  ])("moves %s by its middle-to-middle offset", (_name, g, want) => {
+    expect(expandCenterDelta(g, box)).toBe(want);
   });
 });

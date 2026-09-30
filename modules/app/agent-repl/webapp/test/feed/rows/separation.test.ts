@@ -5,6 +5,7 @@ import {
   FeedSessionSeparationSchema,
   type FeedSessionSeparation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { ITEM_EXPANDED_EVENT } from "../../../src/expand.js";
 import stylesheet from "../../../src/styles.css?raw";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
@@ -202,6 +203,23 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
     el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
     expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
+  });
+
+  it("announces the row expanded when the reader opens the summary", () => {
+    const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
+    let announced = 0;
+    el.addEventListener(ITEM_EXPANDED_EVENT, () => announced++);
+    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
+    expect(announced).toBe(1);
+  });
+
+  it("announces nothing when the reader folds the summary again", () => {
+    const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
+    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
+    let announced = 0;
+    el.addEventListener(ITEM_EXPANDED_EVENT, () => announced++);
+    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
+    expect(announced).toBe(0);
   });
 
   it("keeps the reader's toggle across a re-push (R2)", () => {

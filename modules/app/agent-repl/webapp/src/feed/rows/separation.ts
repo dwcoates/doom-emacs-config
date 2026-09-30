@@ -20,6 +20,7 @@
  * than resetting it.
  */
 import { log } from "../../log.js";
+import { announceItemExpanded } from "../../expand.js";
 import { markdownSlot } from "../../bubble/body.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { renderEditorLink } from "../../link.js";
@@ -211,6 +212,8 @@ export function drawFeedContextCutCompacted(
       context: { folded: next },
     });
     apply(next);
+    // Unfolding is the reader expanding the item: the feed centers it.
+    if (!next) announceItemExpanded(el);
   });
 
   el.append(toggle, body);

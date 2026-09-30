@@ -26,6 +26,8 @@ import {
   expandedSectionAt,
   expandedSectionsOf,
   onVerticalScrollbar,
+  ITEM_EXPANDED_EVENT,
+  announceItemExpanded,
 } from "../src/expand.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { BUBBLE_UNCAPPED, drawBubble, type BubbleCapLines } from "../src/bubble/draw.js";
@@ -1306,5 +1308,20 @@ describe("an uncapped bubble", () => {
     text.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
     // Assert
     expect(open.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+});
+
+describe("announceItemExpanded", () => {
+  it("dispatches the expansion event, bubbling, from the expanded element", () => {
+    // Arrange
+    const outer = document.createElement("div");
+    const inner = document.createElement("div");
+    outer.append(inner);
+    const targets: EventTarget[] = [];
+    outer.addEventListener(ITEM_EXPANDED_EVENT, (e) => targets.push(e.target as EventTarget));
+    // Act
+    announceItemExpanded(inner);
+    // Assert
+    expect(targets).toEqual([inner]);
   });
 });

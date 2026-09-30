@@ -29,6 +29,7 @@
  * snapping shut under a reader who opened it is the whole failure R2 names.
  */
 import { log } from "../log.js";
+import { announceItemExpanded } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -221,16 +222,19 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    */
   function toggleFold(): void {
     clearRefusal();
-    // NEITHER DIRECTION MOVES THE FEED (owner rule, 2026-09-23: the user owns
-    // the scroll). A collapse removes content below the reader's eyes, and an
-    // expansion unrolls the sub-feed beneath the head it was opened from; the
-    // reader scrolls to it themselves. The caret used to park the feed or
-    // scroll the opened panel into view, and both were implicit moves.
+    // A COLLAPSE NEVER MOVES THE FEED (owner rule, 2026-09-23: the user owns
+    // the scroll). AN EXPANSION THE READER ASKED FOR CENTERS THE BUBBLE (owner
+    // request, 2026-09-30): once its sub-feed is drawn, the bubble announces
+    // itself expanded and the root feed puts its middle on the viewport's
+    // (`itemExpanded`). A reveal that opens bubbles along its way calls
+    // `expand` directly, announces nothing, and never scrolls.
     if (expanded) {
       collapse();
       return;
     }
-    void expand();
+    void expand().then((opened) => {
+      if (opened) announceItemExpanded(el);
+    });
   }
 
   /**

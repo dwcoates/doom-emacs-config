@@ -78,9 +78,12 @@ export interface ScrollPosition {
  *   expanded footer; the feed CENTERS that item's card in its viewport
  *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
  *   taller than the viewport lands with its top at the viewport's top.
- * - `bubbleExpanded`: the reader clicked a bubble in the feed open to its
- *   expanded view; the feed CENTERS that bubble in its viewport, exactly as
- *   for `detachedWorkSelected`.
+ * - `itemExpanded`: the reader expanded a feed item — a capped bubble, a tool
+ *   card, a subagent's bubble, a compaction's summary; the feed puts that
+ *   item's vertical MIDDLE on the viewport's vertical middle at once (owner
+ *   request, 2026-09-30, widening the bubble-only ruling of 2026-09-29),
+ *   clamped at the feed's edges, however tall the item is
+ *   (`expandCenterDelta`).
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -108,7 +111,7 @@ export const SCROLL_CAUSES = [
   "promptHeld",
   "selectionMoved",
   "detachedWorkSelected",
-  "bubbleExpanded",
+  "itemExpanded",
   "initialPlacement",
   "replaceRestore",
   "prependCompensation",
@@ -402,15 +405,15 @@ export class TailFollow {
    * CENTER the item's card in the viewport (`revealCenterDelta`).
    */
   detachedWorkSelected(geometry: RevealGeometry): void {
-    this.centerReveal("detachedWorkSelected", geometry);
+    this.centerReveal("detachedWorkSelected", revealCenterDelta(geometry, this.box));
   }
 
   /**
-   * The reader opened a bubble to its expanded view: stop following, and
-   * CENTER the bubble in the viewport (`revealCenterDelta`).
+   * The reader expanded a feed item: stop following, and put the item's
+   * vertical middle on the viewport's (`expandCenterDelta`).
    */
-  bubbleExpanded(geometry: RevealGeometry): void {
-    this.centerReveal("bubbleExpanded", geometry);
+  itemExpanded(geometry: RevealGeometry): void {
+    this.centerReveal("itemExpanded", expandCenterDelta(geometry, this.box));
   }
 
   /**
@@ -513,13 +516,13 @@ export class TailFollow {
   }
 
   /**
-   * THE ONE CENTERING REVEAL: stop following, CENTER the node GEOMETRY reads
-   * in the viewport (`revealCenterDelta`) under CAUSE, take the anchor there,
-   * and latch where the view lands if the latest entry is then in sight.
+   * THE ONE CENTERING REVEAL: stop following, move by the centering DELTA its
+   * caller computed under CAUSE, take the anchor there, and latch where the
+   * view lands if the latest entry is then in sight.
    */
-  private centerReveal(cause: "detachedWorkSelected" | "bubbleExpanded", geometry: RevealGeometry): void {
+  private centerReveal(cause: "detachedWorkSelected" | "itemExpanded", delta: number): void {
     this.release();
-    this.shift(cause, revealCenterDelta(geometry, this.box));
+    this.shift(cause, delta);
     this.takeAnchor();
     this.latchIfLatestVisible();
   }
@@ -876,10 +879,26 @@ export interface RevealGeometry {
  * scroll range the clamp needs. Positive is downward, matching `scrollTop`.
  */
 export function revealCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
-  const offset =
-    g.nodeHeight > g.boxHeight
-      ? g.nodeTop - g.boxTop
-      : g.nodeTop + g.nodeHeight / 2 - (g.boxTop + g.boxHeight / 2);
+  const offset = g.nodeHeight > g.boxHeight ? g.nodeTop - g.boxTop : midpointOffset(g);
+  return clampedDelta(box, offset);
+}
+
+/**
+ * How far the box must move to put an EXPANDED item's vertical middle on the
+ * viewport's vertical middle (owner request, 2026-09-30), whatever the item's
+ * height, clamped at the feed's edges exactly as `revealCenterDelta` is.
+ */
+export function expandCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
+  return clampedDelta(box, midpointOffset(g));
+}
+
+/** How far NODE's vertical midpoint sits below the viewport's. */
+function midpointOffset(g: RevealGeometry): number {
+  return g.nodeTop + g.nodeHeight / 2 - (g.boxTop + g.boxHeight / 2);
+}
+
+/** The move by OFFSET, clamped so the box stays inside its scroll range. */
+function clampedDelta(box: ScrollPosition, offset: number): number {
   const maxScrollTop = Math.max(0, box.scrollHeight - box.clientHeight);
   const target = Math.min(Math.max(box.scrollTop + offset, 0), maxScrollTop);
   return target - box.scrollTop;

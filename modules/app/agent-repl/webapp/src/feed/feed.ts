@@ -18,11 +18,9 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { expandedSectionAt, installClickExpand } from "../expand.js";
+import { ITEM_EXPANDED_EVENT, expandedSectionAt, installClickExpand } from "../expand.js";
 import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
-import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
-import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
@@ -178,10 +176,14 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // open section the reader scrolled away from or left, since that close goes
   // through the one collapse a click uses.
   //
-  // AN EXPANDED BUBBLE IS CENTERED (owner ruling, 2026-09-29): opening a
-  // bubble to its expanded view always centers that bubble in the feed
-  // (`bubbleExpanded`, one of the closed set of scroll causes). It is centered
-  // AFTER the class lands, so the geometry read is the expanded layout.
+  // AN EXPANDED FEED ITEM IS CENTERED (owner request, 2026-09-30, widening
+  // the bubble-only ruling of 2026-09-29): the reader expanding any feed item
+  // puts that item's vertical middle on the feed viewport's vertical middle at
+  // once (`itemExpanded`, one of the closed set of scroll causes). A capped
+  // section this click owner toggles centers here, AFTER the class lands, so
+  // the geometry read is the expanded layout; an item that owns its own fold (a
+  // sub-feed bubble, a compaction's summary) announces ITEM_EXPANDED_EVENT and
+  // centers through the listener below. A collapse never moves the feed.
   const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
     refreshHasMore(section);
     // A card's title fold follows the card's fold (title-fold.ts), so a toggle
@@ -189,8 +191,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     refreshTitleFolds(section);
     if (!expanded) return;
     intentScroll?.arm(section);
-    if (section.classList.contains(BUBBLE_SCROLL_CLASS)) centerExpandedBubble(section);
+    centerExpandedItem(section);
   });
+  const onItemExpanded = (event: Event): void => {
+    if (event.target instanceof HTMLElement) centerExpandedItem(event.target);
+  };
+  host.addEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
 
   const paints = createPaintReporter((id) => root.paintedAt(id));
   const root: FeedController = createFeedController({
@@ -565,26 +571,27 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   }
 
   /**
-   * Center the bubble whose scroll box SECTION the reader just expanded. A
-   * bubble's scroll box hangs directly in its bubble (bubble-scroll.ts), so a
-   * box with no bubble above it is a drawing fault, reported and thrown. A
+   * Center the feed item the reader just expanded: the feed row EXPANDED
+   * belongs to, the nearest one, so an item inside a subagent's sub-feed is
+   * centered as itself. Every expandable item is drawn in a row, so an
+   * expansion with none above it is a drawing fault, reported and thrown. A
    * fixture feed with no scroll box has nothing to move.
    */
-  function centerExpandedBubble(section: HTMLElement): void {
-    const bubble = section.parentElement;
-    if (bubble === null || !bubble.classList.contains(BUBBLE_CLASS)) {
-      log.error("an expanded bubble scroll box hangs in no bubble", {
-        operation: "feed.center-expanded-bubble",
-        context: { parent: bubble?.className ?? "none" },
+  function centerExpandedItem(expanded: HTMLElement): void {
+    const row = expanded.closest<HTMLElement>(FEED_ROW_SELECTOR);
+    if (row === null) {
+      log.error("an expanded feed item hangs in no feed row", {
+        operation: "feed.center-expanded-item",
+        context: { element: expanded.className },
       });
-      throw new Error("feed: an expanded bubble scroll box hangs in no bubble");
+      throw new Error("feed: an expanded feed item hangs in no feed row");
     }
     if (scrollBox === null || tail === null) return;
-    log.debug(`centering an expanded ${bubble.dataset.role ?? "unset"} bubble`, {
-      operation: "feed.center-expanded-bubble",
-      context: { role: bubble.dataset.role ?? "unset" },
+    log.debug("centering an expanded feed item", {
+      operation: "feed.center-expanded-item",
+      context: { row: row.getAttribute("data-feed-row") ?? "unset", element: expanded.className },
     });
-    tail.bubbleExpanded(revealGeometry(scrollBox, bubble));
+    tail.itemExpanded(revealGeometry(scrollBox, row));
   }
 
   /** Mark the row, briefly, as the one meant; scroll to it when SCROLL says so. */
@@ -622,6 +629,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     unobserve?.();
     intentScroll?.uninstall();
     uninstallExpand();
+    host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
     uninstallClear?.();
     overscan?.dispose();
     root.dispose();
