@@ -29,21 +29,21 @@ export interface TabSpec {
   kind:
     | "queue"
     | "prePrompt"
-    | "merge"
+    | "rebasing"
     | "conflicts"
     | "tests"
     | "fixes"
+    | "committing"
+    | "updatingMain"
     | "postPrompt";
-  state: "live" | "parked" | "settled";
+  state: "live" | "settled";
   /** For `settled`. */
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
   summary?: string;
-  /** For `parked`. */
-  line?: string;
   label?: string;
   round?: number;
-  /** Extra kind-level fields (`queue`, `lines`, `suites`). */
+  /** Extra kind-level fields (`queue`, `progress`, `lines`, `suites`, `log`, …). */
   payload?: Record<string, unknown>;
 }
 
@@ -58,30 +58,37 @@ const DEFAULT_QUEUE = {
   behind: [],
 };
 
+/**
+ * The smallest legal payload each kind with a REQUIRED message carries, so a
+ * fixture that says nothing about it is still a legal tab rather than a
+ * malformed view.
+ */
+const REQUIRED_PAYLOADS: Readonly<Record<string, Record<string, unknown>>> = {
+  queue: { queue: DEFAULT_QUEUE },
+  rebasing: { progress: { replayed: 0, total: 1 } },
+  committing: { subject: { text: "Merge branch 'mine'" } },
+  updatingMain: { step: { step: { case: "fetching", value: {} } } },
+  fixes: { attempt: { attempt: 1, maxAttempts: 3 } },
+};
+
 /** A merge-tab row, built from the generated schemas. */
 export function tabRow(rowId: string, spec: TabSpec): FeedRow {
   const state =
     spec.state === "live"
       ? { case: "live" as const, value: {} }
-      : spec.state === "parked"
-        ? { case: "parked" as const, value: { line: { text: spec.line ?? "parked" } } }
-        : {
-            case: "settled" as const,
-            value: {
-              endedAtMs: 5_000n,
-              outcome:
-                spec.outcome === "failed"
-                  ? { case: "failed" as const, value: { summary: spec.summary ?? "it failed" } }
-                  : { case: "succeeded" as const, value: {} },
-            },
-          };
-  // A queue tab MUST carry its snapshot; a fixture that omits one would be a
-  // malformed view rather than a queue tab, so the default supplies the
-  // smallest legal one.
-  const payload =
-    spec.kind === "queue" && spec.payload?.["queue"] === undefined
-      ? { ...(spec.payload ?? {}), queue: DEFAULT_QUEUE }
-      : (spec.payload ?? {});
+      : {
+          case: "settled" as const,
+          value: {
+            endedAtMs: 5_000n,
+            outcome:
+              spec.outcome === "failed"
+                ? { case: "failed" as const, value: { summary: spec.summary ?? "it failed" } }
+                : { case: "succeeded" as const, value: {} },
+          },
+        };
+  // A kind with a required message MUST carry it; the default supplies the
+  // smallest legal one, and anything the spec states wins.
+  const payload = { ...(REQUIRED_PAYLOADS[spec.kind] ?? {}), ...(spec.payload ?? {}) };
   return create(FeedRowSchema, {
     id: id(rowId),
     order: orderFor(rowId),
