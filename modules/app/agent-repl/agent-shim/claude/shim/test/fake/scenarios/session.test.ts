@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
+import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts, transcriptPath } from "../../../src/engine/cold.js";
+import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 describe("identity rotation", () => {
   /** Every message, as plain records, in arrival order. */
@@ -574,17 +575,27 @@ describe("the away summary", () => {
 });
 
 describe("cold-context seeding", () => {
-  it("stamps the turn's closing record TWO HOURS in the past", async () => {
+  it("stamps every transcript record at the fake's own now", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!cold-seed"]);
-    const stamps = recordsOfType(driven.transcript(), "system")
-      .filter((l) => l.subtype === "turn_duration")
+    const stamps = driven
+      .transcript()
+      .filter((l) => typeof l.timestamp === "string")
       .map((l) => Date.parse(String(l.timestamp)));
-    const now = 1_800_000_000_000;
 
-    // Assert. The oldest stamp is what the shim's cold gate reads on the next
-    // resume of this session.
-    expect(Math.min(...stamps)).toBe(now - 2 * 60 * 60 * 1_000);
+    // Assert. A back-dated answer preceded its own prompt, which the live
+    // stream stamped now; the lapse is the gate's clock's business instead.
+    expect(stamps.length).toBeGreaterThan(0);
+    expect(stamps.every((stamp) => stamp === HARNESS_NOW_MS)).toBe(true);
+  });
+
+  it("leaves a context the cold gate reads as above its floor", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cold-seed"]);
+    const facts = readTranscriptFacts(transcriptPath(driven.configDir, driven.cwd, driven.sessionId));
+
+    // Assert
+    expect(facts?.contextTokens).toBeGreaterThanOrEqual(COLD_GATE_FLOOR_TOKENS);
   });
 
   it("still ends the turn successfully, so the seeding is invisible to the turn", async () => {
