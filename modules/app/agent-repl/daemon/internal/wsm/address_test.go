@@ -137,6 +137,26 @@ func TestEncodeAddressRoundTripsTheParent(t *testing.T) {
 	}
 }
 
+func TestEncodeAddressRoundTripsTheMirror(t *testing.T) {
+	// Arrange
+	address := OutputAddress{Feed: feedid.Feed{Root: true}, Mirror: true}
+
+	// Act
+	raw, err := encodeAddress(&address)
+	if err != nil {
+		t.Fatalf("encodeAddress: %v", err)
+	}
+	got, err := decodeAddress("turns", "turn-1", raw.(string))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("decodeAddress: %v", err)
+	}
+	if !got.Mirror {
+		t.Fatalf("decoded address = %+v, want the mirror kept", got)
+	}
+}
+
 func TestEncodeAddressRendersNullForAnAbsentAddress(t *testing.T) {
 	// Arrange / Act
 	got, err := encodeAddress(nil)
