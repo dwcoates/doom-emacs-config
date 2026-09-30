@@ -238,6 +238,10 @@ type Deps struct {
 	WorkspaceDir func(ids.WorkspaceID) (string, error)
 	// Encode renders a row address as its FeedId. Defaults to feedid.Encode.
 	Encode func(feedid.Ref) *frontendv1.FeedId
+	// Decode parses a FeedId back into its row address. Defaults to
+	// feedid.Decode. A MIRRORED output address re-keys each row it draws onto
+	// the root feed through it.
+	Decode func(*frontendv1.FeedId) (feedid.Ref, error)
 	// EncodeFeed renders a feed address as its FeedId. Defaults to
 	// feedid.EncodeFeed.
 	EncodeFeed func(ids.WorkspaceID, feedid.Feed) *frontendv1.FeedId

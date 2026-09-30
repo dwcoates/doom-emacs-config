@@ -52,6 +52,8 @@ type storedAddress struct {
 	Feed storedFeed `json:"feed"`
 	// Parent is the row they nest under, nil for top-level rows.
 	Parent *storedRef `json:"parent,omitempty"`
+	// Mirror draws the rows on the root feed too.
+	Mirror bool `json:"mirror,omitempty"`
 }
 
 // toStoredFeed renders a feed, refusing one that does not name exactly one arm.
@@ -202,7 +204,7 @@ func encodeAddress(addr *OutputAddress) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored := storedAddress{Feed: feed}
+	stored := storedAddress{Feed: feed, Mirror: addr.Mirror}
 	if addr.Parent != nil {
 		parent, err := toStoredRef(*addr.Parent)
 		if err != nil {
@@ -227,7 +229,7 @@ func decodeAddress(table, row string, raw string) (*OutputAddress, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &OutputAddress{Feed: feed}
+	out := &OutputAddress{Feed: feed, Mirror: stored.Mirror}
 	if stored.Parent != nil {
 		parent, err := fromStoredRef(table, row, *stored.Parent)
 		if err != nil {

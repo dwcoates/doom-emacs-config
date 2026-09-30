@@ -493,6 +493,9 @@ func newResolver(deps Deps) (*resolver, error) {
 	if deps.Encode == nil {
 		deps.Encode = feedid.Encode
 	}
+	if deps.Decode == nil {
+		deps.Decode = feedid.Decode
+	}
 	if deps.EncodeFeed == nil {
 		deps.EncodeFeed = feedid.EncodeFeed
 	}
@@ -834,7 +837,19 @@ func (r *resolver) outputPlacement(s *wsState) placement {
 // upsert replaces one row whole and publishes it on its feed's tail. It is the
 // ONE write path: every family function ends here, so identity, ordering and
 // publication can never disagree between families.
+//
+// A row drawn at a MIRRORED output address is drawn on the root feed too
+// (mirror.go), through this same path, so the copy is ordered and published
+// exactly as every other row is.
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
+	r.upsertOne(s, at, row, durable)
+	if copy, ok := r.mirrorRow(s, at.feed, row); ok {
+		r.upsertOne(s, placement{feed: feedid.Feed{Root: true}}, copy, durable)
+	}
+}
+
+// upsertOne is upsert on one feed.
+func (r *resolver) upsertOne(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
 	id := row.GetId().GetValue()
 	if id == "" {
@@ -1046,6 +1061,15 @@ func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool
 // of the shell bubble). The tail's already-delivered upserts of the row are
 // history; the removal is a new publication that supersedes them.
 func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
+	retired := r.retireOne(s, addr, id)
+	if mirrored, ok := r.mirrorID(s, addr, id); ok {
+		r.retireOne(s, feedid.Feed{Root: true}, mirrored)
+	}
+	return retired
+}
+
+// retireOne is retire on one feed.
+func (r *resolver) retireOne(s *wsState, addr feedid.Feed, id string) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
@@ -1295,4 +1319,75 @@ func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, headFeed fee
 // over a missing highlighter would lose the file the agent read.
 func (r *resolver) painter() paint.Painter {
 	return r.deps.Painter
+}
+
+// A MIRRORED OUTPUT ADDRESS (wsm.OutputAddress.Mirror) draws every row that
+// lands at it ALSO on the root feed, as an ordinary row of the conversation.
+// It is how a merge's repair turns -- the workspace's own session resolving a
+// conflict or fixing a suite -- appear both in the merge bubble's tab and in
+// the main feed. The copy is a second resolved row with its own identity (the
+// same row key, addressed on the root feed), never one row the client fans
+// out: a row nested directly under the addressed parent (the tab) is a
+// top-level row on the root feed, and a row nested under another row of the
+// addressed feed is nested under that row's own root copy.
+
+// mirrorRow answers the root feed's copy of a row drawn on feed, and false
+// when the row is not drawn at a mirrored output address. A row whose identity
+// cannot be re-keyed is recorded at ERROR and not mirrored: the tab still has
+// it, and the main feed is missing it loudly rather than holding a guess.
+func (r *resolver) mirrorRow(s *wsState, feed feedid.Feed, row *frontendv1.FeedRow) (*frontendv1.FeedRow, bool) {
+	id, ok := r.mirrorID(s, feed, row.GetId().GetValue())
+	if !ok {
+		return nil, false
+	}
+	copy, cloned := proto.Clone(row).(*frontendv1.FeedRow)
+	if !cloned {
+		r.logger(s.id).Error("daemon.feed.mirror", "a mirrored row could not be copied onto the root feed",
+			dlog.Context{"row": row.GetId().GetValue()})
+		return nil, false
+	}
+	copy.Id = &frontendv1.FeedId{Value: id}
+	copy.Parent = nil
+	if parent := row.GetParent().GetRow().GetValue(); parent != "" && !r.isAddressParent(s, parent) {
+		mirroredParent, ok := r.mirrorID(s, feed, parent)
+		if !ok {
+			return nil, false
+		}
+		copy.Parent = &frontendv1.FeedRowParent{Row: &frontendv1.FeedId{Value: mirroredParent}}
+	}
+	return copy, true
+}
+
+// mirrorID answers the root feed's identity for a row id drawn on feed, and
+// false when feed is not a mirrored output address.
+func (r *resolver) mirrorID(s *wsState, feed feedid.Feed, id string) (string, bool) {
+	if s.address == nil || !s.address.Mirror || feed.Root {
+		return "", false
+	}
+	if r.feedKey(s.id, feed) != r.feedKey(s.id, s.address.Feed) {
+		return "", false
+	}
+	ref, err := r.deps.Decode(&frontendv1.FeedId{Value: id})
+	if err != nil {
+		r.logger(s.id).Error("daemon.feed.mirror", "a row drawn at a mirrored output address could not be re-keyed onto the root feed; the main feed does not show it",
+			dlog.Context{"row": id, "cause": err.Error()})
+		return "", false
+	}
+	ref.Feed = feedid.Feed{Root: true}
+	mirrored := r.deps.Encode(ref).GetValue()
+	if mirrored == "" {
+		r.logger(s.id).Error("daemon.feed.mirror", "a mirrored row's root identity encoded to nothing; the main feed does not show it",
+			dlog.Context{"row": id})
+		return "", false
+	}
+	return mirrored, true
+}
+
+// isAddressParent reports whether a parent id is the output address's own
+// parent row (the merge tab the rows nest under), which a root copy drops.
+func (r *resolver) isAddressParent(s *wsState, parent string) bool {
+	if s.address.Parent == nil {
+		return false
+	}
+	return r.deps.Encode(*s.address.Parent).GetValue() == parent
 }
