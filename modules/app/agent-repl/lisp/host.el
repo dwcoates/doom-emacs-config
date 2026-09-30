@@ -256,7 +256,7 @@ later answers nil here until it is threaded through deliberately."
 (defun agent-repl-host--pushed-composer-gate (ws)
   "Return the composer gate WS's last host push spells, with no local hold.
 
-`:open' `:merge-parked' `:merging' `:draining' `:restarting' come straight
+`:open' `:merging' `:draining' `:restarting' come straight
 off the LIVE arm's `composer' oneof — the resolved arm IS the gate.  The
 other standings are blocked by their own nature and answer `:no-session'
 or `:terminal'; `:unknown' means no host push has arrived yet."
@@ -273,7 +273,7 @@ or `:terminal'; `:unknown' means no host push has arrived yet."
           (:terminal :terminal)
           (:live
            (let ((arm (plist-get (plist-get (plist-get standing :value) :composer) :arm)))
-             (if (memq arm '(:open :merging :draining :restarting :merge-parked))
+             (if (memq arm '(:open :merging :draining :restarting))
                  arm
                (agent-repl--error ws "elisp.host.gate-unknown-composer-arm ws=%s arm=%S" ws arm)
                :unknown)))

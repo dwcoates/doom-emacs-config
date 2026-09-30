@@ -690,15 +690,21 @@ looked at."
     ;; Act / Assert
     (should (eq (agent-repl-host-composer-gate "ws-1") :restarting))))
 
-(ert-deftest agent-repl-test-host-gate-merge-parked-arm ()
-  "A parked merge leaves the composer OPEN WITH CONTEXT, never refused."
+(ert-deftest agent-repl-test-host-gate-retired-merge-parked-arm-is-an-error ()
+  "The retired `:merge-parked' arm is outside the vocabulary: a breach.
+A merge never parks (merge-landing.md, Landed change 1), so the gate
+answers `:unknown' and records the breach rather than opening."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     (agent-repl-test-host--push
      "ws-1" (list :arm :host :value (agent-repl-test-host--composer :merge-parked)))
-    ;; Act / Assert
-    (should (eq (agent-repl-host-composer-gate "ws-1") :merge-parked))))
+    ;; Act
+    (let ((gate (agent-repl-host-composer-gate "ws-1")))
+      ;; Assert
+      (should (eq gate :unknown))
+      (should (agent-repl-test-host--logged-p
+               :error "elisp.host.gate-unknown-composer-arm")))))
 
 (ert-deftest agent-repl-test-host-gate-no-session-arm ()
   "A workspace that never had a session is `:no-session' — and still sends."

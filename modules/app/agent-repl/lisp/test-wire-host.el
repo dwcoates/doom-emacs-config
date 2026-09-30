@@ -443,20 +443,43 @@
   "Return a minimal HostSessionLive JSON carrying EXTRA."
   (format agent-repl-test-wire-host--minimal-live extra))
 
-(ert-deftest agent-repl-test-wire-host-live-decodes-every-composer-arm ()
-  "Every composer gate arm decodes to its keyword; the arm IS the gate."
-  (dolist (case '(("\"open\":{}" :open)
-                  ("\"merging\":{}" :merging)
-                  ("\"draining\":{}" :draining)
-                  ("\"restarting\":{}" :restarting)
-                  ("\"mergeParked\":{}" :merge-parked)))
-    (should (equal (plist-get (agent-repl-test-wire-host--decode
-                               #'agent-repl-wire-decode-host-session-live
-                               (agent-repl-test-wire-host--live (nth 0 case)))
-                              :composer)
-                   (list :arm (nth 1 case) :value nil)))))
+(defun agent-repl-test-wire-host--composer-of (arm-json)
+  "Decode a minimal HostSessionLive carrying ARM-JSON and return its gate."
+  (plist-get (agent-repl-test-wire-host--decode
+              #'agent-repl-wire-decode-host-session-live
+              (agent-repl-test-wire-host--live arm-json))
+             :composer))
 
-(ert-deftest agent-repl-test-wire-host-live-composer-arms-match-the-bindings ()
+(ert-deftest agent-repl-test-wire-host-live-composer-open-arm ()
+  "The `open' gate decodes to `:open'."
+  (should (equal (agent-repl-test-wire-host--composer-of "\"open\":{}")
+                 '(:arm :open :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-live-composer-merging-arm ()
+  "The `merging' gate decodes to `:merging'."
+  (should (equal (agent-repl-test-wire-host--composer-of "\"merging\":{}")
+                 '(:arm :merging :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-live-composer-draining-arm ()
+  "The `draining' gate decodes to `:draining'."
+  (should (equal (agent-repl-test-wire-host--composer-of "\"draining\":{}")
+                 '(:arm :draining :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-live-composer-restarting-arm ()
+  "The `restarting' gate decodes to `:restarting'."
+  (should (equal (agent-repl-test-wire-host--composer-of "\"restarting\":{}")
+                 '(:arm :restarting :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-live-retired-merge-parked-is-refused ()
+  "The retired `merge_parked' gate is refused as an unknown field.
+A merge never parks (merge-landing.md, Landed change 1): tag 10 is
+reserved, so a peer still sending it holds a schema this build does not."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-session-live
+                  (agent-repl-test-wire-host--live "\"mergeParked\":{}"))
+                 '("HostSessionLive" mergeParked "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-live-oneof-arms-match-the-bindings ()
   "The decoder's arm set is exactly what the frozen schema declares.
 Read from the checked-in Go bindings, which carry HostSessionLive's
 composer and vendor_info arms together."
@@ -464,8 +487,7 @@ composer and vendor_info arms together."
                          "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                          "HostSessionLive")
                         #'string<))
-        (spelled (sort (list "open" "merging" "draining" "restarting" "mergeParked"
-                             "claude")
+        (spelled (sort (list "open" "merging" "draining" "restarting" "claude")
                        #'string<)))
     (should (equal spelled declared))))
 
