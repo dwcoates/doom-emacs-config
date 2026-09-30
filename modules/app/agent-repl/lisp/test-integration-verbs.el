@@ -812,6 +812,38 @@ the raw wire text can tell an explicit false from an omitted field."
       (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))
         (should (string-match-p (regexp-quote "\"force\":false") raw))))))
 
+(ert-deftest agent-repl-itest-verbs-merge-sends-own-branch-keep-open-false-on-the-raw-wire ()
+  "Emacs's merge names its own branch as the source, `keep_open' spelled false.
+Only the raw wire text can tell an explicit false from an omitted field
+(merge-landing.md, Landed change 1)."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      ;; Assert.
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "MergeWorkspace"))))
+        (should (string-match-p
+                 (regexp-quote "\"source\":{\"ownBranch\":{\"keepOpen\":false}}")
+                 raw))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-keep-open-sends-keep-open-true ()
+  "A keep-open merge reaches the daemon as `own_branch' with `keep_open' true."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-merge agent-repl-itest-verbs--ws t)
+      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      ;; Assert.
+      (should (eq (agent-repl-itest--body-field
+                   (agent-repl-itest-verbs--body daemon "MergeWorkspace")
+                   'source 'ownBranch 'keepOpen)
+                  t)))))
+
 ;;;; ---- CreateWorkspaceRequest fields (audit finding 75) ----
 
 (ert-deftest agent-repl-itest-verbs-create-sends-the-model ()

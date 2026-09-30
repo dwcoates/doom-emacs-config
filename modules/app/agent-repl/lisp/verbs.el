@@ -23,6 +23,8 @@
 ;;                    one verb this file confirms before sending.
 ;;   OpenWorkspace    opens a closed row; any revival is the daemon's.
 ;;   MergeWorkspace   success means ENQUEUED.  Emacs holds NO merge state.
+;;                    Emacs merges only a workspace's OWN branch
+;;                    (`source.own_branch'); a prefix keeps it open.
 ;;   RestartWorkspace the daemon owns everything the restart entails.
 ;;   CreateWorkspace  the daemon names and creates everything; the caller
 ;;                    supplies facts and the workspace appears on the
@@ -654,14 +656,24 @@ nothing on the stream would ever retire the registration."
                     (plist-get ref :id) "reopened")
                    (agent-repl-workspace-progress-report :open :completed name)))))
 
-(defun agent-repl-verb-merge (ws)
-  "Enqueue WS's merge.  Success means ENQUEUED and nothing more.
+(defun agent-repl-verb-merge (ws &optional keep-open)
+  "Enqueue a merge of WS's OWN branch, run in WS.  Success means ENQUEUED.
+The request's source is `own_branch': WS is both the requesting workspace
+the merge runs in and the workspace whose branch lands.  KEEP-OPEN non-nil
+keeps WS open once its branch lands, so it can go on to further work and
+further merges; nil closes it on landing.  A failed merge never closes it
+either way.
+
 Emacs holds NO merge state whatsoever: the merge's whole life from the
-queue onward is the feed's merge bubble and the roster."
+queue onward is WS's own feed merge bubble, footer and roster row."
   (let ((ref (agent-repl-verbs--ref ws)))
+    (agent-repl--info ws "elisp.verbs.merge-own-branch ws=%s keep-open=%s"
+                      ws (and keep-open t))
     (agent-repl-verbs--send
      #'agent-repl-rpc-merge-workspace (agent-repl-verbs--conn ws)
-     (list :workspace ref)
+     (list :workspace ref
+           :source (list :arm :own-branch
+                         :value (list :keep-open (and keep-open t))))
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
@@ -1522,10 +1534,14 @@ unrecoverable by design."
       (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.open-chosen name=%s" choice)
       (agent-repl-verb-open ref))))
 
-(defun agent-repl-merge-workspace (&optional ws)
-  "Enqueue the current workspace's merge (`SPC TAB M')."
-  (interactive)
-  (agent-repl-verb-merge (agent-repl-verbs--target-ws ws "Merge workspace: ")))
+(defun agent-repl-merge-workspace (&optional ws keep-open)
+  "Enqueue a merge of the current workspace's own branch (`SPC TAB M').
+The workspace closes once its branch lands.  A prefix argument
+\(`C-u SPC TAB M') sets KEEP-OPEN: the workspace stays open after the
+landing, so it can go on to further work and further merges."
+  (interactive (list nil current-prefix-arg))
+  (agent-repl-verb-merge (agent-repl-verbs--target-ws ws "Merge workspace: ")
+                         (and keep-open t)))
 
 (defun agent-repl-restart-workspace (&optional force ws)
   "Restart the current workspace's session (`SPC o C-c').
