@@ -153,15 +153,33 @@ function isHeaderLine(line: string): boolean {
   return line.startsWith(HEADER_PREFIX);
 }
 
-/** A ``` code-fence delimiter, after any leading spaces. */
+/**
+ * A ``` code-fence delimiter, after any leading rail (fenceIndent). A fence the
+ * model drew behind its branch's `│` rail is still a fence: read as a plain
+ * line it is neither tree-core nor a delimiter, so it ENDED the tree region and
+ * every later branch spilled onto the markdown path (2026-09-30).
+ */
 function isFenceDelimiter(line: string): boolean {
-  let i = 0;
-  while (line.charCodeAt(i) === CH_SPACE) i++;
+  const i = fenceIndent(line);
   return (
     line.charCodeAt(i) === CH_BACKTICK &&
     line.charCodeAt(i + 1) === CH_BACKTICK &&
     line.charCodeAt(i + 2) === CH_BACKTICK
   );
+}
+
+/**
+ * The width of LINE's leading rail: spaces and `│` connectors. A fence body
+ * is dedented by its opening delimiter's rail, so code drawn beneath a branch
+ * with or without the tree's vertical rules reads as the same plain block.
+ */
+function fenceIndent(line: string): number {
+  let i = 0;
+  for (;;) {
+    const c = line.charCodeAt(i);
+    if (c !== CH_SPACE && c !== CH_BAR) return i;
+    i++;
+  }
 }
 
 /**
@@ -1193,7 +1211,7 @@ function splitTreeSegments(lines: string[]): TreeSegment[] {
   while (i < n) {
     if (isFenceDelimiter(lines[i])) {
       flushTree();
-      const indent = leadingSpaces(lines[i]);
+      const indent = fenceIndent(lines[i]);
       const lang = fenceLanguage(lines[i]);
       const code: string[] = [];
       let j = i + 1;
@@ -1213,24 +1231,15 @@ function splitTreeSegments(lines: string[]): TreeSegment[] {
   return segments;
 }
 
-/** The count of leading space characters on LINE. */
-function leadingSpaces(line: string): number {
-  let i = 0;
-  while (line.charCodeAt(i) === CH_SPACE) i++;
-  return i;
-}
-
 /** The language tag following the ``` of a fence delimiter, or "". */
 function fenceLanguage(line: string): string {
-  const rest = line.slice(leadingSpaces(line) + 3);
+  const rest = line.slice(fenceIndent(line) + 3);
   return rest.trim().split(/\s+/)[0] ?? "";
 }
 
-/** Strip up to WIDTH leading spaces from LINE. */
+/** Strip up to WIDTH leading rail characters (spaces and `│`) from LINE. */
 function dedent(line: string, width: number): string {
-  let i = 0;
-  while (i < width && line.charCodeAt(i) === CH_SPACE) i++;
-  return line.slice(i);
+  return line.slice(Math.min(width, fenceIndent(line)));
 }
 
 /**
