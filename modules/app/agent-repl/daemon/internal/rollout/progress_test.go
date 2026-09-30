@@ -155,6 +155,33 @@ func TestASuccessorThatServesClosesTheStandingFault(t *testing.T) {
 	}
 }
 
+// A LATER FAILED HANDOVER SUPERSEDES THE STANDING FAULT: failures never pile
+// up, and the one that stands is the latest.
+func TestALaterFailedHandoverSupersedesTheStandingFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.spawner.readyErr = errFake
+	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+		t.Fatalf("the first HandOver succeeded")
+	}
+	first := successorFaults(t, h)
+	if len(first) != 1 {
+		t.Fatalf("faults after the first failure = %+v, want one", first)
+	}
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+		t.Fatalf("the second HandOver succeeded")
+	}
+
+	// Assert
+	open := successorFaults(t, h)
+	if len(open) != 1 || open[0].ID == first[0].ID {
+		t.Fatalf("faults = %+v, want only the second failure's fault standing", open)
+	}
+}
+
 // A SERVING SUCCESSOR IS THE RECOVERY EDGE of every daemon-scoped fault whose
 // lifetime ends there (health/lifetime.go), and of no workspace's.
 func TestAServingSuccessorClosesTheDaemonFaultsWhoseLifetimeEndsThere(t *testing.T) {
