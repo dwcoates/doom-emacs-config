@@ -43,6 +43,7 @@ const (
 	SiteStreamNotFlushable     = "stream_not_flushable"
 	SiteRunEmpty               = "run_empty"
 	SiteVendorTaskEmpty        = "vendor_task_empty"
+	SiteRunIDEmpty             = "run_id_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 	// SitePositionUnset is a ReadAgentPage that names no position arm: the
@@ -473,6 +474,14 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 func validateGetShellRunClaimsRequest(req *storev1.GetShellRunClaimsRequest) *refusal {
 	return validateIDList(req.GetVendorTaskIds(), SiteVendorTaskEmpty, "vendor_task_ids",
 		"vendor_task_ids: the lookup names no spool's task id", "vendor_task_ids: an asked task id is empty")
+}
+
+// validateGetRunSettlementsRequest is the use site for GetRunSettlements: at
+// least one run id, and every one non-empty. Unscoped on purpose, exactly as
+// GetShellRunClaims is.
+func validateGetRunSettlementsRequest(req *storev1.GetRunSettlementsRequest) *refusal {
+	return validateIDList(req.GetRunIds(), SiteRunIDEmpty, "run_ids",
+		"run_ids: the lookup names no run", "run_ids: an asked run id is empty")
 }
 
 // validateIDList is the one shape of an unscoped id-set lookup's request: at

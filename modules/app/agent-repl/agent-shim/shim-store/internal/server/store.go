@@ -70,6 +70,9 @@ type Store interface {
 	// ShellRunClaims answers every claim on record for the asked task ids, each
 	// with its run's owning book when that is on record.
 	ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error)
+	// RunSettlements answers which of the asked runs the record holds as
+	// ended; a run absent from the answer is not settled.
+	RunSettlements(ctx context.Context, runIDs []string) ([]db.SettledRun, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error

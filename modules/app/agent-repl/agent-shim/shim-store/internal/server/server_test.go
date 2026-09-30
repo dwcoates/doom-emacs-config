@@ -148,6 +148,11 @@ type fakeStore struct {
 	claimsFor   []string
 	claimsAsked bool
 
+	settled      []db.SettledRun
+	settledErr   error
+	settledFor   []string
+	settledAsked bool
+
 	cursors      []*storev1.CursorState
 	cursorsErr   error
 	cursorsFor   *string
@@ -265,6 +270,14 @@ func (f *fakeStore) ShellRunClaims(_ context.Context, vendorTaskIDs []string) ([
 	f.claimsAsked = true
 	f.claimsFor = vendorTaskIDs
 	return f.claims, f.claimsErr
+}
+
+func (f *fakeStore) RunSettlements(_ context.Context, runIDs []string) ([]db.SettledRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settledAsked = true
+	f.settledFor = runIDs
+	return f.settled, f.settledErr
 }
 
 func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
@@ -1801,6 +1814,137 @@ func TestGetShellRunClaimsRefusesAnIncompleteRequest(t *testing.T) {
 			}
 			store.mu.Lock()
 			asked := store.claimsAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
+	}
+}
+
+// ---- GetRunSettlements ----
+
+// settlementsRequest is a lookup naming two runs.
+func settlementsRequest() *storev1.GetRunSettlementsRequest {
+	return &storev1.GetRunSettlementsRequest{RunIds: []string{"toolu_1", "toolu_2"}}
+}
+
+func TestGetRunSettlementsServesEachSettledRunWithItsEndInstant(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.settled = []db.SettledRun{{RunID: "toolu_1", EndedAtMs: 42}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetRunSettlements(context.Background(), connect.NewRequest(settlementsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetRunSettlements = %v, want nil", err)
+	}
+	settled := res.Msg.GetSuccess().GetSettled()
+	if len(settled) != 1 || settled[0].GetRunId() != "toolu_1" || settled[0].GetEndedAtMs() != 42 {
+		t.Fatalf("settled = %v, want toolu_1 ended at 42 and toolu_2 absent", settled)
+	}
+}
+
+func TestGetRunSettlementsServesAnEmptySuccessWhenNothingSettled(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetRunSettlements(context.Background(), connect.NewRequest(settlementsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetRunSettlements = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil || len(res.Msg.GetSuccess().GetSettled()) != 0 {
+		t.Fatalf("result = %v, want the success arm with nothing settled", res.Msg.GetResult())
+	}
+}
+
+func TestGetRunSettlementsAsksTheStoreForExactlyTheRequestedIDs(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetRunSettlements(context.Background(), connect.NewRequest(settlementsRequest())); err != nil {
+		t.Fatalf("GetRunSettlements = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if strings.Join(store.settledFor, ",") != "toolu_1,toolu_2" {
+		t.Fatalf("store read %v, want [toolu_1 toolu_2]", store.settledFor)
+	}
+}
+
+func TestGetRunSettlementsMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.settledErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetRunSettlements(context.Background(), connect.NewRequest(settlementsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetRunSettlements = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+	if _, ok := findRecord(t, h.logs, "store.rpc.get-run-settlements", "error"); ok {
+		t.Fatalf("records = %+v, want no second error record for a db failure", records(t, h.logs))
+	}
+	traced := false
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation == "store.rpc.get-run-settlements" && rec.Context["refusal_site"] == SiteDatabaseFailure {
+			traced = true
+		}
+	}
+	if !traced {
+		t.Fatalf("records = %+v, want a trace at site %q", records(t, h.logs), SiteDatabaseFailure)
+	}
+}
+
+func TestGetRunSettlementsRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetRunSettlementsRequest
+		field   string
+	}{
+		{name: "no ids", request: &storev1.GetRunSettlementsRequest{}, field: "run_ids"},
+		{name: "an empty id", request: &storev1.GetRunSettlementsRequest{RunIds: []string{"toolu_1", ""}}, field: "run_ids[1]"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetRunSettlements(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetRunSettlements = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != test.field {
+				t.Fatalf("result = %v, want invalid_request naming %s", res.Msg.GetResult(), test.field)
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-run-settlements", "warn")
+			if !ok || rec.Context["refusal_site"] != SiteRunIDEmpty {
+				t.Fatalf("records = %+v, want one warn refusal at site %q", records(t, h.logs), SiteRunIDEmpty)
+			}
+			store.mu.Lock()
+			asked := store.settledAsked
 			store.mu.Unlock()
 			if asked {
 				t.Fatalf("the store was read for a request the server refuses")
