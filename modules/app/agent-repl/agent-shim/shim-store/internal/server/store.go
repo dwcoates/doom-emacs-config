@@ -67,6 +67,9 @@ type Store interface {
 	// AgentByVendorTask answers which agent of `session`'s lineage a vendor
 	// task locator names; `found` false with no error is the not-found answer.
 	AgentByVendorTask(ctx context.Context, session, vendorTaskID string) (agentID string, found bool, err error)
+	// ShellRunClaims answers every claim on record for the asked task ids, each
+	// with its run's owning book when that is on record.
+	ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error
