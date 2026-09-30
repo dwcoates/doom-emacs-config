@@ -270,17 +270,15 @@ message FooterStatus {
     // MOMENTARY: context is being injected (memory, skills); falls back on
     // the next frame.
     FooterStatusLoading loading = 11;
-    // The merge STOPPED awaiting the user: on a conflict its resolution agent
-    // could not settle, or parked for the user's guidance. It is the same
-    // coarse claim as the roster's `merge_conflict` arm. GREEN (owner ruling,
-    // 2026-09-28): an EXPECTED state, ready for a human response, never a
-    // fault. The composer is OPEN, because what the user types is the merge's
-    // only way forward.
-    FooterStatusMergeConflict merge_conflict = 12;
-    // The merge FAILED; the merge bubble carries the account. It is the same
-    // coarse claim as the roster's `merge_failed` arm. BLUE (owner ruling,
-    // 2026-09-28): something is wrong with this workspace. TERMINAL: the merge
-    // no longer holds the session, so the composer is OPEN.
+    // Tag 12 (`merge_conflict`, a merge stopped awaiting the user) is
+    // RETIRED: nothing parks; a merge whose conflict resolution gives up is
+    // `merge_failed` with substatus "conflicts".
+    // The merge FAILED and the workspace is handed back to the user: it left
+    // the queue at once, so the merges behind it go on. It is the same coarse
+    // claim as the roster's `merge_failed` arm. TURQUOISE: something went
+    // wrong, and the workspace is still usable. TERMINAL: the merge no longer
+    // holds the session, so the composer is OPEN, and the user's next prompt
+    // is an ordinary turn.
     FooterStatusMergeFailed merge_failed = 13;
     // The merge LANDED. It is the same coarse claim as the roster's `merged`
     // arm. GREEN. TERMINAL: the merge no longer holds the session, so the
@@ -300,6 +298,9 @@ message FooterStatus {
     // It replaces `disconnected · degraded`, which is no longer emitted.
     FooterStatusDegraded degraded = 16;
   }
+  // Tag 12 (`merge_conflict`) is retired; see the note in the oneof.
+  reserved 12;
+  reserved "merge_conflict";
 }
 
 // Nothing in flight; the session serves on demand.
@@ -373,6 +374,7 @@ message FooterStatusIdleSalient {
     FooterStatusActivityContextBudget context_budget = 6;
   }
 }
+
 // Never ran a turn this session.
 message FooterSubStatusIdleReady {}
 // The last turn concluded normally.
@@ -754,95 +756,105 @@ message FooterStatusInterruptedSalient {
   }
 }
 
-// A daemon-orchestrated merge is in flight.
+// A daemon-orchestrated merge is in flight in this workspace: the workspace
+// asked for it, and runs it. Nothing about a merge reaches this footer until
+// the turn that asked for it has ended, so the first step shown is already
+// "enqueued" or later.
 message FooterStatusMerging {
-  // The merge run's phase, projected from the merge bubble's vocabulary.
+  // The merge's step, in the order a merge goes through them. A merge that
+  // starts over because the target moved returns to "rebasing"; conflict
+  // resolution returns to "rebasing" and fixing returns to "testing".
   oneof substatus {
-    // The merge is being enqueued.
-    FooterSubStatusMergingEnqueuing enqueuing = 1;
-    // Waiting in the repo's queue.
-    FooterSubStatusMergingQueued queued = 2;
-    // The configured --before-ws-merge prompt is running.
-    FooterSubStatusMergingPrePrompt pre_prompt = 3;
-    // The no-FF merge commit is being created (the bubble's merge tab).
-    FooterSubStatusMergingMerge merge = 4;
-    // The test suite is running against the merge commit.
+    // Waiting in the repository's queue behind the merge being worked on.
+    FooterSubStatusMergingEnqueued enqueued = 13;
+    // The configured before-merge prompt is running.
+    FooterSubStatusMergingPreprocessing preprocessing = 14;
+    // The branch is being replayed onto the target's tip.
+    FooterSubStatusMergingRebasing rebasing = 15;
+    // This workspace's session is resolving a rebase conflict.
+    FooterSubStatusMergingConflictResolution conflict_resolution = 16;
+    // The test gate is running on the rebased branch.
     FooterSubStatusMergingTesting testing = 5;
-    // NO LONGER EMITTED: a parked merge is the `merge_conflict` STATUS arm,
-    // whose own `parked` step carries this same message (owner ruling,
-    // 2026-09-28). Kept only because removing an arm is a breaking change.
-    FooterSubStatusMergingParked parked = 6;
-    // The configured --post-processing-prompt is running.
-    FooterSubStatusMergingPostPrompt post_prompt = 7;
-    // NO LONGER EMITTED: a failed merge is the `merge_failed` STATUS arm
-    // (owner ruling, 2026-09-28). Kept only because removing an arm is a
-    // breaking change.
-    FooterSubStatusMergingFailed failed = 8;
-    // NO LONGER EMITTED: a landed merge is the `merged` STATUS arm. Kept only
-    // because removing an arm is a breaking change.
-    FooterSubStatusMergingMerged merged = 9;
-    // Test-failure fixes are running (the bubble's fixes tab).
-    FooterSubStatusMergingFixes fixes = 11;
-    // Conflict resolution is running (the bubble's conflicts tab).
-    FooterSubStatusMergingConflicts conflicts = 12;
+    // This workspace's session is fixing failed suites.
+    FooterSubStatusMergingFixing fixing = 17;
+    // The merge commit into the target is being made.
+    FooterSubStatusMergingCommitting committing = 18;
+    // A branch already merged upstream: the default branch in the
+    // repository's main worktree is being updated from upstream.
+    FooterSubStatusMergingUpdatingMain updating_main = 19;
+    // The configured after-merge prompt is running.
+    FooterSubStatusMergingPostprocessing postprocessing = 20;
   }
+  // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
+  // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
+  // above replace them, nothing parks, and a failed or landed merge is its
+  // own status arm.
+  reserved 1, 2, 3, 4, 6, 7, 8, 9, 11, 12;
+  reserved "enqueuing", "queued", "pre_prompt", "merge", "parked", "post_prompt", "failed", "merged", "fixes", "conflicts";
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusMergingActivity activity = 10;
 }
-// The merge is being enqueued.
-message FooterSubStatusMergingEnqueuing {}
-// The queue place the run was admitted at.
-message FooterSubStatusMergingQueued {
-  // 1-based position in its repo's queue.
-  int32 position = 1;
-  // How many are queued in that repo.
-  int32 depth = 2;
+// Waiting in the queue, drawn "enqueued 2/5".
+message FooterSubStatusMergingEnqueued {
+  // This merge's 1-based place among the merges WAITING in the repository's
+  // queue: 1 means next to be taken. The merge being worked on is not
+  // counted, so there is never a 0.
+  uint32 place = 1;
+  // How many merges are waiting, this one included. At least `place`.
+  uint32 waiting = 2;
 }
-// The configured --before-ws-merge prompt is running.
-message FooterSubStatusMergingPrePrompt {}
-// The no-FF merge commit is being created.
-message FooterSubStatusMergingMerge {}
-// The test suite is running against the merge commit.
+// The before-merge prompt is running, drawn "preprocessing".
+message FooterSubStatusMergingPreprocessing {}
+// The replay, drawn "rebasing 3/7".
+message FooterSubStatusMergingRebasing {
+  // How many of the branch's commits have been replayed onto the tip.
+  uint32 replayed = 1;
+  // How many commits the branch replays in all. At least 1.
+  uint32 total = 2;
+}
+// Conflict resolution, drawn "conflict resolution".
+message FooterSubStatusMergingConflictResolution {}
+// The test gate, drawn "testing"; the suites stream through the activity
+// line and the expanded footer's tests panel.
 message FooterSubStatusMergingTesting {}
-// Parked awaiting the user's guidance.
-message FooterSubStatusMergingParked {
-  // The daemon-composed line — the same standing fact the bubble's parked
-  // tab shows, this component's own wrapper.
-  string line = 1;
+// Fixing, drawn "fixing attempt 2/3".
+message FooterSubStatusMergingFixing {
+  // This attempt, 1-based.
+  uint32 attempt = 1;
+  // The most attempts the merge makes before it fails: the same bound that
+  // decides failure.
+  uint32 max_attempts = 2;
 }
-// Test-failure fixes are running.
-message FooterSubStatusMergingFixes {}
-// Conflict resolution is running.
-message FooterSubStatusMergingConflicts {}
-// The configured --post-processing-prompt is running.
-message FooterSubStatusMergingPostPrompt {}
-// The merge failed; the bubble carries the account.
-message FooterSubStatusMergingFailed {}
-// The merge landed.
-message FooterSubStatusMergingMerged {}
+// The merge commit, drawn "committing".
+message FooterSubStatusMergingCommitting {}
+// Updating the default branch from upstream, drawn "updating main".
+message FooterSubStatusMergingUpdatingMain {}
+// The after-merge prompt is running, drawn "postprocessing".
+message FooterSubStatusMergingPostprocessing {}
 
-// The merge stopped awaiting the user: on a conflict, or parked.
-message FooterStatusMergeConflict {
-  // The finer step. UNSET for a merge stopped on a conflict, whose name is the
-  // whole fact; `parked` when the merge parked awaiting the user's guidance.
-  oneof substatus {
-    // PARKED awaiting the user's guidance: the resolution agent exhausted its
-    // attempt, the composer is open, and everything typed is delivered to the
-    // merge's agent.
-    FooterSubStatusMergingParked parked = 1;
-  }
-  // The activity cell. ALWAYS SET, the same cell a merge in flight carries.
-  FooterStatusMergingActivity activity = 2;
-}
-
-// The merge failed; the bubble carries the account.
+// The merge failed and the workspace is back with the user.
 message FooterStatusMergeFailed {
-  // No substatus: the bubble carries the account, so the substatus cell
-  // merges into the status cell.
+  // WHERE it failed, drawn as the substatus. Exactly one is set.
+  oneof substatus {
+    // Conflict resolution gave up. The rebase is left in progress where it
+    // stopped, for the user to carry on.
+    FooterSubStatusMergeFailedConflicts conflicts = 2;
+    // The last fixing attempt left suites failing.
+    FooterSubStatusMergeFailedTests tests = 3;
+    // Any other step failed (the rebase itself, the before-merge prompt, the
+    // merge commit, updating main); the merge bubble carries the account.
+    FooterSubStatusMergeFailedOther other = 4;
+  }
   // The activity cell. ALWAYS SET, the same cell a merge in flight carries.
   FooterStatusMergingActivity activity = 1;
 }
+// Drawn "conflicts".
+message FooterSubStatusMergeFailedConflicts {}
+// Drawn "tests".
+message FooterSubStatusMergeFailedTests {}
+// Drawn "merge"; the account is the bubble's.
+message FooterSubStatusMergeFailedOther {}
 
 // The merge landed.
 message FooterStatusMerged {
@@ -868,12 +880,12 @@ message FooterStatusMergingActivity {
 message FooterStatusMergingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
-  // The one salient line. The commit ranks first, because it explains the
-  // merge step; then a deploy's progress, a rate-limit event, the push
-  // notification and the context-budget warning, in that order.
+  // The one salient line. The merge step's own line ranks first, because it
+  // explains the step; then a deploy's progress, a rate-limit event, the
+  // push notification and the context-budget warning, in that order.
   oneof kind {
-    // The commit landing right now, standing until it has landed.
-    FooterStatusActivityMergingCommit merging_commit = 2;
+    // The current step's own line, standing until the step ends.
+    FooterStatusActivityMergeStep merge_step = 7;
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 3;
@@ -893,6 +905,115 @@ message FooterStatusMergingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 2 (`merging_commit`) is RETIRED: the committing step's line is the
+  // merge step's `committing` arm.
+  reserved 2;
+  reserved "merging_commit";
+}
+
+// The merge step's own activity line. THE ARM IS THE STEP it narrates, so a
+// line can only stand under the step it belongs to.
+message FooterStatusActivityMergeStep {
+  oneof step {
+    // Enqueued: the merge being worked on and its step, "fix-reconnect:
+    // testing", replaced only when that merge changes step.
+    FooterMergeStepEnqueued enqueued = 1;
+    // Preprocessing: the before-merge prompt's text.
+    FooterMergeStepPrompt preprocessing = 2;
+    // Rebasing: the command running for the current commit, or its failure.
+    FooterMergeStepRebasing rebasing = 3;
+    // Conflict resolution: the commit that conflicted and how many files.
+    FooterMergeStepConflict conflict_resolution = 4;
+    // Testing: a suite starting, passing or failing.
+    FooterMergeStepSuite testing = 5;
+    // Fixing: the suites being fixed.
+    FooterMergeStepFixing fixing = 6;
+    // Committing: the merge commit's first line.
+    FooterMergeStepCommitting committing = 7;
+    // Updating main: fetching, then fast-forwarding.
+    FooterMergeStepUpdatingMain updating_main = 8;
+    // Postprocessing: the after-merge prompt's text.
+    FooterMergeStepPrompt postprocessing = 9;
+  }
+}
+// The merge ahead in the queue.
+message FooterMergeStepEnqueued {
+  // The workspace being merged, as the roster names it.
+  string workspace_name = 1;
+  // Its step, in the footer's plain words ("testing").
+  string step = 2;
+}
+// A configured prompt's text, drawn verbatim.
+message FooterMergeStepPrompt {
+  string text = 1;
+}
+// The rebase's line for the current commit.
+message FooterMergeStepRebasing {
+  // THE ARM IS WHETHER THE COMMAND IS RUNNING OR FAILED.
+  oneof line {
+    // The command replaying the current commit, drawn verbatim.
+    FooterMergeStepRebaseCommand running = 1;
+    // The command failed; its first error line, drawn verbatim.
+    FooterMergeStepRebaseFailure failed = 2;
+  }
+}
+// A rebase command line.
+message FooterMergeStepRebaseCommand {
+  string text = 1;
+}
+// A rebase failure line.
+message FooterMergeStepRebaseFailure {
+  string text = 1;
+}
+// The conflicting commit, "fix the reconnect loop: 3 files".
+message FooterMergeStepConflict {
+  // The conflicting commit's subject.
+  string commit_subject = 1;
+  // How many files conflict. At least 1.
+  uint32 files = 2;
+}
+// One suite's edge.
+message FooterMergeStepSuite {
+  // The suite's name, verbatim.
+  string name = 1;
+  // THE ARM IS THE EDGE, drawn "▶ name", "✓ name" or "✗ name".
+  oneof edge {
+    FooterMergeStepSuiteStarted started = 2;
+    FooterMergeStepSuitePassed passed = 3;
+    FooterMergeStepSuiteFailed failed = 4;
+  }
+}
+// The suite started.
+message FooterMergeStepSuiteStarted {}
+// The suite passed.
+message FooterMergeStepSuitePassed {}
+// The suite failed.
+message FooterMergeStepSuiteFailed {}
+// The suites a fixing attempt is repairing.
+message FooterMergeStepFixing {
+  // Their names, in the gate's order. At least one.
+  repeated string suites = 1;
+}
+// The merge commit being made.
+message FooterMergeStepCommitting {
+  // Its first line, drawn verbatim.
+  string subject = 1;
+}
+// The update of the default branch from upstream.
+message FooterMergeStepUpdatingMain {
+  oneof step {
+    // Fetching from upstream.
+    FooterMergeStepUpdatingMainFetching fetching = 1;
+    // Fast-forwarding to a commit.
+    FooterMergeStepUpdatingMainFastForwarding fast_forwarding = 2;
+  }
+}
+// Fetching.
+message FooterMergeStepUpdatingMainFetching {}
+// Fast-forwarding.
+message FooterMergeStepUpdatingMainFastForwarding {
+  // The short hash fast-forwarded to.
+  string commit = 1;
 }
 
 // Detached work runs while the main thread is free.
@@ -1427,14 +1548,6 @@ message FooterStatusActivityWakeup {
 message FooterStatusActivityWakeupReason {
   // The sentence, drawn verbatim.
   string text = 1;
-}
-
-// The commit a merge is landing right now.
-message FooterStatusActivityMergingCommit {
-  // The commit's sha, abbreviated by the daemon.
-  string sha = 1;
-  // The commit's subject line.
-  string subject = 2;
 }
 
 // The API answered again after one or more failed attempts.
@@ -2056,6 +2169,17 @@ message FooterLiveWorkChips {
   // ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
   // job is scheduled.
   optional FooterChipCrons crons = 5;
+  // 🧪 — the merge's test gate, while this workspace's merge is testing. Set
+  // iff the merge tests panel holds at least one suite.
+  optional FooterChipMergeTests merge_tests = 6;
+}
+// The merge tests chip's props, drawn "🧪 8/12". A progress fraction, both
+// figures always drawn.
+message FooterChipMergeTests {
+  // How many suites have finished, passed or failed.
+  uint32 finished = 1;
+  // How many suites the gate runs. At least 1 when the chip is set.
+  uint32 total = 2;
 }
 // The crons chip's props.
 message FooterChipCrons {
@@ -2123,11 +2247,65 @@ message FooterExpanded {
   FooterExpandedMonitors monitors = 5;
   // The scheduled jobs — the ⏱ chip's expansion.
   FooterExpandedCrons crons = 6;
+  // The merge's test gate — the 🧪 chip's expansion.
+  FooterExpandedMergeTests merge_tests = 7;
+}
+
+// ---- The merge tests panel -------------------------------------------------
+
+// The 🧪 panel: every suite of the merge's current test round, in the gate's
+// order. Empty whenever the merge is not testing, which unsets the chip, so
+// the panel falls back to whatever else the section shows once testing ends.
+message FooterExpandedMergeTests {
+  // One row per suite. Empty when the merge is not testing.
+  repeated FooterMergeTestRow rows = 1;
+}
+// One suite: state glyph · name · clock.
+message FooterMergeTestRow {
+  // The suite's name, verbatim.
+  FooterMergeTestRowName name = 1;
+  // Where the suite stands.
+  FooterMergeTestRowState state = 2;
+}
+// The suite's drawn name.
+message FooterMergeTestRowName {
+  string text = 1;
+}
+// The suite's state. THE ARM IS THE STATE, drawn as its glyph.
+message FooterMergeTestRowState {
+  oneof state {
+    // Not started yet.
+    FooterMergeTestRowWaiting waiting = 1;
+    // Running; the client ticks the clock from the start.
+    FooterMergeTestRowRunning running = 2;
+    // Passed, drawn with a green check.
+    FooterMergeTestRowPassed passed = 3;
+    // Failed, drawn with a red cross.
+    FooterMergeTestRowFailed failed = 4;
+  }
+}
+// Not started.
+message FooterMergeTestRowWaiting {}
+// Running since an instant.
+message FooterMergeTestRowRunning {
+  // When the suite started, epoch ms.
+  int64 started_at_ms = 1;
+}
+// Passed, and how long it took.
+message FooterMergeTestRowPassed {
+  // The suite's run time in milliseconds.
+  int64 duration_ms = 1;
+}
+// Failed, and how long it took.
+message FooterMergeTestRowFailed {
+  // The suite's run time in milliseconds.
+  int64 duration_ms = 1;
 }
 
 // ---- The daemon's focus ----------------------------------------------------
 
-// The panel the expanded section is opened on when DETACHED WORK STARTS.
+// The panel the expanded section is opened on when DETACHED WORK STARTS, or
+// when this workspace's merge begins testing.
 //
 // THE DAEMON DECIDES IT, the webapp draws it (no business logic in the
 // webapp). Each time a unit of detached work starts — a subagent, a detached
@@ -2154,6 +2332,8 @@ message FooterExpandedFocus {
     FooterFocusAgents agents = 1;
     FooterFocusShells shells = 2;
     FooterFocusMonitors monitors = 3;
+    // The merge tests panel: published when the merge reaches "testing".
+    FooterFocusMergeTests merge_tests = 5;
   }
   // Strictly increasing per workspace, minted by the daemon at each launch
   // that sets a focus. Starts at 1. A client compares for equality with the
@@ -2166,6 +2346,8 @@ message FooterFocusAgents {}
 message FooterFocusShells {}
 // The monitors panel (the 👁 chip's expansion) is the focus.
 message FooterFocusMonitors {}
+// The merge tests panel (the 🧪 chip's expansion) is the focus.
+message FooterFocusMergeTests {}
 
 // ---- The scheduled-jobs panel ----------------------------------------------
 

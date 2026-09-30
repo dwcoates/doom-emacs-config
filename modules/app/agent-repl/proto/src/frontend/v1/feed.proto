@@ -2145,10 +2145,15 @@ message FeedWorktreeBranch {
 //
 //   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
 //   │ ┌───────────────────────────────────────────────────────────────┐ │
-//   │ │ queue ✓ │ rebase ✓ │ tests (2) ● 8/12 │ remediation ⏸       │ │
+//   │ │ queue ✓ │ rebasing ✓ │ tests ✗ │ fixing ✓ │ tests (2) ● 8/12  │ │
 //   │ ├───────────────────────────────────────────────────────────────┤ │
-//   │ │  │ ⚙ agent ▏fixing TestReconnect…                            │ │
+//   │ │  daemon unit ✓   webapp ● …   log: ~/…/merge-logs/…-tests-2.log│ │
 //   │ └───────────────────────────────────────────────────────────────┘ │
+//
+// The bubble lives in the REQUESTING workspace's feed: a merge runs in the
+// workspace that asked for it, and that workspace's own session does the
+// conflict resolution and the fixing, so those turns ALSO appear in the
+// workspace's main feed as ordinary turns.
 message FeedMerge {
   FeedMergeHead head = 1;
   // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
@@ -2228,39 +2233,48 @@ message FeedMergeFold {
 }
 
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
-// TWO TAB SHAPES: RESOLVED tabs (queue, merge, tests) carry their
-// content in this row, replaced whole per push; AGENTIC tabs
-// (pre_prompt, conflicts, fixes, post_prompt) are containers — their
-// content is the sub-feed rows parented to this row (the lease session's
-// conversation, routed by the daemon's output address). Tabs are
-// APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that work began —
-// no conflicts means no conflicts tab, no test failures means no fixes
-// tab, an unconfigured prompt means no prompt tab — and a tab never
-// reopens: a second round is a SECOND TAB with the round in its label
-// ("tests (2)"). The Emacs-repo run is queue | pre-prompt | merge |
-// conflicts | tests | fixes | post-prompt; every other repo's run is
-// queue | pre-prompt | post-prompt (landing, tests and PR work are the
-// prompts' job there).
+// TWO TAB SHAPES: RESOLVED tabs (queue, rebasing, tests, committing,
+// updating main) carry their content in this row, replaced whole per push;
+// AGENTIC tabs (pre_prompt, conflicts, fixes, post_prompt) are containers —
+// their content is the sub-feed rows parented to this row (the requesting
+// workspace's own session, routed by the daemon's output address). Tabs are
+// APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that work began — no
+// conflicts means no conflicts tab, no test failures means no fixes tab, an
+// unconfigured prompt means no prompt tab — and a tab never reopens: a
+// second round is a SECOND TAB with the round in its label ("tests (2)").
+// A merge that STARTS OVER because the target moved opens a new rebasing
+// round and every tab after it afresh.
 //
-// EACH KIND OWNS ITS STATE oneof, declaring exactly the states legal for
-// it: PARKED (stopped, awaiting the user's guidance) exists ONLY on
-// conflicts and fixes — the two loops with a give-up-to-human path; the
-// prompt tabs cannot park (pre-prompt failure fails the run, post-prompt
-// failure rides the terminal), and resolved tabs never can. The leaf
-// payloads (live, parked line, settled outcome) are SHARED messages
-// across the per-kind oneofs — one badge vocabulary, legality carried by
-// the oneof types.
+// The Emacs-repo run is queue | pre-prompt | rebasing | conflicts |
+// tests | fixes | committing | post-prompt, with conflicts after any
+// rebasing round and fixes after any failed tests round; a branch already
+// merged upstream is queue | updating main | post-prompt; every other
+// repo's run is queue | pre-prompt | post-prompt.
+//
+// NOTHING PARKS. A conflict resolution or a fixing loop that gives up FAILS
+// the merge and hands the workspace back to the user (the bubble's error
+// arm, the footer's "merge failed" status); a failed conflict resolution
+// leaves the rebase in progress exactly where it stopped. So every kind's
+// state oneof is live or settled only; the leaf payloads are SHARED
+// messages across the per-kind oneofs — one badge vocabulary.
 message FeedMergeTab {
   FeedMergeTabLabel label = 1;
   oneof kind {
     FeedMergeTabQueue queue = 2;
     FeedMergeTabPrePrompt pre_prompt = 3;
-    FeedMergeTabMerge merge = 4;
+    FeedMergeTabRebasing rebasing = 9;
     FeedMergeTabConflicts conflicts = 5;
     FeedMergeTabTests tests = 6;
     FeedMergeTabFixes fixes = 7;
+    FeedMergeTabCommitting committing = 10;
+    FeedMergeTabUpdatingMain updating_main = 11;
     FeedMergeTabPostPrompt post_prompt = 8;
   }
+  // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
+  // branch is rebased first and the merge commit is made only after the gate
+  // passes, as the committing tab.
+  reserved 4;
+  reserved "merge";
 }
 
 // The tab's drawn label, resolved by the daemon.
@@ -2274,19 +2288,9 @@ message FeedMergeTabLabel {
 
 // SHARED STATE LEAVES — the badge vocabulary every kind's oneof selects
 // from.
+// The tab's work is running.
 message FeedMergeTabLive {}
-// An agentic tab awaiting the USER: the resolution agent exhausted its
-// attempt and the merge parked. The composer is open (the host stream's
-// merge_parked arm); everything the user types while parked is delivered
-// to this tab's agent as guidance and lands here as ordinary rows.
-message FeedMergeTabParked {
-  // The daemon-composed standing line ("parked for your input — 2
-  // conflicts remain in daemon/server.go").
-  FeedMergeTabParkedLine line = 1;
-}
-message FeedMergeTabParkedLine {
-  string text = 1;
-}
+// The tab's work ended, successfully or not.
 message FeedMergeTabSettled {
   // When the tab settled, epoch ms.
   int64 ended_at_ms = 1;
@@ -2323,31 +2327,46 @@ message FeedMergeTabPrePrompt {
   }
 }
 
-// RESOLVED: the landing itself — a NO-FF MERGE COMMIT onto the default
-// branch (one commit to apply, one to revert), narrated thin as
-// daemon-composed lines. Replaced whole per push. A conflict during it
-// opens the conflicts tab; the commit completes there.
-message FeedMergeTabMerge {
+// RESOLVED: the branch being rebased onto the target's tip, in the
+// worktree checked out on the branch. Replaced whole per push. A conflict
+// stops it and opens a conflicts tab; the rebase then continues in a new
+// rebasing round.
+message FeedMergeTabRebasing {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
-  repeated FeedMergeMergeLine lines = 3;
+  // How far the replay has got.
+  FeedMergeRebaseProgress progress = 3;
+  // The daemon-composed narration, oldest first ("replaying 3/7 · fix the
+  // reconnect loop").
+  repeated FeedMergeRebaseLine lines = 4;
 }
-message FeedMergeMergeLine {
-  // One daemon-composed narration line ("merged 4 commits · a1b2c3d").
+// The replay's progress, drawn "3/7".
+message FeedMergeRebaseProgress {
+  // How many of the branch's commits have been replayed onto the tip.
+  uint32 replayed = 1;
+  // How many commits the branch replays in all. At least 1.
+  uint32 total = 2;
+}
+// One narration line of the rebase.
+message FeedMergeRebaseLine {
+  // The daemon-composed line, drawn verbatim.
   string text = 1;
 }
 
-// AGENTIC: conflict resolution for the merge step's conflicts. Absent
-// unless the merge conflicted; parks when the agent exhausts its one
-// attempt per conflict. Content: sub-feed rows parented to this row.
+// AGENTIC: the requesting workspace's session resolving a rebase conflict.
+// Absent unless the rebase conflicted. If the resolution gives up, the merge
+// FAILS and the rebase is left in progress where it stopped. Content:
+// sub-feed rows parented to this row.
 message FeedMergeTabConflicts {
   oneof state {
     FeedMergeTabLive live = 1;
-    FeedMergeTabParked parked = 2;
     FeedMergeTabSettled settled = 3;
   }
+  // Tag 2 (`parked`) is RETIRED: nothing parks.
+  reserved 2;
+  reserved "parked";
 }
 
 // RESOLVED: the programmatic test run — suites, progress, and COLORED
@@ -2358,6 +2377,29 @@ message FeedMergeTabTests {
     FeedMergeTabSettled settled = 2;
   }
   repeated FeedMergeTestSuite suites = 3;
+  // The round's full test log, a link the tab draws in the link blue.
+  // UNSET until the run has written it.
+  optional FeedMergeTestLog log = 4;
+}
+// A link to a test round's full log. Clicking it calls OpenInEditor with the
+// token, and Emacs opens the log in its shared popup on the right.
+message FeedMergeTestLog {
+  // Hand back on click, unchanged.
+  FeedMergeTestLogToken token = 1;
+  // What the link reads.
+  FeedMergeTestLogLabel label = 2;
+}
+// Names one test log the daemon holds for the workspace. Opaque to every
+// client: minted by the daemon, echoed back unchanged in
+// agentrepl.v1.OpenInEditorRequest.merge_test_log, never constructed.
+message FeedMergeTestLogToken {
+  // The daemon's own spelling of the log; never parsed by a client.
+  string value = 1;
+}
+// The link's drawn text: the log's path, shortened with ~ for the home
+// directory.
+message FeedMergeTestLogLabel {
+  string text = 1;
 }
 message FeedMergeTestSuite {
   // The suite's name, verbatim.
@@ -2382,16 +2424,74 @@ message FeedMergeTestSpan {
   string paint_class = 2;
 }
 
-// AGENTIC: test-failure fixes. Absent unless a tests tab failed; parks
-// when the remediation loop escalates to the user. Content: sub-feed
-// rows parented to this row. A round that fixes and re-tests produces
-// "tests (2)", never a reopened tab.
+// AGENTIC: the requesting workspace's session fixing failed suites.
+// Absent unless a tests tab failed. When the last attempt fails, the merge
+// FAILS and the workspace is handed back. Content: sub-feed rows parented to
+// this row. A round that fixes and re-tests produces "tests (2)", never a
+// reopened tab.
 message FeedMergeTabFixes {
   oneof state {
     FeedMergeTabLive live = 1;
-    FeedMergeTabParked parked = 2;
     FeedMergeTabSettled settled = 3;
   }
+  // Tag 2 (`parked`) is RETIRED: nothing parks.
+  reserved 2;
+  reserved "parked";
+  // Which attempt this is, drawn "attempt 2/3".
+  FeedMergeFixAttempt attempt = 4;
+}
+// A fixing attempt's place among the attempts allowed.
+message FeedMergeFixAttempt {
+  // This attempt, 1-based.
+  uint32 attempt = 1;
+  // The most attempts the merge makes before it fails: the same bound that
+  // decides failure, so the two never disagree.
+  uint32 max_attempts = 2;
+}
+
+// RESOLVED: the non-fast-forward merge of the rebased, gated branch into the
+// target — the one step that moves the target. If the target moved while
+// the merge ran, it is not made and the merge starts over. Replaced whole per
+// push.
+message FeedMergeTabCommitting {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  // The merge commit's subject line.
+  FeedMergeCommitSubject subject = 3;
+}
+// The merge commit's first line, drawn verbatim.
+message FeedMergeCommitSubject {
+  string text = 1;
+}
+
+// RESOLVED: a branch already merged upstream — the default branch in the
+// repository's main worktree fast-forwarded from upstream. Replaced whole per
+// push.
+message FeedMergeTabUpdatingMain {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  // The step it is on.
+  FeedMergeUpdatingMainStep step = 3;
+}
+// The update's step. THE ARM IS THE STEP.
+message FeedMergeUpdatingMainStep {
+  oneof step {
+    // Fetching from upstream.
+    FeedMergeUpdatingMainFetching fetching = 1;
+    // Fast-forwarding the default branch to the fetched tip.
+    FeedMergeUpdatingMainFastForwarding fast_forwarding = 2;
+  }
+}
+// Fetching from upstream.
+message FeedMergeUpdatingMainFetching {}
+// Fast-forwarding to a commit.
+message FeedMergeUpdatingMainFastForwarding {
+  // The short hash of the commit fast-forwarded to.
+  string commit = 1;
 }
 
 // AGENTIC: the configured --post-processing-prompt running the
