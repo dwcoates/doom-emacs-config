@@ -139,6 +139,8 @@ function harness(
     /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
     workspaceLockThrows?: boolean;
     keepaliveIntervalMs?: number;
+    /** How much later than now the cold gate judges a transcript. */
+    coldGateLaterMs?: number;
     /** What every scripted query answers `backgroundTasks` with. */
     backgroundTasks?: boolean;
     /** Make `backgroundTasks` reject, so the fail-open path is exercised. */
@@ -295,6 +297,7 @@ function harness(
     ...(options.keepaliveIntervalMs === undefined
       ? {}
       : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
+    ...(options.coldGateLaterMs === undefined ? {} : { coldGateLaterMs: options.coldGateLaterMs }),
     ...(options.watcherConclusionBudgetMs === undefined
       ? {}
       : { watcherConclusionBudgetMs: options.watcherConclusionBudgetMs }),
@@ -1122,6 +1125,16 @@ describe("StartSession, resume", () => {
     await h.engine.startSession(resumeRequest("resume-1"));
 
     expect(h.queries).toHaveLength(0);
+  });
+
+  it("REFUSES a resume judged later than its cache window, though the transcript is warm by the clock", async () => {
+    // Arrange: the transcript is seconds old by the engine's clock, and the
+    // gate is told to judge it ten minutes later.
+    const h = harness({ nowMs: 1_000_100, coldGateLaterMs: 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act + Assert
+    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("cold");
   });
 
   it("PROCEEDS on a warm resume", async () => {
