@@ -2,6 +2,7 @@ package footer
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1513,5 +1514,72 @@ func TestTheMergeTestsPanelIsEmptyWhenTheMergeIsNotTesting(t *testing.T) {
 	// Assert
 	if rows := h.view(t).GetExpanded().GetMergeTests().GetRows(); len(rows) != 0 {
 		t.Fatalf("merge tests panel = %+v, want empty once testing ended", rows)
+	}
+}
+
+// ---- the one reading of a start and an update ---------------------------------
+
+func TestTakeStartDescribesTheRowFromTheStart(t *testing.T) {
+	// Arrange
+	row := &agentRow{}
+	start := subagentStartFrame("agent-2", "Explore").GetStart()
+	description := "map the resolvers"
+	start.Prompt.Description = &description
+
+	// Act
+	row.takeStart(start)
+
+	// Assert
+	want := agentRow{createdAgent: "agent-2", label: "Explore", description: description, startedAt: time.UnixMilli(instant.UnixMilli())}
+	if row.createdAgent != want.createdAgent || row.label != want.label || row.description != want.description || !row.startedAt.Equal(want.startedAt) {
+		t.Fatalf("row = %+v, want %+v", *row, want)
+	}
+}
+
+func TestTakeUpdateFoldsABeat(t *testing.T) {
+	description := "restated"
+	tests := []struct {
+		name            string
+		prompt          *conversationv1.AgentSubagentPrompt
+		wantDescription string
+	}{
+		{name: "a beat that restates a description replaces it", prompt: &conversationv1.AgentSubagentPrompt{Description: &description}, wantDescription: description},
+		{name: "a beat that restates none keeps the row's", prompt: &conversationv1.AgentSubagentPrompt{}, wantDescription: "original"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			row := &agentRow{description: "original", tokens: 5}
+
+			// Act
+			row.takeUpdate(&conversationv1.AgentSubagentUpdate{
+				Prompt:   tt.prompt,
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 900},
+			})
+
+			// Assert
+			if row.tokens != 900 || row.description != tt.wantDescription {
+				t.Fatalf("row = {tokens %d, description %q}, want {900, %q}", row.tokens, row.description, tt.wantDescription)
+			}
+		})
+	}
+}
+
+// EVERY READING OF A SPAWN'S PROMPT INTO A ROW GOES THROUGH takeStart AND
+// takeUpdate: a hand-rolled site elsewhere in chips.go would let the spawning
+// call's stream and the run's own describe one run differently.
+func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("chips.go")
+	if err != nil {
+		t.Fatalf("read chips.go: %v", err)
+	}
+
+	// Act
+	reads := strings.Count(string(source), "GetPrompt().GetDescription()")
+
+	// Assert
+	if reads != 2 {
+		t.Fatalf("chips.go reads a prompt's description at %d sites, want 2 (takeStart and takeUpdate)", reads)
 	}
 }
