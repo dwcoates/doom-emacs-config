@@ -75,7 +75,7 @@
 
 (defconst agent-repl-itest-composer--gate-keywords
   '((open . :open) (merging . :merging) (draining . :draining)
-    (restarting . :restarting) (mergeParked . :merge-parked))
+    (restarting . :restarting))
   "Map a composer arm's protojson key symbol to its gate keyword.
 The wire spellings a scenario passes to
 `agent-repl-itest-composer--with-composer' are the same protojson keys
@@ -929,22 +929,6 @@ the exact wording or erased the input would strand undelivered intent."
     agent-repl-itest-composer-restarting-gate-sends-no-rpc
   restarting "composer closed: restarting")
 
-(ert-deftest agent-repl-itest-composer-merge-parked-gate-sends ()
-  "`merge_parked' is OPEN WITH CONTEXT: the prompt is sent, not refused.
-The merge gave up and wants guidance — everything submitted while parked
-goes to the merge's resolution agent, never refused and never queued as
-the session's own turn."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'mergeParked ref
-      ;; Act.
-      (agent-repl--send :user-sent "rebase onto master" agent-repl-itest-composer--ws)
-      (agent-repl-itest--await-call daemon "SubmitPrompt")
-      ;; Assert.
-      (let ((body (agent-repl-itest-composer--submit-body daemon)))
-        (should (equal (agent-repl-itest--body-field body 'workspace 'id)
-                       (plist-get ref :id)))))))
-
 (ert-deftest agent-repl-itest-composer-no-session-gate-sends ()
   "A workspace with NO session simply submits: there is no precondition.
 Ruled at kickoff — the daemon starts or revives the session implicitly."
@@ -1150,7 +1134,6 @@ the editor situation that caused it."
 (declare-function agent-repl--input-said "input")
 (declare-function agent-repl-host-conn "host")
 (defvar agent-repl-input-notice)
-(defvar agent-repl--input-merge-parked-badge)
 (defvar agent-repl-link-reconnect-interval-seconds)
 (defvar agent-repl-link-reconnect-max-interval-seconds)
 
@@ -1312,32 +1295,6 @@ the edge the composer re-counts on."
                (lambda () (null (agent-repl--input-waiting agent-repl-itest-composer--ws)))
                nil "the waiting line to clear on the host push"))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
-;; audit-2 #34
-(ert-deftest agent-repl-itest-composer-merge-parked-draws-its-badge ()
-  "The `merge_parked' gate draws its exact badge in the composer mode line.
-fanout §7: \"`:merge-parked' send, with the input mode-line badge 'merge
-parked — prompts go to the resolution agent'\".  The composer is OPEN WITH
-CONTEXT: the badge is the only thing that tells the user their words go to
-the resolution agent rather than the session."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'mergeParked ref
-      (ignore ref)
-      (let ((buf (agent-repl-itest-composer--make-buffer
-                  agent-repl-itest-composer--ws "run the tests")))
-        (unwind-protect
-            (progn
-              ;; Act.
-              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
-              (agent-repl-itest--await-call daemon "SubmitPrompt")
-              ;; Assert: the rendered segment carries the badge verbatim.
-              (should (string-match-p
-                       (regexp-quote agent-repl--input-merge-parked-badge)
-                       (agent-repl-itest-composer--notice
-                        agent-repl-itest-composer--ws))))
-          (agent-repl-itest-composer--kill-buffer
-           agent-repl-itest-composer--ws buf))))))
-
 ;; audit-2 #34
 (ert-deftest agent-repl-itest-composer-open-gate-draws-no-badge ()
   "The `open' gate draws NO badge at all.

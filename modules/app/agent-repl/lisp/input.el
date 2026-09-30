@@ -182,9 +182,8 @@ Sets the red and green channels; the blue channel adds
 
 (defvar-local agent-repl-input-notice nil
   "The composer's standing notice, drawn in the input buffer's mode line.
-Set to the merge-parked badge while the gate says the merge's resolution
-agent owns this composer, and to the refusal flash when a submission comes
-back refused.  Buffer-local to the input buffer, because the notice is
+Set to the refusal flash when a submission comes back refused, and
+cleared when the gate opens.  Buffer-local to the input buffer, because the notice is
 about THIS composer and no other.")
 
 (defvar-local agent-repl-input-waiting nil
@@ -316,13 +315,10 @@ CANCEL: the held prompt keeps its content and the queue resumes
 
 THE DWELL OUTLIVES THE FLASH THAT ARMED IT.  The timer fires seconds
 later, and by then WS may have a DIFFERENT composer buffer and that
-buffer a DIFFERENT notice -- the merge-parked badge, most of all, which
-`agent-repl--input-check-gate\=' sets on every submit while the merge\='s
-resolution agent owns the composer.  A dwell that resolved the buffer by
-name and cleared whatever it found would erase a badge it never set: a
-refusal flashed within `agent-repl-input-flash-seconds\=' of a parked
-send would silently take the one line telling the user their words are
-going somewhere else.
+buffer a DIFFERENT notice -- a later refusal's own flash, most of all.  A
+dwell that resolved the buffer by name and cleared whatever it found would
+erase a notice it never set: the first flash's timer would cut the second
+flash's dwell short.
 
 So the expiry is bound to what it flashed on both axes -- the BUFFER it
 wrote to and the TEXT it wrote -- and clears nothing else.  WS is carried
@@ -794,8 +790,8 @@ a key whose only job is to be different from the last one."
     (:restarting . "composer closed: restarting"))
   "The composer gate arms that REFUSE, and the message each one draws.
 Fixed treatments per arm, never a composed sentence: the resolved arm IS
-the gate.  Every other arm sends -- `:merge-parked' with the badge below,
-and `:open', `:no-session', `:terminal' and `:unknown' plainly, because
+the gate.  Every other arm sends -- `:open', `:no-session', `:terminal'
+and `:unknown' plainly, because
 SubmitPrompt has no precondition and the daemon starts or revives the
 session implicitly -- EXCEPT when that session is parked at its COLD
 GATE.  A cold gate is a precondition SubmitPrompt does not satisfy: the
@@ -805,13 +801,6 @@ submission with `SubmitPromptError''s own `cold_gate' arm, which
 `agent-repl--input-on-error' draws; the gate still SENDS rather than
 guessing, because the daemon is the authority on that standing and
 answers by name.")
-
-(defconst agent-repl--input-merge-parked-badge
-  "merge parked -- prompts go to the resolution agent"
-  "The composer badge drawn while the gate reads `:merge-parked'.
-The composer is OPEN WITH CONTEXT: everything submitted while parked is
-delivered to the merge's resolution agent, never refused and never queued
-as the session's own turn.")
 
 (defun agent-repl--input-check-gate (ws)
   "Apply the composer gate's fixed treatment for WS; return the gate keyword.
@@ -824,10 +813,6 @@ user keeps every word they wrote."
      (refusal
       (agent-repl--warn ws "elisp.input.gate-refused ws=%s gate=%S" ws gate)
       (user-error "%s" refusal))
-     ((eq gate :merge-parked)
-      (agent-repl--info ws "elisp.input.gate-merge-parked ws=%s" ws)
-      (agent-repl--input-set-notice ws agent-repl--input-merge-parked-badge)
-      gate)
      ((eq gate :unknown)
       ;; No host push has arrived yet.  The daemon is the authority and
       ;; answers with its own refusal arms, so this SENDS rather than

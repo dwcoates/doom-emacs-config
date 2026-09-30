@@ -418,24 +418,6 @@ fake would not exercise them."
                    '("composer closed: restarting")))
     (should-not agent-repl-test-input--submitted)))
 
-(ert-deftest agent-repl-input-gate-merge-parked-sends ()
-  "A parked merge leaves the composer OPEN WITH CONTEXT: it submits."
-  (agent-repl-test-input--with
-    (setq agent-repl-test-input--gate :merge-parked)
-    (agent-repl-test-input--type "hello")
-    (agent-repl--send :user-sent)
-    (should (agent-repl-test-input--request))))
-
-(ert-deftest agent-repl-input-gate-merge-parked-badges-the-composer ()
-  "The parked gate draws its badge so the user knows who receives the prompt."
-  (agent-repl-test-input--with
-    (setq agent-repl-test-input--gate :merge-parked)
-    (agent-repl-test-input--type "hello")
-    (agent-repl--send :user-sent)
-    (should (equal (buffer-local-value 'agent-repl-input-notice
-                                       agent-repl-test-input--buffer)
-                   agent-repl--input-merge-parked-badge))))
-
 (ert-deftest agent-repl-input-gate-no-session-sends ()
   "SubmitPrompt has no precondition: the daemon starts the session."
   (agent-repl-test-input--with
@@ -1322,23 +1304,22 @@ cleared would be silently lost user intent."
           (should (null (buffer-local-value 'agent-repl-input-notice buffer))))
       (kill-buffer buffer))))
 
-(ert-deftest agent-repl-input-expire-flash-leaves-a-different-notice-standing ()
+(ert-deftest agent-repl-input-expire-flash-leaves-a-later-flash-standing ()
   "The dwell NEVER clears a notice it did not set.
-A refusal flashed within the dwell of a parked send would otherwise erase
-the merge-parked badge -- the one line telling the user their prompts go
-to the resolution agent."
+A second refusal flashed within the first one's dwell would otherwise have
+its own dwell cut short by the first flash's timer."
   ;; Arrange.
   (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
     (unwind-protect
         (progn
           (with-current-buffer buffer
-            (setq-local agent-repl-input-notice agent-repl--input-merge-parked-badge))
+            (setq-local agent-repl-input-notice "composer closed: restarting"))
           ;; Act.
           (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
             (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))
           ;; Assert.
           (should (equal (buffer-local-value 'agent-repl-input-notice buffer)
-                         agent-repl--input-merge-parked-badge)))
+                         "composer closed: restarting")))
       (kill-buffer buffer))))
 
 (ert-deftest agent-repl-input-expire-flash-tolerates-a-dead-buffer ()
