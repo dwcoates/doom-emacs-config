@@ -2756,3 +2756,223 @@ func TestSessionArmNamesTheCompactionAndNetworkResumeArms(t *testing.T) {
 		})
 	}
 }
+
+// A PROMPT JOINING THE RUNNING TURN (StartTurnRequest.join_running_turn,
+// 2026-09-30). It waits behind the daemon's turn in flight: a folded prompt
+// row ends it unrun, and the turn ahead ending first stands it in flight.
+
+// joiningHarness stands the daemon's turn-1 accepted in flight and turn-2
+// recorded as joining it, answering what OnTurnJoining reported.
+func joiningHarness(t *testing.T) (*harness, bool) {
+	t.Helper()
+	h := adoptionHarness(t)
+	h.w.OnTurnOpening("ws-1", "turn-1")
+	acceptQueuedTurn(h, "turn-1")
+	joined := h.w.OnTurnJoining("ws-1", "turn-2")
+	return h, joined
+}
+
+// entryFoldedPrompt is TURN's prompt row, folded into INTO.
+func entryFoldedPrompt(turn, into, agent string) *shimv1.WatchAgentResponse {
+	resp := entryVendorPrompt(turn, agent)
+	prompt := resp.GetEntry().GetEntry().GetUserPrompt()
+	prompt.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
+	prompt.FoldedInto = &conversationv1.TurnId{Value: into}
+	resp.GetEntry().At = &conversationv1.HistoryPointer{Value: "ptr-folded-" + turn}
+	return resp
+}
+
+// endTurn1 routes turn-1's own stamped terminal.
+func endTurn1(h *harness) []event {
+	h.t.Helper()
+	return h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1-end", "turn-1"))
+}
+
+func TestAJoiningTurnIsRecordedBehindTheDaemonsTurnInFlight(t *testing.T) {
+	// Arrange, Act.
+	h, joined := joiningHarness(t)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); !joined || turn == nil || *turn != "turn-1" {
+		t.Fatalf("joined = %v, turn in flight = %v; want recorded, with turn-1 still in flight", joined, turn)
+	}
+}
+
+func TestAFoldedPromptRowEndsItsJoiningTurnAsFolded(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	got := h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-2" || ended.close != wsm.CloseFolded {
+		t.Fatalf("turn ended = (%v, %v), want turn-2 folded", ended.turn, ended.close)
+	}
+}
+
+func TestAFoldedPromptLeavesTheTurnItJoinedInFlight(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1", turn)
+	}
+}
+
+func TestTheTurnAFoldedPromptJoinedEndsWithNothingBehindIt(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Act.
+	endTurn1(h)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none once the joined turn ends", turn)
+	}
+}
+
+func TestAnUnfoldedJoiningTurnStandsInFlightWhenTheTurnAheadEnds(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	var running *ids.TurnID
+	h.lifecycle.onTurnEnded = func() { running = h.w.TurnInFlight() }
+
+	// Act.
+	endTurn1(h)
+
+	// Assert: the queue, told of turn-1's end, finds turn-2 running and pops
+	// nothing into it.
+	if running == nil || *running != "turn-2" {
+		t.Fatalf("turn in flight when turn-1's end was handed over = %v, want turn-2", running)
+	}
+}
+
+func TestAFoldedPromptRowServedAgainEndsNothingMore(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Act.
+	got := h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Assert.
+	for _, e := range got {
+		if e.name() == "lifecycle.OnTurnEnded" {
+			t.Fatalf("events = %v, want no second end for a re-served folded row", got)
+		}
+	}
+}
+
+func TestAFoldedPromptRowForATurnNotHeldEndsNothing(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+	h.w.OnTurnOpening("ws-1", "turn-1")
+	acceptQueuedTurn(h, "turn-1")
+
+	// Act.
+	got := h.route(h.main, entryFoldedPrompt("turn-9", "turn-1", "main-1"))
+
+	// Assert.
+	for _, e := range got {
+		if e.name() == "lifecycle.OnTurnEnded" {
+			t.Fatalf("events = %v, want nothing ended for a join this watcher never held", got)
+		}
+	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.turn_folded_unheld") {
+		t.Fatal("a folded row naming a turn nobody held must be recorded")
+	}
+}
+
+func TestAJoiningTurnStandsInFlightAtOnceWhenNoTurnRuns(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	joined := h.w.OnTurnJoining("ws-1", "turn-2")
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); !joined || turn == nil || *turn != "turn-2" {
+		t.Fatalf("joined = %v, turn in flight = %v; want turn-2 standing", joined, turn)
+	}
+}
+
+func TestAJoinBehindAVendorStartedTurnIsRefused(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+	h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Act.
+	joined := h.w.OnTurnJoining("ws-1", "turn-2")
+
+	// Assert.
+	if joined {
+		t.Fatal("only a turn of the daemon's is joined")
+	}
+	endAdopted(h)
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want nothing recorded behind the vendor-started turn", turn)
+	}
+}
+
+func TestAnAcceptedJoiningTurnKeepsWaitingBehindTheTurnAhead(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	acceptQueuedTurn(h, "turn-2")
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1 still running ahead of the accepted join", turn)
+	}
+}
+
+func TestARefusedJoiningTurnLeavesNothingBehindTheTurnAhead(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.w.OnTurnOpenFailed("ws-1", "turn-2")
+
+	// Act.
+	endTurn1(h)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none: the refused join never waited", turn)
+	}
+}
+
+func TestAJoiningTurnRefusedAtTheWatchersEdgesIsAnError(t *testing.T) {
+	tests := []struct {
+		name      string
+		ws        ids.WorkspaceID
+		turn      ids.TurnID
+		operation string
+	}{
+		{name: "another workspace's turn", ws: "ws-other", turn: "turn-2", operation: "daemon.sessionwatcher.turn_joining_foreign"},
+		{name: "a turn with no id", ws: "ws-1", turn: "", operation: "daemon.sessionwatcher.turn_joining_unidentified"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := adoptionHarness(t)
+			h.w.OnTurnOpening("ws-1", "turn-1")
+			acceptQueuedTurn(h, "turn-1")
+
+			// Act.
+			joined := h.w.OnTurnJoining(tt.ws, tt.turn)
+
+			// Assert.
+			if joined || !h.hasRecord("error", tt.operation) {
+				t.Fatalf("joined = %v, want refused with %s recorded at error", joined, tt.operation)
+			}
+		})
+	}
+}

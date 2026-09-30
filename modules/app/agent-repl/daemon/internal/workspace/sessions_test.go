@@ -353,6 +353,8 @@ func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
 
 func (w *fakeWatcher) OnTurnOpening(ids.WorkspaceID, ids.TurnID) {}
 
+func (w *fakeWatcher) OnTurnJoining(ids.WorkspaceID, ids.TurnID) bool { return false }
+
 func (w *fakeWatcher) OnTurnOpenFailed(ids.WorkspaceID, ids.TurnID) {}
 
 func (w *fakeWatcher) SetMainAgent(*conversationv1.AgentId) {}

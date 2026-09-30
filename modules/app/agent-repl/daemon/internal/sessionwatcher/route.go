@@ -538,6 +538,11 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 	if a.id == nil && prompt.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED {
 		w.adoptVendorTurnLocked(prompt)
 	}
+	// A FOLDED PROMPT'S ROW IS THE ONE STATEMENT THAT ITS JOIN LANDED: the
+	// vendor took it into the turn it names, so its own turn ends unrun.
+	if joined := prompt.GetFoldedInto().GetValue(); a.id == nil && joined != "" {
+		w.foldJoinLocked(ids.TurnID(prompt.GetId().GetValue()), ids.TurnID(joined))
+	}
 	if turn := prompt.GetId().GetValue(); turn != "" {
 		w.knownTurns[ids.TurnID(turn)] = struct{}{}
 	}
