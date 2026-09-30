@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strings"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
@@ -95,7 +94,7 @@ func (d *DB) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]Clai
 		args[i] = id
 	}
 	started := d.mono()
-	query := strings.Replace(shellRunClaimsSQL, "%s", strings.TrimSuffix(strings.Repeat("?,", len(args)), ","), 1)
+	query := expandInList(shellRunClaimsSQL, len(args))
 	rows, err := d.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "reading the claims of %d vendor task id(s)", len(args)))
