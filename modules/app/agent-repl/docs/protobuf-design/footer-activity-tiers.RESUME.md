@@ -87,7 +87,11 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    one drawer entry marked `coalesced` — needs a daemon_hold.proto/tray
    field; emit footer `StageCoalesced`); explicit interrupts still stop an
    act. Integration test of the owner's worked example.
-4-PLAN (held-queue + verdict split, written 2026-09-30 mid-work):
+4-PLAN (held-queue + verdict split, written 2026-09-30 mid-work).
+    PROGRESS: H1-H5 + tray + coalescing + worked-example integration test
+    DONE (wsm `f927fd33e`, proto `8f0bb28f5`, queue `17f162095`, tray
+    `867f390db`, integration `949aabaf5`); daemon unit + integration green.
+    NEXT: H6/H7 verdict split (after_tool_call), then 4a, 4c.
     Findings: `SubmitSessionAct` (promptqueue/acts.go) parks every act in the
     in-memory `wsState.acts` when anything is ahead; `drainActs` runs them at
     a turn end BEFORE `popAndDeliver`, and `releaseActsLocked`, bounce.go:831
