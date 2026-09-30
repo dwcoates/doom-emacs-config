@@ -32,7 +32,8 @@ import {
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
-import { expandedSectionAt, installClickExpand } from "../src/expand.js";
+import { expandedSectionAt, installClickExpand, useVisibilityWatcher } from "../src/expand.js";
+import { fakeVisibility } from "./visibility-fake.js";
 
 /** An `ExpandedSectionAt` for a feed with no open section. */
 const noneOpen = (): HTMLElement | null => null;
@@ -2348,13 +2349,16 @@ describe("installIntentScroll: an open section keeps its whole wheel", () => {
     expect([scroll.classList.contains("expanded"), feed.scrollTop]).toEqual([true, 0]);
   });
 
-  it("composes with auto-collapse: a wheel on the feed outside closes the box and is the feed's", () => {
+  it("composes with auto-collapse: a wheel on the feed outside is the feed's, and closes the box once it is out of view", () => {
     // Arrange
+    const seen = fakeVisibility();
+    useVisibilityWatcher(document, seen.watcher);
     const { feed, scroll } = mount(true, 300);
     uninstall.push(installClickExpand(feed, () => ""));
     // Act
     const e = wheelAt(feed, 40);
-    // Assert — closed, and left to the browser to scroll the feed.
+    seen.report(scroll, false);
+    // Assert — left to the browser to scroll the feed, and closed once unseen.
     expect([scroll.classList.contains("expanded"), e.defaultPrevented]).toEqual([false, false]);
   });
 });
