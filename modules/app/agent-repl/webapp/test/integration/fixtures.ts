@@ -1443,7 +1443,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   update: { phase: { case: "installing", value: {} } },
   queryDied: { text: "the vendor query died" },
   compaction: { text: "compacting · summarizing 412 messages" },
-  retrying: { attempt: 3, status: "overloaded" },
+  retrying: { attempt: 3, status: "overloaded", nextAttempt: { atMs: 60_000n }, maxAttempt: 11 },
   wakeup: { wakeAtMs: 60_000n, reason: { text: "the cron fires" } },
   gatedCall: { text: "Bash npm test" },
   questionLead: { text: "How far should the port go?" },
@@ -1512,6 +1512,7 @@ export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
   updated: { notes: [{ note: { case: "shimWhenIdle", value: {} } }] },
   networkResume: { edge: { case: "waiting", value: { givesUpAtMs: 1_810_000n } } },
   compactionConcluded: { text: "compacted and resumed (101.6k → 12.4k)" },
+  apiRestored: { failedAttempts: 8 },
 };
 
 /**

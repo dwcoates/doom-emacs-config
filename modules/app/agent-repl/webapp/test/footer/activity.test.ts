@@ -451,6 +451,62 @@ describe("the salient kinds", () => {
     expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe("retry #2 · overloaded");
   });
 
+  it("draws the vendor's attempt limit after the attempt", () => {
+    const cell = salientCell("retrying", { attempt: 9, status: "overloaded", maxAttempt: 11 }, "working");
+    expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe("retry #9 of 11 · overloaded");
+  });
+
+  it("counts down to the vendor's next attempt at second resolution", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 9, status: "overloaded", nextAttempt: { atMs: BigInt(NOW + 12_000) } },
+      "working",
+    );
+    expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
+      "retry #9 · next try in 12s · overloaded",
+    );
+  });
+
+  it("re-reads the next-attempt countdown on the shared tick", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 9, status: "overloaded", nextAttempt: { atMs: BigInt(NOW + 12_000) } },
+      "working",
+    );
+    vi.advanceTimersByTime(1000);
+    expect(cell.querySelector("[data-countdown]")?.textContent).toBe("next try in 11s");
+  });
+
+  it("says a next attempt that has passed is overdue, counting up", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 9, status: "overloaded", nextAttempt: { atMs: BigInt(NOW - 120_000) } },
+      "working",
+    );
+    expect(cell.querySelector("[data-countdown]")?.textContent).toBe("next try overdue by 2m");
+  });
+
+  it("turns the countdown overdue when the promised instant passes", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 9, status: "overloaded", nextAttempt: { atMs: BigInt(NOW + 1000) } },
+      "working",
+    );
+    vi.advanceTimersByTime(3000);
+    const countdown = cell.querySelector("[data-countdown]");
+    expect(countdown?.textContent).toBe("next try overdue by 2s");
+    expect(countdown?.hasAttribute("data-overdue")).toBe(true);
+  });
+
+  it("does not mark a pending next attempt overdue", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 9, status: "overloaded", nextAttempt: { atMs: BigInt(NOW + 1000) } },
+      "working",
+    );
+    expect(cell.querySelector("[data-countdown]")?.hasAttribute("data-overdue")).toBe(false);
+  });
+
   it("colours the landing commit's SHA as its own datum", () => {
     const cell = salientCell("mergingCommit", { sha: "4f2a1c", subject: "fold tokens" }, "merging");
     expect(cell.querySelector('[data-datum="sha"]')?.textContent).toBe("4f2a1c");
@@ -632,6 +688,8 @@ describe("the transient kinds", () => {
     ["updated", {}, ".footer-activity-update", "updated"],
     ["updated", { notes: [{ note: { case: "shimWhenIdle", value: {} } }] }, ".footer-activity-update", "updated · shim when idle"],
     ["compactionConcluded", { text: "compacted and resumed (101.6k → 12.4k)" }, ".footer-activity-compaction", "compacted and resumed (101.6k → 12.4k)"],
+    ["apiRestored", { failedAttempts: 8 }, ".footer-activity-api-restored", "API answering again after 8 failed attempts"],
+    ["apiRestored", { failedAttempts: 1 }, ".footer-activity-api-restored", "API answering again after 1 failed attempt"],
     ["networkResume", { edge: { case: "resumed", value: {} } }, ".footer-activity-network-resume", "network resume · resumed"],
     ["networkResume", { edge: { case: "gaveUp", value: {} } }, ".footer-activity-network-resume", "network resume · gave up"],
     ["networkResume", { edge: { case: "abandoned", value: { reason: "the shim stood down" } } }, ".footer-activity-network-resume", "network resume · abandoned · the shim stood down"],
