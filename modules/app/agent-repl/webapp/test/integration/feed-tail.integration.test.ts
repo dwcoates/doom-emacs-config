@@ -89,7 +89,7 @@ describe("the docked footer and the feed's tail", () => {
     // and under jsdom the box only acquires one when this test scripts it.
     harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
     // Act — the footer changes state and grows; the box loses that height.
-    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" }));
     await harness.settle();
     geometry.footerTakes(48);
     fireResize(harness.shell.feedScroll);
@@ -110,7 +110,7 @@ describe("the docked footer and the feed's tail", () => {
     harness.shell.feedScroll.scrollTop = 200;
     harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
     // Act
-    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" }));
     await harness.settle();
     geometry.footerTakes(48);
     fireResize(harness.shell.feedScroll);
@@ -134,7 +134,7 @@ describe("the docked footer and the feed's tail", () => {
     });
     const geometry = scriptGeometry(harness.shell.feedScroll);
     harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
-    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" }));
     await harness.settle();
     geometry.footerTakes(48);
     fireResize(harness.shell.feedScroll);
@@ -161,7 +161,7 @@ describe("the docked footer and the feed's tail", () => {
     // Act — the content grows first, then the footer takes its height.
     geometry.contentGrows(120);
     fireResize(harness.shell.feed);
-    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" }));
     await harness.settle();
     geometry.footerTakes(48);
     fireResize(harness.shell.feedScroll);

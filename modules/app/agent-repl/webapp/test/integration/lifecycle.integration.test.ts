@@ -518,7 +518,7 @@ const MOVE_SITES: MoveSite[] = [
     name: "Interrupt (the footer's stop)",
     rpc: "interrupt",
     click: ".footer-clock [data-interrupt]",
-    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
   },
   {
     name: "AnswerPermission (a feed card)",

@@ -253,7 +253,7 @@ describe("unset-field injection", () => {
     // Assert
     expect(push.footer?.strip?.status).toBeUndefined();
     const [again] = await take(client.watchFooter({ workspace: workspaceRef() }), 1);
-    expect(again.footer?.strip?.status?.status.case).toBe("thinking");
+    expect(again.footer?.strip?.status?.status.case).toBe("working");
   });
 
   it("names the path it strips", () => {

@@ -5234,37 +5234,12 @@ bubble-body.bubble-body { display: block; }
 .footer-allowance-newsworthy { font-weight: 650; }
 .footer-allowance { font-variant-numeric: tabular-nums; }
 
-/* THE RATE LINE IS THE ONE ACTIVITY LINE WITH ITS OWN CUT. Every other kind is
-   prose the grow cell may ellipsize anywhere, because a clipped sentence is
-   still read from its front. This one is two different things — figures and a
-   staleness caveat about them — and letting the cell cut it wherever it liked
-   dropped the caveat off the glass entirely at 1280.
-
-   So the line lays itself out: an inline flex box no wider than the cell, with
-   the FIGURES elastic (they ellipsize, newsworthy window first) and the unread
-   MARKER rigid beside them. The marker is therefore on the glass whenever it
-   is in the DOM, and the figures are what gives when the strip tightens. The
-   caveat in full is a row of the tokens sheet. */
-.footer-activity-rate-limited {
-  display: inline-flex;
-  align-items: baseline;
-  max-width: 100%;
-  vertical-align: bottom;
-}
 .footer-rate-figures {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* THE READ-AGE (src/footer/strip.ts drawFiguresReadAge). It rides beside the
-   allowance figures, saying how long ago they were read; it is a caveat about
-   freshness, not a figure, so it stays un-cut (the figures ellipsize, not it)
-   and takes a caveat's muted weight. */
-.footer-activity-rate-limited > .footer-rate-age {
-  flex: 0 0 auto;
-  color: var(--muted);
 }
 
 /* THE STOP CONTROLS (src/footer/stop.ts). A quiet square that only exists
@@ -5416,17 +5391,13 @@ bubble-body.bubble-body { display: block; }
   font-variant-numeric: tabular-nums;
 }
 /* THE USAGE ROWS beneath the token figures (expanded.ts drawFooterUsageRows):
-   the account's allowances, the unread caveat in full, and the context-budget
-   sentence -- everything the strip's one line cannot fit. They wrap, because
-   the whole reason they are here is that a cut is what sent the reader looking
-   for them. */
+   the account's allowances -- everything the strip's one line cannot fit. They
+   wrap, because the whole reason they are here is that a cut is what sent the
+   reader looking for them. */
 .footer-usage-row {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.footer-usage-unread,
-.footer-usage-context-budget { color: var(--muted); }
-.footer-usage-unread { font-style: italic; }
 
 /* The alarm line reports money already spent that the user would have wanted to
    prevent, so it keeps the error register the old expensive-turn row had. */
@@ -6788,4 +6759,39 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.7rem;
   font-family: var(--mono, ui-monospace, monospace);
   user-select: text;
+}
+
+/* ---- footer enduring line (src/footer/activity.ts) ---- */
+/* THE ENDURING LINE IS THE ONE ACTIVITY LINE WITH ITS OWN CUT
+   (drawFooterActivityEnduring), laid out exactly as the retired rate line was.
+   Every other kind is prose the grow cell may ellipsize anywhere, because a
+   clipped sentence is still read from its front. This one is different things
+   -- allowance figures (`.footer-rate-figures`, elastic), the age of their
+   reading, the context window's fill -- so it is an inline flex box no wider
+   than the cell, and the read-age and the fill stay rigid beside the figures:
+   they are on the glass whenever they are in the DOM, and the figures are what
+   gives when the strip tightens. The figures in full are rows of the tokens
+   sheet. */
+.footer-activity-enduring {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+/* THE READ-AGE (drawFiguresReadAge): a caveat about freshness, not a figure,
+   so it stays un-cut and takes a caveat's muted weight. */
+.footer-activity-enduring > .footer-rate-age {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+/* THE CONTEXT FILL (drawFooterActivityEnduringContextWindow): one short figure,
+   rigid like the age. */
+.footer-activity-enduring > .footer-context-window { flex: 0 0 auto; }
+
+/* ---- footer agents-panel row state (src/footer/expanded.ts) ---- */
+/* THE WAITING-FOR-THE-API STATE (drawFooterAgentRowWaitingForApi): it keeps to
+   one line and does not shrink, so the elastic description is what gives. */
+.footer-row-state {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }

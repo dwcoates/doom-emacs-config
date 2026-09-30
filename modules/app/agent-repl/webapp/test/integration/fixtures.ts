@@ -1431,77 +1431,140 @@ export function allowance(
   };
 }
 
-/** A rate-limited activity whose two allowances carry the given verdicts. */
-export const rateLimitedActivity = (
+/** An enduring line whose usage's two allowances carry the given verdicts. */
+export const enduringUsage = (
   session?: FooterAllowanceArm,
   weekly?: FooterAllowanceArm,
-): object => ({ session: allowance(session), weekly: allowance(weekly ?? "allowed") });
+): object => ({ usage: { session: allowance(session), weekly: allowance(weekly ?? "allowed") } });
 
-/** Every activity kind arm, with a complete payload for each. */
-export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
-  notification: { text: "the agent addressed you" },
-  contextBudget: { text: "84% of the window" },
-  rateLimited: {
-    session: allowance("allowedWarning", { newsworthy: true, resetsAtS: 1_700n, utilization: 0.82 }),
-    weekly: allowance("allowed", { newsworthy: false, resetsAtS: 9_000n, utilization: 0.3 }),
-  },
-  hook: { name: "PreToolUse" },
+/** Every SALIENT kind arm, with a complete payload for each. */
+export const FOOTER_SALIENT_KINDS: Record<string, object> = {
+  update: { phase: { case: "installing", value: {} } },
+  queryDied: { text: "the vendor query died" },
+  compaction: { text: "compacting · summarizing 412 messages" },
   retrying: { attempt: 3, status: "overloaded" },
-  contextInjected: { text: "CLAUDE.md loaded" },
   wakeup: { wakeAtMs: 60_000n, reason: { text: "the cron fires" } },
   gatedCall: { text: "Bash npm test" },
   questionLead: { text: "How far should the port go?" },
   blockedOnUser: { detail: "answer the permission card" },
   coldGateCost: { text: "184k tokens uncached" },
-  compaction: { text: "compacting · summarizing 412 messages" },
-  quietStretch: { text: "✅ Bash finished — handling result..." },
   interrupting: { text: "stopping 3 agents" },
   mergingCommit: { sha: "abc1234", subject: "port the transport" },
   authenticating: { line: "opening the login terminal" },
-  queryDied: { text: "the vendor query died" },
+  fault: { kind: "link_severed", detail: "the socket closed" },
+  startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
   closeBlocked: { text: "a turn is live" },
 };
 
-/** Which activity kinds each status arm legally carries. */
-export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
-  idle: ["notification", "contextBudget", "rateLimited", "queryDied"],
-  working: [
-    "hook",
-    "retrying",
-    "contextInjected",
-    "compaction",
-    "quietStretch",
-    "notification",
-    "contextBudget",
-    "rateLimited",
-  ],
+/**
+ * Which salient kinds each status arm's cell legally carries (footer.proto;
+ * the arms that share a cell share its row).
+ */
+export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
+  idle: ["update", "queryDied"],
+  turnFailed: ["update", "queryDied"],
+  degraded: ["update", "queryDied"],
+  working: ["compaction", "retrying", "update"],
   waiting: [
     "wakeup",
     "gatedCall",
     "questionLead",
     "blockedOnUser",
-    "notification",
     "coldGateCost",
-    "rateLimited",
-    "contextBudget",
     "interrupting",
+    "update",
   ],
-  interrupted: ["notification", "rateLimited", "contextBudget"],
-  merging: ["mergingCommit", "notification", "rateLimited", "contextBudget"],
-  background: ["notification", "rateLimited", "contextBudget", "quietStretch"],
-  blocked: ["authenticating", "rateLimited", "notification", "queryDied", "contextBudget"],
-  disconnected: ["notification", "rateLimited", "contextBudget"],
-  closing: ["closeBlocked", "notification", "rateLimited", "contextBudget"],
-  loading: ["contextInjected", "notification", "rateLimited", "contextBudget"],
-  mergeConflict: ["mergingCommit", "notification", "rateLimited", "contextBudget"],
-  mergeFailed: ["notification", "rateLimited", "contextBudget"],
-  merged: ["notification", "rateLimited", "contextBudget"],
-  turnFailed: ["notification", "rateLimited", "contextBudget", "queryDied"],
-  degraded: ["notification", "rateLimited", "contextBudget"],
+  interrupted: ["update"],
+  merging: ["mergingCommit", "update"],
+  mergeConflict: ["mergingCommit", "update"],
+  mergeFailed: ["mergingCommit", "update"],
+  merged: ["mergingCommit", "update"],
+  background: ["update"],
+  blocked: ["authenticating", "fault", "update"],
+  disconnected: ["startFailed", "fault", "update"],
+  closing: ["closeBlocked", "update"],
+  loading: ["update"],
 };
 
-/** The status arms whose `activity` is NOT optional on the wire. */
-const STATUS_REQUIRING_ACTIVITY: readonly string[] = ["waiting", "loading"];
+/** Every TRANSIENT kind arm, with a complete payload for each. */
+export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
+  thinking: { reasoning: { case: "text", value: { tail: "weighing the port" } } },
+  response: { tail: "the port is done" },
+  toolCall: { tool: "Bash", summary: "npm test" },
+  task: { subject: "write the harness", completed: 2, total: 5 },
+  submitting: { promptLead: "port the footer" },
+  hook: { name: "PreToolUse" },
+  contextInjected: { text: "CLAUDE.md loaded" },
+  notification: { text: "the agent addressed you" },
+  contextBudget: { text: "84% of the window" },
+  fault: { kind: "shim_reported", detail: "the shim said so" },
+  daemonWarning: { operation: "feed.row-order-changed", message: "kept in place" },
+  daemonError: { operation: "store.write", message: "disk full" },
+  sessionChange: { text: "model → opus" },
+  updated: { notes: [{ note: { case: "shimWhenIdle", value: {} } }] },
+  networkResume: { edge: { case: "waiting", value: { givesUpAtMs: 1_810_000n } } },
+  compactionConcluded: { text: "compacted and resumed (101.6k → 12.4k)" },
+};
+
+/**
+ * A transient's expiry far past anything the suite's clock reaches, so a
+ * fixture transient is drawn for the whole test; a test about the lapse states
+ * its own instant.
+ */
+export const FOOTER_TRANSIENT_LIVE_UNTIL_MS = 9_000_000_000_000n;
+
+/** The pseudo-kind naming the enduring line, which is what the cell draws then. */
+export const FOOTER_ENDURING = "enduring";
+
+/**
+ * The activity cell for STATUS.
+ *
+ * KIND picks the tier the way the daemon's resolution lands it: a kind legal
+ * as the arm's SALIENT line is drawn salient; any other kind is a TRANSIENT
+ * over the enduring line; `enduring` (or no kind) is the enduring line alone.
+ * A waiting arm with no kind carries its first salient kind, because its cell
+ * has no unpinned branch.
+ */
+function footerActivity(
+  status: string,
+  init?: {
+    activity?: string;
+    activityAtMs?: bigint;
+    activityOverride?: object;
+    expiresAtMs?: bigint;
+    agent?: string;
+  },
+): object {
+  const salients = FOOTER_STATUS_SALIENTS[status];
+  const at = { atMs: init?.activityAtMs ?? 3_000n };
+  const kind = init?.activity ?? (status === "waiting" ? salients[0] : FOOTER_ENDURING);
+  if (salients.includes(kind)) {
+    const salient = {
+      at,
+      kind: { case: kind, value: init?.activityOverride ?? FOOTER_SALIENT_KINDS[kind] },
+    };
+    return status === "waiting" ? { salient } : { tier: { case: "salient", value: salient } };
+  }
+  if (kind === FOOTER_ENDURING) {
+    return { tier: { case: "unpinned", value: { enduring: init?.activityOverride ?? {} } } };
+  }
+  const payload = FOOTER_TRANSIENT_KINDS[kind];
+  if (payload === undefined) throw new Error(`no activity kind ${JSON.stringify(kind)} under ${status}`);
+  return {
+    tier: {
+      case: "unpinned",
+      value: {
+        transient: {
+          at,
+          expiry: { expiresAtMs: init?.expiresAtMs ?? FOOTER_TRANSIENT_LIVE_UNTIL_MS },
+          ...(init?.agent === undefined ? {} : { agent: { label: init.agent } }),
+          kind: { case: kind, value: init?.activityOverride ?? payload },
+        },
+        enduring: {},
+      },
+    },
+  };
+}
 
 /**
  * The status arm, built from the string tables above.
@@ -1516,8 +1579,12 @@ export function footerStatus(
     substatus?: string;
     activity?: string;
     activityAtMs?: bigint;
-    /** Replace the activity kind's payload, for arm-by-arm tables. */
+    /** Replace the activity kind's payload (or the enduring line), for arm-by-arm tables. */
     activityOverride?: object;
+    /** The transient's expiry, when the kind is a transient. */
+    expiresAtMs?: bigint;
+    /** The subagent a transient came from. */
+    agent?: string;
   },
 ): StatusArm {
   const substatuses = FOOTER_STATUS_SUBSTATUSES[status];
@@ -1527,19 +1594,9 @@ export function footerStatus(
     const substatus = init?.substatus ?? substatuses[0];
     value.substatus = { case: substatus, value: substatusValue(substatus) };
   }
-  // TWO STATUSES REQUIRE AN ACTIVITY (footer.proto: waiting, loading — every
-  // such state has a composable line by construction). Elsewhere the field is
-  // `optional` and absence is a legitimate state, so it is set only when a case
-  // asks for one.
-  const kind = init?.activity ?? (STATUS_REQUIRING_ACTIVITY.includes(status)
-    ? FOOTER_STATUS_ACTIVITIES[status][0]
-    : undefined);
-  if (kind !== undefined) {
-    value.activity = {
-      at: { atMs: init?.activityAtMs ?? 3_000n },
-      kind: { case: kind, value: init?.activityOverride ?? FOOTER_ACTIVITY_KINDS[kind] },
-    };
-  }
+  // EVERY STATUS CARRIES AN ACTIVITY (footer.proto: the enduring tier
+  // guarantees the cell has something to draw under every status).
+  value.activity = footerActivity(status, init);
   return { case: status, value } as StatusArm;
 }
 
@@ -1561,6 +1618,10 @@ type FooterInit = {
   activity?: string;
   activityAtMs?: bigint;
   activityOverride?: object;
+  expiresAtMs?: bigint;
+  agent?: string;
+  /** How many of the agents chip's rows wait for the API; unset draws no glyph. */
+  agentsWaitingForApi?: number;
   turnStartedAtMs?: bigint;
   tokensText?: string;
   alarm?: boolean;
@@ -1586,7 +1647,13 @@ export function footerView(init?: FooterInit): FooterView {
         verdict: init?.verdict ? { verdict: { case: init.verdict, value: {} } } : undefined,
       },
       liveWork: {
-        agents: chips.agents ? { count: 3 } : undefined,
+        agents: chips.agents
+          ? {
+              count: 3,
+              waitingForApi:
+                init?.agentsWaitingForApi === undefined ? undefined : { count: init.agentsWaitingForApi },
+            }
+          : undefined,
         tasks: chips.tasks ? { done: 2, total: 5 } : undefined,
         shells: chips.shells ? { count: 1 } : undefined,
         monitors: chips.monitors ? { count: 4 } : undefined,
@@ -1636,6 +1703,7 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
           description: { text: "review the diff" },
           tokens: { text: "12.4k" },
           runtime: { startedAtMs: 1_000n },
+          state: { case: "running" as const, value: {} },
         },
       ],
     },

@@ -8,7 +8,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import type { FooterActivity } from "../../src/footer/strip.js";
+import type { FooterActivity } from "../../src/footer/activity.js";
 import {
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
@@ -86,11 +86,23 @@ function unresolvedFor(reason: "notDrawn") {
   return { target: { case: "unresolved" as const, value: { reason: { case: reason, value: {} } } } };
 }
 
-/** One activity, as the strip resolves it, for the usage rows to expand. */
-function activity(kindCase: string, kindValue: Record<string, unknown>): FooterActivity {
+/** An unpinned cell whose enduring line carries USAGE, for the rows to expand. */
+function unpinned(usage?: Record<string, unknown>): FooterActivity {
   return create(FooterStatusIdleActivitySchema, {
-    at: { atMs: BigInt(NOW) },
-    kind: { case: kindCase as never, value: kindValue as never },
+    tier: {
+      case: "unpinned",
+      value: { enduring: usage === undefined ? {} : { usage: usage as never } },
+    },
+  });
+}
+
+/** A pinned cell: the dead-query salient line, which ships no enduring line. */
+function pinned(): FooterActivity {
+  return create(FooterStatusIdleActivitySchema, {
+    tier: {
+      case: "salient",
+      value: { at: { atMs: BigInt(NOW) }, kind: { case: "queryDied", value: { text: "x" } } },
+    },
   });
 }
 
@@ -107,7 +119,7 @@ function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
 
 /** The rate-limit activity the sheet photographs: both windows figured. */
 function rateLimited(): FooterActivity {
-  return activity("rateLimited", {
+  return unpinned({
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
     figuresReadAtMs: BigInt(NOW - 630_000),
@@ -116,7 +128,7 @@ function rateLimited(): FooterActivity {
 
 /** The same activity, with the overage window the vendor reported too. */
 function rateLimitedWithOverage(): FooterActivity {
-  return activity("rateLimited", {
+  return unpinned({
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
     overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
@@ -148,10 +160,9 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
     ).toBe("session");
   });
 
-  // THE OVERAGE WINDOW. It has no room on the strip at all, so the sheet is
-  // its only drawn home — one more allowance row of exactly the kind the
-  // other two windows already draw.
-  it("carries the overage window the strip has no room for", () => {
+  // THE OVERAGE WINDOW: one more allowance row of exactly the kind the other
+  // two windows already draw, as the strip draws it one more figure.
+  it("carries the overage window when the vendor reported one", () => {
     const panel = drawTokensPanelWith(rateLimitedWithOverage());
     expect(
       panel.querySelector('[data-usage-allowance="overage"]')?.textContent,
@@ -177,20 +188,14 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
     expect(labels(with_)).toEqual(["session", "overage", "weekly"]);
   });
 
-  it("carries the context-budget sentence whole", () => {
-    const panel = drawTokensPanelWith(
-      activity("contextBudget", { text: "The conversation is approaching its context window budget." }),
-    );
-    expect(panel.querySelector('[data-usage="context-budget"]')?.textContent).toBe(
-      "The conversation is approaching its context window budget.",
-    );
+  // A STANDING SALIENT LINE SHIPS NO ENDURING LINE, so there is no usage to
+  // expand, and the sheet says nothing rather than something empty.
+  it("draws no usage rows while a salient line stands", () => {
+    expect(drawTokensPanelWith(pinned()).querySelector("[data-usage]")).toBeNull();
   });
 
-  // AN ACTIVITY ABOUT THE TURN IS NOT ABOUT THE ACCOUNT: a hook line has no
-  // usage to expand, and the sheet says nothing rather than something empty.
-  it("draws no usage rows for an activity that is not about usage", () => {
-    const panel = drawTokensPanelWith(activity("hook", { text: "PreToolUse" }));
-    expect(panel.querySelector("[data-usage]")).toBeNull();
+  it("draws no usage rows before any usage has been read", () => {
+    expect(drawTokensPanelWith(unpinned()).querySelector("[data-usage]")).toBeNull();
   });
 
   it("draws no usage rows when no activity stands at all", () => {
@@ -515,7 +520,7 @@ const AGENT_ROW = {
   label: { text: "Explore" },
   description: { text: "sweep the repo" },
   tokens: { text: "12.4k tok" },
-  runtime: { startedAtMs: BigInt(NOW - 65_000) },
+  runtime: { startedAtMs: BigInt(NOW - 65_000) },  state: { case: "running" as const, value: {} },
 };
 
 describe("the agents panel", () => {
@@ -916,6 +921,69 @@ async function clickFirstJump(drawn: Drawn, reached: boolean): Promise<Outcome> 
     notice: drawn.panel.querySelector(".footer-row-unreachable")?.textContent === "not on screen",
   };
 }
+
+/** AGENT_ROW, waiting for the API until GIVESUPINMS from now. */
+function waitingRow(givesUpInMs: number) {
+  return {
+    ...AGENT_ROW,
+    state: {
+      case: "waitingForApi" as const,
+      value: {
+        failedAtMs: BigInt(NOW - 60_000),
+        givesUpAtMs: BigInt(NOW + givesUpInMs),
+        resumesDelivered: 0,
+      },
+    },
+  };
+}
+
+describe("the agents panel: what each agent is doing", () => {
+  it("stamps a running agent's state on its row", () => {
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    expect(panel.querySelector(".footer-row-jump")?.getAttribute("data-state")).toBe("running");
+  });
+
+  it("draws nothing more for a running agent", () => {
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    expect(panel.querySelector(".footer-row-state")).toBeNull();
+  });
+
+  it("stamps a waiting agent's state on its row", () => {
+    const { panel } = drawPanel("agents", { agents: [waitingRow(24 * 60_000)] });
+    expect(panel.querySelector(".footer-row-jump")?.getAttribute("data-state")).toBe("waitingForApi");
+  });
+
+  it("draws the wait with the give-up countdown", () => {
+    const { panel } = drawPanel("agents", { agents: [waitingRow(24 * 60_000)] });
+    expect(panel.querySelector(".footer-row-state")?.textContent).toBe(
+      "waiting for the API · gives up in 24m",
+    );
+  });
+
+  it("ticks the give-up countdown down on the shared clock", () => {
+    const { panel } = drawPanel("agents", { agents: [waitingRow(24 * 60_000)] });
+    vi.advanceTimersByTime(60_000);
+    expect(panel.querySelector(".footer-row-state [data-countdown]")?.textContent).toBe("gives up in 23m");
+  });
+
+  it("floors a give-up deadline already past rather than counting backwards", () => {
+    const { panel } = drawPanel("agents", { agents: [waitingRow(-5_000)] });
+    expect(panel.querySelector(".footer-row-state [data-countdown]")?.textContent).toBe("gives up in 0m");
+  });
+
+  it("refuses a row whose state sets no arm", () => {
+    expect(() => drawPanel("agents", { agents: [{ ...AGENT_ROW, state: undefined }] })).toThrow(
+      MalformedView,
+    );
+  });
+
+  it("refuses a state arm the bundle cannot name", () => {
+    const view = expanded({ agents: [AGENT_ROW] });
+    const row = view.agents?.rows[0] as unknown as { state: unknown };
+    row.state = { case: "hibernating", value: {} };
+    expect(() => drawPanel("agents", {}, true, view)).toThrow(MalformedView);
+  });
+});
 
 describe("the click invariant: exactly one outcome, never neither", () => {
   const cases: {

@@ -21,6 +21,11 @@
  * a push whose generation this page has already applied changes nothing, so
  * between launches the reader's own clicks stand.
  *
+ * THE ONE TIMER IS THE TRANSIENT'S EXPIRY. A drawn transient lapses on the
+ * client's clock with no push to say so, so the draw that picked it schedules
+ * one re-render at its expiry instant (`expiry.ts`), and every draw cancels the
+ * last one's first — a newer push replaces it, never stacks beside it.
+ *
  * `onStatus` EXISTS FOR THE COMPOSERS. R7 disables a bubble composer while the
  * footer reads merging, closing or disconnected, and the footer's stream is the
  * one place that fact arrives — so the status ARM is published to subscribers
@@ -54,6 +59,8 @@ import {
   WORK_ID_ATTRIBUTE,
   type FooterPanel,
 } from "./expanded.js";
+import { salientKind } from "./activity.js";
+import { createTransientExpiry } from "./expiry.js";
 import { publishCompactionProgress } from "./progress.js";
 import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
@@ -125,6 +132,10 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   let appliedFocus: bigint | null = null;
   let statusCase: string | null = null;
   let disposed = false;
+  // THE FOURTH: the one pending re-render at the drawn transient's expiry.
+  const expiry = createTransientExpiry(ctx.ticker, () => {
+    redraw("footer.expiry-redraw-undecodable");
+  });
 
   // THE CLIENT'S OWN VERDICT OVERLAYS THE DAEMON'S (owner ruling, 2026-09-13).
   // Subscribing here rather than polling in `draw` is what makes a verdict
@@ -134,22 +145,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // daemon's -- see `publishStatus` for why a client verdict must not close a
   // composer.
   const unsubscribeFromVerdict = onClientVerdict(() => {
-    if (disposed) return;
-    // A REDRAW OF AN UNREADABLE LAST VIEW IS ONE UNREADABLE FRAME, and it gets
-    // the treatment `watchStream` gives one: logged, filed, and skipped. It
-    // cannot be allowed to throw, because the caller here is whatever reported
-    // or cleared the verdict -- an rpc, whose own answer would then be
-    // mislabelled a transport failure by its call site.
-    try {
-      draw();
-    } catch (err) {
-      if (!isMalformedView(err)) throw err;
-      log.error(`the footer's last view could not be redrawn: ${err.detail}`, {
-        operation: "footer.verdict-redraw-undecodable",
-        context: { path: err.path, cause: err.detail },
-      });
-      ctx.failures.report(frameUndecodable(err.detail, `FooterView at ${err.path}`));
-    }
+    redraw("footer.verdict-redraw-undecodable");
   });
 
   const watch: StreamHandle = watchStream<WatchFooterResponse>(ctx, {
@@ -184,6 +180,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       disposed = true;
       log.info("disposing the footer", { operation: "footer.dispose", context: {} });
       unsubscribeFromVerdict();
+      expiry.cancel();
       watch.cancel();
       hold.dispose();
       // The page's compaction line belongs to the stream that just stopped.
@@ -209,6 +206,9 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    */
   function draw(): void {
     if (disposed) return;
+    // Whatever the last draw scheduled belongs to the view it drew; this draw
+    // schedules its own if it picks a live transient.
+    expiry.cancel();
     // WHILE A CLIENT VERDICT STANDS IT WINS, and the daemon's last pushed view
     // is not drawn at all. A push landing under a standing verdict is not
     // evidence the link is up -- the footer stream and the verb that failed are
@@ -254,7 +254,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     );
     section = panel;
     notices.prune(drawnRowKeys(panel));
-    const stripDeps = { ctx, selection, onSelect: select, stops };
+    const stripDeps = { ctx, selection, onSelect: select, stops, expiry };
     const stripEl =
       verdict === null
         ? drawFooterStrip(strip, stripDeps)
@@ -283,6 +283,31 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       host.replaceChildren(target);
     }
     dock = target;
+  }
+
+  /**
+   * Redraw from the last view OUTSIDE a push: a verdict raised or lifted, or
+   * the drawn transient lapsing.
+   *
+   * A REDRAW OF AN UNREADABLE LAST VIEW IS ONE UNREADABLE FRAME, and it gets
+   * the treatment `watchStream` gives one: logged once under OPERATION, filed,
+   * and skipped. It cannot be allowed to throw, because the caller is whatever
+   * reported or cleared the verdict -- an rpc, whose own answer would then be
+   * mislabelled a transport failure by its call site -- or the expiry timer,
+   * where a throw would escape as an uncaught error.
+   */
+  function redraw(operation: string): void {
+    if (disposed) return;
+    try {
+      draw();
+    } catch (err) {
+      if (!isMalformedView(err)) throw err;
+      log.error(`the footer's last view could not be redrawn: ${err.detail}`, {
+        operation,
+        context: { path: err.path, cause: err.detail },
+      });
+      ctx.failures.report(frameUndecodable(err.detail, `FooterView at ${err.path}`));
+    }
   }
 
   /** The dock element, built once and kept for the mount's life. */
@@ -356,8 +381,8 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    * the compaction runs, and the daemon's own phase line is already arriving
    * here. Publishing it is what lets that card draw the daemon's sentence
    * instead of composing one of its own or saying nothing at all. Any other
-   * activity arm — and an absent activity — publishes `null`: the subscriber
-   * then shows nothing.
+   * line — another salient kind, or the unpinned transient-over-enduring pair
+   * — publishes `null`: the subscriber then shows nothing.
    *
    * Called AFTER `draw()`, which has already walked the same view, so a
    * malformed strip is reported by the drawing rather than here.
@@ -366,7 +391,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
     const activity = footerStatusActivity(requireMessage(strip.status, "FooterStrip.status"));
-    const kind = activity?.kind;
+    const kind = salientKind(activity, "FooterStatus.activity");
     publishCompactionProgress(kind?.case === "compaction" ? kind.value.text : null);
   }
 }
