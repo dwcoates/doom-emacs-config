@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/wsm"
 )
 
 // outcome answers one component's decision out of a result.
@@ -321,6 +322,114 @@ func TestAStaleDaemonAcrossALayoutChangeIsRestartedNotHandedOver(t *testing.T) {
 				if got := outcome(t, result, c).Kind; got != DeferredToSuccessor {
 					t.Fatalf("%s = %s, want deferred to the replacement", c, got)
 				}
+			}
+		})
+	}
+}
+
+// AN ADDITIVE LAYOUT CHANGE IS HANDED OVER (owner ruling, 2026-09-30): the
+// joining successor applies the additive steps while the incumbent serves, so
+// a schema bump no longer takes every workspace through a restart.
+func TestAnAdditiveLayoutChangeIsHandedOver(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.freshLayout = runningLayout + 1
+	h.migrationKind = wsm.MigrationAdditive
+
+	// Act
+	result, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if len(h.rollout.handovers) != 1 || len(h.rollout.restarts) != 0 {
+		t.Fatalf("handovers %v, restarts %v: want one handover and no restart", h.rollout.handovers, h.rollout.restarts)
+	}
+	if got := outcome(t, result, ComponentDaemon).Kind; got != HandingOver {
+		t.Fatalf("daemon = %s, want handing over", got)
+	}
+	if len(h.migrationAsked) != 1 || h.migrationAsked[0] != runningLayout {
+		t.Fatalf("migration kind asked from %v, want the running layout", h.migrationAsked)
+	}
+}
+
+func TestAnOlderFreshLayoutIsRestartedWithoutAskingWhatItsStepsAre(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.freshLayout = runningLayout - 1
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if len(h.rollout.restarts) != 1 || len(h.migrationAsked) != 0 {
+		t.Fatalf("restarts %v, migration asked %v: want a restart and no question", h.rollout.restarts, h.migrationAsked)
+	}
+}
+
+func TestTheSameLayoutIsHandedOverWithoutAskingWhatItsStepsAre(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if len(h.rollout.handovers) != 1 || len(h.migrationAsked) != 0 {
+		t.Fatalf("handovers %v, migration asked %v: want a handover and no question", h.rollout.handovers, h.migrationAsked)
+	}
+}
+
+func TestADaemonWhoseMigrationKindCannotBeReadIsNeitherHandedOverNorRestarted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.freshLayout = runningLayout + 1
+	h.migrationErr = errors.New("exit status 2")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Deploy succeeded with the migration kind unknown")
+	}
+	if len(h.rollout.handovers) != 0 || len(h.rollout.restarts) != 0 {
+		t.Fatalf("handovers %v, restarts %v: want neither on a guess", h.rollout.handovers, h.rollout.restarts)
+	}
+	if !logged(h.log, "error", opDecide, "the fresh daemon could not say whether its migrations are additive; the daemon is neither handed over nor restarted") {
+		t.Fatalf("records = %+v, want the unread kind at ERROR", h.log.Records())
+	}
+}
+
+func TestParseMigrationKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		answer  string
+		want    wsm.MigrationKind
+		wantErr bool
+	}{
+		{name: "additive", answer: "additive", want: wsm.MigrationAdditive},
+		{name: "breaking", answer: "breaking", want: wsm.MigrationBreaking},
+		{name: "unmarked names no kind", answer: "unmarked", wantErr: true},
+		{name: "empty names no kind", answer: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := parseMigrationKind("claude-repld", tt.answer)
+
+			// Assert
+			if (err != nil) != tt.wantErr || (!tt.wantErr && got != tt.want) {
+				t.Fatalf("parseMigrationKind(%q) = (%v, %v), want (%v, err %v)", tt.answer, got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

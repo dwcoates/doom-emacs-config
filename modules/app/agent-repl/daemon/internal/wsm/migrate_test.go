@@ -764,3 +764,202 @@ func TestTheMigratedHeldPromptsAreUncoalescedPrompts(t *testing.T) {
 		t.Fatalf("migrated row coalesced=%d with-no-act=%d, want 0 and 1", coalesced, acts)
 	}
 }
+
+// fixtureAt answers a database carried from layout 3 up to version by the
+// migration list's own steps, applied raw, so a test stands in for the file
+// the build at that layout left.
+func fixtureAt(t *testing.T, version int) string {
+	t.Helper()
+	path := layout3Fixture(t)
+	for _, m := range migrations {
+		if m.To > version {
+			break
+		}
+		execRaw(t, path, m.DDL)
+		stampRaw(t, path, m.To)
+	}
+	return path
+}
+
+// EVERY STEP SAYS WHAT IT MEANS FOR THE BUILD BEFORE IT: the deploy decides
+// between a handover and a restart from it, and an unmarked step is never
+// guessed at.
+func TestEveryMigrationDeclaresItsKind(t *testing.T) {
+	for _, m := range migrations {
+		if m.Kind != MigrationAdditive && m.Kind != MigrationBreaking {
+			t.Errorf("migration %d (%s) declares kind %v, want additive or breaking", m.To, m.Name, m.Kind)
+		}
+	}
+}
+
+func TestChainKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		from    int
+		want    MigrationKind
+		wantErr bool
+	}{
+		{name: "the last step alone is additive", from: LayoutVersion - 1, want: MigrationAdditive},
+		{name: "a chain through the dropped column is breaking", from: 5, want: MigrationBreaking},
+		{name: "a chain past the dropped column is additive", from: 6, want: MigrationAdditive},
+		{name: "this build's own layout needs no chain", from: LayoutVersion, wantErr: true},
+		{name: "a layout no chain reaches is refused", from: 2, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := ChainKind(tt.from)
+
+			// Assert
+			if (err != nil) != tt.wantErr || (!tt.wantErr && got != tt.want) {
+				t.Fatalf("ChainKind(%d) = (%v, %v), want (%v, err %v)", tt.from, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMigrationKindString(t *testing.T) {
+	tests := []struct {
+		kind MigrationKind
+		want string
+	}{
+		{MigrationAdditive, "additive"},
+		{MigrationBreaking, "breaking"},
+		{migrationUnmarked, "unmarked"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.kind.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, LayoutVersion-1)
+
+	// Act
+	handle, err := OpenJoining(context.Background(), path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	defer handle.Close()
+	s := handle.(*store)
+	if !s.readOnly {
+		t.Fatalf("the joining handle writes, want it read-only")
+	}
+	if got := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`); got != LayoutVersion {
+		t.Fatalf("layout after the join = %d, want %d", got, LayoutVersion)
+	}
+}
+
+func TestOpenJoiningRefusesABreakingChainAndChangesNothing(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 5)
+
+	// Act
+	_, err := OpenJoining(context.Background(), path)
+
+	// Assert
+	var refusal *LayoutError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Error(), "breaking migration") {
+		t.Fatalf("OpenJoining = %v, want a *LayoutError naming the breaking migration", err)
+	}
+	if got := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`); got != 5 {
+		t.Fatalf("layout after the refusal = %d, want the file left at 5", got)
+	}
+	if copies := backupsBeside(t, path); len(copies) != 0 {
+		t.Fatalf("copies = %v, want nothing written beside a refused file", copies)
+	}
+}
+
+func TestOpenJoiningRefusesANewerLayout(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, LayoutVersion)
+	stampRaw(t, path, LayoutVersion+1)
+
+	// Act
+	_, err := OpenJoining(context.Background(), path)
+
+	// Assert
+	var refusal *LayoutError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("OpenJoining = %v, want a *LayoutError", err)
+	}
+}
+
+func TestOpenJoiningRefusesALayoutNoChainReaches(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+	stampRaw(t, path, 2)
+
+	// Act
+	_, err := OpenJoining(context.Background(), path)
+
+	// Assert
+	var refusal *LayoutError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Error(), "no migration") {
+		t.Fatalf("OpenJoining = %v, want a *LayoutError naming the missing chain", err)
+	}
+}
+
+func TestOpenJoiningLeavesTheCurrentLayoutAlone(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, LayoutVersion)
+
+	// Act
+	handle, err := OpenJoining(context.Background(), path)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	defer handle.Close()
+	if copies := backupsBeside(t, path); len(copies) != 0 {
+		t.Fatalf("copies = %v, want no migration and so no copy", copies)
+	}
+}
+
+func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
+	// Act
+	_, err := OpenJoining(context.Background(), filepath.Join(t.TempDir(), "absent.db"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("OpenJoining created a file a joining daemon must find already there")
+	}
+}
+
+// THE INCUMBENT KEEPS WORKING ACROSS AN ADDITIVE STEP: a handle opened at the
+// older layout -- the incumbent's -- still reads and writes through its own
+// statements after the joining successor carried the file forward.
+func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, LayoutVersion-1)
+	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("open the incumbent: %v", err)
+	}
+	defer incumbent.Close()
+	incumbent.SetMaxOpenConns(1)
+	if _, err := incumbent.Exec(`UPDATE workspaces SET attention = 1 WHERE id = ?`, string(fixtureWorkspaceID)); err != nil {
+		t.Fatalf("the incumbent's write before the join: %v", err)
+	}
+	joined, err := OpenJoining(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	defer joined.Close()
+
+	// Act
+	_, err = incumbent.Exec(`UPDATE workspaces SET attention = 0 WHERE id = ?`, string(fixtureWorkspaceID))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the incumbent's write after the join: %v", err)
+	}
+}
