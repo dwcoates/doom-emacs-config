@@ -15,8 +15,8 @@ import (
 var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
 	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
-	"start_failed", "degraded", "dead", "merge_enqueuing", "merging",
-	"merge_queued", "merge_conflict", "merge_failed", "merged", "none",
+	"start_failed", "degraded", "dead", "merging",
+	"merge_queued", "merge_failed", "merged", "none",
 	"inactive",
 }
 
@@ -24,8 +24,7 @@ var statusArms = []string{
 // rather than a lifecycle dot, and so are keyed in render-colors.json's
 // merge_glyphs table rather than only in roster_status.
 var mergeArms = []string{
-	"merge_enqueuing", "merging", "merge_queued", "merge_conflict",
-	"merge_failed", "merged",
+	"merging", "merge_queued", "merge_failed", "merged",
 }
 
 // wsState is one workspace's live session accumulation — the half of a row the

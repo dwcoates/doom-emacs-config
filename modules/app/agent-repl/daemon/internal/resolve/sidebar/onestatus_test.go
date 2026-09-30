@@ -214,8 +214,15 @@ var turnCases = []turnCase{
 	}},
 }
 
-// mergeStates is every state the merge orchestrator states, "none" included.
-var mergeStates = []string{"none", "enqueuing", "queued", "merging", "parked", "conflict", "failed", "merged"}
+// mergeStates is every state the merge orchestrator states, "none" included,
+// each with the step or area the orchestrator states beside it.
+var mergeStates = map[string]footer.MergeFacts{
+	"none":    {State: "none"},
+	"queued":  {State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 1},
+	"merging": {State: "merging", Step: footer.StepTesting},
+	"failed":  {State: "failed", FailedArea: footer.FailedConflicts},
+	"merged":  {State: "merged"},
+}
 
 // footerClaim reads the footer's last view's claim.
 func footerClaim(t *testing.T, f footer.Resolver) (ladder.Claim, *frontendv1.FooterStatus) {
@@ -244,7 +251,7 @@ func rosterClaim(t *testing.T, r sidebar.Resolver) (ladder.Claim, string) {
 }
 
 func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
-	for _, merge := range mergeStates {
+	for merge, mergeFacts := range mergeStates {
 		for _, lc := range linkCases {
 			for _, tc := range turnCases {
 				for _, parked := range []bool{false, true} {
@@ -265,7 +272,7 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 							s := newSurfaces(t, session)
 							lc.apply(s)
 							tc.apply(s)
-							facts := footer.MergeFacts{State: merge}
+							facts := mergeFacts
 							s.footer.SetMerge(theWS, facts)
 							s.roster.SetMerge(theWS, facts)
 							if parked {
