@@ -164,22 +164,37 @@ func (r *resolver) applySubagent(s *wsState, agent *conversationv1.AgentId, unit
 			}
 			s.agents[unit] = row
 		}
-		row.createdAgent = item.Start.GetCreatedAgentId().GetValue()
-		row.label = subagentLabel(item.Start.GetPrompt())
-		row.description = item.Start.GetPrompt().GetDescription()
-		row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
+		row.takeStart(item.Start)
 	case *conversationv1.AgentSubagent_Update:
 		if row, ok := s.agents[unit]; ok {
-			row.tokens = item.Update.GetProgress().GetTotalTokens()
-			if desc := item.Update.GetPrompt().GetDescription(); desc != "" {
-				row.description = desc
-			}
+			row.takeUpdate(item.Update)
 		}
 	default:
 		if row, ok := s.agents[unit]; ok && row.work != "" {
 			return
 		}
 		delete(s.agents, unit)
+	}
+}
+
+// takeStart describes the row from a spawn's start frame: the agent it
+// created, its label and description, and the run's ORIGINAL start instant.
+// The ONE reading of a start, for the spawning call's stream and the run's own
+// alike, so the two cannot describe one run differently.
+func (row *agentRow) takeStart(start *conversationv1.AgentSubagentStart) {
+	row.createdAgent = start.GetCreatedAgentId().GetValue()
+	row.label = subagentLabel(start.GetPrompt())
+	row.description = start.GetPrompt().GetDescription()
+	row.startedAt = time.UnixMilli(start.GetStartedAt().GetAtMs())
+}
+
+// takeUpdate folds a running beat into the row: the running token sum, and
+// the description when the beat restates one. The ONE reading of an update,
+// for the spawning call's stream and the run's own alike.
+func (row *agentRow) takeUpdate(update *conversationv1.AgentSubagentUpdate) {
+	row.tokens = update.GetProgress().GetTotalTokens()
+	if desc := update.GetPrompt().GetDescription(); desc != "" {
+		row.description = desc
 	}
 }
 
@@ -625,16 +640,9 @@ func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversation
 		}
 	case *conversationv1.DetachableWork_Subagent:
 		if start, ok := item.Subagent.GetResult().(*conversationv1.AgentSubagent_Start); ok {
-			s.agents[id] = &agentRow{
-				work:         id,
-				spawnUnit:    id,
-				createdAgent: start.Start.GetCreatedAgentId().GetValue(),
-				label:        subagentLabel(start.Start.GetPrompt()),
-				description:  start.Start.GetPrompt().GetDescription(),
-				startedAt:    time.UnixMilli(start.Start.GetStartedAt().GetAtMs()),
-				order:        s.nextOrder(),
-				provenance:   provenanceAnnouncement,
-			}
+			row := &agentRow{work: id, spawnUnit: id, order: s.nextOrder(), provenance: provenanceAnnouncement}
+			row.takeStart(start.Start)
+			s.agents[id] = row
 		}
 	case *conversationv1.DetachableWork_Monitor:
 		r.applyMonitor(s, id, item.Monitor)
@@ -677,16 +685,10 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 					s.agents[id] = row
 				}
 				row.work = id
-				row.createdAgent = item.Start.GetCreatedAgentId().GetValue()
-				row.label = subagentLabel(item.Start.GetPrompt())
-				row.description = item.Start.GetPrompt().GetDescription()
-				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
+				row.takeStart(item.Start)
 			case *conversationv1.AgentSubagent_Update:
 				if row, ok := s.agents[id]; ok {
-					row.tokens = item.Update.GetProgress().GetTotalTokens()
-					if desc := item.Update.GetPrompt().GetDescription(); desc != "" {
-						row.description = desc
-					}
+					row.takeUpdate(item.Update)
 				}
 			default:
 				if _, done := s.retiredWork[id]; !done {
