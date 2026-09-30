@@ -890,7 +890,7 @@ func TestAnInjectedMemoryFileIsLoadingMemory(t *testing.T) {
 	if loading.GetMemory() == nil {
 		t.Fatalf("substatus = %+v, want memory", loading.GetSubstatus())
 	}
-	if got := loading.GetActivity().GetContextInjected().GetText(); got != "webapp/CLAUDE.md" {
+	if got := loading.GetActivity().GetUnpinned().GetTransient().GetContextInjected().GetText(); got != "webapp/CLAUDE.md" {
 		t.Fatalf("item line = %q, want the injected path", got)
 	}
 }
@@ -908,7 +908,7 @@ func TestOneLoadedSkillIsLoadingInvoked(t *testing.T) {
 	if loading.GetInvoked() == nil {
 		t.Fatalf("substatus = %+v, want invoked", loading.GetSubstatus())
 	}
-	if got := loading.GetActivity().GetContextInjected().GetText(); got != "graphify" {
+	if got := loading.GetActivity().GetUnpinned().GetTransient().GetContextInjected().GetText(); got != "graphify" {
 		t.Fatalf("item line = %q, want the skill's name", got)
 	}
 }
@@ -926,7 +926,7 @@ func TestSeveralLoadedSkillsAreLoadingDiscovered(t *testing.T) {
 	if loading.GetDiscovered() == nil {
 		t.Fatalf("substatus = %+v, want discovered", loading.GetSubstatus())
 	}
-	if got := loading.GetActivity().GetContextInjected().GetText(); got != "3 skills" {
+	if got := loading.GetActivity().GetUnpinned().GetTransient().GetContextInjected().GetText(); got != "3 skills" {
 		t.Fatalf("item line = %q, want the count", got)
 	}
 }
@@ -1380,5 +1380,47 @@ func TestAnEntryPlacementWithNoUnitIsAnError(t *testing.T) {
 				t.Fatalf("records = %+v, want the ERROR for an unaddressed placement", h.log.Records())
 			}
 		})
+	}
+}
+
+func TestSubagentRowFindsALiveRowByAnyOfItsIdentities(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{name: "the key it is held by", id: "key-1", want: true},
+		{name: "its handle", id: "work-1", want: true},
+		{name: "its spawn unit", id: "unit-1", want: true},
+		{name: "its created agent", id: "agent-1", want: true},
+		{name: "an id it is not addressed by", id: "other", want: false},
+		{name: "the empty id", id: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.agents["key-1"] = &agentRow{work: "work-1", spawnUnit: "unit-1", createdAgent: "agent-1"}
+
+			// Act
+			got := s.subagentRow(tt.id) != nil
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("subagentRow(%q) found = %v, want %v", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+func TestAnInTurnRowIsNotRememberedAtRetirement(t *testing.T) {
+	// Arrange
+	s := newWSState()
+
+	// Act
+	s.rememberRetired(&agentRow{spawnUnit: "unit-1", createdAgent: "agent-1"})
+
+	// Assert
+	if n := len(s.retiredRows); n != 0 {
+		t.Fatalf("%d retired rows kept, want none: an in-turn row is never waited on", n)
 	}
 }

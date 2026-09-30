@@ -895,9 +895,9 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"topbar.OnSessionUpdate"},
 		},
 		{
-			name:   "an mcp server's health is the topbar's",
+			name:   "an mcp server's health is the topbar's, and its change the footer's",
 			update: mcpServerUpdate(),
-			want:   []string{"topbar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "footer.OnSessionUpdate"},
 		},
 		{
 			// The vendor's ai-title was previously UNROUTED and fell to the
@@ -907,14 +907,26 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"topbar.OnSessionUpdate"},
 		},
 		{
-			name:   "a model change is the topbar's and the roster's",
+			name:   "a model change is the topbar's, the roster's and the footer's",
 			update: modelChangedUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
 		},
 		{
-			name:   "a permission mode change is the topbar's and the roster's",
+			name:   "a permission mode change is the topbar's, the roster's and the footer's",
 			update: permissionModeChangedUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
+		},
+		{
+			// Visibility only: no live-work, lifecycle or roster sink reads a
+			// network-resume wait.
+			name:   "the standing network-resume waits are the footer's alone",
+			update: networkResumeWaitsUpdate(),
+			want:   []string{"footer.OnSessionUpdate"},
+		},
+		{
+			name:   "a network-resume outcome is the footer's alone",
+			update: networkResumeOutcomeUpdate(),
+			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
 			name:   "account usage is the footer's",
@@ -930,6 +942,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			name:   "a beginning compaction is the footer's",
 			update: compactingUpdate(),
 			want:   []string{"footer.OnSessionUpdate"},
+		},
+		{
+			name: "a compaction's progress is the footer's",
+			update: &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+				CompactionProgress: &conversationv1.SessionCompactionProgress{}}},
+			want: []string{"footer.OnSessionUpdate"},
 		},
 	}
 
@@ -1020,6 +1038,23 @@ func TestRouteQueryDied(t *testing.T) {
 
 // TestUnroutedSessionArmIsWarnedAbout covers an arm with no route: a frame the
 // daemon silently drops is a fact nobody ever draws.
+func TestACompactionsProgressIsRoutedWithNoWarning(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	h.routeNow(func(w *watcher) {
+		w.routeSessionUpdateLocked(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+			CompactionProgress: &conversationv1.SessionCompactionProgress{}}})
+	})
+
+	// Assert
+	if h.hasRecord("warn", "daemon.sessionwatcher.session_update_unrouted") {
+		t.Fatal("a compaction's progress was warned about as unrouted")
+	}
+}
+
 func TestUnroutedSessionArmIsWarnedAbout(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -1072,11 +1107,11 @@ func TestActivityToolName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange / Act.
-			got := activityToolName(tt.act)
+			got := ActivityToolName(tt.act)
 
 			// Assert.
 			if got != tt.want {
-				t.Fatalf("activityToolName = %q, want %q", got, tt.want)
+				t.Fatalf("ActivityToolName = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -2691,5 +2726,33 @@ func TestAWithheldTerminalKeepsItsPlace(t *testing.T) {
 	// Assert.
 	if call := requireEvent(t, got, "feed.OnAgentTerminal"); call.place.GetAtMs() != 1_700_000_000_500 {
 		t.Fatalf("the released terminal carried place %v, want at_ms 1700000000500", call.place)
+	}
+}
+
+func TestSessionArmNamesTheCompactionAndNetworkResumeArms(t *testing.T) {
+	tests := []struct {
+		name   string
+		update *conversationv1.SessionUpdate
+		want   string
+	}{
+		{
+			name: "compaction progress",
+			update: &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+				CompactionProgress: &conversationv1.SessionCompactionProgress{}}},
+			want: "compaction_progress",
+		},
+		{name: "the standing network-resume waits", update: networkResumeWaitsUpdate(), want: "network_resume_waits"},
+		{name: "a network-resume outcome", update: networkResumeOutcomeUpdate(), want: "network_resume_outcome"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := sessionArm(tt.update)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("sessionArm = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

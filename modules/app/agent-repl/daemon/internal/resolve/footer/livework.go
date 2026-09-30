@@ -102,6 +102,7 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		// A dropped run's token units stop counting with it, exactly as its
 		// own terminal would have stopped them.
 		s.tok.forgetAgent(row.createdAgent)
+		s.rememberRetired(row)
 		delete(s.agents, unit)
 		dropped = append(dropped, "agent:"+unit)
 	}
@@ -121,7 +122,7 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 	}
 
 	for _, id := range sortedKeys(agents) {
-		if heldAgentRow(s, id) {
+		if s.subagentRow(id) != nil {
 			continue
 		}
 		// THE HANDLE, THE SPAWN UNIT AND THE CREATED AGENT ARE ONE VALUE by
@@ -163,17 +164,6 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		added = append(added, "monitor:"+id)
 	}
 	return dropped, added, readded
-}
-
-// heldAgentRow reports whether any agent row already stands for this id, under
-// any of the identities one detached run is addressed by.
-func heldAgentRow(s *wsState, id string) bool {
-	for unit, row := range s.agents {
-		if unit == id || row.work == id || row.spawnUnit == id || row.createdAgent == id {
-			return true
-		}
-	}
-	return false
 }
 
 // rowIsListed reports whether the set lists any of the identities a row is

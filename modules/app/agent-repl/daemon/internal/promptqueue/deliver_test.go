@@ -202,6 +202,24 @@ func TestDeliverPublishesSubmittingToTheFooterBeforeTheShim(t *testing.T) {
 	}
 }
 
+// THE FOOTER IS TOLD WHAT THE TURN DELIVERS, so its `submitting` line can
+// name the prompt: TurnStarted carries the prompt's text.
+func TestDeliverTellsTheFooterThePromptsText(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	turns := h.footer.startedTurns()
+	if len(turns) == 0 || turns[0] == nil || turns[0].Prompt != "hello" {
+		t.Fatalf("footer turns = %+v, want the first to carry the prompt's text", turns)
+	}
+}
+
 // A SHIM REFUSAL NEVER LEAVES THE FOOTER STUCK ON `submitting`. The failure is
 // surfaced to the caller, and the footer drops the turn rather than showing a
 // submitting phase for a turn that never ran.

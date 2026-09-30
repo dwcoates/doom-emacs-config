@@ -365,6 +365,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}
+	// THE DAEMON'S WORKSPACE WARNINGS AND ERRORS REACH THE STRIP through ONE
+	// tee at dlog's workspace-logger emit point, never a hook beside a call
+	// site: every Warn and Error a workspace logger writes is handed to the
+	// footer, which draws it as a transient line (and skips its own records).
+	p.Surfaces.BindRecordTee(footerResolver)
 	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
 	// every row it cannot place, and before the fault hook, which raises the
 	// faults the topbar carries (a failed deploy) onto every strip.

@@ -114,6 +114,9 @@ func (s *stubSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *stubSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+// BindRecordTee implements dlog.Surfaces; this double tees nothing.
+func (s *stubSurfaces) BindRecordTee(dlog.RecordTee) {}
+
 func (s *stubSurfaces) DetachDir(string) error { return nil }
 
 func (s *stubSurfaces) AttachDir(string) error { return nil }

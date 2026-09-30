@@ -29,11 +29,16 @@ import (
 //     nobody has to push them.
 //   - the NOTES are the deploy's per-workspace deferrals, read by id.
 //
-// PRECEDENCE: below a fault, above everything else (footer.proto). A deploy
-// that fails is a fault, drawn through the fault path; this line then goes.
+// IT IS SALIENT while the deploy still moves under the workspace, ranked in
+// each status arm's salient tier below the kind that explains the substatus
+// and any escalating fault (activity.go). A deploy that fails is a fault,
+// drawn through the fault path; this line then goes.
 //
-// `updated` IS MOMENTARY: it stands one momentary dwell and the resolver's own
-// successor push retires it, exactly as `interrupted` and `loading` retire.
+// `updated` IS AN EVENT, NOT A STANDING LINE (owner ruling, 2026-09-28): the
+// finished deploy blocks nothing, so the statement that ends the story takes
+// the salient line down and raises the transient `updated` on every strip,
+// with that workspace's own deferrals. No timer retires anything: the
+// transient's expiry is the client's to apply.
 
 // opDeployProgress is the operation every update-line statement is recorded
 // under.
@@ -43,8 +48,6 @@ const opDeployProgress = "daemon.footer.deploy_progress"
 type deployState struct {
 	progress *deployprogress.Progress
 	at       time.Time
-	// retire is the dwell that retires a momentary `updated`, nil otherwise.
-	retire Timer
 }
 
 // SetDeployProgress implements deployprogress.Sink: it stands (or, with nil,
@@ -59,39 +62,26 @@ func (r *resolver) SetDeployProgress(progress *deployprogress.Progress) {
 		r.log.Global().Error(opDeployProgress, "refused a deploy progress that names no phase", ctx)
 		return
 	}
+	if progress != nil && progress.Phase == deployprogress.Updated {
+		r.log.Global().Info(opDeployProgress, "the deploy finished; the footer took its line down and announced it on every strip", ctx)
+		r.mutateAll(opDeployProgress, "the footer announced a finished deploy on every strip", ctx,
+			func(s *wsState) { r.raiseUpdated(s.id, s, updateNotes(progress.Notes[s.id])) },
+			func() { r.deploy = nil })
+		return
+	}
 	r.log.Global().Info(opDeployProgress, "the footer took a deploy's progress onto every strip", ctx)
 	r.mutateAll(opDeployProgress, "the footer took a deploy's progress onto every strip", ctx,
 		func(*wsState) {}, func() { r.standDeployLocked(progress) })
 }
 
-// standDeployLocked replaces the standing progress. The caller holds r.mu.
+// standDeployLocked replaces the standing progress, nil to clear it. The caller
+// holds r.mu.
 func (r *resolver) standDeployLocked(progress *deployprogress.Progress) {
-	if r.deploy != nil && r.deploy.retire != nil {
-		r.deploy.retire.Stop()
-	}
 	if progress == nil {
 		r.deploy = nil
 		return
 	}
-	state := &deployState{progress: progress, at: r.opts.clock.Now()}
-	if progress.Phase == deployprogress.Updated {
-		state.retire = r.opts.clock.AfterFunc(r.opts.dwell, func() { r.retireDeploy(state) })
-	}
-	r.deploy = state
-}
-
-// retireDeploy is the momentary `updated` line's successor push. It retires
-// THAT statement only: a later deploy's statement is not this dwell's to end.
-func (r *resolver) retireDeploy(state *deployState) {
-	ctx := deployContext(state.progress)
-	r.log.Global().Info(opDeployProgress, "the momentary updated line's dwell elapsed; the footer retired it from every strip", ctx)
-	r.mutateAll("daemon.footer.retire_deploy_progress",
-		"the momentary updated line's dwell elapsed; the footer retired it", ctx,
-		func(*wsState) {}, func() {
-			if r.deploy == state {
-				r.deploy = nil
-			}
-		})
+	r.deploy = &deployState{progress: progress, at: r.opts.clock.Now()}
 }
 
 // updateLine is the update line for this workspace, or nil when no deploy is
@@ -119,12 +109,12 @@ func (r *resolver) updateLine(s *wsState) (*frontendv1.FooterStatusActivityUpdat
 		line.Phase = &frontendv1.FooterStatusActivityUpdate_RestartingServices{
 			RestartingServices: &frontendv1.FooterStatusActivityUpdateRestartingServices{
 				Services: updateComponents(progress.Components)}}
-	case progress.Phase == deployprogress.HandingOver:
+	default:
+		// HANDING OVER is the last phase that stands: `updated` never does
+		// (SetDeployProgress raises it as a transient), and an invalid phase
+		// is refused before it is stood.
 		line.Phase = &frontendv1.FooterStatusActivityUpdate_HandingOver{
 			HandingOver: &frontendv1.FooterStatusActivityUpdateHandingOver{}}
-	default:
-		line.Phase = &frontendv1.FooterStatusActivityUpdate_Updated{
-			Updated: &frontendv1.FooterStatusActivityUpdateUpdated{}}
 	}
 	return line, r.deploy.at
 }

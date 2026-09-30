@@ -310,6 +310,24 @@ func TestAContextCutTellsTheFooterWhatItCarries(t *testing.T) {
 	}
 }
 
+func TestAContextCutTellsTheFooterItsSpelling(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{
+		Kind: ActClear, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+	}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+
+	// Assert
+	turns := h.footer.startedTurns()
+	if len(turns) != 1 || turns[0].Prompt != "/clear" {
+		t.Fatalf("footer turn facts = %+v, want the act's own spelling as its prompt", turns)
+	}
+}
+
 // --- nothing overtakes a running /clear or /compact ------------------------
 
 // cutRunsWithAnInterjectingPromptHeld starts a context cut down the one path,

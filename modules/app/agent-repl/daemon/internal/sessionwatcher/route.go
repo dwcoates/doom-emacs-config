@@ -56,8 +56,18 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
+	case *conversationv1.SessionUpdate_McpServer:
+		// THE FOOTER ANNOUNCES THE CHANGE. The topbar draws the server's
+		// standing health; the footer's activity cell says, for its display
+		// window, that it changed (footer-activity-tiers.md, the
+		// session_change transient).
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the footer", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
+
 	case *conversationv1.SessionUpdate_FastMode,
-		*conversationv1.SessionUpdate_McpServer,
 		*conversationv1.SessionUpdate_IdentityRotated,
 		*conversationv1.SessionUpdate_Title:
 		// THE VENDOR'S ai-title RIDES HERE. It was previously unrouted and fell
@@ -80,15 +90,20 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged:
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and roster", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar, the roster and the footer", dlog.Context{
 			"arm": sessionArm(update),
 		})
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+		// The footer's session_change transient announces the change.
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_AccountUsage,
 		*conversationv1.SessionUpdate_RateLimitStatus,
-		*conversationv1.SessionUpdate_Compacting:
+		*conversationv1.SessionUpdate_Compacting,
+		// A COMPACTION'S PHASES are the footer's: its salient line while the
+		// compaction runs, and the transient that announces how it concluded.
+		*conversationv1.SessionUpdate_CompactionProgress:
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
 			"arm": sessionArm(update),
 		})
@@ -97,6 +112,19 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 	case *conversationv1.SessionUpdate_QueryDied:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		w.routeQueryDiedLocked(update)
+
+	case *conversationv1.SessionUpdate_NetworkResumeWaits,
+		*conversationv1.SessionUpdate_NetworkResumeOutcome:
+		// VISIBILITY ONLY (owner ruling, 2026-09-28): a background subagent's
+		// wait to be resumed after a network outage is the FOOTER's to draw —
+		// its agents row, its chip glyph and the edges' transients — and no
+		// other rule of this daemon reads it. It is deliberately NOT the
+		// live-work ledger's: the waiting agent's run has ended, and a wait
+		// counts toward no freeness, no close-quiet check and no drain.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "default"})
@@ -173,6 +201,12 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "title"
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died"
+	case *conversationv1.SessionUpdate_CompactionProgress:
+		return "compaction_progress"
+	case *conversationv1.SessionUpdate_NetworkResumeWaits:
+		return "network_resume_waits"
+	case *conversationv1.SessionUpdate_NetworkResumeOutcome:
+		return "network_resume_outcome"
 	default:
 		return "unset"
 	}
@@ -1607,18 +1641,19 @@ func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 		fact = &activityFact{}
 		w.facts[id] = fact
 	}
-	fact.tool = activityToolName(act)
+	fact.tool = ActivityToolName(act)
 	if start := act.GetSubagent().GetStart(); start != nil {
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "a subagent start names its created agent"})
 		fact.agent = start.GetCreatedAgentId()
 	}
 }
 
-// activityToolName names the tool a unit called, empty for units that are not
+// ActivityToolName names the tool a unit called, empty for units that are not
 // tool calls (prose, thinking, injected context). ONE PLACE: every consumer of
-// a tool name in this package reads it from here, and an arm added to the
+// a tool name reads it from here -- this package's permission notifications and
+// the footer's tool-call line alike -- and an arm added to the
 // contract without a name here is warned about at the call that needs one.
-func activityToolName(act *conversationv1.AgentActivity) string {
+func ActivityToolName(act *conversationv1.AgentActivity) string {
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Read:
 		return "Read"
