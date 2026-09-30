@@ -3,6 +3,8 @@ package desktopnotify
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -333,6 +335,66 @@ func TestNewRefusesAHalfWiredNotifier(t *testing.T) {
 
 			// Act
 			New(tc.deps)
+		})
+	}
+}
+
+func TestStoodDown(t *testing.T) {
+	live := context.Background()
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	failed := errors.New("signal: killed")
+	cases := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"a failure under an ended lifetime is a stand-down", ended, failed, true},
+		{"a failure under a live lifetime is a real failure", live, failed, false},
+		{"no failure under an ended lifetime is no stand-down", ended, nil, false},
+		{"no failure under a live lifetime is no stand-down", live, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := stoodDown(tc.ctx, tc.err)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("stoodDown = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStandDownSitesShareStoodDown fails a site that hand-rolls the
+// stand-down test instead of asking stoodDown: stoodDown's own body is the
+// one place the lifetime's end is read.
+func TestStandDownSitesShareStoodDown(t *testing.T) {
+	cases := []struct {
+		file      string
+		wantReads int
+	}{
+		{"notifier.go", 1},
+		{"summary.go", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			// Arrange
+			src, err := os.ReadFile(tc.file)
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.file, err)
+			}
+
+			// Act
+			asks := strings.Count(string(src), "stoodDown(")
+			reads := strings.Count(string(src), "ctx.Err() != nil")
+
+			// Assert
+			if asks == 0 || reads != tc.wantReads {
+				t.Fatalf("%s: stoodDown( x%d, ctx.Err() != nil x%d (want %d)", tc.file, asks, reads, tc.wantReads)
+			}
 		})
 	}
 }
