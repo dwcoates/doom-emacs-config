@@ -64,6 +64,7 @@ import type {
   HeldPromptClassificationError,
   HeldPromptClassifying,
   HeldPromptHoldForTurnEnd,
+  HeldPromptAfterToolCall,
   HeldPromptInterject,
   HeldPromptQueuedAt,
   HeldPromptSessionStartingHold,
@@ -316,6 +317,8 @@ function drawClassification(
       return drawHeldPromptClassifying(classification.value, `${path}.classifying`);
     case "interject":
       return drawHeldPromptInterject(classification.value, `${path}.interject`);
+    case "afterToolCall":
+      return drawHeldPromptAfterToolCall(classification.value, `${path}.after_tool_call`);
     case "holdForTurnEnd":
       return drawHeldPromptHoldForTurnEnd(classification.value, `${path}.hold_for_turn_end`);
     case "uninterruptibleTurn":
@@ -362,6 +365,23 @@ export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): V
   });
   return {
     status: "interject",
+    acceptedState: null,
+    detail: rationale(u.rationale),
+    offersAccept: false,
+  };
+}
+
+/**
+ * Joins the running turn after its current tool call: sent now with nothing
+ * interrupted, so it wears the green of a prompt that goes to the agent now.
+ */
+export function drawHeldPromptAfterToolCall(u: HeldPromptAfterToolCall, path: string): Verdict {
+  log.debug("drawing a held prompt joining the running turn", {
+    operation: "tray.held-prompt.after-tool-call",
+    context: { path },
+  });
+  return {
+    status: "afterToolCall",
     acceptedState: null,
     detail: rationale(u.rationale),
     offersAccept: false,
@@ -831,6 +851,8 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  * two anchors are the owner's: WAITING for the turn's end is red, INTERRUPTING
  * is green. The rest take the existing token that says the same thing:
  *
+ *   - after this tool call: the prompt goes to the agent now, joining the
+ *     running turn, so it is green like an interjection;
  *   - classifying: a model is running, the tool card's in-flight orange;
  *   - an uninterruptible turn: the prompt WAITS for the cut's end, so red;
  *   - a classification error: a failure, the error red;
@@ -846,6 +868,7 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
 export const HELD_STATUS_BADGES = {
   classifying: "run",
   interject: "ok",
+  afterToolCall: "ok",
   holdForTurnEnd: "err",
   uninterruptibleTurn: "err",
   classificationError: "err",

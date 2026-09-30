@@ -617,6 +617,9 @@ export function drawFooterActivityTransientSubmitting(
     case "interjecting":
       line.appendChild(document.createTextNode("interrupting the turn"));
       break;
+    case "afterToolCall":
+      line.appendChild(document.createTextNode("after this tool call"));
+      break;
     case "coalesced":
       line.appendChild(document.createTextNode("coalesced"));
       break;

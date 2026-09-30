@@ -679,6 +679,7 @@ describe("the transient kinds", () => {
     ["submitting", { promptLead: "fix the footer", stage: { case: "classifying", value: {} } }, ".footer-activity-submitting", "classifying · fix the footer"],
     ["submitting", { promptLead: "fix the footer", stage: { case: "interjecting", value: {} } }, ".footer-activity-submitting", "interrupting the turn · fix the footer"],
     ["submitting", { promptLead: "fix the footer", stage: { case: "coalesced", value: {} } }, ".footer-activity-submitting", "coalesced · fix the footer"],
+    ["submitting", { promptLead: "fix the footer", stage: { case: "afterToolCall", value: {} } }, ".footer-activity-submitting", "after this tool call · fix the footer"],
     ["submitting", { promptLead: "fix the footer", stage: { case: "delivered", value: {} } }, ".footer-activity-submitting", "sent · fix the footer"],
     ["hook", { name: "protect-master" }, ".footer-activity-hook", "protect-master"],
     ["contextInjected", { text: "webapp/CLAUDE.md" }, ".footer-activity-context-injected", "webapp/CLAUDE.md"],

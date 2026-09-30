@@ -2154,6 +2154,7 @@ export const emptyRoster = (): WorkspaceRoster => roster();
 export const HOLD_CLASSIFICATION_ARMS = [
   "classifying",
   "interject",
+  "afterToolCall",
   "holdForTurnEnd",
   "uninterruptibleTurn",
   "classificationError",
@@ -2177,6 +2178,8 @@ const classificationValue = (
       return { case: "classifying", value: {} };
     case "interject":
       return { case: "interject", value: { rationale: "it changes the current work" } };
+    case "afterToolCall":
+      return { case: "afterToolCall", value: { rationale: "it adds to the running work" } };
     case "holdForTurnEnd":
       return {
         case: "holdForTurnEnd",
@@ -2209,6 +2212,7 @@ export const HELD_TURN_ID = "turn-held";
 export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: string }>> = {
   classifying: { label: "classifying", detail: "queued — classifying" },
   interject: { label: "interrupting", detail: "interjects" },
+  afterToolCall: { label: "after this tool call", detail: "joins the running turn after its current tool call" },
   holdForTurnEnd: { label: "after this turn" },
   uninterruptibleTurn: { label: "after /compact", detail: "waits for /compact to finish" },
   classificationError: { label: "unclassified" },
