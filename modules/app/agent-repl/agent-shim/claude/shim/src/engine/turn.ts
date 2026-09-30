@@ -58,6 +58,7 @@ import { storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
   detachForegroundRefused,
+  invalidArgument,
   killTurnKilled,
   killTurnRefused,
   notFound,
@@ -1324,10 +1325,24 @@ export class TurnEngine {
   async detachForeground(
     request: shimv1.DetachForegroundRequest,
   ): Promise<shimv1.DetachForegroundResponse> {
+    const unit = request.unit?.value ?? "";
+    // A REQUEST NAMING NO UNIT IS INVALID INPUT, refused before anything else
+    // reads it: `backgroundTasks` with no id backgrounds EVERY foreground task
+    // (sdk.d.ts), so an empty unit must never reach the vendor. The route's
+    // validation (`validateDetachForegroundRequest`) already refuses it; this
+    // is the engine's own guard for any caller that skipped it.
+    if (unit === "") {
+      // THE CALLER IS TOLD LOUDLY (InvalidArgument); the record is debug, as
+      // the validation layer's own refusal of the same input is.
+      LOGGER.debug(
+        { rpc: "DetachForeground", field: "detach_foreground.unit.value" },
+        "refused a DetachForeground naming no unit as invalid input; the vendor was not asked",
+      );
+      throw invalidArgument("detach_foreground.unit.value: a DetachForeground must name the unit to move");
+    }
     if (this.session.identity() === undefined) {
       return detachForegroundRefused({ kind: "noSession" }, "no session has been started on this shim");
     }
-    const unit = request.unit?.value ?? "";
     const query = this.session.query();
     if (query === undefined) {
       return detachForegroundRefused({ kind: "alreadyConcluded" }, "the vendor query is dead");
@@ -1335,18 +1350,16 @@ export class TurnEngine {
     const known = this.session.live.byToolUseId(unit);
     // THE REQUEST IS NOTED BEFORE IT IS MADE: the patch that moves the unit
     // reaches the fold through the message loop, possibly before this call
-    // answers, and it must find the request already standing. A request that
-    // names no unit has no patch to be read by, so nothing is noted for it.
-    const noted = unit !== "";
-    if (noted) this.session.noteUserDetach(unit);
+    // answers, and it must find the request already standing.
+    this.session.noteUserDetach(unit);
     let live: boolean;
     try {
       live = await query.backgroundTasks(unit);
     } catch (err) {
-      if (noted) this.session.retireUserDetach(unit, "the vendor refused the request");
+      this.session.retireUserDetach(unit, "the vendor refused the request");
       throw err;
     }
-    if (noted && !live) this.session.retireUserDetach(unit, "the vendor moved nothing for the request");
+    if (!live) this.session.retireUserDetach(unit, "the vendor moved nothing for the request");
     // THE FOREGROUND TABLE IS WHAT KEEPS THE FOUR REFUSALS APART. Without it
     // the engine can only tell "the vendor holds background work for this id"
     // from "it does not", and three of the four answers collapse onto

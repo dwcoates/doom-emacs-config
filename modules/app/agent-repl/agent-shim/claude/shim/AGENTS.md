@@ -1054,6 +1054,13 @@ forever, and the run's announcement stayed open in the record.
   answer of `false` or a throw, and by the query's end; it is bounded by
   `TASK_KIND_CAPACITY` and keyed by the unit, so it can never be read by
   another unit's patch. Every other patch-moved unit stays `vendor_moved`.
+- **`backgroundTasks(unit)` MOVES THE UNIT** (the pinned SDK's documented
+  Ctrl+B equivalent): `true` is the move made at the request, `false` means
+  the vendor matched the unit to no foreground task, which a unit this shim
+  holds live and detachable answers `unsupported` ("nothing was moved").
+  A request naming no unit is `InvalidArgument` at the route's validation
+  and again at the engine, and never reaches the vendor: `backgroundTasks`
+  with no id backgrounds every foreground task.
 
 ## A prompt may JOIN the running turn (2026-09-30)
 
