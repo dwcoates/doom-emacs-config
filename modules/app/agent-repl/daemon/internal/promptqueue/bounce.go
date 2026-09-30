@@ -817,8 +817,8 @@ func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
 	q.resumeDispatchLocked(context.Background(), ws, log)
 }
 
-// resumeDispatchLocked delivers what the drain held: the queued acts first, then
-// the next prompt, exactly as a turn end would. The caller holds the delivery
+// resumeDispatchLocked delivers what the drain held, in order, exactly as a
+// turn end would. The caller holds the delivery
 // lock.
 func (q *queue) resumeDispatchLocked(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	if !q.releaseDrainHoldsLocked(ctx, ws, log) {
@@ -828,7 +828,6 @@ func (q *queue) resumeDispatchLocked(ctx context.Context, ws ids.WorkspaceID, lo
 		log.Debug(opBounce, "a turn is already in flight on the new shim; the held prompts wait for its end", nil)
 		return
 	}
-	q.drainActs(ctx, ws, log)
 	delivered, err := q.popAndDeliver(ctx, ws, log)
 	if err != nil {
 		log.Error(opBounce, "a prompt held through the bounce was not delivered", dlog.Context{"cause": err.Error()})

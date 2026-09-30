@@ -81,8 +81,6 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		return
 	}
 
-	q.drainActs(ctx, ws, log)
-
 	delivered, err := q.popAndDeliver(ctx, ws, log)
 	if err != nil {
 		log.Error(opTurnEnded, "the next held prompt was not delivered", dlog.Context{"cause": err.Error()})
@@ -205,27 +203,37 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
 		return false, nil
 	}
-	next, ok, withheld, err := q.nextDeliverable(ctx, ws)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		if withheld > 0 {
-			// AN EDIT IS WHY NOTHING WENT. Said at INFO, because "the turn
-			// ended and my prompt did not go" is exactly the question it
-			// answers.
-			log.Info(opTurnEnded, "a held prompt is being edited; it and every prompt after it stay held",
-				dlog.Context{"withheld": withheld})
-			return false, nil
+	// A HELD ACT OPENS NO TURN, so the pop goes on to the entry behind it:
+	// every act at the head of the queue is applied, in order, and the first
+	// prompt behind them is delivered as the turn they preceded. A context cut
+	// is a turn, so it ends the pop like any prompt.
+	delivered := false
+	for {
+		next, ok, withheld, err := q.nextDeliverable(ctx, ws)
+		if err != nil {
+			return delivered, err
 		}
-		log.Debug(opTurnEnded, "nothing is waiting to be delivered", nil)
-		return false, nil
+		if !ok {
+			if withheld > 0 {
+				// AN EDIT IS WHY NOTHING WENT. Said at INFO, because "the turn
+				// ended and my prompt did not go" is exactly the question it
+				// answers.
+				log.Info(opTurnEnded, "a held prompt is being edited; it and every prompt after it stay held",
+					dlog.Context{"withheld": withheld})
+				return delivered, nil
+			}
+			log.Debug(opTurnEnded, "nothing is waiting to be delivered", nil)
+			return delivered, nil
+		}
+		log.Info(opTurnEnded, "delivering the next held entry", dlog.Context{"next_turn": string(next.Turn), "session_act": next.Act != nil})
+		if err := q.deliverHeld(ctx, ws, next, log); err != nil {
+			return delivered, err
+		}
+		delivered = true
+		if next.Act == nil {
+			return true, nil
+		}
 	}
-	log.Info(opTurnEnded, "delivering the next held prompt", dlog.Context{"next_turn": string(next.Turn)})
-	if err := q.deliverHeld(ctx, ws, next, log); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // nextDeliverable picks the hold a turn end delivers, and counts the holds a
@@ -350,10 +358,6 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
 			q.reviveInBackground(ctx, ws, log)
-			return
-		}
-		if !held {
-			q.releaseActsLocked(ctx, ws, log)
 		}
 		return
 	}
@@ -375,34 +379,9 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
-	if !held {
-		q.releaseActsLocked(ctx, ws, log)
-	}
 	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
 		log.Error(opLeaseChange, "the released hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
-}
-
-// releaseActsLocked runs the acts queued behind a lease the moment its release
-// leaves nothing ahead of them, exactly as a turn end runs them BEFORE it pops
-// a prompt: a /compact queued while the lease stood is never overtaken by a
-// prompt the release lets go. A handover's adoption is the case that needs it
-// -- the carried acts are installed, the turn they waited behind ended during
-// the move, and the release of the handover hold is the only edge left to run
-// them. A draining workspace or a running turn keeps them queued: the bounce's
-// finish, or the turn's end, drains them. The caller holds the delivery lock
-// and has read that no lease stands.
-func (q *queue) releaseActsLocked(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
-	if q.isDraining(ws) {
-		return
-	}
-	if _, live := q.deps.Client(ws); !live {
-		return
-	}
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
-		return
-	}
-	q.drainActs(ctx, ws, log)
 }
 
 // sameHold reports whether a standing hold already carries the condition the

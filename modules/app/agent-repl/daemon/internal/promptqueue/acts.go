@@ -18,8 +18,18 @@ import (
 // overtake a prompt the user already queued: a model change that jumped the
 // queue would run the queued prompt on a model the user did not choose for it.
 //
-// An act arriving while a turn runs or a prompt waits is QUEUED behind them and
-// drained at the next turn end, in submission order.
+// AN ACT THAT MUST WAIT IS A HELD ENTRY, EXACTLY AS A PROMPT IS (owner rule,
+// 2026-09-30): durable, on the tray, in first-in-first-out order with the
+// prompts around it, and never classified. A context cut is held as the prompt
+// whose text is the command (deliver runs it as the cut); a model or
+// permission-mode change is held with its act (wsm.HeldAct). It used to wait
+// in process memory instead: invisible on the tray, lost to a restart, and
+// run AHEAD of every prompt held before it (2026-09-30: a /compact typed during
+// a turn never appeared as queued).
+//
+// THE DECISION IS TAKEN UNDER THE DELIVERY LOCK, the lock a turn end pops
+// under, so an act can neither start beside a turn that begins in the instant
+// after the check nor be missed by a turn end that pops in that instant.
 func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Act) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -43,49 +53,117 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 		}
 	}
 
-	queued, err := q.somethingIsAhead(ctx, ws)
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
+	running, ahead, err := q.whatIsAhead(ctx, ws)
 	if err != nil {
 		log.Error(opAct, "could not tell whether anything is ahead of the act",
 			dlog.Context{"cause": err.Error()})
 		return err
 	}
-	if queued {
-		state := q.state(ws)
-		q.mu.Lock()
-		if state.bounce != nil && state.bounce.sealed {
-			// THE MOVE HAS SEALED WHAT IT CARRIES: an act queued here now
-			// would be run by no daemon. It is refused so the caller asks the
-			// daemon the workspace moves to.
-			q.mu.Unlock()
-			refusalLevel(ctx, log, log.Info)(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
-			return fmt.Errorf("session act %q on %q: %w", act.Kind, ws, bounce.ErrMovedAway)
-		}
-		state.acts = append(state.acts, act)
-		depth := len(state.acts)
-		q.mu.Unlock()
-		log.Info(opAct, "the act is queued behind the work already in the path",
-			dlog.Context{"queued_acts": depth})
-		return nil
+	if !ahead {
+		return q.runAct(ctx, ws, act, log)
 	}
-	return q.runAct(ctx, ws, act, log)
+	if q.sealedForMove(ws) {
+		// THE MOVE HAS SEALED WHAT IT CARRIES: an act held here now would be
+		// run by no daemon. It is refused so the caller asks the daemon the
+		// workspace moves to.
+		refusalLevel(ctx, log, log.Info)(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
+		return fmt.Errorf("session act %q on %q: %w", act.Kind, ws, bounce.ErrMovedAway)
+	}
+	sub := heldActSubmission(ws, act)
+	if _, err := q.hold(ctx, sub, running, nil, log); err != nil {
+		return err
+	}
+	log.Info(opAct, "the act is held behind the work already in the path, in order with the prompts around it",
+		dlog.Context{"held_turn": string(sub.Turn), "running_turn": string(running)})
+	return nil
 }
 
-// somethingIsAhead reports whether a turn is running or a prompt is standing in
-// the path, which is what an act must queue behind.
-func (q *queue) somethingIsAhead(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	// A BOUNCE IS AHEAD OF EVERYTHING: the act applies to the new shim, and
-	// the bounce's finish drains the acts before any prompt.
-	if q.isDraining(ws) {
-		return true, nil
+// heldActSubmission is the held entry an act that must wait becomes: a
+// context cut as the prompt whose text is the command, any other act as an
+// entry carrying the act and shown as its slash-command form.
+func heldActSubmission(ws ids.WorkspaceID, act Act) Submission {
+	turn := act.Turn
+	if turn == "" {
+		turn = wsm.NewTurnID()
 	}
+	origin := act.Origin
+	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
+	}
+	sub := Submission{WS: ws, Turn: turn, Origin: origin}
+	switch act.Kind {
+	case ActClear, ActCompact:
+		_, literal := contextCutCommand(act.Kind)
+		sub.Said = saidOf(joinArg(literal, act.Value))
+	case ActSetModel:
+		sub.Act = &wsm.HeldAct{Kind: wsm.ActModel, Value: act.Value}
+		sub.Said = saidOf(joinArg("/model", act.Value))
+	case ActSetPermissionMode:
+		sub.Act = &wsm.HeldAct{Kind: wsm.ActPermissionMode, Value: act.Value}
+		sub.Said = saidOf("permission mode: " + act.Value)
+	}
+	return sub
+}
+
+// actOfHeld is the act a held entry carrying one runs as.
+func actOfHeld(sub Submission) Act {
+	kind := ActSetModel
+	if sub.Act.Kind == wsm.ActPermissionMode {
+		kind = ActSetPermissionMode
+	}
+	return Act{Kind: kind, Value: sub.Act.Value, Turn: sub.Turn, Origin: sub.Origin}
+}
+
+// joinArg is a command literal with its argument, when it has one.
+func joinArg(literal, arg string) string {
+	if arg == "" {
+		return literal
+	}
+	return literal + " " + arg
+}
+
+// saidOf is a text-only submission.
+func saidOf(text string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+		Blocks: []*conversationv1.UserContentBlock{{
+			Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
+		}},
+	}}
+}
+
+// whatIsAhead reports whether anything stands ahead of a new act -- a bounce
+// draining, a turn running (or a context cut recorded as the running turn),
+// or a held entry -- and the running turn when one is. The caller holds the
+// delivery lock.
+func (q *queue) whatIsAhead(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error) {
+	var running ids.TurnID
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
-		return true, nil
+		running = *watcher.TurnInFlight()
+	} else if cut, ok := q.runningCut(ws); ok {
+		running = cut.turn
+	}
+	// A BOUNCE IS AHEAD OF EVERYTHING: the act applies to the new shim.
+	if q.isDraining(ws) || running != "" {
+		return running, true, nil
 	}
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
-		return false, fmt.Errorf("read the holds for %q: %w", ws, err)
+		return "", false, fmt.Errorf("read the holds for %q: %w", ws, err)
 	}
-	return len(standing) > 0, nil
+	return "", len(standing) > 0, nil
+}
+
+// sealedForMove reports whether a move has sealed what the workspace's queue
+// carries.
+func (q *queue) sealedForMove(ws ids.WorkspaceID) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	state, ok := q.states[ws]
+	return ok && state.bounce != nil && state.bounce.sealed
 }
 
 // runAct performs one act against the shim now.
@@ -301,43 +379,4 @@ func contextCutCommand(kind string) (conversationv1.SessionCommand, string) {
 		return conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, "/compact"
 	}
 	return conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear"
-}
-
-// drainActs runs the acts queued behind the path, in submission order. It is
-// called at a turn end, BEFORE the next prompt is popped, so an act the user
-// issued while a turn ran applies to the prompt that follows it.
-//
-// A CONTEXT CUT ENDS THE DRAIN. It runs as the session's turn, so the acts
-// queued after it wait for its end exactly as a prompt does, and are drained
-// then, still in order.
-func (q *queue) drainActs(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
-	q.mu.Lock()
-	state, ok := q.states[ws]
-	if !ok || len(state.acts) == 0 {
-		q.mu.Unlock()
-		return
-	}
-	pending := state.acts
-	state.acts = nil
-	q.mu.Unlock()
-
-	for i, act := range pending {
-		if err := q.runAct(ctx, ws, act, log.With(dlog.Context{"act": act.Kind, "value": act.Value})); err != nil {
-			log.Error(opAct, "a queued session act was not delivered at the turn's end",
-				dlog.Context{"act": act.Kind, "cause": err.Error()})
-			continue
-		}
-		cut, running := q.runningCut(ws)
-		if !running || i == len(pending)-1 {
-			continue
-		}
-		rest := pending[i+1:]
-		q.mu.Lock()
-		state.acts = append(append([]Act(nil), rest...), state.acts...)
-		q.mu.Unlock()
-		log.Info(opAct, "a context cut is running; the acts queued after it wait for its end", dlog.Context{
-			"session_act_turn": string(cut.turn), "session_act": cut.command.String(), "queued_acts": len(rest),
-		})
-		return
-	}
 }

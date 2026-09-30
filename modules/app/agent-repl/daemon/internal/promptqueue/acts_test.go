@@ -99,23 +99,64 @@ func TestAQueuedActRunsAtTheTurnsEnd(t *testing.T) {
 	}
 }
 
-func TestAQueuedActRunsBeforeTheNextPromptIsPopped(t *testing.T) {
-	// Arrange: the model change must apply to the prompt that follows it.
+func TestAHeldActWaitsBehindThePromptHeldBeforeIt(t *testing.T) {
+	// Arrange: first in, first out across prompts and acts (owner rule,
+	// 2026-09-30): the prompt was held first, so it runs first.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
+
 	// Act
 	h.watcher.idle()
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
 	// Assert
-	if len(h.sender.models) != 1 {
-		t.Fatalf("models = %v, want the act run", h.sender.models)
-	}
 	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
-		t.Fatalf("started = %v, want the held prompt delivered after the act", started)
+		t.Fatalf("started = %v, want the prompt held first delivered first", started)
+	}
+	if len(h.sender.models) != 0 {
+		t.Fatalf("models = %v, want the act still waiting behind the prompt", h.sender.models)
+	}
+}
+
+func TestAHeldActIsAppliedAtTheEndOfThePromptAheadOfIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseCompleted)
+
+	// Assert
+	if len(h.sender.models) != 1 || h.sender.models[0] != "opus" {
+		t.Fatalf("models = %v, want the act applied after the prompt ahead of it", h.sender.models)
+	}
+}
+
+func TestAHeldActIsOnTheTrayInOrder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 2 || standing[0].Turn != "t1" || standing[1].Act == nil || standing[1].Act.Value != "opus" {
+		t.Fatalf("standing = (%+v, %v), want the prompt then the held model change", standing, err)
 	}
 }
 
@@ -424,10 +465,13 @@ func TestAUserInterruptOfACompactStillEndsItAndDeliversWhatWaited(t *testing.T) 
 func actQueuedBehindARunningTurn(t *testing.T, h *harness) {
 	t.Helper()
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "and then this")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
 }
 
 func TestATurnEndThatStartsAQueuedCompactDeliversNoHeldPromptIntoIt(t *testing.T) {
@@ -443,43 +487,44 @@ func TestATurnEndThatStartsAQueuedCompactDeliversNoHeldPromptIntoIt(t *testing.T
 	}
 }
 
-func TestAPromptKeptBehindAStartedCompactIsRecordedAtInfo(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	actQueuedBehindARunningTurn(t, h)
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-	// Assert
-	for _, r := range h.log.Records() {
-		if r.Level == "info" && r.Operation == opTurnEnded && r.Context["session_act_turn"] == "cut-1" &&
-			r.Context["session_act"] == conversationv1.SessionCommand_SESSION_COMMAND_COMPACT.String() {
-			return
-		}
-	}
-	t.Fatalf("records = %+v, want an info naming the running act and its turn", h.log.Records())
-}
-
-func TestAStillClassifyingPromptIsNotDeliveredIntoACompactTheTurnEndStarted(t *testing.T) {
-	// Arrange: the prompt's verdict is still with the model when the turn
-	// ends and the queued /compact starts.
+func TestAPromptQueuedBehindAHeldCompactIsNeverClassified(t *testing.T) {
+	// Arrange: a /compact held behind the running turn, then a prompt the
+	// classifier would rule interrupting.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
 		t.Fatalf("SubmitSessionAct: %v", err)
 	}
 	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
-	release := h.judge.hold()
+
+	// Act
 	if _, err := h.q.Submit(context.Background(), submission("t1", "actually, do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	<-h.judge.asking()
+	h.q.waitForClassifications()
+
+	// Assert: the act ahead is never interrupted, so the model is not asked.
+	if asked := h.judge.questions(); len(asked) != 0 {
+		t.Fatalf("the classifier was asked %v, want nothing asked about a prompt behind a session act", asked)
+	}
+}
+
+func TestAPromptQueuedBehindAHeldCompactIsNotDeliveredIntoIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "read the doc and continue")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
 	// Act
 	h.watcher.idle()
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-	h.watcher.running("cut-1")
-	release()
-	h.q.waitForClassifications()
+
 	// Assert
 	if started := h.sender.started(); len(started) != 1 || started[0] != "cut-1" {
 		t.Fatalf("started = %v, want the compaction alone", started)

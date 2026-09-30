@@ -364,8 +364,10 @@ func TestInterjectWaitsForTheTurnsRealEndBeforeDelivering(t *testing.T) {
 	}
 }
 
-func TestInterjectMovesThePromptToTheSemanticHead(t *testing.T) {
-	// Arrange: an older prompt is already waiting, and the interjection jumps it.
+func TestAnInterruptVerdictAgainstAQueuedPromptCoalescesTheTwo(t *testing.T) {
+	// Arrange: an older prompt is already queued, and the next one is ruled to
+	// interrupt it (owner rule, 2026-09-30): nothing has started, so the two
+	// are folded into one.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
@@ -373,20 +375,97 @@ func TestInterjectMovesThePromptToTheSemanticHead(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
-	if _, err := h.q.Submit(context.Background(), submission("jumper", "do it the other way")); err != nil {
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseKilled)
-	// Assert
-	if started := h.sender.started(); len(started) != 1 || started[0] != "jumper" {
-		t.Fatalf("started = %v, want the interjecting prompt first", started)
+
+	// Assert: one entry, the older one, carrying both, marked coalesced.
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 1 || standing[0].Turn != "older" || !standing[0].Coalesced {
+		t.Fatalf("standing = (%+v, %v), want the older prompt alone, coalesced", standing, err)
+	}
+	if got := saidText(standing[0].Said); got != "an earlier question\ndo it the other way" {
+		t.Fatalf("merged text = %q, want the older prompt's text then the later one's", got)
+	}
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want nothing interrupted: the prompt ahead had not started", killed)
 	}
 }
 
+func TestAPromptJudgedAgainstAQueuedPromptIsJudgedAgainstThatPromptsText(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("later", "and another")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	asked := h.judge.questions()
+	if len(asked) != 2 || asked[1][0] != "an earlier question" {
+		t.Fatalf("asked = %v, want the later prompt judged against the queued one ahead of it", asked)
+	}
+}
+
+func TestACoalescedPromptIsDeliveredAsOneTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "older" {
+		t.Fatalf("started = %v, want the coalesced prompt as the one turn", started)
+	}
+}
+
+func TestACoalescedPromptTellsTheFooter(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the queued prompt"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if !logged(h.log.Records(), "info", opClassify, "the prompt was ruled to interrupt a prompt that had not started; it is folded into it") {
+		t.Fatalf("the coalescing was not recorded at info: %v", h.log.Records())
+	}
+}
 func TestARefusedInterruptReturnsThePromptToHeld(t *testing.T) {
 	tests := []struct {
 		name    string
