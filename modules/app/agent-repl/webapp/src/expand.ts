@@ -65,6 +65,20 @@ export const CAPPED_CLASSES = [
   "bubble-scroll",
 ] as const;
 
+/**
+ * The DOM event a feed item's OWN expansion dispatches from the expanded
+ * element, bubbling, when the READER expanded it (a sub-feed bubble's fold, a
+ * compaction's summary fold). The root feed, which owns the scroll box,
+ * centers the item's row on it (`itemExpanded`). The capped sections this
+ * module toggles center through the click owner's own callback instead.
+ */
+export const ITEM_EXPANDED_EVENT = "feed-item-expanded";
+
+/** Announce that the reader expanded the feed item EL belongs to. */
+export function announceItemExpanded(el: HTMLElement): void {
+  el.dispatchEvent(new CustomEvent(ITEM_EXPANDED_EVENT, { bubbles: true }));
+}
+
 /** Selector matching every capped section (an element may carry several). */
 export const CAPPED_SELECTOR = CAPPED_CLASSES.map((c) => `.${c}`).join(", ");
 
