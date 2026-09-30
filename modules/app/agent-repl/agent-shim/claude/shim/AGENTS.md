@@ -1039,7 +1039,12 @@ forever, and the run's announcement stayed open in the record.
 - **A PATCH STATES THAT WORK MOVED, NEVER WHY**, so a shell it moves is
   announced `conversation.v1.DetachedCauseVendorMoved`; its own tool result
   restates the row with the real cause when it reaches the shim. An agent
-  moved by a patch keeps `by_user`.
+  moved by a patch is announced `vendor_moved` too (2026-09-30), and nothing
+  restates it: the agent's own tool result is the `async_launched` launch
+  receipt, whose declared shape (`AgentOutput` in the SDK's `sdk-tools.d.ts`)
+  has no cause field, and the vendor also moves agents on its own
+  (`CLAUDE_AUTO_BACKGROUND_TASKS`). No capture holds a moved agent's frames
+  (`ctrl-b-detach-of-foreground-subagent` asked too early and moved nothing).
 
 ## A prompt may JOIN the running turn (2026-09-30)
 

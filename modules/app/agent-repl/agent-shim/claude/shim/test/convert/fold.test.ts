@@ -2424,6 +2424,45 @@ describe("the calls in flight", () => {
     expect(heldIds(fold)).toEqual(["toolu_spawn"]);
   });
 
+  it("keeps a patch-moved agent `vendor_moved` through its launch receipt, which states no cause", () => {
+    // Arrange
+    const fold = createFold();
+    const messages = [
+      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "count" })]),
+      {
+        type: "system",
+        subtype: "task_started",
+        uuid: "uuid-start",
+        session_id: "session-1",
+        task_id: "a-moved",
+        tool_use_id: "toolu_spawn",
+        task_type: "local_agent",
+        description: "count",
+        is_backgrounded: false,
+      } as unknown as SdkMessage,
+      {
+        type: "system",
+        subtype: "task_updated",
+        uuid: "uuid-patch",
+        session_id: "session-1",
+        task_id: "a-moved",
+        tool_use_id: "toolu_spawn",
+        patch: { is_backgrounded: true },
+      } as unknown as SdkMessage,
+      toolResult("toolu_spawn", { ...LAUNCH_RECEIPT, agentId: "a-moved" }),
+    ];
+
+    // Act
+    const discriminators = messages.flatMap((message) =>
+      fold.onSdkMessage(message, foldContext()).entries.map((entry) => entry.source.discriminator),
+    );
+
+    // Assert
+    expect(discriminators.filter((d) => d.startsWith("agent_frame.detached_work.detached"))).toEqual([
+      "agent_frame.detached_work.detached.vendor_moved",
+    ]);
+  });
+
   it("holds nothing after a turn that ended on its own", () => {
     // Arrange: a skill whose document never reaches this stream.
     const fold = foldEach([
