@@ -100,6 +100,33 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
       Find the auto-collapse-on-scroll owner in `webapp/src/feed/` /
       `scroll.ts`; test with the item partly visible (stays open) and fully
       scrolled out (collapses), both directions.
+4b. SPLIT THE INTERRUPT VERDICT (owner, 2026-09-30; lands WITH the
+    held-queue fix, same unit of work). Verdicts: `queue` (wait for the turn's
+    end), `after_tool_call` (reaches the running turn at its next tool
+    boundary; nothing is cut, no rejection text), `interrupt` (cut now,
+    because the prompt invalidates the work; rare). Unsure between the last
+    two: `after_tool_call`. A real `interrupt` delivers the prompt with a
+    daemon-attached note saying the work was cut because this prompt changes
+    it (follow it, don't stop and wait), naming the classifier's reason.
+    Coalescing unchanged (either non-`queue` verdict against a still-queued
+    prompt folds into it). Footer: the interjecting stage splits into "after
+    this tool call" and "interrupting" (new arm on
+    `FooterActivityTransientSubmitting.stage`); the drawer keeps a pending
+    after-tool-call prompt until delivered; a turn blocked on a permission or
+    question shows the prompt as waiting on that answer. Check whether
+    `wsm.ArmInterject` is persisted (schema migration). Classifier prompt and
+    parsing to three verdicts.
+    MECHANISM, SETTLED BY A LIVE PROBE (SDK 0.3.280, Haiku, 2026-09-30): a
+    user message pushed into the streaming input while a Bash call ran was
+    folded into the RUNNING turn right after the tool result (one result,
+    `user_message_uuids` listing both). Documented in `sdk.d.ts`: "queued user
+    message folded into the running turn between tool rounds". So the shim
+    delivers `after_tool_call` by pushing the prompt into its input stream
+    with NO interrupt; the `PostToolUse` fallback is not needed. The daemon
+    binds delivery by `user_message_uuids`.
+    CONTEXT FOR ME: the owner's interrupts in this session were additions,
+    never rejections; the vendor's "tool use was rejected" text on an
+    interjection is exactly what this item removes.
 5. Docs: `AGENTS.md` footer section matches what is built (four tiers, shared
    salient kinds, 80% rule, submitting stages); prompt-queue act handling;
    one line per landed fix in `docs/REMEDIATION-CHANGELOG.md` (combined model,
