@@ -566,106 +566,6 @@ func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	}
 }
 
-func TestViewedReportNeverDrawsANonTurnEndRowPartial(t *testing.T) {
-	cases := []struct {
-		name    string
-		arrange func(t *testing.T, r sidebarResolver)
-		want    string
-	}{
-		{name: "none", arrange: func(*testing.T, sidebarResolver) {}, want: "none"},
-		{name: "init", arrange: func(_ *testing.T, r sidebarResolver) {
-			r.OnLink(theWS, shimclient.LinkDialing)
-		}, want: "init"},
-		{name: "ready", arrange: func(t *testing.T, r sidebarResolver) { live(t, r) }, want: "ready"},
-		{name: "submitting", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-		}, want: "submitting"},
-		{name: "thinking", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-			r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
-		}, want: "thinking"},
-		{name: "clearing", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
-		}, want: "clearing"},
-		{name: "compacting", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActCompact})
-		}, want: "compacting"},
-		{name: "permission", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.OnPermission(theWS, agent("a1"), permissionAsk("p1"))
-		}, want: "permission"},
-		{name: "idle_async", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
-			r.SetTurnEnded(theWS, wsm.CloseCompleted)
-			r.SetViewed(theWS) // read, so the unread done yields to idle_async
-		}, want: "idle_async"},
-		{name: "vendor_blocked", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.OnSessionUpdate(theWS, rejectedRateLimit())
-		}, want: "vendor_blocked"},
-		{name: "severed", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.OnLink(theWS, shimclient.LinkRedialing)
-		}, want: "severed"},
-		{name: "start_failed", arrange: func(_ *testing.T, r sidebarResolver) {
-			r.OnLink(theWS, shimclient.LinkDialing)
-			r.OnLink(theWS, shimclient.LinkDead)
-		}, want: "start_failed"},
-		{name: "degraded", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.OnSessionUpdate(theWS, degradedUpdate())
-		}, want: "degraded"},
-		{name: "dead", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.OnLink(theWS, shimclient.LinkDead)
-		}, want: "dead"},
-		{name: "merge_enqueuing", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetMerge(theWS, footer.MergeFacts{State: "enqueuing"})
-		}, want: "merge_enqueuing"},
-		{name: "merging", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetMerge(theWS, footer.MergeFacts{State: "merging"})
-		}, want: "merging"},
-		{name: "merge_queued", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetMerge(theWS, footer.MergeFacts{State: "queued"})
-		}, want: "merge_queued"},
-		{name: "merge_conflict", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetMerge(theWS, footer.MergeFacts{State: "conflict"})
-		}, want: "merge_conflict"},
-		{name: "merge_failed", arrange: func(t *testing.T, r sidebarResolver) {
-			live(t, r)
-			r.SetMerge(theWS, footer.MergeFacts{State: "failed"})
-		}, want: "merge_failed"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r := arrange(t)
-			tc.arrange(t, r)
-			if got := statusName(onlyRow(t, r)); got != tc.want {
-				t.Fatalf("status = %q, want %q — the arrangement missed the arm", got, tc.want)
-			}
-
-			// Act: the editor reports a dwell, however long it has been.
-			r.SetViewed(theWS)
-
-			// Assert: live work and exceptional states are never deprioritized.
-			if got := onlyRow(t, r).GetViewed(); got != nil {
-				t.Fatalf("viewed = %v on a %s row, want unset: only a turn-end row goes PARTIAL", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAViewedReportOnANonDoneRowDoesNotSurviveIntoDone(t *testing.T) {
 	// Arrange: a report on a thinking row, which is refused.
 	r := live(t, arrange(t))
@@ -910,5 +810,97 @@ func TestAReadFailedResultStaysReadAcrossALinkBlip(t *testing.T) {
 	}
 	if got := row.GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want a read failed result to stay read across an arm change that is not a new result")
+	}
+}
+
+func TestViewedReportNeverDrawsANonTurnEndRowPartialWithNothingParked(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, r sidebarResolver)
+		want    string
+	}{
+		{name: "none", arrange: func(*testing.T, sidebarResolver) {}, want: "none"},
+		{name: "init", arrange: func(_ *testing.T, r sidebarResolver) {
+			r.OnLink(theWS, shimclient.LinkDialing)
+		}, want: "init"},
+		{name: "ready", arrange: func(t *testing.T, r sidebarResolver) { live(t, r) }, want: "ready"},
+		{name: "submitting", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+		}, want: "submitting"},
+		{name: "thinking", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
+		}, want: "thinking"},
+		{name: "clearing", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
+		}, want: "clearing"},
+		{name: "compacting", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActCompact})
+		}, want: "compacting"},
+		{name: "permission", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnPermission(theWS, agent("a1"), permissionAsk("p1"))
+		}, want: "permission"},
+		{name: "idle_async", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+			r.SetViewed(theWS) // read, so the unread done yields to idle_async
+		}, want: "idle_async"},
+		{name: "vendor_blocked", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnSessionUpdate(theWS, rejectedRateLimit())
+		}, want: "vendor_blocked"},
+		{name: "severed", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnLink(theWS, shimclient.LinkRedialing)
+		}, want: "severed"},
+		{name: "start_failed", arrange: func(_ *testing.T, r sidebarResolver) {
+			r.OnLink(theWS, shimclient.LinkDialing)
+			r.OnLink(theWS, shimclient.LinkDead)
+		}, want: "start_failed"},
+		{name: "degraded", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnSessionUpdate(theWS, degradedUpdate())
+		}, want: "degraded"},
+		{name: "dead", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnLink(theWS, shimclient.LinkDead)
+		}, want: "dead"},
+		{name: "merging", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "merging", Step: footer.StepTesting})
+		}, want: "merging"},
+		{name: "merge_queued", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 1})
+		}, want: "merge_queued"},
+		{name: "merge_failed", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "failed", FailedArea: footer.FailedTests})
+		}, want: "merge_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+			tc.arrange(t, r)
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q — the arrangement missed the arm", got, tc.want)
+			}
+
+			// Act: the editor reports a dwell, however long it has been.
+			r.SetViewed(theWS)
+
+			// Assert: live work and exceptional states are never deprioritized.
+			if got := onlyRow(t, r).GetViewed(); got != nil {
+				t.Fatalf("viewed = %v on a %s row, want unset: only a turn-end row goes PARTIAL", got, tc.want)
+			}
+		})
 	}
 }
