@@ -608,6 +608,14 @@ lands in another run's card.
 - A CLAIM IS STATED: `spool-claim` (INFO, path, task, activity) names the kind
   the spool is read as. A refusal (two claims, a path mismatch) is stated at
   ERROR once per path and verbose on every later rescan.
+- THE SHIM'S SHELL-RUN CLAIMS ARE READ ONCE PER RESCAN (`claims.go`,
+  landed change 4, 2026-09-30): `GetShellRunClaims` for the task ids of the
+  held shell spools, and each claim whose owning book's transcript this
+  sidecar has attributed claims its spool through the same `TaskSpawned`
+  observation a launch uses. That is how a shell the vendor moved to the
+  background with no launch in any transcript (a `task_updated` patch) is
+  read. The prose matcher also reads the timeout sentence ("did not complete
+  within its 600s timeout and was moved to the background (ID: X)").
 - A RENAMED CLAIMED SPOOL IS FOLLOWED by its `dev:inode` identity
   (`followRename`), never by its name: the same identity as the watched old
   path re-points the claim, anything else is resolved as a new spool.

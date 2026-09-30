@@ -110,8 +110,10 @@ and are contract on the same terms:
 | `data-tier` | the footer's `.footer-activity` cell (src/footer/activity.ts) | `salient` \| `transient` \| `quiet` \| `enduring`: the tier DRAWN — the daemon's salient line, or, in the unpinned tiers, the transient while the client clock is before its `expiry.expires_at_ms`, then the quiet-stretch line when one stands (only under `working` and `background`), then the enduring line. The cell's `data-arm` is then the salient or transient kind's case name, `quietStretch`, or `enduring` | fa-webapp (footer activity tiers); `quiet` since the combined model |
 | `.footer-activity-transient` + `data-datum="agent"` | a transient raised by a subagent's work: the line's wrapper, and the `.footer-activity-agent` label span in front of it (identity blue, `activityDatumClass("agent")`) | the subagent's label, verbatim; absent for the main agent | fa-webapp |
 | `.footer-activity-enduring` + `data-line` / `.footer-context-window` | the enduring line (it inherits the retired `.footer-activity-rate-limited` layout: figures elastic, read-age rigid) and its context-fill span, whose percentage wears `data-datum="percent"` | `data-line`: the ONE line the daemon chose by the 80% rule, `usage` \| `contextWindow` \| `unobserved` (drawn empty) | fa-webapp; one line since the combined model |
-| `data-stage` + `.footer-activity-submitting` | the `submitting` transient's line: the stage, then the prompt's first line | the stage's case name: `held` (its "queued 2/3" place wears `data-datum="position"`) \| `classifying` \| `interjecting` \| `coalesced` \| `delivered` | the combined model |
+| `data-stage` + `.footer-activity-submitting` | the `submitting` transient's line: the stage, then the prompt's first line | the stage's case name: `held` (its "queued 2/3" place wears `data-datum="position"`) \| `classifying` \| `interjecting` \| `afterToolCall` ("after this tool call") \| `coalesced` \| `delivered` | the combined model; `afterToolCall` since the verdict split |
 | `data-arm` + `.footer-activity-rate-limit` | the salient vendor rate-limit line, painted in the allowance verdict's colour (`allowanceStatusClass`) | the verdict's case name: `allowedWarning` \| `rejected`; its percentage wears `data-datum="percent"` and its reset a `[data-countdown]` span | the combined model |
+| `.footer-next-attempt` + `[data-countdown]` / `data-overdue` | the salient `retrying` line's next-attempt span: "next try in 12s", ticking off `FooterStatusActivityRetrying.next_attempt`, then "next try overdue by 2m" once the instant passes | `data-overdue` present exactly while the promised attempt is past due, so a stalled vendor reads as a stall; the line also names "of N" when `max_attempt` is set | retry countdown, 2026-09-30 |
+| `.footer-activity-api-restored` | the `api_restored` transient: "API answering again after 8 failed attempts" | — | retry countdown, 2026-09-30 |
 | `data-edge` + `.footer-activity-network-resume` | the `network_resume` transient's line | the edge's case name: `waiting` \| `resumed` \| `gaveUp` \| `abandoned`; `waiting` carries a `.footer-gives-up[data-countdown]` span | fa-webapp |
 | `.footer-chip-waiting` + `data-waiting-for-api` | the agents chip's waiting-for-the-API glyph holder, whose `.footer-chip-glyph[data-glyph="waitingForApi"]` is ⧗ | the daemon's waiting count; absent when no agent waits | fa-webapp |
 | `data-state` / `.footer-row-state` | every agents-panel row (`data-state`), and the waiting row's "waiting for the API · gives up in …" span | `running` \| `waitingForApi` | fa-webapp |
@@ -343,6 +345,20 @@ hand any more:
   (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
   bubbles, prompts, held prompts, peers, agentic cards and compaction
   summaries stay capped.
+- **AN EXPANDED ITEM COLLAPSES ON SCROLL ONLY ONCE NO PART OF IT IS VISIBLE**
+  (owner ruling, 2026-09-30; `src/feed/expand.ts`). The reader's own scroll
+  gesture ARMS an expanded section, and an `IntersectionObserver` on the feed's
+  scroll root closes it when its intersection falls to zero; a section still
+  partly in view stays open however far the reader scrolled. The watcher is a
+  seam (`VisibilityWatcher`, faked by `test/visibility-fake.ts`), since jsdom
+  has none.
+- **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
+  2026-09-30). A footer percentage is painted by `footerPercentColor`
+  (`tones.ts`): green below 40%, yellow by 70%, orange by 90%, red from 90%,
+  a continuous gradient between the stops (`src/percent-gradient.ts`). The
+  response bubble's token stamp and the footer's token count share
+  `tokenHeatColor` (`src/token-heat.ts`) over the daemon's
+  `frontend.v1.TokenHeat` position; neither is re-derived locally.
   `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
   has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
   it: "more below" is the FADE (or the ellipsis a spec chooses), never a chevron, and `has-more` means the
