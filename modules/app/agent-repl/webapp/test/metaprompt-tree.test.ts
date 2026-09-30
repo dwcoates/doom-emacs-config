@@ -444,6 +444,34 @@ describe("renderTreeHtml", () => {
     expect(html).toContain(`<span class="mp-prefix">└── 1.3 </span>`);
   });
 
+  it("renders a fence drawn behind its branch's rail as a code block with the rail stripped", () => {
+    // Arrange — the delimiters and body all carry the `│   ` rail of 2.3.
+    const tree = [
+      "├── 2.3 The daemon logged the refusal",
+      "│   ```json",
+      '│   "cause": "unknown_repository"',
+      "│   ```",
+      "└── 2.4 Done",
+    ].join("\n");
+    // Act
+    const html = renderTreeHtml(tree, identity, 100);
+    // Assert — one code block holding the body without its rail, no delimiter
+    // leaking as a tree line, and the branch after it still a tree line.
+    expect(html).toContain('<pre class="md-code"><code class="hljs lang-json">');
+    expect(html).not.toContain("```");
+    expect(html).not.toMatch(/<code[^>]*>│/);
+    expect(html).toContain(`<span class="mp-prefix">└── 2.4 </span>`);
+  });
+
+  it("keeps a code body's own rail beyond its fence's indent", () => {
+    // Arrange — an unrailed fence whose code is itself a drawn tree.
+    const tree = ["├── 1.1 Shape", "    ```", "    │   ├── x", "    ```", "└── 1.2 Done"].join("\n");
+    // Act
+    const html = renderTreeHtml(tree, identity, 100);
+    // Assert
+    expect(html).toContain("<code class=\"hljs\">│   ├── x</code>");
+  });
+
   it("escapes an interior fenced block's markup rather than emitting it", () => {
     // Arrange — a language-less fence whose body carries a raw tag.
     const tree = ["├── 1.1 Snippet", "    ```", "    <img src=x>", "    ```", "└── 1.2 Done"].join("\n");
@@ -598,6 +626,29 @@ describe("findTreeRegion", () => {
     expect(region?.tree).toContain("```python");
     expect(region?.tree).toContain("1.3 Follows");
     expect(region?.tree).toContain("1.4 Verified");
+  });
+
+  it("spans an interior fenced block drawn behind its branch's rail", () => {
+    // Arrange — the 2026-09-30 response: the fence under 2.3 carried the `│`
+    // rail, and every branch after it spilled onto the markdown path.
+    const text = [
+      HEADER,
+      "2 🔍 Root cause",
+      "├── 2.3 The daemon logged the refusal",
+      "│   ```json",
+      '│   "cause": "unknown_repository"',
+      "│   ```",
+      "└── 2.4 The session still said it dispatched",
+      "",
+      "3 ⚠️ Knock-on",
+      "└── 3.1 The same line misleads later dispatchers",
+    ].join("\n");
+    // Act
+    const region = findTreeRegion(text);
+    // Assert
+    expect(region?.after).toBe("");
+    expect(region?.tree).toContain("2.4 The session");
+    expect(region?.tree).toContain("3.1 The same line");
   });
 
   it("keeps a trailing fenced block with a language tag in `after`", () => {
