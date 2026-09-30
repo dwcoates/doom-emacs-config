@@ -111,6 +111,7 @@ describe.each(HOLD_CLASSIFICATION_ARMS)("a %s hold", (classification) => {
 const CLASSIFICATION_TEXT: Record<HoldClassificationArm, string> = {
   classifying: "",
   interject: "it changes the current work",
+  afterToolCall: "it adds to the running work",
   holdForTurnEnd: "it is a follow-up",
   uninterruptibleTurn: "",
   classificationError: "the classifier timed out",

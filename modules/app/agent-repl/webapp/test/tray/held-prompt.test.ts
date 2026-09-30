@@ -256,6 +256,14 @@ describe("drawHeldPrompt classification arms", () => {
       badge: "wire interject",
     },
     {
+      name: "after_tool_call",
+      prompt: heldPrompt({
+        classification: { case: "afterToolCall", value: { rationale: "it adds to the running work" } },
+      }),
+      arm: "afterToolCall",
+      badge: "wire afterToolCall",
+    },
+    {
       name: "hold_for_turn_end",
       prompt: heldPrompt({
         classification: { case: "holdForTurnEnd", value: { rationale: "it can wait" } },
@@ -305,6 +313,24 @@ describe("drawHeldPrompt classification arms", () => {
       tc,
     );
     expect(card.querySelector(".queued-reason")?.textContent).toBe("urgent");
+  });
+
+  it("draws the classifier's rationale on a prompt joining the running turn", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "it adds to it" } } }),
+      tc,
+    );
+    expect(card.querySelector(".queued-reason")?.textContent).toBe("it adds to it");
+  });
+
+  it("offers no accept on a prompt joining the running turn", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "" } } }),
+      tc,
+    );
+    expect(card.querySelector("[data-held-action='accept']")).toBeNull();
   });
 
   it("draws no rationale element when the classifier gave none", () => {
@@ -969,6 +995,7 @@ describe("the tray's own logging", () => {
 const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   classifying: "run",
   interject: "ok",
+  afterToolCall: "ok",
   holdForTurnEnd: "err",
   uninterruptibleTurn: "err",
   classificationError: "err",
@@ -984,6 +1011,7 @@ describe("the daemon's badge words", () => {
   const byStatus: Array<[HeldStatus, () => HeldPrompt]> = [
     ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
     ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "" } } })],
+    ["afterToolCall", () => heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "" } } })],
     ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "" } } })],
     [
       "uninterruptibleTurn",
@@ -1178,6 +1206,7 @@ describe("every status a held card shows is a badge in the table's tone", () => 
   const cards: Array<[HeldStatus, () => HeldPrompt]> = [
     ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
     ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "now" } } })],
+    ["afterToolCall", () => heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "now" } } })],
     ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } })],
     [
       "uninterruptibleTurn",
