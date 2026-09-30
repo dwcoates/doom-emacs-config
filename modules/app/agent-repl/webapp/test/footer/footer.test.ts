@@ -27,6 +27,7 @@ import {
   footerView,
   harness,
   pushView,
+  quietActivity,
   strip,
   type Harness,
 } from "./harness.js";
@@ -86,7 +87,7 @@ const AGENT_ROW = {
   jump: { target: { case: "entry" as const, value: { value: "bubble-1" } } },
   label: { text: "Explore" },
   tokens: { text: "0 tok" },
-  runtime: { startedAtMs: BigInt(NOW) },
+  runtime: { startedAtMs: BigInt(NOW) },  state: { case: "running" as const, value: {} },
 };
 
 /** A view whose agents chip and expanded panel both carry `count` live agents. */
@@ -114,9 +115,14 @@ function compactingStatus(text: string): FooterStatus["status"] {
     case: "working",
     value: {
       substatus: { case: "compacting", value: {} },
-      activity: { at: { atMs: BigInt(NOW) }, kind: { case: "compaction", value: { text } } },
+      activity: {
+        tier: {
+          case: "salient",
+          value: { at: { atMs: BigInt(NOW) }, kind: { case: "compaction", value: { text } } },
+        },
+      },
     },
-  } as FooterStatus["status"];
+  } as unknown as FooterStatus["status"];
 }
 
 // THE COMPACTION LINE IS PUBLISHED PAGE-WIDE (owner's report, 2026-09-14): the
@@ -531,7 +537,12 @@ describe("mountFooter: onStatus", () => {
     h.tail.push(
       pushView(
         footerView({
-          strip: strip({ status: { case: "merging", value: { substatus: { case: "merge", value: {} } } } as never }),
+          strip: strip({
+            status: {
+              case: "merging",
+              value: { substatus: { case: "merge", value: {} }, activity: quietActivity("merging") },
+            } as never,
+          }),
         }),
       ),
     );
@@ -1063,6 +1074,7 @@ describe("mountFooter: the ended quiet-stretch line", () => {
             case: "working",
             value: {
               substatus: { case: "thinking", value: {} },
+              activity: { tier: { case: "unpinned", value: { enduring: {} } } },
               quietStretchEnding: {
                 text: "✅ Bash finished — handling result...",
                 untilPainted: { value: row },
@@ -1100,5 +1112,133 @@ describe("mountFooter: the ended quiet-stretch line", () => {
 
     // Assert
     expect(host.querySelector(".footer-activity-quiet-stretch")).toBeNull();
+  });
+});
+
+// ---- the transient's expiry: the one re-render the footer schedules --------
+
+/** An idle view whose cell carries a hook transient lapsing at EXPIRESATMS. */
+function transientView(
+  name: string,
+  expiresAtMs: number,
+  enduring: Record<string, unknown> = {},
+): ReturnType<typeof footerView> {
+  return footerView({
+    strip: strip({
+      status: {
+        case: "idle",
+        value: {
+          activity: {
+            tier: {
+              case: "unpinned",
+              value: {
+                transient: {
+                  at: { atMs: BigInt(NOW) },
+                  expiry: { expiresAtMs: BigInt(expiresAtMs) },
+                  kind: { case: "hook", value: { name } },
+                },
+                enduring,
+              },
+            },
+          },
+        },
+      } as never,
+    }),
+  });
+}
+
+/** The drawn activity cell's tier. */
+function tierOf(host: HTMLElement): string | null | undefined {
+  return host.querySelector(".footer-activity")?.getAttribute("data-tier");
+}
+
+describe("mountFooter: the transient's expiry", () => {
+  it("draws the pushed transient while it is live", async () => {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
+    await settle();
+    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe("fmt");
+  });
+
+  it("redraws the enduring line at the expiry instant with no push", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
+    await settle();
+    // Act
+    await vi.advanceTimersByTimeAsync(10_000);
+    // Assert
+    expect(tierOf(host)).toBe("enduring");
+  });
+
+  it("keeps the transient drawn until the instant arrives", async () => {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
+    await settle();
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(tierOf(host)).toBe("transient");
+  });
+
+  it("replaces the pending re-render when a newer transient is pushed", async () => {
+    // Arrange: the first transient would lapse at +10s.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("first", NOW + 10_000)));
+    await settle();
+    // Act: a newer one, pushed at +5s, lapses at +15s.
+    await vi.advanceTimersByTimeAsync(5_000);
+    h.tail.push(pushView(transientView("second", NOW + 15_000)));
+    await settle();
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Assert: the first instant passed and the newer transient still stands.
+    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe("second");
+  });
+
+  it("cancels the pending re-render when a push carries no transient", async () => {
+    const { h } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
+    await settle();
+    const before = vi.getTimerCount();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    expect(vi.getTimerCount()).toBe(before - 1);
+  });
+
+  it("cancels the pending re-render on dispose", async () => {
+    const { h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
+    await settle();
+    const before = vi.getTimerCount();
+    footer.dispose();
+    // The dispose also drops the stream's and the clocks' timers; the expiry
+    // is gone with them, so nothing is left to fire at the instant.
+    expect(vi.getTimerCount()).toBeLessThan(before);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("files an enduring line that cannot be drawn at the expiry, rather than throwing", async () => {
+    // ARRANGE: the enduring usage's reset instant does not fit a JS number,
+    // which only the expiry's redraw reaches.
+    const { h } = mount();
+    await settle();
+    h.tail.push(
+      pushView(
+        transientView("fmt", NOW + 10_000, {
+          usage: { session: { newsworthy: false, utilization: 0.1, resetsAtS: 2n ** 62n } },
+        }),
+      ),
+    );
+    await settle();
+    h.sink.reported.length = 0;
+    // ACT
+    await vi.advanceTimersByTimeAsync(10_000);
+    // ASSERT
+    expect(h.sink.reported).toContain("frameUndecodable");
   });
 });

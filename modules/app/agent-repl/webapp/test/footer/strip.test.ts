@@ -8,19 +8,18 @@ import {
   type FooterStatus,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { protoArmName } from "../../src/vocab.js";
 import {
-  FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
-  allowanceStatusClass,
   statusArmClass,
 } from "../../src/footer/tones.js";
 import {
   IDLE_CLOCK_LABEL,
   drawClientDisconnectedStrip,
   drawFooterStrip,
+  WAITING_FOR_API_GLYPH,
+  chipGlyph,
+  footerStatusActivity,
   footerTokensHeatColor,
-  statusWords,
   subStatusWords,
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
@@ -29,8 +28,16 @@ import {
   STATUS_WAVE_LETTER_OFFSET_MS,
   WAVING_STATUS_ARMS,
 } from "../../src/breathing.js";
-import { harness, strip, type Harness, type StripInit } from "./harness.js";
+import {
+  IGNORED_EXPIRY,
+  harness,
+  quietActivity,
+  strip,
+  type Harness,
+  type StripInit,
+} from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
+import { statusWords } from "../../src/footer/parts.js";
 
 /** Every test's clock reads from here, so a countdown's arithmetic is exact. */
 const NOW = 1_800_000_000_000;
@@ -52,7 +59,7 @@ interface Drawn {
 /** Draw a strip, recording every panel the user's clicks would open. */
 function drawStrip(init: StripInit = {}, selection: FooterPanel | null = null, h = harness()): Drawn {
   const selected: FooterPanel[] = [];
-  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx),
+  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
     selection,
     onSelect: (panel) => selected.push(panel),
   });
@@ -75,7 +82,8 @@ const SUBSTATUS_PAIRS: ReadonlyArray<[string, string]> = STATUS_FIELDS.flatMap((
 });
 
 /**
- * A status arm built by NAME.
+ * A status arm built by NAME, carrying the arm's quietest legal activity
+ * unless VALUE states one (an explicit `activity: undefined` leaves it unset).
  *
  * The one cast in this suite, and a deliberate one: these fixtures are built
  * from arm names the schema enumerated at run time, so there is no static type
@@ -86,42 +94,19 @@ function status(
   statusCase: string,
   value: Record<string, unknown>,
 ): FooterStatus["status"] {
+  const full = "activity" in value ? value : { ...value, activity: quietActivity(statusCase) };
   return create(FooterStatusSchema, {
-    status: { case: statusCase, value },
+    status: { case: statusCase, value: full },
   } as never).status;
 }
 
-/** The activity `waiting` and `loading` always carry. */
-const REQUIRED_ACTIVITY = {
-  at: { atMs: BigInt(NOW) },
-  kind: { case: "notification", value: { text: "a line" } },
-};
-
-/** A status arm with SUB set, and the required activity where the arm needs it. */
+/** A status arm with SUB set. */
 function withSubStatus(
   statusCase: string,
   subCase: string,
   subValue: Record<string, unknown> = {},
 ): FooterStatus["status"] {
-  const needsActivity = statusCase === "waiting" || statusCase === "loading";
-  return status(statusCase, {
-    substatus: { case: subCase, value: subValue },
-    ...(needsActivity ? { activity: REQUIRED_ACTIVITY } : {}),
-  });
-}
-
-/** A status arm carrying one ACTIVITY kind, with the arm's substatus when it has one. */
-function withActivity(
-  statusCase: string,
-  subCase: string | null,
-  kindCase: string,
-  kindValue: Record<string, unknown>,
-  atMs: bigint = BigInt(NOW),
-): FooterStatus["status"] {
-  return status(statusCase, {
-    ...(subCase === null ? {} : { substatus: { case: subCase, value: {} } }),
-    activity: { at: { atMs }, kind: { case: kindCase, value: kindValue } },
-  });
+  return status(statusCase, { substatus: { case: subCase, value: subValue } });
 }
 
 // ---- the status cell -------------------------------------------------------
@@ -134,10 +119,6 @@ describe("drawFooterStatus: every arm the contract declares", () => {
     const value = firstSub === undefined ? status(arm, {}) : withSubStatus(arm, firstSub);
     const { row } = drawStrip({ status: value });
     expect(row.querySelector(".footer-status")?.getAttribute("data-arm")).toBe(arm);
-  });
-
-  it.each(FOOTER_STATUS_CASES.map((arm) => [arm]))("words the %s arm lowercase", (arm) => {
-    expect(statusWords(arm)).toBe(protoArmName(arm).replace(/_/g, " "));
   });
 
   it("paints the status cell with the vocabulary's tone class", () => {
@@ -159,8 +140,41 @@ describe("drawFooterStatus: every arm the contract declares", () => {
     });
     const h = harness();
     expect(() =>
-      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
+      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
+  });
+});
+
+// ---- the activity cell ------------------------------------------------------
+
+describe("drawFooterStatus: the activity cell every arm carries", () => {
+  it.each(FOOTER_STATUS_CASES.map((arm) => [arm]))("draws the %s arm's activity cell", (arm) => {
+    const { row } = drawStrip({ status: status(arm, {}) });
+    expect(row.querySelector(".footer-activity")).not.toBeNull();
+  });
+
+  it.each(FOOTER_STATUS_CASES.map((arm) => [arm]))(
+    "refuses a %s push with no activity — the schema always sets one",
+    (arm) => {
+      expect(() => drawStrip({ status: status(arm, { activity: undefined }) })).toThrow(MalformedView);
+    },
+  );
+
+  it("keeps the activity cell as the grow cell that owns the strip's slack", () => {
+    const { row } = drawStrip();
+    expect(row.querySelector(".footer-activity")?.classList.contains("pfooter-grow")).toBe(true);
+  });
+});
+
+describe("footerStatusActivity", () => {
+  it("hands over the cell the arm carries", () => {
+    const u = create(FooterStatusSchema, { status: status("background", {}) });
+    expect(footerStatusActivity(u).$typeName).toBe("frontend.v1.FooterStatusBackgroundActivity");
+  });
+
+  it("refuses an arm with no activity", () => {
+    const u = create(FooterStatusSchema, { status: status("background", { activity: undefined }) });
+    expect(() => footerStatusActivity(u)).toThrow(MalformedView);
   });
 });
 
@@ -264,468 +278,6 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
   });
 });
 
-// ---- the activity cell -----------------------------------------------------
-
-describe("drawFooterStatusActivity", () => {
-  it("draws no activity cell at all when the arm legitimately has none", () => {
-    const { row } = drawStrip({ status: status("idle", {}) });
-    // Absence means draw nothing: the grow cell stays (it owns the strip's
-    // slack and the grabber notch) but is not an activity cell.
-    expect(row.querySelector(".footer-activity")).toBeNull();
-  });
-
-  it("still keeps the grow cell that owns the strip's slack", () => {
-    const { row } = drawStrip({ status: status("idle", {}) });
-    expect(row.querySelector(".pfooter-grow")).not.toBeNull();
-  });
-
-  it("refuses a WAITING push with no activity — the schema requires one", () => {
-    const h = harness();
-    expect(() =>
-      drawFooterStrip(
-        strip({ status: status("waiting", { substatus: { case: "permission", value: {} } }) }),
-        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it("refuses a LOADING push with no activity", () => {
-    const h = harness();
-    expect(() =>
-      drawFooterStrip(
-        strip({ status: status("loading", { substatus: { case: "memory", value: {} } }) }),
-        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it("refuses an activity whose kind oneof sets no arm", () => {
-    const h = harness();
-    expect(() =>
-      drawFooterStrip(
-        strip({ status: status("idle", { activity: { at: { atMs: BigInt(NOW) } } }) }),
-        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it("refuses an activity with no standing instant", () => {
-    const h = harness();
-    expect(() =>
-      drawFooterStrip(
-        strip({
-          status: status("idle", {
-            activity: { kind: { case: "notification", value: { text: "hi" } } },
-          }),
-        }),
-        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it.each([
-    ["idle", null, "notification", { text: "the agent has a question" }, "the agent has a question"],
-    ["idle", null, "contextBudget", { text: "context is 80% spent" }, "context is 80% spent"],
-    ["waiting", "permission", "gatedCall", { text: "Bash: rm -rf …" }, "Bash: rm -rf …"],
-    ["waiting", "question", "questionLead", { text: "2 questions · which?" }, "2 questions · which?"],
-    ["waiting", "permission", "blockedOnUser", { detail: "requires action" }, "requires action"],
-    ["waiting", "coldGate", "coldGateCost", { text: "182k to re-read" }, "182k to re-read"],
-    ["waiting", "interrupting", "interrupting", { text: "stopping the turn…" }, "stopping the turn…"],
-    ["working", "thinking", "hook", { name: "protect-master" }, "protect-master"],
-    ["working", "compacting", "compaction", { text: "compacting · 412 of 900 messages" }, "compacting · 412 of 900 messages"],
-    ["working", "thinking", "contextInjected", { text: "webapp/CLAUDE.md" }, "webapp/CLAUDE.md"],
-    ["blocked", "auth", "authenticating", { line: "open the login" }, "open the login"],
-    ["blocked", "queryDied", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
-    // A dead query is a FAILED TURN (owner ruling, 2026-09-28): its line
-    // stands under `idle · turn failed`.
-    ["idle", "turnFailed", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
-    ["closing", "blocked", "closeBlocked", { text: "a turn is in flight" }, "a turn is in flight"],
-    ["disconnected", "startFailed", "fault", { kind: "resume_failed", detail: "the shim refused" }, "resume failed \u00b7 the shim refused"],
-    ["blocked", "daemonImpaired", "fault", { kind: "prompts_dir_missing", detail: "no ~/.claude/prompts" }, "prompts dir missing \u00b7 no ~/.claude/prompts"],
-    ["idle", null, "fault", { kind: "conversation_abandoned", detail: "no transcript on disk" }, "conversation abandoned \u00b7 no transcript on disk"],
-    ["working", "thinking", "fault", { kind: "classifier_failed", detail: "the run died" }, "classifier failed \u00b7 the run died"],
-    ["working", "thinking", "quietStretch", { text: "✅ Bash finished — handling result..." }, "✅ Bash finished — handling result..."],
-    ["background", null, "quietStretch", { text: "✅ Subagent finished" }, "✅ Subagent finished"],
-  ])("draws the %s/%s %s line verbatim", (statusCase, subCase, kindCase, value, expected) => {
-    const { row } = drawStrip({
-      status: withActivity(statusCase, subCase, kindCase, value),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).toContain(expected);
-  });
-
-  it("draws the bring-up failure's cause verbatim", () => {
-    const { row } = drawStrip({
-      status: withActivity("disconnected", "startFailed", "startFailed", {
-        detail: "exit 1: Cannot find module",
-        droppedPrompts: 0,
-      }),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).toContain(
-      "exit 1: Cannot find module",
-    );
-  });
-
-  it("says nothing about dropped prompts when the failure dropped none", () => {
-    const { row } = drawStrip({
-      status: withActivity("disconnected", "startFailed", "startFailed", {
-        detail: "exit 1: Cannot find module",
-        droppedPrompts: 0,
-      }),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).not.toContain("dropped");
-  });
-
-  it("names the ONE held prompt a bring-up failure dropped in the singular", () => {
-    const { row } = drawStrip({
-      status: withActivity("disconnected", "startFailed", "startFailed", {
-        detail: "exit 1: Cannot find module",
-        droppedPrompts: 1,
-      }),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).toContain(
-      "· 1 held prompt dropped",
-    );
-  });
-
-  it("counts the held prompts a bring-up failure dropped in the plural", () => {
-    const { row } = drawStrip({
-      status: withActivity("disconnected", "startFailed", "startFailed", {
-        detail: "exit 1: Cannot find module",
-        droppedPrompts: 3,
-      }),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).toContain(
-      "· 3 held prompts dropped",
-    );
-  });
-
-  it("names the activity's kind on the cell", () => {
-    const { row } = drawStrip({
-      status: withActivity("working", "thinking", "hook", { name: "fmt" }),
-    });
-    expect(row.querySelector(".footer-activity")?.getAttribute("data-arm")).toBe("hook");
-  });
-
-  it("colours the retry ATTEMPT as its own datum", () => {
-    const { row } = drawStrip({
-      status: withActivity("working", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
-    });
-    expect(row.querySelector('[data-datum="attempt"]')?.textContent).toBe("#2");
-  });
-
-  it("draws the retry's status verbatim beside the attempt", () => {
-    const { row } = drawStrip({
-      status: withActivity("working", "thinking", "retrying", { attempt: 2, status: "overloaded" }),
-    });
-    expect(row.querySelector(".footer-activity-retrying")?.textContent).toContain("· overloaded");
-  });
-
-  it("colours the landing commit's SHA as its own datum", () => {
-    const { row } = drawStrip({
-      status: withActivity("merging", "merge", "mergingCommit", {
-        sha: "4f2a1c",
-        subject: "fold tokens into api",
-      }),
-    });
-    expect(row.querySelector('[data-datum="sha"]')?.textContent).toBe("4f2a1c");
-  });
-
-  it("draws the commit's subject after its sha", () => {
-    const { row } = drawStrip({
-      status: withActivity("merging", "merge", "mergingCommit", {
-        sha: "4f2a1c",
-        subject: "fold tokens into api",
-      }),
-    });
-    expect(row.querySelector(".footer-activity-merging-commit")?.textContent).toBe(
-      "4f2a1c: fold tokens into api",
-    );
-  });
-});
-
-describe("the ticking activity figures", () => {
-  it("counts a wakeup down at second resolution", () => {
-    const { row } = drawStrip({
-      status: withActivity("waiting", "wakeup", "wakeup", {
-        wakeAtMs: BigInt(NOW + 252_000),
-      }),
-    });
-    expect(row.querySelector("[data-countdown]")?.textContent).toBe("wakes in 4m 12s");
-  });
-
-  it("re-reads the wakeup countdown on the shared tick", () => {
-    const { row } = drawStrip({
-      status: withActivity("waiting", "wakeup", "wakeup", {
-        wakeAtMs: BigInt(NOW + 252_000),
-      }),
-    });
-    vi.advanceTimersByTime(1000);
-    expect(row.querySelector("[data-countdown]")?.textContent).toBe("wakes in 4m 11s");
-  });
-
-  it("draws the wakeup's reason when the agent gave one", () => {
-    const { row } = drawStrip({
-      status: withActivity("waiting", "wakeup", "wakeup", {
-        wakeAtMs: BigInt(NOW + 60_000),
-        reason: { text: "check the deploy" },
-      }),
-    });
-    expect(row.querySelector(".footer-activity-wakeup")?.textContent).toContain("check the deploy");
-  });
-
-  it("floors a wakeup whose deadline has passed rather than counting backwards", () => {
-    const { row } = drawStrip({
-      status: withActivity("waiting", "wakeup", "wakeup", { wakeAtMs: BigInt(NOW - 5000) }),
-    });
-    expect(row.querySelector("[data-countdown]")?.textContent).toBe("wakes in 0s");
-  });
-
-  it("draws BOTH rate-limit allowances as percentages", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: { case: "allowedWarning", value: {} } },
-        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: { case: "allowed", value: {} } },
-      }),
-    });
-    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
-      "session 72% · resets in 1h 5m | weekly 31% · resets in 3d",
-    );
-  });
-
-  // THE OVERAGE WINDOW STAYS OFF THE STRIP while either of the pair is
-  // figured: a third figure on a line that already loses its second to the
-  // cut would push the pair a reader needs off the glass. The tokens sheet
-  // draws it instead.
-  it("keeps the overage window off the strip beside the two it draws", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000) },
-        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
-        overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
-      }),
-    });
-    expect(row.querySelector('[data-allowance="overage"]')).toBeNull();
-  });
-
-  // AN OVERAGE EVENT CAN LAND BEFORE THE FIRST USAGE SAMPLE, leaving neither
-  // of the pair figured. The line the daemon opened would then have nothing
-  // in it, so the overage window takes the slot rather than the strip drawing
-  // a blank.
-  it("draws the overage window when it is the only one figured", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
-      }),
-    });
-    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
-      "overage 91% · resets in 2h",
-    );
-  });
-
-  it("emphasizes the newsworthy allowance", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: { case: "allowedWarning", value: {} } },
-        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: { case: "allowed", value: {} } },
-      }),
-    });
-    expect(row.querySelector('[data-allowance="session"]')?.getAttribute("data-newsworthy")).toBe(
-      "true",
-    );
-    expect(row.querySelector('[data-allowance="weekly"]')?.hasAttribute("data-newsworthy")).toBe(
-      false,
-    );
-  });
-
-  /** One rate-limit line whose SESSION allowance stands at ARM. */
-  function allowanceRow(arm: string): HTMLElement {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: {
-          newsworthy: true,
-          utilization: 0.5,
-          resetsAtS: BigInt(NOW / 1000),
-          status: { case: arm as never, value: {} },
-        },
-        weekly: {
-          newsworthy: false,
-          utilization: 0.1,
-          resetsAtS: BigInt(NOW / 1000),
-          status: { case: "allowed", value: {} },
-        },
-      }),
-    });
-    return row;
-  }
-
-  // ---- The last-read age: the strip renders the figures LAST READ and how
-  // long ago they were read, and no longer a "usage unread" caveat.
-
-  /** One rate-limit line whose figures were read `agoMs` ago. */
-  function ageLine(agoMs: number | null): HTMLElement {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.41, resetsAtS: BigInt((NOW + 3_900_000) / 1000) },
-        ...(agoMs === null ? {} : { figuresReadAtMs: BigInt(NOW - agoMs) }),
-      }),
-    });
-    return row;
-  }
-
-  // THE OWNER'S SHAPE: "<usage figures> 10m 30s ago", ticking from the shipped
-  // read instant.
-  it("renders the age of the last usage reading beside the figures", () => {
-    expect(ageLine(630_000).querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 30s ago");
-  });
-
-  // IT TICKS ON THE SHARED CLOCK, like every other footer duration.
-  it("re-reads the usage read-age on the shared tick", () => {
-    const row = ageLine(630_000);
-    vi.advanceTimersByTime(1000);
-    expect(row.querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 31s ago");
-  });
-
-  // NO READ INSTANT, NO AGE: figures from a rate-limit event carry none, and
-  // the strip draws them with no age rather than inventing one.
-  it("draws no read-age when the figures carry no read instant", () => {
-    expect(ageLine(null).querySelector(".footer-rate-age")).toBeNull();
-  });
-
-  // THE UNREAD MESSAGE IS GONE: no sample outcome ever draws a cell now.
-  it("draws no usage-unread cell any more", () => {
-    const row = ageLine(630_000);
-    expect(row.querySelector(".footer-allowance-unread")).toBeNull();
-    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).not.toContain(
-      "usage unread",
-    );
-  });
-  // THE NEWSWORTHY WINDOW LEADS: it is the figure that changes what the reader
-  // does, so it is the half of the line that survives the cut.
-  it("draws the newsworthy window first even when it is the weekly one", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt(NOW / 1000) },
-        weekly: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt(NOW / 1000) },
-      }),
-    });
-    expect(
-      row.querySelector(".footer-rate-figures")?.firstElementChild?.getAttribute("data-allowance"),
-    ).toBe("weekly");
-  });
-
-  // THE CELL'S HOVER IS THE WHOLE LINE. The cell ellipsizes by design, so the
-  // title is what a reader who cannot open the sheet still has.
-  it("titles the activity cell with the full line it may be cutting", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
-        weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
-        figuresReadAtMs: BigInt(NOW - 630_000),
-      }),
-    });
-    const cell = row.querySelector<HTMLElement>(".footer-activity");
-    expect(cell?.title).toBe(row.querySelector(".footer-activity-rate-limited")?.textContent);
-  });
-
-  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the cell", (arm) => {
-    expect(allowanceRow(arm).querySelector('[data-allowance="session"]')?.getAttribute("data-arm")).toBe(
-      arm,
-    );
-  });
-
-  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("paints the %s arm its own colour", (arm) => {
-    const cell = allowanceRow(arm).querySelector('[data-allowance="session"]');
-    expect(cell?.className).toContain(allowanceStatusClass(arm));
-  });
-
-  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("titles the %s arm with its own sentence", (arm) => {
-    const cell = allowanceRow(arm).querySelector<HTMLElement>('[data-allowance="session"]');
-    expect(cell?.title).not.toBe("");
-  });
-
-  it("draws a rejected allowance in the error register, not the warning one", () => {
-    const rejected = allowanceRow("rejected").querySelector('[data-allowance="session"]');
-    const warning = allowanceRow("allowedWarning").querySelector('[data-allowance="session"]');
-    expect(rejected?.className).not.toBe(warning?.className);
-  });
-
-  /** The same line with the session allowance carrying NO vendor verdict. */
-  function unverdictedRow(): HTMLElement {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.5, resetsAtS: BigInt(NOW / 1000) },
-        weekly: {
-          newsworthy: false,
-          utilization: 0.1,
-          resetsAtS: BigInt(NOW / 1000),
-          status: { case: "allowed", value: {} },
-        },
-      }),
-    });
-    return row;
-  }
-
-  it("draws the figures of an allowance the vendor has not yet ruled on", () => {
-    expect(
-      unverdictedRow().querySelector('[data-allowance="session"]')?.textContent,
-    ).toContain("50%");
-  });
-
-  it("marks no arm on an allowance with no vendor verdict yet", () => {
-    expect(
-      unverdictedRow().querySelector('[data-allowance="session"]')?.hasAttribute("data-arm"),
-    ).toBe(false);
-  });
-
-  it("paints no verdict colour before the vendor has given one", () => {
-    expect(unverdictedRow().querySelector('[data-allowance="session"]')?.className).toBe(
-      "footer-allowance footer-allowance-newsworthy",
-    );
-  });
-
-  it("titles nothing on an allowance with no vendor verdict yet", () => {
-    expect(
-      unverdictedRow().querySelector<HTMLElement>('[data-allowance="session"]')?.title,
-    ).toBe("");
-  });
-
-  it("ticks the activity's relative age", () => {
-    const { row } = drawStrip({
-      status: withActivity(
-        "idle",
-        null,
-        "notification",
-        { text: "done" },
-        BigInt(NOW - 120_000),
-      ),
-    });
-    expect(row.querySelector("[data-age]")?.textContent).toBe(" · 2m ago");
-  });
-
-  it("reads the nearest second when a tick samples just short of one", () => {
-    // Arrange + Act: the stamp does not share the shared ticker's phase.
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "notification", { text: "done" }, BigInt(NOW - 4920)),
-    });
-    // Assert: five real seconds old reads 5s, not the lagging 4s.
-    expect(row.querySelector("[data-age]")?.textContent).toBe(" \u00b7 5s ago");
-  });
-
-  it("re-reads the age on the shared tick", () => {
-    const { row } = drawStrip({
-      status: withActivity(
-        "idle",
-        null,
-        "notification",
-        { text: "done" },
-        BigInt(NOW - 120_000),
-      ),
-    });
-    vi.advanceTimersByTime(60_000);
-    expect(row.querySelector("[data-age]")?.textContent).toBe(" · 3m ago");
-  });
-});
-
 // ---- the clock -------------------------------------------------------------
 
 describe("drawFooterClock", () => {
@@ -814,7 +366,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a verdict badge whose oneof sets no arm", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx),
+      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
         selection: null,
         onSelect: () => {},
       }),
@@ -845,7 +397,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a heat outside the gradient", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx),
+      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
         selection: null,
         onSelect: () => {},
       }),
@@ -870,6 +422,39 @@ describe("drawFooterTokensCell", () => {
 });
 
 // ---- the live-work chips ---------------------------------------------------
+
+describe("drawFooterChipAgents: the waiting-for-the-API glyph", () => {
+  it("draws no waiting glyph while no agent waits for the API", () => {
+    const { row } = drawStrip({ liveWork: { agents: { count: 2 } } });
+    expect(row.querySelector('[data-glyph="waitingForApi"]')).toBeNull();
+  });
+
+  it("draws the waiting glyph with its count beside the chip's count", () => {
+    const { row } = drawStrip({ liveWork: { agents: { count: 3, waitingForApi: { count: 1 } } } });
+    expect(row.querySelector('[data-chip="agents"]')?.textContent).toBe(`⚙ 3 ${WAITING_FOR_API_GLYPH} 1`);
+  });
+
+  it("carries the waiting count on the glyph's holder", () => {
+    const { row } = drawStrip({ liveWork: { agents: { count: 3, waitingForApi: { count: 2 } } } });
+    expect(row.querySelector(".footer-chip-waiting")?.getAttribute("data-waiting-for-api")).toBe("2");
+  });
+
+  it("says what the glyph counts on hover", () => {
+    const { row } = drawStrip({ liveWork: { agents: { count: 3, waitingForApi: { count: 2 } } } });
+    expect(row.querySelector<HTMLElement>(".footer-chip-waiting")?.title).toBe("2 waiting for the API");
+  });
+});
+
+describe("chipGlyph", () => {
+  it("draws the character named by its glyph", () => {
+    const mark = chipGlyph("agents", "⚙");
+    expect([mark.textContent, mark.getAttribute("data-glyph")]).toEqual(["⚙", "agents"]);
+  });
+
+  it("hides the glyph from assistive tech", () => {
+    expect(chipGlyph("agents", "⚙").getAttribute("aria-hidden")).toBe("true");
+  });
+});
 
 describe("drawFooterLiveWorkChips", () => {
   it("draws NO chips for a quiet workspace", () => {
@@ -947,23 +532,7 @@ describe("an arm this build has no case for", () => {
     };
     // ACT / ASSERT
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
-    ).toThrow(MalformedView);
-  });
-
-  it("refuses an ACTIVITY KIND the bundle cannot name", () => {
-    const h = harness();
-    const view = strip({
-      status: withActivity("idle", null, "notification", { text: "a line" }),
-    });
-    const activity = (
-      view.status as unknown as {
-        status: { value: { activity: { kind: { case: string; value: unknown } } } };
-      }
-    ).status.value.activity;
-    activity.kind = { case: "teleporting", value: {} };
-    expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 
@@ -976,7 +545,7 @@ describe("an arm this build has no case for", () => {
       view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
     ).verdict.verdict = { case: "unaudited", value: {} };
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -1025,119 +594,9 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({ tokens: { input: { text: "12.3k in" } } }),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx) },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
     });
     expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
-  });
-});
-
-// ---- the standing daemon fault, on every status arm ------------------------
-
-describe("the fault activity: every daemon fault kind reaches the strip", () => {
-  it("draws the kind lowercase with spaces, never underscores", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", {
-        kind: "watch_open_refused",
-        detail: "handle 7",
-      }),
-    });
-    expect(row.querySelector(".footer-activity")?.textContent).not.toContain("_");
-  });
-
-  it("draws the kind alone when the fault carries no detail", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", { kind: "session_absent", detail: "" }),
-    });
-    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe("session absent");
-  });
-
-  it("draws it in the fault's own cell class, beside the bring-up failure's", () => {
-    const { row } = drawStrip({
-      status: withActivity("disconnected", "dead", "fault", { kind: "shim_died", detail: "exit 1" }),
-    });
-    expect(row.querySelector(".footer-activity-fault")).not.toBeNull();
-  });
-
-  it.each([
-    ["idle", null],
-    ["working", "thinking"],
-    ["waiting", "permission"],
-    ["interrupted", "byUser"],
-    ["merging", "merge"],
-    ["background", null],
-    ["blocked", "daemonImpaired"],
-    ["disconnected", "dead"],
-    ["closing", "blocked"],
-    ["loading", "memory"],
-    ["mergeConflict", "parked"],
-    ["mergeFailed", null],
-    ["merged", null],
-  ])("stands under the %s arm", (statusCase, subCase) => {
-    const { row } = drawStrip({
-      status: withActivity(statusCase, subCase, "fault", {
-        kind: "shim_reported",
-        detail: "the shim said so",
-      }),
-    });
-    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
-      "shim reported \u00b7 the shim said so",
-    );
-  });
-
-  // THE TURN THAT CONCLUDED WITH NO GREEN ANSWER. The kind is new, the
-  // rendering is not: the chip holds no table keyed on the kind, so
-  // `final_answer_unresolved` draws through the same line every other fault
-  // kind draws through, with the daemon's terse detail beside it.
-  it.each([
-    ["the turn named no answering response"],
-    ["the named answer has no drawn row"],
-    ["no response frame for 1m30s"],
-  ])("draws the unresolved final answer with its detail %s", (detail) => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", {
-        kind: "final_answer_unresolved",
-        detail,
-      }),
-    });
-    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
-      `final answer unresolved \u00b7 ${detail}`,
-    );
-  });
-
-  // A FAILED DEPLOY. The daemon names the step and its last line of output;
-  // the strip draws it through the same line, with no table keyed on it.
-  it("draws a failed deploy with the step it failed at", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", {
-        kind: "deploy_failed",
-        detail: "build webapp: error TS2322",
-      }),
-    });
-    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
-      "deploy failed \u00b7 build webapp: error TS2322",
-    );
-  });
-
-  it("leaves the idle status standing under a failed deploy", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", {
-        kind: "deploy_failed",
-        detail: "restart services store: exit 5",
-      }),
-    });
-    expect(row.querySelector(".footer-status")?.textContent?.toLowerCase()).toContain("idle");
-  });
-
-  // IT NEVER ESCALATES THE STATUS. The session is serving and the prose is on
-  // screen; `disconnected` would close the composer over a healthy session.
-  it("stands as the activity line under an ordinary idle status", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "fault", {
-        kind: "final_answer_unresolved",
-        detail: "the named answer has no drawn row",
-      }),
-    });
-    expect(row.querySelector(".footer-status")?.textContent?.toLowerCase()).toContain("idle");
   });
 });
 
@@ -1304,106 +763,6 @@ describe("the footer status word's per-letter colour sweep", () => {
 
     // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
     expect(statusLetters(row)).toHaveLength(0);
-  });
-});
-
-// ---- a deploy's progress: the update line ----------------------------------
-
-describe("the update activity: a deploy's progress on the strip", () => {
-  const updateText = (update: Record<string, unknown>): string | null | undefined => {
-    const { row } = drawStrip({ status: withActivity("idle", null, "update", update) });
-    return row.querySelector(".footer-activity-update")?.textContent;
-  };
-
-  it("draws the building phase with the components it builds", () => {
-    expect(
-      updateText({
-        phase: {
-          case: "building",
-          value: { components: [{ component: { case: "shim", value: {} } }, { component: { case: "webapp", value: {} } }] },
-        },
-      }),
-    ).toBe("building · shim, webapp");
-  });
-
-  it("draws a phase with no payload as its arm name alone", () => {
-    expect(updateText({ phase: { case: "handingOver", value: {} } })).toBe("handing over");
-  });
-
-  it("draws the services being restarted", () => {
-    expect(
-      updateText({
-        phase: {
-          case: "restartingServices",
-          value: { services: [{ component: { case: "store", value: {} } }, { component: { case: "sidecar", value: {} } }] },
-        },
-      }),
-    ).toBe("restarting services · store, sidecar");
-  });
-
-  it("draws what a waiting workspace's move waits on", () => {
-    expect(updateText({ phase: { case: "waiting", value: { turns: 1, background: 2 } } })).toBe(
-      "waiting · 1 turn, 2 background",
-    );
-  });
-
-  it("colours the waiting counts as figures", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "update", { phase: { case: "waiting", value: { turns: 0, background: 3 } } }),
-    });
-    const figures = row.querySelectorAll(".footer-activity-update [data-datum='count']");
-    expect([...figures].map((f) => f.textContent)).toEqual(["3"]);
-  });
-
-  it("draws the notes after the phase", () => {
-    expect(
-      updateText({
-        phase: { case: "updated", value: {} },
-        notes: [{ note: { case: "shimWhenIdle", value: {} } }],
-      }),
-    ).toBe("updated · shim when idle");
-  });
-
-  it("stamps the phase arm on the line", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "update", { phase: { case: "installing", value: {} } }),
-    });
-    expect(row.querySelector(".footer-activity-update")?.getAttribute("data-phase")).toBe("installing");
-  });
-
-  it("refuses an update line whose phase is unset", () => {
-    expect(() => drawStrip({ status: withActivity("idle", null, "update", {}) })).toThrow(MalformedView);
-  });
-
-  it("refuses a component whose arm is unset", () => {
-    expect(() =>
-      drawStrip({
-        status: withActivity("idle", null, "update", {
-          phase: { case: "building", value: { components: [{}] } },
-        }),
-      }),
-    ).toThrow(MalformedView);
-  });
-
-  it.each([
-    ["idle", null],
-    ["working", "thinking"],
-    ["waiting", "permission"],
-    ["interrupted", "byUser"],
-    ["merging", "merge"],
-    ["background", null],
-    ["blocked", "daemonImpaired"],
-    ["disconnected", "dead"],
-    ["closing", "blocked"],
-    ["loading", "memory"],
-    ["mergeConflict", "parked"],
-    ["mergeFailed", null],
-    ["merged", null],
-  ])("stands under the %s arm", (statusCase, subCase) => {
-    const { row } = drawStrip({
-      status: withActivity(statusCase, subCase, "update", { phase: { case: "installing", value: {} } }),
-    });
-    expect(row.querySelector(".footer-activity-update")?.textContent).toBe("installing");
   });
 });
 

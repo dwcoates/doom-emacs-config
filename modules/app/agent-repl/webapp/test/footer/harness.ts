@@ -42,6 +42,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker } from "../../src/clock.js";
+import type { TransientExpirySchedule } from "../../src/footer/expiry.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
@@ -196,12 +197,27 @@ export function feedId(value: string): FeedId {
   return create(FeedIdSchema, { value });
 }
 
+/**
+ * The quietest legal activity cell for STATUSCASE: the empty enduring line,
+ * or — for waiting, which has no unpinned branch — a gated-call salient line.
+ */
+export function quietActivity(statusCase: string): Record<string, unknown> {
+  if (statusCase === "waiting") {
+    return { salient: { at: { atMs: 0n }, kind: { case: "gatedCall", value: { text: "Bash: ls" } } } };
+  }
+  return { tier: { case: "unpinned", value: { enduring: {} } } };
+}
+
+/** An expiry schedule for draws whose re-render no test watches. */
+export const IGNORED_EXPIRY: TransientExpirySchedule = { schedule: () => {} };
+
 /** The idle status, the quietest legal one. */
 export function idleStatus(): FooterStatus["status"] {
   return {
     case: "idle",
     value: create(FooterStatusIdleSchema, {
       substatus: { case: "ready", value: create(FooterSubStatusIdleReadySchema, {}) },
+      activity: quietActivity("idle"),
     }),
   };
 }

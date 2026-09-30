@@ -165,7 +165,7 @@ describe("Interrupt refused for confirmation", () => {
   it("draws the refusal at the clicked control", async () => {
     // Arrange
     harness = await startHarness({
-      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
     });
     harness.fake.answer(
       "interrupt",
@@ -185,7 +185,7 @@ describe("Interrupt refused for confirmation", () => {
   it("names the live agent count the daemon reported", async () => {
     // Arrange
     harness = await startHarness({
-      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
     });
     harness.fake.answer(
       "interrupt",
@@ -205,7 +205,7 @@ describe("Interrupt refused for confirmation", () => {
   it("resends with confirm_agents set when the confirmation is taken", async () => {
     // Arrange
     harness = await startHarness({
-      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
     });
     harness.fake.answer(
       "interrupt",
@@ -227,7 +227,7 @@ describe("Interrupt refused for confirmation", () => {
   it("sends the first interrupt without confirm_agents", async () => {
     // Arrange
     harness = await startHarness({
-      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
     });
     // Act
     await harness.click("[data-interrupt]");
@@ -558,7 +558,7 @@ const REFUSAL_SITES: RefusalSite[] = [
     rpc: "interrupt",
     click: "[data-interrupt]",
     site: '[data-component="footer"]',
-    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "working" })),
   },
   {
     name: "AnswerPermission",

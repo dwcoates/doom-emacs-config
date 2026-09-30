@@ -7,7 +7,8 @@
  * 2026-09-29). So the daemon states the ended line and the row that ended it
  * (`FooterStatusQuietStretchEnding`), and this page decides when it goes:
  *
- * - It draws the ended line, in place of the status's activity, until it has
+ * - It draws the ended line as the cell's quiet-stretch line (the daemon states
+ *   an ending only while the cell would draw its enduring line), until it has
  *   PAINTED that row (`feed/painted.ts`), and clears it on that paint (owner
  *   ruling, 2026-09-29: no dwell after it). A row already painted when the
  *   ending arrives holds nothing.
@@ -20,15 +21,14 @@
 import { clone, create } from "@bufbuild/protobuf";
 import {
   FooterStatusActivityQuietStretchSchema,
-  FooterStatusBackgroundActivitySchema,
   FooterStripSchema,
-  FooterStatusWorkingActivitySchema,
   type FooterStatus,
   type FooterStatusQuietStretchEnding,
   type FooterStrip,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { PaintWatch } from "../feed/painted.js";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { requireMessage } from "../rpc/strict.js";
 
 export interface QuietHoldDeps {
@@ -61,27 +61,34 @@ export function quietStretchEndingOf(
 }
 
 /**
- * STRIP with the held line drawn in its status's activity. Only `working` and
- * `background` state an ending, so only they are rewritten.
+ * STRIP with the held line drawn as its status's quiet-stretch line. Only
+ * `working` and `background` state an ending, and the daemon states one only
+ * while their cell is unpinned with nothing above its enduring line, so the
+ * held line takes the quiet tier's place and every other tier is kept as
+ * pushed.
  */
 export function withHeldLine(strip: FooterStrip, ending: FooterStatusQuietStretchEnding): FooterStrip {
   const out = clone(FooterStripSchema, strip);
   const status = requireMessage(out.status, "FooterStrip.status");
-  const at = requireMessage(ending.at, "FooterStatusQuietStretchEnding.at");
   const line = create(FooterStatusActivityQuietStretchSchema, { text: ending.text });
   switch (status.status.case) {
     case "working":
-      status.status.value.activity = create(FooterStatusWorkingActivitySchema, {
-        at,
-        kind: { case: "quietStretch", value: line },
-      });
+    case "background": {
+      const activity = requireMessage(
+        status.status.value.activity,
+        `FooterStatus.${status.status.case}.activity`,
+      );
+      // The daemon states an ending only while nothing stands above the
+      // enduring line, so an ending beside a salient line is a malformed push.
+      if (activity.tier.case !== "unpinned") {
+        throw new MalformedView(
+          `FooterStatus.${status.status.case}.quiet_stretch_ending`,
+          "an ending is stated beside a salient line",
+        );
+      }
+      activity.tier.value.quietStretch = line;
       return out;
-    case "background":
-      status.status.value.activity = create(FooterStatusBackgroundActivitySchema, {
-        at,
-        kind: { case: "quietStretch", value: line },
-      });
-      return out;
+    }
     default:
       return strip;
   }
