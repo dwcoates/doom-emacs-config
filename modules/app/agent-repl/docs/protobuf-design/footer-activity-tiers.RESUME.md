@@ -53,7 +53,9 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
 
 ## Remaining, in order
 
-0. DONE since: e2e committed (`7fa4407c0`), landed change 3 recorded
+0. DONE since (liveness fix: proto `e9631134f` `8033c452d`, store `8ef7a2ee1`,
+   shim `92e590ff6`, sidecar `ea6bf3c73`, daemon test `e1c6d558d`, record
+   landed change 4): e2e committed (`7fa4407c0`), landed change 3 recorded
    (`70aa479c3`), footer percent gradient (owner request: green <40 →
    yellow 70 → orange 90, red >=90; `7239864e0` extraction, `66f672507`).
 1. (done) Finish the e2e step above.
@@ -64,7 +66,7 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    oneof + unobserved arm, submitting stages, retired transient tags 4/5/11/12,
    `ColdGateAnswer.Progress`), and note the owner's 2026-09-30 requests
    (centering, 80% ceiling, toggle style, composer height).
-3. DETACHED-WORK LIVENESS FIX (design in `footer-activity-tiers.md`): shim
+3. (done) DETACHED-WORK LIVENESS FIX (design in `footer-activity-tiers.md`): shim
    writes the claim from SDK `task_started` to the store; sidecar claims held
    spools from store claims (and the prose matcher also matches the timeout
    wording, `launch.go:83` `backgroundSentence`); `WatchBash` on an announced
