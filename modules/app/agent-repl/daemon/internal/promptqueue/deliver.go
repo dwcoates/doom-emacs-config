@@ -103,16 +103,21 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 func (q *queue) acceptOpenedTurn(ctx context.Context, sub Submission, success *shimv1.StartTurnSuccess, watcher Watcher, log dlog.Logger) {
 	// The shim TOOK the turn: the `submitting` window is over.
 	q.deps.Sidebar.AckTurn(sub.WS)
-
-	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
-		watcher.SetMainAgent(agent)
-	}
-	watcher.OnTurnOpened(sub.WS, success.GetPrompt(), success.GetPage())
-
+	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
 		"agent": success.GetPrompt().GetAgent().GetValue(),
 	})
+}
+
+// handOver gives the watcher a turn the shim accepted: the main agent it
+// named, and the turn with its opening page. Shared by a started turn, a
+// context cut and a joining prompt.
+func handOver(ws ids.WorkspaceID, success *shimv1.StartTurnSuccess, watcher Watcher) {
+	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
+		watcher.SetMainAgent(agent)
+	}
+	watcher.OnTurnOpened(ws, success.GetPrompt(), success.GetPage())
 }
 
 // retireOpenedTurn drops the submitting turn a StartTurn opened but the shim

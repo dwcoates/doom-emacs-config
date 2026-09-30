@@ -148,18 +148,11 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 	}
 	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text})
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: text, Stage: footer.StageAfterToolCall})
-	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
-		watcher.SetMainAgent(agent)
-	}
-	watcher.OnTurnOpened(sub.WS, success.GetPrompt(), success.GetPage())
+	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", nil)
-	if err := q.deps.DB.TombstoneHeldPrompt(ctx, sub.Turn, wsm.Tombstone{Kind: tombstoneDelivered, At: q.deps.Now()}); err != nil {
-		log.Error(opJoin, "the prompt was sent to join the running turn but its hold was not retired", dlog.Context{"cause": err.Error()})
-		return
-	}
-	q.clearHeadIf(sub.WS, sub.Turn)
-	_ = q.pushTray(ctx, sub.WS, log)
+	// A retirement that fails is recorded at ERROR where it failed.
+	_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
 }
 
 // joinBlocked answers why HELD cannot join RUNNING now, if something keeps
