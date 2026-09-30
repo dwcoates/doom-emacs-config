@@ -1739,8 +1739,9 @@ describe("DetachForeground", () => {
 
   test("a live unit the SDK cannot detach is refused unsupported", async () => {
     // `unsupported` and NOT `not_detachable`: the unit is perfectly
-    // detachable-in-kind, and the pinned SDK simply offers no verb to initiate
-    // it — the wrong arm would have lied about the reason.
+    // detachable-in-kind, but the vendor tracks no foreground task for it, so
+    // `backgroundTasks` moved nothing — the wrong arm would have lied about
+    // the reason.
     //
     // `!bash-hold` RATHER THAN `!bash`: the refusal under test is only reachable
     // while the unit is genuinely live, and `!bash` settles in the same tick it

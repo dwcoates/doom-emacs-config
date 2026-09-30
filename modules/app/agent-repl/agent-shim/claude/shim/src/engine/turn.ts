@@ -1314,14 +1314,12 @@ export class TurnEngine {
   /**
    * Ctrl-B.
    *
-   * The pinned SDK's only declared handle on this is
-   * `query.backgroundTasks(toolUseId)`, which ANSWERS whether the call has live
-   * background work — it does not cause detachment. So this verb reports what
-   * the vendor already did and refuses what it cannot do, rather than
-   * pretending: a unit the vendor has backgrounded is detached (the
-   * announcement rides its own task stream), and one it has not is
-   * `NotDetachable` with the reason stated. The missing route is a reported
-   * contract gap, not something to improvise around.
+   * The pinned SDK's verb is `query.backgroundTasks(toolUseId)`, documented as
+   * the equivalent of pressing Ctrl+B for the one foreground task that call
+   * started: it MOVES that task to the background and answers whether it
+   * moved one. This verb asks it, reports the move as detached (the
+   * announcement rides the task stream), and refuses with the reason stated
+   * when nothing was moved.
    */
   async detachForeground(
     request: shimv1.DetachForegroundRequest,
@@ -1383,32 +1381,34 @@ export class TurnEngine {
         );
       }
     }
-    // THE VENDOR MADE THIS DETACHMENT, NOT US. `backgroundTasks(unit)` is an
-    // OBSERVATION: it says the vendor already holds live background work for
-    // the unit, which is a detachment the shim can confirm. The pinned SDK
-    // offers no verb to INITIATE one, so a unit that is detachable in kind and
-    // still in flight in the FOREGROUND is refused `unsupported` -- never
-    // `notDetachable`, which would say its kind cannot detach at all and tell a
-    // consumer to stop offering an affordance for work that backgrounds itself
-    // routinely.
-    // `backgroundTasks(unit) === true` IS the confirmation: the vendor holding
-    // live background work for the unit is the detachment, observed. The live
-    // table's own `backgrounded` flag is a laggier restatement of the same fact
-    // (it arrives on a later `background_tasks_changed`), so requiring it too
-    // refused detachments the vendor had already made.
+    // `backgroundTasks(unit)` IS THE VENDOR'S CTRL-B (sdk.d.ts): with a tool
+    // use id it moves the one foreground task that call started to the
+    // background, and answers `true` when it moved one, `false` only when the
+    // id matched no FOREGROUND task. So `true` is the detachment, made at this
+    // request; the patch announcing it rides the task stream (by_user, via
+    // the note above). The live table's own `backgrounded` flag is a laggier
+    // restatement (a later `background_tasks_changed`), so it is not required.
+    //
+    // A UNIT THIS SHIM HOLDS AS LIVE AND DETACHABLE THAT THE VENDOR MATCHED TO
+    // NO FOREGROUND TASK is the one refusal left here: the vendor tracks no
+    // foreground task for that call (not registered yet, or no longer in the
+    // foreground), so nothing was moved. It is refused `unsupported`, the arm
+    // the contract has for "detachable in kind and in flight, but not
+    // detached" -- never `notDetachable`, which would say its kind cannot
+    // detach at all and tell a consumer to stop offering an affordance for
+    // work that backgrounds routinely.
     if (!live && verdict.kind === "live_detachable") {
       LOGGER.debug(
-        { unit, gap: "no_declared_detach_verb" },
-        "refused DetachForeground because the pinned SDK offers no verb to initiate detachment",
+        { unit, gap: "no_vendor_foreground_task" },
+        "refused DetachForeground because the vendor matched the unit to no foreground task, so nothing was moved",
       );
       return detachForegroundRefused(
         { kind: "unsupported" },
-        `unit ${JSON.stringify(unit)} is detachable in kind and still in flight, but the pinned agent SDK ` +
-          "offers no verb to initiate a detachment; the shim can only observe detachments the vendor made " +
-          "(reported as a contract gap)",
+        `unit ${JSON.stringify(unit)} is detachable in kind and in flight here, but the vendor tracks no ` +
+          "foreground task for it, so backgroundTasks moved nothing",
       );
     }
-    LOGGER.info({ unit }, "reported a foreground unit as detached: the vendor holds live background work for it");
+    LOGGER.info({ unit }, "the vendor moved a foreground unit to the background at the user's request");
     return detachForegroundDetached();
   }
 
