@@ -22,6 +22,11 @@ type logger struct {
 	dest    destination
 	runtime string
 	base    Context
+	// workspaceID is the minted id of the workspace this logger's sink
+	// belongs to, empty for a logger bound to no workspace (the run log, a
+	// closed surface's dropping logger). Only a logger with one tees its Warn
+	// and Error records (see BindRecordTee).
+	workspaceID string
 }
 
 // Debug implements Logger.
@@ -46,7 +51,7 @@ func (l *logger) Error(operation, message string, ctx Context) {
 
 // With implements Logger.
 func (l *logger) With(ctx Context) Logger {
-	return &logger{s: l.s, dest: l.dest, runtime: l.runtime, base: merge(l.base, ctx)}
+	return &logger{s: l.s, dest: l.dest, runtime: l.runtime, base: merge(l.base, ctx), workspaceID: l.workspaceID}
 }
 
 // emit renders one record and delivers it.
@@ -56,6 +61,27 @@ func (l *logger) emit(level, operation, message string, ctx Context) {
 	}
 	rec := newRecord(l.s.now(), l.runtime, level, operation, message, merge(l.base, ctx), l.s.pid)
 	l.deliver(rec)
+	l.tee(level, operation, message)
+}
+
+// tee hands a workspace logger's Warn or Error record to the bound record tee,
+// AFTER it is durable: THE ONE PLACE a workspace's warnings and errors are
+// copied out of the log. Nothing else is teed — a record of a lower level, and
+// every record of a logger bound to no workspace.
+func (l *logger) tee(level, operation, message string) {
+	if l.workspaceID == "" || (level != LevelWarn && level != LevelError) {
+		return
+	}
+	box := l.s.tee.Load()
+	if box == nil || box.tee == nil {
+		return
+	}
+	box.tee.OnWorkspaceRecord(WorkspaceRecord{
+		WorkspaceID: l.workspaceID,
+		Level:       level,
+		Operation:   operation,
+		Message:     message,
+	})
 }
 
 // deliver writes the record durably first and mirrors it second. The durable

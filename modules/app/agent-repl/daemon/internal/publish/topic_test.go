@@ -263,3 +263,60 @@ func TestRepublishReportsAnEmptyTopic(t *testing.T) {
 		t.Fatal("Republish reported a value on a topic that never had one")
 	}
 }
+
+func TestLatestOnlySubscriberSkipsSupersededValues(t *testing.T) {
+	// Arrange: a subscriber that reads nothing while a burst is published.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	topic := publish.NewLatestOnly[int]()
+	ch := topic.Subscribe(ctx)
+
+	// Act.
+	for i := 1; i <= 100; i++ {
+		topic.Publish(i)
+	}
+
+	// Assert: at most the one value the pump already held, then the latest.
+	received := 0
+	for got := 0; got != 100; {
+		got = <-ch
+		received++
+	}
+	if received > 2 {
+		t.Fatalf("a latest-only subscriber took %d values to reach the latest, want at most 2", received)
+	}
+}
+
+func TestLatestOnlySubscribeDeliversLatestFirst(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	topic := publish.NewLatestOnly[int]()
+	topic.Publish(1)
+	topic.Publish(2)
+
+	// Act.
+	got := <-topic.Subscribe(ctx)
+
+	// Assert.
+	if got != 2 {
+		t.Fatalf("first delivery = %d, want the latest value 2", got)
+	}
+}
+
+func TestLatestOnlySubscriberReceivesEveryValueItKeepsUpWith(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	topic := publish.NewLatestOnly[int]()
+	ch := topic.Subscribe(ctx)
+
+	// Act, Assert: a reader that takes each value before the next is
+	// published misses none of them.
+	for i := 1; i <= 10; i++ {
+		topic.Publish(i)
+		if got := <-ch; got != i {
+			t.Fatalf("delivery = %d, want %d", got, i)
+		}
+	}
+}

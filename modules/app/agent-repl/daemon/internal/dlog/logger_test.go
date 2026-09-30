@@ -201,3 +201,188 @@ func TestTheEmergencyOutputIsItselfARecord(t *testing.T) {
 		})
 	}
 }
+
+// captureTee records every record the tee is handed, and optionally runs a
+// probe at the moment of hand-off.
+type captureTee struct {
+	got   []WorkspaceRecord
+	probe func(WorkspaceRecord)
+}
+
+// OnWorkspaceRecord implements RecordTee.
+func (c *captureTee) OnWorkspaceRecord(rec WorkspaceRecord) {
+	c.got = append(c.got, rec)
+	if c.probe != nil {
+		c.probe(rec)
+	}
+}
+
+func TestRecordTeeTakesAWorkspaceLoggersWarnAndErrorRecords(t *testing.T) {
+	tests := []struct {
+		name  string
+		emit  func(Logger)
+		level string
+	}{
+		{name: "warn", level: LevelWarn, emit: func(l Logger) { l.Warn("daemon.pkg.verb", "the message", nil) }},
+		{name: "error", level: LevelError, emit: func(l Logger) { l.Error("daemon.pkg.verb", "the message", nil) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			tee := &captureTee{}
+			s.BindRecordTee(tee)
+			dir := t.TempDir()
+			log, err := s.Workspace(dir)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+
+			// Act.
+			tc.emit(log)
+
+			// Assert.
+			want := WorkspaceRecord{WorkspaceID: mintedTestID(dir), Level: tc.level, Operation: "daemon.pkg.verb", Message: "the message"}
+			if len(tee.got) != 1 || tee.got[0] != want {
+				t.Fatalf("tee got %+v, want exactly %+v", tee.got, want)
+			}
+		})
+	}
+}
+
+func TestRecordTeeSkipsLevelsBelowWarn(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(Logger)
+	}{
+		{name: "debug", emit: func(l Logger) { l.Debug("daemon.pkg.verb", "m", nil) }},
+		{name: "info", emit: func(l Logger) { l.Info("daemon.pkg.verb", "m", nil) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			tee := &captureTee{}
+			s.BindRecordTee(tee)
+			log, err := s.Workspace(t.TempDir())
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+
+			// Act.
+			tc.emit(log)
+
+			// Assert.
+			if len(tee.got) != 0 {
+				t.Fatalf("tee got %+v, want nothing below warn", tee.got)
+			}
+		})
+	}
+}
+
+func TestRecordTeeSkipsTheRunLog(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	tee := &captureTee{}
+	s.BindRecordTee(tee)
+
+	// Act.
+	s.Global().Error("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 0 {
+		t.Fatalf("tee got %+v, want nothing from a logger bound to no workspace", tee.got)
+	}
+}
+
+func TestRecordTeeTakesADerivedWorkspaceLoggersRecords(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	tee := &captureTee{}
+	s.BindRecordTee(tee)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.With(Context{"k": "v"}).Warn("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 1 || tee.got[0].WorkspaceID != mintedTestID(dir) {
+		t.Fatalf("tee got %+v, want the derived logger's record under its workspace", tee.got)
+	}
+}
+
+func TestRecordTeeTakesARecordOnlyAfterItIsDurable(t *testing.T) {
+	// Arrange: the tee reads the workspace sink at the moment it is handed
+	// the record.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	durable := false
+	s.BindRecordTee(&captureTee{probe: func(WorkspaceRecord) {
+		durable = hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.pkg.verb")
+	}})
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if !durable {
+		t.Fatal("the tee was handed a record its workspace sink did not yet carry")
+	}
+}
+
+func TestRecordTeeSkipsARecordTheLevelThresholdDrops(t *testing.T) {
+	// Arrange.
+	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	s, err := openSurfaces(runLogPath, LevelError, io.Discard)
+	if err != nil {
+		t.Fatalf("openSurfaces: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	bindTestWorkspaceIDs(s)
+	tee := &captureTee{}
+	s.BindRecordTee(tee)
+	log, err := s.Workspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 0 {
+		t.Fatalf("tee got %+v, want nothing for a record never persisted", tee.got)
+	}
+}
+
+func TestRecordTeeUnboundTakesNothing(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	tee := &captureTee{}
+	s.BindRecordTee(tee)
+	s.BindRecordTee(nil)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 0 {
+		t.Fatalf("an unbound tee got %+v", tee.got)
+	}
+	if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.pkg.verb") {
+		t.Fatal("the record was not persisted with no tee bound")
+	}
+}

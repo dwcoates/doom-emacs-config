@@ -112,3 +112,43 @@ func TestTestSurfacesRefusesAShimSinkBorrow(t *testing.T) {
 		t.Fatalf("TestSurfaces handed out a shim sink")
 	}
 }
+
+// teeCapture records every record a TestSurfaces tee is handed.
+type teeCapture struct{ got []WorkspaceRecord }
+
+// OnWorkspaceRecord implements RecordTee.
+func (c *teeCapture) OnWorkspaceRecord(rec WorkspaceRecord) { c.got = append(c.got, rec) }
+
+func TestTestSurfacesTeesAWorkspaceLoggersWarn(t *testing.T) {
+	// Arrange.
+	s := NewTestSurfaces()
+	tee := &teeCapture{}
+	s.BindRecordTee(tee)
+	log, err := s.Workspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.With(Context{"k": "v"}).Warn("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 1 || tee.got[0].Level != LevelWarn || tee.got[0].WorkspaceID == "" {
+		t.Fatalf("tee got %+v, want the workspace's warn record", tee.got)
+	}
+}
+
+func TestTestSurfacesDoesNotTeeTheGlobalLogger(t *testing.T) {
+	// Arrange.
+	s := NewTestSurfaces()
+	tee := &teeCapture{}
+	s.BindRecordTee(tee)
+
+	// Act.
+	s.Global().Error("daemon.pkg.verb", "m", nil)
+
+	// Assert.
+	if len(tee.got) != 0 {
+		t.Fatalf("tee got %+v, want nothing from the global logger", tee.got)
+	}
+}

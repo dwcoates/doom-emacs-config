@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"claude-repld/internal/dirpath"
@@ -71,6 +72,11 @@ type surfaces struct {
 	// canonical is dirpath.Canonical, injectable so a test can model a
 	// case-folding volume.
 	canonical func(string) (string, error)
+
+	// tee is the bound record tee, read on every workspace Warn and Error
+	// without taking mu: a record can be emitted by a caller that the tee's
+	// own consumer is waiting on, so the read must never contend.
+	tee atomic.Pointer[teeBox]
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -247,11 +253,21 @@ func (s *surfaces) Workspace(dir string) (Logger, error) {
 	// directory that cannot host a sink, which is the contract this surface's
 	// callers depend on.
 	return &logger{
-		s:       s,
-		dest:    workspaceDest{s: s, dir: ws.dir, name: "daemon"},
-		runtime: RuntimeDaemon,
-		base:    Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id, KeyWorkspaceDirHash: ws.dirHash},
+		s:           s,
+		dest:        workspaceDest{s: s, dir: ws.dir, name: "daemon"},
+		runtime:     RuntimeDaemon,
+		base:        Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id, KeyWorkspaceDirHash: ws.dirHash},
+		workspaceID: ws.id,
 	}, nil
+}
+
+// teeBox holds the bound record tee so it can be swapped atomically.
+type teeBox struct{ tee RecordTee }
+
+// BindRecordTee installs the record tee every workspace logger hands its Warn
+// and Error records to. A nil tee unbinds it.
+func (s *surfaces) BindRecordTee(tee RecordTee) {
+	s.tee.Store(&teeBox{tee: tee})
 }
 
 // WorkspaceOrCentral answers the logger for a workspace's records and is
