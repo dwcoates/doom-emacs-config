@@ -5,8 +5,9 @@
 // GIT_OBJECT_DIRECTORY and GIT_ALTERNATE_OBJECT_DIRECTORIES STRIPPED — a
 // leaked GIT_DIR is a real, previously-observed source of bogus work-tree
 // errors. The hook markers (MergeQueueMarker, OwnerOverride) are stripped
-// too, and only FastForward sets the queue's marker. Operations are local only: the client never fetches and never
-// pushes. Every failure carries git's stdout and stderr as evidence.
+// too, and only FastForward sets the queue's marker. Operations are local
+// except Fetch, the one network git (a branch already merged upstream lands by
+// fetching); the client never pushes. Every failure carries git's stdout and stderr as evidence.
 // See ARCHITECTURE.md "gitclient".
 package gitclient
 
@@ -114,6 +115,21 @@ type Git interface {
 	// DeleteBranchAt deletes a local branch only while it still points at
 	// head.
 	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error
+
+	// CommitsBetween lists the commits reachable from tip and not from base,
+	// oldest first, merges excluded: what a rebase of tip onto base replays.
+	CommitsBetween(ctx context.Context, dir, base, tip string) ([]Commit, error)
+	// StartRebase begins replaying commits onto onto in dir's checkout, one
+	// commit per command, and answers where it stands after the first.
+	StartRebase(ctx context.Context, dir, onto string, commits []string) (RebaseStep, error)
+	// ContinueRebase replays the next commit of the rebase standing in dir.
+	ContinueRebase(ctx context.Context, dir string) (RebaseStep, error)
+	// RebaseInProgress reports whether a rebase stands in dir's checkout.
+	RebaseInProgress(ctx context.Context, dir string) (bool, error)
+	// AddWorktree checks an existing branch out at worktreeDir.
+	AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
+	// Fetch fetches remote into dir's repository.
+	Fetch(ctx context.Context, dir, remote string) error
 }
 
 // Worktree is one entry of `git worktree list --porcelain`.
