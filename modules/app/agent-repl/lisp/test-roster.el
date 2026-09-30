@@ -519,6 +519,35 @@ area came up on the fallback buffer."
     ;; Assert
     (should (equal (car agent-repl-test-roster--switched) "second"))))
 
+(ert-deftest agent-repl-test-roster-merged-current-tab-lands-on-the-previously-selected ()
+  "An IMPLICIT close -- the daemon closing a workspace after its merge lands --
+of the tab the user stands on lands them on the workspace selected before
+it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready)
+                                    (agent-repl-test-roster--row "c" "third" :ready))))))
+    (setq agent-repl-test-roster--current-name "third")
+    (let ((agent-repl--workspace-history '("third" "second" "first")))
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "third")))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "third"))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                        (agent-repl-test-roster--row "b" "second" :ready))))
+          :merged (list (agent-repl-test-roster--row "c" "third" :merged :closed t))))))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("second")))))
+
 (ert-deftest agent-repl-test-roster-teardown-goes-through-land-then-kill ()
   "The roster's tab teardown uses the ONE teardown order
 \(`agent-repl--ws-land-then-kill'), the same one
