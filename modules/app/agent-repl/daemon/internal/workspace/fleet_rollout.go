@@ -915,18 +915,54 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: session.HostSessionID}); err != nil {
 		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
 	}
-	// THE LINK IS RESTATED, as the park restates it: no watcher opens on a
-	// parked session, and without it the surfaces draw whatever link they
-	// last knew over the gate the user has to answer.
-	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
-	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
-	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
-	f.publishHost(ws)
+	f.standCarriedColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
 	log.Info(opFleetRollout, "adopted the running shim parked at its cold gate; the gate stands on this daemon", dlog.Context{
 		"shim_pid": client.PID(), "vendor_session_id": session.VendorSessionID,
 	})
 	return client, nil
+}
+
+// RaiseCarriedColdGate raises a carried cold gate over the parked shim a
+// FRESH BOOT already adopted: a restart's replacement dials every surviving
+// shim in its boot, parked ones included, and the gate -- daemon memory --
+// comes across in the carry the outgoing daemon wrote. A workspace this
+// daemon holds no shim for has nothing to raise the gate over.
+func (f *Fleet) RaiseCarriedColdGate(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) error {
+	if cold == nil {
+		return fmt.Errorf("workspace: raise the carried cold gate of %q: no cold facts", ws)
+	}
+	if _, ok := f.Client(ws); !ok {
+		return fmt.Errorf("workspace: raise the carried cold gate of %q: no shim is held for the workspace", ws)
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: raise the carried cold gate of %q: %w", ws, err)
+	}
+	session, _, err := f.deps.DB.Session(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: raise the carried cold gate of %q: read the session record: %w", ws, err)
+	}
+	f.standCarriedColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
+	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opFleetRollout,
+		"raised the carried cold gate over the adopted parked shim; the gate stands on this daemon", dlog.Context{
+			"vendor_session_id": session.VendorSessionID,
+		})
+	return nil
+}
+
+// standCarriedColdGate stands a carried cold gate on this daemon over a held
+// parked shim: whichever path adopted the shim, the gate is raised the one
+// way.
+//
+// THE LINK IS RESTATED, as the park restates it: no session runs behind a
+// parked shim, and without it the surfaces draw whatever link they last knew
+// over the gate the user has to answer.
+func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string) {
+	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
+	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
+	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
+	f.raiseColdGate(ws, vendorSessionID, cold, configDir)
+	f.publishHost(ws)
 }
 
 // StandDown is the rollout's stand-down: end the session, then stop the
