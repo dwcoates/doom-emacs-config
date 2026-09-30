@@ -419,6 +419,7 @@ func (p *process) apply(line []byte) Reply {
 			agent = prompt.GetAgent().GetValue()
 		}
 		p.srv.adoptTurn(agent, prompt)
+		p.srv.foldTurn(agent, prompt)
 		p.srv.agents.publish(agentFrame{agent: agent, prompt: prompt})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 

@@ -202,6 +202,10 @@ type server struct {
 	// turn_in_flight and turnInFlight as the turn waiting behind it, as the
 	// real shim's reannounceStart does.
 	adoptedTurn *conversationv1.TurnId
+	// joiningTurn is the turn a StartTurn with join_running_turn sent while
+	// turnInFlight ran, until a folded prompt row names it or turnInFlight
+	// ends, when it takes turnInFlight's place, as the real shim's join does.
+	joiningTurn *conversationv1.TurnId
 	// liveNow, once set_live_work has stated it, is the live membership every
 	// later re-announcement states, as the real shim's reannounceStart
 	// recomputes it; until then the re-announcement states what StartSession
@@ -538,6 +542,30 @@ func (s *server) openTurn(turn *conversationv1.TurnId) {
 	s.turnInFlight = turn
 }
 
+// joinTurn records a join_running_turn start while a turn runs, and reports
+// whether it did; with no turn running the start opens its turn as any does.
+func (s *server) joinTurn(req *shimv1.StartTurnRequest) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !req.GetJoinRunningTurn() || s.turnInFlight == nil {
+		return false
+	}
+	s.joiningTurn = req.GetTurn()
+	return true
+}
+
+// foldTurn ends the join a folded prompt row pushed to the main agent names.
+func (s *server) foldTurn(agent string, prompt *conversationv1.AgentPrompt) {
+	if agent != MainAgentID || prompt.GetFoldedInto() == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.joiningTurn.GetValue() == prompt.GetId().GetValue() {
+		s.joiningTurn = nil
+	}
+}
+
 // adoptTurn records the turn a VENDOR_STARTED prompt pushed to the main agent
 // opened. Any other prompt opens nothing.
 func (s *server) adoptTurn(agent string, prompt *conversationv1.AgentPrompt) {
@@ -565,7 +593,8 @@ func (s *server) settleTurn(agent, turn string, frame *conversationv1.AgentFrame
 		case s.adoptedTurn != nil && (turn == "" || turn == s.adoptedTurn.GetValue()):
 			s.adoptedTurn = nil
 		case turn == "" || turn == s.turnInFlight.GetValue():
-			s.turnInFlight = nil
+			s.turnInFlight = s.joiningTurn
+			s.joiningTurn = nil
 		}
 	}
 }
@@ -881,7 +910,9 @@ func (s *server) StartTurn(ctx context.Context, req *connect.Request[shimv1.Star
 		}
 		return resp, err
 	}
-	s.openTurn(req.Msg.GetTurn())
+	if !s.joinTurn(req.Msg) {
+		s.openTurn(req.Msg.GetTurn())
+	}
 	return connect.NewResponse(&shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{
 			Prompt: &conversationv1.AgentPrompt{
