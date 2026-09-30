@@ -57,6 +57,11 @@ func unpinnedOf(status *frontendv1.FooterStatus) unpinnedCell {
 	}
 }
 
+// raisedCount counts the transients the resolver raised.
+func raisedCount(h *harness) int {
+	return len(recordsOf(h.log.Records(), "daemon.footer.transient_raised"))
+}
+
 // transientOf is the live transient the last published view carries, nil when
 // none.
 func transientOf(t *testing.T, h *harness) *frontendv1.FooterActivityTransient {
@@ -104,7 +109,7 @@ func TestATransientIsStampedWithItsEventInstantAndExpiry(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Assert
 	got := transientOf(t, h)
@@ -122,7 +127,7 @@ func TestTheTransientWindowIsInjectable(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Assert
 	if want := instant.Add(3 * time.Second).UnixMilli(); transientOf(t, h).GetExpiry().GetExpiresAtMs() != want {
@@ -155,7 +160,7 @@ func TestANewerTransientReplacesAnOlderOne(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("first"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 	h.clock.Advance(time.Second)
 
 	// Act
@@ -163,7 +168,7 @@ func TestANewerTransientReplacesAnOlderOne(t *testing.T) {
 
 	// Assert
 	got := transientOf(t, h)
-	if got.GetSessionChange() == nil || got.GetNotification() != nil {
+	if got.GetSessionChange() == nil || got.GetHook() != nil {
 		t.Fatalf("transient = %+v, want the newer session change alone", got)
 	}
 	if got.GetAt().GetAtMs() != instant.Add(time.Second).UnixMilli() {
@@ -175,7 +180,7 @@ func TestALapsedTransientIsOmittedFromTheNextView(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 	h.clock.Advance(DefaultTransientWindow)
 
 	// Act: an unrelated fact composes a fresh view.
@@ -195,15 +200,15 @@ func TestALiveTransientIsKeptInsideItsWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 	h.clock.Advance(DefaultTransientWindow - time.Millisecond)
 
 	// Act
 	h.r.SetParked(testWS, false)
 
 	// Assert
-	if transientOf(t, h).GetNotification() == nil {
-		t.Fatalf("transient = %+v, want the notification still inside its window", transientOf(t, h))
+	if transientOf(t, h).GetHook() == nil {
+		t.Fatalf("transient = %+v, want the hook line still inside its window", transientOf(t, h))
 	}
 }
 
@@ -213,7 +218,7 @@ func TestRaisingATransientArmsNoTimer(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Assert
 	if n := len(h.clock.pending); n != 0 {
@@ -222,18 +227,18 @@ func TestRaisingATransientArmsNoTimer(t *testing.T) {
 }
 
 func TestATransientOutlivesTheStatusItWasRaisedUnder(t *testing.T) {
-	// Arrange: a response line raised mid-turn.
+	// Arrange: a hook line raised mid-turn.
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnActivity(testWS, mainAgent, responseSuccess("r-1", "All done."))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("stop-hook", true))
 
 	// Act
 	h.r.OnAgentTerminal(testWS, mainAgent, ptr(ids.TurnID("turn-1")), completed(), nil)
 
 	// Assert
-	if got := transientOf(t, h).GetResponse().GetTail(); got != "All done." {
-		t.Fatalf("idle transient = %q, want the turn's last response line carried over", got)
+	if got := transientOf(t, h).GetHook().GetName(); got != "stop-hook" {
+		t.Fatalf("idle transient = %q, want the turn's last hook line carried over", got)
 	}
 }
 
@@ -242,7 +247,7 @@ func TestASalientLineOutranksALiveTransient(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the build is green"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
 
 	// Act
 	h.r.OnSessionUpdate(testWS, vendorCompacting())
@@ -275,7 +280,7 @@ func TestASubagentsTransientCarriesItsLabel(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentStart("u-1", "agent-sub", "Explore", "find the call sites"))
 
 	// Act
-	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-sub"}, notificationFrame("done looking"))
+	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-sub"}, hookFrame("pre-commit", true))
 
 	// Assert
 	if got := transientOf(t, h).GetAgent().GetLabel(); got != "find the call sites" {
@@ -290,7 +295,7 @@ func TestASubagentWithNoDescriptionIsLabelledByItsType(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentStart("u-1", "agent-sub", "Explore", ""))
 
 	// Act
-	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-sub"}, notificationFrame("done looking"))
+	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-sub"}, hookFrame("pre-commit", true))
 
 	// Assert
 	if got := transientOf(t, h).GetAgent().GetLabel(); got != "Explore" {
@@ -367,50 +372,6 @@ func TestAHookSettlingRaisesNothing(t *testing.T) {
 	// Assert
 	if got := transientOf(t, h); got != nil {
 		t.Fatalf("transient = %+v, want none for a settling hook", got)
-	}
-}
-
-func TestAPushNotificationRaisesTheNotificationLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
-
-	// Assert
-	if got := transientOf(t, h).GetNotification().GetText(); got != "the agent needs you" {
-		t.Fatalf("notification = %q, want the agent's message", got)
-	}
-}
-
-func TestAContextBudgetWarningRaisesTheBudgetLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Assert
-	if got := transientOf(t, h).GetContextBudget().GetText(); got != "context is filling" {
-		t.Fatalf("context budget = %q, want the vendor's warning", got)
-	}
-}
-
-func TestAFailedCompactionRaisesTheBudgetLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
-
-	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
-		CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summary was empty"}}})
-
-	// Assert
-	if got := transientOf(t, h).GetContextBudget().GetText(); got != "compaction failed — the summary was empty" {
-		t.Fatalf("context budget = %q, want the failed compaction's account", got)
 	}
 }
 

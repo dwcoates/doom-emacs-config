@@ -17,6 +17,7 @@ package footer
 import (
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/deployprogress"
@@ -149,6 +150,13 @@ type ColdGateAnswer struct {
 	// the footer an instant from a different clock than the one the view is
 	// rendered against.
 	Text string
+	// Progress is the compaction phase the shim relayed that Text words, nil
+	// for the answer's own request line and for a remediation that is not a
+	// compaction. A CONCLUDED phase is the compaction's outcome: success ends
+	// the context-budget line and is announced as `compaction_concluded`, and
+	// failure stands the context-budget line, exactly as the vendor's own
+	// compaction's outcome does.
+	Progress *conversationv1.SessionCompactionProgress
 }
 
 // The cold-gate remediations, spelled once. The verb that answers a gate and
@@ -192,6 +200,38 @@ type TurnStarted struct {
 	Prompt string
 }
 
+// SubmissionStage is where a prompt's delivery stands before the session takes
+// it. The delivery itself is SetTurn's fact.
+type SubmissionStage int
+
+// The stages a submission moves through on its way to the session.
+const (
+	// StageHeld is a prompt held in the queue behind what is ahead of it.
+	StageHeld SubmissionStage = iota + 1
+	// StageClassifying is the classifier judging whether the prompt may
+	// interrupt the item ahead of it.
+	StageClassifying
+	// StageInterjecting is the running turn being interrupted for the prompt.
+	StageInterjecting
+	// StageCoalesced is the prompt folded into the queued prompt ahead of it.
+	StageCoalesced
+)
+
+// Submission is one move of a prompt's delivery, as the prompt queue reports
+// it. The footer draws each move as the `submitting` transient, and the first
+// of them is the next prompt that ends the agent's push notification.
+type Submission struct {
+	// Prompt is the prompt's text, whole; the line draws its first line.
+	Prompt string
+	// Stage is where the delivery stands.
+	Stage SubmissionStage
+	// Position is the prompt's 1-based place in the queue, for StageHeld.
+	Position uint32
+	// Queued is how many entries the queue holds, this one included, for
+	// StageHeld.
+	Queued uint32
+}
+
 // Resolver is the footer's whole surface.
 type Resolver interface {
 	sessionwatcher.FooterSink
@@ -222,6 +262,9 @@ type Resolver interface {
 	// what raises `thinking · submitting` the instant StartTurn is accepted
 	// and what starts the strip's clock.
 	SetTurn(ws ids.WorkspaceID, turn *TurnStarted)
+	// OnSubmission is one move of a prompt's delivery before the session takes
+	// it: held, classifying, interjecting or coalesced.
+	OnSubmission(ws ids.WorkspaceID, sub Submission)
 	// SetMerge installs the merge facts the footer draws.
 	SetMerge(ws ids.WorkspaceID, facts MergeFacts)
 	// SetParked states that the idle sweep stood this workspace's shim down on

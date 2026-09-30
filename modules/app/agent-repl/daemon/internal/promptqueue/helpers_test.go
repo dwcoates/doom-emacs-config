@@ -63,6 +63,8 @@ type fakeDB struct {
 	acceptErr    error
 	// allHeldErr fails the boot restore's all-or-nothing read.
 	allHeldErr error
+	// heldErr fails every standing-holds read.
+	heldErr error
 	// openTurnsErr fails the open-turns read the judge compares against.
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
@@ -243,6 +245,9 @@ func (d *fakeDB) retired(turn ids.TurnID) *wsm.Tombstone {
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.heldErr != nil {
+		return nil, d.heldErr
+	}
 	out := []wsm.HeldPrompt{}
 	for _, turn := range d.order {
 		h := d.held[turn]
@@ -798,6 +803,21 @@ type fakeFooter struct {
 	interrupting []bool
 	turns        []*footer.TurnStarted
 	dropped      []uint32
+	submissions  []footer.Submission
+}
+
+// OnSubmission records a move of a prompt's delivery the queue reported.
+func (f *fakeFooter) OnSubmission(_ ids.WorkspaceID, sub footer.Submission) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submissions = append(f.submissions, sub)
+}
+
+// submissionStages answers the recorded submissions.
+func (f *fakeFooter) submissionStages() []footer.Submission {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]footer.Submission(nil), f.submissions...)
 }
 
 // SetTurn records what the queue told the footer a turn carries.

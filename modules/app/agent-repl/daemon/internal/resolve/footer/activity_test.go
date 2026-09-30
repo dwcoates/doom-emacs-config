@@ -310,13 +310,13 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinned(t *testing.T) {
 			deploying(h)
 			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
 		}, "background", "salient.update"},
-		{"blocked on the account, nothing salient", func(h *harness) {
+		{"blocked on the account, the vendor's refusal explains it", func(h *harness) {
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "enduring"},
-		{"blocked on the account under a deploy", func(h *harness) {
+		}, "blocked", "salient.rate_limit"},
+		{"the refusal that explains the block outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.update"},
+		}, "blocked", "salient.rate_limit"},
 		{"an escalating blocked fault outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindStateUnreadable, false))
@@ -561,8 +561,8 @@ func TestActivityLineOfNamesTheTierAndKind(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, vendorCompacting())
 		}, activityLine{tier: "salient", kind: "compaction", text: "compacting the context…"}},
 		{"a transient line", func(h *harness) {
-			h.r.OnActivity(testWS, mainAgent, notificationFrame("hello"))
-		}, activityLine{tier: "transient", kind: "notification", text: "hello"}},
+			h.r.OnActivity(testWS, mainAgent, hookFrame("hello", true))
+		}, activityLine{tier: "transient", kind: "hook", text: "name:\"hello\""}},
 		{"the quiet-stretch line", func(h *harness) {
 			h.r.OnMainAgent(testWS, mainAgent)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
@@ -622,11 +622,11 @@ func TestATransientLineChangeIsRecordedAtDebug(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, notificationFrame("hello"))
+	h.r.OnActivity(testWS, mainAgent, hookFrame("hello", true))
 
 	// Assert
 	for _, rec := range lineChanges(h.log.Records()) {
-		if rec.Context["kind"] == "transient.notification" && rec.Level != "debug" {
+		if rec.Context["kind"] == "transient.hook" && rec.Level != "debug" {
 			t.Fatalf("a transient line change was recorded at %s, want debug", rec.Level)
 		}
 	}
@@ -638,7 +638,7 @@ func TestATransientLineChangeIsRecordedAtDebug(t *testing.T) {
 func TestCoversEnduringReadsEveryTierAboveTheEnduringLine(t *testing.T) {
 	transient := &frontendv1.FooterActivityTransient{Kind: &frontendv1.FooterActivityTransient_ToolCall{
 		ToolCall: &frontendv1.FooterActivityTransientToolCall{}}}
-	quiet := &frontendv1.FooterStatusActivityQuietStretch{Text: "✅ Bash finished — handling result..."}
+	quiet := &frontendv1.FooterActivityQuietStretch{Text: "✅ Bash finished — handling result..."}
 	tests := []struct {
 		name     string
 		salient  bool

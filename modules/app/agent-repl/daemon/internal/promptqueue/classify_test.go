@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -1065,5 +1066,125 @@ func TestEveryUnjudgedVerdictIsReadThroughNeverJudged(t *testing.T) {
 	// deciding sites read neverJudged.
 	if calls["q.sessionActVerdict("] != 1 || calls["q.deferredVerdict("] != 1 || calls["q.neverJudged("] != 3 {
 		t.Fatalf("call counts = %v, want sessionActVerdict 1, deferredVerdict 1 (both in neverJudged) and neverJudged 3", calls)
+	}
+}
+
+// ---- the footer's submitting stages ------------------------------------------
+
+// stagesOf answers the stages the footer was told, in order.
+func stagesOf(subs []footer.Submission) []footer.SubmissionStage {
+	out := make([]footer.SubmissionStage, len(subs))
+	for i, sub := range subs {
+		out[i] = sub.Stage
+	}
+	return out
+}
+
+func TestAJudgedPromptReportsClassifyingThenItsPlaceInTheQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "it can wait"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "and then this")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	subs := h.footer.submissionStages()
+	want := []footer.SubmissionStage{footer.StageClassifying, footer.StageHeld}
+	if got := stagesOf(subs); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stages = %v, want %v", got, want)
+	}
+	if held := subs[1]; held.Position != 1 || held.Queued != 1 || held.Prompt != "and then this" {
+		t.Fatalf("held = %+v, want place 1 of 1 for the prompt", held)
+	}
+}
+
+func TestAnInterjectingPromptReportsClassifyingThenInterjecting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	want := []footer.SubmissionStage{footer.StageClassifying, footer.StageInterjecting}
+	if got := stagesOf(h.footer.submissionStages()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stages = %v, want %v", got, want)
+	}
+}
+
+func TestAPromptHeldUnderAContextCutReportsOnlyItsPlace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	running(t, h, "running-turn", "/compact")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	want := []footer.SubmissionStage{footer.StageHeld}
+	if got := stagesOf(h.footer.submissionStages()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stages = %v, want %v: no classifier runs under a context cut", got, want)
+	}
+}
+
+func TestQueuePlaceCountsTheStandingHoldsInOrder(t *testing.T) {
+	holds := []wsm.HeldPrompt{{Turn: "a"}, {Turn: "b"}, {Turn: "c"}}
+	tests := []struct {
+		name         string
+		turn         ids.TurnID
+		wantPosition uint32
+		wantQueued   uint32
+	}{
+		{"the first", "a", 1, 3},
+		{"the last", "c", 3, 3},
+		{"one no longer standing", "gone", 0, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			position, queued := queuePlace(holds, tt.turn)
+
+			// Assert
+			if position != tt.wantPosition || queued != tt.wantQueued {
+				t.Fatalf("queuePlace = (%d, %d), want (%d, %d)", position, queued, tt.wantPosition, tt.wantQueued)
+			}
+		})
+	}
+}
+
+func TestReportHeldLogsAnUnreadableQueueAndReportsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.heldErr = errors.New("disk gone")
+	log, err := h.q.logger(context.Background(), theWorkspace)
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+
+	// Act
+	h.q.reportHeld(context.Background(), submission("t1", "and then this"), log)
+
+	// Assert
+	if got := h.footer.submissionStages(); len(got) != 0 {
+		t.Fatalf("stages = %v, want none reported without the queue's place", got)
+	}
+	if !logged(h.log.Records(), "error", opHold, "could not read the holds to report the prompt's place in the queue") {
+		t.Fatalf("records = %+v, want the failed read at error", h.log.Records())
 	}
 }

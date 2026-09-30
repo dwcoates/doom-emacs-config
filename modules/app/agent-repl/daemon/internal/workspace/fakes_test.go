@@ -972,6 +972,9 @@ type fakeFooter struct {
 	// order, the clearing nil included: the ORDER is the assertion, because
 	// the act has to reach the strip before the shim is dialed.
 	coldAnswers []*footer.ColdGateAnswer
+	// coldEvents is every cold-gate setter call, in order: "gate:standing",
+	// "gate:retired", "answer" or "answer:cleared".
+	coldEvents []string
 }
 
 func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
@@ -1000,10 +1003,20 @@ func (f *fakeFooter) SetClosing(ws ids.WorkspaceID, blocked *footer.CloseBlocked
 
 func (f *fakeFooter) SetColdGate(ws ids.WorkspaceID, gate footer.ColdGate) {
 	f.coldGates[ws] = gate
+	if gate.Standing {
+		f.coldEvents = append(f.coldEvents, "gate:standing")
+		return
+	}
+	f.coldEvents = append(f.coldEvents, "gate:retired")
 }
 
 func (f *fakeFooter) SetColdGateAnswer(_ ids.WorkspaceID, answer *footer.ColdGateAnswer) {
 	f.coldAnswers = append(f.coldAnswers, answer)
+	if answer == nil {
+		f.coldEvents = append(f.coldEvents, "answer:cleared")
+		return
+	}
+	f.coldEvents = append(f.coldEvents, "answer")
 }
 
 // coldAnswerLines is every non-clearing line the footer was handed, in order.

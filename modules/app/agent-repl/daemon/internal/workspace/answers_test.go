@@ -976,3 +976,51 @@ func TestAnswerColdGateEndsTheGateOnlyWhenTheReopenSucceeds(t *testing.T) {
 		})
 	}
 }
+
+func TestASucceededReopenRetiresTheGateBeforeClearingTheAnswer(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.footer.coldEvents = nil
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert. The gate goes while the answer's line still stands, so the
+	// strip never draws the answered gate again.
+	events := f.footer.coldEvents
+	if n := len(events); n < 2 || events[n-2] != "gate:retired" || events[n-1] != "answer:cleared" {
+		t.Fatalf("cold-gate events = %v, want the gate retired, then the answer cleared", events)
+	}
+}
+
+func TestTheReopensCompactionPhasesReachTheFooterWithTheirProgress(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	started := phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400)
+	f.fleet.resumePhases = []*conversationv1.SessionCompactionProgress{started}
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert. The footer is handed the phase itself, so it can announce the
+	// outcome of a concluded compaction.
+	var got *conversationv1.SessionCompactionProgress
+	for _, answer := range f.footer.coldAnswers {
+		if answer != nil && answer.Progress != nil {
+			got = answer.Progress
+		}
+	}
+	if got.GetPhase() != conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED {
+		t.Fatalf("progress = %+v, want the started phase handed to the footer", got)
+	}
+}

@@ -52,8 +52,8 @@ func (r *resolver) salientFault(s *wsState, status string) (*frontendv1.FooterSt
 }
 
 // idleActivity resolves the cell idle, turn_failed and degraded share: the
-// dead-query line first, because it explains a `turn_failed` status; then a
-// deploy's progress; then unpinned.
+// dead-query line first, because it explains a `turn_failed` status; then the
+// shared salient lines; then unpinned.
 func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity {
 	if s.queryDied != nil {
 		return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Salient{
@@ -63,25 +63,22 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 					QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
 			}}}
 	}
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Salient{
-			Salient: &frontendv1.FooterStatusIdleSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusIdleSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusIdleSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
 // workingActivity resolves the cell while a turn runs: a compaction first,
-// because it explains the `compacting` step; then a retry; then a deploy's
-// progress; then unpinned, which is most of a turn.
+// because it explains the `compacting` step; then a retry; then the shared
+// salient lines; then unpinned, which is most of a turn.
 func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingActivity {
 	salient := func(at time.Time) *frontendv1.FooterStatusWorkingSalient {
 		return &frontendv1.FooterStatusWorkingSalient{At: stamp(at)}
 	}
 	var line *frontendv1.FooterStatusWorkingSalient
-	switch update, updateAt := r.updateLine(s); {
+	switch shared, ok := r.sharedSalient(s); {
 	case s.compaction != nil:
 		line = salient(s.compaction.at)
 		line.Kind = &frontendv1.FooterStatusWorkingSalient_Compaction{
@@ -90,31 +87,27 @@ func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingAc
 		line = salient(s.retrying.at)
 		line.Kind = &frontendv1.FooterStatusWorkingSalient_Retrying{
 			Retrying: &frontendv1.FooterStatusActivityRetrying{Attempt: s.retrying.attempt, Status: s.retrying.status}}
-	case update != nil:
-		line = salient(updateAt)
-		line.Kind = &frontendv1.FooterStatusWorkingSalient_Update{Update: update}
+	case ok:
+		line = fillShared(&frontendv1.FooterStatusWorkingSalient{}, shared)
 	default:
 		return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
 	}
 	return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Salient{Salient: line}}
 }
 
-// interruptedActivity resolves the cell while interrupted: a stopped turn
-// blocks nothing, so only a deploy's progress can stand.
+// interruptedActivity resolves the cell while interrupted: a stopped turn has
+// no line of its own, so only the shared salient lines can stand.
 func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInterruptedActivity {
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusInterruptedActivity{Tier: &frontendv1.FooterStatusInterruptedActivity_Salient{
-			Salient: &frontendv1.FooterStatusInterruptedSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusInterruptedSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusInterruptedSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusInterruptedActivity{Tier: &frontendv1.FooterStatusInterruptedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
 // mergingActivity resolves the cell merging, merge_conflict, merge_failed and
 // merged share: the commit landing first, because it explains the merge step;
-// then a deploy's progress; then unpinned.
+// then the shared salient lines; then unpinned.
 func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingActivity {
 	if s.mergingCommit != nil {
 		return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{
@@ -125,59 +118,49 @@ func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingAc
 						Sha: s.mergingCommit.sha, Subject: s.mergingCommit.subject}},
 			}}}
 	}
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{
-			Salient: &frontendv1.FooterStatusMergingSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusMergingSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusMergingSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// backgroundActivity resolves the cell while detached work runs: detached work
-// blocks nothing, so only a deploy's progress can stand.
+// backgroundActivity resolves the cell while detached work runs: the detached
+// work's landings are the quiet tier's, so only the shared salient lines can
+// stand.
 func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgroundActivity {
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Salient{
-			Salient: &frontendv1.FooterStatusBackgroundSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusBackgroundSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusBackgroundSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
 }
 
-// coversEnduring reports whether a quiet-capable cell draws anything above its
-// enduring line: a salient line, a live transient or the quiet-stretch line.
-// Any of them is newer than a quiet-stretch line the next feed item ended, so
-// the ending is not stated beside it (quietStretchEnding).
-func coversEnduring(salient bool, unpinned *frontendv1.FooterActivityTransientOverQuietOverEnduring) bool {
-	return salient || unpinned.GetTransient() != nil || unpinned.GetQuietStretch() != nil
-}
-
-// blockedActivity resolves the cell while blocked: the auth prompt first,
-// because it explains the `auth` step; then an escalating fault that claims
-// `blocked`; then a deploy's progress; then unpinned, where the enduring usage
-// figures are exactly what explains a usage-limit block.
+// blockedActivity resolves the cell while blocked: the kind that explains the
+// step first — the auth prompt under `auth`, the vendor's rate-limit event
+// under `usage_limit` — then an escalating fault that claims `blocked`; then
+// the shared salient lines; then unpinned, where the enduring usage figures
+// explain a usage-limit block the vendor sent no event for.
 func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedActivity {
 	salient := func(at time.Time) *frontendv1.FooterStatusBlockedSalient {
 		return &frontendv1.FooterStatusBlockedSalient{At: stamp(at)}
 	}
 	fault, faultAt := r.salientFault(s, "blocked")
-	update, updateAt := r.updateLine(s)
+	shared, sharedOK := r.sharedSalient(s)
 	var line *frontendv1.FooterStatusBlockedSalient
 	switch {
 	case s.blocked != nil && s.blocked.kind == blockedAuth && s.authLine != nil:
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
+	case s.blocked != nil && s.blocked.kind == blockedUsageLimit && s.rateEvent != nil:
+		line = salient(s.rateEvent.at)
+		line.Kind = &frontendv1.FooterStatusBlockedSalient_RateLimit{RateLimit: s.rateEvent.line}
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Fault{Fault: fault}
-	case update != nil:
-		line = salient(updateAt)
-		line.Kind = &frontendv1.FooterStatusBlockedSalient_Update{Update: update}
+	case sharedOK:
+		line = fillShared(&frontendv1.FooterStatusBlockedSalient{}, shared)
 	default:
 		return &frontendv1.FooterStatusBlockedActivity{Tier: &frontendv1.FooterStatusBlockedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
@@ -186,15 +169,15 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 
 // disconnectedActivity resolves the cell while the link is not serving: the
 // bring-up failure first, because it explains the `start_failed` step; then an
-// escalating fault that claims `disconnected`; then a deploy's progress; then
-// unpinned (a step with no line of its own: starting, a severed link being
+// escalating fault that claims `disconnected`; then the shared salient lines;
+// then unpinned (a step with no line of its own: starting, a severed link being
 // retried with no fault yet).
 func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1.FooterStatusDisconnectedActivity {
 	salient := func(at time.Time) *frontendv1.FooterStatusDisconnectedSalient {
 		return &frontendv1.FooterStatusDisconnectedSalient{At: stamp(at)}
 	}
 	fault, faultAt := r.salientFault(s, "disconnected")
-	update, updateAt := r.updateLine(s)
+	shared, sharedOK := r.sharedSalient(s)
 	var line *frontendv1.FooterStatusDisconnectedSalient
 	switch {
 	case s.startFailed != nil:
@@ -217,9 +200,8 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Fault{Fault: fault}
-	case update != nil:
-		line = salient(updateAt)
-		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Update{Update: update}
+	case sharedOK:
+		line = fillShared(&frontendv1.FooterStatusDisconnectedSalient{}, shared)
 	default:
 		return &frontendv1.FooterStatusDisconnectedActivity{Tier: &frontendv1.FooterStatusDisconnectedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
@@ -227,7 +209,8 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 }
 
 // closingActivity resolves the cell while closing: the refusal first, because
-// it explains the `blocked` step; then a deploy's progress; then unpinned.
+// it explains the `blocked` step; then the shared salient lines; then
+// unpinned.
 func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingActivity {
 	if s.closing != nil {
 		return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Salient{
@@ -237,29 +220,30 @@ func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingAc
 					CloseBlocked: &frontendv1.FooterStatusActivityCloseBlocked{Text: s.closing.Detail}},
 			}}}
 	}
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Salient{
-			Salient: &frontendv1.FooterStatusClosingSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusClosingSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusClosingSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusClosingActivity{Tier: &frontendv1.FooterStatusClosingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// loadingActivity resolves the cell while context is injected: an injection
-// blocks nothing, so only a deploy's progress can stand. The injected item
-// itself is the `context_injected` transient the same injection raised, which
-// the unpinned branch carries while the status stands.
+// loadingActivity resolves the cell while context is injected: the injected
+// item is the `context_injected` transient the same injection raised, so only
+// the shared salient lines can stand.
 func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingActivity {
-	if line, at := r.updateLine(s); line != nil {
+	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Salient{
-			Salient: &frontendv1.FooterStatusLoadingSalient{
-				At:   stamp(at),
-				Kind: &frontendv1.FooterStatusLoadingSalient_Update{Update: line},
-			}}}
+			Salient: fillShared(&frontendv1.FooterStatusLoadingSalient{}, line)}}
 	}
 	return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Unpinned{Unpinned: r.unpinned(s)}}
+}
+
+// coversEnduring reports whether a quiet-capable cell draws anything above its
+// enduring line: a salient line, a live transient or the quiet-stretch line.
+// Any of them is newer than a quiet-stretch line the next feed item ended, so
+// the ending is not stated beside it (quietStretchEnding).
+func coversEnduring(salient bool, unpinned *frontendv1.FooterActivityTransientOverQuietOverEnduring) bool {
+	return salient || unpinned.GetTransient() != nil || unpinned.GetQuietStretch() != nil
 }
 
 // waitingSalient is the one salient line a waiting status stands on. It is
