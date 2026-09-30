@@ -50,22 +50,7 @@ func JoiningAddrPath(stateDir string) string {
 // exits before it binds, so every handover that incumbent attempted failed as
 // a successor that never reported an address (2026-09-30).
 func successorArgv(incumbent []string, address string) []string {
-	out := make([]string, 0, len(incumbent)+2)
-	for i := 0; i < len(incumbent); i++ {
-		arg := incumbent[i]
-		name, _, hasValue := cutFlag(arg)
-		switch name {
-		case joiningName:
-			if !hasValue && i+1 < len(incumbent) {
-				i++
-			}
-			continue
-		case ReplacingFlagName:
-			continue
-		}
-		out = append(out, arg)
-	}
-	return append(out, JoiningFlag, address)
+	return append(withoutRoleFlags(incumbent), JoiningFlag, address)
 }
 
 // joiningName is JoiningFlag without its dashes, for argv matching.
