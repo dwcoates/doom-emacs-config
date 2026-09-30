@@ -467,6 +467,10 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.silenceBash(cmd.Work)
 		return Reply{OK: true}
 
+	case OpAwaitBash:
+		p.srv.awaitBash(cmd.Work)
+		return Reply{OK: true}
+
 	case OpSilenceReannouncement:
 		p.srv.silenceReannouncement()
 		return Reply{OK: true}
