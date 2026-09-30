@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -100,18 +101,12 @@ func (q *queue) judgeQueued(ctx context.Context, sub Submission, ahead wsm.HeldP
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the classifier could not decide, so the prompt waits its turn",
 			At:     q.deps.Now(),
-		}, false, log)
-		return
-	}
-	if !verdict.Interject {
-		q.settleQueued(ctx, sub, ahead, epoch, wsm.Classification{
-			Arm: wsm.ArmHoldForTurnEnd, Reason: verdict.Reason, At: q.deps.Now(),
-		}, false, log)
+		}, classifier.RouteQueue, log)
 		return
 	}
 	q.settleQueued(ctx, sub, ahead, epoch, wsm.Classification{
-		Arm: wsm.ArmInterject, Reason: verdict.Reason, At: q.deps.Now(),
-	}, true, log)
+		Arm: routeArm(verdict.Route), Reason: verdict.Reason, At: q.deps.Now(),
+	}, verdict.Route, log)
 }
 
 // settleQueued settles a verdict reached against a queued prompt.
@@ -122,13 +117,15 @@ func (q *queue) judgeQueued(ctx context.Context, sub Submission, ahead wsm.HeldP
 // new prompt into it: the merge either lands before the pop reads it, or the
 // pop has already delivered it and this sees it running.
 //
-// An interrupt verdict against the prompt ahead:
-//   - still queued: COALESCES the two;
-//   - now the running turn (delivered while the verdict was reached):
-//     interrupts it, as a verdict against a running turn does;
+// A verdict that would not wait -- after_tool_call or interrupt -- against the
+// prompt ahead:
+//   - still queued: COALESCES the two, since nothing ahead has started and
+//     there is no running work to join or to interrupt;
+//   - now the running turn (delivered while the verdict was reached): joins
+//     it or interrupts it, as the same verdict against a running turn does;
 //   - gone (dropped): the prompt waits its turn.
-func (q *queue) settleQueued(ctx context.Context, sub Submission, ahead wsm.HeldPrompt, epoch uint64, c wsm.Classification, interrupt bool, log dlog.Logger) {
-	if q.settleQueuedLocked(ctx, sub, ahead, epoch, c, interrupt, log) {
+func (q *queue) settleQueued(ctx context.Context, sub Submission, ahead wsm.HeldPrompt, epoch uint64, c wsm.Classification, route classifier.Route, log dlog.Logger) {
+	if q.settleQueuedLocked(ctx, sub, ahead, epoch, c, route, log) {
 		// THE INTERRUPT IS SENT OFF THE LOCKS: the running turn's end takes
 		// the delivery lock to pop what is held.
 		if !q.interject(ctx, sub, ahead.Turn, log) {
@@ -139,7 +136,7 @@ func (q *queue) settleQueued(ctx context.Context, sub Submission, ahead wsm.Held
 
 // settleQueuedLocked is settleQueued under the delivery and verdict locks. It
 // reports whether the prompt ahead is now running and must be interrupted.
-func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead wsm.HeldPrompt, epoch uint64, c wsm.Classification, interrupt bool, log dlog.Logger) bool {
+func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead wsm.HeldPrompt, epoch uint64, c wsm.Classification, route classifier.Route, log dlog.Logger) bool {
 	state := q.state(sub.WS)
 	state.drain.Lock()
 	defer state.drain.Unlock()
@@ -151,7 +148,7 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 		})
 		return false
 	}
-	if !interrupt {
+	if route == classifier.RouteQueue {
 		q.record(ctx, sub, c, log)
 		state.verdicts.Unlock()
 		q.reportHeld(ctx, sub, log)
@@ -176,9 +173,14 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 	case q.isRunning(sub.WS, ahead.Turn):
 		q.record(ctx, sub, c, log)
 		state.verdicts.Unlock()
-		log.Info(opClassify, "the prompt ahead started while the verdict was reached; the prompt interrupts it", dlog.Context{
-			"turn": string(sub.Turn), "ahead_turn": string(ahead.Turn),
+		log.Info(opClassify, "the prompt ahead started while the verdict was reached; the prompt is routed against it as it runs", dlog.Context{
+			"turn": string(sub.Turn), "ahead_turn": string(ahead.Turn), "route": route.String(),
 		})
+		if route == classifier.RouteAfterToolCall {
+			// THE DELIVERY LOCK IS ALREADY HELD, which is what the join needs.
+			q.joinLocked(ctx, sub, ahead.Turn, log)
+			return false
+		}
 		return true
 	default:
 		state.verdicts.Unlock()

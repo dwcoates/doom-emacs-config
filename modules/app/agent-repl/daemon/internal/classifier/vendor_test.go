@@ -24,8 +24,8 @@ func TestVendorJudgeTakesTheFastPathWithoutAskingTheGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
-	if !got.Interject || !got.FastPath {
-		t.Fatalf("verdict = %+v, want an interjecting fast-path verdict", got)
+	if got.Route != RouteInterrupt || !got.FastPath {
+		t.Fatalf("verdict = %+v, want an interrupting fast-path verdict", got)
 	}
 }
 
@@ -44,31 +44,30 @@ func TestVendorJudgeRefusesWhenVendorCallsAreForbidden(t *testing.T) {
 	}
 }
 
-func TestVendorJudgeInterjectsOnTheJumpToken(t *testing.T) {
-	// Arrange
-	j, _ := answering(t, permissiveGuard(t), TokenJump+"\n", nil)
-	// Act
-	got, err := j.Judge(context.Background(), "running", "also update the docs")
-	// Assert
-	if err != nil {
-		t.Fatalf("Judge: %v", err)
+func TestVendorJudgeRoutesEachAnswerToken(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer string
+		want   Route
+	}{
+		{name: "interrupt", answer: TokenInterrupt + "\n", want: RouteInterrupt},
+		{name: "after this tool call", answer: TokenAfterToolCall, want: RouteAfterToolCall},
+		{name: "hold, padded", answer: " " + TokenHold + " ", want: RouteQueue},
 	}
-	if !got.Interject {
-		t.Fatalf("verdict = %+v, want an interjecting verdict", got)
-	}
-}
-
-func TestVendorJudgeHoldsOnTheHoldToken(t *testing.T) {
-	// Arrange
-	j, _ := answering(t, permissiveGuard(t), " "+TokenHold+" ", nil)
-	// Act
-	got, err := j.Judge(context.Background(), "running", "an unrelated question")
-	// Assert
-	if err != nil {
-		t.Fatalf("Judge: %v", err)
-	}
-	if got.Interject {
-		t.Fatalf("verdict = %+v, want a holding verdict", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			j, _ := answering(t, permissiveGuard(t), tt.answer, nil)
+			// Act
+			got, err := j.Judge(context.Background(), "running", "also update the docs")
+			// Assert
+			if err != nil {
+				t.Fatalf("Judge: %v", err)
+			}
+			if got.Route != tt.want || got.Reason == "" || got.FastPath {
+				t.Fatalf("verdict = %+v, want route %s with a stated reason", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -137,10 +136,11 @@ func TestVendorJudgeRefusesWithNoVendorBinaryConfigured(t *testing.T) {
 func TestSpliceBriefSubstitutesEveryPlaceholder(t *testing.T) {
 	// Arrange.
 	values := map[string]string{
-		"token_jump":   TokenJump,
-		"token_hold":   TokenHold,
-		"running_turn": "the running turn",
-		"new_message":  "the new message",
+		"token_interrupt":       TokenInterrupt,
+		"token_after_tool_call": TokenAfterToolCall,
+		"token_hold":            TokenHold,
+		"running_turn":          "the running turn",
+		"new_message":           "the new message",
 	}
 
 	// Act.
@@ -150,7 +150,7 @@ func TestSpliceBriefSubstitutesEveryPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spliceBrief() error = %v, want nil", err)
 	}
-	for _, want := range []string{TokenJump, TokenHold, "the running turn", "the new message"} {
+	for _, want := range []string{TokenInterrupt, TokenAfterToolCall, TokenHold, "the running turn", "the new message"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("question = %q, want it to contain %q", got, want)
 		}

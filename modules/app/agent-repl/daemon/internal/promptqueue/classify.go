@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -107,8 +108,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 }
 
 // judgedAgainst decides the verdict of a prompt whose item ahead makes
-// classification needless: a held session act ahead, or a queue that could
-// not be read. ok is false when the prompt is to be judged; *ahead and
+// classification needless: a held session act ahead, a prompt joining the
+// running turn ahead, or a queue that could not be read. ok is false when the prompt is to be judged; *ahead and
 // *aheadHeld then name what it is judged against.
 func (q *queue) judgedAgainst(ctx context.Context, sub Submission, ahead *aheadKind, aheadHeld *wsm.HeldPrompt, log dlog.Logger) (wsm.Classification, func(dlog.Logger, ids.TurnID), bool) {
 	kind, prev, err := q.itemAhead(ctx, sub.WS, sub.Turn)
@@ -124,6 +125,9 @@ func (q *queue) judgedAgainst(ctx context.Context, sub Submission, ahead *aheadK
 	*ahead, *aheadHeld = kind, prev
 	if kind == aheadAct {
 		return q.behindActVerdict(prev), func(log dlog.Logger, _ ids.TurnID) { behindActNeverClassified(log, sub.Turn, prev) }, true
+	}
+	if joining, ok := q.joining(sub.WS); ok && kind == aheadRunning {
+		return q.behindJoinVerdict(), func(log dlog.Logger, _ ids.TurnID) { behindJoinNeverClassified(log, sub.Turn, joining) }, true
 	}
 	return wsm.Classification{}, nil, false
 }
@@ -266,13 +270,13 @@ func neverClassified(log dlog.Logger, held ids.TurnID, command conversationv1.Se
 // than a state. Each failure is resolved to the prompt's true state — held
 // for the running turn's end — and logged where the daemon can see it.
 func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, log dlog.Logger) {
-	c, interject := q.verdictFor(ctx, sub, running, log)
-	q.settle(ctx, sub, running, epoch, c, interject, log)
+	c, route := q.verdictFor(ctx, sub, running, log)
+	q.settle(ctx, sub, running, epoch, c, route, log)
 }
 
 // verdictFor reaches the verdict judge settles: the classification to record,
-// and whether it interjects.
-func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) (wsm.Classification, bool) {
+// and where it routes the prompt.
+func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) (wsm.Classification, classifier.Route) {
 	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
 	// context cut cannot be interrupted, so there is nothing to judge.
 	if cut, ok := q.runningCut(sub.WS); ok {
@@ -283,7 +287,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			Reason:  "the running turn is a context cut and cannot be interrupted",
 			Command: cut.command,
 			At:      q.deps.Now(),
-		}, false
+		}, classifier.RouteQueue
 	}
 
 	// A PROMPT THAT IS ITSELF A SESSION ACT, OR IS DEFERRED, never reaches
@@ -292,7 +296,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	// carry one.
 	if verdict, why, ok := q.neverJudged(sub); ok {
 		why(log, running)
-		return verdict, false
+		return verdict, classifier.RouteQueue
 	}
 
 	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
@@ -312,7 +316,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the running turn could not be read, so the prompt waits for it to end",
 			At:     q.deps.Now(),
-		}, false
+		}, classifier.RouteQueue
 	}
 	if !found {
 		log.Error(opClassify, "the queue's running turn is not open in the store; the prompt waits for the running turn to end",
@@ -321,7 +325,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the running turn has no open record to compare against, so the prompt waits for it to end",
 			At:     q.deps.Now(),
-		}, false
+		}, classifier.RouteQueue
 	}
 
 	// A FAILED CLASSIFIER IS NOT A VERDICT, but the prompt still has a true
@@ -339,19 +343,12 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the classifier could not decide, so the prompt waits for the running turn to end",
 			At:     q.deps.Now(),
-		}, false
+		}, classifier.RouteQueue
 	}
-	if !verdict.Interject {
-		log.Debug(opClassify, "the prompt waits for the running turn to end",
-			dlog.Context{"reason": verdict.Reason})
-		return wsm.Classification{
-			Arm: wsm.ArmHoldForTurnEnd, Reason: verdict.Reason, At: q.deps.Now(),
-		}, false
-	}
-
-	return wsm.Classification{
-		Arm: wsm.ArmInterject, Reason: verdict.Reason, At: q.deps.Now(),
-	}, true
+	log.Debug(opClassify, "the classifier routed the prompt", dlog.Context{
+		"route": verdict.Route.String(), "reason": verdict.Reason,
+	})
+	return wsm.Classification{Arm: routeArm(verdict.Route), Reason: verdict.Reason, At: q.deps.Now()}, verdict.Route
 }
 
 // settle records a verdict and, on an interject, runs the interjection — but
@@ -360,7 +357,12 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 // about the replaced words is discarded rather than stamped on the new ones. A
 // move's seal bumps it too (handoff.go): a verdict answering after the
 // workspace was sealed for another daemon is that daemon's to reach.
-func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, interject bool, log dlog.Logger) {
+func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, route classifier.Route, log dlog.Logger) {
+	if route == classifier.RouteAfterToolCall {
+		q.settleJoin(ctx, sub, running, epoch, c, log)
+		return
+	}
+	interject := route == classifier.RouteInterrupt
 	state := q.state(sub.WS)
 	state.verdicts.Lock()
 	defer state.verdicts.Unlock()
@@ -598,4 +600,18 @@ func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnI
 		Reason: "the running turn could not be interrupted, so the prompt waits for it to end",
 		At:     q.deps.Now(),
 	}, log)
+}
+
+// routeArm is the verdict arm a classifier route records.
+func routeArm(route classifier.Route) wsm.ClassificationArm {
+	switch route {
+	case classifier.RouteQueue:
+		return wsm.ArmHoldForTurnEnd
+	case classifier.RouteAfterToolCall:
+		return wsm.ArmAfterToolCall
+	case classifier.RouteInterrupt:
+		return wsm.ArmInterject
+	default:
+		panic(fmt.Sprintf("promptqueue: classifier route %d has no verdict arm", int(route)))
+	}
 }

@@ -431,6 +431,10 @@ type Sender interface {
 	// and the pair to OnTurnOpened — ARCHITECTURE names the queue as the
 	// authoritative source of both — so the success has to come back here.
 	StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
+	// JoinRunningTurn sends the prompt to join the daemon's turn in flight
+	// after its current tool call, with nothing interrupted
+	// (StartTurnRequest.join_running_turn). Answered as StartTurn is.
+	JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
 	// PromptAgent delivers a bubble-composer prompt to one agent.
 	PromptAgent(ctx context.Context, agent *conversationv1.AgentId, said *conversationv1.UserSaid) error
 	// KillTurn interrupts the open turn for an interjection. commandedBy is
@@ -467,8 +471,12 @@ type Watcher interface {
 	// terminal that arrives on the agent stream ahead of StartTurn's response
 	// is still attributable to it.
 	OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID)
-	// OnTurnOpenFailed retires a turn recorded by OnTurnOpening that the shim
-	// then refused.
+	// OnTurnJoining records a turn about to be sent to join the turn in
+	// flight, waiting behind it; false, recording nothing, when the turn in
+	// flight is one the vendor started. See sessionwatcher.Watcher.
+	OnTurnJoining(ws ids.WorkspaceID, turn ids.TurnID) bool
+	// OnTurnOpenFailed retires a turn recorded by OnTurnOpening or
+	// OnTurnJoining that the shim then refused.
 	OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnTurnOpened hands an accepted turn over: the prompt as delivered and
 	// the opening page StartTurnSuccess carried.

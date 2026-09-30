@@ -13,7 +13,7 @@ import (
 func olderQueued(t *testing.T, h *harness) {
 	t.Helper()
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Interject: false, Reason: "independent"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
 	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestAnInterruptVerdictInterruptsThePromptAheadWhenItStartedMeanwhile(t *tes
 	// Arrange: the verdict about "later" is with the model when "older" starts.
 	h := newHarness(t)
 	olderQueued(t, h)
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands"}
 	release := h.judge.hold()
 	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -44,11 +44,35 @@ func TestAnInterruptVerdictInterruptsThePromptAheadWhenItStartedMeanwhile(t *tes
 	}
 }
 
+func TestAnAfterToolCallVerdictJoinsThePromptAheadWhenItStartedMeanwhile(t *testing.T) {
+	// Arrange: the verdict about "later" is with the model when "older" starts.
+	h := newHarness(t)
+	olderQueued(t, h)
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteAfterToolCall, Reason: "it adds to it"}
+	release := h.judge.hold()
+	if _, err := h.q.Submit(context.Background(), submission("later", "and also this")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-h.judge.asking()
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	h.watcher.running("older")
+
+	// Act
+	release()
+	h.q.waitForClassifications()
+
+	// Assert
+	if killed, joins := h.sender.killed(), h.sender.joins; len(killed) != 0 || len(joins) != 1 || joins[0] != "later" {
+		t.Fatalf("killed = %v, joins = %v; want later sent to join the prompt ahead, now running, and nothing interrupted", killed, joins)
+	}
+}
+
 func TestAnInterruptVerdictWaitsWhenThePromptAheadWasDroppedMeanwhile(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	olderQueued(t, h)
-	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands"}
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands"}
 	release := h.judge.hold()
 	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
