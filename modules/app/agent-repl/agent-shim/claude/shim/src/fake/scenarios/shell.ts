@@ -91,9 +91,10 @@ const BASH_HOLD = scenario({
     "shell inside a turn that ended",
   async run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "bash-hold" }, "fake held foreground bash turn");
-    // NO startTask AND NO run_in_background: the vendor has no background work
-    // for this call, which is the whole point — the unit is detachable IN KIND
-    // and the pinned SDK offers no verb to initiate the detachment.
+    // NO startTask AND NO run_in_background: the vendor tracks no task for
+    // this call at all, which is the whole point — the unit is detachable IN
+    // KIND, but `backgroundTasks` matches it to no foreground task and moves
+    // nothing.
     ctx.toolUse("Bash", { command: "tail -f /var/log/system.log" });
     // Parked in the same synchronous run as the call above, so there is no
     // window in which the unit is live and a stop has nothing to resolve.
