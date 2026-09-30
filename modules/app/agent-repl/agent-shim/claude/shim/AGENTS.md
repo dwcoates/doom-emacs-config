@@ -1045,6 +1045,15 @@ forever, and the run's announcement stayed open in the record.
   has no cause field, and the vendor also moves agents on its own
   (`CLAUDE_AUTO_BACKGROUND_TASKS`). No capture holds a moved agent's frames
   (`ctrl-b-detach-of-foreground-subagent` asked too early and moved nothing).
+- **A MOVE THE SHIM ASKED FOR IS THE USER'S** (ruled 2026-09-30).
+  `DetachForeground` (the user's Ctrl-B) notes its unit with the fold
+  (`EngineFold.noteUserDetach`, kept in `TaskKindRegistry` by spawning call)
+  BEFORE calling `query.backgroundTasks(unit)`, so the patch that moves that
+  unit, shell or agent, is announced `by_user`. The request is retired by
+  that patch, by the unit's `task_notification`, by a `backgroundTasks`
+  answer of `false` or a throw, and by the query's end; it is bounded by
+  `TASK_KIND_CAPACITY` and keyed by the unit, so it can never be read by
+  another unit's patch. Every other patch-moved unit stays `vendor_moved`.
 
 ## A prompt may JOIN the running turn (2026-09-30)
 

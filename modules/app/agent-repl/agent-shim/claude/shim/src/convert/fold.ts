@@ -196,6 +196,10 @@ interface Fold {
    * it; any other answer is kept for the refusal record that follows.
    */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /** The shim asked the vendor to move this unit at the user's request (`TaskKindRegistry.noteUserDetach`). */
+  noteUserDetach(toolUseId: string): void;
+  /** Retire such a request whose move will not come (`TaskKindRegistry.retireUserDetach`). */
+  retireUserDetach(toolUseId: string, why: string): void;
   /** Which agent a vendor task is running, as this fold knows it. */
   taskAgent(taskId: string): TaskAgentKnowledge;
   /**
@@ -264,7 +268,10 @@ export function createFold(): Fold {
     inFlightCalls: () => state.calls.open(),
     endQuery(why) {
       endQueryCalls(state.calls, why);
+      state.taskKinds.clearUserDetaches(why);
     },
+    noteUserDetach: (toolUseId) => state.taskKinds.noteUserDetach(toolUseId),
+    retireUserDetach: (toolUseId, why) => state.taskKinds.retireUserDetach(toolUseId, why),
     taskAwaitingAgent: (message, context) => taskAwaitingAgent(message, context, state.taskKinds, state.calls),
     learnTaskAgent(taskId, answer) {
       if (answer.kind === "found") {
