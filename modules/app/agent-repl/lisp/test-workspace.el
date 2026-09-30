@@ -2318,15 +2318,15 @@ The screen must only demote names that could not be routed at all."
 
 ;;;; ---- Render status is the roster's arm --------------------------------
 
-(ert-deftest agent-repl-test-ws-render-status-answers-the-roster-arm ()
-  "The status renderers read is the roster row's status arm."
+(ert-deftest agent-repl-test-ws-render-status-answers-a-merge-failed-arm ()
+  "The status renderers read is the roster row's status arm, verbatim."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "alpha" :project-dir "/w/1")
     (cl-letf (((symbol-function 'agent-repl-status-tab-state)
-               (lambda (_ws) :merge-conflict)))
+               (lambda (_ws) :merge-failed)))
       ;; Act / Assert
-      (should (eq (agent-repl--ws-render-status "alpha") :merge-conflict)))))
+      (should (eq (agent-repl--ws-render-status "alpha") :merge-failed)))))
 
 (ert-deftest agent-repl-test-ws-render-status-is-nil-before-the-first-push ()
   "A workspace the roster has not spoken about draws no colour."
@@ -2407,11 +2407,20 @@ The screen must only demote names that could not be routed at all."
       ;; Act / Assert
       (should-not (agent-repl--ws-merge-unfinished-p "alpha")))))
 
-(ert-deftest agent-repl-test-ws-teardown-guard-refuses-an-unfinished-merge ()
+(ert-deftest agent-repl-test-ws-teardown-guard-refuses-a-queued-merge ()
+  "Tearing down a workspace whose merge is queued loses the merge."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merge-queued)))
+      ;; Act / Assert
+      (should-error (agent-repl--assert-mergeable-teardown "alpha")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-ws-teardown-guard-refuses-a-running-merge ()
   "Tearing a merging workspace down kills the session the merge is driving."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merge-conflict)))
+    (cl-letf (((symbol-function 'agent-repl-status-tab-state) (lambda (_ws) :merging)))
       ;; Act / Assert
       (should-error (agent-repl--assert-mergeable-teardown "alpha")
                     :type 'user-error))))

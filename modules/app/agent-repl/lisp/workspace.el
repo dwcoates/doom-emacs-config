@@ -991,9 +991,7 @@ Returns:
     (:degraded       . "📡")
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
-    (:merge-conflict . "💥")
     (:merging        . "🔄")
-    (:merge-enqueuing . "🕒")
     (:merge-queued   . "🕒"))
   "Alist mapping a render-state keyword to its indicator glyph.
 The glyph half of the render-state unification: renderers resolve a
@@ -1032,14 +1030,14 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 ;; through these, not poke persp-mode directly.
 
 (defconst agent-repl--unfinished-merge-states
-  '(:merging :merge-queued :merge-conflict)
+  '(:merging :merge-queued)
   "Roster status arms that mean WS's merge has NOT reached a verdict.
 
 `:merged' and `:merge-failed' are absent deliberately: both are terminal,
 and a workspace sitting on either is finished with the daemon and free to
 be torn down.  Everything here is a merge the daemon is still carrying —
-running it, holding it behind a sibling in its repository's queue, or
-resolving its conflict under the merge lease.")
+running it (conflict resolution and test repair included) or holding it
+behind a sibling in its repository's queue.")
 
 (defun agent-repl--ws-merge-unfinished-p (ws)
   "Return non-nil when WS's ROSTER STATUS ARM is an unfinished merge.
