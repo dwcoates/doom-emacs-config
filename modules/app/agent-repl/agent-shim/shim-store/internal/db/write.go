@@ -70,6 +70,9 @@ type WriteResult struct {
 	// Locators is how many vendor task pairings this batch stated. A COUNT,
 	// like Shapes: a re-stated pairing is absorbed and still counts.
 	Locators int
+	// Claims is how many shell run claims this batch stated. A COUNT, like
+	// Locators: a re-stated claim is absorbed and still counts.
+	Claims int
 	// Shapes is how many residue shape observations this batch folded into the
 	// catalog. A COUNT and not a list: the store's answer is the same whichever
 	// row each landed on, and the producer already knows which hashes it sent.
@@ -164,8 +167,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 	entries := batch.GetEntries()
 	cursor := batch.GetCursorAdvance()
 	locators := batch.GetAgentLocators()
-	if len(entries) == 0 && cursor == nil && len(shapes) == 0 && len(locators) == 0 {
-		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance nor a shape observation nor an agent locator"))
+	claims := batch.GetShellRunClaims()
+	if len(entries) == 0 && cursor == nil && len(shapes) == 0 && len(locators) == 0 && len(claims) == 0 {
+		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance nor a shape observation nor an agent locator nor a shell run claim"))
 	}
 
 	// Validation first and whole, so a refusal names the offending entry
@@ -202,6 +206,11 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 			return result, d.refuse(base, err)
 		}
 	}
+	for i, claim := range claims {
+		if err := validateShellRunClaim(claim, i); err != nil {
+			return result, d.refuse(base, err)
+		}
+	}
 
 	remaining := routes
 	for transaction := 1; ; transaction++ {
@@ -209,9 +218,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 		// first rows, so a lookup can answer from the moment any of them is
 		// durable. A later transaction's failure leaves them committed, and the
 		// re-read re-states them into the absorbing insert.
-		var first []*storev1.AgentLocator
+		var first pairings
 		if transaction == 1 {
-			first = locators
+			first = pairings{locators: locators, claims: claims}
 		}
 		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes, first, batch.GetRetirements())
 		if err != nil {
@@ -244,6 +253,15 @@ func (r *WriteResult) merge(part WriteResult) {
 	r.Restamped += part.Restamped
 	r.Retired += part.Retired
 	r.Locators += part.Locators
+	r.Claims += part.Claims
+}
+
+// pairings are the batch's joins of a vendor id with the identity every plane
+// books under: the subagent locators and the shell run claims. They ride a
+// batch's first transaction.
+type pairings struct {
+	locators []*storev1.AgentLocator
+	claims   []*storev1.ShellRunClaim
 }
 
 // writeTransaction commits ONE transaction of a batch: every remaining entry
@@ -252,7 +270,7 @@ func (r *WriteResult) merge(part WriteResult) {
 // advance only when it consumed the last of them. Its outcome is returned only
 // once it has COMMITTED; a rolled-back transaction contributes nothing.
 func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class WriteClass, transaction int, routes []routed,
-	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation, locators []*storev1.AgentLocator, retirements []*storev1.StoreRetirement) (WriteResult, int, error) {
+	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation, joins pairings, retirements []*storev1.StoreRetirement) (WriteResult, int, error) {
 	var result WriteResult
 	consumed := 0
 
@@ -320,10 +338,14 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	final := consumed == len(routes)
 
-	if err := d.applyAgentLocators(ctx, tx, locators, now); err != nil {
+	if err := d.applyAgentLocators(ctx, tx, joins.locators, now); err != nil {
 		return WriteResult{}, 0, d.refuse(base, err)
 	}
-	result.Locators = len(locators)
+	result.Locators = len(joins.locators)
+	if err := d.applyShellRunClaims(ctx, tx, joins.claims, now); err != nil {
+		return WriteResult{}, 0, d.refuse(base, err)
+	}
+	result.Claims = len(joins.claims)
 
 	if final {
 		// THE RETIREMENTS RIDE THE CURSOR ADVANCE'S TRANSACTION, AFTER EVERY
@@ -359,8 +381,8 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
-	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d locators=%d cursor_advance=%t final=%t",
-		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, result.Locators, final && cursor != nil, final)
+	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d locators=%d claims=%d cursor_advance=%t final=%t",
+		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, result.Locators, result.Claims, final && cursor != nil, final)
 	return result, consumed, nil
 }
 

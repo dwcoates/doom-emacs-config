@@ -80,8 +80,10 @@ const (
 	StatementLiveWork   = "live_work"
 	// StatementAgentByVendorTask is the lineage-scoped locator lookup.
 	StatementAgentByVendorTask = "agent_by_vendor_task"
-	StatementListCursors       = "list_cursors"
-	StatementBashRun           = "bash_run"
+	// StatementShellRunClaims is the sidecar's claim lookup by task ids.
+	StatementShellRunClaims = "shell_run_claims"
+	StatementListCursors    = "list_cursors"
+	StatementBashRun        = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.
 	StatementResidueShapes = "residue_shapes"
 	// StatementLedgerSweep is one transaction of the write-ledger sweep. It

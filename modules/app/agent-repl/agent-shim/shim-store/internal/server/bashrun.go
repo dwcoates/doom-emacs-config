@@ -24,7 +24,9 @@ import (
 // THERE IS NO TOKEN AND NO FAILURE ARM. A run is addressed by the identity the
 // spawning stream already announced, so there is nothing to mint; and a run the
 // store holds no row for is a REFUSED OPEN at the transport (CodeNotFound), the
-// same convention WatchAgentSession uses for a token it does not know.
+// same convention WatchAgentSession uses for a token it does not know — unless
+// the caller vouches the run exists (`await_first_row`), when the stream waits
+// for its first row.
 func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.WatchBashRunRequest], stream *connect.ServerStream[storev1.WatchBashRunResponse]) error {
 	log := s.rpcLogger(storev1connect.ShimStoreWatchBashRunProcedure, req.Header())
 	if ref := validateWatchBashRunRequest(req.Msg); ref != nil {
@@ -48,10 +50,19 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	if len(replay.Rows) == 0 {
-		ref := refuseClass(classUnknownRun, SiteUnknownBashRun, "run",
-			fmt.Sprintf("watch: this store holds no row for run %q, so there is no run to follow", runID))
-		s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
-		return connect.NewError(connect.CodeNotFound, ref)
+		if !req.Msg.GetAwaitFirstRow() {
+			ref := refuseClass(classUnknownRun, SiteUnknownBashRun, "run",
+				fmt.Sprintf("watch: this store holds no row for run %q, so there is no run to follow", runID))
+			s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
+			return connect.NewError(connect.CodeNotFound, ref)
+		}
+		// AN ANNOUNCED RUN WITH NO ROW YET IS WAITED ON, NOT REFUSED. Its
+		// producer vouched that it exists; its rows are written by whoever
+		// reads its spool, possibly long after the announcement. The
+		// subscription above already holds every row committed from before the
+		// replay query, so the first row cannot slip past.
+		log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run"},
+			"bash run watch waiting: the run was announced and has no stored row yet")
 	}
 
 	replayed := make(map[uint64]struct{}, len(replay.Rows))

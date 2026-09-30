@@ -746,6 +746,58 @@ func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentBy
 	})
 }
 
+// ---- GetShellRunClaims ----
+
+// GetShellRunClaims answers which run each asked task id names, with the book
+// holding each run's launching call. An id with no claim is simply absent from
+// the answer, which is an ordinary answer, not a refusal.
+func (s *Server) GetShellRunClaims(ctx context.Context, req *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetShellRunClaimsProcedure, req.Header())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "resolving %d spool task id(s) to their runs", len(req.Msg.GetVendorTaskIds()))
+
+	if ref := validateGetShellRunClaimsRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-shell-run-claims", ref, logging.Fields{})
+		return shellRunClaimsFailure(ref), nil
+	}
+
+	claims, err := s.store.ShellRunClaims(correlated(ctx, req.Header()), req.Msg.GetVendorTaskIds())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-shell-run-claims", err, logging.Fields{})
+		return shellRunClaimsFailure(ref), nil
+	}
+	success := &storev1.GetShellRunClaimsSuccess{Claims: make([]*storev1.ShellRunClaimed, 0, len(claims))}
+	for _, c := range claims {
+		claimed := &storev1.ShellRunClaimed{Claim: &storev1.ShellRunClaim{
+			VendorTaskId: c.VendorTaskID,
+			Run:          &conversationv1.AgentActivityId{Value: c.Run},
+		}}
+		if c.Owner != "" {
+			claimed.Owner = &conversationv1.AgentId{Value: c.Owner}
+		}
+		success.Claims = append(success.Claims, claimed)
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "answering claims=%d", len(success.Claims))
+	return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
+		Result: &storev1.GetShellRunClaimsResponse_Success{Success: success},
+	}), nil
+}
+
+// shellRunClaimsFailure has TWO arms: the request was malformed, or the
+// storage layer failed.
+func shellRunClaimsFailure(ref *refusal) *connect.Response[storev1.GetShellRunClaimsResponse] {
+	failure := &storev1.GetShellRunClaimsFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetShellRunClaimsFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetShellRunClaimsInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetShellRunClaimsFailure_StorageFailure{StorageFailure: &storev1.GetShellRunClaimsStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
+		Result: &storev1.GetShellRunClaimsResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- ListResidueShapes ----
 
 // ListResidueShapes serves the catalog of key structures observed on lines no

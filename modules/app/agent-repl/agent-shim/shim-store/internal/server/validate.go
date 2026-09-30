@@ -312,8 +312,8 @@ func validateEntryBatch(b *storev1.EntryBatch, carriesShapes bool) *refusal {
 	if b == nil {
 		return refuse(SiteBatchMissing, "batch", "batch: the request carries no EntryBatch")
 	}
-	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && len(b.GetAgentLocators()) == 0 && !carriesShapes {
-		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance nor an agent locator, and the request carries no shape observation either")
+	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && len(b.GetAgentLocators()) == 0 && len(b.GetShellRunClaims()) == 0 && !carriesShapes {
+		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance nor an agent locator nor a shell run claim, and the request carries no shape observation either")
 	}
 	for i, entry := range b.GetEntries() {
 		if ref := validateStoreEntry(entry, i); ref != nil {
@@ -462,6 +462,23 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 	}
 	if req.GetVendorTaskId() == "" {
 		return refuse(SiteVendorTaskEmpty, "vendor_task_id", "vendor_task_id: the lookup names no vendor task locator")
+	}
+	return nil
+}
+
+// validateGetShellRunClaimsRequest is the use site for GetShellRunClaims: at
+// least one task id, and every one non-empty. The lookup is unscoped on
+// purpose (the sidecar reads every session on the host), so the ids are the
+// whole request.
+func validateGetShellRunClaimsRequest(req *storev1.GetShellRunClaimsRequest) *refusal {
+	ids := req.GetVendorTaskIds()
+	if len(ids) == 0 {
+		return refuse(SiteVendorTaskEmpty, "vendor_task_ids", "vendor_task_ids: the lookup names no spool's task id")
+	}
+	for i, id := range ids {
+		if id == "" {
+			return refuse(SiteVendorTaskEmpty, fmt.Sprintf("vendor_task_ids[%d]", i), "vendor_task_ids: an asked task id is empty")
+		}
 	}
 	return nil
 }

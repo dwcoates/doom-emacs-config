@@ -36,14 +36,16 @@ type bashWatcher struct {
 }
 
 func startBashWatch(h *harness, ctx context.Context, run string) *bashWatcher {
+	return startBashWatchRequest(h, ctx, &storev1.WatchBashRunRequest{Run: &conversationv1.AgentActivityId{Value: run}})
+}
+
+func startBashWatchRequest(h *harness, ctx context.Context, req *storev1.WatchBashRunRequest) *bashWatcher {
 	w := &bashWatcher{
 		streamc: make(chan *connect.ServerStreamForClient[storev1.WatchBashRunResponse], 1),
 		errc:    make(chan error, 1),
 	}
 	go func() {
-		stream, err := h.stream.WatchBashRun(ctx, connect.NewRequest(&storev1.WatchBashRunRequest{
-			Run: &conversationv1.AgentActivityId{Value: run},
-		}))
+		stream, err := h.stream.WatchBashRun(ctx, connect.NewRequest(req))
 		if err != nil {
 			w.errc <- err
 			return
@@ -107,6 +109,39 @@ func TestWatchBashRunRefusesARunTheStoreHoldsNoRowFor(t *testing.T) {
 	err := w.refusal(t)
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("code = %v, want %v (error: %v)", connect.CodeOf(err), connect.CodeNotFound, err)
+	}
+}
+
+func TestWatchBashRunWaitsForAnAnnouncedRunsFirstRow(t *testing.T) {
+	// Arrange. The caller vouches the run exists; no row is stored yet.
+	store := newFakeStore()
+	store.bashRun = BashRunReplay{PinSeq: 4}
+	h := newHarness(t, store, 0)
+	w := startBashWatchRequest(h, context.Background(), &storev1.WatchBashRunRequest{
+		Run: &conversationv1.AgentActivityId{Value: "run-1"}, AwaitFirstRow: true,
+	})
+	stream := w.open(t)
+
+	// Act. The run's first row, and then its terminal, are written.
+	h.server.publishBashRows(h.server.log, "sidecar", []BashRowWritten{
+		{RunID: "run-1", Row: bashRow("run-1", false).Row, WriteSeq: 5},
+		{RunID: "run-1", Row: bashRow("run-1", true).Row, WriteSeq: 6},
+	})
+
+	// Assert. Both rows stream, then the watch ends at the terminal.
+	for i := 0; i < 2; i++ {
+		if !stream.Receive() {
+			t.Fatalf("row %d was not delivered: %v", i, stream.Err())
+		}
+	}
+	if stream.Receive() {
+		t.Fatal("the stream delivered a row after the terminal; want it ended")
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error = %v, want a clean natural end", err)
+	}
+	if _, ok := findRecord(t, h.logs, "store.rpc.watch-bash-run", "info"); !ok {
+		t.Fatalf("records = %+v, want the wait stated at info", records(t, h.logs))
 	}
 }
 
