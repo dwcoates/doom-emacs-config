@@ -5,7 +5,8 @@
  * fact: the vendor's own (`identity_rotated`, `query_died`, `model_changed`,
  * `permission_mode_changed`, `fast_mode`, `mcp_server`, `account_usage`,
  * `context_budget_warning`, `compacting`) and the shim's own about itself
- * (`diagnostics`, `context_usage`).
+ * (`diagnostics`, `context_usage`, `network_resume_waits`,
+ * `network_resume_outcome`).
  *
  * THE FIRST PUSH IS READINESS, AND IT IS SYNCHRONOUS WITH THE OPEN. After
  * `StartSession`, the first frame every WatchSession receives is `diagnostics` —
@@ -16,8 +17,8 @@
  * "refused", and a silent WatchSession stalls the daemon's whole bring-up.
  *
  * THEN THE CURRENT VIEW, THEN CHANGES ONLY. A joining subscriber also gets the
- * current `context_usage`, `model_changed`, `permission_mode_changed` and
- * `title` — a
+ * current `context_usage`, `model_changed`, `permission_mode_changed`,
+ * `fast_mode`, `account_usage`, `title` and `network_resume_waits` — a
  * consumer that attached late is not entitled to a blank session — and after
  * that, an arm is pushed only when its value actually CHANGED. A periodic push
  * of an unchanged view is indistinguishable from a change at the consumer and
@@ -153,6 +154,13 @@ export class SessionPushes {
   // which is BEFORE the daemon's standing WatchSession exists — so without a
   // replay the topbar would draw the workspace name until some later turn
   // happened to change the title.
+  //
+  // `networkResumeWaits` is a STANDING SET whose producer obligation is to be
+  // stated on every open before any live frame (session.proto): a consumer
+  // that (re)connects mid-outage learns the waits from its own stream. Like
+  // every level here it is replayed once it has been stated, so a session
+  // that never waited states nothing, and one whose last wait ended replays
+  // the empty set it stated then.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
@@ -160,6 +168,7 @@ export class SessionPushes {
     "fastMode",
     "accountUsage",
     "title",
+    "networkResumeWaits",
   ];
 
   /**

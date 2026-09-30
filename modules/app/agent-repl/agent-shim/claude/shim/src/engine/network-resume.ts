@@ -32,9 +32,18 @@
  *   `promptAgent`), so the shim asks the MAIN agent to continue each agent with
  *   `SendMessage` — the same call a person made by hand in the incident, which
  *   the vendor answers by resuming the same agent from its own transcript.
+ * - THE WAIT IS VISIBLE ON THE SESSION STREAM (footer-activity-tiers.md,
+ *   landed change 2). Every change to the waiting set is stated WHOLE as
+ *   `SessionUpdate.network_resume_waits`, and every wait that ends is stated
+ *   once as `SessionUpdate.network_resume_outcome`, through the injected
+ *   {@link NetworkResumeDeps.emit}. Visibility only: nothing here reads what
+ *   it states back, so the rule above is unchanged by it.
  */
+import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { isAgentTaskType } from "../convert/detached.js";
+import { detachedWorkId } from "../convert/ids.js";
+import { conversationv1 } from "../proto.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import { networkResumePrompt } from "./network-resume-prompt.js";
 import type { SdkMessage } from "../sdk/types.js";
@@ -194,12 +203,20 @@ export interface NetworkResumeDeps {
   readonly deliver: (prompt: string) => Promise<ResumeDelivery>;
   readonly nowMs: () => number;
   readonly scheduler: KeepaliveScheduler;
+  /**
+   * States one session fact on the session's standing stream: the WHOLE
+   * waiting set (`network_resume_waits`) each time it changes, and one
+   * `network_resume_outcome` per wait that ends.
+   */
+  readonly emit: (update: conversationv1.SessionUpdate) => void;
   readonly intervalMs?: number;
   readonly windowMs?: number;
 }
 
 /** One agent run the shim saw start. */
 interface KnownRun {
+  /** The run's own call (the spawn, or the `SendMessage` that resumed it): its `DetachedWorkId` value. */
+  readonly toolUseId: string;
   readonly taskId: string;
   readonly description: string;
 }
@@ -225,7 +242,19 @@ interface Chain {
 interface Waiting {
   readonly chain: Chain;
   readonly failedAtMs: number;
+  /** The failed run's `DetachedWorkId` value: the handle its failure terminal retired. */
+  readonly work: string;
+  /**
+   * How this wait ended, once it has: set by {@link NetworkResume.endWait}, the
+   * ONE place a wait leaves the standing set on the wire, so a second ending
+   * (a delivery that completes after `expire()` already gave the wait up) is
+   * seen and never stated.
+   */
+  ended?: WaitEnd["case"];
 }
+
+/** How one wait ended, as the session stream states it. */
+type WaitEnd = conversationv1.SessionNetworkResumeOutcome["outcome"];
 
 /**
  * The shim's one network-resume state: which agent runs it saw, what each
@@ -293,6 +322,7 @@ export class NetworkResume {
     if (this.stopped) return;
     this.stopped = true;
     this.cancelLoop();
+    const abandoned = this.waiting.size;
     for (const entry of this.waiting.values()) {
       LOGGER.info(
         {
@@ -304,8 +334,13 @@ export class NetworkResume {
         },
         "the shim is standing down; the agent waiting to be resumed after a network outage keeps its failure",
       );
+      this.endWait(entry, {
+        case: "abandoned",
+        value: create(conversationv1.SessionNetworkResumeAbandonedSchema, { reason }),
+      });
     }
     this.waiting.clear();
+    if (abandoned > 0) this.stateWaits();
     this.chains.clear();
     this.runs.clear();
     this.evidence.clear();
@@ -316,7 +351,11 @@ export class NetworkResume {
   private noteStarted(message: Extract<SdkMessage, { subtype: "task_started" }>): void {
     if (!isAgentTaskType(message.task_type)) return;
     if (message.tool_use_id === undefined || message.tool_use_id === "") return;
-    this.runs.set(message.tool_use_id, { taskId: message.task_id, description: message.description });
+    this.runs.set(message.tool_use_id, {
+      toolUseId: message.tool_use_id,
+      taskId: message.task_id,
+      description: message.description,
+    });
     // A NEW RUN STARTS WITH NO ERROR. What an earlier run of the same agent said
     // is not what this one will fail with.
     this.evidence.delete(message.task_id);
@@ -379,12 +418,28 @@ export class NetworkResume {
       this.forgetAgent(taskId);
       return;
     }
-    this.enqueue(run, verdict);
+    this.enqueue(run, this.failedRun(run, message.tool_use_id), verdict);
+  }
+
+  /**
+   * The run a failure notification ended: the one its `tool_use_id` names,
+   * else the agent's LATEST run — the handle the fold's failure terminal
+   * retires (`convert/detached.ts`, the remembered `tool_use_id`), which after
+   * a resume is the resuming `SendMessage`'s, not the spawn's.
+   */
+  private failedRun(first: KnownRun, statedToolUseId: string | undefined): KnownRun {
+    const stated = statedToolUseId === undefined ? undefined : this.runs.get(statedToolUseId);
+    if (stated?.taskId === first.taskId) return stated;
+    let latest = first;
+    for (const run of this.runs.values()) {
+      if (run.taskId === first.taskId) latest = run;
+    }
+    return latest;
   }
 
   // -- the wait ---------------------------------------------------------------
 
-  private enqueue(run: KnownRun, verdict: FailureClassification): void {
+  private enqueue(run: KnownRun, failed: KnownRun, verdict: FailureClassification): void {
     const now = this.deps.nowMs();
     const existing = this.chains.get(run.taskId);
     let chain: Chain;
@@ -410,10 +465,12 @@ export class NetworkResume {
     }
     const givesUpAtMs = chain.windowStartMs + this.windowMs;
     if (now >= givesUpAtMs) {
+      // NO WAIT OPENED, so the session stream is told nothing: an outcome is
+      // stated only for a wait that stood in the set.
       this.giveUp(chain, now, now, "its window had already run out when it failed again");
       return;
     }
-    this.waiting.set(run.taskId, { chain, failedAtMs: now });
+    this.waiting.set(run.taskId, { chain, failedAtMs: now, work: failed.toolUseId });
     LOGGER.info(
       {
         task_id: run.taskId,
@@ -427,6 +484,7 @@ export class NetworkResume {
       },
       "a background agent failed because the API was unreachable; it waits to be resumed once the API is reachable",
     );
+    this.stateWaits();
     this.ensureLoop();
   }
 
@@ -484,11 +542,15 @@ export class NetworkResume {
   /** Give up on every wait whose window has run out. */
   private expire(): void {
     const now = this.deps.nowMs();
+    let expired = 0;
     for (const entry of [...this.waiting.values()]) {
       if (now < entry.chain.windowStartMs + this.windowMs) continue;
       this.waiting.delete(entry.chain.taskId);
       this.giveUp(entry.chain, entry.failedAtMs, now, "the API stayed unreachable for the whole window");
+      this.endWait(entry, gaveUp());
+      expired += 1;
     }
+    if (expired > 0) this.stateWaits();
   }
 
   private giveUp(chain: Chain, failedAtMs: number, now: number, why: string): void {
@@ -531,7 +593,9 @@ export class NetworkResume {
         for (const entry of due) {
           this.waiting.delete(entry.chain.taskId);
           this.giveUp(entry.chain, entry.failedAtMs, now, `the resume could not be delivered: ${delivery.detail}`);
+          this.endWait(entry, gaveUp());
         }
+        this.stateWaits();
         this.cancelLoopIfIdle();
         return;
       case "delivered":
@@ -551,9 +615,90 @@ export class NetworkResume {
             },
             "the API is reachable again; asked the main agent to continue the background agent a network outage cut off",
           );
+          this.endWait(entry, {
+            case: "resumed",
+            value: create(conversationv1.SessionNetworkResumeResumedSchema, {}),
+          });
         }
+        this.stateWaits();
         this.cancelLoopIfIdle();
         return;
+    }
+  }
+
+  // -- what the session stream is told ----------------------------------------
+
+  /** State the WHOLE waiting set, in the order the waits opened. */
+  private stateWaits(): void {
+    const entries = [...this.waiting.values()];
+    this.say(
+      "networkResumeWaits",
+      { waiting: entries.length, task_ids: entries.map((entry) => entry.chain.taskId) },
+      () =>
+        create(conversationv1.SessionUpdateSchema, {
+          update: {
+            case: "networkResumeWaits",
+            value: create(conversationv1.SessionNetworkResumeWaitsSchema, {
+              waits: entries.map((entry) =>
+                create(conversationv1.SessionNetworkResumeWaitSchema, {
+                  work: detachedWorkId(entry.work),
+                  failedAtMs: BigInt(entry.failedAtMs),
+                  givesUpAtMs: BigInt(entry.chain.windowStartMs + this.windowMs),
+                  resumesDelivered: entry.chain.resumes,
+                }),
+              ),
+            }),
+          },
+        }),
+    );
+  }
+
+  /**
+   * End one wait on the session stream: EXACTLY ONE OUTCOME PER WAIT.
+   *
+   * A delivery is awaited, and the probe loop's next beat may run `expire()`
+   * meanwhile, so a wait can be given up while its resume is still out; the
+   * delivery then completes for a wait that no longer stands. The rule itself
+   * is unchanged by that (the late resume is still delivered and logged); only
+   * the wire is guarded, here, on the same single-threaded state `expire()`
+   * mutates, so the stream never states a second ending for one wait.
+   */
+  private endWait(entry: Waiting, end: WaitEnd): void {
+    if (entry.ended !== undefined) {
+      LOGGER.info(
+        { task_id: entry.chain.taskId, work: entry.work, suppressed: end.case, already: entry.ended },
+        "a network-resume wait that had already ended is not stated ended again on the session stream",
+      );
+      return;
+    }
+    entry.ended = end.case;
+    const { work } = entry;
+    this.say("networkResumeOutcome", { task_id: entry.chain.taskId, work, end: end.case }, () =>
+      create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "networkResumeOutcome",
+          value: create(conversationv1.SessionNetworkResumeOutcomeSchema, { work: detachedWorkId(work), outcome: end }),
+        },
+      }),
+    );
+  }
+
+  /**
+   * Build one update and hand it to the session stream.
+   *
+   * A FAILURE HERE IS RECORDED AT ERROR AND GOES NO FURTHER: it is raised from
+   * inside the vendor stream's observation or the probe loop's beat, and
+   * neither may be broken by a consumer's view of the wait, which is what the
+   * frame is. The wait itself carries on exactly as the rule says.
+   */
+  private say(arm: string, context: Record<string, unknown>, build: () => conversationv1.SessionUpdate): void {
+    try {
+      this.deps.emit(build());
+    } catch (err) {
+      LOGGER.error(
+        { ...context, arm, cause: err instanceof Error ? err.message : String(err) },
+        "could not state a network-resume wait on the session stream",
+      );
     }
   }
 
@@ -586,4 +731,9 @@ function noticeText(message: unknown): string | undefined {
         : "";
   const trimmed = text.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/** The give-up arm of an outcome. */
+function gaveUp(): WaitEnd {
+  return { case: "gaveUp", value: create(conversationv1.SessionNetworkResumeGaveUpSchema, {}) };
 }

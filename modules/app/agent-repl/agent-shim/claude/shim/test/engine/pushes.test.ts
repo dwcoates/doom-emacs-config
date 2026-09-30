@@ -499,6 +499,89 @@ describe("the vendor's title for the conversation", () => {
   });
 });
 
+describe("the network-resume waiting set", () => {
+  function waits(...works: string[]): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "networkResumeWaits",
+        value: create(conversationv1.SessionNetworkResumeWaitsSchema, {
+          waits: works.map((value) =>
+            create(conversationv1.SessionNetworkResumeWaitSchema, {
+              work: create(conversationv1.DetachedWorkIdSchema, { value }),
+              failedAtMs: 1n,
+              givesUpAtMs: 2n,
+            }),
+          ),
+        }),
+      },
+    });
+  }
+
+  function resumed(work: string): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "networkResumeOutcome",
+        value: create(conversationv1.SessionNetworkResumeOutcomeSchema, {
+          work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+          outcome: { case: "resumed", value: create(conversationv1.SessionNetworkResumeResumedSchema, {}) },
+        }),
+      },
+    });
+  }
+
+  it("is stated to a consumer that opens while an agent waits", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(waits("toolu_spawn"));
+
+    // Act
+    const opening = await take(pushes.subscribe(), 2);
+
+    // Assert
+    expect(opening[1]).toEqual(waits("toolu_spawn"));
+  });
+
+  it("is stated empty to a consumer that opens after the last wait ended", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(waits("toolu_spawn"));
+    pushes.push(waits());
+
+    // Act
+    const opening = await take(pushes.subscribe(), 2);
+
+    // Assert
+    expect(opening[1]).toEqual(waits());
+  });
+
+  it("is not stated to a consumer of a session that never waited", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    const stream = pushes.subscribe();
+    pushes.standDown();
+
+    // Act
+    const opening = await reader(stream).rest();
+
+    // Assert
+    expect(opening.map((update) => update.update.case)).toEqual(["diagnostics"]);
+  });
+
+  it("an outcome is not replayed to a consumer that opens after it", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(resumed("toolu_spawn"));
+    const stream = pushes.subscribe();
+    pushes.standDown();
+
+    // Act
+    const opening = await reader(stream).rest();
+
+    // Assert
+    expect(opening.map((update) => update.update.case)).toEqual(["diagnostics"]);
+  });
+});
+
 describe("account usage", () => {
   function accountUsage(observedAtMs: bigint, utilizationPercent: number): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {

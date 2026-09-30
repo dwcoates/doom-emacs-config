@@ -618,8 +618,11 @@ way a refusal does.
    `next()` resolves without waiting on anything. That push IS the daemon's
    readiness signal, and there is no other. A late joiner is then caught up on
    the current `context_usage`, `model_changed`, `permission_mode_changed`,
-   `fast_mode`, `account_usage` and `title`;
-   after that, arms are pushed on CHANGE only.
+   `fast_mode`, `account_usage`, `title` and `network_resume_waits`;
+   after that, arms are pushed on CHANGE only. A level is replayed only once
+   it has been stated: a session that never waited on the network states no
+   `network_resume_waits` at open, and one whose last wait ended replays the
+   empty set it stated then.
 3. **The store client ends `WatchAgentSession` by CANCELLING its context**
    (an `AbortSignal`), never by a bare close: a bare close leaves the store
    holding a reading session nobody will ever pull, and the store has no other
@@ -1091,9 +1094,22 @@ owns the rule, `src/engine/api-reachability.ts` the probe, and
 - **Every transition is one record** under `shim.engine.network_resume`, with
   `outcome` = `waiting`, `resumed`, `not_resumed`, `abandoned` or `gave_up`
   (ERROR).
-- **Not yet visible in the footer or live work.** Showing "waiting to resume"
-  needs a proto arm the owner has not ruled on; until then the wait is visible
-  in the log only, and the feed row keeps its failure.
+- **Visible on the session stream, and only there** (visibility only,
+  `docs/protobuf-design/footer-activity-tiers.md`, landed change 2).
+  `NetworkResume`'s injected `emit` states the WHOLE waiting set as
+  `SessionUpdate.network_resume_waits` on every change, and one
+  `network_resume_outcome` (resumed, gave_up, abandoned with its reason) per
+  wait that ends, at the `resumed`, `gave_up` and `abandoned` log sites;
+  `not_resumed` states nothing. AN OUTCOME IS STATED ONLY FOR A WAIT THAT
+  STANDS, EXACTLY ONCE: `endWait` marks the wait ended, so a delivery that
+  completes after `expire()` gave its wait up is still delivered and logged
+  but states nothing on the wire (an INFO record names the suppressed and
+  the standing outcome), and a refail past its window, which opens no wait,
+  states no `gave_up`. A wait's `work` is the FAILED RUN's
+  `DetachedWorkId`: the notification's `tool_use_id`, else the agent's latest
+  run, so after a resume it is the resuming `SendMessage`'s handle, the one the
+  fold's failure terminal retired. A seam failure is recorded at ERROR and the
+  wait carries on. The feed row keeps its failure.
 
 `--fake`-only levers (a real session never honors them):
 

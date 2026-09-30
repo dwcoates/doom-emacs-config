@@ -10774,6 +10774,111 @@ describe("a background agent a network outage cut off", () => {
     expect(h.networkScheduler.cleared).toBe(1);
   });
 
+  /** Open a WatchSession on the engine. */
+  function watch(h: Harness): AsyncIterator<shimv1.WatchSessionResponse> {
+    return h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+  }
+
+  /**
+   * Every session update a watch yields up to a `queryDied` sentinel pushed
+   * NOW, so the read is bounded by a frame the test itself put last.
+   */
+  async function updatesUntilSentinel(
+    h: Harness,
+    iterator: AsyncIterator<shimv1.WatchSessionResponse>,
+  ): Promise<conversationv1.SessionUpdate[]> {
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "queryDied", value: create(conversationv1.SessionQueryDiedSchema, {}) },
+      }),
+    );
+    const updates: conversationv1.SessionUpdate[] = [];
+    for (;;) {
+      const frame = await nextPush(iterator);
+      if (frame.frame.case !== "update") continue;
+      if (frame.frame.value.update.case === "queryDied") return updates;
+      updates.push(frame.frame.value);
+    }
+  }
+
+  /** The works of the last waiting set among `updates`. */
+  function lastWaits(updates: conversationv1.SessionUpdate[]): string[] | undefined {
+    const sets = updates.flatMap((update) =>
+      update.update.case === "networkResumeWaits" ? [update.update.value.waits.map((wait) => wait.work?.value)] : [],
+    );
+    return sets.at(-1) as string[] | undefined;
+  }
+
+  it("states the standing wait to a consumer that opens after it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await cutOff(h);
+
+    // Act
+    const iterator = watch(h);
+    const updates = await updatesUntilSentinel(h, iterator);
+    await iterator.return?.();
+
+    // Assert
+    expect(lastWaits(updates)).toEqual(["toolu_spawn"]);
+  });
+
+  it("states the wait to a consumer already watching when it opens", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const iterator = watch(h);
+
+    // Act
+    await cutOff(h);
+    const updates = await updatesUntilSentinel(h, iterator);
+    await iterator.return?.();
+
+    // Assert
+    expect(lastWaits(updates)).toEqual(["toolu_spawn"]);
+  });
+
+  it("states the resume's outcome on the session stream", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    const iterator = watch(h);
+
+    // Act
+    await beat(h);
+    const updates = await updatesUntilSentinel(h, iterator);
+    await iterator.return?.();
+
+    // Assert
+    const outcomes = updates.flatMap((update) =>
+      update.update.case === "networkResumeOutcome"
+        ? [[update.update.value.work?.value, update.update.value.outcome.case]]
+        : [],
+    );
+    expect(outcomes).toEqual([["toolu_spawn", "resumed"]]);
+  });
+
+  it("stand-down states the wait abandoned before the stream ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await cutOff(h);
+    const iterator = watch(h);
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const ends: (string | undefined)[] = [];
+    for (let frame = await iterator.next(); frame.done !== true; frame = await iterator.next()) {
+      const update = frame.value.frame.case === "update" ? frame.value.frame.value.update : undefined;
+      if (update?.case === "networkResumeOutcome") ends.push(update.value.outcome.case);
+    }
+    expect(ends).toEqual(["abandoned"]);
+  });
+
   it("the vendor query dying cancels the probe loop", async () => {
     // Arrange
     const h = harness();

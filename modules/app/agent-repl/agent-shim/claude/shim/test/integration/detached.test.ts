@@ -28,6 +28,7 @@ import {
   activityId,
   agentId,
   freshSession,
+  openSessionUpdates,
   openStream,
   resumeSession,
   startTurnRequest,
@@ -1475,6 +1476,139 @@ describe("a subagent a network outage cut off", () => {
     // Assert
     const notResumed = await shim.log.record(outcome("not_resumed"));
     expect(notResumed.level).toBe("info");
+  });
+
+  /** A WatchSession on `shim`, re-announcement dropped. */
+  function watchSession(shim: Awaited<ReturnType<typeof spawnShim>>): ReturnType<typeof openSessionUpdates> {
+    return openSessionUpdates((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+  }
+
+  /** The session update a frame carries, if it carries one. */
+  function updateOf(frame: shimv1.WatchSessionResponse): conversationv1.SessionUpdate["update"] | undefined {
+    return frame.frame.case === "update" ? frame.frame.value.update : undefined;
+  }
+
+  /** The next waiting set the stream states. */
+  async function nextWaits(
+    watch: ReturnType<typeof openSessionUpdates>,
+  ): Promise<conversationv1.SessionNetworkResumeWait[]> {
+    const frame = await watch.until((candidate) => updateOf(candidate)?.case === "networkResumeWaits");
+    const update = updateOf(frame);
+    return update?.case === "networkResumeWaits" ? update.value.waits : [];
+  }
+
+  /** The next outcome the stream states. */
+  async function nextOutcome(
+    watch: ReturnType<typeof openSessionUpdates>,
+  ): Promise<conversationv1.SessionNetworkResumeOutcome | undefined> {
+    const frame = await watch.until((candidate) => updateOf(candidate)?.case === "networkResumeOutcome");
+    const update = updateOf(frame);
+    return update?.case === "networkResumeOutcome" ? update.value : undefined;
+  }
+
+  test("the session stream states the wait, its window and no resumes yet", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+    const watch = watchSession(shim);
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+
+    // Assert
+    const [wait, ...rest] = await nextWaits(watch);
+    watch.close();
+    expect([
+      rest.length,
+      (wait?.work?.value ?? "") !== "",
+      Number((wait?.givesUpAtMs ?? 0n) - (wait?.failedAtMs ?? 0n)),
+      wait?.resumesDelivered,
+    ]).toEqual([0, true, 60_000, 0]);
+  });
+
+  test("a consumer that opens mid-wait is told the standing wait", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.log.record(outcome("waiting"));
+
+    // Act
+    const watch = watchSession(shim);
+
+    // Assert
+    const waits = await nextWaits(watch);
+    watch.close();
+    expect(waits).toHaveLength(1);
+  });
+
+  test("the session stream states the resume for the work that waited", async () => {
+    // Arrange
+    const { shim, gate } = await outageShim();
+    const watch = watchSession(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const [wait] = await nextWaits(watch);
+
+    // Act
+    writeFileSync(gate, "");
+
+    // Assert
+    const ended = await nextOutcome(watch);
+    watch.close();
+    expect([ended?.work?.value, ended?.outcome.case]).toEqual([wait?.work?.value, "resumed"]);
+  });
+
+  test("the session stream states the empty set once the resume is delivered", async () => {
+    // Arrange
+    const { shim, gate } = await outageShim();
+    const watch = watchSession(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await nextWaits(watch);
+
+    // Act
+    writeFileSync(gate, "");
+
+    // Assert
+    const after = await nextWaits(watch);
+    watch.close();
+    expect(after).toEqual([]);
+  });
+
+  test("the session stream states a give-up", async () => {
+    // Arrange
+    const { shim } = await outageShim(200);
+    const watch = watchSession(shim);
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+
+    // Assert
+    const ended = await nextOutcome(watch);
+    watch.close();
+    expect(ended?.outcome.case).toBe("gaveUp");
+  });
+
+  test("the session stream states the wait abandoned at stand-down, then the empty set", async () => {
+    // Arrange
+    const { shim } = await outageShim();
+    const watch = watchSession(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await nextWaits(watch);
+
+    // Act
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const stated = (await watch.drain())
+      .map(updateOf)
+      .flatMap((update) =>
+        update?.case === "networkResumeOutcome"
+          ? [update.value.outcome.case]
+          : update?.case === "networkResumeWaits"
+            ? [`waits:${String(update.value.waits.length)}`]
+            : [],
+      );
+    expect(stated.slice(-2)).toEqual(["abandoned", "waits:0"]);
   });
 
   test("stand-down abandons the wait", async () => {

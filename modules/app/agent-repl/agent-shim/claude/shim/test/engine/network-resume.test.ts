@@ -16,6 +16,7 @@ import {
 } from "../../src/engine/network-resume.js";
 import { resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
 import { REAL_SCHEDULER } from "../../src/engine/keepalive.js";
+import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler, ScriptedProbe } from "./fakes.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
@@ -63,11 +64,17 @@ function subagentAnswer(parentToolUseId: string, model = "claude-opus-5-5"): Sdk
   } as unknown as SdkMessage;
 }
 
-function notification(taskId: string, status: "completed" | "failed" | "stopped", summary: string): SdkMessage {
+function notification(
+  taskId: string,
+  status: "completed" | "failed" | "stopped",
+  summary: string,
+  toolUseId?: string,
+): SdkMessage {
   return {
     type: "system",
     subtype: "task_notification",
     task_id: taskId,
+    ...(toolUseId === undefined ? {} : { tool_use_id: toolUseId }),
     status,
     output_file: `/tmp/${taskId}.output`,
     summary,
@@ -86,6 +93,8 @@ interface Harness {
   readonly probe: ScriptedProbe;
   readonly prompts: string[];
   readonly clock: { now: number };
+  /** Every update the seam stated on the session stream, in order. */
+  readonly emitted: conversationv1.SessionUpdate[];
   delivery: ResumeDelivery | Error;
 }
 
@@ -94,11 +103,13 @@ function harness(): Harness {
   const probe = new ScriptedProbe();
   const prompts: string[] = [];
   const clock = { now: 1_000_000 };
+  const emitted: conversationv1.SessionUpdate[] = [];
   const h: Harness = {
     scheduler,
     probe,
     prompts,
     clock,
+    emitted,
     delivery: { kind: "delivered" },
     resume: new NetworkResume({
       probe: probe.probe,
@@ -109,9 +120,59 @@ function harness(): Harness {
       },
       nowMs: () => clock.now,
       scheduler,
+      emit: (update) => emitted.push(update),
     }),
   };
   return h;
+}
+
+/** One stated wait, flattened for comparison. */
+interface StatedWait {
+  readonly work: string;
+  readonly failedAtMs: number;
+  readonly givesUpAtMs: number;
+  readonly resumesDelivered: number;
+}
+
+/** Every waiting set the seam stated, in order, each flattened. */
+function statedSets(h: Harness): StatedWait[][] {
+  return h.emitted.flatMap((update) =>
+    update.update.case === "networkResumeWaits"
+      ? [
+          update.update.value.waits.map((wait) => ({
+            work: wait.work?.value ?? "",
+            failedAtMs: Number(wait.failedAtMs),
+            givesUpAtMs: Number(wait.givesUpAtMs),
+            resumesDelivered: wait.resumesDelivered,
+          })),
+        ]
+      : [],
+  );
+}
+
+/** The last waiting set the seam stated. */
+function lastSet(h: Harness): StatedWait[] | undefined {
+  return statedSets(h).at(-1);
+}
+
+/** One stated outcome, flattened: the work and the arm (plus an abandonment's reason). */
+function statedOutcomes(h: Harness): { work: string; end: string; reason?: string }[] {
+  return h.emitted.flatMap((update) => {
+    if (update.update.case !== "networkResumeOutcome") return [];
+    const { work, outcome } = update.update.value;
+    return [
+      {
+        work: work?.value ?? "",
+        end: outcome.case ?? "",
+        ...(outcome.case === "abandoned" ? { reason: outcome.value.reason } : {}),
+      },
+    ];
+  });
+}
+
+/** The arm of every update the seam stated, in order. */
+function statedArms(h: Harness): string[] {
+  return h.emitted.map((update) => update.update.case ?? "");
 }
 
 /** Spawn agent `taskId` under call `toolUseId` and fail it with an ENOTFOUND outage. */
@@ -119,6 +180,13 @@ function failWithOutage(h: Harness, taskId: string, toolUseId: string): void {
   h.resume.observe(taskStarted(taskId, toolUseId));
   h.resume.observe(subagentError(toolUseId, "server_error", ENOTFOUND_NOTICE));
   h.resume.observe(notification(taskId, "failed", ENOTFOUND_SUMMARY));
+}
+
+/** Fail a1, resume it, and start its resumed run under a SendMessage call. */
+async function resumedOnce(h: Harness): Promise<void> {
+  failWithOutage(h, "a1", "toolu_spawn");
+  await h.resume.tick();
+  h.resume.observe(taskStarted("a1", "toolu_send"));
 }
 
 afterEach(() => {
@@ -380,6 +448,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => Date.now(),
       scheduler: REAL_SCHEDULER,
+      emit: () => undefined,
     });
     const start = Date.now();
     failWithOutage({ resume } as Harness, "a1", "toolu_spawn");
@@ -409,6 +478,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
     const first = resume.tick();
@@ -444,6 +514,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
     const mark = logSinkMark();
@@ -723,13 +794,6 @@ describe("the thirty-minute window", () => {
 // ---------------------------------------------------------------------------
 
 describe("a resumed agent that fails again", () => {
-  /** Fail a1, resume it, and start its resumed run under a SendMessage call. */
-  async function resumedOnce(h: Harness): Promise<void> {
-    failWithOutage(h, "a1", "toolu_spawn");
-    await h.resume.tick();
-    h.resume.observe(taskStarted("a1", "toolu_send"));
-  }
-
   it("without progress keeps the window its FIRST failure opened", async () => {
     // Arrange
     const h = harness();
@@ -821,6 +885,476 @@ describe("a resumed agent that fails again", () => {
 
     // Act
     await h.resume.tick();
+
+    // Assert
+    expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the session stream is told (session.proto, network_resume_waits and
+// network_resume_outcome; footer-activity-tiers.md, landed change 2)
+// ---------------------------------------------------------------------------
+
+describe("the waiting set on the session stream", () => {
+  it("a wait opening states the set with the failed run's work, failure instant, deadline and no resumes", () => {
+    // Arrange
+    const h = harness();
+    const failedAt = h.clock.now;
+
+    // Act
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Assert
+    expect(lastSet(h)).toEqual([
+      {
+        work: "toolu_spawn",
+        failedAtMs: failedAt,
+        givesUpAtMs: failedAt + NETWORK_RESUME_WINDOW_MS,
+        resumesDelivered: 0,
+      },
+    ]);
+  });
+
+  it("a second wait opening states both waits, in the order they opened", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_1");
+
+    // Act
+    failWithOutage(h, "a2", "toolu_2");
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_1", "toolu_2"]);
+  });
+
+  it("a failure notification that names its call names that call as the work", () => {
+    // Arrange
+    const h = harness();
+    h.resume.observe(taskStarted("a1", "toolu_spawn"));
+    h.resume.observe(taskStarted("a1", "toolu_later"));
+    h.resume.observe(subagentError("toolu_spawn", "server_error", ENOTFOUND_NOTICE));
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY, "toolu_spawn"));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_spawn"]);
+  });
+
+  it("an unreachable beat states nothing, because nothing changed", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.probe.reachable = false;
+    const before = h.emitted.length;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(h.emitted).toHaveLength(before);
+  });
+
+  it("a busy main agent states nothing, because nothing changed", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.delivery = { kind: "busy", detail: "a turn is open" };
+    const before = h.emitted.length;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(h.emitted).toHaveLength(before);
+  });
+
+  it("a failure that is not a network outage states nothing", () => {
+    // Arrange
+    const h = harness();
+    h.resume.observe(taskStarted("a1", "toolu_spawn"));
+    h.resume.observe(subagentError("toolu_spawn", "rate_limit", "API Error: 429"));
+
+    // Act
+    h.resume.observe(notification("a1", "failed", "failed (error type rate_limit)"));
+
+    // Assert
+    expect(h.emitted).toEqual([]);
+  });
+});
+
+describe("a wait's outcome on the session stream", () => {
+  it("a delivered resume states resumed for the failed run's work", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "resumed" }]);
+  });
+
+  it("a delivered resume states the outcome, then the set without the wait", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.emitted.length = 0;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect([statedArms(h), lastSet(h)]).toEqual([["networkResumeOutcome", "networkResumeWaits"], []]);
+  });
+
+  it("a resume that reaches only the waits due states the set still holding a wait opened meanwhile", async () => {
+    // Arrange
+    const h = harness();
+    let release: (delivery: ResumeDelivery) => void = () => undefined;
+    let delivering: () => void = () => undefined;
+    const asked = new Promise<void>((resolve) => {
+      delivering = resolve;
+    });
+    const resume = new NetworkResume({
+      probe: h.probe.probe,
+      deliver: () =>
+        new Promise((resolve) => {
+          release = resolve;
+          delivering();
+        }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      emit: (update) => h.emitted.push(update),
+    });
+    failWithOutage({ ...h, resume }, "a1", "toolu_1");
+    const beat = resume.tick();
+    await asked;
+    failWithOutage({ ...h, resume }, "a2", "toolu_2");
+
+    // Act
+    release({ kind: "delivered" });
+    await beat;
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_2"]);
+  });
+
+  it("a window that runs out states gave_up for the work", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "gaveUp" }]);
+  });
+
+  it("a window that runs out states the empty set once the last wait ended", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(lastSet(h)).toEqual([]);
+  });
+
+  it("a resume that cannot be delivered states gave_up for the work", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.delivery = { kind: "unavailable", detail: "no query" };
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "gaveUp" }]);
+  });
+
+  it("a resume that cannot be delivered states the empty set", async () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.delivery = { kind: "unavailable", detail: "no query" };
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(lastSet(h)).toEqual([]);
+  });
+
+  it("stand-down states abandoned with its reason for every wait", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_1");
+    failWithOutage(h, "a2", "toolu_2");
+
+    // Act
+    h.resume.stop("session closing");
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([
+      { work: "toolu_1", end: "abandoned", reason: "session closing" },
+      { work: "toolu_2", end: "abandoned", reason: "session closing" },
+    ]);
+  });
+
+  it("stand-down states the empty set after the abandonments", () => {
+    // Arrange
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+    h.emitted.length = 0;
+
+    // Act
+    h.resume.stop("session closing");
+
+    // Assert
+    expect([statedArms(h), lastSet(h)]).toEqual([["networkResumeOutcome", "networkResumeWaits"], []]);
+  });
+
+  it("stand-down with nothing waiting states nothing", () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    h.resume.stop("session closing");
+
+    // Assert
+    expect(h.emitted).toEqual([]);
+  });
+});
+
+describe("a resumed agent's next wait on the session stream", () => {
+  it("names the resuming send's run as the work", async () => {
+    // Arrange
+    const h = harness();
+    await resumedOnce(h);
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.work)).toEqual(["toolu_send"]);
+  });
+
+  it("counts the resume already delivered", async () => {
+    // Arrange
+    const h = harness();
+    await resumedOnce(h);
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.resumesDelivered)).toEqual([1]);
+  });
+
+  it("states the instant of the new failure", async () => {
+    // Arrange
+    const h = harness();
+    await resumedOnce(h);
+    h.clock.now += 5_000;
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.failedAtMs)).toEqual([h.clock.now]);
+  });
+
+  it("without progress keeps the deadline its first failure set", async () => {
+    // Arrange
+    const h = harness();
+    const firstFailure = h.clock.now;
+    await resumedOnce(h);
+    h.clock.now += 5_000;
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.givesUpAtMs)).toEqual([firstFailure + NETWORK_RESUME_WINDOW_MS]);
+  });
+
+  it("after progress moves the deadline to a window from the new failure", async () => {
+    // Arrange
+    const h = harness();
+    await resumedOnce(h);
+    h.resume.observe(subagentAnswer("toolu_send"));
+    h.clock.now += 5_000;
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(lastSet(h)?.map((wait) => wait.givesUpAtMs)).toEqual([h.clock.now + NETWORK_RESUME_WINDOW_MS]);
+  });
+
+  it("past its first window without progress states nothing, because no wait opened", async () => {
+    // Arrange
+    const h = harness();
+    await resumedOnce(h);
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+    h.emitted.length = 0;
+
+    // Act
+    h.resume.observe(notification("a1", "failed", ENOTFOUND_SUMMARY));
+
+    // Assert
+    expect(h.emitted).toEqual([]);
+  });
+});
+
+describe("a delivery that completes after its wait was given up", () => {
+  /**
+   * A harness whose delivery is held open: the beat reaches `deliver`, a second
+   * beat past the window gives the wait up, and only then is the delivery
+   * answered with `answer`.
+   */
+  async function expiredDuringDelivery(answer: ResumeDelivery): Promise<Harness> {
+    const h = harness();
+    let release: (delivery: ResumeDelivery) => void = () => undefined;
+    let delivering: () => void = () => undefined;
+    const asked = new Promise<void>((resolve) => {
+      delivering = resolve;
+    });
+    const resume = new NetworkResume({
+      probe: h.probe.probe,
+      deliver: () =>
+        new Promise((resolve) => {
+          release = resolve;
+          delivering();
+        }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      emit: (update) => h.emitted.push(update),
+    });
+    const held = { ...h, resume };
+    failWithOutage(held, "a1", "toolu_spawn");
+    const pending = resume.tick();
+    await asked;
+    h.clock.now += NETWORK_RESUME_WINDOW_MS;
+    await resume.tick();
+    release(answer);
+    await pending;
+    return held;
+  }
+
+  it("states exactly one outcome, the give-up", async () => {
+    // Arrange / Act
+    const h = await expiredDuringDelivery({ kind: "delivered" });
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "gaveUp" }]);
+  });
+
+  it("leaves the stated set empty", async () => {
+    // Arrange / Act
+    const h = await expiredDuringDelivery({ kind: "delivered" });
+
+    // Assert
+    expect(lastSet(h)).toEqual([]);
+  });
+
+  it("records the suppressed resumed outcome at INFO, naming the give-up that stood", async () => {
+    // Arrange
+    const mark = logSinkMark();
+
+    // Act
+    await expiredDuringDelivery({ kind: "delivered" });
+
+    // Assert
+    const suppressed = logRecordsSince(mark).find((r) => r.context.suppressed !== undefined);
+    expect([suppressed?.level, suppressed?.context]).toEqual([
+      "info",
+      expect.objectContaining({ task_id: "a1", work: "toolu_spawn", suppressed: "resumed", already: "gaveUp" }),
+    ]);
+  });
+
+  it("still logs the late resume as delivered, since the rule is unchanged", async () => {
+    // Arrange
+    const mark = logSinkMark();
+
+    // Act
+    await expiredDuringDelivery({ kind: "delivered" });
+
+    // Assert
+    expect(logRecordsSince(mark).filter((r) => r.context.outcome === "resumed")).toHaveLength(1);
+  });
+
+  it("an undeliverable answer states no second give-up", async () => {
+    // Arrange / Act
+    const h = await expiredDuringDelivery({ kind: "unavailable", detail: "no query" });
+
+    // Assert
+    expect(statedOutcomes(h)).toEqual([{ work: "toolu_spawn", end: "gaveUp" }]);
+  });
+});
+
+describe("a session stream that cannot take the statement", () => {
+  /** A harness whose seam throws. */
+  function throwing(): Harness {
+    const h = harness();
+    const resume = new NetworkResume({
+      probe: h.probe.probe,
+      deliver: () => Promise.resolve({ kind: "delivered" }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      emit: () => {
+        throw new Error("the fan-out is broken");
+      },
+    });
+    return { ...h, resume };
+  }
+
+  it("is recorded at ERROR with the arm and the cause", () => {
+    // Arrange
+    const h = throwing();
+    const mark = logSinkMark();
+
+    // Act
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Assert
+    expect(logRecordsSince(mark).find((r) => r.level === "error")?.context).toMatchObject({
+      arm: "networkResumeWaits",
+      cause: "the fan-out is broken",
+      task_ids: ["a1"],
+    });
+  });
+
+  it("an outcome it cannot take is recorded at ERROR with the work", async () => {
+    // Arrange
+    const h = throwing();
+    failWithOutage(h, "a1", "toolu_spawn");
+    const mark = logSinkMark();
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(
+      logRecordsSince(mark).find((r) => r.level === "error" && r.context.arm === "networkResumeOutcome")?.context,
+    ).toMatchObject({ work: "toolu_spawn", end: "resumed", cause: "the fan-out is broken" });
+  });
+
+  it("leaves the wait standing", () => {
+    // Arrange
+    const h = throwing();
+
+    // Act
+    failWithOutage(h, "a1", "toolu_spawn");
 
     // Assert
     expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
