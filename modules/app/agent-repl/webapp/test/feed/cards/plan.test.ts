@@ -156,20 +156,21 @@ describe("drawFeedPlan", () => {
     expect(el.querySelector(".plan-edit a")?.hasAttribute("data-editor-link")).toBe(true);
   });
 
-  it("raises OpenInEditor with the served path, verbatim", async () => {
+  it("raises OpenInEditor with the served path as its workspace_file target, verbatim", async () => {
     const h = harness();
     const el = drawFeedPlan(plan(planned("# the plan", PLAN_PATH)), h.rc);
     el.querySelector<HTMLAnchorElement>(".plan-edit a")?.click();
     await settle();
-    expect(h.opened.map((r) => r.path)).toEqual([PLAN_PATH]);
+    expect(h.opened.map((r) => (r.target.case === "workspaceFile" ? r.target.value.path : null))).toEqual([PLAN_PATH]);
   });
 
-  it("names no line, so the editor opens the plan at its top", async () => {
+  it("names no line in its target, so the editor opens the plan at its top", async () => {
     const h = harness();
     const el = drawFeedPlan(plan(planned("# the plan", PLAN_PATH)), h.rc);
     el.querySelector<HTMLAnchorElement>(".plan-edit a")?.click();
     await settle();
-    expect(h.opened[0]?.line).toBeUndefined();
+    const target = h.opened[0]?.target;
+    expect(target?.case === "workspaceFile" ? target.value.line : "not a workspace file").toBeUndefined();
   });
 
   it("draws nothing extra when the editor opened", async () => {

@@ -291,15 +291,17 @@ describe("a finding's parts", () => {
 });
 
 describe("a finding's location click", () => {
-  it("raises OpenInEditor with the served path and line", async () => {
+  it("raises OpenInEditor with the served path and line as its workspace_file target", async () => {
     const h = harness();
     const el = drawFeedFindings(findings([finding()]), h.rc);
     el.querySelector<HTMLAnchorElement>(".finding-location a")?.click();
     await settle();
-    expect(h.opened.map((r) => [r.path, r.line])).toEqual([["daemon/server.go", 214]]);
+    expect(
+      h.opened.map((r) => (r.target.case === "workspaceFile" ? [r.target.value.path, r.target.value.line] : null)),
+    ).toEqual([["daemon/server.go", 214]]);
   });
 
-  it("names no line when the finding set none", async () => {
+  it("names no line in its target when the finding set none", async () => {
     const h = harness();
     const el = drawFeedFindings(
       findings([finding({ location: { text: "daemon/", path: "daemon/" } })]),
@@ -307,7 +309,8 @@ describe("a finding's location click", () => {
     );
     el.querySelector<HTMLAnchorElement>(".finding-location a")?.click();
     await settle();
-    expect(h.opened[0]?.line).toBeUndefined();
+    const target = h.opened[0]?.target;
+    expect(target?.case === "workspaceFile" ? target.value.line : "not a workspace file").toBeUndefined();
   });
 
   it("draws the refusal at the location when the editor could not be opened", async () => {

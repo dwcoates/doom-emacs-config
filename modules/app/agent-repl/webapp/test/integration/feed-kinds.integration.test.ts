@@ -35,6 +35,7 @@ import {
 
 import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
+import type { OpenInEditorRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { drawnPaintClass, expectedPaintClass } from "./vocab";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import {
@@ -1939,9 +1940,18 @@ describe("an answered permission card", () => {
 //
 // Ruling (2026-08-29): `renderEditorLink` is the ONE shared component for the
 // plan edit button, findings locations and worktree divider paths, and
-// `OpenInEditor{path, line?}` carries the SERVED values — the client never
-// parses a location string to derive them.
+// `OpenInEditor{target.workspace_file{path, line?}}` carries the SERVED
+// values — the client never parses a location string to derive them.
 // ---------------------------------------------------------------------------
+
+/** The workspace-file target of the INDEXth OpenInEditor call; any other arm fails. */
+function editorFileOf(index: number): { path: string; line?: number } {
+  const request = harness.fake.calls<OpenInEditorRequest>("openInEditor")[index];
+  if (request?.target.case !== "workspaceFile") {
+    throw new Error(`expected a workspaceFile target, got ${String(request?.target.case)}`);
+  }
+  return request.target.value;
+}
 
 describe("the editor link on a plan", () => {
   it("wears the shared editor-link hook", async () => {
@@ -1951,14 +1961,13 @@ describe("the editor link on a plan", () => {
     expect(row.querySelector("[data-editor-link]")).not.toBeNull();
   });
 
-  it("calls OpenInEditor with the served path", async () => {
+  it("calls OpenInEditor with the served path as a workspace_file target", async () => {
     // Arrange
     await drawRow(activityRow(planUnit("planned"), { id: feedId("plan-1") }));
     // Act
     await harness.click('[data-feed-row="plan-1"] [data-editor-link]');
     // Assert
-    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
-    expect(request.path).toBe(PLAN_EDIT_PATH);
+    expect(editorFileOf(0).path).toBe(PLAN_EDIT_PATH);
   });
 
   it("echoes the workspace on the editor call", async () => {
@@ -1980,46 +1989,42 @@ describe("the editor link on a finding's location", () => {
     expect(row.querySelectorAll("[data-editor-link]")).toHaveLength(3);
   });
 
-  it("calls OpenInEditor with the served path", async () => {
+  it("calls OpenInEditor with the served path as a workspace_file target", async () => {
     // Arrange
     await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
     // Act
     await harness.click('[data-feed-row="find-2"] [data-editor-link]');
     // Assert
-    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
-    expect(request.path).toBe(FINDINGS_LOCATION.path);
+    expect(editorFileOf(0).path).toBe(FINDINGS_LOCATION.path);
   });
 
-  it("carries the served line rather than one parsed off the text", async () => {
+  it("carries the served line in its target rather than one parsed off the text", async () => {
     // Arrange
     await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
     // Act
     await harness.click('[data-feed-row="find-2"] [data-editor-link]');
     // Assert
-    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
-    expect(request.line).toBe(FINDINGS_LOCATION.line);
+    expect(editorFileOf(0).line).toBe(FINDINGS_LOCATION.line);
   });
 
-  it("omits the line where the location carries none", async () => {
+  it("omits the target's line where the location carries none", async () => {
     // Arrange: an absent `optional` field means send nothing, never a zero.
     await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
     const links = harness.$$('[data-feed-row="find-2"] [data-editor-link]');
     // Act
     await harness.clickElement(links[2]);
     // Assert
-    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
-    expect(request.line).toBeUndefined();
+    expect(editorFileOf(0).line).toBeUndefined();
   });
 
-  it("names the path the third location carries", async () => {
+  it("names the path the third location carries in its target", async () => {
     // Arrange
     await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
     const links = harness.$$('[data-feed-row="find-2"] [data-editor-link]');
     // Act
     await harness.clickElement(links[2]);
     // Assert
-    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
-    expect(request.path).toBe(FINDINGS_LOCATION_NO_LINE.path);
+    expect(editorFileOf(0).path).toBe(FINDINGS_LOCATION_NO_LINE.path);
   });
 });
 
@@ -2031,24 +2036,22 @@ describe("the editor link on a worktree divider", () => {
     expect(row.querySelector("[data-editor-link]")).not.toBeNull();
   });
 
-  it("calls OpenInEditor with the served worktree path", async () => {
+  it("calls OpenInEditor with the served worktree path as a workspace_file target", async () => {
     // Arrange
     await drawRow(separationRow("worktreeEntered", { id: feedId("wt-1") }));
     // Act
     await harness.click('[data-feed-row="wt-1"] [data-editor-link]');
     // Assert
-    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
-    expect(request.path).toBe(WORKTREE_PATH);
+    expect(editorFileOf(0).path).toBe(WORKTREE_PATH);
   });
 
-  it("sends no line for a directory", async () => {
+  it("sends no target line for a directory", async () => {
     // Arrange
     await drawRow(separationRow("worktreeEntered", { id: feedId("wt-1") }));
     // Act
     await harness.click('[data-feed-row="wt-1"] [data-editor-link]');
     // Assert
-    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
-    expect(request.line).toBeUndefined();
+    expect(editorFileOf(0).line).toBeUndefined();
   });
 });
 
