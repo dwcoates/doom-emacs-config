@@ -18,22 +18,34 @@ import (
 // the process start alone.
 const layoutProbeBound = 10 * time.Second
 
+// askBinary runs a daemon binary with one question's argument, bounded by
+// layoutProbeBound, and answers its trimmed stdout. A binary that fails is
+// never read as any answer: its error carries the question and its stderr.
+// Every question a deploy asks the STAGED binary goes through here.
+func askBinary(ctx context.Context, bin, question string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, bin, question)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("deploy: ask %s %s: %w (stderr: %q)", bin, question, err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // BinaryLayout asks a daemon binary which state layout it writes, by running
 // it with `-layout-version`: the answer is the binary's own, never inferred
 // from the source it was built from.
 func BinaryLayout(ctx context.Context, bin string) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
-	defer cancel()
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, "-"+rollout.LayoutVersionFlagName)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	answer, err := askBinary(ctx, bin, "-"+rollout.LayoutVersionFlagName)
 	if err != nil {
-		return 0, fmt.Errorf("deploy: ask %s for its state layout: %w (stderr: %q)", bin, err, strings.TrimSpace(stderr.String()))
+		return 0, err
 	}
-	layout, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	layout, err := strconv.Atoi(answer)
 	if err != nil {
-		return 0, fmt.Errorf("deploy: %s answered a state layout that is not a number: %q", bin, strings.TrimSpace(string(out)))
+		return 0, fmt.Errorf("deploy: %s answered a state layout that is not a number: %q", bin, answer)
 	}
 	if layout <= 0 {
 		return 0, fmt.Errorf("deploy: %s answered a non-positive state layout %d", bin, layout)
@@ -45,16 +57,11 @@ func BinaryLayout(ctx context.Context, bin string) (int, error) {
 // running layout up to its own mean for the running build, by running it with
 // `-migration-kind-from`: the answer is the binary's own migration list.
 func BinaryMigrationKind(ctx context.Context, bin string, from int) (wsm.MigrationKind, error) {
-	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
-	defer cancel()
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, "-"+rollout.MigrationKindFromFlagName+"="+strconv.Itoa(from))
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	answer, err := askBinary(ctx, bin, "-"+rollout.MigrationKindFromFlagName+"="+strconv.Itoa(from))
 	if err != nil {
-		return 0, fmt.Errorf("deploy: ask %s what its migrations from layout %d are: %w (stderr: %q)", bin, from, err, strings.TrimSpace(stderr.String()))
+		return 0, err
 	}
-	return parseMigrationKind(bin, strings.TrimSpace(string(out)))
+	return parseMigrationKind(bin, answer)
 }
 
 // parseMigrationKind reads a binary's migration-kind answer. An answer that
