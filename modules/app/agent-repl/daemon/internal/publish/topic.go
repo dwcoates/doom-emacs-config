@@ -25,11 +25,29 @@ import (
 //     stream never ends holding a stale view.
 //   - A slow subscriber never blocks Publish: each subscriber owns an
 //     unbounded queue drained by its own goroutine.
+//
+// A LATEST-ONLY topic (NewLatestOnly) relaxes "skipping none": a subscriber
+// that has not yet taken a queued value has it REPLACED by the newer one, so
+// its queue never holds more than one value. It is for a WHOLE-VIEW topic
+// whose every value supersedes the last, published at a rate a slow reader
+// must not have to replay (the footer's activity cell republishes per line of
+// streamed reasoning). A subscriber still receives the latest value, and a
+// stream still never ends holding a stale one.
 type Topic[T any] struct {
 	mu     sync.Mutex
 	latest T
 	has    bool
 	subs   map[*subscriber[T]]struct{}
+	// latestOnly makes every subscriber's queue hold at most the newest
+	// value. It is fixed at construction.
+	latestOnly bool
+}
+
+// NewLatestOnly builds a topic whose subscribers are handed only the newest
+// value they have not yet taken: a value superseded before its subscriber took
+// it is dropped for that subscriber. Every other guarantee of Topic holds.
+func NewLatestOnly[T any]() *Topic[T] {
+	return &Topic[T]{latestOnly: true}
 }
 
 // Publish records v as the topic's latest value and hands it to every
@@ -83,8 +101,9 @@ func (t *Topic[T]) Latest() (T, bool) {
 func (t *Topic[T]) Subscribe(ctx context.Context) <-chan T {
 	out := make(chan T)
 	s := &subscriber[T]{
-		out:    out,
-		signal: make(chan struct{}, 1),
+		out:        out,
+		signal:     make(chan struct{}, 1),
+		latestOnly: t.latestOnly,
 	}
 
 	t.mu.Lock()
@@ -148,13 +167,20 @@ type subscriber[T any] struct {
 	queue  []T
 	out    chan T
 	signal chan struct{}
+	// latestOnly replaces a value still queued rather than queuing behind it.
+	latestOnly bool
 }
 
 // enqueue appends v and wakes the pump. It never blocks, which is what keeps a
-// slow subscriber off the publisher's back.
+// slow subscriber off the publisher's back. On a latest-only subscriber a
+// value still waiting in the queue is replaced, so the queue holds at most one.
 func (s *subscriber[T]) enqueue(v T) {
 	s.mu.Lock()
-	s.queue = append(s.queue, v)
+	if s.latestOnly && len(s.queue) > 0 {
+		s.queue[len(s.queue)-1] = v
+	} else {
+		s.queue = append(s.queue, v)
+	}
 	s.mu.Unlock()
 	select {
 	case s.signal <- struct{}{}:
