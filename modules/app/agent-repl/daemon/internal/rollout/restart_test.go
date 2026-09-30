@@ -196,20 +196,17 @@ func TestARestartIsRefusedWhileAHandoverIsInFlight(t *testing.T) {
 
 func TestReplacementArgv(t *testing.T) {
 	tests := []struct {
-		name      string
-		incumbent []string
-		want      []string
+		name   string
+		config []string
+		want   []string
 	}{
-		{name: "no flags is just the replacing flag", want: []string{"--replacing"}},
-		{name: "every other flag is carried through", incumbent: []string{"--prompts-dir", "/prompts"}, want: []string{"--prompts-dir", "/prompts", "--replacing"}},
-		{name: "a separated joining flag is dropped with its value", incumbent: []string{"--joining", "127.0.0.1:9", "--node", "node"}, want: []string{"--node", "node", "--replacing"}},
-		{name: "an attached joining flag is dropped", incumbent: []string{"-joining=127.0.0.1:9"}, want: []string{"--replacing"}},
-		{name: "an earlier replacing flag is not doubled", incumbent: []string{"-replacing", "--node", "node"}, want: []string{"--node", "node", "--replacing"}},
+		{name: "no configuration is just the replacing flag", want: []string{"--replacing"}},
+		{name: "the configuration is carried through ahead of the role", config: []string{"--prompts-dir=/prompts", "--node=node"}, want: []string{"--prompts-dir=/prompts", "--node=node", "--replacing"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange / Act
-			got := replacementArgv(tt.incumbent)
+			got := replacementArgv(tt.config)
 
 			// Assert
 			if !slices.Equal(got, tt.want) {
@@ -219,55 +216,30 @@ func TestReplacementArgv(t *testing.T) {
 	}
 }
 
-func TestWithoutRoleFlags(t *testing.T) {
+// TestSpawnArgvLeavesTheConfigurationUntouched pins that a spawn's argv is a
+// copy: the configuration is shared by every spawn this daemon makes, so an
+// append that wrote into its backing array would hand one spawn's role to
+// the next.
+func TestSpawnArgvLeavesTheConfigurationUntouched(t *testing.T) {
 	tests := []struct {
-		name      string
-		incumbent []string
-		want      []string
+		name  string
+		build func(config []string) []string
 	}{
-		{name: "no flags is no flags", want: []string{}},
-		{name: "a non-role flag is carried through", incumbent: []string{"--prompts-dir", "/prompts"}, want: []string{"--prompts-dir", "/prompts"}},
-		{name: "a separated joining flag is dropped with its value", incumbent: []string{"--joining", "127.0.0.1:9", "--node", "node"}, want: []string{"--node", "node"}},
-		{name: "an attached joining flag is dropped alone", incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"}, want: []string{"--node", "node"}},
-		{name: "a trailing joining flag with no value is dropped", incumbent: []string{"--node", "node", "--joining"}, want: []string{"--node", "node"}},
-		{name: "a replacing flag is dropped", incumbent: []string{"--replacing", "--node", "node"}, want: []string{"--node", "node"}},
-		{name: "an attached replacing flag is dropped", incumbent: []string{"-replacing=true", "--node", "node"}, want: []string{"--node", "node"}},
+		{name: "successor", build: func(c []string) []string { return successorArgv(c, "127.0.0.1:1") }},
+		{name: "replacement", build: replacementArgv},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange / Act
-			got := withoutRoleFlags(tt.incumbent)
+			// Arrange: spare capacity, so an in-place append would land.
+			config := make([]string, 1, 8)
+			config[0] = "--node=node"
+
+			// Act
+			_ = tt.build(config)
 
 			// Assert
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("argv = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestEverySpawnArgvIsTheRolelessArgvPlusItsOwnRole pins that both argv
-// builders share withoutRoleFlags: a builder that strips its own way would
-// leave a role flag in one of them, and the daemon it spawns refuses to start.
-func TestEverySpawnArgvIsTheRolelessArgvPlusItsOwnRole(t *testing.T) {
-	incumbent := []string{"--default-config-dir", "/roots", "--replacing", "-joining=127.0.0.1:9", "--node", "node"}
-	roleless := withoutRoleFlags(incumbent)
-	tests := []struct {
-		name string
-		got  []string
-		role []string
-	}{
-		{name: "successor", got: successorArgv(incumbent, "127.0.0.1:1"), role: []string{JoiningFlag, "127.0.0.1:1"}},
-		{name: "replacement", got: replacementArgv(incumbent), role: []string{"--" + ReplacingFlagName}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			want := append(slices.Clone(roleless), tt.role...)
-
-			// Act / Assert
-			if !slices.Equal(tt.got, want) {
-				t.Fatalf("argv = %v, want %v", tt.got, want)
+			if got := config[:cap(config)][1]; got != "" {
+				t.Fatalf("the configuration's backing array was written: %q", got)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -95,7 +96,7 @@ func TestJoiningAddrPathNamesTheOneReportFile(t *testing.T) {
 
 func TestSpawnRefusesWithNoDaemonBinary(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("", t.TempDir())
+	spawner := NewProcessSpawner("", t.TempDir(), nil)
 
 	// Act
 	_, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -108,7 +109,7 @@ func TestSpawnRefusesWithNoDaemonBinary(t *testing.T) {
 
 func TestSpawnRefusesWithNoIncumbentAddress(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("/bin/true", t.TempDir())
+	spawner := NewProcessSpawner("/bin/true", t.TempDir(), nil)
 
 	// Act
 	_, err := spawner.Spawn(context.Background(), "")
@@ -131,7 +132,7 @@ func TestSpawnAnswersTheAddressTheSuccessorReports(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(script, state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 
@@ -167,7 +168,7 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(script, state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
@@ -257,7 +258,7 @@ func TestSpawnPutsTheSuccessorInItsOwnSession(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(script, state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 
@@ -313,7 +314,7 @@ func reportingBody(state string) string {
 func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 	// Arrange: a successor that stays up and never reports.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state)
+	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 	spawner.StopGrace = 50 * time.Millisecond
@@ -338,7 +339,7 @@ func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 	// Arrange: a deadline no test run reaches, so only the exit can answer.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state)
+	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state, nil)
 	spawner.Poll = time.Hour
 	spawner.Timeout = time.Hour
 
@@ -358,7 +359,7 @@ func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 func TestSpawnAnswersTheAddressASuccessorReportedBeforeItExited(t *testing.T) {
 	// Arrange: the report lands, then the process ends, before any poll.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state, nil)
 	spawner.Poll = time.Hour
 	spawner.Timeout = time.Hour
 
@@ -380,7 +381,7 @@ func TestSpawnClearsAStaleReportFromAnEarlierHandover(t *testing.T) {
 	if err := ReportJoiningAddr(state, "127.0.0.1:9999"); err != nil {
 		t.Fatalf("ReportJoiningAddr: %v", err)
 	}
-	spawner := NewProcessSpawner("/usr/bin/true", state)
+	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 
@@ -400,54 +401,25 @@ func TestSpawnClearsAStaleReportFromAnEarlierHandover(t *testing.T) {
 	}
 }
 
-// TestTheSuccessorInheritsTheIncumbentsArgv covers what a successor IS: the
-// same daemon, re-pointed. A successor assembled from a curated list of flags
-// would differ from its incumbent in exactly the ways nobody thought to list.
-func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
+// TestTheSuccessorInheritsTheIncumbentsConfiguration covers what a successor
+// IS: the same daemon, re-pointed.
+func TestTheSuccessorInheritsTheIncumbentsConfiguration(t *testing.T) {
 	tests := []struct {
-		name      string
-		incumbent []string
-		want      []string
+		name   string
+		config []string
+		want   []string
 	}{
-		{
-			name:      "no flags at all is just the joining flag",
-			incumbent: nil,
-			want:      []string{JoiningFlag, "127.0.0.1:1"},
-		},
-		{
-			name:      "every other flag is carried through",
-			incumbent: []string{"--default-config-dir", "/roots/default", "--prompts-dir", "/prompts"},
-			want:      []string{"--default-config-dir", "/roots/default", "--prompts-dir", "/prompts", JoiningFlag, "127.0.0.1:1"},
-		},
-		{
-			name:      "a separated joining flag is dropped with its value",
-			incumbent: []string{"--joining", "127.0.0.1:9", "--prompts-dir", "/prompts"},
-			want:      []string{"--prompts-dir", "/prompts", JoiningFlag, "127.0.0.1:1"},
-		},
-		{
-			name:      "an attached joining flag is dropped",
-			incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"},
-			want:      []string{"--node", "node", JoiningFlag, "127.0.0.1:1"},
-		},
-		{
-			name:      "a replacing flag an incumbent booted with is dropped",
-			incumbent: []string{"--default-config-dir", "/roots/default", "--replacing"},
-			want:      []string{"--default-config-dir", "/roots/default", JoiningFlag, "127.0.0.1:1"},
-		},
+		{name: "no configuration is just the joining flag", want: []string{JoiningFlag, "127.0.0.1:1"}},
+		{name: "the configuration is carried through ahead of the role", config: []string{"--default-config-dir=/roots/default", "--prompts-dir=/prompts"}, want: []string{"--default-config-dir=/roots/default", "--prompts-dir=/prompts", JoiningFlag, "127.0.0.1:1"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange / Act.
-			got := successorArgv(tc.incumbent, "127.0.0.1:1")
+			// Arrange / Act
+			got := successorArgv(tc.config, "127.0.0.1:1")
 
-			// Assert.
-			if len(got) != len(tc.want) {
+			// Assert
+			if !slices.Equal(got, tc.want) {
 				t.Fatalf("argv = %v, want %v", got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("argv = %v, want %v", got, tc.want)
-				}
 			}
 		})
 	}
@@ -456,7 +428,7 @@ func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
 func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
 	// Arrange: a process that starts and exits without reporting.
 	state := t.TempDir()
-	spawner := NewProcessSpawner("/usr/bin/true", state)
+	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 
@@ -477,7 +449,7 @@ func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
 
 func TestSpawnAnswersNoHandleWhenNothingStarted(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner(filepath.Join(t.TempDir(), "absent"), t.TempDir())
+	spawner := NewProcessSpawner(filepath.Join(t.TempDir(), "absent"), t.TempDir(), nil)
 
 	// Act
 	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -518,7 +490,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 				t.Fatalf("write the stand-in: %v", err)
 			}
-			spawner := NewProcessSpawner(script, state)
+			spawner := NewProcessSpawner(script, state, nil)
 			spawner.Poll = time.Millisecond
 			spawner.Timeout = 10 * time.Second
 			spawner.StopGrace = 50 * time.Millisecond
@@ -548,7 +520,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	t.Helper()
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state, nil)
 	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	spawner.StopGrace = 50 * time.Millisecond
@@ -644,7 +616,7 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state)
+	spawner := NewProcessSpawner(script, state, nil)
 
 	// Act
 	pid, err := spawner.SpawnReplacement(context.Background())
@@ -662,9 +634,70 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	}
 }
 
+// TestEverySpawnStartsItsProcessOnTheConfigurationArgv pins that both spawns
+// hand the process ProcessSpawner.Argv plus their own role, and nothing read
+// from this process's own command line.
+func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
+	config := []string{"--default-config-dir=/roots/default", "--node=node"}
+	tests := []struct {
+		name  string
+		spawn func(s *ProcessSpawner) error
+		want  []string
+	}{
+		{
+			name: "successor",
+			spawn: func(s *ProcessSpawner) error {
+				successor, err := s.Spawn(context.Background(), "127.0.0.1:7777")
+				if successor != nil {
+					t.Cleanup(func() { _ = successor.Stop(context.Background()) })
+				}
+				return err
+			},
+			want: append(slices.Clone(config), JoiningFlag, "127.0.0.1:7777"),
+		},
+		{
+			name: "replacement",
+			spawn: func(s *ProcessSpawner) error {
+				_, err := s.SpawnReplacement(context.Background())
+				return err
+			},
+			want: append(slices.Clone(config), "--"+ReplacingFlagName),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the stand-in reports an address, then writes its argv
+			// into a FIFO, whose blocking read is this test's synchronization.
+			state := t.TempDir()
+			fifo := filepath.Join(state, "argv")
+			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+				t.Fatalf("mkfifo: %v", err)
+			}
+			body := reportingBody(state) + "printf '%s\\n' \"$@\" > " + fifo + "\n"
+			spawner := NewProcessSpawner(spawnScript(t, state, body), state, config)
+			spawner.Poll = time.Millisecond
+
+			// Act
+			if err := tt.spawn(spawner); err != nil {
+				t.Fatalf("spawn: %v", err)
+			}
+
+			// Assert
+			raw, err := os.ReadFile(fifo)
+			if err != nil {
+				t.Fatalf("read the stand-in's argv: %v", err)
+			}
+			got := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("argv = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("", t.TempDir())
+	spawner := NewProcessSpawner("", t.TempDir(), nil)
 
 	// Act
 	_, err := spawner.SpawnReplacement(context.Background())
