@@ -31,6 +31,9 @@ const (
 	MaxSummaryLines = 3
 )
 
+// StoodDownCause names a summary the daemon's stand-down cut short.
+const StoodDownCause = "the daemon stood down"
+
 // NoAnswerLine is the body of a completed turn that named no final answer.
 const NoAnswerLine = "The turn ended with no final answer."
 
@@ -105,6 +108,14 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		Prompt:    question,
 		Timeout:   timeout,
 	})
+	if err != nil && ctx.Err() != nil {
+		// ctx is the notifier's lifetime: the daemon stood down mid-call and
+		// killed the child, which is the stand-down working, not a failure.
+		log.Info(opSummary, "the daemon stood down during the turn-summary call", dlog.Context{
+			"model": headless.ModelSonnet, "cause": ctx.Err().Error(), "detail": err.Error(),
+		})
+		return "", StoodDownCause
+	}
 	if err != nil {
 		cause := headless.CauseOf(err)
 		log.Error(opSummary, "the turn-summary model call failed", dlog.Context{
