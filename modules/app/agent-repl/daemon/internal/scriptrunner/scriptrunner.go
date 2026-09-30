@@ -73,7 +73,16 @@ func New(log dlog.Logger) (*Runner, error) {
 }
 
 // Run executes argv in dir and returns the combined stdout and stderr with
-// the process's exit code.
+// the process's exit code. It is RunLines with nobody listening.
+func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+	return r.RunLines(ctx, dir, argv, nil)
+}
+
+// RunLines executes argv in dir and returns the combined stdout and stderr with
+// the process's exit code, handing each line of that output to onLine AS IT IS
+// WRITTEN (without its newline), so a caller can follow a long script live. A
+// last line with no newline is handed over when the script exits. onLine runs
+// on one goroutine at a time; nil hands nothing over.
 //
 // An empty argv or an empty dir is refused before anything is spawned: every
 // caller names both a script and a directory to run it in, so either being
@@ -81,7 +90,7 @@ func New(log dlog.Logger) (*Runner, error) {
 // refusal and a failed spawn are both reported as errors alongside a failed
 // run's own non-zero code, per the package doc's RAN-AND-FAILED-versus
 // COULD-NOT-BE-CLASSIFIED distinction.
-func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
 	if len(argv) == 0 {
 		err := fmt.Errorf("scriptrunner: argv is empty")
 		r.log.Error("daemon.scriptrunner.run", "refused an empty argv", dlog.Context{"dir": dir})
@@ -99,12 +108,13 @@ func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, in
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
 	// terminal would have shown, not two streams it must interleave itself.
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	out := &lineWriter{onLine: onLine}
+	cmd.Stdout = out
+	cmd.Stderr = out
 
 	err := cmd.Run()
-	output := buf.String()
+	out.flush()
+	output := out.buf.String()
 
 	var exitErr *exec.ExitError
 	if err == nil {
@@ -141,4 +151,38 @@ func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, in
 		"script": argv[0], "dir": dir, "cause": err.Error(),
 	})
 	return output, 0, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
+}
+
+// lineWriter keeps everything written to it and hands each complete line to
+// onLine the moment its newline arrives. exec calls Write from one goroutine
+// at a time when stdout and stderr share one writer, so it needs no lock.
+type lineWriter struct {
+	buf     bytes.Buffer
+	pending []byte
+	onLine  func(string)
+}
+
+// Write keeps p and hands over every line p completes.
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf.Write(p)
+	if w.onLine == nil {
+		return len(p), nil
+	}
+	w.pending = append(w.pending, p...)
+	for {
+		i := bytes.IndexByte(w.pending, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		w.onLine(string(w.pending[:i]))
+		w.pending = w.pending[i+1:]
+	}
+}
+
+// flush hands over a last line that ended without a newline.
+func (w *lineWriter) flush() {
+	if w.onLine != nil && len(w.pending) > 0 {
+		w.onLine(string(w.pending))
+		w.pending = nil
+	}
 }
