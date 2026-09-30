@@ -682,3 +682,56 @@ func TestASilencedReannouncementSilencesOneWatchAlone(t *testing.T) {
 		t.Fatalf("silenced = (%v, %v), want (true, false)", first, second)
 	}
 }
+
+// TestTheFakeModelsAJoinAsTheRealShimDoes covers join_running_turn in the
+// fake: a join while a turn runs leaves that turn in flight, takes its place
+// when it ends, and a folded prompt row ends the join.
+func TestTheFakeModelsAJoinAsTheRealShimDoes(t *testing.T) {
+	started := &conversationv1.TurnId{Value: "turn-1"}
+	join := &shimv1.StartTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-2"}, JoinRunningTurn: true}
+	success := &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}}
+	folded := &conversationv1.AgentPrompt{Id: join.GetTurn(), FoldedInto: started}
+	tests := []struct {
+		name         string
+		act          func(srv *server)
+		wantInFlight string
+	}{
+		{name: "a join leaves the running turn in flight", act: func(srv *server) {
+			srv.openTurn(started)
+			srv.joinTurn(join)
+		}, wantInFlight: "turn-1"},
+		{name: "the running turn's end stands the join in its place", act: func(srv *server) {
+			srv.openTurn(started)
+			srv.joinTurn(join)
+			srv.settleTurn(MainAgentID, "turn-1", success)
+		}, wantInFlight: "turn-2"},
+		{name: "a folded join leaves nothing once the running turn ends", act: func(srv *server) {
+			srv.openTurn(started)
+			srv.joinTurn(join)
+			srv.foldTurn(MainAgentID, folded)
+			srv.settleTurn(MainAgentID, "turn-1", success)
+		}, wantInFlight: ""},
+		{name: "a join with nothing running joins nothing", act: func(srv *server) {
+			if srv.joinTurn(join) {
+				srv.openTurn(started)
+			}
+		}, wantInFlight: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			srv := newServer(NewRecorder(), Profile{}, nil)
+			srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+				Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1"},
+			}}})
+
+			// Act
+			tt.act(srv)
+
+			// Assert
+			if got := srv.startedSession().GetTurnInFlight().GetValue(); got != tt.wantInFlight {
+				t.Fatalf("turn in flight = %q, want %q", got, tt.wantInFlight)
+			}
+		})
+	}
+}
