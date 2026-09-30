@@ -263,6 +263,13 @@ const (
 	// clock from the instant the footer learned of it) while its descriptive
 	// frame was on its way — or never came.
 	provenanceLiveWorkSet rowProvenance = "live_work_set"
+	// provenanceDetachedAnnouncement: a `detached` announcement named a
+	// subagent the footer drew no row for under the unit it detached from --
+	// a subagent RESUMED BY A SEND, whose unit is the send -- and the footer
+	// had never described that agent either (a daemon that came up after the
+	// launch). The row is minimal until the run's own frames restate its
+	// commission (bindDetachedAgent).
+	provenanceDetachedAnnouncement rowProvenance = "detached_announcement"
 	// provenanceResumeWait: a network-resume wait named work the footer never
 	// described, so a MINIMAL row stands for the wait (netresume.go).
 	provenanceResumeWait rowProvenance = "network_resume_wait"
