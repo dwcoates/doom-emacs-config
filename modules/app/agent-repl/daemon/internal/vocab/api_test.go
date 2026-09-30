@@ -17,10 +17,8 @@ const repoVocabDir = "../../../proto/vocab"
 // mergeArms is the merge pipeline's RosterRow.status arms: the arms that take
 // a glyph treatment instead of a lifecycle color.
 var mergeArms = []string{
-	"merge_enqueuing",
 	"merging",
 	"merge_queued",
-	"merge_conflict",
 	"merge_failed",
 	"merged",
 }
@@ -160,19 +158,6 @@ func TestLoadRenderColorsAcceptsADeclaredColoredMergeArm(t *testing.T) {
 	// Assert.
 	if got != "turquoise" {
 		t.Fatalf("roster_status[merge_failed] = %q, want turquoise (owner ruling, 2026-09-28)", got)
-	}
-}
-
-func TestLoadRenderColorsPaintsAMergeConflictGreen(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
-
-	// Act.
-	got := c.RosterStatus["merge_conflict"]
-
-	// Assert.
-	if got != "green" {
-		t.Fatalf("roster_status[merge_conflict] = %q, want green (owner ruling, 2026-09-28)", got)
 	}
 }
 
@@ -710,49 +695,6 @@ func TestContainsAcceptsPlainAndInventoryClasses(t *testing.T) {
 	}
 }
 
-func TestTheColorAssignmentsFollowTheOwnersColorMeanings(t *testing.T) {
-	// The owner's ruling (2026-09-28): blue is an UNUSABLE workspace,
-	// turquoise a usable one with something wrong, purple a merge in
-	// progress. One row per arm the ruling moved.
-	tests := []struct {
-		name  string
-		table string
-		arm   string
-		want  string
-	}{
-		{name: "a failed turn is turquoise on the roster", table: "roster", arm: "turn_failed", want: "turquoise"},
-		{name: "a failed merge is turquoise on the roster", table: "roster", arm: "merge_failed", want: "turquoise"},
-		{name: "a degraded view is turquoise on the roster", table: "roster", arm: "degraded", want: "turquoise"},
-		{name: "a vendor or account block is blue on the roster", table: "roster", arm: "vendor_blocked", want: "blue"},
-		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
-		{name: "an enqueuing merge is purple on the roster", table: "roster", arm: "merge_enqueuing", want: "purple"},
-		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
-		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
-		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},
-		{name: "a failed merge is turquoise on the footer", table: "footer", arm: "merge_failed", want: "turquoise"},
-		{name: "a degraded view is turquoise on the footer", table: "footer", arm: "degraded", want: "turquoise"},
-		{name: "a vendor or account block is blue on the footer", table: "footer", arm: "blocked", want: "blue"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			c := loadColors(t)
-			table := c.RosterStatus
-			if tc.table == "footer" {
-				table = c.FooterStatus
-			}
-
-			// Act.
-			got := table[tc.arm]
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("%s[%s] = %q, want %q", tc.table, tc.arm, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestTheComposerClosesOnBlueAndPurpleOnly(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
@@ -787,6 +729,49 @@ func TestLoadRenderColorsRefusesABadComposerClosedColors(t *testing.T) {
 			// Assert.
 			if err == nil {
 				t.Fatalf("LoadRenderColors accepted composer_closed_colors = %v", tc.value)
+			}
+		})
+	}
+}
+
+func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *testing.T) {
+	// The owner's ruling (2026-09-28): blue is an UNUSABLE workspace,
+	// turquoise a usable one with something wrong, purple a merge in
+	// progress. One row per arm the ruling moved.
+	tests := []struct {
+		name  string
+		table string
+		arm   string
+		want  string
+	}{
+		{name: "a failed turn is turquoise on the roster", table: "roster", arm: "turn_failed", want: "turquoise"},
+		{name: "a failed merge is turquoise on the roster", table: "roster", arm: "merge_failed", want: "turquoise"},
+		{name: "a degraded view is turquoise on the roster", table: "roster", arm: "degraded", want: "turquoise"},
+		{name: "a vendor or account block is blue on the roster", table: "roster", arm: "vendor_blocked", want: "blue"},
+		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
+		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
+		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
+		{name: "a landed merge is green on the roster", table: "roster", arm: "merged", want: "green"},
+		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},
+		{name: "a failed merge is turquoise on the footer", table: "footer", arm: "merge_failed", want: "turquoise"},
+		{name: "a degraded view is turquoise on the footer", table: "footer", arm: "degraded", want: "turquoise"},
+		{name: "a vendor or account block is blue on the footer", table: "footer", arm: "blocked", want: "blue"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := loadColors(t)
+			table := c.RosterStatus
+			if tc.table == "footer" {
+				table = c.FooterStatus
+			}
+
+			// Act.
+			got := table[tc.arm]
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("%s[%s] = %q, want %q", tc.table, tc.arm, got, tc.want)
 			}
 		})
 	}

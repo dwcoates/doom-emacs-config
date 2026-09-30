@@ -105,17 +105,16 @@ func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInter
 	return &frontendv1.FooterStatusInterruptedActivity{Tier: &frontendv1.FooterStatusInterruptedActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// mergingActivity resolves the cell merging, merge_conflict, merge_failed and
-// merged share: the commit landing first, because it explains the merge step;
-// then the shared salient lines; then unpinned.
+// mergingActivity resolves the cell merging, merge_failed and merged share:
+// the merge step's own line first, because it explains the step; then the
+// shared salient lines; then unpinned. The step's line is the orchestrator's,
+// and it is cleared when its step ends.
 func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingActivity {
-	if s.mergingCommit != nil {
+	if s.merge.Line != nil {
 		return &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{
 			Salient: &frontendv1.FooterStatusMergingSalient{
-				At: stamp(s.mergingCommit.at),
-				Kind: &frontendv1.FooterStatusMergingSalient_MergingCommit{
-					MergingCommit: &frontendv1.FooterStatusActivityMergingCommit{
-						Sha: s.mergingCommit.sha, Subject: s.mergingCommit.subject}},
+				At:   stamp(s.merge.LineAt),
+				Kind: &frontendv1.FooterStatusMergingSalient_MergeStep{MergeStep: s.merge.Line},
 			}}}
 	}
 	if line, ok := r.sharedSalient(s); ok {
