@@ -75,8 +75,6 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 	switch claim {
 	case ladder.Merging:
 		return mergeArm(s.merge)
-	case ladder.MergeConflict:
-		return "merge_conflict"
 	case ladder.MergeFailed:
 		return "merge_failed"
 	case ladder.Merged:
@@ -133,8 +131,6 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 // name is one the orchestrator reports, so it draws `merging` (ladder.MergeClaim).
 func mergeArm(facts footer.MergeFacts) string {
 	switch facts.State {
-	case "enqueuing":
-		return "merge_enqueuing"
 	case "queued":
 		return "merge_queued"
 	default:
@@ -332,18 +328,12 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "dead":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"dead\""})
 		row.Status = &frontendv1.RosterRow_Dead{Dead: &frontendv1.RosterRowStatusDead{}}
-	case "merge_enqueuing":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_enqueuing\""})
-		row.Status = &frontendv1.RosterRow_MergeEnqueuing{MergeEnqueuing: &frontendv1.RosterRowStatusMergeEnqueuing{}}
 	case "merging":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merging\""})
 		row.Status = &frontendv1.RosterRow_Merging{Merging: &frontendv1.RosterRowStatusMerging{}}
 	case "merge_queued":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_queued\""})
 		row.Status = &frontendv1.RosterRow_MergeQueued{MergeQueued: &frontendv1.RosterRowStatusMergeQueued{}}
-	case "merge_conflict":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_conflict\""})
-		row.Status = &frontendv1.RosterRow_MergeConflict{MergeConflict: &frontendv1.RosterRowStatusMergeConflict{}}
 	case "merge_failed":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_failed\""})
 		row.Status = &frontendv1.RosterRow_MergeFailed{MergeFailed: &frontendv1.RosterRowStatusMergeFailed{}}

@@ -33,15 +33,15 @@ func testColors() vocab.RenderColors {
 	for _, arm := range []string{
 		"submitting", "thinking", "clearing", "compacting", "permission", "done",
 		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
-		"start_failed", "degraded", "dead", "merge_enqueuing", "merging",
-		"merge_queued", "merge_conflict", "merge_failed", "merged", "none",
+		"start_failed", "degraded", "dead", "merging",
+		"merge_queued", "merge_failed", "merged", "none",
 		"inactive",
 	} {
 		status[arm] = "grey"
 	}
 	glyphs := map[string]string{}
 	for _, arm := range []string{
-		"merge_enqueuing", "merging", "merge_queued", "merge_conflict",
+		"merging", "merge_queued",
 		"merge_failed", "merged",
 	} {
 		glyphs[arm] = "recycle"
@@ -194,14 +194,10 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "degraded"
 	case *frontendv1.RosterRow_Dead:
 		return "dead"
-	case *frontendv1.RosterRow_MergeEnqueuing:
-		return "merge_enqueuing"
 	case *frontendv1.RosterRow_Merging:
 		return "merging"
 	case *frontendv1.RosterRow_MergeQueued:
 		return "merge_queued"
-	case *frontendv1.RosterRow_MergeConflict:
-		return "merge_conflict"
 	case *frontendv1.RosterRow_MergeFailed:
 		return "merge_failed"
 	case *frontendv1.RosterRow_Merged:

@@ -504,38 +504,6 @@ func TestRowIsNotInactiveWhenClosedWithASessionStillLive(t *testing.T) {
 	}
 }
 
-func TestRosterResolvesEveryMergeArm(t *testing.T) {
-	tests := []struct {
-		name  string
-		state string
-		want  string
-	}{
-		{name: "enqueuing", state: "enqueuing", want: "merge_enqueuing"},
-		{name: "queued", state: "queued", want: "merge_queued"},
-		{name: "merging", state: "merging", want: "merging"},
-		{name: "conflict", state: "conflict", want: "merge_conflict"},
-		// A parked merge holds its lease awaiting the user; the roster has no
-		// parked arm and spells it as the conflict awaiting resolution.
-		{name: "parked", state: "parked", want: "merge_conflict"},
-		{name: "failed", state: "failed", want: "merge_failed"},
-		{name: "merged", state: "merged", want: "merged"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r := live(t, arrange(t))
-
-			// Act.
-			r.SetMerge(theWS, footer.MergeFacts{State: tc.state})
-
-			// Assert.
-			if got := statusName(onlyRow(t, r)); got != tc.want {
-				t.Fatalf("status = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestMergeStateNoneLeavesTheSessionLifecycleStanding(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
@@ -590,21 +558,6 @@ func TestTheLinkDominatesATerminalMerge(t *testing.T) {
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "severed" {
 		t.Fatalf("status = %q, want severed", got)
-	}
-}
-
-func TestAMergeConflictDominatesTheLink(t *testing.T) {
-	// Arrange: a merge stopped on a conflict still holds its lease, so it
-	// ranks with the merge in flight.
-	r := live(t, arrange(t))
-	r.OnLink(theWS, shimclient.LinkRedialing)
-
-	// Act.
-	r.SetMerge(theWS, footer.MergeFacts{State: "conflict"})
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "merge_conflict" {
-		t.Fatalf("status = %q, want merge_conflict", got)
 	}
 }
 
@@ -1391,5 +1344,47 @@ func TestARunningTurnFoundAtAttachLeavesThisDaemonsOwnTurn(t *testing.T) {
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "clearing" {
 		t.Fatalf("status = %q, want the standing clear untouched", got)
+	}
+}
+
+func TestRosterResolvesEveryMergeArmWithNothingParked(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts footer.MergeFacts
+		want  string
+	}{
+		{name: "queued", facts: footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 2}, want: "merge_queued"},
+		{name: "merging", facts: footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Total: 1}, want: "merging"},
+		{name: "failed", facts: footer.MergeFacts{State: "failed", FailedArea: footer.FailedConflicts}, want: "merge_failed"},
+		{name: "merged", facts: footer.MergeFacts{State: "merged"}, want: "merged"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			r.SetMerge(theWS, tc.facts)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMergeInFlightDominatesTheLink(t *testing.T) {
+	// Arrange: the daemon owns the merge, so it is knowable whatever the
+	// route is doing.
+	r := live(t, arrange(t))
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Act.
+	r.SetMerge(theWS, footer.MergeFacts{State: "merging", Step: footer.StepTesting})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
 	}
 }
