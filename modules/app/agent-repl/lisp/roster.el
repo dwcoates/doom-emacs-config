@@ -50,6 +50,7 @@
 (declare-function agent-repl--with-log-context "core"
                   (workspace request-id function))
 (defvar agent-repl--global-log-scope)
+(defvar agent-repl--workspace-history)
 (defvar agent-repl--log-context-request-id)
 (defvar agent-repl--log-context-workspace)
 (declare-function agent-repl--current-ws-p "core" (ws))
@@ -643,6 +644,38 @@ A row that fails to reconcile is contained rather than fatal; see
   "Return WS's roster status arm keyword, or nil before its first push."
   (let ((row (agent-repl-roster-row-for-ws ws)))
     (and row (agent-repl-roster-row-status row))))
+
+(defun agent-repl-roster-last-selected-ms (ws)
+  "Return WS's durable last-selected instant in epoch ms, or nil.
+Read from WS's roster row (`RosterRowLastSelected'), which the daemon
+fills from its own record, so it survives an Emacs restart.  nil when the
+roster has no row for WS or the user never selected it."
+  (plist-get (plist-get (agent-repl-roster-row-for-ws ws) :last-selected) :at-ms))
+
+(defun agent-repl-roster-selection-recency-order (names)
+  "Return NAMES ordered most recently selected first.
+THE ONE SELECTION-RECENCY ORDER: the landing after a close
+\(`agent-repl--teardown-landing-target') and the jump to the most recent
+workspace (`agent-repl--roster-recent-names') both order by it, so the two
+can never disagree about which workspace came before.
+
+  1. Names in `agent-repl--workspace-history', in its order: this
+     session's own switches, exact and immediate.
+  2. Then names the history does not hold, by the roster's durable
+     last-selected instant (`agent-repl-roster-last-selected-ms'),
+     newest first: what a fresh Emacs knows of earlier sessions.
+  3. Then names never selected at all, in the order NAMES gives them.
+
+NAMES is never filtered, only reordered."
+  (let* ((history (cl-remove-if-not (lambda (n) (member n names))
+                                    agent-repl--workspace-history))
+         (rest (cl-remove-if (lambda (n) (member n history)) names))
+         (stamped (cl-remove-if-not #'agent-repl-roster-last-selected-ms rest))
+         (never (cl-remove-if #'agent-repl-roster-last-selected-ms rest)))
+    (append history
+            (cl-stable-sort (copy-sequence stamped) #'>
+                            :key #'agent-repl-roster-last-selected-ms)
+            never)))
 
 (defun agent-repl-roster-tab-order ()
   "Return the tab names in roster walk order — the tab bar's only order."

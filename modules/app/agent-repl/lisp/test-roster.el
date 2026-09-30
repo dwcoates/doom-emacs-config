@@ -548,6 +548,97 @@ it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("second")))))
 
+;;; --- The one selection-recency order
+
+(defmacro agent-repl-test-roster--with-instants (instants history &rest body)
+  "Run BODY with INSTANTS (alist name -> ms) as the roster's durable
+last-selected instants and HISTORY as this session's switches."
+  (declare (indent 2))
+  `(let ((agent-repl--workspace-history ,history)
+         (instants ,instants))
+     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                (lambda (ws)
+                  (let ((ms (cdr (assoc ws instants))))
+                    (and ms (list :last-selected (list :at-ms ms)))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-recency-order-puts-session-history-first ()
+  "This session's switches outrank a newer durable instant from the roster."
+  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900)) '("a")
+    (should (equal (agent-repl-roster-selection-recency-order '("b" "a"))
+                   '("a" "b")))))
+
+(ert-deftest agent-repl-test-roster-recency-order-orders-the-rest-by-the-durable-instant ()
+  "Workspaces the history does not hold order newest durable instant first."
+  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900) ("c" . 500)) nil
+    (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
+                   '("b" "c" "a")))))
+
+(ert-deftest agent-repl-test-roster-recency-order-keeps-the-never-selected-in-given-order ()
+  "Never-selected workspaces come last, in the order the caller gave them."
+  (agent-repl-test-roster--with-instants '(("s" . 100)) nil
+    (should (equal (agent-repl-roster-selection-recency-order '("y" "s" "x"))
+                   '("s" "y" "x")))))
+
+(ert-deftest agent-repl-test-roster-recency-order-ignores-history-outside-names ()
+  "A history entry that is not a candidate (closed, departing) adds nothing."
+  (agent-repl-test-roster--with-instants nil '("gone" "b")
+    (should (equal (agent-repl-roster-selection-recency-order '("a" "b"))
+                   '("b" "a")))))
+
+(ert-deftest agent-repl-test-roster-last-selected-ms-reads-the-row ()
+  "The durable instant is the row's `last_selected'."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :ready)
+                                               :last-selected '(:at-ms 42)))))))
+    (should (equal (agent-repl-roster-last-selected-ms "first") 42))))
+
+(ert-deftest agent-repl-test-roster-last-selected-ms-is-nil-for-a-never-selected-row ()
+  "A row with no `last_selected' was never selected."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
+    (should-not (agent-repl-roster-last-selected-ms "first"))))
+
+(ert-deftest agent-repl-test-roster-merged-current-tab-lands-by-the-durable-instant-after-restart ()
+  "After an Emacs restart the session history holds only the closing tab, and
+the landing is the workspace the roster says was selected most recently."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :ready)
+                                               :last-selected '(:at-ms 100))
+                                    (plist-put (agent-repl-test-roster--row "b" "second" :ready)
+                                               :last-selected '(:at-ms 900))
+                                    (plist-put (agent-repl-test-roster--row "c" "third" :ready)
+                                               :last-selected '(:at-ms 1000)))))))
+    (setq agent-repl-test-roster--current-name "third")
+    (let ((agent-repl--workspace-history '("third")))
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-all-names)
+                 (lambda () '("first" "second" "third")))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("first" "second" "third"))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :ready)
+                                                   :last-selected '(:at-ms 100))
+                                        (plist-put (agent-repl-test-roster--row "b" "second" :ready)
+                                                   :last-selected '(:at-ms 900)))))
+          :merged (list (plist-put (agent-repl-test-roster--row "c" "third" :merged :closed t)
+                                   :last-selected '(:at-ms 1000)))))))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("second")))))
+
 (ert-deftest agent-repl-test-roster-teardown-goes-through-land-then-kill ()
   "The roster's tab teardown uses the ONE teardown order
 \(`agent-repl--ws-land-then-kill'), the same one
