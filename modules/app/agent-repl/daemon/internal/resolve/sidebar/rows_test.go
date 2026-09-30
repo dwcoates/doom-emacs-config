@@ -227,6 +227,67 @@ func TestTheWhenColumnIgnoresLastSelected(t *testing.T) {
 	}
 }
 
+func TestTheRowCarriesTheDurableLastSelectedInstant(t *testing.T) {
+	cases := []struct {
+		name     string
+		selected *time.Time
+		closed   bool
+		want     *int64
+	}{
+		{name: "a selected workspace carries its instant", selected: at(2 * time.Hour), want: millis(at(2 * time.Hour))},
+		{name: "a never-selected workspace carries none", selected: nil, want: nil},
+		{name: "a closed workspace still carries its instant", selected: at(time.Hour), closed: true, want: millis(at(time.Hour))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := workspace("w1", "one")
+			ws.LastSelectedAt = tc.selected
+			ws.Closed = tc.closed
+
+			// Act.
+			r.SetRegistry(registry(ws))
+
+			// Assert.
+			got := onlyRow(t, r).GetLastSelected()
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("last_selected = %v, want unset", got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("last_selected unset, want %d", *tc.want)
+			case tc.want != nil && got.GetAtMs() != *tc.want:
+				t.Fatalf("last_selected = %d, want %d", got.GetAtMs(), *tc.want)
+			}
+		})
+	}
+}
+
+// TestANewRegistryMovesTheLastSelectedInstant pins that the field follows the
+// durable record push by push: a selection re-publishes the registry, and the
+// row carries the new instant.
+func TestANewRegistryMovesTheLastSelectedInstant(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	ws := workspace("w1", "one")
+	ws.LastSelectedAt = at(time.Hour)
+	r.SetRegistry(registry(ws))
+	ws.LastSelectedAt = at(3 * time.Hour)
+
+	// Act.
+	r.SetRegistry(registry(ws))
+
+	// Assert.
+	if got := onlyRow(t, r).GetLastSelected().GetAtMs(); got != epoch.Add(3*time.Hour).UnixMilli() {
+		t.Fatalf("last_selected = %d, want the newer selection instant", got)
+	}
+}
+
+func millis(t *time.Time) *int64 {
+	ms := t.UnixMilli()
+	return &ms
+}
+
 func TestMergedBeatsLastActiveInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
