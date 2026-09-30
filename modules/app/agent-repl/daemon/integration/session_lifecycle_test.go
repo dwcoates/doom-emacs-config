@@ -830,10 +830,14 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	})
 	_ = awaitRow_
 
-	// Assert: the roster shows dead.
-	awaitRoster(t, f.d, roster, "the roster row dead", func(r *frontendv1.WorkspaceRoster) bool {
+	// Assert: the roster shows the killed workspace INACTIVE. A kill marks the
+	// workspace closed in its fast half, before its session dies, so the tab
+	// goes the moment the verb is accepted (BeginKill); a closed workspace with
+	// nothing live behind it is `inactive`, which sits above every session
+	// state (sidebar status.go), so the session's death never reads `dead`.
+	awaitRoster(t, f.d, roster, "the roster row inactive and closed", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetDead() != nil
+		return row != nil && row.GetInactive() != nil && row.GetClosed().GetClosed()
 	})
 }
 
