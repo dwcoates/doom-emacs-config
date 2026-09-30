@@ -73,6 +73,7 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { footerClockSpan } from "./clock-span.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
   drawFooterAllowance,
@@ -860,14 +861,10 @@ export function drawFooterCronRowNextFire(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const countdown = document.createElement("span");
-  countdown.className = "footer-row-clock";
-  countdown.setAttribute("data-countdown", "");
   const fireAtMs = msOf(u.fireAtMs, `${path}.fire_at_ms`);
-  tick(countdown, deps.ctx.ticker, (nowMs) => {
-    countdown.textContent = remainingLabel(fireAtMs - nowMs);
+  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
+    span.textContent = remainingLabel(fireAtMs - nowMs);
   });
-  return countdown;
 }
 
 // ---- shared row parts -----------------------------------------------------
