@@ -1424,3 +1424,90 @@ func TestAnInTurnRowIsNotRememberedAtRetirement(t *testing.T) {
 		t.Fatalf("%d retired rows kept, want none: an in-turn row is never waited on", n)
 	}
 }
+
+// mergeTestRow is one merge tests panel row.
+func mergeTestRow(name string, state *frontendv1.FooterMergeTestRowState) *frontendv1.FooterMergeTestRow {
+	return &frontendv1.FooterMergeTestRow{Name: &frontendv1.FooterMergeTestRowName{Text: name}, State: state}
+}
+
+func waitingRow() *frontendv1.FooterMergeTestRowState {
+	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Waiting{Waiting: &frontendv1.FooterMergeTestRowWaiting{}}}
+}
+
+func runningRow() *frontendv1.FooterMergeTestRowState {
+	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Running{Running: &frontendv1.FooterMergeTestRowRunning{StartedAtMs: 1}}}
+}
+
+func passedRow() *frontendv1.FooterMergeTestRowState {
+	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Passed{Passed: &frontendv1.FooterMergeTestRowPassed{DurationMs: 1000}}}
+}
+
+func failedRow() *frontendv1.FooterMergeTestRowState {
+	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Failed{Failed: &frontendv1.FooterMergeTestRowFailed{DurationMs: 2000}}}
+}
+
+func TestTheMergeTestsChipCountsFinishedSuitesOfAll(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	rows := []*frontendv1.FooterMergeTestRow{
+		mergeTestRow("daemon", passedRow()),
+		mergeTestRow("webapp", failedRow()),
+		mergeTestRow("elisp", runningRow()),
+		mergeTestRow("shim", waitingRow()),
+	}
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting, TestsRound: 1, Tests: rows})
+
+	// Assert
+	chip := h.view(t).GetStrip().GetLiveWork().GetMergeTests()
+	if chip.GetFinished() != 2 || chip.GetTotal() != 4 {
+		t.Fatalf("merge tests chip = %+v, want 2 of 4 finished", chip)
+	}
+}
+
+func TestTheMergeTestsChipIsUnsetWithNoSuites(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepCommitting})
+
+	// Assert
+	if chip := h.view(t).GetStrip().GetLiveWork().GetMergeTests(); chip != nil {
+		t.Fatalf("merge tests chip = %+v, want unset when the panel holds no suite", chip)
+	}
+}
+
+func TestTheMergeTestsPanelListsTheRoundsSuitesInOrder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	rows := []*frontendv1.FooterMergeTestRow{mergeTestRow("daemon", passedRow()), mergeTestRow("webapp", runningRow())}
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting, TestsRound: 1, Tests: rows})
+
+	// Assert
+	panel := h.view(t).GetExpanded().GetMergeTests().GetRows()
+	if len(panel) != 2 || panel[0].GetName().GetText() != "daemon" || panel[1].GetState().GetRunning() == nil {
+		t.Fatalf("merge tests panel = %+v, want daemon then a running webapp", panel)
+	}
+}
+
+func TestTheMergeTestsPanelIsEmptyWhenTheMergeIsNotTesting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting, TestsRound: 1, Tests: []*frontendv1.FooterMergeTestRow{mergeTestRow("daemon", runningRow())}})
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepCommitting, TestsRound: 1})
+
+	// Assert
+	if rows := h.view(t).GetExpanded().GetMergeTests().GetRows(); len(rows) != 0 {
+		t.Fatalf("merge tests panel = %+v, want empty once testing ended", rows)
+	}
+}

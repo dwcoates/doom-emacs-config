@@ -536,8 +536,6 @@ type wsState struct {
 	// stands it (the push, or the terminal's query_died arm), and it stands
 	// until the next prompt opens a turn.
 	queryDied *standing
-	// mergingCommit is the commit a merge is landing right now.
-	mergingCommit *mergingCommit
 
 	// tok is the turn's token accumulation.
 	tok tokenState
@@ -619,16 +617,6 @@ type wsState struct {
 	focus focusState
 	// seq mints the panel orders so a row's place is its arrival order.
 	seq int
-}
-
-// mergingCommit is the commit a merge is landing right now.
-type mergingCommit struct {
-	// sha is the commit's abbreviated sha.
-	sha string
-	// subject is the commit's subject line.
-	subject string
-	// at is when it began landing.
-	at time.Time
 }
 
 // newWSState builds an empty accumulation.

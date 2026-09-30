@@ -36,8 +36,6 @@ func unpinnedOf(status *frontendv1.FooterStatus) unpinnedCell {
 		return arm.Interrupted.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_Merging:
 		return arm.Merging.GetActivity().GetUnpinned()
-	case *frontendv1.FooterStatus_MergeConflict:
-		return arm.MergeConflict.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_MergeFailed:
 		return arm.MergeFailed.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_Merged:

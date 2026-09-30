@@ -29,36 +29,95 @@ import (
 )
 
 // MergeFacts is what the merge orchestrator tells the footer and the sidebar
-// about a workspace's merge. ARCHITECTURE.md does not fix its fields; the
-// minimum the contract implies is the state, its queue position and the
-// evidence a parked merge needs.
+// about a workspace's merge. The footer and the roster read the SAME value, so
+// the two can never disagree about a merge; the roster reads State alone.
+//
+// A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, so these are the requesting
+// workspace's facts, and nothing about a merge is told before the turn that
+// asked for it has ended: the first State a workspace is ever given is
+// "queued" (or later).
 type MergeFacts struct {
-	// State names the merge's standing: "none", "enqueuing", "queued",
-	// "merging", "parked", "conflict", "failed", "merged".
+	// State names the merge's standing: "none", "queued", "merging",
+	// "failed", "merged".
 	State string
-	// QueuePosition is the workspace's place in its repo's queue, zero when it
-	// is not queued.
-	QueuePosition int
-	// QueueDepth is how many runs are queued in the same repo, zero when the
-	// workspace is not queued.
-	QueueDepth int
-	// Round is the merge's current round number, zero before the first.
-	Round int
-	// Detail is the evidence a conflicted or failed merge carries.
+	// Step is the merging substatus: the step the merge is on. Set for
+	// "queued" (always StepEnqueued) and "merging"; empty otherwise.
+	Step MergeStep
+	// QueuePlace and QueueWaiting are "enqueued k/n": this merge's 1-based
+	// place among the merges WAITING in its repository's queue (the one being
+	// worked on is not counted) and how many are waiting, this one included.
+	QueuePlace   int
+	QueueWaiting int
+	// Replayed and Total are "rebasing k/n": commits replayed onto the
+	// target's tip, and commits to replay in all.
+	Replayed int
+	Total    int
+	// Attempt and MaxAttempts are "fixing attempt x/y". MaxAttempts is the
+	// merge's ONE fix bound, the same one that decides failure.
+	Attempt     int
+	MaxAttempts int
+	// FailedArea is WHERE a failed merge failed, the merge_failed substatus;
+	// empty for any other state.
+	FailedArea MergeFailedArea
+	// Line is the step's own salient activity line, nil when none stands. The
+	// orchestrator composes it; its arm is the step it narrates.
+	Line *frontendv1.FooterStatusActivityMergeStep
+	// LineAt is when Line began standing.
+	LineAt time.Time
+	// Tests are the merge tests panel's rows, in the gate's order. EMPTY
+	// whenever the merge is not testing, which unsets the 🧪 chip.
+	Tests []*frontendv1.FooterMergeTestRow
+	// TestsRound counts the merge's testing rounds. Each new round publishes
+	// the merge tests panel as the expanded footer's focus, under a new
+	// generation.
+	TestsRound int
+	// Detail is the evidence a failed or landed merge carries.
 	Detail string
-	// ParkedLine is the merge orchestrator's COMPOSED standing line for a
-	// parked merge — the same sentence the bubble's parked tab shows. The
-	// footer draws it verbatim as FooterSubStatusMergingParked.line, and never
-	// composes one of its own: a parked merge's account is the orchestrator's
-	// fact. Empty while the merge is not parked.
-	ParkedLine string
-	// ActiveTab is the label of the merge bubble's FRONT entry's active tab
-	// ("pre_prompt", "merge", "testing", "fixes", "conflicts", "post_prompt").
-	// It is what refines the `merging` state into the phase substatus the
-	// footer draws, so the footer never guesses a phase from a state word.
-	// Empty means the state alone decides.
-	ActiveTab string
 }
+
+// MergeStep is a merge's step, the merging substatus, spelled as the
+// FooterStatusMerging.substatus arm that draws it.
+type MergeStep string
+
+// The merge steps, in the order a merge goes through them.
+const (
+	StepEnqueued           MergeStep = "enqueued"
+	StepPreprocessing      MergeStep = "preprocessing"
+	StepRebasing           MergeStep = "rebasing"
+	StepConflictResolution MergeStep = "conflict_resolution"
+	StepTesting            MergeStep = "testing"
+	StepFixing             MergeStep = "fixing"
+	StepCommitting         MergeStep = "committing"
+	StepUpdatingMain       MergeStep = "updating_main"
+	StepPostprocessing     MergeStep = "postprocessing"
+)
+
+// Words is the step in the footer's plain words, as a person reads it: the
+// "enqueued" line names the merge ahead's step this way.
+func (s MergeStep) Words() string {
+	switch s {
+	case StepConflictResolution:
+		return "conflict resolution"
+	case StepUpdatingMain:
+		return "updating main"
+	}
+	return string(s)
+}
+
+// MergeFailedArea is where a failed merge failed, spelled as the
+// FooterStatusMergeFailed.substatus arm that draws it.
+type MergeFailedArea string
+
+// The failure areas.
+const (
+	// FailedConflicts is a conflict resolution that gave up; the rebase is
+	// left in progress where it stopped.
+	FailedConflicts MergeFailedArea = "conflicts"
+	// FailedTests is the last fixing attempt leaving suites failing.
+	FailedTests MergeFailedArea = "tests"
+	// FailedOther is any other step failing.
+	FailedOther MergeFailedArea = "other"
+)
 
 // CloseBlocked is why a close was refused: a close requires quiet, and the
 // refusal MANIFESTS IN THE FOOTER rather than only in the rpc's answer.
