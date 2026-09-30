@@ -25,6 +25,17 @@ import (
 // went through recognition): runContextCut runs it, so the queue records it as
 // the running session act and nothing can interject it or be popped into it.
 func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) (Disposition, error) {
+	// A HELD ACT IS APPLIED, NOT STARTED: it opens no turn, so the pop that
+	// delivered it goes on to the entry behind it.
+	if sub.Act != nil {
+		log.Info(opDeliver, "the entry is a held session act; it is applied now", dlog.Context{
+			"session_act": sub.Act.Kind, "value": sub.Act.Value,
+		})
+		if err := q.runAct(ctx, sub.WS, actOfHeld(sub), log); err != nil {
+			return Disposition{}, err
+		}
+		return Disposition{Delivered: true}, nil
+	}
 	if command, arg, ok := contextCutOf(sub); ok {
 		act := Act{Kind: actKindOf(command), Value: arg, Turn: sub.Turn, Origin: sub.Origin}
 		log.Info(opDeliver, "the prompt is a session act; it is delivered as one", dlog.Context{

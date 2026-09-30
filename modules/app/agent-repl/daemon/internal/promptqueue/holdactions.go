@@ -15,6 +15,9 @@ import (
 const (
 	tombstoneDelivered = "delivered"
 	tombstoneDropped   = "dropped"
+	// tombstoneCoalesced retires a prompt folded into the queued prompt ahead
+	// of it.
+	tombstoneCoalesced = "coalesced"
 )
 
 // Release delivers a held prompt NOW, overriding the hold and interrupting the
@@ -234,6 +237,7 @@ func submissionOf(held wsm.HeldPrompt) Submission {
 		Origin:   conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[held.Origin]),
 		Target:   held.Target,
 		Delivery: held.Delivery,
+		Act:      held.Act,
 	}
 }
 

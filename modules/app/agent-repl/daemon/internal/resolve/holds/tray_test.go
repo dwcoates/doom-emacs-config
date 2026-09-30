@@ -613,3 +613,79 @@ func holdForTurnEnd(accepted bool) *frontendv1.HeldPrompt_HoldForTurnEnd {
 func uninterruptibleArm(command conversationv1.SessionCommand) *frontendv1.HeldPrompt_UninterruptibleTurn {
 	return &frontendv1.HeldPrompt_UninterruptibleTurn{UninterruptibleTurn: &frontendv1.HeldPromptUninterruptibleTurn{Command: command}}
 }
+
+func TestTrayCarriesAHeldSessionAct(t *testing.T) {
+	tests := []struct {
+		name string
+		act  wsm.HeldAct
+		want func(*frontendv1.HeldSessionAct) string
+	}{
+		{name: "a model change", act: wsm.HeldAct{Kind: wsm.ActModel, Value: "opus"},
+			want: func(a *frontendv1.HeldSessionAct) string { return a.GetModel().GetModel() }},
+		{name: "a permission-mode change", act: wsm.HeldAct{Kind: wsm.ActPermissionMode, Value: "plan"},
+			want: func(a *frontendv1.HeldSessionAct) string { return a.GetPermissionMode().GetMode() }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			held := hold("t1", "/model opus")
+			act := tc.act
+			held.Act = &act
+
+			// Act.
+			r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+			// Assert.
+			if got := tc.want(onlyPrompt(t, latest(t, r)).GetAct()); got != tc.act.Value {
+				t.Fatalf("act value = %q, want %q", got, tc.act.Value)
+			}
+		})
+	}
+}
+
+func TestTrayCarriesNoActForAPrompt(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "fix it")})
+
+	// Assert.
+	if act := onlyPrompt(t, latest(t, r)).GetAct(); act != nil {
+		t.Fatalf("act = %v, want none on a prompt", act)
+	}
+}
+
+func TestTrayRecordsAnUnknownActLoudly(t *testing.T) {
+	// Arrange.
+	r, sink := newResolver(t)
+	held := hold("t1", "theme dark")
+	held.Act = &wsm.HeldAct{Kind: "theme", Value: "dark"}
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	if act := onlyPrompt(t, latest(t, r)).GetAct(); act != nil {
+		t.Fatalf("act = %v, want none drawn for an unknown kind", act)
+	}
+	if !hasError(sink.Records(), "daemon.holds.act") {
+		t.Fatalf("the unknown act was not recorded at error: %v", sink.Records())
+	}
+}
+
+func TestTrayMarksACoalescedHold(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	held := hold("t1", "a\nb")
+	held.Coalesced = true
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	if onlyPrompt(t, latest(t, r)).GetCoalesced() == nil {
+		t.Fatal("the coalesced mark did not reach the tray")
+	}
+}

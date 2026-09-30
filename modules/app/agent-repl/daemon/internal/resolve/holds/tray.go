@@ -68,8 +68,37 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.Hel
 		log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
 		out.Editing = &frontendv1.HeldPromptEditing{}
 	}
+	if h.Coalesced {
+		log.Debug("daemon.holds.coalesced", "later prompts were folded into the hold", dlog.Context{"turn_id": string(h.Turn)})
+		out.Coalesced = &frontendv1.HeldPromptCoalesced{}
+	}
+	if h.Act != nil {
+		out.Act = heldSessionAct(h, log)
+	}
 	out.Badges = heldBadges(out, log)
 	return out
+}
+
+// heldSessionAct projects a held model or permission-mode change. The store
+// refuses any other kind, so one reaching here is a defect, stated loudly, and
+// the entry is still drawn as the prompt its `said` shows.
+func heldSessionAct(h wsm.HeldPrompt, log dlog.Logger) *frontendv1.HeldSessionAct {
+	ctx := dlog.Context{"turn_id": string(h.Turn), "act": h.Act.Kind, "value": h.Act.Value}
+	switch h.Act.Kind {
+	case wsm.ActModel:
+		log.Debug("daemon.holds.act", "the hold is a model change", ctx)
+		return &frontendv1.HeldSessionAct{Act: &frontendv1.HeldSessionAct_Model{
+			Model: &frontendv1.HeldSessionActModel{Model: h.Act.Value}}}
+	case wsm.ActPermissionMode:
+		log.Debug("daemon.holds.act", "the hold is a permission-mode change", ctx)
+		return &frontendv1.HeldSessionAct{Act: &frontendv1.HeldSessionAct_PermissionMode{
+			PermissionMode: &frontendv1.HeldSessionActPermissionMode{Mode: h.Act.Value}}}
+	default:
+		ctx["invariant_violation"] = "unknown wsm.HeldAct kind"
+		ctx["remediation"] = "add the act to the tray's projection"
+		log.Error("daemon.holds.act", "a hold carried an unknown act and was drawn as its said alone", ctx)
+		return nil
+	}
 }
 
 // setClassification projects the durable verdict onto the tray's oneof. A
