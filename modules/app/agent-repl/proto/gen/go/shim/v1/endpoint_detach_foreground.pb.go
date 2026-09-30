@@ -203,7 +203,7 @@ type DetachForegroundFailure struct {
 	//	*DetachForegroundFailure_AlreadyConcluded
 	//	*DetachForegroundFailure_NotDetachable
 	//	*DetachForegroundFailure_NoSession
-	//	*DetachForegroundFailure_Unsupported
+	//	*DetachForegroundFailure_NotInForeground
 	Kind          isDetachForegroundFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -289,10 +289,10 @@ func (x *DetachForegroundFailure) GetNoSession() *DetachForegroundNoSession {
 	return nil
 }
 
-func (x *DetachForegroundFailure) GetUnsupported() *DetachForegroundUnsupported {
+func (x *DetachForegroundFailure) GetNotInForeground() *DetachForegroundNotInForeground {
 	if x != nil {
-		if x, ok := x.Kind.(*DetachForegroundFailure_Unsupported); ok {
-			return x.Unsupported
+		if x, ok := x.Kind.(*DetachForegroundFailure_NotInForeground); ok {
+			return x.NotInForeground
 		}
 	}
 	return nil
@@ -322,12 +322,10 @@ type DetachForegroundFailure_NoSession struct {
 	NoSession *DetachForegroundNoSession `protobuf:"bytes,5,opt,name=no_session,json=noSession,proto3,oneof"`
 }
 
-type DetachForegroundFailure_Unsupported struct {
-	// The unit is detachable in kind and still in flight, but the vendor
-	// offers NO VERB to initiate a detachment on the pinned SDK: the shim can
-	// only observe detachments the vendor made on its own (announced on the
-	// turn's stream as `detached_work.detached`), never cause one.
-	Unsupported *DetachForegroundUnsupported `protobuf:"bytes,6,opt,name=unsupported,proto3,oneof"`
+type DetachForegroundFailure_NotInForeground struct {
+	// The vendor matched no foreground task for this unit: it left the
+	// foreground between the shim's check and the vendor's.
+	NotInForeground *DetachForegroundNotInForeground `protobuf:"bytes,6,opt,name=not_in_foreground,json=notInForeground,proto3,oneof"`
 }
 
 func (*DetachForegroundFailure_UnknownUnit) isDetachForegroundFailure_Kind() {}
@@ -338,7 +336,7 @@ func (*DetachForegroundFailure_NotDetachable) isDetachForegroundFailure_Kind() {
 
 func (*DetachForegroundFailure_NoSession) isDetachForegroundFailure_Kind() {}
 
-func (*DetachForegroundFailure_Unsupported) isDetachForegroundFailure_Kind() {}
+func (*DetachForegroundFailure_NotInForeground) isDetachForegroundFailure_Kind() {}
 
 type DetachForegroundUnknownUnit struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -484,26 +482,26 @@ func (*DetachForegroundNoSession) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_detach_foreground_proto_rawDescGZIP(), []int{7}
 }
 
-type DetachForegroundUnsupported struct {
+type DetachForegroundNotInForeground struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DetachForegroundUnsupported) Reset() {
-	*x = DetachForegroundUnsupported{}
+func (x *DetachForegroundNotInForeground) Reset() {
+	*x = DetachForegroundNotInForeground{}
 	mi := &file_shim_v1_endpoint_detach_foreground_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DetachForegroundUnsupported) String() string {
+func (x *DetachForegroundNotInForeground) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DetachForegroundUnsupported) ProtoMessage() {}
+func (*DetachForegroundNotInForeground) ProtoMessage() {}
 
-func (x *DetachForegroundUnsupported) ProtoReflect() protoreflect.Message {
+func (x *DetachForegroundNotInForeground) ProtoReflect() protoreflect.Message {
 	mi := &file_shim_v1_endpoint_detach_foreground_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -515,8 +513,8 @@ func (x *DetachForegroundUnsupported) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DetachForegroundUnsupported.ProtoReflect.Descriptor instead.
-func (*DetachForegroundUnsupported) Descriptor() ([]byte, []int) {
+// Deprecated: Use DetachForegroundNotInForeground.ProtoReflect.Descriptor instead.
+func (*DetachForegroundNotInForeground) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_detach_foreground_proto_rawDescGZIP(), []int{8}
 }
 
@@ -531,21 +529,21 @@ const file_shim_v1_endpoint_detach_foreground_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2 .shim.v1.DetachForegroundSuccessH\x00R\asuccess\x12<\n" +
 	"\afailure\x18\x02 \x01(\v2 .shim.v1.DetachForegroundFailureH\x00R\afailureB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17DetachForegroundSuccess\"\xbe\x03\n" +
+	"\x17DetachForegroundSuccess\"\xcc\x03\n" +
 	"\x17DetachForegroundFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12I\n" +
 	"\funknown_unit\x18\x02 \x01(\v2$.shim.v1.DetachForegroundUnknownUnitH\x00R\vunknownUnit\x12X\n" +
 	"\x11already_concluded\x18\x03 \x01(\v2).shim.v1.DetachForegroundAlreadyConcludedH\x00R\x10alreadyConcluded\x12O\n" +
 	"\x0enot_detachable\x18\x04 \x01(\v2&.shim.v1.DetachForegroundNotDetachableH\x00R\rnotDetachable\x12C\n" +
 	"\n" +
-	"no_session\x18\x05 \x01(\v2\".shim.v1.DetachForegroundNoSessionH\x00R\tnoSession\x12H\n" +
-	"\vunsupported\x18\x06 \x01(\v2$.shim.v1.DetachForegroundUnsupportedH\x00R\vunsupportedB\x06\n" +
+	"no_session\x18\x05 \x01(\v2\".shim.v1.DetachForegroundNoSessionH\x00R\tnoSession\x12V\n" +
+	"\x11not_in_foreground\x18\x06 \x01(\v2(.shim.v1.DetachForegroundNotInForegroundH\x00R\x0fnotInForegroundB\x06\n" +
 	"\x04kind\"\x1d\n" +
 	"\x1bDetachForegroundUnknownUnit\"\"\n" +
 	" DetachForegroundAlreadyConcluded\"\x1f\n" +
 	"\x1dDetachForegroundNotDetachable\"\x1b\n" +
-	"\x19DetachForegroundNoSession\"\x1d\n" +
-	"\x1bDetachForegroundUnsupportedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x19DetachForegroundNoSession\"!\n" +
+	"\x1fDetachForegroundNotInForegroundB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_detach_foreground_proto_rawDescOnce sync.Once
@@ -569,7 +567,7 @@ var file_shim_v1_endpoint_detach_foreground_proto_goTypes = []any{
 	(*DetachForegroundAlreadyConcluded)(nil), // 5: shim.v1.DetachForegroundAlreadyConcluded
 	(*DetachForegroundNotDetachable)(nil),    // 6: shim.v1.DetachForegroundNotDetachable
 	(*DetachForegroundNoSession)(nil),        // 7: shim.v1.DetachForegroundNoSession
-	(*DetachForegroundUnsupported)(nil),      // 8: shim.v1.DetachForegroundUnsupported
+	(*DetachForegroundNotInForeground)(nil),  // 8: shim.v1.DetachForegroundNotInForeground
 	(*v1.AgentActivityId)(nil),               // 9: conversation.v1.AgentActivityId
 }
 var file_shim_v1_endpoint_detach_foreground_proto_depIdxs = []int32{
@@ -580,7 +578,7 @@ var file_shim_v1_endpoint_detach_foreground_proto_depIdxs = []int32{
 	5, // 4: shim.v1.DetachForegroundFailure.already_concluded:type_name -> shim.v1.DetachForegroundAlreadyConcluded
 	6, // 5: shim.v1.DetachForegroundFailure.not_detachable:type_name -> shim.v1.DetachForegroundNotDetachable
 	7, // 6: shim.v1.DetachForegroundFailure.no_session:type_name -> shim.v1.DetachForegroundNoSession
-	8, // 7: shim.v1.DetachForegroundFailure.unsupported:type_name -> shim.v1.DetachForegroundUnsupported
+	8, // 7: shim.v1.DetachForegroundFailure.not_in_foreground:type_name -> shim.v1.DetachForegroundNotInForeground
 	8, // [8:8] is the sub-list for method output_type
 	8, // [8:8] is the sub-list for method input_type
 	8, // [8:8] is the sub-list for extension type_name
@@ -602,7 +600,7 @@ func file_shim_v1_endpoint_detach_foreground_proto_init() {
 		(*DetachForegroundFailure_AlreadyConcluded)(nil),
 		(*DetachForegroundFailure_NotDetachable)(nil),
 		(*DetachForegroundFailure_NoSession)(nil),
-		(*DetachForegroundFailure_Unsupported)(nil),
+		(*DetachForegroundFailure_NotInForeground)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

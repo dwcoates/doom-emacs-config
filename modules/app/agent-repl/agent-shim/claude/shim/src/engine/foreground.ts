@@ -7,7 +7,7 @@
  * differently: the unit was never a unit (`unknown_unit`), it already finished
  * (`already_concluded`), its KIND cannot detach at all (`not_detachable`), or it
  * is perfectly detachable in kind but the vendor tracks no foreground task for
- * it, so `backgroundTasks` moved nothing (`unsupported`). Without a table
+ * it, so `backgroundTasks` moved nothing (`not_in_foreground`). Without a table
  * of the calls in flight the engine can only tell "the vendor holds background
  * work for this id" from "it does not", so three of those four answers collapse
  * onto `unknown_unit` — which tells a consumer to stop offering an affordance

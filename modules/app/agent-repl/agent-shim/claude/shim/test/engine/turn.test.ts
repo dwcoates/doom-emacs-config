@@ -2874,7 +2874,7 @@ describe("DetachForeground on a live foreground unit", () => {
     );
   }
 
-  it("refuses unsupported: the vendor matched a live detachable unit to no foreground task", async () => {
+  it("refuses not_in_foreground: the vendor matched a live detachable unit to no foreground task", async () => {
     // The unit is detachable in kind and in flight here, but `backgroundTasks`
     // answered `false`: the vendor tracks no foreground task for the call, so
     // nothing was moved.
@@ -2889,7 +2889,7 @@ describe("DetachForeground on a live foreground unit", () => {
       }),
     );
 
-    expect(failureKind(response)).toBe("unsupported");
+    expect(failureKind(response)).toBe("notInForeground");
   });
 
   it("never says not_detachable, which would deny a kind that backgrounds routinely", async () => {
@@ -2959,7 +2959,7 @@ describe("DetachForeground on a live foreground subagent", () => {
       unit: create(conversationv1.AgentActivityIdSchema, { value: unit }),
     });
 
-  it("refuses unsupported: a live foreground subagent the vendor matched to no foreground task", async () => {
+  it("refuses not_in_foreground: a live foreground subagent the vendor matched to no foreground task", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.foreground.note("toolu_agent", "subagent", false);
@@ -2967,7 +2967,7 @@ describe("DetachForeground on a live foreground subagent", () => {
 
     const response = await h.turns.detachForeground(detach("toolu_agent"));
 
-    expect(failureKind(response)).toBe("unsupported");
+    expect(failureKind(response)).toBe("notInForeground");
   });
 
   it("CONFIRMS a live foreground subagent the vendor already holds live background work for", async () => {

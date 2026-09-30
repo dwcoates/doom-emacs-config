@@ -545,15 +545,14 @@ type DetachForegroundKind =
   | { readonly kind: "notDetachable" }
   | { readonly kind: "noSession" }
   /**
-   * The unit is detachable IN KIND and still in flight, but the pinned SDK
-   * offers NO VERB to initiate a detachment.
+   * The vendor matched no foreground task for this unit: it left the
+   * foreground between the shim's check and the vendor's.
    *
    * NOT `notDetachable`, which says the unit's KIND cannot detach — a claim
    * that is false for a shell or a subagent and would tell a caller to stop
-   * offering the affordance for work that detaches on its own all the time.
-   * The shim can only OBSERVE detachments the vendor made.
+   * offering the affordance for work that detaches routinely.
    */
-  | { readonly kind: "unsupported" };
+  | { readonly kind: "notInForeground" };
 
 /** The base constructor for `shim.v1.DetachForegroundFailure`. */
 export function detachForegroundFailure(
@@ -572,8 +571,8 @@ export function detachForegroundFailure(
             : cause.kind === "noSession"
               ? { case: "noSession", value: create(shimv1.DetachForegroundNoSessionSchema, {}) }
               : {
-                  case: "unsupported",
-                  value: create(shimv1.DetachForegroundUnsupportedSchema, {}),
+                  case: "notInForeground",
+                  value: create(shimv1.DetachForegroundNotInForegroundSchema, {}),
                 },
   });
 }

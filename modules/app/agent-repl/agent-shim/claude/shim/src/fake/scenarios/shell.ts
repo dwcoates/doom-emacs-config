@@ -83,7 +83,7 @@ const BASH_HOLD = scenario({
     "unit stays live and foreground for as long as a caller needs it to",
   writes: "the tool_use line, the prompt line and (at the interrupt) the turn record",
   arms:
-    "no terminal at all while it holds — the lever for DetachForeground's `unsupported` refusal, which needs a " +
+    "no terminal at all while it holds — the lever for DetachForeground's `not_in_foreground` refusal, which needs a " +
     "GENUINELY LIVE foreground unit to refuse (`!bash` settles before the call can be made, so it answered " +
     "`already_concluded` instead and the refusal under test was never reached). AT THE STOP the unit settles " +
     "AgentBashInterrupted.cause=by_user, minted by the converter's own `cut` rather than by any vendor result: " +
