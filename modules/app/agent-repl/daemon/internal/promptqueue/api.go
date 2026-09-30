@@ -125,6 +125,11 @@ type Submission struct {
 	// permission-mode change) rather than a prompt: never classified, and run
 	// as the act when what is ahead of it ends.
 	Act *wsm.HeldAct
+
+	// interjected reports a held prompt delivered because its verdict
+	// interrupted the running turn: its StartTurn carries the interruption
+	// note. Set by the delivery of a hold, never by a caller.
+	interjected bool
 }
 
 // Disposition is what became of a submission. A hold is an ANSWER, not a
@@ -435,6 +440,10 @@ type Sender interface {
 	// after its current tool call, with nothing interrupted
 	// (StartTurnRequest.join_running_turn). Answered as StartTurn is.
 	JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
+	// StartInterjection opens the turn of a prompt that interrupted the
+	// running one, with NOTE for the agent alone (StartTurnRequest.vendor_note).
+	// Answered as StartTurn is.
+	StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error)
 	// PromptAgent delivers a bubble-composer prompt to one agent.
 	PromptAgent(ctx context.Context, agent *conversationv1.AgentId, said *conversationv1.UserSaid) error
 	// KillTurn interrupts the open turn for an interjection. commandedBy is

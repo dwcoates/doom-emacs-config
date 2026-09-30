@@ -112,26 +112,45 @@ type shimclientSender interface {
 // needs the prompt's agent for SetMainAgent and the opening page for the
 // watcher's turn handover, and neither is recoverable from an error.
 func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
-	return s.startTurn(ctx, turn, said, origin, false)
+	return s.startTurn(ctx, turn, said, origin, turnStart{})
 }
 
 // JoinRunningTurn sends the prompt to join the daemon's turn in flight after
 // its current tool call (StartTurnRequest.join_running_turn), answered exactly
 // as StartTurn is.
 func (s *sender) JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
-	return s.startTurn(ctx, turn, said, origin, true)
+	return s.startTurn(ctx, turn, said, origin, turnStart{join: true})
 }
 
-// startTurn is the one StartTurn call both verbs make.
-func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, join bool) (*shimv1.StartTurnSuccess, error) {
-	response, err := s.client.StartTurn(ctx, &shimv1.StartTurnRequest{
+// StartInterjection opens the turn of a prompt that interrupted the running
+// one, with NOTE for the agent alone (StartTurnRequest.vendor_note), answered
+// exactly as StartTurn is.
+func (s *sender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, turnStart{note: note})
+}
+
+// turnStart is how a StartTurn differs between the verbs that make one.
+type turnStart struct {
+	// join asks the shim to join the running turn.
+	join bool
+	// note is the vendor note, empty for none.
+	note string
+}
+
+// startTurn is the one StartTurn call every verb makes.
+func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, how turnStart) (*shimv1.StartTurnSuccess, error) {
+	req := &shimv1.StartTurnRequest{
 		Turn:            &conversationv1.TurnId{Value: string(turn)},
 		Said:            said,
 		Origin:          origin,
 		PageSize:        turnPageSize,
 		KnownThrough:    s.knownThrough(),
-		JoinRunningTurn: join,
-	})
+		JoinRunningTurn: how.join,
+	}
+	if how.note != "" {
+		req.VendorNote = &how.note
+	}
+	response, err := s.client.StartTurn(ctx, req)
 	if err != nil {
 		return nil, err
 	}

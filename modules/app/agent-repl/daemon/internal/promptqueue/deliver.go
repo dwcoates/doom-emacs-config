@@ -82,7 +82,7 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// call returns; a terminal routed while no turn stands in flight is
 	// attributable to nothing, and every AwaitTurnEnd on that turn hangs.
 	watcher.OnTurnOpening(sub.WS, sub.Turn)
-	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+	success, err := q.startTurn(ctx, sender, sub, log)
 	if err != nil {
 		// A refusal is surfaced to the caller (which answers the rpc with it)
 		// rather than swallowed, and the footer and roster drop the submitting
@@ -210,4 +210,21 @@ func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conver
 func (q *queue) mirrorBlocks(said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
 	return feed.DrawUserBlocks(said.GetContent(), q.deps.StripSentinels, q.deps.ResolveImage,
 		q.deps.Log.Global())
+}
+
+// interruptionNote is what the agent is told, alone, with a prompt that
+// interrupted its running turn (StartTurnRequest.vendor_note). The vendor
+// records the cut as the user rejecting the work; this says why it happened,
+// so the agent follows the prompt rather than reading it as a rejection.
+const interruptionNote = "The work you were doing was interrupted to deliver this message, because the user's message changes that work. " +
+	"It is not a rejection of what you did: read the message and carry on as it directs."
+
+// startTurn opens SUB's turn: with the interruption note when the prompt
+// interrupted the running turn, as an ordinary start otherwise.
+func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, log dlog.Logger) (*shimv1.StartTurnSuccess, error) {
+	if !sub.interjected {
+		return sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+	}
+	log.Info(opDeliver, "the prompt interrupted the running turn; it is delivered with a note telling the agent why", nil)
+	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, interruptionNote)
 }

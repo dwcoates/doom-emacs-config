@@ -200,6 +200,7 @@ func (q *queue) deliverHeld(ctx context.Context, ws ids.WorkspaceID, held wsm.He
 	}
 
 	sub := submissionOf(held)
+	sub.interjected = held.Classification != nil && held.Classification.Arm == wsm.ArmInterject
 	var derr error
 	if sub.Target != nil {
 		_, derr = q.deliverToAgent(ctx, sub, sender, log)
