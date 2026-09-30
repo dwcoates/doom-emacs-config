@@ -347,19 +347,15 @@ message RosterRow {
 
     // The merge pipeline. These render a glyph rather than a lifecycle dot,
     // except merged, which is settled and files under recently_merged.
-    // merge_conflict and merge_failed ALSO take a color (owner ruling,
-    // 2026-09-28): green for a conflict, blue for a failure.
-    // The first instant of a merge, before anything durable exists for it.
-    RosterRowStatusMergeEnqueuing merge_enqueuing = 19;
-    // A merge is actively running.
+    // merge_failed ALSO takes a color: turquoise, something went wrong and
+    // the workspace is usable. No merge fact reaches the roster before the
+    // turn that asked for the merge has ended, so a row goes straight to
+    // merge_queued or merging.
+    // A merge is actively running in this workspace.
     RosterRowStatusMerging merging = 20;
     // Enqueued behind another workspace's merge.
     RosterRowStatusMergeQueued merge_queued = 21;
-    // The merge stopped awaiting the user: on a conflict its resolution
-    // agent could not settle, or PARKED for the user's guidance. GREEN: an
-    // expected state, ready for a human response.
-    RosterRowStatusMergeConflict merge_conflict = 22;
-    // The merge failed outright. BLUE: something is wrong with the workspace.
+    // The merge failed and the workspace is back with the user. TURQUOISE.
     RosterRowStatusMergeFailed merge_failed = 23;
     // The merge settled successfully.
     RosterRowStatusMerged merged = 24;
@@ -375,6 +371,10 @@ message RosterRow {
     // its session once was.
     RosterRowStatusInactive inactive = 26;
   }
+  // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
+  // merge fact is shown before the requesting turn ends, and nothing parks.
+  reserved 19, 22;
+  reserved "merge_enqueuing", "merge_conflict";
 
   // Whether this row is the selected workspace — the row's highlight bar.
   // Redundant with a comparison against WorkspaceRoster.current and
@@ -548,13 +548,9 @@ message RosterRowStatusDegraded {}
 
 message RosterRowStatusDead {}
 
-message RosterRowStatusMergeEnqueuing {}
-
 message RosterRowStatusMerging {}
 
 message RosterRowStatusMergeQueued {}
-
-message RosterRowStatusMergeConflict {}
 
 message RosterRowStatusMergeFailed {}
 

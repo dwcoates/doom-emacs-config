@@ -1,5 +1,10 @@
 // endpoint_merge_workspace.proto — MergeWorkspace. SIDEBAR section.
-// Enqueue this workspace's merge. Success means ENQUEUED — the merge's whole life from the queue onward is the feed's merge bubble; the merge targets the workspace's parent by definition, and the daemon decides everything else.
+// Enqueue a merge that RUNS IN the requesting workspace. Success means
+// ENQUEUED — the merge's whole life from the queue onward is the requesting
+// workspace's own: its feed's merge bubble, its footer's merging status, and
+// its own session doing any conflict resolution and test fixing. No
+// workspace is ever created for a merge. The merge targets the merged
+// branch's parent by definition, and the daemon decides everything else.
 
 syntax = "proto3";
 
@@ -10,8 +15,61 @@ import "workspace/v1/workspace.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message MergeWorkspaceRequest {
+  // The REQUESTING workspace: the one the merge runs in, whose feed, footer
+  // and session carry it from the queue to its end.
   workspace.v1.WorkspaceRef workspace = 1;
+  // WHAT the requesting workspace merges. REQUIRED: a request with no arm
+  // set is refused as invalid.
+  MergeWorkspaceSource source = 2;
 }
+
+// What a merge lands. THE ARM IS THE SOURCE, and each arm decides where the
+// rebase runs and what closes once the branch lands.
+message MergeWorkspaceSource {
+  // Exactly one is set.
+  oneof source {
+    // The requesting workspace's own branch, rebased and gated in its own
+    // worktree.
+    MergeWorkspaceSourceOwnBranch own_branch = 1;
+    // Another open workspace's branch, rebased in THAT workspace's worktree
+    // by the REQUESTING workspace's session. The other workspace is closed
+    // once its branch lands; the requester is never closed by it.
+    MergeWorkspaceSourceWorkspace workspace = 2;
+    // A branch that is no workspace (a subagent's branch), rebased in the
+    // branch's own worktree when one exists, else in a worktree the daemon
+    // makes for it and removes afterwards. The requester is never closed by
+    // it.
+    MergeWorkspaceSourceBranch branch = 3;
+    // The requesting workspace's own branch, ALREADY MERGED UPSTREAM through
+    // its pull request: the daemon updates the repository's default branch
+    // in its main worktree from upstream and closes the workspace, merging
+    // nothing itself. The caller asserts the upstream merge; the daemon does
+    // not re-check it.
+    MergeWorkspaceSourceMergedUpstream merged_upstream = 4;
+  }
+}
+// The requesting workspace's own branch.
+message MergeWorkspaceSourceOwnBranch {
+  // TRUE keeps the requesting workspace open once its branch lands, so it
+  // can go on to further work and further merges; FALSE closes it on
+  // landing. A failed merge never closes it either way.
+  bool keep_open = 1;
+}
+// Another open workspace, named by its ref.
+message MergeWorkspaceSourceWorkspace {
+  // The workspace whose branch is merged. It must be open, in the same
+  // repository as the requester, and not the requester itself.
+  workspace.v1.WorkspaceRef ref = 1;
+}
+// A branch that is no workspace.
+message MergeWorkspaceSourceBranch {
+  // The branch's name in the requesting workspace's repository, as git
+  // spells it ("agent-1a2b/fix-reconnect").
+  string name = 1;
+}
+// The requesting workspace's own branch, already merged upstream. No
+// fields: the branch and the repository are the requester's own.
+message MergeWorkspaceSourceMergedUpstream {}
 
 // THE ARM IS THE OUTCOME.
 message MergeWorkspaceResponse {
@@ -44,6 +102,11 @@ message MergeWorkspaceError {
     MergeWorkspaceAlreadyQueued already_queued = 7;
     // This workspace's merge is already in flight.
     MergeWorkspaceAlreadyMerging already_merging = 8;
+    // The source workspace is not open, is in another repository, or is the
+    // requester itself.
+    MergeWorkspaceUnknownSourceWorkspace unknown_source_workspace = 9;
+    // The named branch does not exist in the requester's repository.
+    MergeWorkspaceUnknownBranch unknown_branch = 10;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}
@@ -60,3 +123,5 @@ message MergeWorkspaceNoLayoutFacts {}
 message MergeWorkspaceSessionDeleted {}
 message MergeWorkspaceAlreadyQueued {}
 message MergeWorkspaceAlreadyMerging {}
+message MergeWorkspaceUnknownSourceWorkspace {}
+message MergeWorkspaceUnknownBranch {}

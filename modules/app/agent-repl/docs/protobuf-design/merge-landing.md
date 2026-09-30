@@ -53,6 +53,49 @@ branch into the target as a non-fast-forward merge.
   - Does not claim: what "turn failed"'s substatuses are. The owner left that
     separation open, and it is outside this change.
 
+- **A merge runs in the workspace that asked for it (owner, 2026-09-30).**
+  No workspace is ever created for a merge. The requesting workspace's feed
+  carries the merge bubble, its footer carries the merge status, and its own
+  session does the conflict resolution and test fixing, because that session
+  holds the context that makes the resolution good.
+  - Consequences for the contract: a merge request names the requesting
+    workspace AND what it merges (its own branch, another workspace's branch,
+    a branch that is no workspace, or its own branch already merged upstream).
+  - Reopens: the `claude-repld merge-queue -branch` landing workspace
+    (`merge-queue/<bare>-landing`), which exists only because the queue could
+    merge nothing but a workspace.
+  - Does not claim: where the rebase's files live. The lead ruled (below)
+    that the rebase happens in a worktree checked out on the branch being
+    merged.
+- **A requesting workspace may stay open after its merge (owner,
+  2026-09-30).** A request can ask the daemon not to close the workspace
+  once its own branch lands, so it can go on to further merges.
+- **If master moved while a merge ran, the merge starts over (owner,
+  2026-09-30).** The whole process repeats from the rebase onto the new tip;
+  a gate result is only ever trusted for the exact tip it ran on.
+- **The test log is a link (owner, 2026-09-30).** The merge bubble's tests
+  tab names the failure log statically and draws it in the link blue;
+  clicking it opens the log in Emacs in a split on the right, beside the
+  agent-repl panels.
+- **The owner pre-authorized every remaining design decision on this change
+  (2026-09-30: "everything else you can implement as you see fit").** The
+  lead's rulings are recorded below as they are made, each with its reason.
+
+## Lead rulings (2026-09-30), under the owner's pre-authorization
+
+- **The rebase runs in a worktree checked out on the branch being merged.**
+  The requesting workspace's own worktree for its own branch; the branch's
+  existing worktree when it has one; otherwise a worktree the daemon creates
+  for the branch under its state directory and removes after the merge. The
+  repair turns are the requesting workspace's own session, told the directory
+  they work in.
+- **Merging another workspace's branch closes that other workspace once the
+  branch lands**, since its work is done; the requesting workspace is never
+  closed by a merge of a branch that is not its own.
+- **`keep_open` belongs to the own-branch source only.** It means nothing
+  for the other sources, which never close the requester, so it rides inside
+  that source's arm rather than beside the source.
+
 ## Context (step 1)
 
 - **The daemon does not verify a PR-merged assertion (owner ruling, 2026-09-29).**
@@ -144,3 +187,51 @@ branch into the target as a non-fast-forward merge.
   when fixing has failed), never a guess.
 
 ## Landed changes
+
+### 1. The merge runs in the requesting workspace; rebase first; nothing parks (2026-09-30)
+
+- **Decided by** the owner's rulings of 2026-09-29 and 2026-09-30 above,
+  with the lead's rulings under the owner's pre-authorization.
+- **What changed, on the wire:**
+  - `agentrepl.v1.MergeWorkspaceRequest.source` names what the requesting
+    workspace merges: its own branch (with `keep_open`), another workspace,
+    a branch that is no workspace, or its own branch already merged upstream.
+    New refusals: `unknown_source_workspace`, `unknown_branch`.
+  - `agentrepl.v1.OpenInEditorRequest` takes a `target` oneof: a workspace
+    file (the old path and line), or a merge test log named by the
+    `frontend.v1.FeedMergeTestLogToken` the bubble served. The log lives in
+    the daemon's state, outside the worktree, so it is named by token rather
+    than path. New refusal: `unknown_merge_test_log`.
+  - The merge bubble's tabs: `rebasing` (with progress and narration)
+    replaces the retired `merge` tab; `committing` and `updating_main` are
+    new; `conflicts` and `fixes` lose `parked`; `fixes` carries its attempt
+    and the maximum; `tests` carries the round's log link.
+  - The footer: the merging substatuses are enqueued k/n, preprocessing,
+    rebasing k/n, conflict resolution, testing, fixing attempt x/y,
+    committing, updating main and postprocessing; every older arm is
+    retired. Each step's own activity line is one salient arm,
+    `merge_step`, whose arm is the step, replacing `merging_commit`.
+    `merge_failed` gains its area substatus (conflicts, tests, other) and is
+    turquoise; the `merge_conflict` status is retired. The expanded footer
+    gains a 🧪 chip and a merge tests panel, which the daemon focuses when
+    testing begins through the existing focus edge; the panel empties when
+    testing ends, which unsets the chip.
+  - The roster: `merge_enqueuing` and `merge_conflict` are retired;
+    `merge_failed` is turquoise.
+  - The host stream: `merge_parked` is retired.
+- **Consequences, accepted:**
+  - Emacs needs no change to open the log on the right: its one shared
+    popup (`lisp/popup.el`) already opens a right side window at half the
+    frame; only the request's target changes.
+  - A merge of a branch that is no workspace no longer makes a landing
+    workspace, so `claude-repld merge-queue -branch` and the merge-queue
+    skill send `source.branch` from the calling workspace instead.
+  - `fixes` round and `attempt` agree by construction only if the daemon
+    uses one bound for both; the daemon states that bound once.
+- **Obviated and removed in the same change:** `FooterStatusMergeConflict`,
+  `FooterSubStatusMergingEnqueuing` and the other retired substatus
+  messages, `FooterStatusActivityMergingCommit`, `FeedMergeTabParked`,
+  `FeedMergeTabParkedLine`, `FeedMergeTabMerge`, `FeedMergeMergeLine`,
+  `RosterRowStatusMergeEnqueuing`, `RosterRowStatusMergeConflict`,
+  `HostComposerMergeParked`: each was referenced only by the arm retired
+  here.
