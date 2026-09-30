@@ -91,7 +91,14 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
     PROGRESS: H1-H5 + tray + coalescing + worked-example integration test
     DONE (wsm `f927fd33e`, proto `8f0bb28f5`, queue `17f162095`, tray
     `867f390db`, integration `949aabaf5`); daemon unit + integration green.
-    NEXT: H6/H7 verdict split (after_tool_call), then 4a, 4c.
+    NEXT: 4a, then 4c, then H6/H7 verdict split (own unit). H6 design notes:
+    the SDK folds a pushed message only at a TOOL BOUNDARY; with no tool call
+    in flight the message becomes the vendor's NEXT turn. So the shim verb
+    (StartTurn `fold_into_open_turn` or a FoldPrompt rpc) must handle both:
+    folded (result.user_message_uuids lists it -> the prompt row belongs to
+    the open turn) and not folded (the next SDK turn IS the prompt's turn:
+    the shim opens it under the prompt's turn id and origin, and the daemon
+    must learn it as that turn, not as a vendor-started adoption).
     Findings: `SubmitSessionAct` (promptqueue/acts.go) parks every act in the
     in-memory `wsState.acts` when anything is ahead; `drainActs` runs them at
     a turn end BEFORE `popAndDeliver`, and `releaseActsLocked`, bounce.go:831
