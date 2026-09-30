@@ -183,8 +183,8 @@ Sets the red and green channels; the blue channel adds
 (defvar-local agent-repl-input-notice nil
   "The composer's standing notice, drawn in the input buffer's mode line.
 Set to the refusal flash when a submission comes back refused, and
-cleared when the gate opens.  Buffer-local to the input buffer, because the notice is
-about THIS composer and no other.")
+cleared when the gate opens.  Buffer-local to the input buffer, because
+the notice is about THIS composer and no other.")
 
 (defvar-local agent-repl-input-waiting nil
   "The composer's held-prompt waiting line, or nil.

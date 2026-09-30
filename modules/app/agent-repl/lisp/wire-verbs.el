@@ -57,6 +57,7 @@
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
+(declare-function agent-repl-wire--encode-empty "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
