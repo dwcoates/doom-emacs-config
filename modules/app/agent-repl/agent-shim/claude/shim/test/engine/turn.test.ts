@@ -85,6 +85,10 @@ interface Harness {
    * Every stop command the engine held for a turn's terminal, in order, and
    * whether the vendor interrupt had already been sent when it was held.
    */
+  /** Every unit the engine told the fold the user asked to move, in order. */
+  readonly userDetaches: string[];
+  /** Every such request the engine retired, with why, in order. */
+  readonly retiredUserDetaches: { toolUseId: string; why: string }[];
   readonly stopCommands: {
     turn: string;
     command: conversationv1.AgentInterruptedByUser | undefined;
@@ -133,10 +137,14 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     watchers: [] as AgentPageSession[],
     stopCommands: [],
     shellStarts: new Map<string, PersistEntry>(),
+    userDetaches: [],
+    retiredUserDetaches: [],
   };
   const context: SessionContext = {
     persistence,
     foreground,
+    noteUserDetach: (toolUseId) => state.userDetaches.push(toolUseId),
+    retireUserDetach: (toolUseId, why) => state.retiredUserDetaches.push({ toolUseId, why }),
     gate,
     live,
     identity: () => state.identity,
@@ -2244,6 +2252,77 @@ describe("DetachForeground", () => {
     h.query.backgroundTaskAnswer = true;
 
     expect((await h.turns.detachForeground(detach("toolu_1"))).result.case).toBe("success");
+  });
+
+  it("notes the user's request with the fold BEFORE asking the vendor", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.backgroundTaskAnswer = true;
+    let notedWhenAsked: string[] = [];
+    const ask = h.query.backgroundTasks.bind(h.query);
+    h.query.backgroundTasks = (toolUseId?: string) => {
+      notedWhenAsked = [...h.userDetaches];
+      return ask(toolUseId);
+    };
+
+    // Act
+    await h.turns.detachForeground(detach("toolu_1"));
+
+    // Assert
+    expect(notedWhenAsked).toEqual(["toolu_1"]);
+  });
+
+  it("keeps the request standing when the vendor moved the unit, for its patch to consume", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.backgroundTaskAnswer = true;
+
+    // Act
+    await h.turns.detachForeground(detach("toolu_1"));
+
+    // Assert
+    expect([h.userDetaches, h.retiredUserDetaches]).toEqual([["toolu_1"], []]);
+  });
+
+  it("retires the request when the vendor moved nothing for it", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.backgroundTaskAnswer = false;
+
+    // Act
+    await h.turns.detachForeground(detach("toolu_1"));
+
+    // Assert
+    expect(h.retiredUserDetaches).toEqual([{ toolUseId: "toolu_1", why: "the vendor moved nothing for the request" }]);
+  });
+
+  it("retires the request when the vendor refused it, and still surfaces the refusal", async () => {
+    // Arrange
+    const h = await harness();
+    h.query.backgroundTasks = () => Promise.reject(new Error("background tasks are disabled"));
+
+    // Act
+    const outcome = await h.turns.detachForeground(detach("toolu_1")).then(
+      () => "answered",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    );
+
+    // Assert
+    expect([outcome, h.retiredUserDetaches]).toEqual([
+      "background tasks are disabled",
+      [{ toolUseId: "toolu_1", why: "the vendor refused the request" }],
+    ]);
+  });
+
+  it("notes nothing for a request that names no unit", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {}));
+
+    // Assert
+    expect(h.userDetaches).toEqual([]);
   });
 });
 

@@ -4624,6 +4624,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     gate,
     live,
     foreground,
+    noteUserDetach: (toolUseId) => deps.fold.noteUserDetach(toolUseId),
+    retireUserDetach: (toolUseId, why) => deps.fold.retireUserDetach(toolUseId, why),
     identity: () => identity,
     query: () => query,
     nowMs: deps.nowMs,

@@ -635,6 +635,158 @@ describe("convertDetached: task_updated", () => {
   });
 });
 
+describe("convertDetached: a move the user asked for (DetachForeground)", () => {
+  const MOVED = { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } };
+
+  /** A registry that knows `t1` as `taskType`. */
+  function taskOf(taskType: string): ReturnType<typeof createTaskKindRegistry> {
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", taskType);
+    return registry;
+  }
+
+  /** The cause of the one announcement a set of entries carries. */
+  function announcedCause(entries: readonly PersistEntry[]): string | undefined {
+    return detachedOrigin(entries.find((entry) => entry.item.kind === "frame")).cause.case;
+  }
+
+  it("announces an agent the user asked to move `by_user`", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+
+    // Act
+    const entries = convert(MOVED, {}, registry);
+
+    // Assert
+    expect(announcedCause(entries)).toBe("byUser");
+  });
+
+  it("announces a shell the user asked to move `by_user`", () => {
+    // Arrange
+    const registry = taskOf("local_bash");
+    registry.noteUserDetach("toolu_1");
+
+    // Act
+    const entries = convert(MOVED, {}, registry);
+
+    // Assert
+    expect(announcedCause(entries)).toBe("byUser");
+  });
+
+  it("remembers `by_user` for the moved unit, so its notification restates it", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+
+    // Act
+    convert(MOVED, {}, registry);
+
+    // Assert
+    expect(registry.causeOf("t1")).toBe("by_user");
+  });
+
+  it("records the requested move at INFO", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+    const mark = logSinkMark();
+
+    // Act
+    convert(MOVED, {}, registry);
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.context.requested_by_user !== undefined);
+    expect([record?.level, record?.message, record?.context.cause, record?.context.requested_by_user]).toEqual([
+      "info",
+      "running work the user asked to move is now in the background",
+      "by_user",
+      true,
+    ]);
+  });
+
+  it("an unrequested patch stays `vendor_moved` while another unit's request stands", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_other");
+
+    // Act
+    const entries = convert(MOVED, {}, registry);
+
+    // Assert
+    expect(announcedCause(entries)).toBe("vendorMoved");
+  });
+
+  it("retires the request at the patch that consumed it", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+
+    // Act
+    convert(MOVED, {}, registry);
+
+    // Assert
+    expect(registry.takeUserDetach("toolu_1")).toBe(false);
+  });
+
+  it("retires a request whose patch never came when its unit ends", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+
+    // Act
+    convert({ subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status: "completed" }, {}, registry);
+
+    // Assert
+    expect(registry.takeUserDetach("toolu_1")).toBe(false);
+  });
+
+  it("records the retirement at the unit's end", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+    const mark = logSinkMark();
+
+    // Act
+    convert({ subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status: "completed" }, {}, registry);
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.context.why === "the unit ended");
+    expect([record?.level, record?.context.tool_use_id]).toEqual(["debug", "toolu_1"]);
+  });
+
+  it("clearing every request leaves a later patch of that unit `vendor_moved`", () => {
+    // Arrange
+    const registry = taskOf("local_agent");
+    registry.noteUserDetach("toolu_1");
+    registry.clearUserDetaches("the query was replaced");
+
+    // Act
+    const entries = convert(MOVED, {}, registry);
+
+    // Assert
+    expect(announcedCause(entries)).toBe("vendorMoved");
+  });
+
+  it("forgets the oldest request past the table's bound, recording the loss at WARN", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    for (let i = 0; i < TASK_KIND_CAPACITY; i += 1) registry.noteUserDetach(`toolu_${String(i)}`);
+    const mark = logSinkMark();
+
+    // Act
+    registry.noteUserDetach("toolu_over");
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.level === "warn");
+    expect([record?.context.task_id, registry.takeUserDetach("toolu_0"), registry.takeUserDetach("toolu_over")]).toEqual([
+      "toolu_0",
+      false,
+      true,
+    ]);
+  });
+});
+
 /** The progress arm one task-progress beat produced, when it produced one. */
 function progressOf(entry: PersistEntry | undefined): conversationv1.AgentSubagentProgress {
   const subagent = activityOf(entry)?.item.value as conversationv1.AgentSubagent;

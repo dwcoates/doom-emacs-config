@@ -101,6 +101,14 @@ export interface SessionContext {
   readonly live: LiveWorkTable;
   /** The tool calls in flight, which is what tells DetachForeground's arms apart. */
   readonly foreground: ForegroundUnitTable;
+  /**
+   * Tell the fold the shim is asking the vendor to move `toolUseId`'s unit at
+   * the user's request, so the patch that moves it is the user's
+   * (`EngineFold.noteUserDetach`).
+   */
+  noteUserDetach(toolUseId: string): void;
+  /** Retire that request: the vendor moved nothing for it (`EngineFold.retireUserDetach`). */
+  retireUserDetach(toolUseId: string, why: string): void;
   /** The session's identity, or absence before StartSession. */
   identity(): SessionIdentity | undefined;
   /** The one live query, or absence when it is dead or not yet started. */
@@ -1327,7 +1335,20 @@ export class TurnEngine {
       return detachForegroundRefused({ kind: "alreadyConcluded" }, "the vendor query is dead");
     }
     const known = this.session.live.byToolUseId(unit);
-    const live = await query.backgroundTasks(unit);
+    // THE REQUEST IS NOTED BEFORE IT IS MADE: the patch that moves the unit
+    // reaches the fold through the message loop, possibly before this call
+    // answers, and it must find the request already standing. A request that
+    // names no unit has no patch to be read by, so nothing is noted for it.
+    const noted = unit !== "";
+    if (noted) this.session.noteUserDetach(unit);
+    let live: boolean;
+    try {
+      live = await query.backgroundTasks(unit);
+    } catch (err) {
+      if (noted) this.session.retireUserDetach(unit, "the vendor refused the request");
+      throw err;
+    }
+    if (noted && !live) this.session.retireUserDetach(unit, "the vendor moved nothing for the request");
     // THE FOREGROUND TABLE IS WHAT KEEPS THE FOUR REFUSALS APART. Without it
     // the engine can only tell "the vendor holds background work for this id"
     // from "it does not", and three of the four answers collapse onto

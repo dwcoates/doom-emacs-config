@@ -766,6 +766,28 @@ export interface TaskKindRegistry {
    * writes nothing. Answering `true` also FORGETS the task.
    */
   concludesInForeground(taskId: string): boolean;
+  /**
+   * Remember that THE SHIM ITSELF asked the vendor to move the unit whose
+   * spawning call is `toolUseId` to the background (`DetachForeground`, the
+   * user's Ctrl-B, through `query.backgroundTasks(unit)`).
+   *
+   * THE CAUSE OF THE PATCH THAT FOLLOWS IS THEN A FACT THIS PROCESS HOLDS: the
+   * user asked. Keyed by the unit's call, the identity the patch carries, so a
+   * request can only ever be read by that unit's own patch. Retired by that
+   * patch ({@link takeUserDetach}), by the unit's end ({@link retireUserDetach}),
+   * by a request the vendor answered moved nothing, and by the query's end;
+   * bounded by the same cap as every other table here.
+   */
+  noteUserDetach(toolUseId: string): void;
+  /**
+   * Whether the shim asked to move this unit, retiring the request: the patch
+   * that moves it consumes it.
+   */
+  takeUserDetach(toolUseId: string): boolean;
+  /** Retire a request whose patch will not come; `why` names the reason in the record. */
+  retireUserDetach(toolUseId: string, why: string): void;
+  /** Retire every request: the query they were made on is over. */
+  clearUserDetaches(why: string): void;
 }
 
 export function createTaskKindRegistry(): TaskKindRegistry {
@@ -802,7 +824,31 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     );
   };
   const FACTS_LOST = "its kind and cause, so its notification cannot be typed";
+  /** The units the shim asked the vendor to move, by spawning call (a set: the value is unused). */
+  const userDetaches = new Map<string, true>();
   return {
+    noteUserDetach(toolUseId) {
+      if (!userDetaches.has(toolUseId)) {
+        reserve(userDetaches, "a user's request to move that unit, so its move would be announced vendor_moved");
+      }
+      userDetaches.set(toolUseId, true);
+      LOGGER.debug(
+        { tool_use_id: toolUseId, requests: userDetaches.size },
+        "the shim asked the vendor to move a unit to the background; its move is the user's",
+      );
+    },
+    takeUserDetach(toolUseId) {
+      return userDetaches.delete(toolUseId);
+    },
+    retireUserDetach(toolUseId, why) {
+      if (!userDetaches.delete(toolUseId)) return;
+      LOGGER.debug({ tool_use_id: toolUseId, why }, "a user's request to move a unit was retired without its move");
+    },
+    clearUserDetaches(why) {
+      if (userDetaches.size === 0) return;
+      LOGGER.debug({ requests: userDetaches.size, why }, "every user's request to move a unit was retired");
+      userDetaches.clear();
+    },
     remember(taskId, taskType) {
       reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), kind: taskType });
@@ -1119,13 +1165,19 @@ export function convertDetached(
       // shape (`AgentOutput`, sdk-tools.d.ts) carries no cause field, and the
       // vendor also moves agents on its own (`CLAUDE_AUTO_BACKGROUND_TASKS`),
       // so `by_user` would assert a cause the stream never stated (2026-09-30).
+      // THE ONE EXCEPTION IS A MOVE THE SHIM ITSELF ASKED FOR: a
+      // `DetachForeground` (the user's Ctrl-B) made through
+      // `backgroundTasks(unit)` noted the unit, so its patch is the user's.
       const shell = taskKindOf(taskType) === "bash";
-      const cause: DetachCause = "vendor_moved";
+      const requested = taskKinds.takeUserDetach(toolUseId);
+      const cause: DetachCause = requested ? "by_user" : "vendor_moved";
       LOGGER.info(
-        { uuid, task_id: taskId, tool_use_id: toolUseId, cause },
-        shell
-          ? "the vendor moved a running shell to the background; its tool result states why"
-          : "the vendor moved running work to the background; no frame states why",
+        { uuid, task_id: taskId, tool_use_id: toolUseId, cause, requested_by_user: requested },
+        requested
+          ? "running work the user asked to move is now in the background"
+          : shell
+            ? "the vendor moved a running shell to the background; its tool result states why"
+            : "the vendor moved running work to the background; no frame states why",
       );
       calls.detach(toolUseId);
       taskKinds.rememberCause(taskId, cause);
@@ -1175,6 +1227,10 @@ export function convertDetached(
     }
 
     case "task_notification": {
+      // THE UNIT ENDED, so a move the user asked for that never came never will.
+      if (toolUseId !== undefined && toolUseId !== "") {
+        taskKinds.retireUserDetach(toolUseId, "the unit ended");
+      }
       if (taskKinds.concludesInForeground(taskId)) {
         // FOREGROUND WORK THAT NEVER LEFT THE TURN ends on its own tool result,
         // which settles its unit. A detachment upsert here would announce, at
