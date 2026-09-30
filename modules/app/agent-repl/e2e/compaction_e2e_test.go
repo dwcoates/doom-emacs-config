@@ -127,19 +127,11 @@ func cpFindCompactionFailedSeparation(rows []*frontendv1.FeedRow) *frontendv1.Fe
 	return nil
 }
 
-// cpContextBudgetText answers the footer's standing context-budget activity
-// text, whichever status arm it currently stands under (idle or thinking —
-// footer.proto legalizes FooterStatusActivityContextBudget under both), or ""
-// if neither carries one.
+// cpContextBudgetText answers the footer's standing context-budget line,
+// whichever status arm it stands under — it rides every arm's salient oneof —
+// or "" if none stands.
 func cpContextBudgetText(v *frontendv1.FooterView) string {
-	status := v.GetStrip().GetStatus()
-	if cb := status.GetIdle().GetActivity().GetContextBudget(); cb != nil {
-		return cb.GetText()
-	}
-	if cb := status.GetWorking().GetActivity().GetContextBudget(); cb != nil {
-		return cb.GetText()
-	}
-	return ""
+	return footerContextBudget(v)
 }
 
 // cpDriveObservingInProgress submits prompt, awaits the footer's
