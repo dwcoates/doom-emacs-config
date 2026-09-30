@@ -82,6 +82,8 @@ const (
 	StatementAgentByVendorTask = "agent_by_vendor_task"
 	// StatementShellRunClaims is the sidecar's claim lookup by task ids.
 	StatementShellRunClaims = "shell_run_claims"
+	// StatementRunSettlements is the sidecar's settled-run lookup by run ids.
+	StatementRunSettlements = "run_settlements"
 	StatementListCursors    = "list_cursors"
 	StatementBashRun        = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.

@@ -746,6 +746,51 @@ func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentBy
 	})
 }
 
+// ---- GetRunSettlements ----
+
+// GetRunSettlements answers which of the asked runs the record holds as ended.
+// A run absent from the answer is not settled, which is an ordinary answer,
+// not a refusal.
+func (s *Server) GetRunSettlements(ctx context.Context, req *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetRunSettlementsProcedure, req.Header())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "resolving %d run id(s) to their settlements", len(req.Msg.GetRunIds()))
+
+	if ref := validateGetRunSettlementsRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-run-settlements", ref, logging.Fields{})
+		return runSettlementsFailure(ref), nil
+	}
+
+	settled, err := s.store.RunSettlements(correlated(ctx, req.Header()), req.Msg.GetRunIds())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-run-settlements", err, logging.Fields{})
+		return runSettlementsFailure(ref), nil
+	}
+	success := &storev1.GetRunSettlementsSuccess{Settled: make([]*storev1.RunSettlement, 0, len(settled))}
+	for _, run := range settled {
+		success.Settled = append(success.Settled, &storev1.RunSettlement{RunId: run.RunID, EndedAtMs: run.EndedAtMs})
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "answering settled=%d", len(success.Settled))
+	return connect.NewResponse(&storev1.GetRunSettlementsResponse{
+		Result: &storev1.GetRunSettlementsResponse_Success{Success: success},
+	}), nil
+}
+
+// runSettlementsFailure has TWO arms: the request was malformed, or the
+// storage layer failed.
+func runSettlementsFailure(ref *refusal) *connect.Response[storev1.GetRunSettlementsResponse] {
+	failure := &storev1.GetRunSettlementsFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetRunSettlementsFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetRunSettlementsInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetRunSettlementsFailure_StorageFailure{StorageFailure: &storev1.GetRunSettlementsStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetRunSettlementsResponse{
+		Result: &storev1.GetRunSettlementsResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- GetShellRunClaims ----
 
 // GetShellRunClaims answers which run each asked task id names, with the book
