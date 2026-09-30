@@ -775,6 +775,38 @@ unchanged.
   - `shim.v1.WatchBashResponse`'s doc says a run claimed only by task id has
     no `start` and opens on its output.
 
+### 5. The retry schedule and the restored API (2026-09-30)
+
+- **Decided by** the owner after the outage of 2026-09-30.
+  - The retrying line stood for 17 minutes with no sign of when the next
+    try was due.
+  - The vendor's own records show it promised a retry in 32 seconds after
+    its eighth failure and never made one: the vendor stalled, and nothing
+    cleared the line because nothing recovered.
+- **What changed, on the wire:**
+  - `conversation.v1.ApiRequestFailed.retry` carries
+    `conversation.v1.ApiRetry{attempt, max_retries, next_attempt_at_ms}`,
+    the vendor's `retryAttempt`, `maxRetries` and the failure's instant
+    plus its `retryInMs`.
+  - `frontend.v1.FooterStatusActivityRetrying` gains `next_attempt` (an
+    instant) and `max_attempt`, both unset when the vendor stated no
+    schedule.
+  - `frontend.v1.FooterActivityTransient.api_restored`
+    (`frontend.v1.FooterActivityTransientApiRestored{failed_attempts}`).
+- **What changed, in the systems:**
+  - The sidecar reads the schedule from every recorded `api_error`.
+  - The daemon counts attempts as the vendor does when it states a schedule.
+    - Counting failures itself had run one ahead of the vendor's count.
+  - The retried call's first response ends the line and raises
+    `api_restored`.
+  - The webapp draws "retry #9 of 11 · next try in 12s · <status>", the
+    countdown ticking on the shared clock.
+    - Once the promised instant passes it reads "next try overdue by 2m",
+      so a stalled vendor is visible as a stall.
+  - The webapp draws the transient as "API answering again after 8 failed
+    attempts".
+- **Left open:** nothing acts on an overdue retry. The line only shows it.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.
