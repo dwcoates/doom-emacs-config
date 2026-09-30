@@ -113,7 +113,7 @@ describe("every rpc answers", () => {
       ["sendLoginInput", client.sendLoginInput({ workspace, input: { case: "resize", value: { rows: 24, cols: 80 } } })],
       ["closeLogin", client.closeLogin({ workspace })],
       ["openExternal", client.openExternal({ workspace, url: "https://example.test" })],
-      ["openInEditor", client.openInEditor({ workspace, path: "/repo/a.ts" })],
+      ["openInEditor", client.openInEditor({ workspace, target: { case: "workspaceFile", value: { path: "/repo/a.ts" } } })],
       ["requestCommandSupport", client.requestCommandSupport({ workspace, command: "/agents" })],
     ];
     // Act

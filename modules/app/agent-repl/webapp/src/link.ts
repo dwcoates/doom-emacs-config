@@ -20,6 +20,9 @@
  * `renderEditorLink` is the ONE shared jump-to-file affordance: the plan
  * bubble's edit button, a findings row's location and a worktree divider's
  * path all render through it. A second one would be a defect.
+ * `renderMergeTestLogLink` is the same verb with the other target: a merge's
+ * test log, named by the opaque token the merge bubble served, because the
+ * log lives in the daemon's state and has no workspace path to send.
  *
  * NOTHING IS DRAWN ON SUCCESS. The result of either click happens elsewhere —
  * in a browser window, in an editor — so a confirmation on this page would be
@@ -35,6 +38,7 @@ import {
   OpenInEditorResponseSchema,
   type OpenInEditorError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import type { FeedMergeTestLog, FeedMergeTestLogToken } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "./rpc/context.js";
 import {
   clearRefusals,
@@ -43,7 +47,7 @@ import {
   drawTypedRefusal,
   type SentenceTable,
 } from "./rpc/refuse.js";
-import { requireCase, unreachableArm } from "./rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 
 /** Only these two schemes are a hyperlink; everything else is text. */
@@ -130,9 +134,68 @@ export function renderEditorLink(ctx: AppContext, spec: EditorLinkSpec): HTMLEle
     if (!claimsClick(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    void openInEditor(ctx, anchor, spec);
+    void openInEditor(ctx, anchor, workspaceFileTarget(spec));
   });
   return anchor;
+}
+
+/**
+ * A merge's test log, drawn in the link blue a response bubble's links wear.
+ *
+ * THE TOKEN IS ECHOED, NEVER READ. The merge bubble served it and
+ * `OpenInEditorRequest.merge_test_log` takes it back unchanged; the page never
+ * parses it, builds one, or shows it. What the reader sees is the label the
+ * daemon composed (the log's path, shortened with ~).
+ */
+export function renderMergeTestLogLink(
+  ctx: AppContext,
+  u: FeedMergeTestLog,
+  path: string,
+): HTMLElement {
+  const token = requireMessage(u.token, `${path}.token`);
+  const label = requireMessage(u.label, `${path}.label`);
+  const anchor = document.createElement("a");
+  anchor.className = "editor-link merge-test-log-link";
+  anchor.textContent = label.text;
+  anchor.setAttribute("data-merge-test-log", "");
+  // No href, for the same reason as the editor link: the log is on the
+  // daemon's host, and the click is an rpc, never a navigation.
+  anchor.setAttribute("role", "button");
+  anchor.tabIndex = 0;
+  anchor.addEventListener("click", (event: MouseEvent) => {
+    if (!claimsClick(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void openInEditor(ctx, anchor, { case: "mergeTestLog", value: token });
+  });
+  return anchor;
+}
+
+/** What an editor link opens: a workspace file, or a merge's test log. */
+export type EditorTarget =
+  | { case: "workspaceFile"; value: { path: string; line?: number } }
+  | { case: "mergeTestLog"; value: FeedMergeTestLogToken };
+
+/** A workspace file's target, with the line only when the view gave one. */
+export function workspaceFileTarget(spec: { path: string; line?: number }): EditorTarget {
+  return {
+    case: "workspaceFile",
+    value: { path: spec.path, ...(spec.line !== undefined ? { line: spec.line } : {}) },
+  };
+}
+
+/** What a log line says the click was opening, per target. */
+function editorTargetContext(target: EditorTarget): Record<string, unknown> {
+  switch (target.case) {
+    case "workspaceFile":
+      return { target: target.case, path: target.value.path, line: target.value.line };
+    case "mergeTestLog":
+      return { target: target.case, token: target.value.value };
+    default: {
+      const other: { case: string } = target;
+      return unreachableArm("OpenInEditorRequest.target", other.case);
+    }
+  }
 }
 
 /**
@@ -189,7 +252,7 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
   if (path !== null) {
     event.preventDefault();
     event.stopPropagation();
-    void openInEditor(ctx, anchor, { text: anchor.textContent ?? "", path });
+    void openInEditor(ctx, anchor, workspaceFileTarget({ path }));
     return;
   }
   // Neither web nor local file. Markdown restricts anchors to http/https, so
@@ -269,18 +332,14 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
   }
 }
 
-async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLinkSpec): Promise<void> {
+async function openInEditor(ctx: AppContext, anchor: HTMLElement, target: EditorTarget): Promise<void> {
   clearRefusal(anchor);
+  const context = editorTargetContext(target);
   try {
     const response = await callUnary(
       ctx,
       "OpenInEditor",
-      (client) =>
-        client.openInEditor({
-          workspace: ctx.workspace,
-          path: spec.path,
-          ...(spec.line !== undefined ? { line: spec.line } : {}),
-        }),
+      (client) => client.openInEditor({ workspace: ctx.workspace, target }),
       OpenInEditorResponseSchema,
     );
     const result = requireCase(response.result, "OpenInEditorResponse.result");
@@ -292,18 +351,18 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
       (result.value).cause,
       EDITOR_SENTENCES,
     );
-    log.warn(`OpenInEditor refused ${spec.path}`, {
+    log.warn(`OpenInEditor refused a ${target.case} target`, {
       operation: "link.open-in-editor-refused",
-      context: { path: spec.path, line: spec.line, arm },
+      context: { ...context, arm },
     });
   } catch (err) {
     if (drawMalformedRefusal(ctx, refusalHost(anchor), "link.open-in-editor-unreadable", err)) {
       return;
     }
     drawTransportRefusal(refusalHost(anchor));
-    log.error(`OpenInEditor failed for ${spec.path}: ${String(err)}`, {
+    log.error(`OpenInEditor failed for a ${target.case} target: ${String(err)}`, {
       operation: "link.open-in-editor-failed",
-      context: { path: spec.path, line: spec.line, cause: err },
+      context: { ...context, cause: err },
     });
   }
 }
@@ -351,11 +410,13 @@ export function openExternalRefusal(cause: OpenExternalCause): string {
   }
 }
 
-/** OpenInEditor's own arm: the path guard the daemon applies. */
+/** OpenInEditor's own arms: the path guard, and a log token it does not hold. */
 export function openInEditorRefusal(cause: OpenInEditorCause): string {
   switch (cause.case) {
     case "pathEscapesWorkspace":
       return "that path is outside this workspace";
+    case "unknownMergeTestLog":
+      return "that test log is no longer available";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("OpenInEditorError.cause", other.case);
@@ -380,6 +441,8 @@ const EXTERNAL_SENTENCES: SentenceTable = {
 const EDITOR_SENTENCES: SentenceTable = {
   pathEscapesWorkspace: () =>
     openInEditorRefusal({ case: "pathEscapesWorkspace", value: {} } as OpenInEditorCause),
+  unknownMergeTestLog: () =>
+    openInEditorRefusal({ case: "unknownMergeTestLog", value: {} } as OpenInEditorCause),
 };
 
 function clearRefusal(anchor: HTMLElement): void {

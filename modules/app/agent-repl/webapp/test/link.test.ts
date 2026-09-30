@@ -12,7 +12,12 @@ import {
   OpenInEditorErrorSchema,
   OpenInEditorResponseSchema,
   type OpenInEditorRequest,
+  type OpenInEditorWorkspaceFile,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import {
+  FeedMergeTestLogSchema,
+  type FeedMergeTestLog,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { oneofArms } from "./arms.js";
 import { WorkspaceRefSchema } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../src/clock.js";
@@ -24,6 +29,7 @@ import {
   openInEditorRefusal,
   renderEditorLink,
   renderExternalLink,
+  renderMergeTestLogLink,
 } from "../src/link.js";
 import { renderMarkdown } from "../src/markdown.js";
 import { createAgentReplClient } from "../src/rpc/client.js";
@@ -147,6 +153,147 @@ afterEach(() => {
 function swallowNavigation(event: Event): void {
   event.preventDefault();
 }
+
+/** The workspace-file target a request carried; any other arm fails the test. */
+function workspaceFileOf(req: OpenInEditorRequest): OpenInEditorWorkspaceFile {
+  if (req.target.case !== "workspaceFile") {
+    throw new Error(`expected a workspaceFile target, got ${String(req.target.case)}`);
+  }
+  return req.target.value;
+}
+
+/** A served test-log link, token and label as the merge bubble carries them. */
+function testLog(token = "log-7f3a", label = "~/.claude-emacs/merge-logs/ws-tests-2.log"): FeedMergeTestLog {
+  return create(FeedMergeTestLogSchema, { token: { value: token }, label: { text: label } });
+}
+
+describe("renderMergeTestLogLink", () => {
+  it("renders an anchor", () => {
+    const { ctx } = harness();
+    expect(renderMergeTestLogLink(ctx, testLog(), "log").tagName).toBe("A");
+  });
+
+  it("draws the daemon's label as its text", () => {
+    const { ctx } = harness();
+    const a = renderMergeTestLogLink(ctx, testLog("t", "~/logs/x.log"), "log");
+    expect(a.textContent).toBe("~/logs/x.log");
+  });
+
+  it("carries the merge test log hook", () => {
+    const { ctx } = harness();
+    expect(renderMergeTestLogLink(ctx, testLog(), "log").hasAttribute("data-merge-test-log")).toBe(true);
+  });
+
+  it("wears the link class the stylesheet paints in the response bubble's link blue", () => {
+    const { ctx } = harness();
+    expect(renderMergeTestLogLink(ctx, testLog(), "log").classList.contains("merge-test-log-link")).toBe(true);
+  });
+
+  it("carries NO href, since the log is on the daemon's host", () => {
+    const { ctx } = harness();
+    expect(renderMergeTestLogLink(ctx, testLog(), "log").hasAttribute("href")).toBe(false);
+  });
+
+  it("does not show the token anywhere in the markup", () => {
+    const { ctx } = harness();
+    const a = renderMergeTestLogLink(ctx, testLog("secret-token", "~/x.log"), "log");
+    expect(a.outerHTML.includes("secret-token")).toBe(false);
+  });
+
+  it("is reachable by keyboard", () => {
+    const { ctx } = harness();
+    expect(renderMergeTestLogLink(ctx, testLog(), "log").tabIndex).toBe(0);
+  });
+
+  it("cancels the click", () => {
+    const { ctx } = harness();
+    expect(click(renderMergeTestLogLink(ctx, testLog(), "log")).defaultPrevented).toBe(true);
+  });
+
+  it("sends the merge_test_log target", async () => {
+    const { ctx, editor } = harness();
+    click(renderMergeTestLogLink(ctx, testLog(), "log"));
+    await settle();
+    expect(editor[0].target.case).toBe("mergeTestLog");
+  });
+
+  it("echoes the token exactly as served", async () => {
+    const { ctx, editor } = harness();
+    click(renderMergeTestLogLink(ctx, testLog("opaque/ token=1"), "log"));
+    await settle();
+    const target = editor[0].target;
+    expect(target.case === "mergeTestLog" ? target.value.value : null).toBe("opaque/ token=1");
+  });
+
+  it("addresses the request to this page's workspace", async () => {
+    const { ctx, editor } = harness();
+    click(renderMergeTestLogLink(ctx, testLog(), "log"));
+    await settle();
+    expect(editor[0].workspace?.id).toBe("ws-1");
+  });
+
+  it("draws an unknown log's refusal at the link", async () => {
+    const { ctx } = harness("error", "invalidUrl", "unknownMergeTestLog");
+    const a = renderMergeTestLogLink(ctx, testLog(), "log");
+    click(a);
+    await settle();
+    expect(refusalAt(a)?.textContent).toContain("no longer available");
+  });
+
+  it("warns on a refusal, naming the target kind", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx } = harness("error", "invalidUrl", "unknownMergeTestLog");
+    click(renderMergeTestLogLink(ctx, testLog(), "log"));
+    await settle();
+    expect(
+      lines.some(
+        ([level, line]) =>
+          level === "warn" && line.includes("link.open-in-editor-refused") && line.includes("mergeTestLog"),
+      ),
+    ).toBe(true);
+  });
+
+  it("errors when the daemon could not be reached", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx } = harness("throw");
+    click(renderMergeTestLogLink(ctx, testLog(), "log"));
+    await settle();
+    expect(lines.some(([level, line]) => level === "error" && line.includes("link.open-in-editor-failed"))).toBe(true);
+  });
+
+  it("refuses a log with no token", () => {
+    const { ctx } = harness();
+    const u = create(FeedMergeTestLogSchema, { label: { text: "~/x.log" } });
+    expect(() => renderMergeTestLogLink(ctx, u, "log")).toThrow(MalformedView);
+  });
+
+  it("refuses a log with no label", () => {
+    const { ctx } = harness();
+    const u = create(FeedMergeTestLogSchema, { token: { value: "t" } });
+    expect(() => renderMergeTestLogLink(ctx, u, "log")).toThrow(MalformedView);
+  });
+
+  it("leaves a modified click to the platform", async () => {
+    const { ctx, editor } = harness();
+    const a = renderMergeTestLogLink(ctx, testLog(), "log");
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+    await settle();
+    expect(editor).toHaveLength(0);
+  });
+
+  it("is left alone by the prose interceptor, opening once", async () => {
+    const { ctx, editor } = harness();
+    const root = document.createElement("div");
+    root.appendChild(renderMergeTestLogLink(ctx, testLog(), "log"));
+    const off = installProseLinkRouting(ctx, root);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor).toHaveLength(1);
+    off();
+  });
+});
 
 describe("renderExternalLink: what it renders", () => {
   it("renders an anchor for an https url", () => {
@@ -408,28 +555,35 @@ describe("renderEditorLink", () => {
     expect(editor).toHaveLength(1);
   });
 
-  it("relays the path verbatim", async () => {
+  it("sends the workspace_file target", async () => {
+    const { ctx, editor } = harness();
+    click(renderEditorLink(ctx, { text: "x", path: "/w/x" }));
+    await settle();
+    expect(editor[0].target.case).toBe("workspaceFile");
+  });
+
+  it("relays the path verbatim inside the workspace_file target", async () => {
     const { ctx, editor } = harness();
     click(renderEditorLink(ctx, { text: "x", path: "/w/a b/c.md" }));
     await settle();
-    expect(editor[0].path).toBe("/w/a b/c.md");
+    expect(workspaceFileOf(editor[0]).path).toBe("/w/a b/c.md");
   });
 
-  it("sends the line when one was given", async () => {
+  it("sends the target's line when one was given", async () => {
     const { ctx, editor } = harness();
     click(renderEditorLink(ctx, { text: "x", path: "/w/x", line: 42 }));
     await settle();
-    expect(editor[0].line).toBe(42);
+    expect(workspaceFileOf(editor[0]).line).toBe(42);
   });
 
-  it("leaves the line UNSET when none was given, rather than sending a zero", async () => {
+  it("leaves the target's line UNSET when none was given, rather than sending a zero", async () => {
     // ARRANGE: unset means the file's top; a zero would claim line zero exists.
     const { ctx, editor } = harness();
     // ACT
     click(renderEditorLink(ctx, { text: "x", path: "/w/x" }));
     await settle();
     // ASSERT
-    expect(editor[0].line).toBeUndefined();
+    expect(workspaceFileOf(editor[0]).line).toBeUndefined();
   });
 
   it("addresses the request to this page's workspace", async () => {
@@ -595,7 +749,7 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
 
     // Assert.
     expect(editor).toHaveLength(1);
-    expect(editor[0].path).toBe("/Users/u/w/my file.go");
+    expect(workspaceFileOf(editor[0]).path).toBe("/Users/u/w/my file.go");
     off();
   });
 
@@ -610,7 +764,7 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
 
     // Assert.
     expect(editor).toHaveLength(1);
-    expect(editor[0].path).toBe("/Users/u/w/a.go");
+    expect(workspaceFileOf(editor[0]).path).toBe("/Users/u/w/a.go");
     off();
   });
 
