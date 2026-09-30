@@ -402,8 +402,8 @@ func acceptanceEvidence(ctx context.Context, tx *sql.Tx, id WorkspaceID, turn Tu
 	}
 	var ended int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT count(*) FROM turns WHERE id = ? AND workspace_id = ? AND close_kind IN (?, ?, ?)`,
-		turn, id, int(CloseCompleted), int(CloseFailed), int(CloseKilled)).Scan(&ended); err != nil {
+		`SELECT count(*) FROM turns WHERE id = ? AND workspace_id = ? AND close_kind IN (?, ?, ?, ?)`,
+		turn, id, int(CloseCompleted), int(CloseFailed), int(CloseKilled), int(CloseFolded)).Scan(&ended); err != nil {
 		return "", err
 	}
 	if ended > 0 {

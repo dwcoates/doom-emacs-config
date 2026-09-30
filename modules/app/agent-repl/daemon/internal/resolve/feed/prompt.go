@@ -35,6 +35,21 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		// AN UNPLACEABLE PROMPT STILL OPENS ITS TURN: only its row is not drawn
 		// (place has reported why).
 		at, placed := r.place(s, recipient)
+		// A PROMPT FOLDED INTO A RUNNING TURN OPENS NO TURN. The vendor took it
+		// into the turn it names at a tool boundary, so its bubble belongs to
+		// that turn: stamped with it, working while it runs and settled by its
+		// terminal, and the turn the feed is running is left as it stands.
+		if joined := prompt.GetFoldedInto(); joined.GetValue() != "" {
+			if !placed {
+				return
+			}
+			row := r.userPromptRow(s, at, turn, joined, prompt.GetOrigin(), blocks)
+			log.Debug("daemon.feed.folded_prompt",
+				"a prompt folded into a running turn was drawn under that turn",
+				dlog.Context{"turn": turn.GetValue(), "folded_into": joined.GetValue(), "blocks": len(blocks)})
+			r.upsert(s, at, row, true)
+			return
+		}
 		// THE TURN THE SESSION IS RUNNING, learned from the prompt that opened
 		// it: every later row this turn produces is stamped with it, and its
 		// terminal row is what clears it. This is set even for a directive turn,
@@ -105,7 +120,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		if !placed {
 			return
 		}
-		row := r.userPromptRow(s, at, turn, prompt.GetOrigin(), blocks)
+		row := r.userPromptRow(s, at, turn, turn, prompt.GetOrigin(), blocks)
 		log.Debug("daemon.feed.user_prompt",
 			"a delivered prompt was drawn as a user-prompt row",
 			dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String(), "blocks": len(blocks)})
@@ -154,18 +169,21 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 }
 
 // userPromptRow composes THE user-prompt row. It is one function because the
-// same row is drawn from three places — a delivered prompt, a replayed one,
-// and a fork's ported parent conversation — and three spellings of one row
-// would let them disagree about its identity or its author.
+// same row is drawn from four places — a delivered prompt, a replayed one, a
+// prompt folded into a running turn, and a fork's ported parent conversation —
+// and four spellings of one row would let them disagree about its identity or
+// its author. The row is keyed by the prompt's own id and stamped with the
+// turn it belongs to, which differ only for a folded prompt.
 func (r *resolver) userPromptRow(
 	s *wsState,
 	at placement,
+	prompt *conversationv1.TurnId,
 	turn *conversationv1.TurnId,
 	origin conversationv1.PromptOrigin,
 	blocks []*frontendv1.FeedUserPromptBlock,
 ) *frontendv1.FeedRow {
 	return &frontendv1.FeedRow{
-		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue()}),
+		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: prompt.GetValue()}),
 		Turn: turn,
 		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
 			Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
@@ -245,7 +263,7 @@ func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 	}
 	at := r.outputPlacement(s)
 	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
-	row := r.userPromptRow(s, at, turn, prompt.Origin, blocks)
+	row := r.userPromptRow(s, at, turn, turn, prompt.Origin, blocks)
 	r.logger(s.id).Debug("daemon.feed.ported_prompt",
 		"a prompt ported from the parent workspace was drawn on the fork's feed",
 		dlog.Context{"turn": prompt.Turn, "origin": prompt.Origin.String(), "blocks": len(blocks)})

@@ -723,3 +723,90 @@ func TestTheAuthorLabelOfAVendorStartedTurnIsTheVendor(t *testing.T) {
 		t.Fatalf("author = %q, want Vendor", got)
 	}
 }
+
+// deliverFoldedPrompt draws a prompt the vendor folded into INTO at a tool
+// boundary.
+func (h *harness) deliverFoldedPrompt(turn, into, text string) {
+	h.t.Helper()
+	h.resolver.OnPrompt(testWorkspace, mainAgent(), &conversationv1.AgentPrompt{
+		Id:         &conversationv1.TurnId{Value: turn},
+		Agent:      mainAgent(),
+		Origin:     conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		FoldedInto: &conversationv1.TurnId{Value: into},
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{textBlock(text)},
+		}},
+	}, nil, noAddress())
+}
+
+// promptRow is the user-prompt row keyed by TURN on the root feed.
+func (h *harness) promptRow(turn string) *frontendv1.FeedRow {
+	h.t.Helper()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == h.promptRowID(turn) {
+			return row
+		}
+	}
+	h.t.Fatalf("no user-prompt row for turn %q", turn)
+	return nil
+}
+
+func TestAFoldedPromptIsStampedWithTheTurnItJoined(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+
+	// Act
+	h.deliverFoldedPrompt("turn-2", "turn-1", "also cover the edge case")
+
+	// Assert
+	if got := h.promptRow("turn-2").GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("turn stamp = %q, want the joined turn-1", got)
+	}
+}
+
+func TestAFoldedPromptLeavesTheRunningTurnStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+
+	// Act
+	h.deliverFoldedPrompt("turn-2", "turn-1", "also cover the edge case")
+
+	// Assert
+	h.resolver.mu.Lock()
+	running := h.resolver.state(testWorkspace).turnInFlight
+	h.resolver.mu.Unlock()
+	if running == nil || *running != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1 still running", running)
+	}
+}
+
+func TestAFoldedPromptWorksWhileTheTurnItJoinedRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+
+	// Act
+	h.deliverFoldedPrompt("turn-2", "turn-1", "also cover the edge case")
+
+	// Assert
+	if !h.promptRow("turn-2").GetUserPrompt().GetWorking() {
+		t.Fatal("a folded prompt must work while the turn it joined runs")
+	}
+}
+
+func TestTheJoinedTurnsTerminalSettlesTheFoldedPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+	h.deliverFoldedPrompt("turn-2", "turn-1", "also cover the edge case")
+
+	// Act
+	h.terminal("turn-1", completed(""), nil)
+
+	// Assert
+	if h.promptRow("turn-2").GetUserPrompt().GetWorking() {
+		t.Fatal("the joined turn's terminal must settle the folded prompt")
+	}
+}
