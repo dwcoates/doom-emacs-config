@@ -155,8 +155,10 @@ var ErrMovedAway = errors.New("bounce: the workspace is moving to another daemon
 // daemon it takes the workspace to, which installs it before it dials the
 // shim.
 type Handoff struct {
-	// Acts are the session acts queued behind the running work, in
-	// submission order.
+	// Acts are session acts a daemon built before acts were durable held
+	// entries queued in its memory, in submission order. This build writes
+	// none -- its acts are holds, which every daemon reads from the store --
+	// and holds any it adopts.
 	Acts []HandoffAct `json:"acts,omitempty"`
 	// Cut is the context cut (/clear, /compact) that IS the running turn, nil
 	// when none is.

@@ -165,8 +165,8 @@ func TestOnLeaseChangedDeliversAReleasedHoldWhenNothingIsRunning(t *testing.T) {
 	}
 }
 
-func TestOnLeaseChangedRunsAQueuedActBeforeTheReleasedPrompt(t *testing.T) {
-	// Arrange: a /compact queued behind a prompt the lease holds.
+func TestOnLeaseChangedReleasesThePromptHeldBeforeACompactFirst(t *testing.T) {
+	// Arrange: a prompt the lease holds, then a /compact behind it.
 	h := newHarness(t)
 	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
 	h.lease(wsm.HolderDrain, wsm.PolicyHold)
@@ -179,40 +179,53 @@ func TestOnLeaseChangedRunsAQueuedActBeforeTheReleasedPrompt(t *testing.T) {
 	h.clearLease()
 	// Act
 	h.q.OnLeaseChanged(theWorkspace)
-	// Assert: the cut runs, and the prompt waits for the cut's end.
-	if started := h.sender.started(); len(started) != 1 || started[0] != "t-compact" {
-		t.Fatalf("started = %v, want the queued /compact first and alone", started)
+	// Assert: first in, first out: the prompt, then the cut at its end.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started = %v, want the prompt held first delivered first", started)
 	}
 }
-
-func TestOnLeaseChangedWithNoHoldsStillRunsAQueuedAct(t *testing.T) {
-	// Arrange: an act installed with nothing held behind the lease.
+func TestOnLeaseChangedReleasesAHeldActAtTheLeasesEnd(t *testing.T) {
+	// Arrange: a model change held behind a holding lease.
 	h := newHarness(t)
 	h.lease(wsm.HolderRestart, wsm.PolicyHold)
-	h.q.mu.Lock()
-	h.q.stateLocked(theWorkspace).acts = []Act{{Kind: ActSetModel, Value: "opus"}}
-	h.q.mu.Unlock()
+	heldModelChange(t, h, "t-model", "opus")
+	h.q.OnLeaseChanged(theWorkspace)
 	h.clearLease()
+
 	// Act
 	h.q.OnLeaseChanged(theWorkspace)
+
 	// Assert
 	if models := h.sender.modelsSet(); len(models) != 1 || models[0] != "opus" {
-		t.Fatalf("models = %v, want the queued act run at the lease's release", models)
+		t.Fatalf("models = %v, want the held act applied at the lease's release", models)
 	}
 }
 
-func TestOnLeaseChangedKeepsAQueuedActWhileTheLeaseStands(t *testing.T) {
+func TestOnLeaseChangedKeepsAHeldActWhileTheLeaseStands(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.lease(wsm.HolderRestart, wsm.PolicyHold)
-	h.q.mu.Lock()
-	h.q.stateLocked(theWorkspace).acts = []Act{{Kind: ActSetModel, Value: "opus"}}
-	h.q.mu.Unlock()
+	heldModelChange(t, h, "t-model", "opus")
+
 	// Act
 	h.q.OnLeaseChanged(theWorkspace)
+
 	// Assert
 	if models := h.sender.modelsSet(); len(models) != 0 {
 		t.Fatalf("models = %v, want the act kept behind the standing lease", models)
+	}
+}
+
+// heldModelChange records a held model change, as SubmitSessionAct holds one
+// that must wait.
+func heldModelChange(t *testing.T, h *harness, turn ids.TurnID, model string) {
+	t.Helper()
+	sub := heldActSubmission(theWorkspace, Act{Kind: ActSetModel, Value: model, Turn: turn})
+	if err := h.db.PutHeldPrompt(context.Background(), wsm.HeldPrompt{
+		Workspace: theWorkspace, Turn: sub.Turn, Said: sub.Said, Origin: sub.Origin.String(),
+		QueuedAt: instant, Act: sub.Act,
+	}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
 	}
 }
 

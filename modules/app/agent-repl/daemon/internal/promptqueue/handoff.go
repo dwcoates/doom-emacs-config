@@ -89,18 +89,13 @@ func (q *queue) SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handof
 
 	q.mu.Lock()
 	handoff := bounce.Handoff{Interrupting: state.interrupting}
-	for _, act := range state.acts {
-		handoff.Acts = append(handoff.Acts, bounce.HandoffAct{
-			Kind: act.Kind, Value: act.Value, Turn: string(act.Turn), Origin: int32(act.Origin),
-		})
-	}
 	if state.cut != nil {
 		handoff.Cut = &bounce.HandoffCut{Turn: string(state.cut.turn), Command: int32(state.cut.command)}
 	}
 	if state.head != nil {
 		handoff.Head = string(*state.head)
 	}
-	state.acts, state.cut, state.head, state.interrupting = nil, nil, nil, false
+	state.cut, state.head, state.interrupting = nil, nil, false
 	carried := pending.across
 	pending.across = nil
 	pending.sealed = true
@@ -145,7 +140,7 @@ func (q *queue) UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff boun
 		pending.sealed = false
 	}
 	q.mu.Unlock()
-	q.installLocked(ws, state, handoff, true)
+	q.installLocked(ws, state, handoff)
 	if err := q.verifyInstalledLocked(ctx, ws, handoff, log); err != nil {
 		return err
 	}
@@ -175,14 +170,44 @@ func (q *queue) AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bo
 	state := q.state(ws)
 	state.drain.Lock()
 	defer state.drain.Unlock()
-	q.installLocked(ws, state, handoff, false)
+	q.installLocked(ws, state, handoff)
 	if err := q.verifyInstalledLocked(ctx, ws, handoff, log); err != nil {
+		return err
+	}
+	if err := q.holdCarriedActs(ctx, ws, handoff.Acts, log); err != nil {
 		return err
 	}
 	log.Info(opHandoff, "installed what the previous daemon's queue held in memory for the workspace", dlog.Context{
 		"acts": len(handoff.Acts), "running_cut": handoff.Cut != nil, "semantic_head": handoff.Head,
 		"interrupting": handoff.Interrupting,
 	})
+	return nil
+}
+
+// holdCarriedActs holds the session acts a handover from a daemon built before
+// acts were durable held entries carried in its memory. They are held exactly
+// as a new act that must wait is, at the tail of the queue: their submission
+// instants were never recorded, so no truer place exists. A handover this
+// build writes carries no acts, because its acts are already holds.
+func (q *queue) holdCarriedActs(ctx context.Context, ws ids.WorkspaceID, carried []bounce.HandoffAct, log dlog.Logger) error {
+	for _, a := range carried {
+		act := Act{Kind: a.Kind, Value: a.Value, Turn: ids.TurnID(a.Turn), Origin: conversationv1.PromptOrigin(a.Origin)}
+		switch act.Kind {
+		case ActClear, ActCompact, ActSetModel, ActSetPermissionMode:
+		default:
+			log.Error(opHandoff, "the handover carried an act of a kind the queue does not carry; it is not held", dlog.Context{
+				"act": a.Kind, "value": a.Value,
+			})
+			return fmt.Errorf("adopt %q: carried act %q is not a kind the queue carries", ws, a.Kind)
+		}
+		sub := heldActSubmission(ws, act)
+		if _, err := q.hold(ctx, sub, "", nil, log); err != nil {
+			return err
+		}
+		log.Info(opHandoff, "held a session act the previous daemon carried in memory", dlog.Context{
+			"act": act.Kind, "value": act.Value, "held_turn": string(sub.Turn),
+		})
+	}
 	return nil
 }
 
@@ -227,19 +252,8 @@ func (q *queue) verifyInstalledLocked(ctx context.Context, ws ids.WorkspaceID, h
 // installLocked puts a handoff into a workspace's memory. front puts the acts
 // AHEAD of any queued since (a take-back: they were queued first); otherwise
 // they are appended. The caller holds the delivery lock.
-func (q *queue) installLocked(ws ids.WorkspaceID, state *wsState, handoff bounce.Handoff, front bool) {
-	acts := make([]Act, 0, len(handoff.Acts))
-	for _, a := range handoff.Acts {
-		acts = append(acts, Act{
-			Kind: a.Kind, Value: a.Value, Turn: ids.TurnID(a.Turn), Origin: conversationv1.PromptOrigin(a.Origin),
-		})
-	}
+func (q *queue) installLocked(ws ids.WorkspaceID, state *wsState, handoff bounce.Handoff) {
 	q.mu.Lock()
-	if front {
-		state.acts = append(acts, state.acts...)
-	} else {
-		state.acts = append(state.acts, acts...)
-	}
 	if handoff.Cut != nil {
 		state.cut = &runningCut{turn: ids.TurnID(handoff.Cut.Turn), command: conversationv1.SessionCommand(handoff.Cut.Command)}
 	}

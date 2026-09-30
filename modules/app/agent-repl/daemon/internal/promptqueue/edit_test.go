@@ -278,8 +278,8 @@ func TestCommitEditThenAnInterjectVerdictInterruptsTheRunningTurn(t *testing.T) 
 	}
 }
 
-func TestCommitEditThenAnInterjectVerdictDeliversAtTheTurnsEnd(t *testing.T) {
-	// Arrange
+func TestCommitEditThenAnInterruptVerdictAgainstAQueuedPromptCoalesces(t *testing.T) {
+	// Arrange: t1's edit is ruled to interrupt t0, which is still queued.
 	h := newHarness(t)
 	queuedBehind(t, h, "t0", "t1")
 	beginEdit(t, h, "t1")
@@ -288,14 +288,15 @@ func TestCommitEditThenAnInterjectVerdictDeliversAtTheTurnsEnd(t *testing.T) {
 		t.Fatalf("CommitEdit: %v", err)
 	}
 	h.q.waitForClassifications()
+
 	// Act
 	turnEnds(h)
-	// Assert
-	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
-		t.Fatalf("started = %v, want the interjecting t1 first, as any interject", started)
+
+	// Assert: t0 carries t1 and is the one turn delivered.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t0" {
+		t.Fatalf("started = %v, want t0 carrying the folded t1", started)
 	}
 }
-
 func TestCommitEditWithNothingRunningDeliversInPlace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

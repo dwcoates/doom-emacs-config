@@ -104,8 +104,7 @@ type wsState struct {
 	// running turn (a verdict, an interjection, a release, the turn end's
 	// pop) reads it. Guarded by q.mu; set by runContextCut, retired by the
 	// turn's end or a refused start.
-	cut  *runningCut
-	acts []Act
+	cut *runningCut
 }
 
 // runningCut is a context cut running as the session's turn.

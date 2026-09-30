@@ -56,7 +56,7 @@ func TestSealMoveSealsAMoveTakenAtFreenessToo(t *testing.T) {
 	transfer.finish(h, nil)
 }
 
-func TestSealMoveCarriesTheQueuedActsInOrder(t *testing.T) {
+func TestSealMoveCarriesNoActsBecauseQueuedActsAreDurableHolds(t *testing.T) {
 	// Arrange: a /compact and a model change queued behind the running turn.
 	h := newHarness(t)
 	transfer := sealedBusyMove(t, h)
@@ -69,29 +69,10 @@ func TestSealMoveCarriesTheQueuedActsInOrder(t *testing.T) {
 	// Act
 	handoff, _, err := h.q.SealMove(context.Background(), theWorkspace)
 
-	// Assert
-	if err != nil || len(handoff.Acts) != 2 || handoff.Acts[0].Kind != ActCompact || handoff.Acts[0].Turn != "t-compact" || handoff.Acts[1].Value != "opus" {
-		t.Fatalf("SealMove = (%+v, %v), want the /compact then the model change", handoff, err)
-	}
-	transfer.finish(h, nil)
-}
-
-func TestSealMoveTakesTheActsOutOfThisDaemonsMemory(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	transfer := sealedBusyMove(t, h)
-	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "t-compact"}); err != nil {
-		t.Fatalf("SubmitSessionAct: %v", err)
-	}
-
-	// Act
-	if _, _, err := h.q.SealMove(context.Background(), theWorkspace); err != nil {
-		t.Fatalf("SealMove: %v", err)
-	}
-
-	// Assert
-	if acts := h.q.state(theWorkspace).acts; len(acts) != 0 {
-		t.Fatalf("acts left here after the seal = %+v, want none: they are the next daemon's", acts)
+	// Assert: the acts are standing holds the next daemon reads from the store.
+	standing, readErr := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || readErr != nil || len(handoff.Acts) != 0 || len(standing) != 2 {
+		t.Fatalf("SealMove = (%+v, %v), standing = (%d, %v); want no carried acts and two standing holds", handoff, err, len(standing), readErr)
 	}
 	transfer.finish(h, nil)
 }
@@ -162,34 +143,6 @@ func TestSealMoveSupersedesAVerdictStillBeingJudged(t *testing.T) {
 	transfer.finish(h, nil)
 }
 
-func TestUnsealMovePutsTheActsBackAheadOfLaterOnes(t *testing.T) {
-	// Arrange: a sealed /compact, then the move is taken back.
-	h := newHarness(t)
-	transfer := sealedBusyMove(t, h)
-	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "t-compact"}); err != nil {
-		t.Fatalf("SubmitSessionAct: %v", err)
-	}
-	handoff, _, err := h.q.SealMove(context.Background(), theWorkspace)
-	if err != nil {
-		t.Fatalf("SealMove: %v", err)
-	}
-	h.q.mu.Lock()
-	h.q.states[theWorkspace].acts = []Act{{Kind: ActSetModel, Value: "opus"}}
-	h.q.mu.Unlock()
-
-	// Act
-	if err := h.q.UnsealMove(context.Background(), theWorkspace, handoff); err != nil {
-		t.Fatalf("UnsealMove: %v", err)
-	}
-
-	// Assert
-	acts := h.q.state(theWorkspace).acts
-	if len(acts) != 2 || acts[0].Kind != ActCompact || acts[1].Kind != ActSetModel {
-		t.Fatalf("acts after the take-back = %+v, want the carried /compact ahead of the later act", acts)
-	}
-	transfer.finish(h, errors.New("the transfer failed"))
-}
-
 func TestUnsealMoveLetsTheRunningMoveCarryRequestsAgain(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -213,8 +166,9 @@ func TestUnsealMoveLetsTheRunningMoveCarryRequestsAgain(t *testing.T) {
 	transfer.finish(h, errors.New("the transfer failed"))
 }
 
-func TestAdoptHandoffQueuesTheCarriedActsForTheTurnsEnd(t *testing.T) {
-	// Arrange: the adopted shim still runs the turn the act waited behind.
+func TestAdoptHandoffHoldsAnOlderDaemonsCarriedActsForTheTurnsEnd(t *testing.T) {
+	// Arrange: the adopted shim still runs the turn the act waited behind, and
+	// the handover came from a daemon that queued acts in memory.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	handoff := bounce.Handoff{Acts: []bounce.HandoffAct{{Kind: ActSetModel, Value: "opus"}}}
@@ -229,6 +183,41 @@ func TestAdoptHandoffQueuesTheCarriedActsForTheTurnsEnd(t *testing.T) {
 	// Assert
 	if models := h.sender.modelsSet(); len(models) != 1 || models[0] != "opus" {
 		t.Fatalf("models set at the turn's end = %v, want the carried act run", models)
+	}
+}
+
+func TestAdoptHandoffShowsAnOlderDaemonsCarriedActAsAHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	handoff := bounce.Handoff{Acts: []bounce.HandoffAct{{Kind: ActSetModel, Value: "opus"}}}
+
+	// Act
+	if err := h.q.AdoptHandoff(context.Background(), theWorkspace, handoff); err != nil {
+		t.Fatalf("AdoptHandoff: %v", err)
+	}
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 1 || standing[0].Act == nil || standing[0].Act.Value != "opus" {
+		t.Fatalf("standing = (%+v, %v), want one held model change", standing, err)
+	}
+}
+
+func TestAdoptHandoffRefusesACarriedActOfAnUnknownKind(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	handoff := bounce.Handoff{Acts: []bounce.HandoffAct{{Kind: "theme", Value: "dark"}}}
+
+	// Act
+	err := h.q.AdoptHandoff(context.Background(), theWorkspace, handoff)
+
+	// Assert
+	if err == nil {
+		t.Fatal("AdoptHandoff held an act of a kind the queue does not carry")
+	}
+	if !logged(h.log.Records(), "error", opHandoff, "the handover carried an act of a kind the queue does not carry; it is not held") {
+		t.Fatalf("the refused act was not recorded at error: %v", h.log.Records())
 	}
 }
 

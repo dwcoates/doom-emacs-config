@@ -142,9 +142,17 @@ func (d *fakeDB) PutHeldPrompt(_ context.Context, h wsm.HeldPrompt) error {
 	if d.putHeldErr != nil {
 		return d.putHeldErr
 	}
+	// AN UPSERT BY TURN, as the real store's: a re-put keeps the entry's place,
+	// and a retired hold never resurrects.
+	prior, exists := d.held[h.Turn]
+	if exists && prior.Tombstone != nil {
+		return errors.New("the hold is retired")
+	}
 	copied := h
 	d.held[h.Turn] = &copied
-	d.order = append(d.order, h.Turn)
+	if !exists {
+		d.order = append(d.order, h.Turn)
+	}
 	return nil
 }
 

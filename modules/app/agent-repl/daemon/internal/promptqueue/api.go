@@ -121,6 +121,10 @@ type Submission struct {
 	// and runs as its own turn. It is stored on the hold, so every later
 	// judgement of the hold honors it.
 	Delivery wsm.Delivery
+	// Act, when set, makes the submission a held SESSION ACT (a model or
+	// permission-mode change) rather than a prompt: never classified, and run
+	// as the act when what is ahead of it ends.
+	Act *wsm.HeldAct
 }
 
 // Disposition is what became of a submission. A hold is an ANSWER, not a

@@ -29,6 +29,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		Target:    sub.Target,
 		QueuedAt:  q.deps.Now(),
 		Delivery:  sub.Delivery,
+		Act:       sub.Act,
 	}
 	if lease != nil {
 		kind := lease.kind
@@ -48,6 +49,8 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	var cut runningCut
 	underCut := false
 	var unjudged func(dlog.Logger, ids.TurnID)
+	ahead := aheadRunning
+	var aheadHeld wsm.HeldPrompt
 	if running != "" {
 		if cut, underCut = q.runningCut(sub.WS); underCut {
 			held.Classification = &wsm.Classification{
@@ -57,6 +60,9 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 				At:      q.deps.Now(),
 			}
 		} else if verdict, why, ok := q.neverJudged(sub); ok {
+			unjudged = why
+			held.Classification = &verdict
+		} else if verdict, why, ok := q.judgedAgainst(ctx, sub, &ahead, &aheadHeld, log); ok {
 			unjudged = why
 			held.Classification = &verdict
 		} else {
@@ -96,13 +102,45 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// THE VERDICT IS ASYNCHRONOUS. The tray's `classifying` arm exists exactly
 	// so the submission is answered now and the judge's round trip does not sit
 	// inside the rpc.
+	q.startJudge(ctx, sub, running, ahead, aheadHeld, log)
+	return disposition, nil
+}
+
+// judgedAgainst decides the verdict of a prompt whose item ahead makes
+// classification needless: a held session act ahead, or a queue that could
+// not be read. ok is false when the prompt is to be judged; *ahead and
+// *aheadHeld then name what it is judged against.
+func (q *queue) judgedAgainst(ctx context.Context, sub Submission, ahead *aheadKind, aheadHeld *wsm.HeldPrompt, log dlog.Logger) (wsm.Classification, func(dlog.Logger, ids.TurnID), bool) {
+	kind, prev, err := q.itemAhead(ctx, sub.WS, sub.Turn)
+	if err != nil {
+		log.Error(opClassify, "could not read what is queued ahead of the prompt; it waits its turn and is not classified",
+			dlog.Context{"turn": string(sub.Turn), "cause": err.Error()})
+		return wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "what is queued ahead of the prompt could not be read, so it waits its turn",
+			At:     q.deps.Now(),
+		}, func(dlog.Logger, ids.TurnID) {}, true
+	}
+	*ahead, *aheadHeld = kind, prev
+	if kind == aheadAct {
+		return q.behindActVerdict(prev), func(log dlog.Logger, _ ids.TurnID) { behindActNeverClassified(log, sub.Turn, prev) }, true
+	}
+	return wsm.Classification{}, nil, false
+}
+
+// startJudge runs the classifier asynchronously against the item ahead: the
+// queued prompt ahead when one is, the running turn otherwise.
+func (q *queue) startJudge(ctx context.Context, sub Submission, running ids.TurnID, ahead aheadKind, aheadHeld wsm.HeldPrompt, log dlog.Logger) {
 	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
 	go func() {
 		defer q.classifying.Done()
+		if ahead == aheadQueued {
+			q.judgeQueued(context.WithoutCancel(ctx), sub, aheadHeld, epoch, log)
+			return
+		}
 		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
 	}()
-	return disposition, nil
 }
 
 // classifyHeld re-enters a STANDING hold into the classifier path against the
@@ -128,13 +166,15 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 		q.record(ctx, sub, verdict, log)
 		return
 	}
+	ahead := aheadRunning
+	var aheadHeld wsm.HeldPrompt
+	if verdict, why, ok := q.judgedAgainst(ctx, sub, &ahead, &aheadHeld, log); ok {
+		why(log, running)
+		q.record(ctx, sub, verdict, log)
+		return
+	}
 	q.record(ctx, sub, wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}, log)
-	epoch := q.contentEpoch(sub.WS, sub.Turn)
-	q.classifying.Add(1)
-	go func() {
-		defer q.classifying.Done()
-		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
-	}()
+	q.startJudge(ctx, sub, running, ahead, aheadHeld, log)
 }
 
 // sessionActVerdict answers the verdict a held prompt earns when its own text
@@ -168,6 +208,13 @@ func (q *queue) neverJudged(sub Submission) (verdict wsm.Classification, why fun
 	if verdict, command, isAct := q.sessionActVerdict(sub); isAct {
 		return verdict, func(log dlog.Logger, running ids.TurnID) { neverClassified(log, sub.Turn, command, running) }, true
 	}
+	if sub.Act != nil {
+		return wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the entry is a " + sub.Act.Kind + " change, a session act: it is queued behind what is ahead of it and never classified",
+			At:     q.deps.Now(),
+		}, func(log dlog.Logger, running ids.TurnID) { heldActNeverClassified(log, sub.Turn, sub.Act, running) }, true
+	}
 	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
 		return verdict, func(log dlog.Logger, running ids.TurnID) { deferredNeverClassified(log, sub.Turn, running) }, true
 	}
@@ -195,6 +242,14 @@ func (q *queue) deferredVerdict(sub Submission) (wsm.Classification, bool) {
 func deferredNeverClassified(log dlog.Logger, held, running ids.TurnID) {
 	log.Info(opClassify, "the prompt was deferred; it waits for the running turn to end and is never classified", dlog.Context{
 		"held_turn": string(held), "running_turn": string(running),
+	})
+}
+
+// heldActNeverClassified records, at INFO, a held model or permission-mode
+// change kept from the classifier.
+func heldActNeverClassified(log dlog.Logger, held ids.TurnID, act *wsm.HeldAct, running ids.TurnID) {
+	log.Info(opClassify, "the entry is a session act; it is queued behind the running turn and never classified", dlog.Context{
+		"held_turn": string(held), "session_act": act.Kind, "value": act.Value, "running_turn": string(running),
 	})
 }
 
