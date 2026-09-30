@@ -426,7 +426,9 @@ Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
 
 A held prompt whose first word is `stop` or `abort` (the explicit-interrupt
 fast path, also without `--fake`) or whose text contains `[interject]` is
-classified `interject`; every other prompt is `hold_for_turn_end`.
+routed `interrupt` (the `interject` verdict); one whose text contains
+`[after-tool-call]` is routed `after_tool_call` and joins the running turn;
+every other prompt is `hold_for_turn_end`.
 
 ## Kernel locks (shim-held; the daemon only probes)
 
