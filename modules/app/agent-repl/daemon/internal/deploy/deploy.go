@@ -96,10 +96,11 @@ const (
 	ShimsBouncing       OutcomeKind = "shims"
 	ReloadPushed        OutcomeKind = "reload_pushed"
 	DeferredToSuccessor OutcomeKind = "deferred_to_successor"
-	// RestartingAcrossLayout is a stale daemon whose fresh build writes a
-	// DIFFERENT state layout: it is rolled out stop-then-start
+	// RestartingAcrossLayout is a stale daemon whose fresh build changes the
+	// state layout by a BREAKING step: it is rolled out stop-then-start
 	// (rollout.Controller.Restart), never handed over, because a joining
-	// successor cannot carry an older layout forward on its read-only handle.
+	// successor carries an older layout forward by additive steps alone
+	// (wsm.OpenJoining).
 	RestartingAcrossLayout OutcomeKind = "restarting_across_layout"
 )
 
@@ -220,6 +221,10 @@ type Deps struct {
 	// StateLayout answers the state layout a daemon binary writes; nil is
 	// BinaryLayout, which asks the binary itself.
 	StateLayout func(ctx context.Context, bin string) (int, error)
+	// MigrationKind answers what a daemon binary's migration steps from a
+	// running layout up to its own mean for the running build; nil is
+	// BinaryMigrationKind, which asks the binary itself.
+	MigrationKind func(ctx context.Context, bin string, from int) (wsm.MigrationKind, error)
 	// RunningLayout is the state layout THIS process writes; zero is
 	// wsm.LayoutVersion, which is what this binary was built with.
 	RunningLayout int
@@ -286,6 +291,9 @@ func New(deps Deps) (*Deployer, error) {
 	}
 	if deps.StateLayout == nil {
 		deps.StateLayout = BinaryLayout
+	}
+	if deps.MigrationKind == nil {
+		deps.MigrationKind = BinaryMigrationKind
 	}
 	if deps.RunningLayout == 0 {
 		deps.RunningLayout = wsm.LayoutVersion
@@ -738,10 +746,11 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 	daemon := Outcome{Component: ComponentDaemon, Build: fresh.daemon, Kind: UpToDate}
 	if fresh.daemon != d.deps.DaemonBuild {
 		// THE FRESH BINARY IS ASKED WHICH LAYOUT IT WRITES before anything is
-		// decided. A handover's successor opens the state READ-ONLY and cannot
-		// migrate it, so a layout change handed over is a successor that dies
-		// at boot (2026-09-27); it is rolled out stop-then-start instead. A
-		// binary that cannot answer is not handed over on a guess.
+		// decided. A handover's successor may carry the state forward only by
+		// ADDITIVE steps (wsm.OpenJoining); a layout change it cannot make is
+		// a successor that dies at boot (2026-09-27), so a breaking one is
+		// rolled out stop-then-start instead (restartsAcrossLayout). A binary
+		// that cannot answer is not handed over on a guess.
 		layout, err := d.deps.StateLayout(ctx, staged.DaemonBin())
 		fields := dlog.Context{"running": d.deps.DaemonBuild, "fresh": fresh.daemon, "forced": force}
 		if err != nil {
@@ -749,8 +758,12 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 			return []Outcome{daemon}, fmt.Errorf("deploy: read the fresh daemon's state layout: %w", err)
 		}
 		fields["running_layout"], fields["fresh_layout"] = d.deps.RunningLayout, layout
-		if layout != d.deps.RunningLayout {
-			d.log.Info(opDecide, "this daemon runs an older build whose state layout differs from the fresh one; restarting it rather than handing over", fields)
+		restart, err := d.restartsAcrossLayout(ctx, staged, layout, fields)
+		if err != nil {
+			return []Outcome{daemon}, err
+		}
+		if restart {
+			d.log.Info(opDecide, "this daemon runs an older build whose state layout the fresh one changes by a breaking step; restarting it rather than handing over", fields)
 			d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 				Components: []deployprogress.Component{deployprogress.Daemon}, Draining: !force})
 			accepted, err := d.deps.Rollout.Restart(ctx, force)
@@ -786,6 +799,33 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		return []Outcome{daemon}, err
 	}
 	return []Outcome{daemon, shims, d.webapp(fresh)}, nil
+}
+
+// restartsAcrossLayout decides whether a stale daemon is restarted rather
+// than handed over. The same layout is handed over. A NEWER layout reached
+// only by ADDITIVE steps is handed over too: the joining successor applies
+// them while the incumbent still serves (wsm.OpenJoining), which the steps
+// leave working. A breaking step, or a layout this build would move
+// backwards, is restarted across. A binary that cannot say what its steps
+// mean is neither handed over nor restarted on a guess.
+func (d *Deployer) restartsAcrossLayout(ctx context.Context, staged Staged, layout int, fields dlog.Context) (bool, error) {
+	switch {
+	case layout == d.deps.RunningLayout:
+		return false, nil
+	case layout < d.deps.RunningLayout:
+		return true, nil
+	}
+	kind, err := d.deps.MigrationKind(ctx, staged.DaemonBin(), d.deps.RunningLayout)
+	if err != nil {
+		d.log.Error(opDecide, "the fresh daemon could not say whether its migrations are additive; the daemon is neither handed over nor restarted", withCause(fields, err))
+		return false, fmt.Errorf("deploy: read the fresh daemon's migration kind: %w", err)
+	}
+	fields["migration_kind"] = kind.String()
+	if kind == wsm.MigrationAdditive {
+		d.log.Info(opDecide, "the fresh daemon's state layout differs by additive steps alone; its successor applies them while joining, so it is handed over", fields)
+		return false, nil
+	}
+	return true, nil
 }
 
 // shims asks the rollout to judge every live shim against the installed

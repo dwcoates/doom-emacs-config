@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -124,9 +125,16 @@ type options struct {
 	// layoutVersion asks ONE question and starts no daemon: which state
 	// layout does this binary write? A deploy asks it of the STAGED binary
 	// before it decides between a handover and a restart, because a joining
-	// successor opens the state read-only and cannot carry an older layout
-	// forward (see rollout.Controller.Restart).
+	// successor carries an older layout forward by additive steps alone
+	// (wsm.OpenJoining; see rollout.Controller.Restart).
 	layoutVersion bool
+	// migrationKindFrom asks ONE question and starts no daemon: what do the
+	// migration steps from this layout up to the binary's own mean for the
+	// build that wrote it -- additive or breaking? A deploy asks it of the
+	// STAGED binary when the layouts differ: an additive chain is handed over
+	// (the joining successor applies it, wsm.OpenJoining), a breaking one is
+	// restarted across. Zero is unset.
+	migrationKindFrom int
 	// replacing marks a daemon spawned by an incumbent RESTARTING across a
 	// state layout change: it waits for the incumbent's boot claim for
 	// rollout.ReplacementClaimWait rather than the ordinary bound, because the
@@ -176,6 +184,11 @@ func main() {
 		// opened and nothing is logged.
 		fmt.Fprintln(os.Stdout, wsm.LayoutVersion)
 		os.Exit(exitSuccess)
+	}
+	if opts.migrationKindFrom != 0 {
+		// THE ANSWER IS THE BINARY'S OWN migration list, and it starts
+		// nothing: no state is opened and nothing is logged.
+		os.Exit(answerMigrationKind(opts.migrationKindFrom, os.Stdout, os.Stderr))
 	}
 	if opts.probeBootClaim {
 		// THE PROBE STARTS NOTHING. No log surfaces, no state root creation, no
@@ -243,6 +256,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	boot.StringVar(&opts.joining, "joining", "", "address of the incumbent daemon to take over from")
 	boot.BoolVar(&opts.probeBootClaim, "probe-boot-claim", false, "report whether this state root's boot claim is held and exit: 0 free, 3 held, 2 undecided")
 	boot.BoolVar(&opts.layoutVersion, rollout.LayoutVersionFlagName, false, "print the state layout version this binary writes and exit")
+	boot.IntVar(&opts.migrationKindFrom, rollout.MigrationKindFromFlagName, 0, "print whether the migrations from this state layout to the binary's own are additive or breaking and exit")
 	boot.BoolVar(&opts.replacing, rollout.ReplacingFlagName, false, "this daemon replaces an incumbent restarting across a state layout change: wait longer for its boot claim")
 	return config, boot
 }
@@ -359,4 +373,18 @@ func resolveStoreSocket(flagValue, envValue string, userHome func() (string, err
 		return "", fmt.Errorf("claude-repld: resolve the store socket: %w", err)
 	}
 	return socket, nil
+}
+
+// answerMigrationKind prints what the migration steps from a running layout up
+// to this binary's own mean for the build that wrote it, and answers the exit
+// status: success with `additive` or `breaking` on stdout, failure with the
+// reason on stderr when no chain reaches this binary's layout.
+func answerMigrationKind(from int, stdout, stderr io.Writer) int {
+	kind, err := wsm.ChainKind(from)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitFailure
+	}
+	fmt.Fprintln(stdout, kind)
+	return exitSuccess
 }
