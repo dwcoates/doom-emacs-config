@@ -689,6 +689,69 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 	}
 }
 
+// OnTurnJoining records a turn a caller is about to send to join the turn in
+// flight. See the interface.
+func (w *watcher) OnTurnJoining(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws != w.ws {
+		w.log.Error("daemon.sessionwatcher.turn_joining_foreign", "a joining turn was recorded on another workspace's watcher", dlog.Context{
+			"handed_workspace_id": string(ws), "turn_id": string(turn),
+		})
+		return false
+	}
+	if turn == "" {
+		w.log.Error("daemon.sessionwatcher.turn_joining_unidentified", "a joining turn named no id", nil)
+		return false
+	}
+	if w.turn == nil {
+		// THE TURN IT WAS TO JOIN ALREADY ENDED, so the shim starts the prompt
+		// as its own turn: it stands in flight exactly as an opening turn does.
+		if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a joining turn is going to the shim with no turn left to join") {
+			w.turnAccepted = false
+		}
+		return true
+	}
+	if w.adopted != nil && *w.adopted == *w.turn {
+		w.log.Info("daemon.sessionwatcher.turn_joining_refused", "the turn in flight is one the vendor started; only a turn of the daemon's is joined", dlog.Context{
+			"turn_id": string(turn), "turn_in_flight": string(*w.turn),
+		})
+		return false
+	}
+	w.waiting = append(w.waiting, waitingTurn{turn: turn})
+	w.knownTurns[turn] = struct{}{}
+	w.log.Info("daemon.sessionwatcher.turn_joining", "a turn is going to the shim to join the turn in flight; it waits behind it", dlog.Context{
+		"turn_id": string(turn), "turn_in_flight": string(*w.turn),
+	})
+	return true
+}
+
+// foldJoinLocked ends a joining turn the vendor folded into the turn in
+// flight, which its prompt row states. A row served again, or one for a join
+// this watcher never had in hand, ends nothing.
+func (w *watcher) foldJoinLocked(turn, into ids.TurnID) {
+	if _, ended := w.closedTurns[turn]; ended {
+		w.log.Debug("daemon.sessionwatcher.turn_folded_again", "a folded prompt's row was served again; its turn already ended", dlog.Context{
+			"turn_id": string(turn), "folded_into": string(into),
+		})
+		return
+	}
+	waiting := false
+	for _, entry := range w.waiting {
+		waiting = waiting || entry.turn == turn
+	}
+	if !waiting {
+		w.log.Info("daemon.sessionwatcher.turn_folded_unheld", "a folded prompt's row named a turn this watcher was not holding; nothing ends", dlog.Context{
+			"turn_id": string(turn), "folded_into": string(into), "turn_in_flight": turnValue(w.turn),
+		})
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.turn_folded", "the vendor folded a joining prompt into the turn in flight; its own turn ends unrun", dlog.Context{
+		"turn_id": string(turn), "folded_into": string(into),
+	})
+	w.turnEndedLocked(turn, wsm.CloseFolded)
+}
+
 // acceptedLocked reports whether `turn` is the turn in flight and past its
 // opening.
 func (w *watcher) acceptedLocked(turn ids.TurnID) bool {
@@ -702,20 +765,25 @@ func (w *watcher) acceptedLocked(turn ids.TurnID) bool {
 // reply to its own send (ruled 2026-09-28), so displacing the running turn
 // would leave its terminal ending nothing and its row open forever.
 func (w *watcher) waitBehindAdoptedLocked(turn ids.TurnID, accepted bool) bool {
-	if w.adopted == nil || w.turn == nil || *w.turn != *w.adopted || *w.turn == turn {
+	if w.turn == nil || *w.turn == turn {
 		return false
 	}
 	if _, ended := w.closedTurns[turn]; ended {
 		return false
 	}
+	// A TURN ALREADY WAITING -- behind the adopted turn, or joining a turn of
+	// the daemon's (OnTurnJoining) -- is marked handed over where it waits.
 	for i := range w.waiting {
 		if w.waiting[i].turn == turn {
 			w.waiting[i].accepted = w.waiting[i].accepted || accepted
-			w.log.Debug("daemon.sessionwatcher.turn_waiting", "a turn already waiting behind the adopted turn was handed over", dlog.Context{
+			w.log.Debug("daemon.sessionwatcher.turn_waiting", "a turn already waiting behind the turn in flight was handed over", dlog.Context{
 				"turn_id": string(turn), "turn_in_flight": string(*w.turn), "accepted": w.waiting[i].accepted,
 			})
 			return true
 		}
+	}
+	if w.adopted == nil || *w.turn != *w.adopted {
+		return false
 	}
 	w.waiting = append(w.waiting, waitingTurn{turn: turn, accepted: accepted})
 	w.knownTurns[turn] = struct{}{}
