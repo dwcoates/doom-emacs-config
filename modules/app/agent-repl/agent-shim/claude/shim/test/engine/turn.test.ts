@@ -53,6 +53,12 @@ interface Harness {
   adopted: OpenTurn | undefined;
   identity: SessionIdentity | undefined;
   submitRejects: Error | undefined;
+  /** Every prompt sent to join the running turn, with the turn it joins. */
+  readonly joins: { prompt: conversationv1.AgentPrompt; turn: string; into: string }[];
+  /** What `SessionContext.joiningTurn()` answers. */
+  joining: OpenTurn | undefined;
+  /** When set, `SessionContext.joinRunningTurn` throws it, as a refused push does. */
+  joinRejects: Error | undefined;
   /** Every store_unreachable the turn verbs reported to the session. */
   readonly storeFaults: string[];
   /** How many reads this shim SERVED, which is what lifts a store fault. */
@@ -114,6 +120,9 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     adopted: undefined,
     identity,
     submitRejects: undefined,
+    joins: [],
+    joining: undefined,
+    joinRejects: undefined,
     storeFaults: [] as string[],
     storeRecoveries: [] as number[],
     knows: true,
@@ -156,6 +165,12 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     },
     setOpenTurn: (turn) => {
       state.open = turn;
+    },
+    joiningTurn: () => state.joining,
+    joinRunningTurn: (prompt, turn, into) => {
+      if (state.joinRejects !== undefined) throw state.joinRejects;
+      state.joining = turn;
+      state.joins.push({ prompt, turn: turn.id.value, into: into.id.value });
     },
     releaseTurn: (turn) => {
       if (state.open === turn) state.open = undefined;
@@ -953,6 +968,186 @@ const REPEAT_MESSAGE =
 function repeatRecord(before: number): LogRecord | undefined {
   return logRecordsSince(before).find((record) => record.message === REPEAT_MESSAGE);
 }
+
+/** A StartTurn asking to join the running turn (`join_running_turn`). */
+function joinTurn(turn: conversationv1.TurnId = OTHER_TURN): shimv1.StartTurnRequest {
+  return create(shimv1.StartTurnRequestSchema, {
+    turn,
+    said: textSaid("also cover the edge case"),
+    origin: conversationv1.PromptOrigin.USER_SENT,
+    pageSize: 20,
+    joinRunningTurn: true,
+  });
+}
+
+/** A daemon turn standing in the send slot. */
+function openDaemonTurn(h: Harness): OpenTurn {
+  h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
+  return h.open;
+}
+
+describe("StartTurn joining the running turn", () => {
+  it("accepts a join while a daemon turn runs", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("sends the prompt to join the running turn under its own id", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(h.joins.map((join) => [join.turn, join.into])).toEqual([["turn-2", "turn-1"]]);
+  });
+
+  it("carries what the user said and the request's origin on the joining prompt", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    const prompt = h.joins[0]?.prompt;
+    expect([saidText(prompt?.said ?? textSaid("")), prompt?.origin]).toEqual([
+      "also cover the edge case",
+      conversationv1.PromptOrigin.USER_SENT,
+    ]);
+  });
+
+  it("interrupts nothing to join", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(h.query.calls).toEqual([]);
+  });
+
+  it("writes no prompt row before the vendor decides the join's fate", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect([...h.persistence.durable, ...h.persistence.buffered].map((entry) => entry.upsertKey)).toEqual([]);
+  });
+
+  it("leaves the running turn in the send slot", async () => {
+    // Arrange
+    const h = await harness();
+    const running = openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(h.open).toBe(running);
+  });
+
+  it("refuses a second join while one waits, as turn_already_open", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    await h.turns.startTurn(joinTurn());
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn(create(conversationv1.TurnIdSchema, { value: "turn-3" })));
+
+    // Assert
+    expect(failureKind(response)).toBe("turnAlreadyOpen");
+  });
+
+  it("refuses a join against a dead query as query_dead", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.queryDead = true;
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(failureKind(response)).toBe("queryDead");
+  });
+
+  it("refuses a join the vendor would not take as vendor_refused, and logs it", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.joinRejects = new Error("the input stream is closed");
+    const mark = logSinkMark();
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn());
+
+    // Assert
+    const logged = logRecordsSince(mark).find(
+      (record: LogRecord) => record.message === "the vendor refused the prompt sent to join the running turn",
+    );
+    expect([failureKind(response), logged?.level, logged?.context.cause]).toEqual([
+      "vendorRefused",
+      "error",
+      "the input stream is closed",
+    ]);
+  });
+
+  it("does not remember a refused join as started, so its retry is a first start", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.joinRejects = new Error("the input stream is closed");
+    await h.turns.startTurn(joinTurn());
+    h.joinRejects = undefined;
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(h.joins).toHaveLength(1);
+  });
+
+  it("starts the prompt as its own turn when no turn runs", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect([h.open?.id.value, h.joins.length, h.submitted.length]).toEqual(["turn-2", 0, 1]);
+  });
+
+  it("never joins the shim's own keep-alive: the prompt waits for it like any start", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const starting = h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect([await settled(starting), h.joins.length]).toEqual([false, 0]);
+  });
+});
 
 describe("StartTurn racing a turn the vendor started on its own", () => {
   // RULED 2026-09-28: a turn the vendor started on its own is adopted BESIDE
