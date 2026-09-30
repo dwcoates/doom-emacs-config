@@ -26,6 +26,14 @@ make_tree() {
         mkdir -p "$tree/$module"
         printf 'module fixture\n' >"$tree/$module/go.mod"
     done
+    # ensure-e2e-deps.sh has hermetic tests of its own (test-build-frontend.sh);
+    # here it is a stub recording that it ran, exiting ENSURE_STUB_STATUS.
+    cat >"$tree/bin/ensure-e2e-deps.sh" <<EOF
+#!/usr/bin/env bash
+echo ran >>"$tree/ensure.log"
+exit "\${ENSURE_STUB_STATUS:-0}"
+EOF
+    chmod +x "$tree/bin/ensure-e2e-deps.sh"
 }
 
 # make_stubs writes a `go` that fabricates counter files on `test` and a
@@ -94,6 +102,7 @@ run_coverage() {
         GO_STUB_NO_COUNTERS="${GO_STUB_NO_COUNTERS:-0}" \
         GO_STUB_MALFORMED_REPORT="${GO_STUB_MALFORMED_REPORT:-0}" \
         C8_STUB_FAIL="${C8_STUB_FAIL:-0}" \
+        ENSURE_STUB_STATUS="${ENSURE_STUB_STATUS:-0}" \
         "$tree/bin/e2e-coverage.sh" "$@" >"$tree/stdout" 2>"$tree/stderr"
     RUN_RC=$?
     set -e
@@ -176,6 +185,32 @@ test_c8_failure_is_loud() {
     fi
 }
 
+test_npm_deps_are_ensured_before_the_suite() {
+    local tree="$TMP/deps-ensured"
+    setup "$tree"
+    run_coverage "$tree"
+
+    if [ "$RUN_RC" -eq 0 ] && [ "$(cat "$tree/ensure.log" 2>/dev/null)" = "ran" ]; then
+        pass "the e2e suite's npm deps are ensured once before it runs"
+    else
+        fail "the e2e suite's npm deps are ensured once before it runs"
+    fi
+}
+
+test_failed_npm_deps_abort_before_the_suite() {
+    local tree="$TMP/deps-failed"
+    setup "$tree"
+    ENSURE_STUB_STATUS=3 run_coverage "$tree"
+
+    if [ "$RUN_RC" -ne 0 ] &&
+        grep -q "npm deps could not be ensured" "$tree/stderr" &&
+        [ ! -d "$tree/cov/claude-repld" ]; then
+        pass "npm deps that cannot be ensured abort the run before the suite"
+    else
+        fail "npm deps that cannot be ensured abort the run before the suite"
+    fi
+}
+
 test_summary_counts_only_our_sources() {
     local dir="$TMP/summary-ours"
     mkdir -p "$dir"
@@ -225,6 +260,8 @@ test_suite_failure_still_reports_and_fails
 test_missing_counters_are_loud
 test_malformed_go_summary_is_loud
 test_c8_failure_is_loud
+test_npm_deps_are_ensured_before_the_suite
+test_failed_npm_deps_abort_before_the_suite
 test_summary_counts_only_our_sources
 test_summary_without_our_sources_is_loud
 
