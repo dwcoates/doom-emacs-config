@@ -88,7 +88,14 @@ export interface PersistEntry {
         readonly run: conversationv1.AgentActivityId;
         readonly frame: conversationv1.AgentBash;
       }
-    | { readonly kind: "residue"; readonly residue: storev1.StoreUnservedItem };
+    | { readonly kind: "residue"; readonly residue: storev1.StoreUnservedItem }
+    /**
+     * A detached shell run's CLAIM on its spool (store.v1 ShellRunClaim): the
+     * vendor's task id paired with the run, as the task stream stated both.
+     * Not a row: the writer lifts it into the batch's `shell_run_claims`, and
+     * it rides the same ordered buffer so it is retried like every write.
+     */
+    | { readonly kind: "shell_run_claim"; readonly claim: storev1.ShellRunClaim };
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +414,10 @@ export interface Persistence {
    * announcement, so an announced run always has its first row, and there is
    * no producer left to wait for.
    */
-  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  openBashRun(
+    work: conversationv1.DetachedWorkId,
+    options: { readonly awaitFirstRow: boolean },
+  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe faults the record plane raises. Returns an unsubscribe. */
   onFault(listener: (fault: conversationv1.SessionFault) => void): () => void;
   /** Observe degraded windows the record plane opens and closes. */

@@ -1545,7 +1545,7 @@ describe("convertDetached: the announcement's kind", () => {
     expect(registry.causeOf("t1")).toBeUndefined();
   });
 
-  it("states the kind a task's START named on a by-hand backgrounding", () => {
+  it("states the kind a task's START named when a patch moves it", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     registry.remember("t1", "local_bash");
@@ -1558,7 +1558,7 @@ describe("convertDetached: the announcement's kind", () => {
     );
 
     // Assert.
-    expect(kindOf(entries[0]).case).toBe("bash");
+    expect(kindOf(entries.find((entry) => entry.item.kind === "frame")).case).toBe("bash");
   });
 
   it("states the kind the vendor's LIVE LEVEL named when the start was never seen", () => {
@@ -1569,7 +1569,7 @@ describe("convertDetached: the announcement's kind", () => {
     );
 
     // Assert.
-    expect(kindOf(entries[0]).case).toBe("bash");
+    expect(kindOf(entries.find((entry) => entry.item.kind === "frame")).case).toBe("bash");
   });
 
   it("announces nothing for a by-hand backgrounding of a task of no known kind, at ERROR", () => {
@@ -2015,15 +2015,81 @@ describe("the shell run's lifecycle rows", () => {
     expect(again?.source).toEqual(first?.source);
   });
 
-  it("puts a by-hand backgrounded shell's START ahead of its announcement", () => {
-    // Arrange, Act: the incident's path, a shell a person backgrounded, announced here.
+  it("claims the moved shell's spool, then puts its START ahead of its announcement", () => {
+    // Arrange, Act: the incident's path, a shell the vendor's timeout moved, announced here.
     const entries = convert(BY_HAND, {}, shellTask(), holdingShell());
 
     // Assert.
-    expect(entries.map((entry) => entry.upsertKey)).toEqual([`bash:${SHELL}:start`, `detached:${SHELL}`]);
+    expect(entries.map((entry) => entry.upsertKey)).toEqual([
+      "shell-run-claim:t1",
+      `bash:${SHELL}:start`,
+      `detached:${SHELL}`,
+    ]);
   });
 
-  it("writes no start when a by-hand backgrounded task is an AGENT", () => {
+  it("claims the spool of a moved shell whose call this fold never saw, with no start and no announcement refused", () => {
+    // Arrange, Act: a shell of a backgrounded subagent, whose calls never reach this stream.
+    const entries = convert(BY_HAND, {}, shellTask(), createCallRegistry());
+
+    // Assert.
+    const claim = entries[0]?.item.kind === "shell_run_claim" ? entries[0].item.claim : undefined;
+    expect(claim?.vendorTaskId).toBe("t1");
+    expect(claim?.run?.value).toBe(SHELL);
+    expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
+  });
+
+  it("announces a moved shell as `vendor_moved`: the patch states no cause", () => {
+    // Arrange, Act.
+    const entries = convert(BY_HAND, {}, shellTask(), holdingShell());
+
+    // Assert.
+    expect(detachedOrigin(entries.find((entry) => entry.item.kind === "frame")).cause.case).toBe("vendorMoved");
+  });
+
+  it("remembers `vendor_moved` for a moved shell until its result states the cause", () => {
+    // Arrange.
+    const registry = shellTask();
+
+    // Act.
+    convert(BY_HAND, {}, registry, holdingShell());
+
+    // Assert.
+    expect(registry.causeOf("t1")).toBe("vendor_moved");
+  });
+
+  it("lets the moved shell's own result restate the cause it states", () => {
+    // Arrange.
+    const registry = shellTask();
+    convert(BY_HAND, {}, registry, holdingShell());
+
+    // Act.
+    drain([bashDetachment({ backgroundTaskId: "t1", timedOutAfterMs: 600_000 }, undefined, registry)]);
+
+    // Assert.
+    expect(registry.causeOf("t1")).toBe("timed_out");
+  });
+
+  it("claims the spool of a shell that STARTED in the background, and announces nothing yet", () => {
+    // Arrange, Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: SHELL, task_type: "local_bash", is_backgrounded: true },
+    );
+
+    // Assert.
+    expect(entries.map((entry) => entry.item.kind)).toEqual(["shell_run_claim"]);
+  });
+
+  it("claims nothing for a shell that started in the FOREGROUND", () => {
+    // Arrange, Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: SHELL, task_type: "local_bash", is_backgrounded: false },
+    );
+
+    // Assert.
+    expect(entries).toEqual([]);
+  });
+
+  it("writes no start and claims no spool when a moved task is an AGENT", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     registry.remember("t1", "local_agent");
@@ -2032,7 +2098,7 @@ describe("the shell run's lifecycle rows", () => {
     const entries = convert(BY_HAND, {}, registry, holdingShell());
 
     // Assert.
-    expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
+    expect(entries.some((entry) => entry.item.kind === "bash_run" || entry.item.kind === "shell_run_claim")).toBe(false);
   });
 
   it("ends a concluded shell with its start restated and NO terminal: the sidecar writes the run's end", () => {

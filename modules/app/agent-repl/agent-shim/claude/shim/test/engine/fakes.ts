@@ -501,8 +501,14 @@ export class RecordingPersistence implements Persistence {
    * suite can say the start was made durable BEFORE the run was opened.
    */
   readonly bashRunCalls: string[] = [];
-  openBashRun(work?: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>> {
+  /** Whether each shell-run open asked the store to wait for a first row. */
+  readonly bashRunAwaits: boolean[] = [];
+  openBashRun(
+    work?: conversationv1.DetachedWorkId,
+    options?: { readonly awaitFirstRow: boolean },
+  ): Promise<AsyncIterable<conversationv1.AgentBash>> {
     this.bashRunCalls.push(`open:${work?.value ?? ""}`);
+    this.bashRunAwaits.push(options?.awaitFirstRow ?? false);
     const frames = this.bashFrames;
     return Promise.resolve({
       async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {

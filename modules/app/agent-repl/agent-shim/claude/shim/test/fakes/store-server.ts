@@ -50,7 +50,8 @@
  *     one row per upsert key, holding its newest write, as the real store's
  *     `ON CONFLICT(upsert_key)` does — then follows every write, and ENDS
  *     after the terminal row. A run with no stored row is a
- *     refused open — closed at the transport, like every other watch here.
+ *     refused open — closed at the transport, like every other watch here —
+ *     unless the request sets `await_first_row`, when it waits for the first.
  *   - A WRITE ID IS APPLIED ONCE. A batch entry whose `write_id` already
  *     landed is ABSORBED — it lands nothing, supersedes nothing and reaches no
  *     watcher — as the real store's write ledger absorbs it. A producer that
@@ -181,6 +182,8 @@ export interface FakeStore {
    * duplicate looked alike. The verdict is the discriminator.
    */
   writeBatches(): readonly FakeStoreWrite[];
+  /** Every shell run claim written, as `task id -> run`, in write order. */
+  shellRunClaims(): readonly string[];
   /** One book's rows, oldest first — the store's own order, for assertions. */
   book(agentId: string): storev1.StoreLineAt[];
   /** Every session-update row written, in order. */
@@ -276,6 +279,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
    * from these within one session's lineage, exactly as the real store does.
    */
   const vendorTasks = new Map<string, Set<string>>();
+  /** Every shell run claim a batch stated, as `task id -> run`. */
+  const runClaims: string[] = [];
   /**
    * Every bash row per run, ONE PER UPSERT KEY, in first-insert order, each
    * holding its newest write — the real store's row model. A run's output is
@@ -680,8 +685,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       async *watchBashRun(request) {
         noteRead("WatchBashRun", request);
         const run = request.run?.value ?? "";
-        const stored = bashRowsByRun.get(run);
-        if (stored === undefined || stored.length === 0) {
+        const stored = bashRowsByRun.get(run) ?? [];
+        // A VOUCHED RUN WITH NO ROW YET IS WAITED ON, as the real store waits.
+        if (stored.length === 0 && !request.awaitFirstRow) {
           // A REFUSED OPEN closes at the transport: the response type is the
           // row, so there is nowhere in the message to say "no such run".
           throw new ConnectError(
@@ -1004,6 +1010,13 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
             },
           });
         }
+        for (const claim of request.batch?.shellRunClaims ?? []) {
+          const run = claim.run?.value ?? "";
+          if (claim.vendorTaskId === "" || run === "") {
+            throw new Error("fake store: a batch stated a shell run claim missing its task id or its run");
+          }
+          runClaims.push(`${claim.vendorTaskId} -> ${run}`);
+        }
         for (const locator of request.batch?.agentLocators ?? []) {
           const agent = locator.agent?.value ?? "";
           if (locator.vendorTaskId === "" || agent === "") {
@@ -1064,6 +1077,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       readFailures.set(verb, { arm, detail: detail ?? `fake store refuses ${verb}` });
     },
     writeBatches: () => [...writeVerdicts],
+    shellRunClaims: () => [...runClaims],
     openTails: () => [...openTailTokens],
     tailOpened: async () => {
       const already = [...openTailTokens][0];
