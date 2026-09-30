@@ -455,6 +455,10 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
+	if err := d.refuseLostOverSettled(ctx, tx, r); err != nil {
+		return d.refuse(fields, err)
+	}
+
 	if prior != nil && retiredFrom == "" {
 		unchanged, err := sameContentBarVersion(r, prior)
 		if err != nil {

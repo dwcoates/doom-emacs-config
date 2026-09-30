@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 )
@@ -67,5 +68,43 @@ func TestRunSettlementsRefusesAnEmptyRunID(t *testing.T) {
 	}
 	if got := resp.Msg.GetFailure().GetInvalidRequest().GetField(); got != "run_ids[0]" {
 		t.Fatalf("failure = %v, want invalid_request naming run_ids[0]", resp.Msg.GetResult())
+	}
+}
+
+// bashLostFrame is the sidecar's LOST terminal for a shell run.
+func bashLostFrame() *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Cause: &conversationv1.AgentBashInterrupted_Lost{Lost: &conversationv1.DetachedLost{
+				How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}},
+			}},
+		}},
+	}}}
+}
+
+func TestALostTerminalOverAnEndedRunIsRefusedAndRecordedOnceAtError(t *testing.T) {
+	// Arrange: the run ended on its spool's own terminator.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	sidecar.write(ctx, t,
+		sidecar.agentEntry("w-exit", "bash:run-done:terminal", bashRun(nil, "run-done", bashSuccess("make", 0))))
+	before := runSettlements(ctx, t, cli, "run-done")
+	mark := store.logMark()
+
+	// Act
+	failure := sidecar.writeExpectingFailure(ctx, t, nil,
+		sidecar.agentEntry("w-lost", "bash:run-done:terminal", bashRun(nil, "run-done", bashLostFrame())))
+
+	// Assert: refused naming the entry, recorded once at ERROR under the
+	// site, and the run's recorded ending stands.
+	assertWriteInvalidRequest(t, failure, "entries[0]")
+	rec := assertExactlyOneNormalRecordAtLevel(t, recordsAtOperation(store.logRecordsAfter(mark), "store.rpc.write-batch"), "the refused LOST terminal", "error")
+	assertRefusalKeys(t, rec, "lost_over_settled", "invalid_request")
+	after := runSettlements(ctx, t, cli, "run-done")
+	if len(before) != 1 || len(after) != 1 || after[0].GetEndedAtMs() != before[0].GetEndedAtMs() {
+		t.Fatalf("settlement before = %v after = %v, want the original ending to stand", before, after)
 	}
 }

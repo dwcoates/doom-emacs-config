@@ -146,7 +146,7 @@ func correlated(ctx context.Context, header http.Header) context.Context {
 // and refusals that are a verb's ordinary answer alike.
 func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
 	fields.Operation = operation
-	fields.Level = ref.class.logLevel()
+	fields.Level = ref.logLevel()
 	fields.RefusalSite = ref.site
 	fields.RefusalKind = ref.class.armName()
 	log.Log(fields, "refused: %s", ref.detail)
