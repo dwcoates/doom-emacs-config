@@ -581,6 +581,18 @@ type Watcher interface {
 	// The caller MUST pair it with either OnTurnOpened (the shim accepted the
 	// turn) or OnTurnOpenFailed (it did not).
 	OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnJoining records a turn a caller is ABOUT to send to join the turn
+	// in flight (shim.v1.StartTurnRequest.join_running_turn), before StartTurn
+	// is dispatched. It waits BEHIND the turn in flight: when the vendor folds
+	// its prompt in, its prompt row (conversation.v1.AgentPrompt.folded_into)
+	// ends it as wsm.CloseFolded; when the turn in flight ends first, it stands
+	// in flight in its place. With no turn in flight it stands at once, as the
+	// shim then starts it as its own turn.
+	//
+	// It reports false, recording nothing, when the turn in flight is one the
+	// vendor started: only a turn of the daemon's is joined. The caller MUST
+	// pair a true with OnTurnOpened or OnTurnOpenFailed, as OnTurnOpening.
+	OnTurnJoining(ws ids.WorkspaceID, turn ids.TurnID) bool
 	// OnTurnOpenFailed retires a turn recorded by OnTurnOpening that the shim
 	// then refused, so a turn that never started does not stand as in flight.
 	OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID)
