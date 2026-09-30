@@ -2884,10 +2884,10 @@ describe("DetachForeground on a live foreground unit", () => {
     );
   }
 
-  it("refuses unsupported: the pinned SDK offers no verb to INITIATE a detachment", async () => {
-    // The unit is detachable in kind and STILL IN THE FOREGROUND -- the vendor
-    // holds no background work for it, so there is nothing to confirm and no
-    // verb to start one with.
+  it("refuses unsupported: the vendor matched a live detachable unit to no foreground task", async () => {
+    // The unit is detachable in kind and in flight here, but `backgroundTasks`
+    // answered `false`: the vendor tracks no foreground task for the call, so
+    // nothing was moved.
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.foreground.note("toolu_f", "bash", false);
@@ -2969,7 +2969,7 @@ describe("DetachForeground on a live foreground subagent", () => {
       unit: create(conversationv1.AgentActivityIdSchema, { value: unit }),
     });
 
-  it("refuses unsupported: a live foreground subagent is detachable in kind, but the pinned SDK offers no verb to INITIATE a detachment", async () => {
+  it("refuses unsupported: a live foreground subagent the vendor matched to no foreground task", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.foreground.note("toolu_agent", "subagent", false);
