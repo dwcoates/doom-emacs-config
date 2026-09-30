@@ -15,6 +15,7 @@ import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { tokenHeatColor } from "../../../src/token-heat.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
@@ -252,12 +253,37 @@ describe("the usage stamp", () => {
   it.each(STATES)("draws the stamp verbatim in the %s state", (arm) => {
     const el = drawFeedResponse(
       response({
-        usage: { text: "2.1k" },
+        usage: { text: "2.1k", heat: { position: 0.5 } },
         result: { case: arm, value: { prose: { markdown: "hi" } } },
       }),
       rowContext(),
     );
     expect(el.querySelector(".bubble-box .usage-stamp")?.textContent).toBe("2.1k");
+  });
+
+  it("colors the stamp by its heat, with the footer's token color", () => {
+    const el = drawFeedResponse(
+      response({
+        usage: { text: "40k", heat: { position: 0.5 } },
+        result: { case: "success", value: { prose: { markdown: "hi" } } },
+      }),
+      rowContext(),
+    );
+    const probe = document.createElement("span");
+    probe.style.color = tokenHeatColor(0.5, "p");
+    expect(el.querySelector<HTMLElement>(".usage-stamp")?.style.color).toBe(probe.style.color);
+  });
+
+  it("refuses a stamp that carries no heat", () => {
+    expect(() =>
+      drawFeedResponse(
+        response({
+          usage: { text: "40k" },
+          result: { case: "success", value: { prose: { markdown: "hi" } } },
+        }),
+        rowContext(),
+      ),
+    ).toThrow(MalformedView);
   });
 
   it("draws no stamp at all when no usage has been observed", () => {
@@ -273,7 +299,7 @@ describe("the usage corner's hover timestamp", () => {
   /** A settled response whose corner carries a token figure and a settle instant. */
   function settled(atMs: bigint) {
     return response({
-      usage: { text: "2.1k", atMs },
+      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
       result: { case: "success", value: { prose: { markdown: "done" } } },
     });
   }
@@ -356,7 +382,7 @@ describe("the usage corner's hover timestamp", () => {
     // Arrange, Act: usage stated at open, but no settle instant yet.
     const el = drawFeedResponse(
       response({
-        usage: { text: "2.1k", atMs: 0n },
+        usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
         result: { case: "update", value: { prose: { markdown: "typing" } } },
       }),
       rowContext(),
@@ -382,7 +408,7 @@ describe("the usage corner's hover timestamp", () => {
     // Arrange, Act
     const el = drawFeedResponse(
       response({
-        usage: { text: "2.1k", atMs: 0n },
+        usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
         result: { case: "update", value: { prose: { markdown: "typing" } } },
       }),
       rowContext(),
@@ -414,7 +440,7 @@ describe("the usage corner's slider markup", () => {
   /** A response whose corner carries the token figure and the given settle instant. */
   function withUsage(atMs: bigint) {
     return response({
-      usage: { text: "12.4k", atMs },
+      usage: { text: "12.4k", atMs, heat: { position: 0.5 } },
       result: { case: "success", value: { prose: { markdown: "done" } } },
     });
   }
@@ -666,7 +692,7 @@ describe("the usage corner's error paths", () => {
   /** A settled response whose corner settled at AT_MS. */
   function settled(atMs: bigint) {
     return response({
-      usage: { text: "2.1k", atMs },
+      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
       result: { case: "success", value: { prose: { markdown: "done" } } },
     });
   }
@@ -743,7 +769,7 @@ describe("the usage corner's first-line float", () => {
   /** A settled response whose corner carries a token figure and a settle instant. */
   function settled(atMs: bigint) {
     return response({
-      usage: { text: "2.1k", atMs },
+      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
       result: { case: "success", value: { prose: { markdown: "done" } } },
     });
   }
@@ -955,7 +981,7 @@ describe("the notice register", () => {
     const el = drawFeedResponse(
       response({
         notice: { heading: "a system remark" },
-        usage: { text: "2.1k" },
+        usage: { text: "2.1k", heat: { position: 0.5 } },
         result: { case: "success", value: { prose: { markdown: "hi" } } },
       }),
       rowContext(),
@@ -2432,7 +2458,7 @@ describe("the data-driven final-answer green", () => {
 describe("a re-push updates the bubble in place", () => {
   /** What a re-push may carry besides its prose. */
   interface Extra {
-    usage?: { text: string; atMs?: bigint };
+    usage?: { text: string; atMs?: bigint; heat?: { position: number } };
     notice?: { heading: string };
   }
 
@@ -2522,32 +2548,32 @@ describe("a re-push updates the bubble in place", () => {
 
   it("keeps the usage corner when its figure did not change", () => {
     // Arrange
-    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext());
     mount(before);
     const corner = before.querySelector(".usage-corner");
     // Act
-    drawFeedResponse(arriving("hello world", { usage: { text: "1k" } }), rowContext(before));
+    drawFeedResponse(arriving("hello world", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext(before));
     // Assert
     expect(before.querySelector(".usage-corner")).toBe(corner);
   });
 
   it("replaces the usage corner when its figure changed", () => {
     // Arrange
-    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext());
     mount(before);
     // Act
-    drawFeedResponse(arriving("hello world", { usage: { text: "2k" } }), rowContext(before));
+    drawFeedResponse(arriving("hello world", { usage: { text: "2k", heat: { position: 0.5 } } }), rowContext(before));
     // Assert
     expect(before.querySelectorAll(".usage-stamp")[0]?.textContent).toBe("2k");
   });
 
   it("stops the clock of a corner it replaced", () => {
     // Arrange -- a settled corner ticks its "ago".
-    const before = drawFeedResponse(settledAs("done", { usage: { text: "1k", atMs: 1_000n } }), rowContext());
+    const before = drawFeedResponse(settledAs("done", { usage: { text: "1k", atMs: 1_000n, heat: { position: 0.5 } } }), rowContext());
     mount(before);
     const corner = before.querySelector(".usage-corner");
     // Act
-    drawFeedResponse(settledAs("done", { usage: { text: "2k", atMs: 1_000n } }), rowContext(before));
+    drawFeedResponse(settledAs("done", { usage: { text: "2k", atMs: 1_000n, heat: { position: 0.5 } } }), rowContext(before));
     // Assert
     expect(corner?.querySelector(`[${TICKING_ATTRIBUTE}]`)).toBeNull();
   });
