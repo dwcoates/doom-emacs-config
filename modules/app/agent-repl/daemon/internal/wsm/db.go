@@ -231,10 +231,13 @@ type DB interface {
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
 
-	// EnqueueMerge puts a workspace in its target repository's DURABLE merge
-	// queue and returns its one-based position, refusing a workspace already
-	// queued there.
-	EnqueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) (int, error)
+	// RequestMerge RECORDS a workspace's merge request in its target
+	// repository's durable queue, in the requested state (in nobody's line),
+	// refusing a workspace already requested, queued or admitted there.
+	RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error
+	// QueueMerge moves a requested merge into line, at the back, and returns
+	// its one-based place among the entries in line.
+	QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (int, error)
 	// AdmitMerge marks the entry the orchestrator is running now.
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.

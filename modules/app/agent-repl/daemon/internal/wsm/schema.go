@@ -212,11 +212,15 @@ CREATE TABLE merge_queue_repos (
 );
 
 CREATE TABLE merge_queue (
-  repo_key     TEXT NOT NULL,
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  seq          INTEGER NOT NULL,
-  state        INTEGER NOT NULL,
-  enqueued_at  INTEGER NOT NULL,
+  repo_key         TEXT NOT NULL,
+  workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  seq              INTEGER NOT NULL,
+  state            INTEGER NOT NULL,
+  enqueued_at      INTEGER NOT NULL,
+  source_kind      INTEGER NOT NULL DEFAULT 0,
+  source_keep_open INTEGER NOT NULL DEFAULT 0,
+  source_workspace TEXT,
+  source_branch    TEXT,
   PRIMARY KEY (repo_key, workspace_id)
 );
 
