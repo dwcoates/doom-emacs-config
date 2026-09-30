@@ -1583,3 +1583,286 @@ func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
 		t.Fatalf("chips.go reads a prompt's description at %d sites, want 2 (takeStart and takeUpdate)", reads)
 	}
 }
+
+// ---- a subagent resumed by a send ------------------------------------------------
+
+// resumedSubagent announces AGENT's run resumed by the send SEND: the handle
+// and the unit it detached from are the send's, and the kind names the agent
+// that is running (AgentDetachedWork.kind).
+func resumedSubagent(send, agent string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: send},
+		Kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Subagent{
+			Subagent: &conversationv1.DetachedWorkKindSubagent{AgentId: &conversationv1.AgentId{Value: agent}},
+		}},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: send},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+}
+
+// commissionBeat is a running beat restating the commission it was spawned with.
+func commissionBeat(subagentType, description string, tokens uint64) *conversationv1.AgentSubagent {
+	return &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+		Prompt:   &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType, Description: &description},
+		Progress: &conversationv1.AgentSubagentProgress{TotalTokens: tokens},
+	}}}
+}
+
+// launchedThenSettled runs "spawn-1" (agent "spawn-1", opus-medium, "fix the
+// shim", 900 tokens) from its launch to its own terminal, so it is retired.
+func launchedThenSettled(h *harness) {
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "spawn-1", "opus-medium", "fix the shim"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnSubagent(testWS, workID("spawn-1"), detachedProgress(900))
+	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
+}
+
+// THE OWNER'S REPORT (2026-09-30): a subagent resumed by SendMessage came back
+// as a row labelled "subagent" with 0 tokens. The resume is the same agent as
+// the launch, so its row carries the launch's identity.
+func TestAResumedSubagentCarriesItsRetiredLaunchsIdentity(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 {
+		t.Fatalf("%d agent rows, want the resumed agent's one row", len(rows))
+	}
+	row := rows[0]
+	if row.GetLabel().GetText() != "opus-medium" || row.GetDescription().GetText() != "fix the shim" ||
+		row.GetTokens().GetText() != "900 tok" || row.GetWork().GetValue() != "send-1" {
+		t.Fatalf("row = %+v, want the launch's label, description and tokens under the resume's handle", row)
+	}
+	rec := lastRecord(t, h, "daemon.footer.detached_agent_bound")
+	if rec.Level != dlog.LevelInfo || rec.Context["identity"] != "retired_row" ||
+		rec.Context["work_id"] != "send-1" || rec.Context["agent_id"] != "spawn-1" || rec.Context["unit"] != "send-1" {
+		t.Fatalf("record = %+v, want INFO identity retired_row for send-1 running spawn-1", rec)
+	}
+}
+
+func TestAResumeOfALiveAgentReAddressesItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "spawn-1", "opus-medium", "fix the shim"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetWork().GetValue() != "send-1" || rows[0].GetLabel().GetText() != "opus-medium" {
+		t.Fatalf("rows = %+v, want the one live row re-addressed by the resume's handle", rows)
+	}
+	if rec := lastRecord(t, h, "daemon.footer.detached_agent_bound"); rec.Context["identity"] != "live_row" {
+		t.Fatalf("record = %+v, want identity live_row", rec)
+	}
+}
+
+// A DAEMON THAT CAME UP AFTER THE LAUNCH never saw the agent, so the row opens
+// minimal and says so.
+func TestAResumeOfAnAgentNeverDescribedOpensAMinimalRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" || rows[0].GetWork().GetValue() != "send-1" {
+		t.Fatalf("rows = %+v, want one minimal row under the resume's handle", rows)
+	}
+	rec := lastRecord(t, h, "daemon.footer.detached_agent_bound")
+	if rec.Level != dlog.LevelInfo || rec.Context["identity"] != "undescribed" {
+		t.Fatalf("record = %+v, want INFO identity undescribed", rec)
+	}
+	jumps := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")
+	if got := jumps[len(jumps)-1].Context["provenance"]; got != "detached_announcement" {
+		t.Fatalf("jump provenance = %v, want detached_announcement", got)
+	}
+}
+
+// AND THE RUN'S OWN BEAT DESCRIBES IT, because it restates the commission.
+func TestAResumedRunsBeatDescribesARowNeverDescribed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("send-1"), commissionBeat("opus-medium", "fix the shim", 379_388))
+
+	// Assert
+	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
+	if row.GetLabel().GetText() != "opus-medium" || row.GetDescription().GetText() != "fix the shim" || row.GetTokens().GetText() != "379.4k tok" {
+		t.Fatalf("row = %+v, want the beat's commission and running sum", row)
+	}
+}
+
+// THE BEAT ALSO RIDES THE CALLER'S STREAM, under the send's unit, which is the
+// row's handle and not its key.
+func TestAResumedRunsBeatOnTheCallersStreamReachesItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, subagentProgress("send-1", 2_000))
+
+	// Assert
+	if got := h.view(t).GetExpanded().GetAgents().GetRows()[0].GetTokens().GetText(); got != "2k tok" {
+		t.Fatalf("tokens = %q, want the resumed run's beat", got)
+	}
+}
+
+func TestAResumedRunsTerminalRetiresItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("send-1"), subagentSettled(false))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
+		t.Fatalf("agents chip = %d, want the resumed run retired at its own terminal", got.GetCount())
+	}
+}
+
+// EVERY RESUME CARRIES THE LATEST RUN'S IDENTITY: the second resume takes what
+// the first one's terminal left behind.
+func TestASecondResumeCarriesTheFirstResumesTokens(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+	h.r.OnSubagent(testWS, workID("send-1"), detachedProgress(5_000))
+	h.r.OnSubagent(testWS, workID("send-1"), subagentSettled(false))
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-2", "spawn-1"))
+
+	// Assert
+	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
+	if row.GetTokens().GetText() != "5k tok" || row.GetLabel().GetText() != "opus-medium" || row.GetWork().GetValue() != "send-2" {
+		t.Fatalf("row = %+v, want the first resume's tokens and the launch's label under send-2", row)
+	}
+}
+
+// THE READDED_RETIRED SHAPE OF THE REPORT: the set listing the resumed agent
+// finds its bound row and opens no minimal one beside it.
+func TestTheSetListingAResumedAgentAddsNoMinimalRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"spawn-1"}, nil, nil))
+
+	// Assert
+	rec := lastRecord(t, h, "daemon.footer.live_work_taken")
+	if got, _ := rec.Context["added"].([]string); len(got) != 0 {
+		t.Fatalf("added = %v, want nothing: the resumed agent already has its row", got)
+	}
+	if rows := h.view(t).GetExpanded().GetAgents().GetRows(); len(rows) != 1 || rows[0].GetLabel().GetText() != "opus-medium" {
+		t.Fatalf("rows = %+v, want the one described row", rows)
+	}
+}
+
+// THE RUN'S OWN ENTRY FIRST: the feed draws a resumed run under the send's
+// unit, which is on screen even when the launch's bubble is not.
+func TestAResumedRowJumpsToTheResumedRunsEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "feed-launch"})
+	launchedThenSettled(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnEntryPlaced(testWS, "send-1", &frontendv1.FeedId{Value: "feed-resume"})
+
+	// Assert
+	if got := h.view(t).GetExpanded().GetAgents().GetRows()[0].GetJump().GetEntry().GetValue(); got != "feed-resume" {
+		t.Fatalf("jump entry = %q, want the resumed run's own entry", got)
+	}
+}
+
+// UNTIL THE RESUMED RUN IS DRAWN, the launch's entry is where the agent is.
+func TestAResumedRowJumpsToTheLaunchUntilTheResumeIsDrawn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "feed-launch"})
+	launchedThenSettled(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Assert
+	if got := h.view(t).GetExpanded().GetAgents().GetRows()[0].GetJump().GetEntry().GetValue(); got != "feed-launch" {
+		t.Fatalf("jump entry = %q, want the launch's entry", got)
+	}
+}
+
+// A START ON THE RUN'S OWN STREAM, addressed by the resume's handle, describes
+// the bound row rather than opening a second one keyed by the handle.
+func TestAStartAddressedByAResumedHandleDescribesTheBoundRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("send-1"), subagentStartFrame("spawn-1", "opus-medium"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetLabel().GetText() != "opus-medium" {
+		t.Fatalf("rows = %+v, want the one bound row described by the start", rows)
+	}
+}
+
+func TestTakeUpdateLabelsAGenericRowFromTheCommission(t *testing.T) {
+	// Arrange
+	row := &agentRow{label: subagentLabel(nil)}
+
+	// Act
+	row.takeUpdate(commissionBeat("opus-medium", "fix the shim", 1).GetUpdate())
+
+	// Assert
+	if row.label != "opus-medium" {
+		t.Fatalf("label = %q, want the commission's type", row.label)
+	}
+}
+
+func TestTakeUpdateKeepsALabelledRowsLabel(t *testing.T) {
+	// Arrange
+	row := &agentRow{label: "Explore"}
+
+	// Act
+	row.takeUpdate(commissionBeat("", "a description", 1).GetUpdate())
+
+	// Assert
+	if row.label != "Explore" {
+		t.Fatalf("label = %q, want the row's own label kept", row.label)
+	}
+}
