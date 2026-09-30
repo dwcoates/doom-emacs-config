@@ -223,8 +223,9 @@ hash is mutated, so a rejected rename leaves both names untouched.
 The complete OLD-WS plist is preserved under NEW-WS except that
 `:project-dir' is replaced with the canonical new path and cached
 `:ws-dir-hash' is cleared for lazy recomputation from that path.  OLD-WS is
-then removed.  Returns NEW-WS after the move; invariant violations
-signal `user-error'."
+then removed, and NEW-WS takes OLD-WS's place in
+`agent-repl--workspace-history'.  Returns NEW-WS after the move; invariant
+violations signal `user-error'."
   (unless (and (stringp old-ws) (not (string-empty-p old-ws)))
     (agent-repl--log old-ws
                      "ws-rename-state: REJECT old-ws=%S new-ws=%S reason=invalid-old-name"
@@ -278,6 +279,12 @@ signal `user-error'."
     ;; mutations, so observers cannot run against a half-moved entry.
     (puthash new-ws new-plist agent-repl--workspaces)
     (remhash old-ws agent-repl--workspaces)
+    ;; The selection history is keyed by name, so the renamed workspace keeps
+    ;; its place in it: a rename is not a visit, and losing the entry would
+    ;; make a close skip the workspace the user was on before
+    ;; (`agent-repl--teardown-landing-target').
+    (setq agent-repl--workspace-history
+          (cl-substitute new-ws old-ws agent-repl--workspace-history :test #'equal))
     new-ws))
 
 (defun agent-repl--ws-rewrite-source-back-refs
