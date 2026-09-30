@@ -20,6 +20,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 
 	"connectrpc.com/connect"
@@ -141,6 +142,12 @@ type fakeStore struct {
 	byTaskID      string
 	byTaskAsked   bool
 
+	// the shell run claims answer, and what the last lookup asked for
+	claims      []db.ClaimedRun
+	claimsErr   error
+	claimsFor   []string
+	claimsAsked bool
+
 	cursors      []*storev1.CursorState
 	cursorsErr   error
 	cursorsFor   *string
@@ -250,6 +257,14 @@ func (f *fakeStore) AgentByVendorTask(_ context.Context, session, vendorTaskID s
 	f.byTaskSession, f.byTaskID = session, vendorTaskID
 	f.mu.Unlock()
 	return f.byTaskAgent, f.byTaskFound, f.byTaskErr
+}
+
+func (f *fakeStore) ShellRunClaims(_ context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claimsAsked = true
+	f.claimsFor = vendorTaskIDs
+	return f.claims, f.claimsErr
 }
 
 func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
@@ -1665,6 +1680,127 @@ func TestGetAgentByVendorTaskRefusesAnIncompleteRequest(t *testing.T) {
 			}
 			store.mu.Lock()
 			asked := store.byTaskAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
+	}
+}
+
+// ---- GetShellRunClaims ----
+
+// claimsFor is a lookup naming two spools' task ids.
+func claimsRequest() *storev1.GetShellRunClaimsRequest {
+	return &storev1.GetShellRunClaimsRequest{VendorTaskIds: []string{"b1", "b2"}}
+}
+
+func TestGetShellRunClaimsServesEachClaimWithItsOwnerWhenOnRecord(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.claims = []db.ClaimedRun{
+		{VendorTaskID: "b1", Run: "toolu_1", Owner: "agent-sub"},
+		{VendorTaskID: "b2", Run: "toolu_2"},
+	}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetShellRunClaims(context.Background(), connect.NewRequest(claimsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetShellRunClaims = %v, want nil", err)
+	}
+	claims := res.Msg.GetSuccess().GetClaims()
+	if len(claims) != 2 {
+		t.Fatalf("claims = %v, want two", claims)
+	}
+	if claims[0].GetClaim().GetVendorTaskId() != "b1" || claims[0].GetClaim().GetRun().GetValue() != "toolu_1" || claims[0].GetOwner().GetValue() != "agent-sub" {
+		t.Fatalf("claims[0] = %v, want b1 -> toolu_1 owned by agent-sub", claims[0])
+	}
+	if claims[1].Owner != nil {
+		t.Fatalf("claims[1].owner = %v, want unset while no owner is on record", claims[1].Owner)
+	}
+}
+
+func TestGetShellRunClaimsAsksTheStoreForExactlyTheRequestedIDs(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetShellRunClaims(context.Background(), connect.NewRequest(claimsRequest())); err != nil {
+		t.Fatalf("GetShellRunClaims = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if strings.Join(store.claimsFor, ",") != "b1,b2" {
+		t.Fatalf("store read %v, want [b1 b2]", store.claimsFor)
+	}
+}
+
+func TestGetShellRunClaimsMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.claimsErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetShellRunClaims(context.Background(), connect.NewRequest(claimsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetShellRunClaims = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+	// internal/db logged this failure already; the server only traces that it
+	// answered the failure arm, at the database-failure site.
+	if _, ok := findRecord(t, h.logs, "store.rpc.get-shell-run-claims", "error"); ok {
+		t.Fatalf("records = %+v, want no second error record for a db failure", records(t, h.logs))
+	}
+	traced := false
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation == "store.rpc.get-shell-run-claims" && rec.Context["refusal_site"] == SiteDatabaseFailure {
+			traced = true
+		}
+	}
+	if !traced {
+		t.Fatalf("records = %+v, want a trace at site %q", records(t, h.logs), SiteDatabaseFailure)
+	}
+}
+
+func TestGetShellRunClaimsRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetShellRunClaimsRequest
+		field   string
+	}{
+		{name: "no ids", request: &storev1.GetShellRunClaimsRequest{}, field: "vendor_task_ids"},
+		{name: "an empty id", request: &storev1.GetShellRunClaimsRequest{VendorTaskIds: []string{"b1", ""}}, field: "vendor_task_ids[1]"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetShellRunClaims(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetShellRunClaims = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != test.field {
+				t.Fatalf("result = %v, want invalid_request naming %s", res.Msg.GetResult(), test.field)
+			}
+			store.mu.Lock()
+			asked := store.claimsAsked
 			store.mu.Unlock()
 			if asked {
 				t.Fatalf("the store was read for a request the server refuses")

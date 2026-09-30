@@ -864,6 +864,20 @@ var inPlaceTables = []struct{ name, ddl, backfill string }{
 CREATE INDEX IF NOT EXISTS entry_place_book_order ON entry_place(book_agent_id, at_ms, ordinal, position)`,
 		`INSERT INTO entry_place (position, book_agent_id, at_ms, ordinal, recorded)
   SELECT position, book_agent_id, first_inserted_at_ms, 0, 0 FROM entry WHERE book_agent_id IS NOT NULL`},
+	// THE SHELL RUN CLAIMS (store.v1 ShellRunClaim): the vendor's task id —
+	// the name of a detached shell's spool — paired with the run, as the shim
+	// read both off the vendor's task stream (EntryBatch.shell_run_claims). The
+	// sidecar reads them back through GetShellRunClaims to claim a spool no
+	// transcript line claimed. One row per (task id, run), so a re-stated claim
+	// is absorbed and a task id claimed by two runs stays visible to the
+	// reader, which refuses it rather than choosing. A database that predates
+	// the table simply holds no claims, which reads as "no claim yet".
+	{"shell_run_claim", `CREATE TABLE IF NOT EXISTS shell_run_claim (
+  vendor_task_id TEXT    NOT NULL,
+  run_id         TEXT    NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (vendor_task_id, run_id)
+)`, ""},
 }
 
 // indexMigrationError is a failure to build a missing lineage index or
@@ -880,7 +894,7 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "residue_shapes", "schema_meta", "vendor_task", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "residue_shapes", "schema_meta", "shell_run_claim", "vendor_task", "workflow", "write_ledger"}
 
 // shapeTables is a table set with the in-place tables taken out: the part of a
 // database's shape that must match EXACTLY, because the in-place tables are the
