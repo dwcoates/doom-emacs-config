@@ -63,6 +63,7 @@ status arm and whatever else the case is about."
                    :priority nil
                    :viewed nil
                    :reviving nil
+                   :last-selected nil
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -104,6 +105,23 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"reviving\":{\"since\":1}"))
                  '("RosterRowReviving" since "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-selected-instant ()
+  "A row carrying `lastSelected' decodes its durable selection instant."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"ready\":{}" "\"lastSelected\":{\"atMs\":\"1756400000000\"}"))
+                            :last-selected)
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-row-last-selected-refuses-an-unknown-field ()
+  "`RosterRowLastSelected' carries only its instant: anything else is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"lastSelected\":{\"atMs\":\"1\",\"by\":\"emacs\"}"))
+                 '("RosterRowLastSelected" by "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-every-status-arm ()
   "Every one of the declared status arms decodes to its own keyword."
