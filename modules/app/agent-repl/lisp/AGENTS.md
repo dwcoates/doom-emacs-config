@@ -203,14 +203,20 @@ a workspace after its merge lands), ONE rule decides what Emacs selects:
   (`agent-repl-roster--tear-down-tab`). Nothing else chooses a landing.
 - `agent-repl--land-before-teardown` moves the user ONLY when they stand on
   the closing workspace; standing on another workspace changes nothing.
-- The target (`agent-repl--teardown-landing-target`) is the most recently
-  selected workspace still open, read from `agent-repl--workspace-history`
-  (maintained on every perspective activation, carried across renames by
-  `agent-repl--ws-rename-state`). Entries since closed are skipped.
-- The first open tab is taken only when the history names no survivor, the
-  expected case of a session in which the user has stood in no other open
-  workspace yet (the history is in memory and starts empty with Emacs).
-  The source that decided (`history` or `tab-order`) is logged at INFO.
+- The target (`agent-repl--teardown-landing-target`) is the first open
+  workspace in THE ONE selection-recency order,
+  `agent-repl-roster-selection-recency-order` (roster.el):
+  - this session's `agent-repl--workspace-history` first (maintained on every
+    perspective activation, carried across renames by
+    `agent-repl--ws-rename-state`);
+  - then the roster row's durable `last_selected` instant, newest first, so a
+    fresh Emacs still lands where the user was before;
+  - then tab order, only for workspaces never selected at all.
+- `agent-repl--roster-recent-names` (`SPC … R`) orders by the same helper;
+  there is no second recency rule. The retired when-column `last_selected`
+  arm is never read.
+- The source that decided (`history`, `roster`, `tab-order` or
+  `foreign-persp`) is logged at INFO.
 - The webapp decides nothing: its highlight is the daemon's `current`, which
   the landing's own SelectWorkspace moves.
 

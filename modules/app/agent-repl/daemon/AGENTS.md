@@ -1468,6 +1468,14 @@ through `reviveIfParked` and inherits this; nothing in the verbs calls
 N callers, exactly one Start), and the request-order landing by
 `TestARevivalFinishingNeverRestampsTheSelection`.
 
+**THE ROSTER CARRIES THE DURABLE SELECTION INSTANT.** Every roster row's
+`last_selected` is WSM's `last_selected_at` (unset when never selected, set on
+closed rows too), filled by the sidebar resolver on every push, so a
+selection's republish carries it. Clients order most-recently-selected by it
+(Emacs's landing after a close, `SPC … R`) and never draw it; the when-column
+stays activity. Covered by `TestTheRowCarriesTheDurableLastSelectedInstant`
+and `TestSelectPublishesARegistryCarryingTheSelectionInstant`.
+
 ## A duplicate is only a submission the queue accepted
 
 `internal/prompthandler` + `wsm.ClaimIdempotencyKey` (2026-09-27: three prompts claimed, never delivered, re-driven after a respawn under the same keys, answered `duplicate_submission` and dropped by Emacs).
