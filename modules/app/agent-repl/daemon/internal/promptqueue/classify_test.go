@@ -144,7 +144,7 @@ func TestJudgeStampsHoldForTurnEndOnAHoldingVerdict(t *testing.T) {
 	h.q.waitForClassifications()
 	// Assert
 	if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
-		t.Fatalf("arm = %s, want hold_for_turn_end", armName(got))
+		t.Fatalf("arm = %s, want hold_for_turn_end", got.String())
 	}
 }
 
@@ -228,7 +228,7 @@ func TestJudgeHoldsForTurnEndOnEveryFailure(t *testing.T) {
 			h.q.waitForClassifications()
 			// Assert.
 			if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
-				t.Fatalf("arm = %s, want hold_for_turn_end", armName(got))
+				t.Fatalf("arm = %s, want hold_for_turn_end", got.String())
 			}
 		})
 	}
@@ -271,7 +271,7 @@ func TestJudgeStampsUninterruptibleWhileAContextCutRuns(t *testing.T) {
 	// Assert
 	held := h.db.hold("t1")
 	if held.Classification.Arm != wsm.ArmUninterruptibleTurn {
-		t.Fatalf("arm = %s, want uninterruptible_turn", armName(held.Classification.Arm))
+		t.Fatalf("arm = %s, want uninterruptible_turn", held.Classification.Arm.String())
 	}
 	if held.Classification.Command != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR {
 		t.Fatalf("command = %s, want /clear", held.Classification.Command)
@@ -492,7 +492,7 @@ func TestARefusedInterruptReturnsThePromptToHeld(t *testing.T) {
 			h.q.waitForClassifications()
 			// Assert.
 			if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
-				t.Fatalf("arm = %s, want hold_for_turn_end", armName(got))
+				t.Fatalf("arm = %s, want hold_for_turn_end", got.String())
 			}
 		})
 	}
@@ -708,35 +708,6 @@ func TestDrainReportsFalseWhenAVerdictOutlivesTheBound(t *testing.T) {
 	// Assert: reported, never waited on forever.
 	if left {
 		t.Fatal("Drain = true with a verdict still in flight, want false")
-	}
-}
-
-// Every classification arm renders under its own name in the log, and an arm
-// nobody taught this function about renders its numeric value rather than
-// silently reading as one of the known arms.
-func TestArmNameRendersEveryClassificationArm(t *testing.T) {
-	tests := []struct {
-		name string
-		arm  wsm.ClassificationArm
-		want string
-	}{
-		{name: "classifying", arm: wsm.ArmClassifying, want: "classifying"},
-		{name: "interject", arm: wsm.ArmInterject, want: "interject"},
-		{name: "hold for turn end", arm: wsm.ArmHoldForTurnEnd, want: "hold_for_turn_end"},
-		{name: "uninterruptible turn", arm: wsm.ArmUninterruptibleTurn, want: "uninterruptible_turn"},
-		{name: "classification error", arm: wsm.ArmClassificationError, want: "classification_error"},
-		{name: "an arm this renderer has never been taught", arm: wsm.ClassificationArm(97), want: "arm(97)"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := armName(tc.arm)
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("armName(%v) = %q, want %q", tc.arm, got, tc.want)
-			}
-		})
 	}
 }
 
