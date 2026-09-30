@@ -20,7 +20,7 @@ func probeOf(claims ...Claim) func(Claim) (string, bool) {
 
 func idleDrawing() string { return string(Idle) }
 
-func TestResolveTakesTheStrongestClaimTheFactsMake(t *testing.T) {
+func TestResolveTakesTheStrongestClaimTheFactsMakeWithNoStoppedMerge(t *testing.T) {
 	cases := []struct {
 		name   string
 		merge  string
@@ -30,12 +30,13 @@ func TestResolveTakesTheStrongestClaimTheFactsMake(t *testing.T) {
 	}{
 		{name: "nothing claims, so the walk ends at idle", want: Idle},
 		{name: "a merge in flight outranks a broken route", merge: "merging", claims: []Claim{Merging, Disconnected}, want: Merging},
-		{name: "a merge stopped on a conflict outranks a broken route", merge: "conflict", claims: []Claim{MergeConflict, Disconnected}, want: MergeConflict},
+		{name: "a queued merge outranks a broken route", merge: "queued", claims: []Claim{Merging, Disconnected}, want: Merging},
 		{name: "a broken route outranks a failed merge", merge: "failed", claims: []Claim{MergeFailed, Disconnected}, want: Disconnected},
 		{name: "a broken route outranks a landed merge", merge: "merged", claims: []Claim{Merged, Disconnected}, want: Disconnected},
 		{name: "a vendor block outranks a failed merge", merge: "failed", claims: []Claim{MergeFailed, Blocked}, want: Blocked},
 		{name: "a vendor block outranks a landed merge", merge: "merged", claims: []Claim{Merged, Blocked}, want: Blocked},
 		{name: "a landed merge outranks a degraded view", merge: "merged", claims: []Claim{Merged, Degraded}, want: Merged},
+		{name: "a failed merge outranks a permission ask", merge: "failed", claims: []Claim{MergeFailed, Waiting}, want: MergeFailed},
 		{name: "a broken route outranks a degraded view", claims: []Claim{Disconnected, Degraded}, want: Disconnected},
 		{name: "a vendor block outranks a degraded view", claims: []Claim{Blocked, Degraded}, want: Blocked},
 		{name: "a degraded view outranks a permission ask", claims: []Claim{Degraded, Waiting}, want: Degraded},
@@ -65,18 +66,15 @@ func TestResolveTakesTheStrongestClaimTheFactsMake(t *testing.T) {
 	}
 }
 
-func TestMergeClaimPlacesEveryMergeState(t *testing.T) {
+func TestMergeClaimPlacesEveryMergeStateOnARungWithNoStoppedMerge(t *testing.T) {
 	cases := []struct {
 		state string
 		want  Claim
 	}{
 		{state: "", want: ""},
 		{state: "none", want: ""},
-		{state: "enqueuing", want: Merging},
 		{state: "queued", want: Merging},
 		{state: "merging", want: Merging},
-		{state: "conflict", want: MergeConflict},
-		{state: "parked", want: MergeConflict},
 		{state: "failed", want: MergeFailed},
 		{state: "merged", want: Merged},
 		{state: "a state this build does not name", want: Merging},

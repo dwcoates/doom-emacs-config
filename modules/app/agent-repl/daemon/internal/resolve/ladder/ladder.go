@@ -21,36 +21,33 @@
 //
 // THE LADDER, strongest claim first:
 //
-//  1. merging        a merge is IN FLIGHT: enqueuing, queued or running a
-//     phase. It outranks the link because it is the DAEMON's own fact,
-//     knowable whatever the route to the shim is doing, and "the merge
-//     pipeline owns the row while it runs" (the roster's standing ruling).
-//  2. merge_conflict the merge STOPPED awaiting the user — on a conflict, or
-//     parked. The run still holds its lease, so it ranks with the merge in
-//     flight, above the link: what the user types goes to the merge's agent,
-//     not through the session's route.
-//  3. disconnected   the route to the session is not serving, or a turn the
+//  1. merging        a merge is IN FLIGHT: queued or running a step. It
+//     outranks the link because it is the DAEMON's own fact, knowable
+//     whatever the route to the shim is doing, and "the merge pipeline owns
+//     the row while it runs" (the roster's standing ruling). Nothing parks
+//     (owner ruling, 2026-09-29): a merge that gives up FAILS.
+//  2. disconnected   the route to the session is not serving, or a turn the
 //     daemon accepted awaits the bring-up of a route never seen
 //     (AwaitingBringUp). SKIPPED WHOLE while the session is PARKED: the idle
 //     sweep put the route down itself and a prompt brings it back, so a
 //     parked session is idle, not broken.
-//  4. closing        a close was refused. The roster observes no close
+//  3. closing        a close was refused. The roster observes no close
 //     refusal, so only the footer ever stands here.
-//  5. blocked        the vendor or the account refuses the session until
+//  4. blocked        the vendor or the account refuses the session until
 //     something outside it is resolved (ClassifyFailure).
-//  6. merge_failed   the merge failed. TERMINAL: the merge no longer holds the
+//  5. merge_failed   the merge failed. TERMINAL: the merge no longer holds the
 //     session, so every claim that the workspace is UNUSABLE (the three
 //     above) outranks it, while it outranks everything the session itself
 //     is doing.
-//  7. merged         the merge landed. Terminal, ranked as merge_failed is.
-//  8. degraded       the session serves, but the daemon's view of it is
+//  6. merged         the merge landed. Terminal, ranked as merge_failed is.
+//  7. degraded       the session serves, but the daemon's view of it is
 //     compromised: a shim component dropping or delaying observations, or a
 //     taken-back shim that never re-reported its session state. USABLE, so
 //     every unusable claim outranks it; SKIPPED while PARKED, as the link is.
-//  9. waiting        the session waits on the user: a permission ask, and on
+//  8. waiting        the session waits on the user: a permission ask, and on
 //     the footer also an interrupt landing, a question or a cold gate.
-//  10. thinking      a turn is in flight, a context cut included.
-//  11. idle          the foreground is free: a turn end (read or not, a
+//  9. thinking      a turn is in flight, a context cut included.
+//  10. idle          the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or
 //     nothing at all.
 //
@@ -66,8 +63,8 @@
 //
 // WHERE THE TWO RESOLVERS' OLD ORDERS DISAGREED, this is what was chosen:
 //   - the footer ranked `disconnected` above every merge state; the roster
-//     ranked every merge state above the link. A merge in flight or stopped on
-//     a conflict now outranks the link (the daemon owns it and it is knowable
+//     ranked every merge state above the link. A merge in flight now outranks
+//     the link (the daemon owns it and it is knowable
 //     regardless), and a terminal merge ranks below it (it is over, and the
 //     roster's own ruling scoped its precedence to a merge that "runs");
 //   - the footer ranked `blocked` above `merging`; the roster ranked every
@@ -103,8 +100,6 @@ type Claim string
 const (
 	// Merging is a merge in flight.
 	Merging Claim = "merging"
-	// MergeConflict is a merge stopped awaiting the user.
-	MergeConflict Claim = "merge_conflict"
 	// Disconnected is a route to the session that is not serving.
 	Disconnected Claim = "disconnected"
 	// Closing is a refused close.
@@ -134,7 +129,7 @@ const Inactive Claim = "inactive"
 // Order is the ladder, strongest claim first. It is the ONE statement of the
 // precedence; the package comment explains every position.
 var Order = []Claim{
-	Merging, MergeConflict, Disconnected, Closing, Blocked, MergeFailed,
+	Merging, Disconnected, Closing, Blocked, MergeFailed,
 	Merged, Degraded, Waiting, Thinking, Idle,
 }
 
@@ -159,8 +154,6 @@ func MergeClaim(state string) Claim {
 	switch state {
 	case "", "none":
 		return ""
-	case "conflict", "parked":
-		return MergeConflict
 	case "failed":
 		return MergeFailed
 	case "merged":
@@ -181,7 +174,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 	standing := MergeClaim(merge)
 	for _, claim := range Order {
 		switch claim {
-		case Merging, MergeConflict, MergeFailed, Merged:
+		case Merging, MergeFailed, Merged:
 			if claim != standing {
 				continue
 			}
