@@ -24,8 +24,15 @@ not "stop".
   tray act + coalesced badge, worked-example integration test.
 - 4a: response bubble token figure colored by the shared token-heat rule;
   expanded items auto-collapse only once wholly out of view.
-- 4c, partly: proto (`05360ec4d`), sidecar (`70aea48d5`), daemon footer
-  (`e986ba0ab`) — see item 1.
+- 4c DONE: proto (`05360ec4d`), sidecar (`70aea48d5`), daemon footer
+  (`e986ba0ab`), webapp countdown/overdue/restored (`40c589c13`), daemon
+  integration (landed change 5).
+- H6/H7 verdict split DONE: proto (`fa0bdd0e5`, `132d53b2d`), shim join
+  (`5825dc3fa`) and vendor note (`e39c8a6fe`), wsm.CloseFolded + feed
+  (`a65a1b2ff`), watcher (`da13f884c`), footer stage + tray (`73da3d1ad`),
+  classifier + queue join (`947cc4342`), integration (`d6839a6a8`), webapp
+  (`6dce4c2db`), interruption note (`893d3b353`). Extractions:
+  TurnClose.String (`7f8afb030`), ClassificationArm.String (`d7cf4b927`).
 
 ## Remaining, in order
 
