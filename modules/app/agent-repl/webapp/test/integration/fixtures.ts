@@ -2037,10 +2037,8 @@ export const ROSTER_STATUS_ARMS = [
   "startFailed",
   "degraded",
   "dead",
-  "mergeEnqueuing",
   "merging",
   "mergeQueued",
-  "mergeConflict",
   "mergeFailed",
   "merged",
   "none",
@@ -2051,13 +2049,11 @@ export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 /**
  * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
  * the ones render-colors.json declares in `colored_merge_arms` also spend a
- * color (owner ruling, 2026-09-28: merge_conflict green, merge_failed blue).
+ * color (every one does since 2026-09-28; merge_failed is turquoise).
  */
 export const ROSTER_MERGE_ARMS = [
-  "mergeEnqueuing",
   "merging",
   "mergeQueued",
-  "mergeConflict",
   "mergeFailed",
   "merged",
 ] as const;

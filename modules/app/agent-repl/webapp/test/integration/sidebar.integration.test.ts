@@ -75,7 +75,6 @@ describe("arm coverage", () => {
   });
 
   it.each([
-    ["mergeConflict", "green"],
     ["mergeFailed", "turquoise"],
     ["merging", "purple"],
   ])("paints the colored merge arm %s %s", (arm, color) => {

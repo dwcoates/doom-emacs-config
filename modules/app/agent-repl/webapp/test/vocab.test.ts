@@ -174,10 +174,8 @@ describe("topbarTone", () => {
 
 describe("mergeGlyph", () => {
   const cases: ReadonlyArray<[string, string]> = [
-    ["mergeEnqueuing", "queue"],
     ["mergeQueued", "queue"],
     ["merging", "recycle"],
-    ["mergeConflict", "conflict"],
     ["mergeFailed", "failed"],
     ["merged", "check"],
   ];

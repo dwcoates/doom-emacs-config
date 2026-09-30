@@ -42,10 +42,8 @@ export const ROSTER_STATUS_CASES = [
   "startFailed",
   "degraded",
   "dead",
-  "mergeEnqueuing",
   "merging",
   "mergeQueued",
-  "mergeConflict",
   "mergeFailed",
   "merged",
   "none",
@@ -79,7 +77,6 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
 export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   queue: "≡",
   recycle: "⟳",
-  conflict: "⇄",
   failed: "✕",
   check: "✓",
   inactive: "?",
@@ -155,5 +152,5 @@ export function armBreathes(arm: RosterStatusCase): boolean {
 
 /** Whether the arm's glyph SPINS: the merge run the queue is actively on. */
 export function armSpins(arm: RosterStatusCase): boolean {
-  return arm === "merging" || arm === "mergeConflict";
+  return arm === "merging";
 }

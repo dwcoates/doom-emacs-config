@@ -77,14 +77,6 @@ describe("the status mark", () => {
     expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "check", char: "✓" });
   });
 
-  it("draws a merge conflict as a green conflict mark", () => {
-    expect(rosterArmMark("mergeConflict")).toEqual({
-      toneClass: "tone-green",
-      glyph: "conflict",
-      char: "⇄",
-    });
-  });
-
   it("draws a question mark for a perspective-less workspace", () => {
     expect(rosterArmMark("inactive")).toEqual({
       toneClass: "tone-none",
@@ -117,11 +109,11 @@ describe("the rail's two animations", () => {
     },
   );
 
-  it.each(["merging", "mergeConflict"] as const)("spins on %s", (arm) => {
+  it.each(["merging"] as const)("spins on %s", (arm) => {
     expect(armSpins(arm)).toBe(true);
   });
 
-  it.each(["mergeQueued", "mergeFailed", "merged", "mergeEnqueuing"] as const)(
+  it.each(["mergeQueued", "mergeFailed", "merged"] as const)(
     "does not spin on %s",
     (arm) => {
       expect(armSpins(arm)).toBe(false);
