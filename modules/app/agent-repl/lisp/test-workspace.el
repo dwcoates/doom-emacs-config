@@ -136,6 +136,31 @@
     (should (agent-repl--ws-live-p "old"))
     (should-not (agent-repl--ws-known-p "new"))))
 
+(ert-deftest agent-repl-test-ws-rename-state-keeps-the-selection-history-place ()
+  "A renamed workspace keeps its place in the selection history, so closing
+the workspace selected after it still lands on it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (let ((agent-repl--workspace-history '("current" "old" "first")))
+      ;; Act
+      (agent-repl--ws-rename-state "old" "new" "/new/path")
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("current" "new" "first"))))))
+
+(ert-deftest agent-repl-test-ws-rename-state-rejected-leaves-the-selection-history ()
+  "A rejected rename leaves the selection history untouched."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (agent-repl--ws-put "new" :project-dir "/occupied/path")
+    (let ((agent-repl--workspace-history '("current" "old")))
+      ;; Act
+      (should-error (agent-repl--ws-rename-state "old" "new" "/new/path")
+                    :type 'user-error)
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("current" "old"))))))
+
 ;;;; ---- Tests: ws-rewrite-source-back-refs -------------------------------
 
 (ert-deftest agent-repl-test-ws-rewrite-source-back-refs-targets-matches-only ()
