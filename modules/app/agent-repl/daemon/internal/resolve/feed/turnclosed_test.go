@@ -400,3 +400,21 @@ func TestAnUnreadableRecordedCloseIsAnErrorAndThePageStillDraws(t *testing.T) {
 		t.Fatalf("the page's prompt was not drawn")
 	}
 }
+
+func TestAFoldedCloseDrawsNoEndingOfItsOwn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+	h.deliverFoldedPrompt("turn-2", "turn-1", "also cover the edge case")
+
+	// Act
+	h.closeTurn("turn-2", wsm.CloseFolded)
+
+	// Assert
+	if n := h.endingRows("turn-2") + h.endingRows("turn-1"); n != 0 {
+		t.Fatalf("ending rows = %d, want none: the joined turn is still running", n)
+	}
+	if !h.hasRecord(dlog.LevelDebug, "daemon.feed.turn_closed_folded") {
+		t.Fatalf("records = %+v, want the folded close recorded", h.records())
+	}
+}

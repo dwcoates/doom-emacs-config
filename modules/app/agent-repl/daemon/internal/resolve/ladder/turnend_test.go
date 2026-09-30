@@ -69,3 +69,13 @@ func TestTurnEndNamesTheRosterArm(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveTurnEndReadsNoEndForAFoldedPrompt(t *testing.T) {
+	// Act
+	_, ok := ResolveTurnEnd(wsm.CloseFolded, NoFailure)
+
+	// Assert
+	if ok {
+		t.Fatal("a folded prompt's turn never ran, so it has no turn end to read")
+	}
+}

@@ -549,6 +549,11 @@ const (
 	// CloseAgentDied is a turn the agent process (its shim) cut by dying on its
 	// own: nobody ordered the death, and no terminal will ever arrive for it.
 	CloseAgentDied
+	// CloseFolded is a prompt the vendor folded into the running turn at a tool
+	// boundary (conversation.v1.AgentPrompt.folded_into): it was delivered and
+	// answered, but as part of that turn, so its own turn never ran and no
+	// ending of its own is drawn.
+	CloseFolded
 )
 
 // Failed reports whether the close is the turn failing: its own failure, or

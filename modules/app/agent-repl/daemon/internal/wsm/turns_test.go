@@ -741,6 +741,24 @@ func TestCloseTurnAcceptsTheAgentDiedClose(t *testing.T) {
 	}
 }
 
+func TestCloseTurnAcceptsTheFoldedClose(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := openTurn(t, s, ws.ID)
+
+	// Act
+	err := s.CloseTurn(context.Background(), turn, instant, CloseFolded)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CloseTurn(CloseFolded): %v", err)
+	}
+	if kind := scalar[int](t, s, `SELECT close_kind FROM turns WHERE id = ?`, turn); kind != int(CloseFolded) {
+		t.Fatalf("close kind = %d, want %d", kind, int(CloseFolded))
+	}
+}
+
 func TestTurnCloseFailed(t *testing.T) {
 	tests := []struct {
 		name string
@@ -752,6 +770,7 @@ func TestTurnCloseFailed(t *testing.T) {
 		{name: "killed", how: CloseKilled, want: false},
 		{name: "orphaned", how: CloseOrphaned, want: false},
 		{name: "agent died", how: CloseAgentDied, want: true},
+		{name: "folded", how: CloseFolded, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1055,6 +1074,7 @@ func TestClaimIdempotencyKeyReadsTheClaimedTurnsRow(t *testing.T) {
 		{name: "a completed close is acceptance", row: true, close: closePtr(CloseCompleted), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 		{name: "a failed close is acceptance", row: true, close: closePtr(CloseFailed), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 		{name: "a killed close is acceptance", row: true, close: closePtr(CloseKilled), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
+		{name: "a folded close is acceptance", row: true, close: closePtr(CloseFolded), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

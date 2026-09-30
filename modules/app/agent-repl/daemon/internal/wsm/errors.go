@@ -251,7 +251,7 @@ func (a ClassificationArm) String() string {
 var ErrAcceptNotOffered = errors.New("wsm: accept is legal only on a hold_for_turn_end verdict")
 
 // valid reports whether the turn close is one of the declared arms.
-func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseAgentDied }
+func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseFolded }
 
 // String names a turn close for a log record; an undeclared close is named by
 // its number.
@@ -267,6 +267,8 @@ func (c TurnClose) String() string {
 		return "orphaned"
 	case CloseAgentDied:
 		return "agent_died"
+	case CloseFolded:
+		return "folded"
 	default:
 		return fmt.Sprintf("close(%d)", int(c))
 	}
