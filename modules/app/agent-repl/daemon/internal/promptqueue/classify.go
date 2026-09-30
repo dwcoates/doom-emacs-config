@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -76,17 +77,21 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 
 	disposition := Disposition{Held: held.Hold, Classification: held.Classification}
 	if running == "" {
+		q.reportHeld(ctx, sub, log)
 		return disposition, nil
 	}
 	if underCut {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
 			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
+		q.reportHeld(ctx, sub, log)
 		return disposition, nil
 	}
 	if unjudged != nil {
 		unjudged(log, running)
+		q.reportHeld(ctx, sub, log)
 		return disposition, nil
 	}
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageClassifying})
 
 	// THE VERDICT IS ASYNCHRONOUS. The tray's `classifying` arm exists exactly
 	// so the submission is answered now and the judge's round trip does not sit
@@ -314,8 +319,45 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 	if interject {
 		// A verdict kept from interjecting by a running session act is
 		// re-stamped and recorded by interject itself.
-		q.interject(ctx, sub, running, log)
+		if !q.interject(ctx, sub, running, log) {
+			q.reportHeld(ctx, sub, log)
+		}
+		return
 	}
+	q.reportHeld(ctx, sub, log)
+}
+
+// reportHeld tells the footer where a held prompt stands in the queue: its
+// 1-based place among the standing holds and how many stand. A prompt no
+// longer standing (delivered or dropped since) reports nothing.
+func (q *queue) reportHeld(ctx context.Context, sub Submission, log dlog.Logger) {
+	standing, err := q.deps.DB.HeldPrompts(ctx, sub.WS)
+	if err != nil {
+		log.Error(opHold, "could not read the holds to report the prompt's place in the queue",
+			dlog.Context{"turn": string(sub.Turn), "cause": err.Error()})
+		return
+	}
+	position, queued := queuePlace(standing, sub.Turn)
+	if position == 0 {
+		log.Debug(opHold, "the prompt no longer stands; its place in the queue is not reported",
+			dlog.Context{"turn": string(sub.Turn)})
+		return
+	}
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{
+		Prompt: saidText(sub.Said), Stage: footer.StageHeld, Position: position, Queued: queued,
+	})
+}
+
+// queuePlace answers TURN's 1-based place among the standing holds, which the
+// store answers in queue order, and how many stand; position 0 when TURN is
+// not standing.
+func queuePlace(holds []wsm.HeldPrompt, turn ids.TurnID) (position, queued uint32) {
+	for i, h := range holds {
+		if h.Turn == turn {
+			position = uint32(i + 1)
+		}
+	}
+	return position, uint32(len(holds))
 }
 
 // contentEpoch answers how many times a held prompt's content was replaced.
@@ -421,6 +463,7 @@ func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnI
 	state.interrupting = true
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(sub.WS, true)
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageInterjecting})
 	log.Info(opInterject, "the prompt jumped the queue and the interrupt was registered",
 		dlog.Context{"turn": string(sub.Turn), "interrupted_turn": string(running)})
 

@@ -508,12 +508,20 @@ type wsState struct {
 	// event instant and expiry, and nothing ever clears it — the client's
 	// clock retires it at its expiry. Nil until the first transient.
 	transient *frontendv1.FooterActivityTransient
-	// streams are the reasoning and prose units streaming right now, by unit,
-	// each holding the tail of its text and the line last raised from it
-	// (tails.go).
-	streams map[string]*streamTail
 	// rate is the vendor's last rate-limit status per window.
 	rate rateState
+	// rateEvent is the standing vendor rate-limit event that warned or
+	// refused, nil when none stands (salient.go).
+	rateEvent *rateEventState
+	// notification is the agent's standing push notification, nil when none
+	// stands. It stands until the next prompt (salient.go).
+	notification *standing
+	// contextBudget is the standing context-budget line, nil when none stands.
+	// It stands until a cut shrinks the context (salient.go).
+	contextBudget *budgetState
+	// vendorSession is the vendor session the last session start named, so a
+	// start naming another one is recognized as a switch.
+	vendorSession string
 	// contextWindow is the main agent's last readable context-usage report,
 	// nil until one arrives. The enduring line draws it.
 	contextWindow *contextWindowState
@@ -639,7 +647,6 @@ func newWSState() *wsState {
 	return &wsState{
 		permissions: map[string]standing{},
 		questions:   map[string]standing{},
-		streams:     map[string]*streamTail{},
 		retiredRows: map[string]*agentRow{},
 		agents:      map[string]*agentRow{},
 		shells:      map[string]*shellRow{},

@@ -229,7 +229,9 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		// composes the sentence (footer.CompactionLine) so the vendor's own
 		// auto-compaction and this one read identically.
 		OnPhase: func(progress *conversationv1.SessionCompactionProgress) {
-			v.spendingColdGate(ws, choice, footer.CompactionLine(progress))
+			v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{
+				Choice: choice, Text: footer.CompactionLine(progress), Progress: progress,
+			})
 		},
 	}, func(runCtx context.Context, err error) {
 		v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
@@ -246,20 +248,25 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 // `cold_gate_reopen_failed` fault, which is the footer's line for it, and
 // stands the gate again so the user can choose again.
 func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, err error) {
-	v.deps.Footer.SetColdGateAnswer(ws, nil)
 	switch {
 	case err == nil:
+		// THE GATE RETIRES BEFORE THE ANSWER'S LINE DOES. With the answer's
+		// line gone first, the footer would draw the still-standing gate for
+		// one push: a gate the user already answered, shown again.
 		v.deps.Cards.EndColdGate(ws, vendorSessionID)
 		v.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: false})
+		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		// AND THE STRIP STOPS SAYING IT TOO. The re-open starts a session, so
 		// the topbar's own session facts arrive on its heels and the full view
 		// returns; retiring the gate here is what lets them.
 		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
 	case canceled(err):
+		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})
 	default:
+		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		var refusal *Refusal
 		if !errors.As(err, &refusal) {
 			log.Error(opColdGate, "the re-open with the remediation failed", dlog.Context{"cause": err.Error()})

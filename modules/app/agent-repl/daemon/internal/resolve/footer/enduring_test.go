@@ -152,7 +152,7 @@ func TestAnAllowanceIsCarriedAsAFractionAndEpochSeconds(t *testing.T) {
 	bothAllowances(h, 90, 90)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetUtilization() != 0.9 {
 		t.Fatalf("utilization = %v, want the 0..1 fraction the contract carries", got.GetUtilization())
 	}
@@ -172,7 +172,7 @@ func TestAnAllowanceCopiesTheVendorsStatusArm(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetAllowed() == nil {
 		t.Fatalf("status = %+v, want the vendor's allowed arm copied", got.GetStatus())
 	}
@@ -192,7 +192,7 @@ func TestAnAllowanceWarningStatusIsCopied(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetAllowedWarning() == nil {
 		t.Fatalf("status = %+v, want the vendor's allowed_warning arm copied", got.GetStatus())
 	}
@@ -214,7 +214,7 @@ func TestARejectedAllowanceStatusIsCopied(t *testing.T) {
 	// Assert
 	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
 	// allowance line stands under the block.
-	got := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the vendor's rejected arm copied", got.GetStatus())
 	}
@@ -232,7 +232,7 @@ func TestAStatusTheVendorLeftUnsetDrawsNoArm(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetStatus() != nil {
 		t.Fatalf("status = %+v, want no arm; an absent status is never defaulted", got.GetStatus())
 	}
@@ -262,7 +262,7 @@ func TestTheResetComesFromTheUsageSampleInSeconds(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetResetsAtS() != instant.Add(5*time.Hour).Unix() {
 		t.Fatalf("resets_at_s = %d, want the sample's reset in seconds", got.GetResetsAtS())
 	}
@@ -277,7 +277,7 @@ func TestTheVerdictIsUnsetBeforeAnyRateLimitEvent(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetStatus() != nil {
 		t.Fatalf("status = %+v, want no verdict until a rate-limit event is seen", got.GetStatus())
 	}
@@ -299,7 +299,7 @@ func TestTheVerdictJoinsWhenTheRateLimitEventArrives(t *testing.T) {
 	// Assert
 	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
 	// allowance line stands under the block.
-	got := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the verdict to have joined the drawn allowance", got.GetStatus())
 	}
@@ -396,7 +396,7 @@ func TestAnEarlierSampleDoesNotOverwriteALaterEvent(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 99, 5*time.Hour))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetUtilization() != 0.99 {
 		t.Fatalf("utilization = %v, want the event's figure, which arrived last", got.GetUtilization())
 	}
@@ -418,7 +418,7 @@ func TestALaterSampleOverwritesAnEarlierEventsFigure(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(-5*time.Millisecond).UnixMilli()))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetUtilization() != 0.95 {
 		t.Fatalf("utilization = %v, want the sample's figure, which arrived last", got.GetUtilization())
 	}
@@ -435,7 +435,7 @@ func TestAStaleSampleDoesNotOverwriteANewerSample(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(81, 90, instant.Add(-time.Minute).UnixMilli()))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetUtilization() != 0.95 {
 		t.Fatalf("utilization = %v, want the newer sample's figure kept", got.GetUtilization())
 	}
@@ -452,7 +452,7 @@ func TestAnUnavailableSampleLeavesTheStandingFiguresAlone(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	got := enduringUsageOf(h).GetSession()
 	if got.GetUtilization() != 0.95 {
 		t.Fatalf("utilization = %v, want the standing figures left alone", got.GetUtilization())
 	}
@@ -634,7 +634,7 @@ func TestAnAllowanceIsNewsworthyOnlyAboveTheThresholdOnceTheScalesAgree(t *testi
 			bothAllowances(h, tc.fiveHour, 10)
 
 			// Assert
-			session := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+			session := enduringUsageOf(h).GetSession()
 			if session.GetNewsworthy() != tc.wantNewsworthy {
 				t.Fatalf("session newsworthy = %v, want %v (allowance = %+v)", session.GetNewsworthy(), tc.wantNewsworthy, session)
 			}
@@ -643,6 +643,15 @@ func TestAnAllowanceIsNewsworthyOnlyAboveTheThresholdOnceTheScalesAgree(t *testi
 }
 
 // enduringOf is the idle cell's enduring line.
+// enduringUsageOf is the usage the enduring line would draw now, read off the
+// resolver's state: a standing rate-limit event pins the cell salient, so the
+// pushed view carries no enduring line while it stands.
+func enduringUsageOf(h *harness) *frontendv1.FooterActivityEnduringUsage {
+	h.r.mu.Lock()
+	defer h.r.mu.Unlock()
+	return h.r.enduringUsage(h.r.stateLocked(testWS))
+}
+
 func enduringOf(t *testing.T, h *harness) *frontendv1.FooterActivityEnduring {
 	t.Helper()
 	return h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
@@ -701,18 +710,90 @@ func TestTheContextWindowIsDrawnWithItsFill(t *testing.T) {
 	}
 }
 
-func TestTheEnduringLineCarriesUsageAndContextTogether(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	bothAllowances(h, 41, 12)
+func TestTheEightyPercentRuleChoosesTheEnduringLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		fiveHour float64
+		weekly   float64
+		used     int64
+		want     string
+	}{
+		{"both under 80%: usage", 50, 30, 100_000, "usage"},
+		{"only the context at or above 80%: the context", 50, 90, 166_000, "context_window"},
+		{"only the five-hour allowance at or above 80%: usage", 86, 30, 166_000, "usage"},
+		{"both at or above 80%, the context higher: the context", 81, 30, 180_000, "context_window"},
+		{"both at or above 80%, usage higher: usage", 95, 30, 166_000, "usage"},
+		{"both at 80% exactly: usage wins the tie", 80, 30, 160_000, "usage"},
+		{"the weekly allowance never enters the choice", 50, 99, 100_000, "usage"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			bothAllowances(h, tt.fiveHour, tt.weekly)
 
-	// Act
-	h.r.OnSessionUpdate(testWS, contextUsage(50_000, 200_000))
+			// Act
+			h.r.OnSessionUpdate(testWS, contextUsage(tt.used, 200_000))
 
-	// Assert
-	enduring := enduringOf(t, h)
-	if enduring.GetUsage() == nil || enduring.GetContextWindow() == nil {
-		t.Fatalf("enduring = %+v, want both the usage and the context window", enduring)
+			// Assert
+			enduring := enduringOf(t, h)
+			if got := string(enduring.ProtoReflect().WhichOneof(enduring.ProtoReflect().Descriptor().Oneofs().ByName("line")).Name()); got != tt.want {
+				t.Fatalf("enduring line = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnEnduringLineWithOneFigureObservedDrawsThatFigure(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{"usage alone", func(h *harness) { bothAllowances(h, 10, 5) }, "usage"},
+		{"the context window alone, however low", func(h *harness) { h.r.OnSessionUpdate(testWS, contextUsage(10_000, 200_000)) }, "context_window"},
+		{"neither", func(h *harness) {}, "unobserved"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			enduring := enduringOf(t, h)
+			if got := string(enduring.ProtoReflect().WhichOneof(enduring.ProtoReflect().Descriptor().Oneofs().ByName("line")).Name()); got != tt.want {
+				t.Fatalf("enduring line = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContextClaimsEnduring(t *testing.T) {
+	tests := []struct {
+		name           string
+		fiveHour, fill float64
+		want           bool
+	}{
+		{"context below the threshold", 0.1, 0.79, false},
+		{"context at the threshold, five-hour below it", 0.5, 0.8, true},
+		{"both at the threshold: usage wins the tie", 0.8, 0.8, false},
+		{"both above, context higher", 0.85, 0.9, true},
+		{"both above, five-hour higher", 0.95, 0.9, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := contextClaimsEnduring(tt.fiveHour, tt.fill)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("contextClaimsEnduring(%v, %v) = %v, want %v", tt.fiveHour, tt.fill, got, tt.want)
+			}
+		})
 	}
 }

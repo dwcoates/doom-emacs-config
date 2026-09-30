@@ -78,13 +78,9 @@ func activityArm(act *conversationv1.AgentActivity) string {
 // subagent label the frame's transients carry, empty for the main agent.
 func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, label, unit string, act *conversationv1.AgentActivity) {
 	switch item := act.GetItem().(type) {
-	case *conversationv1.AgentActivity_Thinking:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Thinking"})
-		r.applyThinking(ws, s, label, unit, item.Thinking)
 	case *conversationv1.AgentActivity_Response:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
 		r.applyResponse(s, unit, item.Response)
-		r.applyResponseTail(ws, s, label, unit, item.Response)
 	case *conversationv1.AgentActivity_Hook:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
 		if start := item.Hook.GetStart(); start != nil {
@@ -116,7 +112,7 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversa
 	case *conversationv1.AgentActivity_PushNotification:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_PushNotification"})
 		if start := item.PushNotification.GetStart(); start != nil {
-			r.raiseNotification(ws, s, label, start.GetMessage())
+			r.standNotification(ws, s, start.GetMessage())
 		}
 	}
 }
@@ -424,6 +420,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 	r.mutate(ws, "daemon.footer.on_agent_terminal", "the footer took an agent terminal",
 		dlog.Context{"turn": turn != nil, "failed": failure != nil}, func(s *wsState) {
 			r.retireAgent(s, agent)
+			r.endSubagentBudget(ws, s, agent.GetValue())
 			if turn == nil {
 				return
 			}
@@ -431,10 +428,6 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			r.endTurnMotion(s)
 			s.tok.settled = true
 			s.interrupting = false
-			// THE TURN'S UNSETTLED UNITS END WITH IT: a unit the terminal cut
-			// short never settles, and its tail is not kept for a stream that
-			// will not resume.
-			s.streams = map[string]*streamTail{}
 			// THE TURN'S END IS THE COMPACTION'S END: the flag and the line
 			// go together (compaction.go, "the line's lifetime").
 			s.compacting = false

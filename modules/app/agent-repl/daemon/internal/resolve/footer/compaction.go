@@ -141,12 +141,14 @@ func (r *resolver) endCompaction(ws ids.WorkspaceID, s *wsState, cause string) {
 	s.compaction = nil
 }
 
-// concludeCompaction ends a compaction at its CONCLUDED phase: the salient
-// line goes, and the outcome is announced as a transient — the composed
-// "compacted and resumed (…)" line as `compaction_concluded`, a failure as
-// `context_budget`, because the context is still as large as it was. While a
-// cold gate's answer is in flight the salient line is the ANSWER's, which its
-// verb ends; the transient is raised beneath it all the same.
+// concludeCompaction ends a compaction at its CONCLUDED phase: the running
+// compaction's salient line goes. A compaction that SUCCEEDED shrank the
+// context, so it ends the context-budget line and is announced as the
+// `compaction_concluded` transient ("compacted and resumed (…)"); a failure
+// stands the salient context-budget line, because the context is still as
+// large as it was. While a cold gate's answer is in flight the running line is
+// the ANSWER's, which its verb ends; the outcome is recorded beneath it all
+// the same.
 func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *conversationv1.SessionCompactionProgress) {
 	const cause = "daemon.footer.on_session_update.compaction_progress"
 	if s.coldAnswer == nil {
@@ -154,9 +156,10 @@ func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *
 	}
 	line := CompactionLine(progress)
 	if progress.GetPhase() == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED {
-		r.raiseContextBudget(ws, s, "", line)
+		r.standContextBudget(ws, s, "", line)
 		return
 	}
+	r.endContextBudget(ws, s, cause)
 	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
 		Kind: &frontendv1.FooterActivityTransient_CompactionConcluded{
 			CompactionConcluded: &frontendv1.FooterActivityTransientCompactionConcluded{Text: line}},

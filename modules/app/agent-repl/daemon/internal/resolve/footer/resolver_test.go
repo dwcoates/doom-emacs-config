@@ -313,7 +313,7 @@ func TestAFailedCompactionDrawsItsAccountAsEvidence(t *testing.T) {
 
 	// Assert
 	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	text := idle.GetActivity().GetUnpinned().GetTransient().GetContextBudget().GetText()
+	text := idle.GetActivity().GetSalient().GetContextBudget().GetText()
 	if text == "" || !contains(text, "summary model refused") {
 		t.Fatalf("activity text = %q, want the producer's account", text)
 	}

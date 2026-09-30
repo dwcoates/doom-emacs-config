@@ -712,10 +712,12 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 			}},
 		}},
 	})
-	// ...and the VERDICT comes from rate_limit_status, for the same window.
+	// ...and the VERDICT comes from rate_limit_status, for the same window. An
+	// ALLOWED verdict, because a warning or a refusal is the vendor speaking and
+	// stands as the salient rate-limit line over the enduring one.
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-			Status: &conversationv1.SessionRateLimitStatus_AllowedWarning{AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}},
+			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
 			RateLimitType: &conversationv1.SessionRateLimitType{
 				Window: &conversationv1.SessionRateLimitType_FiveHour{FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}},
 			},
@@ -723,10 +725,10 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	})
 
 	// Assert: the session allowance carries BOTH the figure (utilization,
-	// reset) from account_usage and the verdict (allowed_warning) from
+	// reset) from account_usage and the verdict (allowed) from
 	// rate_limit_status -- one cell composed from two different facts.
 	got := awaitFooter(t, f, footer, "the session allowance composed from both facts", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession().GetAllowedWarning() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession().GetAllowed() != nil
 	})
 	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
 	if allowance.GetUtilization() != 0.95 {
@@ -1757,18 +1759,51 @@ func ftTransient(v *frontendv1.FooterView) *frontendv1.FooterActivityTransient {
 	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient()
 }
 
-// A NEWER TRANSIENT REPLACES AN OLDER ONE, whatever their kinds: the transient
-// tier is ordered by recency alone (owner ruling, 2026-09-28).
+// ftHookStart is a hook named NAME starting, as the main agent's activity.
+func ftHookStart(id, name string) *conversationv1.AgentFrame {
+	return activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID(id),
+		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{Result: &conversationv1.AgentHook_Start{
+			Start: &conversationv1.AgentHookStart{HookName: name, Event: conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_PRE_TOOL_USE, StartedAt: startedAt(1)},
+		}}},
+	})
+}
+
+// A NEWER TRANSIENT REPLACES AN OLDER ONE: the transient tier is ordered by
+// recency alone (owner ruling, 2026-09-28).
 func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "context filling"}},
-	}))
-	awaitFooter(t, f, footer, "the context-budget transient", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetContextBudget() != nil
+	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "first-hook"))
+	awaitFooter(t, f, footer, "the first hook's transient", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetHook().GetName() == "first-hook"
+	})
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-2", "second-hook"))
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the newer hook replacing the first", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetHook().GetName() == "second-hook"
+	})
+	transient := ftTransient(got)
+	if transient.GetExpiry().GetExpiresAtMs() <= transient.GetAt().GetAtMs() {
+		t.Fatalf("transient expiry = %d at %d, want an expiry after the event", transient.GetExpiry().GetExpiresAtMs(), transient.GetAt().GetAtMs())
+	}
+}
+
+// THE PUSH NOTIFICATION IS SALIENT (owner ruling, 2026-09-30): it stands over
+// a live transient until the next prompt.
+func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "a-hook"))
+	awaitFooter(t, f, footer, "the hook's transient", func(v *frontendv1.FooterView) bool {
+		return ftTransient(v).GetHook() != nil
 	})
 
 	// Act
@@ -1783,16 +1818,38 @@ func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
 	}))
 
 	// Assert
-	got := awaitFooter(t, f, footer, "the notification replacing the budget warning", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetNotification() != nil
+	awaitFooter(t, f, footer, "the notification standing salient", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetNotification().GetText() == "the branch is ready for review"
 	})
-	transient := ftTransient(got)
-	if transient.GetNotification().GetText() != "the branch is ready for review" || transient.GetContextBudget() != nil {
-		t.Fatalf("transient = %v, want the newer notification alone", transient)
-	}
-	if transient.GetExpiry().GetExpiresAtMs() <= transient.GetAt().GetAtMs() {
-		t.Fatalf("transient expiry = %d at %d, want an expiry after the event", transient.GetExpiry().GetExpiresAtMs(), transient.GetAt().GetAtMs())
-	}
+}
+
+// A CONTEXT-BUDGET WARNING IS SALIENT (owner ruling, 2026-09-30), standing
+// until a cut shrinks the context.
+func TestFooterAContextBudgetWarningStandsUntilACut(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "context filling"}},
+	}))
+	awaitFooter(t, f, footer, "the salient context-budget line", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetContextBudget().GetText() == "context filling"
+	})
+
+	// Act
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
+		CompactionProgress: &conversationv1.SessionCompactionProgress{
+			Phase:        conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED,
+			TokensBefore: 180_000,
+			TokensAfter:  20_000,
+		}}})
+
+	// Assert
+	awaitFooter(t, f, footer, "the budget line ended by the compaction", func(v *frontendv1.FooterView) bool {
+		activity := v.GetStrip().GetStatus().GetIdle().GetActivity()
+		return activity.GetSalient().GetContextBudget() == nil && activity.GetUnpinned().GetTransient().GetCompactionConcluded() != nil
+	})
 }
 
 // THE ENDURING LINE IS ALWAYS DRAWN: an idle session with no transient still
@@ -1822,8 +1879,8 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 	if session := enduring.GetUsage().GetSession(); session.GetUtilization() != 0.12 || session.GetNewsworthy() {
 		t.Fatalf("session allowance = %v, want 0.12 drawn and not newsworthy", session)
 	}
-	if enduring.GetContextWindow().GetWindowTokens() == 0 {
-		t.Fatalf("context window = %v, want the fake shim's opening context usage drawn", enduring.GetContextWindow())
+	if enduring.GetContextWindow() != nil {
+		t.Fatalf("enduring = %v, want the usage line alone: neither figure is at 80%%", enduring)
 	}
 }
 

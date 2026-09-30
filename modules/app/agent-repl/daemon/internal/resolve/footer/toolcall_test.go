@@ -79,6 +79,25 @@ func TestToolCallStartNamesTheToolAndComposesItsGist(t *testing.T) {
 	}
 }
 
+// thinkingDelta is one streamed frame of visible reasoning.
+func thinkingDelta(unit, text string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Update{Update: &conversationv1.AgentThinkingUpdate{
+				Reasoning: &conversationv1.AgentThinkingUpdate_Text{Text: &conversationv1.AgentThinkingTextDelta{NewText: text}}}}}},
+	}
+}
+
+// responseDelta is one streamed frame of prose.
+func responseDelta(unit, markdown string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
+			Result: &conversationv1.AgentResponse_Update{Update: &conversationv1.AgentResponseUpdate{NewMarkdown: markdown}}}},
+	}
+}
+
 func TestToolCallStartIgnoresFramesThatAreNotAStart(t *testing.T) {
 	tests := []struct {
 		name string

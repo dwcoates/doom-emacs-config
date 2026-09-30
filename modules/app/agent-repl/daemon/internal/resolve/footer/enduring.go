@@ -5,18 +5,46 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
-// THE ENDURING TIER: facts that are always true, drawn beneath every transient
-// so the activity cell is never empty (footer.proto "The enduring tier"). It is
-// the account's usage allowances and how full the main agent's context window
-// is, each UNSET until its first figure has been observed.
+// THE ENDURING TIER: facts that are always true, drawn beneath every other
+// tier so the activity cell is never empty (footer.proto "The enduring tier").
+// It is ONE line: the account's usage allowances or how full the main agent's
+// context window is, chosen by the 80% rule (owner ruling, 2026-09-30).
 
-// enduring composes the enduring line. It is always set; its parts are unset
-// until observed.
+// EnduringThreshold is the fill at which a figure claims the enduring line:
+// 80%, the owner's rule.
+const EnduringThreshold = 0.8
+
+// enduring composes the enduring line: the line the 80% rule chooses, or the
+// unobserved arm before either figure has been observed.
 func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
-	return &frontendv1.FooterActivityEnduring{
-		Usage:         r.enduringUsage(s),
-		ContextWindow: enduringContextWindow(s),
+	usage := r.enduringUsage(s)
+	window := enduringContextWindow(s)
+	switch {
+	case usage == nil && window == nil:
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Unobserved{
+			Unobserved: &frontendv1.FooterActivityEnduringUnobserved{}}}
+	case window == nil:
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
+	case usage == nil:
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_ContextWindow{ContextWindow: window}}
 	}
+	if contextClaimsEnduring(usage.GetSession().GetUtilization(), window.GetFill()) {
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_ContextWindow{ContextWindow: window}}
+	}
+	return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
+}
+
+// contextClaimsEnduring is the 80% rule between two observed figures: the
+// five-hour allowance's utilization and the context window's fill, both 0..1.
+// The context window claims the line when it is at or above the threshold and
+// either the five-hour allowance is not, or the context is the higher of the
+// two; usage wins a tie. An unreported five-hour allowance reads 0, since only
+// a reported figure can reach the threshold.
+func contextClaimsEnduring(fiveHour, fill float64) bool {
+	if fill < EnduringThreshold {
+		return false
+	}
+	return fiveHour < EnduringThreshold || fill > fiveHour
 }
 
 // enduringUsage is the account's usage allowances, or nil before any figure

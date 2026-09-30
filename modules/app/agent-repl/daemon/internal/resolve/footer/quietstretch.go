@@ -549,12 +549,13 @@ func (r *resolver) checkQuietStretch(ws ids.WorkspaceID, s *wsState, cause strin
 		})
 }
 
-// quietStretchLine is the standing quiet-stretch line, or nil.
-func (r *resolver) quietStretchLine(s *wsState) *frontendv1.FooterStatusActivityQuietStretch {
+// quietStretchLine is the standing quiet-stretch line with the instant it
+// began standing, or nil.
+func (r *resolver) quietStretchLine(s *wsState) *frontendv1.FooterActivityQuietStretch {
 	if s.motion.line == nil {
 		return nil
 	}
-	return &frontendv1.FooterStatusActivityQuietStretch{Text: s.motion.line.text}
+	return &frontendv1.FooterActivityQuietStretch{At: stamp(s.motion.line.at), Text: s.motion.line.text}
 }
 
 // quietStretchEnding states the line the next feed item's drawing ended, or
