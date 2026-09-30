@@ -6875,3 +6875,7 @@ bubble-body.bubble-body { display: block; }
   flex: 0 0 auto;
   white-space: nowrap;
 }
+
+/* A held session act (a model or permission-mode change) is drawn as the change
+   it makes, in the card's body where a prompt's words would be. */
+.queued-act { font-style: italic; }

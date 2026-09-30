@@ -58,6 +58,7 @@
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
+  HeldSessionAct,
   HeldPromptBadge,
   HeldPromptBuildRefreshHold,
   HeldPromptClassificationError,
@@ -159,6 +160,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   const statuses: HeldStatus[] = [verdict.status];
   // DAEMON-STATED: the editing badge stands exactly while the entry carries `editing`.
   if (u.editing !== undefined) statuses.push("editing");
+  if (u.coalesced !== undefined) statuses.push("coalesced");
   if (verdict.acceptedState === true) statuses.push("accepted");
   if (holdStatus !== null) statuses.push(holdStatus);
   const drawn = drawHeldPromptBadges(u.badges, statuses, `${path}.badges`);
@@ -168,7 +170,8 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
     // card to the shutdown it should explain.
     drawn.pills[drawn.pills.length - 1]?.setAttribute("data-schedule-id", hold.value.scheduleId);
   }
-  const content = drawUserSaid(said, `${path}.said`);
+  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as what was said.
+  const content = u.act === undefined ? drawUserSaid(said, `${path}.said`) : [drawHeldSessionAct(u.act, `${path}.act`)];
 
   // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
   // draws beside its row lands inside the region and folds away with it.
@@ -211,12 +214,39 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   card.setAttribute("data-hold", hold === null ? "none" : hold.case);
   if (u.editing === undefined) card.removeAttribute("data-editing");
   else card.setAttribute("data-editing", "true");
+  if (u.coalesced === undefined) card.removeAttribute("data-coalesced");
+  else card.setAttribute("data-coalesced", "true");
+  if (u.act === undefined) card.removeAttribute("data-act");
+  else card.setAttribute("data-act", requireCase(u.act.act, `${path}.act.act`).case);
   // The acceptance is STATE OF THE CARD, not of a marker that only exists once
   // it is true: the arm that has an acceptance says which way it stands, and
   // the arms that have none say nothing at all.
   if (verdict.acceptedState === null) card.removeAttribute("data-accepted");
   else card.setAttribute("data-accepted", verdict.acceptedState ? "true" : "false");
   return card;
+}
+
+/**
+ * A held session act: the change it makes when what is ahead of it ends,
+ * "model → claude-opus-5-5" or "permission mode → plan".
+ */
+export function drawHeldSessionAct(u: HeldSessionAct, path: string): HTMLElement {
+  const act = requireCase(u.act, `${path}.act`);
+  const line = document.createElement("div");
+  line.className = "queued-act";
+  switch (act.case) {
+    case "model":
+      line.textContent = `model → ${act.value.model}`;
+      break;
+    case "permissionMode":
+      line.textContent = `permission mode → ${act.value.mode}`;
+      break;
+    default: {
+      const other: { case: string } = act;
+      return unreachableArm(`${path}.act`, other.case);
+    }
+  }
+  return line;
 }
 
 /**
@@ -790,7 +820,8 @@ export type HeldStatus =
   | NonNullable<HeldPrompt["classification"]["case"]>
   | NonNullable<HeldPrompt["hold"]["case"]>
   | "accepted"
-  | "editing";
+  | "editing"
+  | "coalesced";
 
 /** The semantic color a held badge takes: a class on the shared `.badge`. */
 export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
@@ -808,7 +839,9 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a session-starting hold: the machinery bringing a session up, the
  *     hibernation teal;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
- *     the in-flight orange.
+ *     the in-flight orange;
+ *   - coalesced: later prompts were folded into this one, an acknowledgement
+ *     that changes nothing about delivery, muted like `accepted`.
  */
 export const HELD_STATUS_BADGES = {
   classifying: "run",
@@ -821,6 +854,7 @@ export const HELD_STATUS_BADGES = {
   buildRefresh: "amber",
   sessionStarting: "teal",
   editing: "run",
+  coalesced: "muted",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
 
 /** The class every held badge wears beside the shared `.badge`. */
