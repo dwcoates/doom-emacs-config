@@ -170,6 +170,8 @@ export function row(init: {
   viewed?: boolean;
   /** The REVIVING marker: present while the daemon revives this workspace. */
   reviving?: boolean;
+  /** The durable last-selected instant, epoch ms; omitted = never selected. */
+  lastSelectedAtMs?: bigint;
   priority?: string;
   /** The when-column's ARM; omitted leaves the column empty. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
@@ -188,6 +190,7 @@ export function row(init: {
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.reviving === true ? { reviving: {} } : {}),
+    ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
 }

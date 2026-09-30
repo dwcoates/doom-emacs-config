@@ -1099,3 +1099,20 @@ describe("the reviving shimmer", () => {
     expect(name.classList.contains("viewed")).toBe(true);
   });
 });
+
+describe("the durable last-selected instant", () => {
+  it("draws a row carrying it exactly as the same row without it", () => {
+    // Arrange: the instant is an ordering fact for clients, never drawn.
+    const plain = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Act.
+    const stamped = drawRosterRow(
+      row({ id: "ws-1", lastSelectedAtMs: 1756400000000n }),
+      sidebarContext(),
+      "R",
+    );
+
+    // Assert.
+    expect(stamped.outerHTML).toBe(plain.outerHTML);
+  });
+});
