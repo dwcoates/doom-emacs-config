@@ -53,6 +53,7 @@
 
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
+(declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
