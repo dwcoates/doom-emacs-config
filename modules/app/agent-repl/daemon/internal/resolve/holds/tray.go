@@ -248,6 +248,9 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 	if p.GetEditing() != nil {
 		out = append(out, badge("editing", "editing"))
 	}
+	if p.GetCoalesced() != nil {
+		out = append(out, badge("coalesced", "later prompts were folded into this one"))
+	}
 	out = append(out, confirmed...)
 	switch arm := p.GetHold().(type) {
 	case nil:
