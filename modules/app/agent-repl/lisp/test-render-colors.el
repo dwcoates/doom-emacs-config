@@ -147,12 +147,6 @@ them reporting nothing at all."
     (should (assoc (agent-repl-test--wire-name (car row))
                    (agent-repl-test--fixture "merge_glyphs")))))
 
-(ert-deftest agent-repl-test-colors-the-two-queue-arms-share-one-glyph ()
-  "The two arms the fixture assigns the `queue' glyph draw one character."
-  ;; Act / Assert
-  (should (equal (alist-get :merge-enqueuing agent-repl-status-merge-glyphs)
-                 (alist-get :merge-queued agent-repl-status-merge-glyphs))))
-
 ;;;; ---- The five colors -------------------------------------------------
 
 (ert-deftest agent-repl-test-colors-the-palette-is-the-fixtures-five ()

@@ -214,30 +214,29 @@ unstubbed."
     (startFailed . :start-failed)
     (degraded . :degraded)
     (dead . :dead)
-    (mergeEnqueuing . :merge-enqueuing)
     (merging . :merging)
     (mergeQueued . :merge-queued)
-    (mergeConflict . :merge-conflict)
     (mergeFailed . :merge-failed)
     (merged . :merged)
     (none . :none)
     (inactive . :inactive))
   "Every RosterRow.status arm frontend/v1/sidebar.proto declares, and the
-keyword §8 pins for it.  The list is EXHAUSTIVE by contract: 24 arms, and
+keyword §8 pins for it.  The list is EXHAUSTIVE by contract: 22 arms, and
 the roster's vocabulary is the ONE source for tab coloring and the sidebar
-dot.  A 24th arm appearing on the wire must be a loud failure, not a
+dot.  A 23rd arm appearing on the wire must be a loud failure, not a
 silent default, which is why the suite pins the count as well as the
 mapping.")
 
-(ert-deftest agent-repl-itest-roster-declares-every-status-arm ()
-  "The suite's arm table matches the contract's arm count exactly.
+(ert-deftest agent-repl-itest-roster-declares-the-twenty-two-status-arms ()
+  "The suite's arm table matches the contract's 22 arms exactly.
 A drifted table would let a new arm ship untested, and the coloring would
-silently fall through to `none'."
+silently fall through to `none'.  `merge_enqueuing' and `merge_conflict'
+are retired (merge-landing.md, Landed change 1)."
   ;; Arrange / Act / Assert.
-  (should (equal 24 (length agent-repl-itest-roster--status-arms))))
+  (should (equal 22 (length agent-repl-itest-roster--status-arms))))
 
 (ert-deftest agent-repl-itest-roster-every-status-arm-decodes-to-its-keyword ()
-  "Each of the 24 status arms resolves to exactly one tab-state keyword.
+  "Each of the 22 status arms resolves to exactly one tab-state keyword.
 The roster's per-row state vocabulary is the ONE source for tab coloring;
 there is no HostWorkspace lifecycle axis to fall back on."
   ;; Arrange.
@@ -1332,10 +1331,10 @@ SOME visual marker even though they take no lifecycle color."
                       (agent-repl-status-tab-state "itest-glyph-inactive"))
                      "?")))))
 
-(ert-deftest agent-repl-itest-roster-merge-conflict-arm-draws-its-glyph ()
-  "One merge arm (`merge_conflict') draws its glyph through the render path.
-Fanout §8: the merge pipeline's arms \"report themselves with a glyph\"
-rather than a lifecycle color."
+(ert-deftest agent-repl-itest-roster-merge-failed-arm-draws-its-glyph ()
+  "The `merge_failed' arm draws its ✗ glyph through the render path.
+A failed merge is turquoise AND glyphed, so the tab says both that
+something went wrong and that it was the merge."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1343,17 +1342,17 @@ rather than a lifecycle color."
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
-                      "itest-glyph-conflict" "itest-glyph-conflict" 'mergeConflict))))
+                      "itest-glyph-failed" "itest-glyph-failed" 'mergeFailed))))
       (agent-repl-itest--wait-until
        (lambda ()
-         (and (agent-repl--ws-known-p "itest-glyph-conflict")
-              (eq (agent-repl-status-tab-state "itest-glyph-conflict") :merge-conflict)))
-       nil "the merge-conflict state")
+         (and (agent-repl--ws-known-p "itest-glyph-failed")
+              (eq (agent-repl-status-tab-state "itest-glyph-failed") :merge-failed)))
+       nil "the merge-failed state")
       ;; Assert.
       (should (equal (agent-repl-status-tab-glyph
-                      "itest-glyph-conflict"
-                      (agent-repl-status-tab-state "itest-glyph-conflict"))
-                     "≠")))))
+                      "itest-glyph-failed"
+                      (agent-repl-status-tab-state "itest-glyph-failed"))
+                     "✗")))))
 
 (ert-deftest agent-repl-itest-roster-logs-the-roster-stream-open ()
   "The roster subscription is logged through the canonical ladder."

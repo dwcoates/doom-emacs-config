@@ -145,9 +145,9 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-four ()
-  "The status vocabulary is the 24 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 24)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-two ()
+  "The status vocabulary is the 22 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 22)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."
@@ -162,6 +162,32 @@ arriving as an unknown field on some later push."
                   #'agent-repl-wire-decode-roster-row
                   (agent-repl-test-wire-roster--row "\"ready\":{}" "\"thinking\":{}"))
                  '("RosterRow" status "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-retired-merge-enqueuing-is-refused ()
+  "The retired `merge_enqueuing' arm is refused as an unknown field.
+No merge fact is shown before the requesting turn ends (merge-landing.md,
+Landed change 1), so tag 19 is reserved."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"mergeEnqueuing\":{}"))
+                 '("RosterRow" mergeEnqueuing "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-retired-merge-conflict-is-refused ()
+  "The retired `merge_conflict' arm is refused as an unknown field.
+A merge never parks (merge-landing.md, Landed change 1), so tag 22 is
+reserved."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"mergeConflict\":{}"))
+                 '("RosterRow" mergeConflict "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-merge-failed-decodes ()
+  "The `merge_failed' arm decodes to `:merge-failed'."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row "\"mergeFailed\":{}"))
+                            :status)
+                 '(:arm :merge-failed :value nil))))
 
 (ert-deftest agent-repl-test-wire-roster-row-unknown-status-arm-is-refused ()
   "An arm this build does not know is refused loudly, never drawn."

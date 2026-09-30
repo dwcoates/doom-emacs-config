@@ -23,8 +23,8 @@
     "             taking on context, clearing or compacting. Usable.",
     "  yellow     the main thread is idle while detached work runs. Usable.",
     "  green      ready for the user: idle, a turn done or interrupted, a",
-    "             question or permission waiting, a merge stopped awaiting",
-    "             the user, a merge that landed. Usable.",
+    "             question or permission waiting, a merge that landed.",
+    "             Usable.",
     "  purple     a merge is IN PROGRESS; the daemon holds the workspace, so",
     "             the composer is closed.",
     "  turquoise  something unexpected went wrong and wants the user's",
@@ -83,10 +83,11 @@
     "unpainted dot.",
     "",
     "EVERY MERGE ARM SPENDS A COLOR AS WELL AS A GLYPH (owner rulings,",
-    "2026-09-28): a merge in progress (merge_enqueuing, merge_queued,",
-    "merging) is PURPLE, a merge stopped awaiting the user (merge_conflict,",
-    "a parked merge included) is GREEN, a landed merge (merged) is GREEN and",
-    "a failed merge (merge_failed) is TURQUOISE. All keep their glyphs.",
+    "2026-09-28): a merge in progress (merge_queued, merging) is PURPLE, a",
+    "landed merge (merged) is GREEN and a failed merge (merge_failed) is",
+    "TURQUOISE. All keep their glyphs. A merge never parks and no merge fact",
+    "is shown before the requesting turn ends (merge-landing.md, Landed",
+    "change 1), so there is no conflict arm and no enqueuing arm.",
     "'none' and 'inactive' take 'none' because a workspace with no session",
     "has no lifecycle to report at all.",
     "",
@@ -115,10 +116,8 @@
     "done": "green",
     "interrupted": "green",
     "permission": "green",
-    "merge_enqueuing": "purple",
     "merging": "purple",
     "merge_queued": "purple",
-    "merge_conflict": "green",
     "merge_failed": "turquoise",
     "merged": "green"
   },
@@ -129,10 +128,8 @@
     "color deliberately."
   ],
   "colored_merge_arms": [
-    "merge_enqueuing",
     "merge_queued",
     "merging",
-    "merge_conflict",
     "merge_failed",
     "merged"
   ],
@@ -148,10 +145,8 @@
     "states."
   ],
   "merge_glyphs": {
-    "merge_enqueuing": "queue",
     "merge_queued": "queue",
     "merging": "recycle",
-    "merge_conflict": "conflict",
     "merge_failed": "failed",
     "merged": "check"
   },
@@ -173,8 +168,7 @@
     "2026-09-28): something went wrong, but the workspace is usable and the",
     "composer is open.",
     "",
-    "GREEN 'merge_conflict' is a merge stopped awaiting the user, and green",
-    "'merged' a merge that landed."
+    "GREEN 'merged' is a merge that landed."
   ],
   "footer_status": {
     "idle": "green",
@@ -187,7 +181,6 @@
     "disconnected": "blue",
     "closing": "blue",
     "loading": "red",
-    "merge_conflict": "green",
     "merge_failed": "turquoise",
     "merged": "green",
     "turn_failed": "turquoise",

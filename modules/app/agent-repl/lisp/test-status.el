@@ -156,14 +156,6 @@ would be a second vocabulary saying what the state color already says."
   (dolist (entry agent-repl--tab-palette)
     (should-not (plist-member (plist-get (cdr entry) :unselected) :bracket-bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-conflict-is-green ()
-  "`:merge-conflict' paints the tab GREEN (owner ruling, 2026-09-28): a
-conflict, a parked merge included, is an expected state ready for a human
-response, never the in-flight purple and never blue."
-  ;; Act / Assert
-  (should (equal agent-repl--color-done-green
-                 (plist-get (agent-repl--tab-spec :merge-conflict nil) :bg))))
-
 (ert-deftest agent-repl-test-tab-spec-merge-failed-is-turquoise ()
   "`:merge-failed' paints the tab TURQUOISE (owner ruling, 2026-09-28):
 something went wrong, but the workspace is usable."
@@ -185,12 +177,6 @@ rather than the agent\='s, and red would have claimed a turn was running."
   ;; Act / Assert
   (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merging nil) :bg))))
-
-(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-is-purple ()
-  "A merge on its way into the queue is already in flight, so it is purple."
-  ;; Act / Assert
-  (should (equal agent-repl--color-merging-purple
-                 (plist-get (agent-repl--tab-spec :merge-enqueuing nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-merge-queued-is-purple ()
   "A merge waiting behind a sibling is in flight from the user\='s side.
@@ -3327,12 +3313,13 @@ usable (owner ruling, 2026-09-28)."
   (should (equal (sort (agent-repl-test-status--arms-taking "turquoise") #'string<)
                  (sort (list :degraded :turn-failed :merge-failed) #'string<))))
 
-(ert-deftest agent-repl-test-status-purple-is-the-in-flight-merge ()
-  "Purple is spent on the three merge arms with no verdict yet, and on
-nothing else: a surface with no status word can carry one purple."
+(ert-deftest agent-repl-test-status-purple-is-the-queued-or-running-merge ()
+  "Purple is spent on the two merge arms with no verdict yet, and on
+nothing else: no merge fact is shown before the requesting turn ends, so
+there is no enqueuing arm (merge-landing.md, Landed change 1)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "purple") #'string<)
-                 (sort (list :merge-enqueuing :merge-queued :merging) #'string<))))
+                 (sort (list :merge-queued :merging) #'string<))))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
   "Red is a turn in flight."
@@ -3346,14 +3333,13 @@ nothing else: a surface with no status word can carry one purple."
   ;; Act / Assert
   (should (equal (agent-repl-test-status--arms-taking "yellow") '(:idle-async))))
 
-(ert-deftest agent-repl-test-status-green-is-the-session-yours-to-use ()
-  "Green covers ready, done, interrupted, permission, a merge conflict and a
-landed merge alike: a pending permission, like a merge stopped on a conflict, means the
-workspace is ready for the user."
+(ert-deftest agent-repl-test-status-green-is-ready-or-landed ()
+  "Green covers ready, done, interrupted, permission and a landed merge:
+the workspace is ready for the user.  A merge never parks on a conflict,
+so no merge arm but `:merged' is green (merge-landing.md, Landed change 1)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "green") #'string<)
-                 (sort (list :ready :done :interrupted :permission :merge-conflict
-                             :merged)
+                 (sort (list :ready :done :interrupted :permission :merged)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()
@@ -3373,28 +3359,27 @@ reaching the palette with one paints nothing rather than guessing."
 
 ;;;; ---- Glyphs ----------------------------------------------------------
 
-(ert-deftest agent-repl-test-status-a-merge-arm-draws-its-glyph ()
-  "The merge arms carry no lifecycle colour, so the glyph is their report."
+(ert-deftest agent-repl-test-status-a-queued-merge-tab-draws-its-hourglass ()
+  "A `:merge-queued\=' tab draws its ⧖ glyph over its purple."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-conflict)
-                   (alist-get :merge-conflict agent-repl-status-merge-glyphs)))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-queued) "⧖"))))
+
+(ert-deftest agent-repl-test-status-a-running-merge-tab-draws-its-cycle ()
+  "A `:merging\=' tab draws its ↻ glyph over its purple."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merging) "↻"))))
 
 (ert-deftest agent-repl-test-status-a-merge-failed-tab-draws-its-cross ()
-  "A `:merge-failed\=' tab draws its ✗ glyph as well as its blue: the color
+  "A `:merge-failed\=' tab draws its ✗ glyph as well as its turquoise: the color
 says something is wrong, and the glyph says it is the merge."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
     (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed) "✗"))))
-
-(ert-deftest agent-repl-test-status-a-merge-conflict-tab-draws-its-glyph ()
-  "A `:merge-conflict\=' tab draws its ≠ glyph as well as its green."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-conflict) "≠"))))
 
 (ert-deftest agent-repl-test-status-a-merged-tab-draws-its-check ()
   "A `:merged\=' tab draws its ✓ glyph as well as its green."
