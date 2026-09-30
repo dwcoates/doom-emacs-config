@@ -33,7 +33,7 @@ var File_store_v1_service_proto protoreflect.FileDescriptor
 
 const file_store_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x16store/v1/service.proto\x12\bstore.v1\x1a0store/v1/endpoint_get_agent_by_vendor_task.proto\x1a%store/v1/endpoint_get_live_work.proto\x1a+store/v1/endpoint_get_sidecar_cursors.proto\x1a$store/v1/endpoint_get_workflow.proto\x1a+store/v1/endpoint_list_residue_shapes.proto\x1a*store/v1/endpoint_open_agent_session.proto\x1a'store/v1/endpoint_read_agent_page.proto\x1a+store/v1/endpoint_watch_agent_session.proto\x1a&store/v1/endpoint_watch_bash_run.proto\x1a#store/v1/endpoint_write_batch.proto2\xed\x06\n" +
+	"\x16store/v1/service.proto\x12\bstore.v1\x1a0store/v1/endpoint_get_agent_by_vendor_task.proto\x1a%store/v1/endpoint_get_live_work.proto\x1a,store/v1/endpoint_get_shell_run_claims.proto\x1a+store/v1/endpoint_get_sidecar_cursors.proto\x1a$store/v1/endpoint_get_workflow.proto\x1a+store/v1/endpoint_list_residue_shapes.proto\x1a*store/v1/endpoint_open_agent_session.proto\x1a'store/v1/endpoint_read_agent_page.proto\x1a+store/v1/endpoint_watch_agent_session.proto\x1a&store/v1/endpoint_watch_bash_run.proto\x1a#store/v1/endpoint_write_batch.proto2\xcb\a\n" +
 	"\tShimStore\x12Y\n" +
 	"\x10OpenAgentSession\x12!.store.v1.OpenAgentSessionRequest\x1a\".store.v1.OpenAgentSessionResponse\x12^\n" +
 	"\x11WatchAgentSession\x12\".store.v1.WatchAgentSessionRequest\x1a#.store.v1.WatchAgentSessionResponse0\x01\x12P\n" +
@@ -43,7 +43,8 @@ const file_store_v1_service_proto_rawDesc = "" +
 	"\x11ListResidueShapes\x12\".store.v1.ListResidueShapesRequest\x1a#.store.v1.ListResidueShapesResponse\x12\\\n" +
 	"\x11GetSidecarCursors\x12\".store.v1.GetSidecarCursorsRequest\x1a#.store.v1.GetSidecarCursorsResponse\x12J\n" +
 	"\vGetLiveWork\x12\x1c.store.v1.GetLiveWorkRequest\x1a\x1d.store.v1.GetLiveWorkResponse\x12e\n" +
-	"\x14GetAgentByVendorTask\x12%.store.v1.GetAgentByVendorTaskRequest\x1a&.store.v1.GetAgentByVendorTaskResponse\x12G\n" +
+	"\x14GetAgentByVendorTask\x12%.store.v1.GetAgentByVendorTaskRequest\x1a&.store.v1.GetAgentByVendorTaskResponse\x12\\\n" +
+	"\x11GetShellRunClaims\x12\".store.v1.GetShellRunClaimsRequest\x1a#.store.v1.GetShellRunClaimsResponse\x12G\n" +
 	"\n" +
 	"WriteBatch\x12\x1b.store.v1.WriteBatchRequest\x1a\x1c.store.v1.WriteBatchResponseB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
@@ -57,17 +58,19 @@ var file_store_v1_service_proto_goTypes = []any{
 	(*GetSidecarCursorsRequest)(nil),     // 6: store.v1.GetSidecarCursorsRequest
 	(*GetLiveWorkRequest)(nil),           // 7: store.v1.GetLiveWorkRequest
 	(*GetAgentByVendorTaskRequest)(nil),  // 8: store.v1.GetAgentByVendorTaskRequest
-	(*WriteBatchRequest)(nil),            // 9: store.v1.WriteBatchRequest
-	(*OpenAgentSessionResponse)(nil),     // 10: store.v1.OpenAgentSessionResponse
-	(*WatchAgentSessionResponse)(nil),    // 11: store.v1.WatchAgentSessionResponse
-	(*ReadAgentPageResponse)(nil),        // 12: store.v1.ReadAgentPageResponse
-	(*WatchBashRunResponse)(nil),         // 13: store.v1.WatchBashRunResponse
-	(*GetWorkflowResponse)(nil),          // 14: store.v1.GetWorkflowResponse
-	(*ListResidueShapesResponse)(nil),    // 15: store.v1.ListResidueShapesResponse
-	(*GetSidecarCursorsResponse)(nil),    // 16: store.v1.GetSidecarCursorsResponse
-	(*GetLiveWorkResponse)(nil),          // 17: store.v1.GetLiveWorkResponse
-	(*GetAgentByVendorTaskResponse)(nil), // 18: store.v1.GetAgentByVendorTaskResponse
-	(*WriteBatchResponse)(nil),           // 19: store.v1.WriteBatchResponse
+	(*GetShellRunClaimsRequest)(nil),     // 9: store.v1.GetShellRunClaimsRequest
+	(*WriteBatchRequest)(nil),            // 10: store.v1.WriteBatchRequest
+	(*OpenAgentSessionResponse)(nil),     // 11: store.v1.OpenAgentSessionResponse
+	(*WatchAgentSessionResponse)(nil),    // 12: store.v1.WatchAgentSessionResponse
+	(*ReadAgentPageResponse)(nil),        // 13: store.v1.ReadAgentPageResponse
+	(*WatchBashRunResponse)(nil),         // 14: store.v1.WatchBashRunResponse
+	(*GetWorkflowResponse)(nil),          // 15: store.v1.GetWorkflowResponse
+	(*ListResidueShapesResponse)(nil),    // 16: store.v1.ListResidueShapesResponse
+	(*GetSidecarCursorsResponse)(nil),    // 17: store.v1.GetSidecarCursorsResponse
+	(*GetLiveWorkResponse)(nil),          // 18: store.v1.GetLiveWorkResponse
+	(*GetAgentByVendorTaskResponse)(nil), // 19: store.v1.GetAgentByVendorTaskResponse
+	(*GetShellRunClaimsResponse)(nil),    // 20: store.v1.GetShellRunClaimsResponse
+	(*WriteBatchResponse)(nil),           // 21: store.v1.WriteBatchResponse
 }
 var file_store_v1_service_proto_depIdxs = []int32{
 	0,  // 0: store.v1.ShimStore.OpenAgentSession:input_type -> store.v1.OpenAgentSessionRequest
@@ -79,19 +82,21 @@ var file_store_v1_service_proto_depIdxs = []int32{
 	6,  // 6: store.v1.ShimStore.GetSidecarCursors:input_type -> store.v1.GetSidecarCursorsRequest
 	7,  // 7: store.v1.ShimStore.GetLiveWork:input_type -> store.v1.GetLiveWorkRequest
 	8,  // 8: store.v1.ShimStore.GetAgentByVendorTask:input_type -> store.v1.GetAgentByVendorTaskRequest
-	9,  // 9: store.v1.ShimStore.WriteBatch:input_type -> store.v1.WriteBatchRequest
-	10, // 10: store.v1.ShimStore.OpenAgentSession:output_type -> store.v1.OpenAgentSessionResponse
-	11, // 11: store.v1.ShimStore.WatchAgentSession:output_type -> store.v1.WatchAgentSessionResponse
-	12, // 12: store.v1.ShimStore.ReadAgentPage:output_type -> store.v1.ReadAgentPageResponse
-	13, // 13: store.v1.ShimStore.WatchBashRun:output_type -> store.v1.WatchBashRunResponse
-	14, // 14: store.v1.ShimStore.GetWorkflow:output_type -> store.v1.GetWorkflowResponse
-	15, // 15: store.v1.ShimStore.ListResidueShapes:output_type -> store.v1.ListResidueShapesResponse
-	16, // 16: store.v1.ShimStore.GetSidecarCursors:output_type -> store.v1.GetSidecarCursorsResponse
-	17, // 17: store.v1.ShimStore.GetLiveWork:output_type -> store.v1.GetLiveWorkResponse
-	18, // 18: store.v1.ShimStore.GetAgentByVendorTask:output_type -> store.v1.GetAgentByVendorTaskResponse
-	19, // 19: store.v1.ShimStore.WriteBatch:output_type -> store.v1.WriteBatchResponse
-	10, // [10:20] is the sub-list for method output_type
-	0,  // [0:10] is the sub-list for method input_type
+	9,  // 9: store.v1.ShimStore.GetShellRunClaims:input_type -> store.v1.GetShellRunClaimsRequest
+	10, // 10: store.v1.ShimStore.WriteBatch:input_type -> store.v1.WriteBatchRequest
+	11, // 11: store.v1.ShimStore.OpenAgentSession:output_type -> store.v1.OpenAgentSessionResponse
+	12, // 12: store.v1.ShimStore.WatchAgentSession:output_type -> store.v1.WatchAgentSessionResponse
+	13, // 13: store.v1.ShimStore.ReadAgentPage:output_type -> store.v1.ReadAgentPageResponse
+	14, // 14: store.v1.ShimStore.WatchBashRun:output_type -> store.v1.WatchBashRunResponse
+	15, // 15: store.v1.ShimStore.GetWorkflow:output_type -> store.v1.GetWorkflowResponse
+	16, // 16: store.v1.ShimStore.ListResidueShapes:output_type -> store.v1.ListResidueShapesResponse
+	17, // 17: store.v1.ShimStore.GetSidecarCursors:output_type -> store.v1.GetSidecarCursorsResponse
+	18, // 18: store.v1.ShimStore.GetLiveWork:output_type -> store.v1.GetLiveWorkResponse
+	19, // 19: store.v1.ShimStore.GetAgentByVendorTask:output_type -> store.v1.GetAgentByVendorTaskResponse
+	20, // 20: store.v1.ShimStore.GetShellRunClaims:output_type -> store.v1.GetShellRunClaimsResponse
+	21, // 21: store.v1.ShimStore.WriteBatch:output_type -> store.v1.WriteBatchResponse
+	11, // [11:22] is the sub-list for method output_type
+	0,  // [0:11] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -104,6 +109,7 @@ func file_store_v1_service_proto_init() {
 	}
 	file_store_v1_endpoint_get_agent_by_vendor_task_proto_init()
 	file_store_v1_endpoint_get_live_work_proto_init()
+	file_store_v1_endpoint_get_shell_run_claims_proto_init()
 	file_store_v1_endpoint_get_sidecar_cursors_proto_init()
 	file_store_v1_endpoint_get_workflow_proto_init()
 	file_store_v1_endpoint_list_residue_shapes_proto_init()

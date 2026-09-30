@@ -1,0 +1,82 @@
+// endpoint_get_shell_run_claims.proto — GetShellRunClaims: WHICH RUN each of a
+// set of vendor task ids names, and which book holds that run's launching call.
+//
+// WHY THE SIDECAR ASKS. A detached shell's spool is named by the vendor's task
+// id, and the sidecar reads a spool only once a spawning call claims it. The
+// transcript states the claim in a structured field for most launches, but a
+// shell the vendor moved to the background on its own timeout inside a
+// subagent is stated only in prose, and a spool nothing claimed is never read:
+// its terminal is never seen and the run stays live forever. The vendor's task
+// stream states the pairing for every run, and the shim, which reads that
+// stream, writes it (EntryBatch.shell_run_claims).
+//
+// WHY THE BOOK COMES FROM THE STORE. The shim does not always know which agent
+// made the launching call (a backgrounded subagent's calls never reach its
+// stream), but the call's own activity row is on record in exactly that book,
+// written by whichever producer read the call. So the store answers the book
+// from the row, and a run whose call is not on record yet is answered without
+// one: the sidecar holds the spool and asks again.
+//
+// UNSCOPED ON PURPOSE. The sidecar reads every session on the host; a task id
+// is the vendor's own name and is compared for equality only.
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask which run each vendor task id names.
+message GetShellRunClaimsRequest {
+  // REQUIRED, at least one. Each non-empty; an empty id is refused with
+  // `invalid_request`.
+  repeated string vendor_task_ids = 1;
+}
+
+// The claims, or why they could not be read. THE ARM IS THE ANSWER.
+message GetShellRunClaimsResponse {
+  oneof result {
+    GetShellRunClaimsSuccess success = 1;
+    GetShellRunClaimsFailure failure = 2;
+  }
+}
+
+// Every claim on record for the asked ids. An id with no claim is simply
+// absent; an id with more than one claim is answered with every one of them,
+// and the caller refuses to choose.
+message GetShellRunClaimsSuccess {
+  repeated ShellRunClaimed claims = 1;
+}
+
+// One claim on record.
+message ShellRunClaimed {
+  // The claim, exactly as the shim stated it.
+  ShellRunClaim claim = 1;
+  // The book holding the run's launching call (its `activity:` row). Unset
+  // while no producer has written that row yet.
+  optional conversation.v1.AgentId owner = 2;
+}
+
+// The claims could not be read. THE ARM IS WHY.
+message GetShellRunClaimsFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // No ids, or an empty id.
+    GetShellRunClaimsInvalidRequest invalid_request = 2;
+    // The database failed; `detail` carries the driver's text.
+    GetShellRunClaimsStorageFailure storage_failure = 3;
+  }
+}
+
+// The request was malformed.
+message GetShellRunClaimsInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+
+// The database failed.
+message GetShellRunClaimsStorageFailure {}

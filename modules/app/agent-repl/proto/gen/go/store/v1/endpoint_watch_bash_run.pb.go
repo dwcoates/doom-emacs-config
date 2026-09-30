@@ -34,7 +34,15 @@ type WatchBashRunRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The run's unit identity, exactly as the spawning stream announced it and
 	// as every StoreAgentBash row carries it.
-	Run           *v1.AgentActivityId `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
+	Run *v1.AgentActivityId `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
+	// Whether the caller KNOWS the run exists: its producer announced it and
+	// has not concluded it. When set, a run the store holds no row for yet is
+	// WAITED on: the stream stands open and sends the run's first row the moment
+	// it is written. When unset, such a run is a refused open. A run can be
+	// announced before any of its rows is stored (its spool is read by another
+	// producer), and refusing it then left the run with no watch able to see its
+	// end.
+	AwaitFirstRow bool `protobuf:"varint,2,opt,name=await_first_row,json=awaitFirstRow,proto3" json:"await_first_row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -76,11 +84,19 @@ func (x *WatchBashRunRequest) GetRun() *v1.AgentActivityId {
 	return nil
 }
 
+func (x *WatchBashRunRequest) GetAwaitFirstRow() bool {
+	if x != nil {
+		return x.AwaitFirstRow
+	}
+	return false
+}
+
 // A stream with a natural end: every stored row of the run in write order
 // (the start, each delta, the terminal if already written), then rows as
 // they are written, ending after the terminal row is sent. A run with no
 // stored row is a refused open — closed at the transport, the store's
-// convention for every watch; no failure frame.
+// convention for every watch; no failure frame — unless the request sets
+// `await_first_row`, when the stream waits for the run's first row.
 type WatchBashRunResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// One row, an item's whole latest state.
@@ -130,9 +146,10 @@ var File_store_v1_endpoint_watch_bash_run_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_watch_bash_run_proto_rawDesc = "" +
 	"\n" +
-	"&store/v1/endpoint_watch_bash_run.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"I\n" +
+	"&store/v1/endpoint_watch_bash_run.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"q\n" +
 	"\x13WatchBashRunRequest\x122\n" +
-	"\x03run\x18\x01 \x01(\v2 .conversation.v1.AgentActivityIdR\x03run\"B\n" +
+	"\x03run\x18\x01 \x01(\v2 .conversation.v1.AgentActivityIdR\x03run\x12&\n" +
+	"\x0fawait_first_row\x18\x02 \x01(\bR\rawaitFirstRow\"B\n" +
 	"\x14WatchBashRunResponse\x12*\n" +
 	"\x03row\x18\x01 \x01(\v2\x18.store.v1.StoreAgentBashR\x03rowB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 

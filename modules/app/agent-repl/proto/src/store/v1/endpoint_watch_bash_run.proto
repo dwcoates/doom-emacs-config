@@ -19,13 +19,22 @@ message WatchBashRunRequest {
   // The run's unit identity, exactly as the spawning stream announced it and
   // as every StoreAgentBash row carries it.
   conversation.v1.AgentActivityId run = 1;
+  // Whether the caller KNOWS the run exists: its producer announced it and
+  // has not concluded it. When set, a run the store holds no row for yet is
+  // WAITED on: the stream stands open and sends the run's first row the moment
+  // it is written. When unset, such a run is a refused open. A run can be
+  // announced before any of its rows is stored (its spool is read by another
+  // producer), and refusing it then left the run with no watch able to see its
+  // end.
+  bool await_first_row = 2;
 }
 
 // A stream with a natural end: every stored row of the run in write order
 // (the start, each delta, the terminal if already written), then rows as
 // they are written, ending after the terminal row is sent. A run with no
 // stored row is a refused open — closed at the transport, the store's
-// convention for every watch; no failure frame.
+// convention for every watch; no failure frame — unless the request sets
+// `await_first_row`, when the stream waits for the run's first row.
 message WatchBashRunResponse {
   // One row, an item's whole latest state.
   StoreAgentBash row = 1;

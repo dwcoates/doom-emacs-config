@@ -65,6 +65,9 @@ const (
 	// ShimStoreGetAgentByVendorTaskProcedure is the fully-qualified name of the ShimStore's
 	// GetAgentByVendorTask RPC.
 	ShimStoreGetAgentByVendorTaskProcedure = "/store.v1.ShimStore/GetAgentByVendorTask"
+	// ShimStoreGetShellRunClaimsProcedure is the fully-qualified name of the ShimStore's
+	// GetShellRunClaims RPC.
+	ShimStoreGetShellRunClaimsProcedure = "/store.v1.ShimStore/GetShellRunClaims"
 	// ShimStoreWriteBatchProcedure is the fully-qualified name of the ShimStore's WriteBatch RPC.
 	ShimStoreWriteBatchProcedure = "/store.v1.ShimStore/WriteBatch"
 )
@@ -81,6 +84,7 @@ var (
 	shimStoreGetSidecarCursorsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
 	shimStoreGetLiveWorkMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
 	shimStoreGetAgentByVendorTaskMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
+	shimStoreGetShellRunClaimsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
 	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
@@ -119,6 +123,10 @@ type ShimStoreClient interface {
 	// agent, and when that agent raises an ask. The pairing is the sidecar's,
 	// written with the agent's first rows (EntryBatch.agent_locators).
 	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
+	// WHICH RUN each held shell spool belongs to, from the claims the shim wrote
+	// (EntryBatch.shell_run_claims), with the book that holds each run's
+	// launching call. The sidecar asks for the spools no transcript line claimed.
+	GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -187,6 +195,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getShellRunClaims: connect.NewClient[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse](
+			httpClient,
+			baseURL+ShimStoreGetShellRunClaimsProcedure,
+			connect.WithSchema(shimStoreGetShellRunClaimsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		writeBatch: connect.NewClient[v1.WriteBatchRequest, v1.WriteBatchResponse](
 			httpClient,
 			baseURL+ShimStoreWriteBatchProcedure,
@@ -207,6 +221,7 @@ type shimStoreClient struct {
 	getSidecarCursors    *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
 	getLiveWork          *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
 	getAgentByVendorTask *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
+	getShellRunClaims    *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
 	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
@@ -255,6 +270,11 @@ func (c *shimStoreClient) GetAgentByVendorTask(ctx context.Context, req *connect
 	return c.getAgentByVendorTask.CallUnary(ctx, req)
 }
 
+// GetShellRunClaims calls store.v1.ShimStore.GetShellRunClaims.
+func (c *shimStoreClient) GetShellRunClaims(ctx context.Context, req *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error) {
+	return c.getShellRunClaims.CallUnary(ctx, req)
+}
+
 // WriteBatch calls store.v1.ShimStore.WriteBatch.
 func (c *shimStoreClient) WriteBatch(ctx context.Context, req *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
 	return c.writeBatch.CallUnary(ctx, req)
@@ -295,6 +315,10 @@ type ShimStoreHandler interface {
 	// agent, and when that agent raises an ask. The pairing is the sidecar's,
 	// written with the agent's first rows (EntryBatch.agent_locators).
 	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
+	// WHICH RUN each held shell spool belongs to, from the claims the shim wrote
+	// (EntryBatch.shell_run_claims), with the book that holds each run's
+	// launching call. The sidecar asks for the spools no transcript line claimed.
+	GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -359,6 +383,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetShellRunClaimsHandler := connect.NewUnaryHandler(
+		ShimStoreGetShellRunClaimsProcedure,
+		svc.GetShellRunClaims,
+		connect.WithSchema(shimStoreGetShellRunClaimsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreWriteBatchHandler := connect.NewUnaryHandler(
 		ShimStoreWriteBatchProcedure,
 		svc.WriteBatch,
@@ -385,6 +415,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetLiveWorkHandler.ServeHTTP(w, r)
 		case ShimStoreGetAgentByVendorTaskProcedure:
 			shimStoreGetAgentByVendorTaskHandler.ServeHTTP(w, r)
+		case ShimStoreGetShellRunClaimsProcedure:
+			shimStoreGetShellRunClaimsHandler.ServeHTTP(w, r)
 		case ShimStoreWriteBatchProcedure:
 			shimStoreWriteBatchHandler.ServeHTTP(w, r)
 		default:
@@ -430,6 +462,10 @@ func (UnimplementedShimStoreHandler) GetLiveWork(context.Context, *connect.Reque
 
 func (UnimplementedShimStoreHandler) GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetAgentByVendorTask is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetShellRunClaims is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {

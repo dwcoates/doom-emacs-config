@@ -297,6 +297,29 @@ message EntryBatch {
   // one, so a re-read cut short never retires past the position it resumes
   // from.
   repeated StoreRetirement retirements = 4;
+
+  // THE DETACHED SHELL RUNS THE STREAM PLANE SAW LEAVE THEIR TURN, each
+  // pairing the vendor's task id (the name of the run's spool) with the run.
+  // Only the shim sends any: the vendor's task stream states both halves
+  // (`task_started`'s `task_id` and `tool_use_id`) whatever wording the
+  // transcript uses for the backgrounding, and it is the one producer that
+  // reads that stream. The sidecar reads them back through GetShellRunClaims
+  // to claim a spool no transcript line claimed. Re-stating a claim already on
+  // record is absorbed; the store keeps one row per (task id, run).
+  repeated ShellRunClaim shell_run_claims = 5;
+}
+
+// One detached shell run's spool, claimed by the run.
+//
+// THE TASK ID IS NEVER THE RUN. The vendor names a shell's spool by its task
+// id (`tasks/<task_id>.output`), while every plane books the run under the
+// `tool_use_id` of the call that launched it. This message joins the two, and
+// a consumer compares both for equality only.
+message ShellRunClaim {
+  // The vendor's task id, verbatim. REQUIRED, non-empty.
+  string vendor_task_id = 1;
+  // The run: the launching call's unit. REQUIRED, non-empty.
+  conversation.v1.AgentActivityId run = 2;
 }
 
 // One subagent's vendor task locator, paired with the agent it names.

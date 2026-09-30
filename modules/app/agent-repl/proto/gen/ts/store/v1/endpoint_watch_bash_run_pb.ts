@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_watch_bash_run.proto.
  */
 export const file_store_v1_endpoint_watch_bash_run: GenFile = /*@__PURE__*/
-  fileDesc("CiZzdG9yZS92MS9lbmRwb2ludF93YXRjaF9iYXNoX3J1bi5wcm90bxIIc3RvcmUudjEiRAoTV2F0Y2hCYXNoUnVuUmVxdWVzdBItCgNydW4YASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkIj0KFFdhdGNoQmFzaFJ1blJlc3BvbnNlEiUKA3JvdxgBIAEoCzIYLnN0b3JlLnYxLlN0b3JlQWdlbnRCYXNoQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_store_v1_store]);
+  fileDesc("CiZzdG9yZS92MS9lbmRwb2ludF93YXRjaF9iYXNoX3J1bi5wcm90bxIIc3RvcmUudjEiXQoTV2F0Y2hCYXNoUnVuUmVxdWVzdBItCgNydW4YASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEhcKD2F3YWl0X2ZpcnN0X3JvdxgCIAEoCCI9ChRXYXRjaEJhc2hSdW5SZXNwb25zZRIlCgNyb3cYASABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
  * Which run.
@@ -36,6 +36,19 @@ export type WatchBashRunRequest = Message<"store.v1.WatchBashRunRequest"> & {
    * @generated from field: conversation.v1.AgentActivityId run = 1;
    */
   run?: AgentActivityId | undefined;
+
+  /**
+   * Whether the caller KNOWS the run exists: its producer announced it and
+   * has not concluded it. When set, a run the store holds no row for yet is
+   * WAITED on: the stream stands open and sends the run's first row the moment
+   * it is written. When unset, such a run is a refused open. A run can be
+   * announced before any of its rows is stored (its spool is read by another
+   * producer), and refusing it then left the run with no watch able to see its
+   * end.
+   *
+   * @generated from field: bool await_first_row = 2;
+   */
+  awaitFirstRow: boolean;
 };
 
 /**
@@ -50,7 +63,8 @@ export const WatchBashRunRequestSchema: GenMessage<WatchBashRunRequest> = /*@__P
  * (the start, each delta, the terminal if already written), then rows as
  * they are written, ending after the terminal row is sent. A run with no
  * stored row is a refused open — closed at the transport, the store's
- * convention for every watch; no failure frame.
+ * convention for every watch; no failure frame — unless the request sets
+ * `await_first_row`, when the stream waits for the run's first row.
  *
  * @generated from message store.v1.WatchBashRunResponse
  */

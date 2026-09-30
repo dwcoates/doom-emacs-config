@@ -14,6 +14,7 @@ package store.v1;
 
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_live_work.proto";
+import "store/v1/endpoint_get_shell_run_claims.proto";
 import "store/v1/endpoint_get_sidecar_cursors.proto";
 import "store/v1/endpoint_get_workflow.proto";
 import "store/v1/endpoint_list_residue_shapes.proto";
@@ -71,6 +72,11 @@ service ShimStore {
   // agent, and when that agent raises an ask. The pairing is the sidecar's,
   // written with the agent's first rows (EntryBatch.agent_locators).
   rpc GetAgentByVendorTask(GetAgentByVendorTaskRequest) returns (GetAgentByVendorTaskResponse);
+
+  // WHICH RUN each held shell spool belongs to, from the claims the shim wrote
+  // (EntryBatch.shell_run_claims), with the book that holds each run's
+  // launching call. The sidecar asks for the spools no transcript line claimed.
+  rpc GetShellRunClaims(GetShellRunClaimsRequest) returns (GetShellRunClaimsResponse);
 
   // ---- Writes: how a producer hands records to the store ----
 
