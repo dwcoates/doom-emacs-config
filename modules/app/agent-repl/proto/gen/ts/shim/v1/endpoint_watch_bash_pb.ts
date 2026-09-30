@@ -25,7 +25,10 @@ export const file_shim_v1_endpoint_watch_bash: GenFile = /*@__PURE__*/
  */
 export type WatchBashRequest = Message<"shim.v1.WatchBashRequest"> & {
   /**
-   * WHICH item — the handle its announcement carried. Not a live shell: refused.
+   * WHICH item — the handle its announcement carried. A shell this shim
+   * announced and has not concluded is FOLLOWED even before any of its rows is
+   * stored: the stream waits for the first. Any other handle whose run has no
+   * stored row is refused.
    *
    * @generated from field: conversation.v1.DetachedWorkId work = 1;
    */
@@ -41,8 +44,10 @@ export const WatchBashRequestSchema: GenMessage<WatchBashRequest> = /*@__PURE__*
 
 /**
  * One frame: the bash unit itself. Opens with `start` (the command, the
- * ORIGINAL instant), then output deltas with their offsets, then the terminal
- * arm at the process's exit.
+ * ORIGINAL instant) when a producer read the launching call, then output
+ * deltas with their offsets, then the terminal arm at the process's exit. A
+ * run whose spool was claimed only through its task id (the launching call was
+ * read by no producer) has no `start` and opens on its output.
  *
  * @generated from message shim.v1.WatchBashResponse
  */
