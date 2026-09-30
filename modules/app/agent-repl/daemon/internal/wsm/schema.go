@@ -143,7 +143,10 @@ CREATE TABLE held_prompts (
   tombstone_kind           TEXT,
   tombstone_at             INTEGER,
   queued_at                INTEGER NOT NULL,
-  delivery                 INTEGER NOT NULL DEFAULT 0
+  delivery                 INTEGER NOT NULL DEFAULT 0,
+  act_kind                 TEXT,
+  act_value                TEXT,
+  coalesced                INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX held_prompts_by_workspace ON held_prompts(workspace_id);
