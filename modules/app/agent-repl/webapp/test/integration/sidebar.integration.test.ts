@@ -10,6 +10,7 @@
  * divergence from the Emacs tab bar is a defect. Fake timers make that
  * assertable rather than a matter of watching it.
  */
+import type { MergeWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -503,6 +504,21 @@ describe.each(WORKSPACE_VERBS)("the $verb verb", ({ verb, rpc }) => {
     // Assert
     const [request] = harness.fake.calls<{ workspace?: { id: string } }>(rpc);
     expect(request.workspace?.id).toBe("ws-target");
+  });
+});
+
+describe("the merge verb's source", () => {
+  it("asks to merge the row's own branch, closing it once it lands", async () => {
+    // Arrange
+    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
+    // Act
+    await harness.click('[data-roster-row="ws-target"] [data-verb="merge"]');
+    // Assert
+    const [request] = harness.fake.calls<MergeWorkspaceRequest>("mergeWorkspace");
+    const source = request.source?.source;
+    expect(source?.case === "ownBranch" ? { keepOpen: source.value.keepOpen } : source?.case).toEqual({
+      keepOpen: false,
+    });
   });
 });
 
