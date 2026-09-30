@@ -807,6 +807,36 @@ unchanged.
     attempts".
 - **Left open:** nothing acts on an overdue retry. The line only shows it.
 
+### 6. The verdict split (2026-09-30)
+
+- **Decided by** the owner: most prompts sent during a turn add to its work,
+  and interrupting for them made the agent read the addition as a rejection.
+  - A live probe (SDK 0.3.280) settled the mechanism: a message pushed while
+    a tool call runs is folded into the running turn after the tool result.
+  - With no tool call in flight it becomes the vendor's next turn instead.
+- **What changed, on the wire:**
+  - `shim.v1.StartTurnRequest.join_running_turn` sends a prompt into the
+    running turn with no interrupt.
+  - `conversation.v1.AgentPrompt.folded_into` names the turn a prompt was
+    folded into.
+  - `shim.v1.StartTurnRequest.vendor_note` carries words for the agent alone.
+  - `frontend.v1.HeldPrompt.after_tool_call` and
+    `frontend.v1.FooterActivityTransientSubmitting.after_tool_call`.
+- **What changed, in the systems:**
+  - The classifier routes `queue`, `after_tool_call` or `interrupt`, and
+    answers `after_tool_call` when unsure.
+  - The queue sends an `after_tool_call` prompt to join the running turn, one
+    at a time; against a still-queued prompt either non-queue route coalesces.
+  - The shim holds the join until the vendor's echo decides its fate.
+    - Folded: its row names the running turn, and the daemon closes its own
+      turn as `wsm.CloseFolded`, drawing its bubble under the running turn.
+    - Not folded: it takes the slot the moment the running turn leaves it,
+      and the daemon's watcher stands it in flight in that turn's place.
+  - A prompt whose verdict interrupted the turn is delivered with a note
+    telling the agent the work was cut because this message changes it.
+  - The tray draws the new verdict with a green badge; the footer reads
+    "after this tool call".
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.
