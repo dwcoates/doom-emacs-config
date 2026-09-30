@@ -86,7 +86,7 @@ func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingAc
 	case s.retrying != nil:
 		line = salient(s.retrying.at)
 		line.Kind = &frontendv1.FooterStatusWorkingSalient_Retrying{
-			Retrying: &frontendv1.FooterStatusActivityRetrying{Attempt: s.retrying.attempt, Status: s.retrying.status}}
+			Retrying: s.retrying.line()}
 	case ok:
 		line = fillShared(&frontendv1.FooterStatusWorkingSalient{}, shared)
 	default:
