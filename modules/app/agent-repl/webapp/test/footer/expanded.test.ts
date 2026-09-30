@@ -220,9 +220,14 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   });
 
   it.each(FOOTER_PANELS.map((panel) => [panel]))("draws the %s panel when selected", (panel) => {
-    // The agents panel folds away with no rows, so it needs a live agent to
-    // draw at all; every other panel draws its own empty state.
-    const init: ExpandedInit = panel === "agents" ? { agents: [AGENT_ROW] } : {};
+    // The agents and merge tests panels fold away with no rows, so each needs
+    // a row to draw at all; every other panel draws its own empty state.
+    const init: ExpandedInit =
+      panel === "agents"
+        ? { agents: [AGENT_ROW] }
+        : panel === "mergeTests"
+          ? { mergeTests: [mergeTestRow("waiting", {})] }
+          : {};
     expect(drawPanel(panel, init).panel.getAttribute("data-panel")).toBe(panel);
   });
 
@@ -1284,5 +1289,115 @@ describe("the section keeps the reader's scroll", () => {
 
     // Assert
     expect(monitors).not.toBe(shells);
+  });
+});
+
+// ---- the merge tests panel -------------------------------------------------
+
+/** One suite row of STATE carrying VALUE. */
+function mergeTestRow(state: string, value: Record<string, unknown>, name = "webapp"): NonNullable<ExpandedInit["mergeTests"]>[number] {
+  return { name: { text: name }, state: { state: { case: state, value } } } as never;
+}
+
+describe("the merge tests panel", () => {
+  it("folds away entirely when the merge is not testing", () => {
+    const h = harness();
+    expect(
+      drawFooterExpanded(expanded({ mergeTests: [] }), "mergeTests", {
+        ctx: h.ctx,
+        stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
+        selectDetachedWork: async () => true,
+      }),
+    ).toBeNull();
+  });
+
+  it("draws one row per suite, in the gate's order", () => {
+    const { panel } = drawPanel("mergeTests", {
+      mergeTests: [mergeTestRow("passed", { durationMs: 1000n }, "daemon unit"), mergeTestRow("waiting", {}, "webapp")],
+    });
+    expect([...panel.querySelectorAll(".footer-row-label")].map((el) => el.textContent)).toEqual([
+      "daemon unit",
+      "webapp",
+    ]);
+  });
+
+  it.each([
+    ["waiting", {}, "○"],
+    ["running", { startedAtMs: BigInt(NOW) }, "●"],
+    ["passed", { durationMs: 1000n }, "✓"],
+    ["failed", { durationMs: 1000n }, "✗"],
+  ])("draws a %s suite with its glyph", (state, value, glyph) => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow(state, value)] });
+    expect(panel.querySelector(`[data-glyph="${state}"]`)?.textContent).toBe(glyph);
+  });
+
+  it("stamps the suite's state on its row", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("failed", { durationMs: 1000n })] });
+    expect(panel.querySelector("[data-row]")?.getAttribute("data-suite-state")).toBe("failed");
+  });
+
+  it("paints a passed suite's check green", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("passed", { durationMs: 1000n })] });
+    expect(panel.querySelector('[data-glyph="passed"]')?.classList.contains("tone-green")).toBe(true);
+  });
+
+  it("paints a failed suite's cross red", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("failed", { durationMs: 1000n })] });
+    expect(panel.querySelector('[data-glyph="failed"]')?.classList.contains("tone-red")).toBe(true);
+  });
+
+  it("ticks a running suite's clock from its start", () => {
+    const { panel } = drawPanel("mergeTests", {
+      mergeTests: [mergeTestRow("running", { startedAtMs: BigInt(NOW - 42_000) })],
+    });
+    expect(panel.querySelector(".footer-row-clock")?.textContent).toBe("42s");
+  });
+
+  it("re-reads a running suite's clock on the shared tick", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("running", { startedAtMs: BigInt(NOW) })] });
+    vi.advanceTimersByTime(3000);
+    expect(panel.querySelector(".footer-row-clock")?.textContent).toBe("3s");
+  });
+
+  it("shows how long a passed suite took", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("passed", { durationMs: 95_000n })] });
+    expect(panel.querySelector("[data-duration]")?.textContent).toBe("1m 35s");
+  });
+
+  it("shows how long a failed suite took", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("failed", { durationMs: 7_000n })] });
+    expect(panel.querySelector("[data-duration]")?.textContent).toBe("7s");
+  });
+
+  it("does not tick a finished suite's clock", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("passed", { durationMs: 7_000n })] });
+    vi.advanceTimersByTime(5000);
+    expect(panel.querySelector("[data-duration]")?.textContent).toBe("7s");
+  });
+
+  it("draws no clock for a suite that has not started", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("waiting", {})] });
+    expect(panel.querySelector(".footer-row-clock")).toBeNull();
+  });
+
+  it("is not a jump target", () => {
+    const { panel } = drawPanel("mergeTests", { mergeTests: [mergeTestRow("waiting", {})] });
+    expect(panel.querySelector(".footer-row-jump")).toBeNull();
+  });
+
+  it("refuses a suite row with no state", () => {
+    expect(() => drawPanel("mergeTests", { mergeTests: [{ name: { text: "webapp" } }] })).toThrow(MalformedView);
+  });
+
+  it("refuses a suite row whose state sets no arm", () => {
+    expect(() => drawPanel("mergeTests", { mergeTests: [{ name: { text: "webapp" }, state: {} }] })).toThrow(
+      MalformedView,
+    );
+  });
+
+  it("refuses a suite row with no name", () => {
+    expect(() =>
+      drawPanel("mergeTests", { mergeTests: [{ state: { state: { case: "waiting", value: {} } } }] }),
+    ).toThrow(MalformedView);
   });
 });

@@ -36,7 +36,7 @@ const ARM_VALUES: Readonly<Record<string, Record<string, unknown>>> = {
 
 describe("drawFooterStatusActivityMergeStep: every arm", () => {
   it("has a value for every arm the contract declares", () => {
-    expect(Object.keys(ARM_VALUES).sort()).toEqual(oneofArms(FooterStatusActivityMergeStepSchema, "step").sort());
+    expect(Object.keys(ARM_VALUES).sort()).toEqual([...oneofArms(FooterStatusActivityMergeStepSchema, "step")].sort());
   });
 
   it.each(Object.entries(ARM_VALUES))("stamps the %s arm as data-step", (arm, value) => {
