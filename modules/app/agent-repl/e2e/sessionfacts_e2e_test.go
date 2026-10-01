@@ -15,9 +15,9 @@
 //   - proto/src/frontend/v1/footer.proto — the ENDURING usage line
 //     (FooterActivityEnduringUsage, always drawn when nothing covers it)
 //     with its FooterAllowance cells (`newsworthy`,
-//     `resets_at_s`, `utilization`, the typed verdict), and the SALIENT
-//     vendor rate-limit line (FooterStatusActivityRateLimit: a warning or a
-//     refusal, standing until a later event reports the allowance allowed).
+//     `resets_at_s`, `utilization`, the typed verdict). A vendor rate-limit
+//     event stands no salient line: it feeds these figures (owner ruling,
+//     2026-10-01).
 //   - proto/src/frontend/v1/mcp_panel.proto — McpPanelView/McpPanelRow, the
 //     surface the MCP healths are drawn on (driven here through /mcp, the
 //     same synchronous command mcpmonitors_e2e_test.go reads).
@@ -37,12 +37,12 @@
 //     assertions below are on the DRAWN ARM and no longer on a daemon log
 //     record.
 //
-//  2. A VENDOR RATE-LIMIT EVENT THAT WARNS OR REFUSES IS SALIENT (owner
-//     ruling, 2026-09-30): the vendor speaking stands its own line on every
-//     status arm, whatever the figure, until a later event reports that
-//     allowance allowed. `!rate-limit-five-hour`, `!rate-limit-seven-day` and
-//     `!rate-limit` each send an `allowed_warning`, so each stands the line
-//     naming its allowance.
+//  2. A VENDOR RATE-LIMIT EVENT FEEDS THE ENDURING USAGE LINE (owner
+//     ruling, 2026-10-01, superseding the 2026-09-30 ruling that made it
+//     salient): the event's figure and verdict land on the allowance it
+//     names, and no salient line stands. `!rate-limit-five-hour`,
+//     `!rate-limit-seven-day` and `!rate-limit` each send an
+//     `allowed_warning`, so each draws that verdict on its allowance.
 //
 //  3. AN UNREAD SAMPLE DRAWS NO CAVEAT (owner ruling, fc4917be4,
 //     2026-09-15). An unread sample leaves the read figures standing, and
@@ -50,8 +50,7 @@
 //     failure's cause — is recorded on the daemon's `daemon.footer.usage_
 //     sample_unreadable` breadcrumb instead. The enduring usage line is drawn
 //     whatever the figures (owner ruling, 2026-09-28), so the tests below
-//     read the sampled figures straight off it; they never open a rate-limit
-//     line first, because a standing warning would cover the enduring line.
+//     read the sampled figures straight off it.
 //
 // Every scenario here runs against the scripted fake git (harness.NewRepo)
 // and the fake-SDK vendor inside the real shim: no real git, no vendor
@@ -336,14 +335,14 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 // rate_limit_event naming the `five_hour` window at utilization 0.82,
 // resetting in an hour).
 //
-// THE VENDOR SPEAKING IS SALIENT (owner ruling, 2026-09-30): the event stands
-// the rate-limit line naming the SESSION allowance, its `allowed_warning`
-// verdict, and the daemon's percent→fraction and milliseconds→seconds
-// conversions (footer salient.go observeRateLimitEvent). It stands until a
-// later event reports the allowance allowed, whatever samples arrive between.
+// THE EVENT FEEDS THE ENDURING USAGE LINE (owner ruling, 2026-10-01): the
+// SESSION allowance carries the event's `allowed_warning` verdict and the
+// daemon's percent→fraction and milliseconds→seconds conversions (footer
+// resolver.go observeRateLimitStatus), and no salient line stands — the
+// awaited view is the unpinned tier, which a salient line would replace.
 // ===========================================================================
 
-func TestRateLimitFiveHourWindowStandsTheSessionRateLimitLine(t *testing.T) {
+func TestRateLimitFiveHourWindowFeedsTheSessionAllowance(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
@@ -356,34 +355,24 @@ func TestRateLimitFiveHourWindowStandsTheSessionRateLimitLine(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the session allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
-		return footerRateLimit(v).GetWindow().GetSession() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the session allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
+		return footerEnduringUsage(v).GetSession().GetAllowedWarning() != nil
 	})
 
 	// Assert
-	line := footerRateLimit(view)
-	if got := line.GetUtilization(); got < 0.815 || got > 0.825 {
-		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.82 as a 0..1 fraction", got)
-	}
-	if line.GetAllowedWarning() == nil {
-		t.Errorf("FooterStatusActivityRateLimit.verdict = %v, want the allowed_warning arm the event carried", line.GetVerdict())
-	}
-	if line.GetResetsAtS() == 0 {
-		t.Errorf("FooterStatusActivityRateLimit.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
-	}
+	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetSession(), 0.82)
 }
 
 // ===========================================================================
 // The seven-day rate-limit window — `!rate-limit-seven-day` (the same
 // scenario factory naming the `seven_day` window at utilization 0.91).
 //
-// The event stands the rate-limit line naming the WEEKLY allowance. Both hops
-// are asserted — the drawn line and the session-arm record behind it —
-// because the line alone would not say the event's own window reached the
-// store.
+// The event feeds the WEEKLY allowance. Both hops are asserted — the drawn
+// allowance and the session-arm record behind it — because the allowance
+// alone would not say the event's own window reached the store.
 // ===========================================================================
 
-func TestRateLimitSevenDayWindowStandsTheWeeklyRateLimitLine(t *testing.T) {
+func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, workspaceDir := sfNewWorkspace(t)
@@ -397,21 +386,12 @@ func TestRateLimitSevenDayWindowStandsTheWeeklyRateLimitLine(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the weekly allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
-		return footerRateLimit(v).GetWindow().GetWeekly() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the weekly allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
+		return footerEnduringUsage(v).GetWeekly().GetAllowedWarning() != nil
 	})
 
 	// Assert
-	line := footerRateLimit(view)
-	if got := line.GetUtilization(); got < 0.905 || got > 0.915 {
-		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.91 as a 0..1 fraction", got)
-	}
-	if line.GetAllowedWarning() == nil {
-		t.Errorf("FooterStatusActivityRateLimit.verdict = %v, want the allowed_warning arm the event carried", line.GetVerdict())
-	}
-	if line.GetResetsAtS() == 0 {
-		t.Errorf("FooterStatusActivityRateLimit.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
-	}
+	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetWeekly(), 0.91)
 	sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status", before+1)
 }
 
@@ -420,15 +400,14 @@ func TestRateLimitSevenDayWindowStandsTheWeeklyRateLimitLine(t *testing.T) {
 // `allowed_warning` event on the `overage` window at utilization 0.79 with a
 // surpassed threshold).
 //
-// THE VENDOR'S WARNING STANDS WHATEVER THE FIGURE (owner ruling, 2026-09-30):
-// the old newsworthiness gate decided whether a rate line was drawn at all;
-// now the vendor speaking is the salient line, and 0.79 is the figure it
-// carries. The harness's warning sweep — which fails on any warn record this
-// test does not declare — still asserts the retired
+// The event feeds the OVERAGE allowance whatever the figure: 0.79 sits below
+// the newsworthy gate, which only colors an allowance and never decides
+// whether it is drawn. The harness's warning sweep — which fails on any warn
+// record this test does not declare — still asserts the retired
 // `daemon.footer.rate_limit_overage` warning stays gone.
 // ===========================================================================
 
-func TestRateLimitOverageWindowStandsTheOverageRateLimitLine(t *testing.T) {
+func TestRateLimitOverageWindowFeedsTheOverageAllowance(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
@@ -442,11 +421,26 @@ func TestRateLimitOverageWindowStandsTheOverageRateLimitLine(t *testing.T) {
 	// Assert
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the overage allowance's rate-limit line", func(v *frontendv1.FooterView) bool {
-		return footerRateLimit(v).GetWindow().GetOverage() != nil
+	view := harness.AwaitView(t, ctx, footer.Stream, "the overage allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
+		return footerEnduringUsage(v).GetOverage().GetAllowedWarning() != nil
 	})
-	if got := footerRateLimit(view).GetUtilization(); got < 0.785 || got > 0.795 {
-		t.Errorf("FooterStatusActivityRateLimit.utilization = %v, want the event's 0.79 as a 0..1 fraction", got)
+	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetOverage(), 0.79)
+}
+
+// sfAssertEventFeedsAllowance asserts one rate-limit event's figures landed on
+// ALLOWANCE: its utilization as a 0..1 fraction within half a point of WANT,
+// and its reset instant in epoch SECONDS. It also asserts VIEW stands no
+// salient line, because the event is never one (owner ruling, 2026-10-01).
+func sfAssertEventFeedsAllowance(t *testing.T, view *frontendv1.FooterView, allowance *frontendv1.FooterAllowance, want float64) {
+	t.Helper()
+	if salient := footerTier(view, "salient"); salient != nil {
+		t.Errorf("footer stands salient line %v, want none: a rate-limit event feeds the enduring usage line only", salient)
+	}
+	if got := allowance.GetUtilization(); got < want-0.005 || got > want+0.005 {
+		t.Errorf("FooterAllowance.utilization = %v, want the event's %v as a 0..1 fraction", got, want)
+	}
+	if allowance.GetResetsAtS() == 0 {
+		t.Errorf("FooterAllowance.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
 }
 
