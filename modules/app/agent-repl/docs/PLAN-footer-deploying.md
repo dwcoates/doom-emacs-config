@@ -308,17 +308,26 @@ the canonical log record), and keep the tracked suites green.
 - DONE: `sessionwatcher.watcher.SetOutputAddress` and the `addr` sink parameters removed (`d6ff74611`).
 - The first merge request FAILED (2026-10-01 14:34:34): the queue merged the branch recorded at
   workspace creation (`footer-activity-updates`, which no longer exists) instead of the checked-out
-  `merge-queue-rework`, and the failure never reached this session. Owner-approved fixes, landed
-  before re-requesting the merge:
-  1. An own-branch merge request resolves the branch CHECKED OUT in the workspace's worktree at
-     request time; a detached HEAD is refused at once, saying why. The `/merge-queue` skill says
-     it merges the checked-out branch and must never be pointed at a branch that is not checked out.
-  2. A merge that fails (any area) automatically prompts the requesting workspace to analyze the
-     failure. That prompt is a new `conversation.v1.PromptOrigin` (pre-approved): the feed draws NO
-     prompt row for it (as for `PROMPT_ORIGIN_VENDOR_STARTED`) but draws the turn's responses, and
-     the store does NOT persist the prompt itself.
-- Then request the merge of `merge-queue-rework` through `/merge-queue` (`--enqueue-own
-  --keep-open`), and do not edit the worktree while that merge runs.
+  `merge-queue-rework`, and the failure never reached this session. Owner-approved fixes:
+  1. DONE (`29aa8c782`, `866fc7f0e`, skill `959b3cfa6`): own-branch, workspace and pr-merged
+     requests record the branch CHECKED OUT in the worktree at request time; a detached HEAD is
+     refused at once (`unknown_branch`); the `/merge-queue` skill says so and forbids requesting
+     a branch that is not checked out.
+  2. TODO, FIRST after compaction: a merge that fails (any area, including before its first
+     step) automatically prompts the requesting workspace to analyze the failure.
+     - A new `conversation.v1.PromptOrigin`, `PROMPT_ORIGIN_MERGE_FAILURE_ANALYSIS` (additive).
+     - The daemon submits it once the failed merge has handed the workspace back, carrying the
+       failure's area, summary, branch and the merge's log pointers.
+     - It is NOT a merge-started origin, so its turn draws on the root feed, not the merge bubble.
+     - The feed draws NO prompt row for it (as for `PROMPT_ORIGIN_VENDOR_STARTED`) but draws the
+       turn's responses.
+     - The store does NOT persist the prompt's words. The shim writes the turn-open prompt row
+       as an EDGE with empty `said` (as a vendor-started row is), so the turn structure and the
+       StartTurn ack still hold; the sidecar does not ingest the vendor transcript's record of
+       that user message (it is recognized by a marker the shim puts on the submission).
+       The vendor's own transcript file still holds it, which is outside our store.
+- DONE: the merge of `merge-queue-rework` was re-requested after fix 1; do not edit the
+  worktree while it runs.
 - Known defect outside this plan, not yet ruled on: a user interrupt replaced the vendor process
   and killed a background agent (2026-10-01 13:03:29) while the shim logged that detached work
   keeps running.
