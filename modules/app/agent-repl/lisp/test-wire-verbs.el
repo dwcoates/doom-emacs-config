@@ -3665,6 +3665,13 @@ encoder reads: the common codec owns the real encoding.")
                        (format "{\"error\":{\"%s\":{}}}" (car case))))
                      (list :arm :error :value (list :cause (list :arm (cdr case) :value nil))))))))
 
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-being-edited-requires-the-turn ()
+  "A being-edited refusal with no editing turn is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-edit-held-prompt-being-edited
+                   (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-being-edited-names-the-turn ()
   "The being-edited refusal names the prompt the standing edit is on."
   (agent-repl-test-wire-verbs--with-common

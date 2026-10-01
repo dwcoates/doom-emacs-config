@@ -4257,14 +4257,12 @@ reaching the wire."
 
 (defun agent-repl-wire-decode-edit-held-prompt-being-edited (json)
   "Decode EditHeldPromptBeingEdited from JSON into (:editing-turn TURN)."
-  (let ((message "EditHeldPromptBeingEdited")
-        (cell nil))
+  (let ((message "EditHeldPromptBeingEdited"))
     (agent-repl-wire-verbs--check-keys message json '(editingTurn))
-    (setq cell (assq 'editingTurn json))
-    (unless (and cell (not (eq (cdr cell) :null)))
-      (agent-repl-wire-verbs--fail message "editing_turn" "required field is unset"))
     (list :editing-turn
-          (agent-repl-wire-decode-edit-held-prompt-being-edited-editing-turn (cdr cell)))))
+          (agent-repl-wire--decode-message
+           message 'editingTurn json
+           #'agent-repl-wire-decode-edit-held-prompt-being-edited-editing-turn))))
 
 (defun agent-repl-wire-decode-edit-held-prompt-empty-cause (message)
   "Return a decoder for the empty refusal arm MESSAGE."
