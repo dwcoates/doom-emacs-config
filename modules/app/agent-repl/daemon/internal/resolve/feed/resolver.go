@@ -50,7 +50,13 @@ type resolver struct {
 // wsState is one workspace's whole feed universe plus the accumulation every
 // piecemeal frame folds into.
 type wsState struct {
-	id ids.WorkspaceID
+	// rolledBack is the turns rolled back (rollback.go): no row of one is
+	// drawn.
+	rolledBack map[ids.TurnID]bool
+	// promptSaid is each delivered prompt as said, by the turn it opened, so a
+	// rollback can hand it back to the composer (rollback.go).
+	promptSaid map[ids.TurnID]*conversationv1.UserSaid
+	id         ids.WorkspaceID
 
 	// feeds are the workspace's feeds, keyed by the encoded feed address.
 	feeds map[string]*feedState
@@ -594,6 +600,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	s = newWSState(ws)
 	r.workspaces[ws] = s
 	r.restoreDurable(s)
+	r.restoreRolledBack(s)
 	return s
 }
 
@@ -639,6 +646,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},
+		rolledBack:           map[ids.TurnID]bool{},
+		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
 		liveEndings:          map[ids.TurnID]TurnEnding{},
@@ -857,6 +866,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 // upsertOne is upsert on one feed.
 func (r *resolver) upsertOne(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
+	if r.rolledBackRow(s, f, row) {
+		return
+	}
 	id := row.GetId().GetValue()
 	if id == "" {
 		r.logger(s.id).Error("daemon.feed.row_without_identity",

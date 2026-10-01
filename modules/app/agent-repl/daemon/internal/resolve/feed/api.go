@@ -190,6 +190,20 @@ type Resolver interface {
 	// over this set; the resolver owns the set itself, because it draws the
 	// border. Empty is "no final responses yet", never an error.
 	FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId
+	// RollbackPrompts answers the prompt rows a rollback can reach, oldest
+	// first: the prompts that open a turn of the workspace's own current
+	// conversation, after its newest clear or compaction. The server walks
+	// its prompt selection over this set. Empty is "nothing to roll back to",
+	// never an error.
+	RollbackPrompts(ws ids.WorkspaceID) []*frontendv1.FeedId
+	// RollbackTarget answers what rolling back to just before a prompt row
+	// drops — its turn and every later reachable turn — and the prompt as
+	// said; false when the row is not a prompt a rollback can reach.
+	RollbackTarget(ws ids.WorkspaceID, row *frontendv1.FeedId) (RollbackTarget, bool)
+	// RollBackTurns removes turns from the feed for good (rollback.go). The
+	// removal always happens; an error says only that recording it durably
+	// failed, already logged and raised.
+	RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error
 	// ResponseMarkdown answers the settled markdown of one selectable final
 	// response, and whether the feedid is selectable at all. A miss is a
 	// feedid the daemon does not deem selectable — the submit path refuses it
@@ -353,6 +367,10 @@ type Deps struct {
 	// footer takes the same frame (the watcher routes every frame to the feed
 	// first). nil tells nobody.
 	ItemDrawn func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool)
+	// RolledBack is the durable record of rolled-back turns (wsm.DB). nil
+	// records and loads nothing, which is what a test that is not about
+	// surviving a restart wants.
+	RolledBack RolledBackTurnStore
 	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
 	PageSize int
 	// TailRetention is how many published rows a feed retains for a tail's

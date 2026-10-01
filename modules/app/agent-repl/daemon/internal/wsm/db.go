@@ -301,6 +301,12 @@ type DB interface {
 	// when none is set.
 	FeedTextScale(ctx context.Context) (float64, error)
 
+	// RecordRolledBackTurns records that turns were rolled back, all or
+	// nothing; the feed never draws them again.
+	RecordRolledBackTurns(ctx context.Context, id WorkspaceID, turns []TurnID) error
+	// RolledBackTurns loads every rolled-back turn of a workspace.
+	RolledBackTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error)
+
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.
 	ClaimServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error
