@@ -73,6 +73,19 @@ type Worktree struct {
 	Files []string `json:"files"`
 	// Locked makes `worktree list` report the tree locked.
 	Locked bool `json:"locked,omitempty"`
+	// Rebase is the rebase standing in the tree, nil when none is.
+	Rebase *Rebase `json:"rebase,omitempty"`
+}
+
+// Rebase is one interactive rebase in progress: the commits it replays onto
+// Onto, how many it has replayed, and the head the replays have built.
+type Rebase struct {
+	Onto    string   `json:"onto"`
+	Todo    []string `json:"todo"`
+	Done    int      `json:"done"`
+	NewHead string   `json:"new_head"`
+	// Stopped reports that the current commit stopped on a conflict.
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 // Repo is one fake repository: a common dir every one of its worktrees reports.
@@ -84,6 +97,9 @@ type Repo struct {
 	Branches      []string `json:"branches"`
 	// BranchHeads maps a branch to the commit it points at.
 	BranchHeads map[string]string `json:"branch_heads"`
+	// RemoteHeads maps a branch of the `origin` remote to the commit a fetch
+	// brings in; `refs/remotes/origin/<branch>` resolves to it.
+	RemoteHeads map[string]string `json:"remote_heads,omitempty"`
 	Worktrees   []*Worktree       `json:"worktrees"`
 }
 
@@ -99,6 +115,11 @@ type Conflict struct {
 	// SourceHead is the branch head the conflict was first met at, empty
 	// until then.
 	SourceHead string `json:"source_head,omitempty"`
+	// RebaseCommit, when set, makes this a REBASE conflict instead: replaying
+	// the branch's commit at that 1-based place stops on Paths, once.
+	RebaseCommit int `json:"rebase_commit,omitempty"`
+	// Met reports that a rebase conflict has stopped a replay already.
+	Met bool `json:"met,omitempty"`
 }
 
 // Failure scripts one command failing: the next invocation whose subject starts
