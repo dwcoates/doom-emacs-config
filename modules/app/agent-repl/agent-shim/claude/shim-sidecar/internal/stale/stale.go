@@ -17,12 +17,17 @@
 //     every sweep, because a run discovered after the boot pass (a spool whose
 //     hold expired, say) is exactly as dead as one that was open during it.
 //
-// IT RE-DERIVES FROM FILES AND CURSORS, because there is nothing else left to
-// derive from: the store holds no open-task snapshot for the sidecar
-// (GetLiveWork is the shim's verb, and the sidecar's only recovery verb is
-// GetSidecarCursors). What the sidecar knows is which files exist, when they
-// were last written, and how far its cursors have read them — so that is what
-// the policy is built out of.
+// IT RE-DERIVES FROM FILES AND CURSORS, AND ASKS THE RECORD WHAT SETTLED. What
+// the sidecar knows is which files exist, when they were last written, and how
+// far its cursors have read them — so that is what the policy's clocks are
+// built out of. What it can NOT know from a file is that a run already settled
+// before this process started: the terminator sits behind the committed cursor
+// and is never read again. On 2026-09-30 a restarted sidecar re-tracked such a
+// finished run from its quiet spool and concluded it LOST. So the caller asks
+// the store (GetRunSettlements) before it observes a run, and a run the record
+// holds as ended is settled here (SettledByRecord) instead of tracked. Inside
+// one process every settle lands in one set, and observing a settled run
+// panics: a settled run is never tracked again.
 //
 // IT MINTS NO RECORDS. A Lost is an OBSERVATION; turning one into the run's
 // terminal frame is conversion, and conversion lives behind the handler seam.
@@ -137,8 +142,21 @@ type entry struct {
 type Tracker struct {
 	mu   sync.Mutex
 	open map[string]*entry // by resolved path
-	opt  Options
-	log  *logging.Bound
+	// settled is every path this process has seen settle — by a terminal read
+	// off its own file, a transcript's conclusion, a stop, a LOST terminal made
+	// durable, or the store already holding the run as ended. A SETTLED RUN IS
+	// NEVER TRACKED AGAIN: observing one is an invariant violation and panics,
+	// so the caller asks Settled first. Settle and SettledByRecord are the only
+	// ways in, both through retireLocked.
+	//
+	// A SWEEP'S CONCLUSION IS NOT YET A SETTLE. Sweep stops tracking what it
+	// concludes so it is not restated every pass, but the run is settled only
+	// once the caller has made its LOST terminal durable and says so through
+	// Settle: a conclusion whose write failed must be re-derived and restated
+	// by the next cycle, which a settled run never would be.
+	settled map[string]struct{}
+	opt     Options
+	log     *logging.Bound
 	// bootUnknownSaid keeps the "no boot time" statement to once per process:
 	// the sweep runs on a timer, and repeating it every tick would bury it.
 	bootUnknownSaid bool
@@ -170,7 +188,7 @@ func New(opt Options, log *logging.Bound) *Tracker {
 	log.With(logging.Context{Operation: "stale-new"}).LogVerbose(
 		"constructing lost tracker grace=%s shell_silence=%s agent_silence=%s workflow_silence=%s",
 		opt.Grace, opt.ShellSilence, opt.AgentSilence, opt.WorkflowSilence)
-	return &Tracker{open: map[string]*entry{}, opt: opt, log: log}
+	return &Tracker{open: map[string]*entry{}, settled: map[string]struct{}{}, opt: opt, log: log}
 }
 
 // Windows reports the windows this tracker actually runs with, defaults filled
@@ -196,12 +214,19 @@ func (t *Tracker) SetProcessStart(ms int64) {
 // Observe records that a run's file is being watched. Re-observing a known run
 // refreshes what the reader has since learned about it (its owner, its run
 // handle) without disturbing its activity clock.
+//
+// A SETTLED RUN IS NEVER OBSERVED. Tracking it again is how a finished run came
+// to be concluded LOST (2026-09-30), so a caller that reaches here with one has
+// broken the invariant, and it panics rather than track it.
 func (t *Tracker) Observe(work Work, nowMs int64) {
 	if work.Path == "" {
 		panic("stale: a tracked run must name its file")
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if _, settled := t.settled[work.Path]; settled {
+		panic("stale: observing a run that already settled: " + work.Path)
+	}
 	if existing, ok := t.open[work.Path]; ok {
 		if work.OwnerAgentID != "" {
 			existing.work.OwnerAgentID = work.OwnerAgentID
@@ -264,18 +289,59 @@ func (t *Tracker) MarkVanished(path string, nowMs int64, benignEnd string) {
 		"the run's file vanished; the grace window of %s decides whether that is a rename race or a LOST run", t.opt.Grace)
 }
 
-// Settle stops tracking a run whose terminal the reader actually READ (a
-// spool's EXIT marker, say). A settled run is never swept: LOST is only ever
-// the answer for a run we stopped seeing, never for one we saw finish.
-func (t *Tracker) Settle(path string) {
+// Settle records that a run ended on evidence — its own terminator, a
+// transcript's conclusion, a stop, or a LOST the caller refused to restate —
+// and stops tracking it. A settled run is never swept and never tracked again:
+// LOST is only ever the answer for a run we stopped seeing, never for one we
+// saw finish. It answers whether the run was being tracked.
+//
+// A RUN NOT BEING TRACKED IS STILL RECORDED AS SETTLED, so a file whose watcher
+// is rebuilt later in this process is never tracked again either.
+func (t *Tracker) Settle(path string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	existing, ok := t.open[path]
+	t.retireLocked(path)
 	if !ok {
-		return
+		t.log.With(logging.Context{Operation: "lost-policy", Path: path}).LogVerbose(
+			"run recorded as settled; it was not being tracked, and it never will be")
+		return false
 	}
-	delete(t.open, path)
 	t.bound(existing.work).Log("run settled by a terminal read from its own file; it can no longer be concluded LOST")
+	return true
+}
+
+// SettledByRecord records that the store already holds a run as ended, so it
+// is never tracked. It is the answer for a run that settled before this process
+// started: its terminator sits behind the committed cursor and is never read
+// again, so nothing on the file plane could say so.
+//
+// A RUN BEING TRACKED CANNOT BE SETTLED BY THE RECORD: the caller asks the
+// store BEFORE it observes, and reaching here with an open run means it did
+// not, which panics.
+func (t *Tracker) SettledByRecord(work Work, endedAtMs int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, open := t.open[work.Path]; open {
+		panic("stale: a tracked run cannot be settled by the record; the store is asked before a run is observed: " + work.Path)
+	}
+	t.retireLocked(work.Path)
+	t.bound(work).Log("run already settled per the store (ended_at_ms=%d); it is not tracked and can never be concluded LOST", endedAtMs)
+}
+
+// Settled reports whether a path's run has settled in this process.
+func (t *Tracker) Settled(path string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, ok := t.settled[path]
+	return ok
+}
+
+// retireLocked is the ONE way a run stops being tracked: it leaves `open` and
+// joins `settled`, so it can never be observed again. Caller holds mu.
+func (t *Tracker) retireLocked(path string) {
+	delete(t.open, path)
+	t.settled[path] = struct{}{}
 }
 
 // Open reports whether a path is still being tracked.

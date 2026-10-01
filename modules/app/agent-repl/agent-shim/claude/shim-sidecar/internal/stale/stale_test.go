@@ -768,3 +768,184 @@ func TestEveryBenignEndStatesItsConclusionWithoutWarning(t *testing.T) {
 		})
 	}
 }
+
+// ---- a settled run is never tracked again ----
+
+// requirePanic runs act and fails unless it panics.
+func requirePanic(t *testing.T, what string, act func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("%s did not panic", what)
+		}
+	}()
+	act()
+}
+
+func TestSettleAnswersWhetherTheRunWasTracked(t *testing.T) {
+	tests := []struct {
+		name    string
+		observe bool
+		want    bool
+	}{
+		{name: "a tracked run", observe: true, want: true},
+		{name: "an untracked run", observe: false, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			tr, _ := tracker(t, Options{})
+			if test.observe {
+				tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+			}
+
+			// Act.
+			got := tr.Settle("/private/tmp/b1.output")
+
+			// Assert.
+			if got != test.want {
+				t.Fatalf("Settle = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSettleStatesATrackedRunAtInfo(t *testing.T) {
+	// Arrange.
+	tr, logs := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+	// Act.
+	tr.Settle("/private/tmp/b1.output")
+
+	// Assert.
+	rec := requireSettleRecord(t, parseLogLines(t, *logs), "run settled by a terminal read")
+	if rec.Level != "info" {
+		t.Fatalf("the settle was recorded at %q, want info", rec.Level)
+	}
+}
+
+func TestSettleRecordsAnUntrackedRunAsSettled(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+
+	// Act.
+	tr.Settle("/private/tmp/b1.output")
+
+	// Assert: a watcher rebuilt later in the process never tracks it again.
+	if !tr.Settled("/private/tmp/b1.output") {
+		t.Fatal("an untracked run that settled is not recorded as settled")
+	}
+}
+
+func TestObservingASettledRunPanics(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	tr.Settle("/private/tmp/b1.output")
+
+	// Act / Assert.
+	requirePanic(t, "observing a settled run", func() {
+		tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	})
+}
+
+func TestASweepConclusionIsNotASettleUntilTheCallerSettlesIt(t *testing.T) {
+	tests := []struct {
+		name  string
+		sweep func(tr *Tracker)
+	}{
+		{name: "the silence sweep", sweep: func(tr *Tracker) { tr.Sweep(bootMs, nowMs+shellMs) }},
+		{name: "the boot sweep", sweep: func(tr *Tracker) { tr.BootSweep(nowMs+1, nowMs) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: a conclusion whose LOST write fails must be restated by
+			// the next cycle, so the sweep alone does not settle it.
+			tr, _ := tracker(t, Options{})
+			tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+			// Act.
+			test.sweep(tr)
+
+			// Assert.
+			if tr.Open("/private/tmp/b1.output") || tr.Settled("/private/tmp/b1.output") {
+				t.Fatalf("open=%t settled=%t, want a concluded run untracked and not yet settled",
+					tr.Open("/private/tmp/b1.output"), tr.Settled("/private/tmp/b1.output"))
+			}
+		})
+	}
+}
+
+func TestObservingAConcludedRunOnceItsLostIsSettledPanics(t *testing.T) {
+	// Arrange: the caller made the LOST durable and settled it.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	tr.Sweep(bootMs, nowMs+shellMs)
+	tr.Settle("/private/tmp/b1.output")
+
+	// Act / Assert.
+	requirePanic(t, "observing a run whose LOST was settled", func() {
+		tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	})
+}
+
+func TestSettledByRecordNeverTracksTheRun(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+
+	// Act.
+	tr.SettledByRecord(shellRun("/private/tmp/b1.output", nowMs), 42)
+
+	// Assert.
+	if tr.Open("/private/tmp/b1.output") || !tr.Settled("/private/tmp/b1.output") {
+		t.Fatal("a run the record holds as ended must be settled and untracked")
+	}
+	if lost := tr.Sweep(bootMs, nowMs+24*shellMs); len(lost) != 0 {
+		t.Fatalf("swept %+v, want nothing: a settled run is never concluded LOST", lost)
+	}
+}
+
+func TestSettledByRecordStatesTheRunOnceAtInfo(t *testing.T) {
+	// Arrange.
+	tr, logs := tracker(t, Options{})
+
+	// Act.
+	tr.SettledByRecord(shellRun("/private/tmp/b1.output", nowMs), 42)
+
+	// Assert.
+	rec := requireSettleRecord(t, parseLogLines(t, *logs), "run already settled per the store")
+	if rec.Level != "info" || !strings.Contains(rec.Message, "ended_at_ms=42") {
+		t.Fatalf("record = %+v, want one info record naming ended_at_ms=42", rec)
+	}
+	if got := ctxString(t, rec, "activity_id"); got != "call-1" {
+		t.Fatalf("activity_id = %q, want call-1", got)
+	}
+}
+
+func TestSettledByRecordOfATrackedRunPanics(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+	// Act / Assert.
+	requirePanic(t, "settling a tracked run by the record", func() {
+		tr.SettledByRecord(shellRun("/private/tmp/b1.output", nowMs), 42)
+	})
+}
+
+// requireSettleRecord finds the one lost-policy record whose message holds
+// substring.
+func requireSettleRecord(t *testing.T, records []logRecord, substring string) logRecord {
+	t.Helper()
+	var found []logRecord
+	for _, r := range records {
+		if r.Operation == "lost-policy" && strings.Contains(r.Message, substring) {
+			found = append(found, r)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("the log holds %d lost-policy records saying %q, want exactly one; it held %v", len(found), substring, operationLevels(records))
+	}
+	return found[0]
+}
