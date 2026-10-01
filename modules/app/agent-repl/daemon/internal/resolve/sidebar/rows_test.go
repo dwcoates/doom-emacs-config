@@ -5,6 +5,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -900,6 +901,57 @@ func TestViewedReportNeverDrawsANonTurnEndRowPartialWithNothingParked(t *testing
 			// Assert: live work and exceptional states are never deprioritized.
 			if got := onlyRow(t, r).GetViewed(); got != nil {
 				t.Fatalf("viewed = %v on a %s row, want unset: only a turn-end row goes PARTIAL", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---- AVAILABILITY: whether an editor may open the workspace yet -------------
+//
+// Resolved from the shim link alone: available once a link has connected under
+// this daemon (and never again pending), unavailable when the link died before
+// it ever connected, pending otherwise.
+
+// availabilityName names the row's set availability arm, "" when unset.
+func availabilityName(row *frontendv1.RosterRow) string {
+	switch row.GetAvailability().GetAvailability().(type) {
+	case *frontendv1.RosterRowAvailability_Pending:
+		return "pending"
+	case *frontendv1.RosterRowAvailability_Available:
+		return "available"
+	case *frontendv1.RosterRowAvailability_Unavailable:
+		return "unavailable"
+	default:
+		return ""
+	}
+}
+
+func TestAvailabilityFollowsTheShimLink(t *testing.T) {
+	cases := []struct {
+		name  string
+		links []shimclient.LinkState
+		want  string
+	}{
+		{name: "no link was ever seen", links: nil, want: "pending"},
+		{name: "the link is still dialing", links: []shimclient.LinkState{shimclient.LinkDialing}, want: "pending"},
+		{name: "the link connected", links: []shimclient.LinkState{shimclient.LinkConnected}, want: "available"},
+		{name: "the link died before it ever connected", links: []shimclient.LinkState{shimclient.LinkDialing, shimclient.LinkDead}, want: "unavailable"},
+		{name: "a link that connected and then died", links: []shimclient.LinkState{shimclient.LinkConnected, shimclient.LinkDead}, want: "available"},
+		{name: "a failed start that a later start brought up", links: []shimclient.LinkState{shimclient.LinkDead, shimclient.LinkConnected}, want: "available"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+
+			// Act.
+			for _, link := range tc.links {
+				r.OnLink(theWS, link)
+			}
+
+			// Assert.
+			if got := availabilityName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("availability = %q, want %q", got, tc.want)
 			}
 		})
 	}
