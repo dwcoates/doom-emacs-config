@@ -1,4 +1,4 @@
-# Plan: a deploy in the footer (status, steps, activities, sidebar notice)
+# Plan: a deploy in the footer (status, steps, activities, enduring blocked line)
 
 Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
@@ -163,15 +163,16 @@ In every combination the client sees ONE transfer, from step 3 to step 6 (`deplo
 
 - They are shared by every workspace, so they cannot drain one workspace at a time; hot reloading
   them is not supported, which removes the problem instead of solving it.
-- A deploy still detects when either is out of date: their build differs from the fresh one
-  (`Deployer.serviceStale`, `daemon/internal/deploy/deploy.go:689`). An unchanged service is never restarted.
-- When either is out of date, EVERY automatic hot reload (daemon, shim and webapp included) is
-  BLOCKED until a full Emacs restart.
-  - The sidebar shows, at its very bottom with a small gap from the edge, in red:
-    `Full emacs restart needed to unblock automatic agent-repl hot reloads`.
-  - The text is sized to fit on one line of the sidebar and never wraps.
-  - It stands until the restart has brought the stale service onto the fresh build.
-- Required: a full Emacs restart actually restarts a stale store or sidecar onto the installed build.
+- If the store or the sidecar is out of date FOR ANY REASON, NO deploy happens at all: nothing
+  is installed, restarted, handed over or reloaded.
+  - Out of date means the running service's build differs from the freshly built one
+    (`Deployer.serviceStale`, `daemon/internal/deploy/deploy.go:689`); a deploy builds into
+    staging, finds the difference, and stops before installing.
+  - An unchanged service is never restarted.
+- While blocked, the footer shows an ENDURING activity line,
+  `Full emacs restart needed to unblock automatic agent-repl hot reloads` (see "Enduring lines").
+- Required: a full Emacs restart builds, installs and restarts a stale store or sidecar, and the
+  line goes once both run the current build.
 
 ## Expanded footer: no deploy panel (owner ruling, 2026-10-01)
 
@@ -208,17 +209,38 @@ In every combination the client sees ONE transfer, from step 3 to step 6 (`deplo
   `frontend.v2`, say), which happens only on a breaking change.
   - Nothing records the versions a build speaks today: the build stamps them, and a deploy whose
     fresh set differs from the running one is blocked.
-- Both draw the same red sidebar notice and block EVERY hot reload until a full Emacs restart.
+- Both block EVERY hot reload and raise the same enduring blocked line until a full Emacs restart.
+
+## Enduring lines (owner ruling, 2026-10-01)
+
+- The footer's enduring tier holds up to two lines:
+  - the weekly and 5-hour usage line (today's only one);
+  - the deploy-blocked line, only while hot reloads are blocked.
+- With both present they alternate every 10 seconds, chosen by the wall clock rather than by a
+  timer: line `floor(epoch_ms / 10000) mod 2`.
+  - So when a transient or salient line above them goes away, the enduring line showing is the
+    one the clock says, with the rest of its 10 seconds, never a fresh 10 seconds.
+  - Every client, and every workspace's strip, shows the same line at the same moment.
+- The daemon sends both lines; the client picks which to draw, because a choice made every 10
+  seconds is the clock's, not a fact worth a frame.
+- The sidebar shows no deploy notice (superseded).
+
+## Emacs connections during a daemon swap
+
+- While some workspaces have moved and others are still draining, Emacs holds TWO main
+  connections, one to each daemon (`agent-repl-host-route-handover`, `lisp/host.el:1224`).
+- "The old daemon has exited" means the old connection is gone and only the new one remains;
+  that is when the Emacs lisp reloads.
 
 ## Work, by system
 
-1. Proto (`frontend.v1`): new status arm and substatuses, new activity arms, the failed-deploy salient activity, and the sidebar restart notice.
+1. Proto (`frontend.v1`): new status arm and substatuses, new activity arms, the failed-deploy salient activity, and the enduring blocked line.
 2. Daemon:
    - `deployprogress.Progress` grows the steps and per-component rows;
    - the builder callback;
    - the resolver derives the B substatuses from the rollout's per-workspace transfer state;
    - the manifest carries steps and rows across the handover.
-3. Webapp: the status, activity arms, durations, and the sidebar restart notice in `footer/`.
+3. Webapp: the status, activity arms, durations, the enduring blocked line, and the 10-second enduring alternation in `footer/`.
 4. Lisp: nothing beyond the generic status rendering, to be confirmed.
 5. Docs: `docs/USER-GUIDE.md` gains the deploy footer, per the `AGENTS.md` rule.
 
