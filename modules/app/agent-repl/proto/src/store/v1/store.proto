@@ -140,12 +140,44 @@ message StoreAgentUpdate {
 
 // One line of one agent's book.
 message StorePageLine {
-  // The book: the agent whose page this line renders in. A pagination query
-  // filters on this and nothing else.
-  conversation.v1.AgentId page_agent_id = 1;
+  // WHICH BOOK THE LINE IS FILED IN, as the producer knows it. REQUIRED: a line
+  // with neither arm set is refused as an invalid request.
+  //
+  // A WRITER NEVER CLAIMS A BOOK IT DOES NOT KNOW. Most lines name their book,
+  // because the producer observed whose fact it is. A producer that observed a
+  // fact about a unit WITHOUT observing whose unit it is -- the vendor's task
+  // stream is session-wide and names no agent, so a backgrounded subagent's own
+  // spawn reaches it with no owner -- says so with `owner_unknown`, rather than
+  // naming a book it would only be guessing at.
+  oneof book {
+    // The book: the agent whose page this line renders in. A pagination query
+    // filters on this and nothing else. The line's own attribution (the
+    // frame's agent_id, the prompt's or peer message's recipient) must name
+    // the same agent, or the write is refused.
+    conversation.v1.AgentId page_agent_id = 1;
+    // The producer does not know whose line this is. See
+    // StorePageLineOwnerUnknown for how the store places it.
+    StorePageLineOwnerUnknown owner_unknown = 3;
+  }
   // The line itself.
   StoreAgentItem agent_item = 2;
 }
+
+// THE PRODUCER DOES NOT KNOW WHOSE LINE THIS IS, so the store places it.
+//
+// ONLY AN UPSERT OF A ROW THE RECORD ALREADY HOLDS CAN BE PLACED. The store
+// files the line in the book that already holds its upsert_key, attributes it
+// to that book's agent (it stamps the frame's agent_id, which the producer
+// leaves UNSET), and keeps the stored row's top_level; from then on the row is
+// exactly what a write naming that book would have stored. An upsert_key the
+// record does not hold yet names no book at all, so nothing is stored and the
+// entry is reported in WriteBatchSuccess.unplaced -- never filed in a guessed
+// book.
+//
+// ONLY AN AGENT FRAME MAY BE UNOWNED. A prompt and a peer message always name
+// their recipient, so a line carrying either with this arm is refused as an
+// invalid request, as is an agent frame whose agent_id is set.
+message StorePageLineOwnerUnknown {}
 
 // A servable conversation fact: a prompt or an agent's frame.
 message StoreAgentItem {

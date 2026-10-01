@@ -127,6 +127,23 @@ message WriteBatchSuccess {
   // its own startup catch-up summary; a skip in steady state is unexpected and
   // the producer warns. Empty on the ordinary path.
   repeated WriteBatchSkippedEntry skipped = 1;
+  // Entries the store did NOT STORE because they name no book it could place
+  // them in: a page line written `owner_unknown` (StorePageLineOwnerUnknown)
+  // whose upsert_key the record does not hold yet. Nothing of such an entry is
+  // committed -- no row, no ledger row -- while the batch's other entries
+  // commit in the same transaction. EACH IS AN ERROR, recorded at ERROR by the
+  // store and by the producer: a fact was observed and is not in the record.
+  // Empty on the ordinary path.
+  repeated WriteBatchUnplacedEntry unplaced = 2;
+}
+
+// One entry the store could not place (WriteBatchSuccess.unplaced): what the
+// producer needs to record the loss without re-deriving it.
+message WriteBatchUnplacedEntry {
+  // The upsert_key the entry was written under, which no stored row holds.
+  string upsert_key = 1;
+  // The store's account of why, for a human and for logs; never switched on.
+  string detail = 2;
 }
 
 // One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
