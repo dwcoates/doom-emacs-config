@@ -265,6 +265,9 @@ func TestKillRecordsTheAdoptedShimsDeath(t *testing.T) {
 	if info.PID != p.pid {
 		t.Fatalf("the recorded exit names pid %d, want the adopted peer's %d", info.PID, p.pid)
 	}
+	if info.At.IsZero() || info.At.After(time.Now()) {
+		t.Fatalf("the recorded exit is stamped %v, want the instant the death was concluded", info.At)
+	}
 }
 
 // TestKillReadsAnAbsentAdoptedSocketAsAlreadyStopped asserts a shim whose

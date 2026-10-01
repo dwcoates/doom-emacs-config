@@ -293,6 +293,11 @@ type ExitInfo struct {
 	// set it: an inferred departure NOBODY asked for is still a death, and
 	// still loud.
 	Inferred bool
+	// At is when this client concluded the process was gone: the wait status
+	// was read, or the departure was inferred. Nothing the process wrote can
+	// be later than it, which is what lets a bring-up account for the last
+	// writer of the process's transcript.
+	At time.Time
 }
 
 // KillAttribution records who asked for a kill and why, so a supervised stop

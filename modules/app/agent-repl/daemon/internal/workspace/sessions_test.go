@@ -68,8 +68,10 @@ type fakeClient struct {
 	sessionStream   chan *shimv1.WatchSessionResponse
 	watchSessionErr error
 	// reaped makes the supervised process ALREADY GONE, which is how a test
-	// reaches the split between a session row and a live shim.
-	reaped bool
+	// reaches the split between a session row and a live shim; reapedAt is
+	// when its death was concluded.
+	reaped   bool
+	reapedAt time.Time
 	// entered is closed by StartSession on its first call and startHold is
 	// what it then waits on, which is how a test holds a start open for as
 	// long as it needs to observe something about the caller that is NOT
@@ -106,7 +108,7 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 	if !c.reaped {
 		return shimclient.ExitInfo{}, false
 	}
-	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL"}, true
+	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL", At: c.reapedAt}, true
 }
 
 func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
@@ -204,6 +206,12 @@ func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) er
 	}
 	c.kills = append(c.kills, attr)
 	c.standDownBeforeStop = c.stoodDown
+	// A KILL THAT RETURNS HAS WITNESSED THE REAP, exactly as the real client's
+	// does: its exit is concluded before the call answers.
+	c.reaped = true
+	if c.reapedAt.IsZero() {
+		c.reapedAt = fixedNow
+	}
 	// THE SUPERVISOR LETS GO WHEN THE PROCESS DOES, exactly as the real
 	// client's exit decode releases its hold: a spawn registry that still
 	// named a killed process would answer "ours" for a shim that is gone.
@@ -3947,15 +3955,26 @@ func TestStartOfALiveSessionRaisesNoBringUp(t *testing.T) {
 // the one adoption decision: adoptable, too fresh, none, and a failed probe.
 func TestNewestAdoptableDecidesTheDirectorysNewestTranscript(t *testing.T) {
 	tests := []struct {
-		name      string
-		modTime   time.Time
-		noneOnDir bool
-		probeErr  error
-		wantOK    bool
-		wantLevel string
-		wantMsg   string
+		name         string
+		modTime      time.Time
+		writerGoneAt time.Time
+		noneOnDir    bool
+		probeErr     error
+		wantOK       bool
+		wantLevel    string
+		wantMsg      string
 	}{
 		{name: "an idle transcript is adoptable", modTime: fixedNow.Add(-2 * TranscriptAdoptionIdleWindow), wantOK: true},
+		{
+			name: "a fresh transcript last written before this daemon's shim was gone is adoptable", modTime: fixedNow.Add(-2 * time.Second),
+			writerGoneAt: fixedNow.Add(-time.Second), wantOK: true,
+			wantLevel: dlog.LevelInfo, wantMsg: "the newest transcript was last written before this daemon's own shim for it was gone; the idle guard is waived",
+		},
+		{
+			name: "a fresh transcript written after this daemon's shim was gone is refused", modTime: fixedNow.Add(-time.Second),
+			writerGoneAt: fixedNow.Add(-2 * time.Second),
+			wantLevel:    dlog.LevelInfo, wantMsg: "the newest transcript was modified too recently to adopt safely; the session comes up FRESH",
+		},
 		{
 			name: "a transcript inside the idle window is refused", modTime: fixedNow.Add(-time.Second),
 			wantLevel: dlog.LevelInfo, wantMsg: "the newest transcript was modified too recently to adopt safely; the session comes up FRESH",
@@ -3979,7 +3998,7 @@ func TestNewestAdoptableDecidesTheDirectorysNewestTranscript(t *testing.T) {
 			f.accounts.newestErr = tt.probeErr
 
 			// Act
-			got, ok := f.fleet.newestAdoptable(context.Background(), f.log.logger, "/tree/w1")
+			got, ok := f.fleet.newestAdoptable(context.Background(), f.log.logger, "/tree/w1", tt.writerGoneAt)
 
 			// Assert
 			if ok != tt.wantOK || (ok && got.VendorSessionID != "newest") {
@@ -3989,5 +4008,220 @@ func TestNewestAdoptableDecidesTheDirectorysNewestTranscript(t *testing.T) {
 				t.Fatalf("the refusal was not recorded at %s: %q", tt.wantLevel, tt.wantMsg)
 			}
 		})
+	}
+}
+
+// restoreMessage is the record of a restored directory transcript.
+const restoreMessage = "the recorded conversation has no transcript on disk; restoring the directory's newest transcript"
+
+// engagedWithLostTranscript arranges an engaged workspace whose recorded
+// conversation has no transcript, and whose directory's newest transcript is
+// "newest", last written at modTime.
+func engagedWithLostTranscript(t *testing.T, modTime time.Time) (*fleetFixture, wsm.Session) {
+	t.Helper()
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	f.accounts.newest = account.AdoptableTranscript{VendorSessionID: "newest", ModTime: modTime}
+	return f, wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
+}
+
+func TestClassifySourceRestoresTheDirectorysNewestTranscript(t *testing.T) {
+	// Arrange
+	f, session := engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
+
+	// Act
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if got.Fresh || got.VendorSessionID != "newest" {
+		t.Fatalf("classifySource() = %+v, want a resume of the directory's newest transcript", got)
+	}
+	var restored *dlog.Record
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && r.Message == restoreMessage {
+			restored = &r
+		}
+	}
+	if restored == nil || restored.Context["recorded_vendor_session_id"] != "vendor-stale" || restored.Context["adopted_vendor_session_id"] != "newest" {
+		t.Fatalf("restore record = %+v, want both ids at info", restored)
+	}
+	if opened := abandonedFaults(f.db); len(opened) != 0 {
+		t.Fatalf("abandoned faults = %+v, want none for a restored conversation", opened)
+	}
+}
+
+func TestClassifySourceRecordsTheRestoredConversationAsTheResumeHandle(t *testing.T) {
+	// Arrange
+	f, session := engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
+
+	// Act
+	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+
+	// Assert
+	if got := f.db.sessions["w1"].VendorSessionID; got != "newest" {
+		t.Fatalf("the recorded resume handle = %q, want the restored conversation", got)
+	}
+}
+
+func TestClassifySourceStillRestoresWhenTheResumeHandleCannotBeRecorded(t *testing.T) {
+	// Arrange
+	f, session := engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
+	f.db.setVendorErr = errFake
+
+	// Act
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert
+	if err != nil || got.VendorSessionID != "newest" {
+		t.Fatalf("classifySource() = (%+v, %v), want the restored conversation resumed", got, err)
+	}
+	if !recordedAt(f, dlog.LevelError, opBringUp, "could not record the adopted conversation as the session's resume handle; the session still resumes it") {
+		t.Fatalf("records = %+v, want the failed record at error", f.log.logger.Records())
+	}
+}
+
+func TestClassifySourceRestoresAJustWrittenTranscriptThisDaemonsReapAccountsFor(t *testing.T) {
+	// Arrange: the transcript was written a second ago, by the shim this
+	// daemon reaped half a second later.
+	f, session := engagedWithLostTranscript(t, fixedNow.Add(-time.Second))
+	f.fleet.noteReap("w1", &fakeClient{reaped: true, reapedAt: fixedNow.Add(-500 * time.Millisecond)})
+
+	// Act
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert
+	if err != nil || got.VendorSessionID != "newest" {
+		t.Fatalf("classifySource() = (%+v, %v), want the just-written transcript restored", got, err)
+	}
+}
+
+func TestClassifySourceAbandonsLoudlyWhenAnUnaccountedWriterMayHoldTheTranscript(t *testing.T) {
+	// Arrange: written a second ago, and this daemon reaped no shim for it.
+	f, session := engagedWithLostTranscript(t, fixedNow.Add(-time.Second))
+
+	// Act
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert
+	if err != nil || !got.Fresh {
+		t.Fatalf("classifySource() = (%+v, %v), want a fresh start", got, err)
+	}
+	if !recordedAt(f, dlog.LevelInfo, opBringUp, "the newest transcript was modified too recently to adopt safely; the session comes up FRESH") {
+		t.Fatalf("records = %+v, want the idle guard's notice", f.log.logger.Records())
+	}
+	if !recordedAt(f, dlog.LevelWarn, opBringUp, abandonedMessage) || len(abandonedFaults(f.db)) != 1 {
+		t.Fatalf("records = %+v, want the abandonment warning and its fault", f.log.logger.Records())
+	}
+}
+
+func TestClassifySourceAbandonsLoudlyWhenTheDirectoryHasNoTranscript(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
+
+	// Act
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert
+	if err != nil || !got.Fresh {
+		t.Fatalf("classifySource() = (%+v, %v), want a fresh start", got, err)
+	}
+	if !recordedAt(f, dlog.LevelWarn, opBringUp, abandonedMessage) || len(abandonedFaults(f.db)) != 1 {
+		t.Fatalf("records = %+v, want the abandonment warning and its fault", f.log.logger.Records())
+	}
+}
+
+func TestEveryAdoptingBranchAsksTheOneAdoptionDecision(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(*fleetFixture) (wsm.Session, bool)
+	}{
+		{"no session record", func(*fleetFixture) (wsm.Session, bool) { return wsm.Session{}, false }},
+		{"a recorded conversation with no transcript", func(f *fleetFixture) (wsm.Session, bool) {
+			f.accounts.transcriptErr = errors.New("no such file")
+			f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+			return wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}, true
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			session, exists := tt.arrange(f)
+
+			// Act
+			if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, exists); err != nil {
+				t.Fatalf("classifySource: %v", err)
+			}
+
+			// Assert
+			if !f.accounts.newestProbed {
+				t.Fatal("the branch decided without the one adoption decision")
+			}
+		})
+	}
+}
+
+func TestTheFleetRecordsEveryReapItWitnesses(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(*testing.T, *fleetFixture, ids.WorkspaceID)
+	}{
+		{"a stop", func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			if err := f.fleet.Stop(context.Background(), ws, true); err != nil {
+				t.Fatalf("Stop: %v", err)
+			}
+		}},
+		{"a shim found dead at the next bring-up", func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			f.client.reaped = true
+			f.fleet.retireReaped(ws)
+		}},
+		{"an install over a reaped shim", func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			f.client.reaped = true
+			if err := f.fleet.Install(context.Background(), ws, &fakeClient{pid: 4242}); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a live session whose shim's death is concluded at a
+			// known instant.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			f.client.reapedAt = fixedNow.Add(-time.Second)
+
+			// Act
+			tt.act(t, f, ws.ID)
+
+			// Assert
+			if got := f.fleet.writerGoneAt(ws.ID); !got.Equal(fixedNow.Add(-time.Second)) {
+				t.Fatalf("writerGoneAt = %v, want the reap's instant", got)
+			}
+		})
+	}
+}
+
+func TestTheFleetRecordsNoReapForAShimStillRunning(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+
+	// Act
+	f.fleet.noteReap("w1", &fakeClient{})
+
+	// Assert
+	if got := f.fleet.writerGoneAt("w1"); !got.IsZero() {
+		t.Fatalf("writerGoneAt = %v, want none for a shim not yet reaped", got)
 	}
 }

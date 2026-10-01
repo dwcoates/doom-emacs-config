@@ -365,6 +365,19 @@ a prompt sent meanwhile joins it. The cut turn ends as `agent_process_died`
 (`wsm.CloseAgentDied`). One unattended revival until a turn ends; a second
 death is WARN and left down.
 
+### A bring-up resumes the directory's last session
+
+`workspace.Fleet.classifySource` decides what a session comes up on, in this
+order: the recorded conversation when its transcript is on disk; else, for a
+workspace that ever took a turn, the directory's newest transcript
+(`Fleet.newestAdoptable`, the one adoption decision the no-record branch uses
+too), recorded as the session's resume handle; else FRESH, with the WARN and
+the `conversation_abandoned` fault. The 45s idle guard against a second writer
+is waived only for a transcript last written at or before this daemon
+concluded its own shim for the workspace gone (`Fleet.noteReap`, stamped from
+`shimclient.ExitInfo.At` on a stop, a relaunch's install, or a death found at
+the next bring-up). A never-engaged workspace still comes up fresh quietly.
+
 ### A turn row closes through ONE door
 
 Every close of a `turns` row goes through `promptqueue/turnclose.go`

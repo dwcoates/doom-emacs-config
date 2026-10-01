@@ -360,6 +360,11 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	}
 	f.mu.Lock()
 	previous := f.sessions[ws]
+	if previous != nil {
+		// A RELAUNCH INSTALLS ONLY ONCE ITS REAP GATE HAS PASSED, so the
+		// client it replaces is gone, and is recorded so.
+		f.noteReapLocked(ws, previous.client)
+	}
 	// An INSTALL rotates the process, never the session: the adopted client
 	// serves the identity the retired one did.
 	carried := ""
