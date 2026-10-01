@@ -190,11 +190,11 @@
      answer). A thinking bubble wears no border at all. */
   --interim-response-border: #b0b00c;
   /* THE SELECTED ENTRY's color: the ring on a card a footer detached-work
-     jump landed on, and the border of the response the reader has SELECTED to
-     reply to (reply-to-a-past-response mode), where it replaces the green a
-     final answer wears at rest, so the one bubble the next prompt will quote
-     is unmistakable among the green answers around it. */
-  --selected-response: #2563eb;
+     jump landed on, and the border of the row the feed's selection names — a
+     final response the next prompt replies to, where it replaces the green a
+     final answer wears at rest, or a prompt the rollback keys act on — so the
+     one selected bubble is unmistakable among those around it. */
+  --selected-entry: #2563eb;
   /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
      worn by every response bubble while its scroll box is open, over whatever
      the ladder would otherwise draw. A shade deeper than true eggshell here,
@@ -411,8 +411,8 @@
     --final-response: #4ade80;
     --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
-       the selected-response hairline still reads against the dark bubble. */
-    --selected-response: #60a5fa;
+       the selected-entry hairline still reads against the dark bubble. */
+    --selected-entry: #60a5fa;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -1786,23 +1786,26 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    2026-09-24): its bubble keeps the response's purple fill and wears red. */
 .bubble[data-variant="turn-ended"] { border-color: var(--err); }
 /* THE SELECTED ENTRY (src/feed/selected-entry.ts): the one mark a feed entry
-   wears while a footer detached-work jump has landed on it or the reader's
-   reply-to-a-past-response selection names it — ON THE CARD ITSELF, so a
-   centered, width-capped card is marked where it is drawn rather than at the
-   feed's far left edge. An INSET ring: an outline pulled inside the card's own
-   border box never reflows the feed, never replaces the card's own shadow, and
-   is not clipped by the row's paint containment (`content-visibility`).
-   A final response is excluded: its own border is its mark (below). */
-.entry-selected:not(.final-response) {
-  outline: 2px solid var(--selected-response);
+   wears while a footer detached-work jump has landed on it or the feed's
+   selection names it — ON THE CARD ITSELF, so a centered, width-capped card is
+   marked where it is drawn rather than at the feed's far left edge. An INSET
+   ring: an outline pulled inside the card's own border box never reflows the
+   feed, never replaces the card's own shadow, and is not clipped by the row's
+   paint containment (`content-visibility`).
+   A final response and a prompt are excluded: their own border is their mark
+   (below). */
+.entry-selected:not(.final-response):not([data-role="prompt"]) {
+  outline: 2px solid var(--selected-entry);
   outline-offset: -2px;
 }
-/* The SELECTED final response: its own border turns blue in place of the
-   green, which is the whole mark, so no ring sits over it. Declared after the
-   green rule at higher specificity, so the selected bubble reads blue while
-   selected and green the moment it clears. */
-.bubble.final-response.entry-selected {
-  border-color: var(--selected-response);
+/* The SELECTED final response or prompt: its own border turns blue (in place
+   of a final answer's green, or a prompt's none or amber), which is the whole
+   mark, so no ring sits over it. Declared after the green and amber rules at
+   higher specificity, so the selected bubble reads blue while selected and
+   returns to its own border the moment it clears. */
+.bubble.final-response.entry-selected,
+.bubble[data-role="prompt"].entry-selected {
+  border-color: var(--selected-entry);
 }
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it

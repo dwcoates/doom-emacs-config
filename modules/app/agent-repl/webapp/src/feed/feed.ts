@@ -20,6 +20,9 @@ import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { ITEM_EXPANDED_EVENT, expandedSectionAt, installClickExpand } from "../expand.js";
 import { installBackgroundClear } from "./background-click.js";
+import { LEFT_VIEW_REQUEST, createSelectionVisibility } from "./selection-visibility.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { selectFeedRow } from "./select-feed-row.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -154,6 +157,18 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // works exactly as before, minus the pre-render. ONE instance is shared with
   // every sub-feed, since they all scroll inside this one box.
   const overscan = scrollBox === null ? null : createOverscan(scrollBox);
+  // THE SELECTED ROW LEAVING THE VIEWPORT ENDS THE SELECTION: the daemon is
+  // told (`left_view`), and its `none.stay` push drops the mark in place.
+  const selectionVisibility =
+    scrollBox === null
+      ? null
+      : createSelectionVisibility(scrollBox, (row) => {
+          void guardMalformed(
+            ctx,
+            "feed.selection-left-view",
+            selectFeedRow(ctx, { case: "leftView", value: { row } }, LEFT_VIEW_REQUEST),
+          );
+        });
   let watch: StreamHandle | null = null;
   let disposed = false;
 
@@ -210,12 +225,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     bodyContext: feedContext(),
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
+    selectionVisibility: selectionVisibility ?? undefined,
     onPainted: (ids, at) => {
       paints.report(ids, at);
     },
   });
 
-  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends an active reply selection
+  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
   // the daemon's cleared push then parks the tail through `applySelection`.
   const uninstallClear =
@@ -632,6 +648,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
     uninstallClear?.();
     overscan?.dispose();
+    selectionVisibility?.dispose();
     root.dispose();
   }
 }

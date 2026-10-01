@@ -1495,7 +1495,7 @@ describe("mountBubble: the non-row frames a sub-feed tail carries", () => {
     // Arrange
     const { h, channel } = await expandedTail(subagentRow("b1"));
     // Act
-    channel.push(pushSelection({ active: false }));
+    channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
     expect(h.sink.reported).toEqual(["frameUndecodable"]);

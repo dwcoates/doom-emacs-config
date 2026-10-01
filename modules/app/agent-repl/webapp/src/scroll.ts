@@ -71,9 +71,10 @@ export interface ScrollPosition {
  *   time (one this client just sent that the daemon held included); the feed
  *   parks at its tail and follows, exactly as for `promptSent`. A re-push of a
  *   card already drawn, or its removal, moves nothing.
- * - `selectionMoved`: the reader stepped the reply-to-a-past-response
- *   selection by keybinding; the selected row is centered, and a cleared
- *   selection returns to the tail.
+ * - `selectionMoved`: the reader stepped the feed selection (a final
+ *   response or a prompt) by keybinding; the selected row is centered, and a
+ *   dismissed selection returns to the tail. A selection that ended because
+ *   its row left the viewport moves nothing (`selectionEnded`).
  * - `detachedWorkSelected`: the reader picked a detached-work item in the
  *   expanded footer; the feed CENTERS that item's card in its viewport
  *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
@@ -382,10 +383,26 @@ export class TailFollow {
     this.park("replaceRestore");
   }
 
-  /** The reader cleared the reply selection: return to the tail and follow. */
+  /** The reader cleared the selection: return to the tail and follow. */
   selectionCleared(): void {
     this.selectionActive = false;
     this.park("selectionMoved");
+  }
+
+  /**
+   * The selection ended because its row left the viewport: move nothing, and
+   * stop holding the latest-visible latch off, so the follow starts again only
+   * once the reader can see the latest entry (at once, when they already can).
+   */
+  selectionEnded(): void {
+    this.selectionActive = false;
+    this.heldOffReported = false;
+    this.sync();
+    log.debug("the selection ended where the reader is; the view stays", {
+      operation: "scroll.selection-ended",
+      context: { at: this.box.scrollTop },
+    });
+    this.latchIfLatestVisible();
   }
 
   /**

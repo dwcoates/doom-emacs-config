@@ -26,7 +26,8 @@ import {
   type FeedController,
 } from "../../src/feed/feed-view.js";
 import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
-import { SELECTED_ENTRY_CLASS, SELECTED_RESPONSE_ATTRIBUTE } from "../../src/feed/selected-entry.js";
+import { SELECTED_ENTRY_CLASS, SELECTED_ROW_ATTRIBUTE } from "../../src/feed/selected-entry.js";
+import type { SelectionVisibility } from "../../src/feed/selection-visibility.js";
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { onDiscard, tickWhileShown } from "../../src/feed/ticking.js";
@@ -41,6 +42,7 @@ import {
   mergeTabRow,
   page,
   responseRow,
+  selectionOf,
   separationRow,
   stubRenderers,
   subagentRow,
@@ -1530,7 +1532,7 @@ describe("createFeedController: a landed thinking row collapsing", () => {
   });
 });
 
-describe("createFeedController: the response selection", () => {
+describe("createFeedController: the feed selection", () => {
   /** A response renderer that draws the real `.bubble.assistant` chrome. */
   function assistantResponse(): HTMLElement {
     const el = document.createElement("div");
@@ -1551,6 +1553,7 @@ describe("createFeedController: the response selection", () => {
       isFollowing: () => false,
       follow: () => undefined,
       selectionCleared: () => acts.push("selectionCleared"),
+      selectionEnded: () => acts.push("selectionEnded"),
       selectionMoved: (g: CenterGeometry | null) => {
         acts.push("selectionMoved");
         if (g !== null) shifts.push(centerDelta(g));
@@ -1564,6 +1567,13 @@ describe("createFeedController: the response selection", () => {
     geometry = { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 },
     withScroll = true,
   ) {
+    const watched: Array<{ element: HTMLElement; id: string } | null> = [];
+    const selectionVisibility: SelectionVisibility = {
+      watch: (row) => {
+        watched.push(row === null ? null : { element: row.element, id: row.id.value });
+      },
+      dispose: () => undefined,
+    };
     const h = harness();
     const host = document.createElement("div");
     document.body.replaceChildren(host);
@@ -1583,17 +1593,9 @@ describe("createFeedController: the response selection", () => {
         revealRow: async () => false,
       },
       scroll: withScroll ? { box: scroll.box, tail: scroll.tail as never } : undefined,
+      selectionVisibility,
     });
-    return { controller, host, acts: scroll.acts, shifts: scroll.shifts };
-  }
-
-  /** The selection state as the daemon pushes it. */
-  function sel(init: { selected?: string; active: boolean; center?: string }) {
-    return create(FeedSelectionSchema, {
-      selected: init.selected === undefined ? undefined : feedId(init.selected),
-      active: init.active,
-      center: init.center === undefined ? undefined : feedId(init.center),
-    });
+    return { controller, host, acts: scroll.acts, shifts: scroll.shifts, watched };
   }
 
   /** Script a row element's box, which jsdom lays out not at all. */
@@ -1609,7 +1611,7 @@ describe("createFeedController: the response selection", () => {
     const { controller, host } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
     expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
@@ -1620,7 +1622,7 @@ describe("createFeedController: the response selection", () => {
     const { controller, host } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     const row = host.querySelector('[data-feed-row="r1"]');
     expect(row?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
@@ -1630,7 +1632,7 @@ describe("createFeedController: the response selection", () => {
     // Arrange — a tool card's push draws a new card element in the old one's place.
     const { controller, host } = selecting();
     controller.upsert(toolCallRow("t1", "running"));
-    controller.applySelection(sel({ selected: "t1", active: true }));
+    controller.applySelection(selectionOf({ response: "t1" }));
     const before = host.querySelector('[data-feed-row="t1"]')?.firstElementChild;
     // Act
     controller.upsert(toolCallRow("t1", "returned"));
@@ -1644,10 +1646,10 @@ describe("createFeedController: the response selection", () => {
     const { controller, host } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     const row = host.querySelector('[data-feed-row="r1"]');
-    expect(row?.getAttribute(SELECTED_RESPONSE_ATTRIBUTE)).toBe("true");
+    expect(row?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe("response");
   });
 
   it("clears the blue from the previously selected bubble when the selection moves", () => {
@@ -1655,9 +1657,9 @@ describe("createFeedController: the response selection", () => {
     const { controller, host } = selecting();
     controller.upsert(responseRow("r1"));
     controller.upsert(responseRow("r2"));
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Act — C-n moves the selection to the next response.
-    controller.applySelection(sel({ selected: "r2", active: true }));
+    controller.applySelection(selectionOf({ response: "r2" }));
     // Assert
     const first = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
     expect(first?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
@@ -1667,55 +1669,55 @@ describe("createFeedController: the response selection", () => {
     // Arrange
     const { controller, host } = selecting();
     controller.upsert(responseRow("r1"));
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Act — double-escape clears the selection.
-    controller.applySelection(sel({ active: false }));
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
     expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
   });
 
-  it("hands an active selection to the tail owner as selectionMoved", () => {
+  it("hands a selected row to the tail owner as selectionMoved", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     expect(acts).toEqual(["selectionMoved"]);
   });
 
-  it("returns to the bottom when the selection clears", () => {
+  it("returns to the bottom when the selection is dismissed (return_to_tail)", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
-    controller.applySelection(sel({ selected: "r1", active: true }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     acts.length = 0;
     // Act
-    controller.applySelection(sel({ active: false }));
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
     expect(acts).toEqual(["selectionCleared"]);
   });
 
-  it("does not move the feed when an inactive selection is restated", () => {
+  it("does not move the feed when an empty selection is restated", () => {
     // Arrange — REMOVED TRIGGER: every inactive push used to park the feed,
     // including the one a re-opened stream restates with nothing selected.
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ active: false }));
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
     expect(acts).toEqual([]);
   });
 
-  it("does not re-center when the same center is restated", () => {
+  it("does not re-center when the same row is restated", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     acts.length = 0;
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     expect(acts).toEqual([]);
   });
@@ -1725,10 +1727,10 @@ describe("createFeedController: the response selection", () => {
     const capture = captureLogRecords("debug");
     const { controller } = selecting();
     // Act
-    controller.applySelection(sel({ active: false }));
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
     const record = await forwardedRecord(capture, "feed.selection-unchanged");
-    expect(record.context).toMatchObject({ feed: "root", active: false });
+    expect(record.context).toMatchObject({ feed: "root", selected: "none" });
   });
 
   it("center-scrolls the selected row to the middle of the viewport", () => {
@@ -1739,7 +1741,7 @@ describe("createFeedController: the response selection", () => {
     const row = host.querySelector<HTMLElement>('[data-feed-row="r1"]');
     withRowGeometry(row as HTMLElement, 500, 100);
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     expect(shifts).toEqual([400]);
   });
@@ -1748,7 +1750,7 @@ describe("createFeedController: the response selection", () => {
     // Arrange — no rows drawn.
     const { controller, shifts } = selecting();
     // Act
-    controller.applySelection(sel({ selected: "gone", active: true, center: "gone" }));
+    controller.applySelection(selectionOf({ response: "gone" }));
     // Assert — nothing is scrolled, and nothing throws.
     expect(shifts).toEqual([]);
   });
@@ -1758,13 +1760,13 @@ describe("createFeedController: the response selection", () => {
     const capture = captureLogRecords("debug");
     const { controller } = selecting();
     // Act
-    controller.applySelection(sel({ selected: "gone", active: true, center: "gone" }));
+    controller.applySelection(selectionOf({ response: "gone" }));
     // Assert
     const record = await forwardedRecord(capture, "feed.selection-center-absent");
     expect(record.context).toMatchObject({ feed: "root", row: "gone" });
   });
 
-  it("reports no active selection before the daemon pushes one", () => {
+  it("reports no selection before the daemon pushes one", () => {
     // Arrange
     const { controller } = selecting();
     // Act
@@ -1773,23 +1775,23 @@ describe("createFeedController: the response selection", () => {
     expect(active).toBe(false);
   });
 
-  it("reports the selection active once an active selection is pushed", () => {
+  it("reports the selection active once a selected row is pushed", () => {
     // Arrange
     const { controller } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     expect(controller.selectionActive()).toBe(true);
   });
 
-  it("reports the selection inactive once the daemon pushes it cleared", () => {
+  it("reports the selection inactive once the daemon pushes none", () => {
     // Arrange
     const { controller } = selecting();
     controller.upsert(responseRow("r1"));
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Act
-    controller.applySelection(sel({ active: false }));
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
     expect(controller.selectionActive()).toBe(false);
   });
@@ -1799,10 +1801,140 @@ describe("createFeedController: the response selection", () => {
     const { controller, host } = selecting(undefined, false);
     controller.upsert(responseRow("r1"));
     // Act
-    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    controller.applySelection(selectionOf({ response: "r1" }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
     expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
+  });
+
+  it("marks a selected prompt's card with the selection mark", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(userPromptRow("p1", "hello"));
+    // Act
+    controller.applySelection(selectionOf({ prompt: "p1" }));
+    // Assert
+    const card = host.querySelector('[data-feed-row="p1"]')?.firstElementChild;
+    expect([card?.getAttribute("data-role"), card?.classList.contains(SELECTED_ENTRY_CLASS)]).toEqual([
+      "prompt",
+      true,
+    ]);
+  });
+
+  it("names a selected prompt's kind on its row", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(userPromptRow("p1", "hello"));
+    // Act
+    controller.applySelection(selectionOf({ prompt: "p1" }));
+    // Assert
+    const row = host.querySelector('[data-feed-row="p1"]');
+    expect(row?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe("prompt");
+  });
+
+  it("moves the mark off a response when the selection moves to a prompt", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.upsert(userPromptRow("p1", "hello"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    // Act — C-S-p replaces a selected response with the newest prompt.
+    controller.applySelection(selectionOf({ prompt: "p1" }));
+    // Assert
+    const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
+  });
+
+  it("centers again each time the selection moves to a new row", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.upsert(userPromptRow("p1", "hello"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(selectionOf({ prompt: "p1" }));
+    // Assert
+    expect(acts).toEqual(["selectionMoved"]);
+  });
+
+  it("stays where the reader is when the selection ends with stay", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    acts.length = 0;
+    // Act — the selected row left the viewport.
+    controller.applySelection(selectionOf({ none: "stay" }));
+    // Assert — no park, no centering: only the hold-off ends.
+    expect(acts).toEqual(["selectionEnded"]);
+  });
+
+  it("drops the mark when the selection ends with stay", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    // Act
+    controller.applySelection(selectionOf({ none: "stay" }));
+    // Assert
+    const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
+  });
+
+  it("does not move the feed when stay is restated with nothing selected", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    // Act
+    controller.applySelection(selectionOf({ none: "stay" }));
+    // Assert
+    expect(acts).toEqual([]);
+  });
+
+  it("points the left-view watch at the selected row", () => {
+    // Arrange
+    const { controller, host, watched } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ response: "r1" }));
+    // Assert
+    const row = host.querySelector('[data-feed-row="r1"]');
+    expect(watched.at(-1)).toEqual({ element: row, id: "r1" });
+  });
+
+  it("stops the left-view watch when nothing is selected", () => {
+    // Arrange
+    const { controller, watched } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    // Act
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
+    // Assert
+    expect(watched.at(-1)).toBeNull();
+  });
+
+  it("watches nothing for a selected row this feed has not drawn", () => {
+    // Arrange
+    const { controller, watched } = selecting();
+    // Act
+    controller.applySelection(selectionOf({ prompt: "gone" }));
+    // Assert
+    expect(watched).toEqual([null]);
+  });
+
+  it("refuses a selection with no arm set as a malformed view", () => {
+    // Arrange
+    const { controller } = selecting();
+    // Act / Assert
+    expect(() => controller.applySelection(create(FeedSelectionSchema, {}))).toThrow(MalformedView);
+  });
+
+  it("refuses an empty selection with no viewport set as a malformed view", () => {
+    // Arrange
+    const { controller } = selecting();
+    const bare = create(FeedSelectionSchema, { selection: { case: "none", value: {} } });
+    // Act / Assert
+    expect(() => controller.applySelection(bare)).toThrow(MalformedView);
   });
 });
 
