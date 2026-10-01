@@ -4,12 +4,16 @@
 // scheduler's whole model is "one unit, one slot, one core":
 //
 //   - every Go program in every unit -- the toolchain, every test binary and
-//     every system a test spawns -- runs with GOMAXPROCS=1, and the go command
+//     every system a test spawns -- runs with GOMAXPROCS=2, and the go command
 //     with GOFLAGS -p=1 (one package built or tested at a time); Go test units
 //     add -parallel=1. Left at its default, every one of the dozens of Go
 //     processes a full run keeps alive sized itself to the WHOLE machine, and
-//     their idle scheduler threads spinning against each other cost more CPU
-//     than the tests did;
+//     their idle scheduler threads spinning against each other doubled the
+//     run's total CPU. ONE P was measured too, and rejected: it serialized
+//     every goroutine of the daemon, store and sidecar the e2e worlds run,
+//     and e2e waits missed their bounds in every full run (3 of 3) and in an
+//     e2e-only run; at two, 0 of 4. Two also keeps real parallelism in the
+//     systems under test, which a single P would hide from them;
 //   - vitest runs with --maxWorkers=1 --minWorkers=1;
 //   - Emacs is single-threaded.
 //
@@ -76,7 +80,7 @@ func Build(l Layout, s roster.Suite) (Units, error) {
 // package comment promises, plus the GOFLAGS the caller already had.
 func PinnedEnv() []string {
 	flags := strings.TrimSpace(os.Getenv("GOFLAGS") + " -p=1")
-	return []string{"GOFLAGS=" + flags, "GOMAXPROCS=1"}
+	return []string{"GOFLAGS=" + flags, "GOMAXPROCS=2"}
 }
 
 func spec(id, suite, dir string, argv []string, env ...string) run.Spec {
