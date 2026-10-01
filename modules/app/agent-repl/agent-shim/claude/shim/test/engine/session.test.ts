@@ -5181,11 +5181,10 @@ describe("the session-started record", () => {
 
     // Assert.
     const record = logRecordsSince(mark).find((entry) => entry.message === "session started");
-    expect(record?.context).toMatchObject({
-      mcp_status_ms: expect.any(Number),
-      live_work_ms: expect.any(Number),
-      context_usage_ms: expect.any(Number),
-    });
+    const context = record?.context ?? {};
+    for (const step of ["mcp_status_ms", "live_work_ms", "context_usage_ms"]) {
+      expect(typeof context[step]).toBe("number");
+    }
   });
 });
 

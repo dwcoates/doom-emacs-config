@@ -3,6 +3,7 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,6 +37,7 @@ func TestSpawnArgvIsTheContractVerbatim(t *testing.T) {
 		"--listen", spec.UDSPath,
 		"--store-socket", spec.StoreSocket,
 		"--log-fd", "3",
+		"--spawn-gate-fd", "4",
 		"--fake",
 	}
 	if !reflect.DeepEqual(record.Argv, want) {
@@ -1038,5 +1040,39 @@ func TestSpawnNeverDisablesVendorCompaction(t *testing.T) {
 				t.Fatalf("child %s = %q, want unset", name, got)
 			}
 		})
+	}
+}
+
+// TestTheSpawnGateOpensOnlyOnceThePidIsRecorded pins the gate's order: the
+// child reports nothing -- binds nothing -- while Spec.Spawned is still making
+// its pid durable, and goes on once it has.
+func TestTheSpawnGateOpensOnlyOnceThePidIsRecorded(t *testing.T) {
+	// Arrange: the record pipe is read without blocking inside the callback.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	var reportedBeforeRecorded error
+	spec.Spawned = func(int) {
+		if err := sink.r.SetReadDeadline(time.Now()); err != nil {
+			reportedBeforeRecorded = err
+			return
+		}
+		var b [1]byte
+		if _, err := sink.r.Read(b[:]); !errors.Is(err, os.ErrDeadlineExceeded) {
+			reportedBeforeRecorded = fmt.Errorf("the child wrote before its pid was recorded (read err %v)", err)
+		}
+		_ = sink.r.SetReadDeadline(time.Time{})
+	}
+
+	// Act
+	_ = spawnReady(t, f, spec)
+	record := sink.record(t)
+
+	// Assert
+	if reportedBeforeRecorded != nil {
+		t.Fatal(reportedBeforeRecorded)
+	}
+	if record.Gate != "opened" {
+		t.Fatalf("the child read the gate as %q, want opened", record.Gate)
 	}
 }
