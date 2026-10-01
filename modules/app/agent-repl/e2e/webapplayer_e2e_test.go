@@ -484,18 +484,12 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	repoRef := wlRepositoryRef(t, w, repo)
 	ws := wlCreateChild(t, w, repoRef, "wl-merge")
 
-	// A SCRIPTED CONFLICT, so the merge PARKS instead of landing.
-	//
-	// A landed merge tears the child workspace's worktree down and releases
-	// its lease — which would pull the page's own workspace out from under it
-	// mid-file. A conflict keeps the workspace alive, opens the merge tab, and
-	// gives the strip its agentic tabs (conflicts, and PARKED), which is what
-	// section F7 is about. The conflict is scripted into the FAKE git's state;
-	// no real repository is involved.
-	repo.ScriptConflict(repo.Dir, filepath.Base(ws.GetDir()), "conflict.txt")
-	// The parked conflict is scripted above ON PURPOSE, so the merge parking
-	// on it is this area's own subject rather than an unexplained warning.
-	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.conflicts")
+	// THE PAGE MERGES ITS WORKSPACE'S OWN BRANCH, KEPT OPEN (the request in
+	// merge-tabs.layer.test.ts), so the landing never pulls the page's own
+	// workspace out from under it. The branch carries no work of its own, so
+	// the merge concludes as already on its target: nothing lands and nothing
+	// deploys, and the strip still carries the queue and rebasing tabs that
+	// section F7 is about.
 
 	host := w.Daemon.WatchHost(ws)
 	defer host.Close()

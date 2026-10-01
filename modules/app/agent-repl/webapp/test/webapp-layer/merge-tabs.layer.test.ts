@@ -17,7 +17,8 @@
  * workspace, and points this page at the child — because a merge needs
  * something to merge. Nothing here touches real git.
  *
- * ONE MERGE, ENQUEUED ONCE, IN `beforeAll`. A merge is not a step the page can
+ * ONE MERGE, ENQUEUED ONCE, IN `beforeAll`, of the workspace's own branch
+ * kept open, so the page's workspace outlives the landing. A merge is not a step the page can
  * repeat: `MergeWorkspace` enqueues, and "life thereafter is the feed's merge
  * bubble" — a second enqueue mid-merge is a different subject (the merge
  * queue's, which the Go area owns). It is also LIVE while it runs, which keeps
@@ -47,27 +48,36 @@ beforeAll(async () => {
   app = await bootLayer();
 
   // Enqueue the merge through the app's OWN verb, then wait for the bubble the
-  // daemon draws for it and for the tab strip inside that bubble.
-  const response = await app.ctx.client.mergeWorkspace({ workspace: app.ctx.workspace });
+  // daemon draws for it. The request names its source -- the workspace's own
+  // branch, KEPT OPEN, so the page's own workspace is not closed under it when
+  // the merge lands.
+  const response = await app.ctx.client.mergeWorkspace({
+    workspace: app.ctx.workspace,
+    source: { source: { case: "ownBranch", value: { keepOpen: true } } },
+  });
   expect(response.result.case, `MergeWorkspace answered ${response.result.case}`).toBe("success");
   await awaitDrawn(app, "the merge bubble", () => mergeRows().length > 0);
   const drawn = mergeRows();
   const id = (drawn[drawn.length - 1]).dataset.feedRow;
   if (id === undefined || id === "") throw new Error("the merge bubble carries no FeedId");
   bubbleId = id;
+  // THE BUBBLE IS LAZY: collapsed it is its one head line, and its tabs arrive
+  // with the sub-feed when the reader opens it. Open it, as a reader would.
+  if (bubble()?.dataset.expanded !== "true") {
+    const expand = app.$(`[data-feed-row="${bubbleId}"] [data-expand]`);
+    if (expand === null) throw new Error("the collapsed merge bubble draws no expand control");
+    await app.clickElement(expand);
+  }
   await awaitDrawn(
     app,
     "the merge bubble's tab strip",
     () => app.$$(`[data-feed-row="${bubbleId}"] [data-merge-tab]`).length > 0,
   );
-  // BUDGET: the ordinary boot + one-turn budget, with NO new bound minted.
-  // MEASURED against this chain: the merge bubble is drawn 19-57ms after the
-  // enqueue and the tab strip 6-8ms after that (three runs), because the
-  // scripted conflict parks the merge early — the daemon's own repair turn
-  // runs on behind it and nothing here waits for it. An earlier draft carried
-  // a 15s "merge chain" bound; that was covering a HARNESS FAULT (a missing
-  // AGENT_REPL_TEST_ALL_SCRIPT made the gate exit 127 so the merge never
-  // reached a terminal), not a slow merge, and it went away with the fault.
+  // BUDGET: the ordinary boot + one-turn budget, with NO new bound minted. An
+  // earlier draft carried a 15s "merge chain" bound; that was covering a
+  // HARNESS FAULT (a missing AGENT_REPL_TEST_ALL_SCRIPT made the gate exit 127
+  // so the merge never reached a terminal), not a slow merge, and it went away
+  // with the fault.
 }, TURN_TEST_MS + BOOT_BUDGET_MS);
 
 afterAll(async () => {
@@ -115,28 +125,10 @@ it("draws no raw ANSI escape anywhere in the merge bubble", () => {
 
 // §F7 #32 — THE PARITY INVARIANT: the bubble's body is a FEED at the bubble's
 // own FeedId, the same address a subagent bubble's sub-feed lives at. A
-// merge-specific nested-content loader would draw no such container.
-// This is the one test in the file that ACTS on the live merge (it clicks the
-// expand control and waits for the OpenFeed round trip), so it takes the turn
-// budget rather than the 900ms global — the same per-site discipline the
-// integration config states, never a raised global.
-it(
-  "holds the merge body in a sub-feed at the bubble's own address",
-  async () => {
-    // Act — open the bubble if the daemon drew it collapsed (a merge bubble
-    // starts where the daemon says, unlike a subagent's).
-    if (bubble()?.dataset.expanded !== "true") {
-      const expand = app.$(`[data-feed-row="${bubbleId}"] [data-expand]`);
-      if (expand !== null) await app.clickElement(expand);
-    }
-
-    // Assert
-    await awaitDrawn(
-      app,
-      `the merge sub-feed at ${bubbleId}`,
-      () => app.feedContainer(bubbleId) !== null,
-    );
-    expect(app.feedContainer(bubbleId)).not.toBeNull();
-  },
-  TURN_TEST_MS,
-);
+// merge-specific nested-content loader would draw no such container. The
+// bubble was opened through its expand control in `beforeAll`, which is the
+// subagent bubble's own OpenFeed round trip.
+it("holds the merge body in a sub-feed at the bubble's own address", () => {
+  // Assert
+  expect(app.feedContainer(bubbleId)).not.toBeNull();
+});
