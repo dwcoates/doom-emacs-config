@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { FooterAllowanceSchema, FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   drawFooterStatusActivity,
@@ -12,11 +12,23 @@ import {
 } from "../../src/footer/activity.js";
 import { footerStatusActivity } from "../../src/footer/strip.js";
 import {
-  FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   activityDatumClass,
   footerPercentColor,
 } from "../../src/footer/tones.js";
+
+/**
+ * Every `FooterAllowance.status` arm, read off the generated schema.
+ *
+ * Read directly here rather than through `src/footer/tones.ts`: the colour
+ * chain that once lived there (`ALLOWANCE_ARM_CLASS`) was removed as dead
+ * code once the salient rate-limit line stopped painting an allowance
+ * colour, but this suite still needs the arm set itself to parametrize its
+ * assertions about `drawFooterAllowance`.
+ */
+const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
+  FooterAllowanceSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
+).map((field) => field.localName);
 
 /** The color a footer percent of PERCENT is painted, as the DOM reports it. */
 function paintedAs(percent: number): string {

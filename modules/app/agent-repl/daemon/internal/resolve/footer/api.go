@@ -460,8 +460,8 @@ const (
 )
 
 // New builds the footer resolver. It takes the render-colors vocabulary so the
-// footer_status and footer_allowance tables are asserted against the arms this
-// resolver emits, at boot, rather than drawing an unpainted state later.
+// footer_status table is asserted against the arms this resolver emits, at
+// boot, rather than drawing an unpainted state later.
 func New(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (Resolver, error) {
 	return newResolver(colors, log, opts...)
 }

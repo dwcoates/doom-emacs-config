@@ -36,7 +36,6 @@ interface RenderColors {
   colored_merge_arms: string[];
   feed_merge_head_glyph: string;
   footer_status: Record<string, string>;
-  footer_allowance: Record<string, string>;
   topbar_connectivity: Record<string, string>;
   topbar_tones: string[];
   failure_sides: Record<string, string>;
@@ -64,10 +63,6 @@ export const rosterStatusColor = (arm: string): string => lookup(RENDER_COLORS.r
 
 /** The color the vocabulary assigns a FooterStatus arm. */
 export const footerStatusColor = (arm: string): string => lookup(RENDER_COLORS.footer_status, arm, "footer_status");
-
-/** The color the vocabulary assigns a FooterAllowance verdict arm. */
-export const footerAllowanceColor = (arm: string): string =>
-  lookup(RENDER_COLORS.footer_allowance, arm, "footer_allowance");
 
 /** The glyph name the vocabulary assigns a merge roster arm. */
 export const mergeGlyph = (arm: string): string => lookup(RENDER_COLORS.merge_glyphs, arm, "merge_glyphs");
