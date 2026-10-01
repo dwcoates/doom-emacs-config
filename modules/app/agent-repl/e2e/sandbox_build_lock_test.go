@@ -169,6 +169,7 @@ func sandboxEnv(f *fakeDocker, lockDir string, extra ...string) []string {
 // TestSandboxBuildSkipsWhenImageAlreadyCarriesTheStamp: a second build that
 // finds this checkout's stamp already on the tag must not rebuild.
 func TestSandboxBuildSkipsWhenImageAlreadyCarriesTheStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
 	f.setLabel(t, currentSandboxStamp(t))
@@ -194,6 +195,7 @@ func TestSandboxBuildSkipsWhenImageAlreadyCarriesTheStamp(t *testing.T) {
 // TestSandboxBuildForceRebuildsDespiteMatchingStamp: --force is the deliberate
 // way past the skip, so the skip can never become a way to lose a rebuild.
 func TestSandboxBuildForceRebuildsDespiteMatchingStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
 	f.setLabel(t, currentSandboxStamp(t))
@@ -216,6 +218,7 @@ func TestSandboxBuildForceRebuildsDespiteMatchingStamp(t *testing.T) {
 // TestSandboxBuildLabelsImageWithTheSandboxStamp: the built image must carry
 // its sources, since that label is the only thing `run` can check.
 func TestSandboxBuildLabelsImageWithTheSandboxStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
 	stamp := currentSandboxStamp(t)
@@ -245,6 +248,7 @@ func TestSandboxBuildLabelsImageWithTheSandboxStamp(t *testing.T) {
 // TestSandboxBuildTakesOverALockHeldByADeadPid: a crashed build must not wedge
 // every later build on the host.
 func TestSandboxBuildTakesOverALockHeldByADeadPid(t *testing.T) {
+	t.Parallel()
 	// Arrange: a lock recording a pid that is certainly gone.
 	f := newFakeDocker(t)
 	f.setLabel(t, currentSandboxStamp(t))
@@ -276,6 +280,7 @@ func TestSandboxBuildTakesOverALockHeldByADeadPid(t *testing.T) {
 // proceed once it is released -- observed through the script's own output and
 // the fake runtime's call log, never through a timed sleep.
 func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
+	t.Parallel()
 	// Arrange: a live holder (this test process) owns the lock.
 	f := newFakeDocker(t)
 	lock := filepath.Join(t.TempDir(), "build.lock")
@@ -334,6 +339,7 @@ func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
 
 // TestSandboxRunRefusesAStaleImage: the silent-stale-image failure, ended.
 func TestSandboxRunRefusesAStaleImage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
 	f.setLabel(t, "0000000000000000000000000000000000000000")
@@ -357,6 +363,7 @@ func TestSandboxRunRefusesAStaleImage(t *testing.T) {
 // existed is exactly the stale image this gate is for, so "no label" is a
 // refusal and not a pass.
 func TestSandboxRunRefusesAnUnlabelledImage(t *testing.T) {
+	t.Parallel()
 	// Arrange: the label file stays empty.
 	f := newFakeDocker(t)
 	lock := filepath.Join(t.TempDir(), "build.lock")
@@ -378,6 +385,7 @@ func TestSandboxRunRefusesAnUnlabelledImage(t *testing.T) {
 // TestSandboxRunAllowsAStaleImageWhenOverridden: the escape hatch exists, is
 // deliberate, and says out loud what it is doing.
 func TestSandboxRunAllowsAStaleImageWhenOverridden(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
 	f.setLabel(t, "0000000000000000000000000000000000000000")

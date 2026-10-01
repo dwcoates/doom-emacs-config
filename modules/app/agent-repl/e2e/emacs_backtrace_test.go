@@ -45,6 +45,7 @@ func gdbCapture(mainFrames int, helpers int) string {
 }
 
 func TestTheExcerptLeadsWithTheMainThread(t *testing.T) {
+	t.Parallel()
 	// Arrange, Act.
 	got := nativeBacktraceExcerpt(gdbCapture(20, 3))
 
@@ -62,6 +63,7 @@ func TestTheExcerptLeadsWithTheMainThread(t *testing.T) {
 }
 
 func TestTheExcerptKeepsEveryMainThreadFrame(t *testing.T) {
+	t.Parallel()
 	// Arrange: a main stack far longer than the trim budget.
 	frames := nativeBacktraceHeadFrames * 3
 
@@ -77,6 +79,7 @@ func TestTheExcerptKeepsEveryMainThreadFrame(t *testing.T) {
 }
 
 func TestTheExcerptQuotesTheMainThreadOnlyOnce(t *testing.T) {
+	t.Parallel()
 	// Arrange, Act: gdb prints thread 1 twice, once per `bt` command.
 	got := nativeBacktraceExcerpt(gdbCapture(5, 2))
 
@@ -93,6 +96,7 @@ func TestTheExcerptQuotesTheMainThreadOnlyOnce(t *testing.T) {
 }
 
 func TestTheExcerptKeepsTheThreadIndex(t *testing.T) {
+	t.Parallel()
 	// Arrange, Act.
 	got := strings.Join(nativeBacktraceExcerpt(gdbCapture(5, 3)), "\n")
 
@@ -103,6 +107,7 @@ func TestTheExcerptKeepsTheThreadIndex(t *testing.T) {
 }
 
 func TestTheExcerptTrimsHelperThreadsAndSaysSo(t *testing.T) {
+	t.Parallel()
 	// Arrange: more helper stacks than the budget past the main thread.
 	// Act.
 	got := strings.Join(nativeBacktraceExcerpt(gdbCapture(5, 12)), "\n")
@@ -114,6 +119,7 @@ func TestTheExcerptTrimsHelperThreadsAndSaysSo(t *testing.T) {
 }
 
 func TestTheExcerptTrimsAHelperThreadWholeOrNotAtAll(t *testing.T) {
+	t.Parallel()
 	// Arrange, Act.
 	got := nativeBacktraceExcerpt(gdbCapture(5, 12))
 
@@ -136,6 +142,7 @@ func TestTheExcerptTrimsAHelperThreadWholeOrNotAtAll(t *testing.T) {
 }
 
 func TestAnUnthreadedCaptureIsQuotedWhole(t *testing.T) {
+	t.Parallel()
 	// Arrange: gdb said something, but named no thread — a failed attach.
 	text := "ptrace: Operation not permitted.\n(gdb exited with: exit status 1)"
 

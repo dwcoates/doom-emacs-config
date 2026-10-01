@@ -29,6 +29,7 @@ func writeScript(t *testing.T, dir, name, body string) string {
 }
 
 func TestHostPreflightBoundReportsAScriptThatNeverAnswers(t *testing.T) {
+	t.Parallel()
 	// Arrange: a preflight that blocks far past the bound.
 	script := writeScript(t, t.TempDir(), "preflight-hangs.sh", "exec sleep 120\n")
 	const bound = 300 * time.Millisecond
@@ -50,6 +51,7 @@ func TestHostPreflightBoundReportsAScriptThatNeverAnswers(t *testing.T) {
 }
 
 func TestHostPreflightBoundNamesTheWedgedEngine(t *testing.T) {
+	t.Parallel()
 	// Arrange: a preflight that prints, then blocks past the bound.
 	script := writeScript(t, t.TempDir(), "preflight-partial.sh",
 		"echo 'probing docker'\nexec sleep 120\n")
@@ -65,6 +67,7 @@ func TestHostPreflightBoundNamesTheWedgedEngine(t *testing.T) {
 }
 
 func TestHostPreflightQuotesANonZeroExitVerbatim(t *testing.T) {
+	t.Parallel()
 	// Arrange: a preflight that fails the way a missing image fails.
 	const message = "agent-repl e2e sandbox UNAVAILABLE: image 'x:latest' is not built."
 	script := writeScript(t, t.TempDir(), "preflight-fails.sh",
@@ -80,6 +83,7 @@ func TestHostPreflightQuotesANonZeroExitVerbatim(t *testing.T) {
 }
 
 func TestHostPreflightIsSilentWhenTheSandboxIsUsable(t *testing.T) {
+	t.Parallel()
 	// Arrange: a preflight that reports READY.
 	script := writeScript(t, t.TempDir(), "preflight-ready.sh",
 		"echo 'agent-repl e2e sandbox READY'\nexit 0\n")
@@ -94,6 +98,7 @@ func TestHostPreflightIsSilentWhenTheSandboxIsUsable(t *testing.T) {
 }
 
 func TestPreflightScriptExitsFourteenWhenTheRuntimeNeverAnswers(t *testing.T) {
+	t.Parallel()
 	// Arrange: a fake runtime binary that blocks on every call, standing in
 	// for a Docker engine whose socket never answers. No real docker.
 	dir := t.TempDir()
@@ -128,6 +133,7 @@ func TestPreflightScriptExitsFourteenWhenTheRuntimeNeverAnswers(t *testing.T) {
 }
 
 func TestPreflightScriptWedgeMessageSaysToRestartTheEngine(t *testing.T) {
+	t.Parallel()
 	// Arrange: the same wedged runtime, named `docker` so the docker-specific
 	// remedy is the one printed.
 	dir := t.TempDir()
