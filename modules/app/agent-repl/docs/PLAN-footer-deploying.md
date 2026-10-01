@@ -171,8 +171,11 @@ In every combination the client sees ONE transfer, from step 3 to step 6 (`deplo
   - An unchanged service is never restarted.
 - While blocked, the footer shows an ENDURING activity line,
   `Full emacs restart needed to unblock automatic agent-repl hot reloads` (see "Enduring lines").
-- Required: a full Emacs restart builds, installs and restarts a stale store or sidecar, and the
-  line goes once both run the current build.
+- Required: a full Emacs restart builds and installs EVERY component, and starts each stale one
+  on the current build: the store, the sidecar, the daemon, every shim and the webapp.
+  - With working hot reloads the last three are never stale at a restart, but the restart is the
+    recovery path when a hot reload breaks, so it covers them too.
+  - The blocked line goes once every component runs the current build.
 
 ## Expanded footer: no deploy panel (owner ruling, 2026-10-01)
 
