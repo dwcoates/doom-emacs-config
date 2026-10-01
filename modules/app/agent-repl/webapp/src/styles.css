@@ -4415,24 +4415,26 @@ bubble-body.bubble-body { display: block; }
    2026-09-15). The corner floats top-right INSIDE the scroll box, before the
    `.bubble-body` block it shares that box's block-formatting context with, so
    the prose's FIRST line flows to its left and every later line runs the
-   bubble's full width. */
+   bubble's full width.
+
+   THE SIZING GHOST: THE BUBBLE FITS THE FIRST LINE AND THE CORNER TOGETHER.
+   A float that precedes a BLOCK adds nothing to the box's fit-content width
+   beside that block (the engine takes the wider of the two, never their sum),
+   so a short response sized itself to its text alone and the corner then took
+   its first line's room: a one-sentence answer wrapped well short of its
+   bubble's cap. A float shares a line's width only inside that line's own
+   inline formatting context, so an uncapped response's first paragraph opens
+   with a GHOST of the corner -- a zero-height, invisible float exactly the
+   corner's footprint wide -- and the bubble widens by that footprint before
+   its first line wraps. It changes NOTHING about the corner: the corner's
+   element, box, reveal and hover are untouched, and the ghost is zero-height,
+   so no line is shortened by it and the first line still flows beside the
+   real corner. A capped bubble (thinking, agentic, compaction) has no ghost,
+   so its fold, fade and ellipsis clamp measure exactly what they did. */
 .usage-corner {
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
   font-size: 0.85em;
-  /* The half-leading of the corner's line: the space between its line box's
-     top and the figures' em box. It is part of the top gap as drawn, so the
-     right gap carries it too. */
-  --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
-  /* `.bubble`'s own top padding, which the corner sits under. styles.test.ts
-     fails if the two ever disagree. */
-  --usage-bubble-pad-top: 0.6rem;
-  /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
-     box, top and right alike. It is the top gap the corner has always had,
-     and the right gap is derived from it below. */
-  --usage-corner-gap: calc(var(--usage-bubble-pad-top) + var(--usage-half-leading));
-  /* The normal gap between the token and the duration, unchanged. */
-  --usage-pair-gap: 0.35rem;
   /* One phase of the reveal; the two phases together take 0.5s. */
   --usage-phase: 0.25s;
   /* The hover hit area's padding (owner ruling, 2026-09-14). */
@@ -4465,6 +4467,52 @@ bubble-body.bubble-body { display: block; }
   margin-right: calc(
     var(--usage-corner-gap) - var(--bubble-scroll-gap) - var(--usage-hit-x)
   );
+}
+/* THE CORNER'S GEOMETRY TOKENS are declared once, below, for both of their
+   readers: the corner, and the ghost's host paragraph (whose `::before` the
+   ghost is, and inherits them). Each is substituted where it is used, so an
+   `em` in one resolves against the corner's own font size on the corner and
+   the ghost's identical one on the ghost. */
+.usage-corner,
+.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child {
+  /* The half-leading of the corner's line: the space between its line box's
+     top and the figures' em box. It is part of the top gap as drawn, so the
+     right gap carries it too. */
+  --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
+  /* `.bubble`'s own top padding, which the corner sits under. styles.test.ts
+     fails if the two ever disagree. */
+  --usage-bubble-pad-top: 0.6rem;
+  /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
+     box, top and right alike. It is the top gap the corner has always had,
+     and the right gap is derived from it below. */
+  --usage-corner-gap: calc(var(--usage-bubble-pad-top) + var(--usage-half-leading));
+  /* The normal gap between the token and the duration, unchanged. */
+  --usage-pair-gap: 0.35rem;
+}
+/* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
+   exactly the corner's footprint wide. That footprint is the corner's in-flow
+   content -- the token's 6ch slot, the pair gap and the widest duration label
+   -- plus its right gap (`--usage-corner-gap` from the bubble's edge, less the
+   `--bubble-scroll-gap` the bubble's own padding gives); the hit padding the
+   corner's margins cancel adds nothing. It reads the corner's own size, 0.85em,
+   so its 6ch and its labels measure as the corner's do. The labels arrive as
+   `--usage-reserve-labels`, which the response draw sets on the bubble from
+   the one list the corner's reserve is drawn from (`USAGE_AGE_RESERVE_LABELS`,
+   src/feed/cards/response.ts), one per line, so the box is as wide as the
+   widest of them, exactly like the corner's one-cell reserve grid. The
+   real-WebKit suite (test/webkit/usage-corner-ghost.webkit.test.ts) holds the
+   ghost's width to the corner's measured footprint. */
+.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
+  content: var(--usage-reserve-labels);
+  float: right;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: pre;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  padding-left: calc(6ch + var(--usage-pair-gap));
+  padding-right: calc(var(--usage-corner-gap) - var(--bubble-scroll-gap));
 }
 /* The token's width reservation: the token text again, invisible, in the
    token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:

@@ -222,6 +222,11 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     },
     rc.previous,
   );
+  // THE SIZING GHOST'S TEXT (styles.css "THE SIZING GHOST"): the widest
+  // duration labels the corner reserves, handed to the ghost that widens the
+  // bubble by the corner's footprint. Set only while the bubble has a corner.
+  if (corner === undefined) bubble.style.removeProperty(USAGE_RESERVE_LABELS_PROPERTY);
+  else bubble.style.setProperty(USAGE_RESERVE_LABELS_PROPERTY, usageReserveLabelsCss());
   bubble.toggleAttribute("data-thinking", u.thinking);
   bubble.toggleAttribute("data-notice", u.notice !== undefined);
   markRevealed(bubble, shown);
@@ -428,6 +433,18 @@ function usageAgeLabel(ageMs: number): string {
 export const USAGE_AGE_RESERVE_LABELS: readonly string[] = USAGE_AGE_WIDEST_MS.map((ms) =>
   zeroFigures(usageAgeLabel(ms)),
 );
+
+/** The custom property the sizing ghost (styles.css) reads its reserved labels from. */
+export const USAGE_RESERVE_LABELS_PROPERTY = "--usage-reserve-labels";
+
+/**
+ * The reserve labels as one CSS string, one label per line (`\A`), for the
+ * sizing ghost's `content`: drawn `white-space: pre`, its box is as wide as
+ * the widest label, exactly as the corner's one-cell reserve grid is.
+ */
+export function usageReserveLabelsCss(): string {
+  return `"${USAGE_AGE_RESERVE_LABELS.join("\\A ")}"`;
+}
 
 /**
  * Whether LABEL fits the reserve: some reserved label has its shape (the same
