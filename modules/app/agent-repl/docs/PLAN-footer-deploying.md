@@ -15,18 +15,18 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 - A failure is the `deploy_failed` fault, and the activity line goes.
 - There is no deploy status arm and no expanded panel.
 
-## Principle: status versus activity
+## Principle: status versus activity (owner ruling, 2026-10-01)
 
-- A status arm says what THIS workspace is doing, and it is exclusive: a `deploying` status
-  would hide `working`, `merging` or `background`.
-- Most of a deploy does not touch the workspace: a turn runs normally while the daemon builds,
-  installs, or restarts the store.
-- So the plan splits it:
-  - **daemon-wide steps stay an ACTIVITY** on whatever status the workspace has;
-  - **the workspace's OWN move becomes a STATUS**, `frontend.v1.FooterStatusDeploying`, standing
-    only while the workspace genuinely cannot serve (quiesced, transferring, shim replaced).
-- This mirrors `frontend.v1.FooterStatusMerging`, which is a status only while the merge owns
-  the workspace.
+- `deploying` is a STATUS, and it stands ONLY while THIS workspace has no working end-to-end
+  path to the vendor because the deploy is moving something it runs on.
+  - It is an unusable state, so it draws blue.
+  - Another workspace's move, or a build that touches nothing running, is NOT this workspace deploying.
+- Everything a deploy does while the workspace still works stays an ACTIVITY on the
+  workspace's own status (building, installing, waiting on its own work, deferred notes).
+- `deploying` is exclusive with `working` and `merging`, because a status is one arm.
+  - Gotcha: a handover never waits on work (`daemon/internal/rollout/handover.go:275`), so a
+    transfer can happen mid-turn while the shim keeps the turn running.
+  - For that window the strip draws `deploying · transferring`, and the turn's activity is not drawn.
 
 ## Every step, in order
 
@@ -56,24 +56,25 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 - Every step carries `stage_entered_at_ms`, the same field the merge bubble uses, so the client
   draws its duration.
 
-### B. Per-workspace (status arm `deploying`, only this workspace's strip)
+### B. Per-workspace (status arm `deploying`, blue, only while this workspace is cut off)
 
-| # | Substatus | Stands while |
-|---|---|---|
-| B1 | `waiting` | an unforced move waits on this workspace's own turn or background work |
-| B2 | `quiescing` | the incumbent holds the workspace's intake and seals its queue |
-| B3 | `transferring` | the workspace is handed to the successor |
-| B4 | `adopting` | the successor claims serving and re-attaches the shim |
-| B5 | `replacing_shim` | this workspace's stale shim is bounced and the fresh one starts |
-| B6 | `taken_back` | the adoption window expired and the incumbent reclaims (then reverts) |
+| # | Substatus | Stands while | Which workspaces |
+|---|---|---|---|
+| B1 | `restarting_store` | the store and sidecar restart, so no record path exists | every workspace |
+| B2 | `restarting_sidecar` | the sidecar alone restarts | every workspace |
+| B3 | `quiescing` | the incumbent holds this workspace's intake and seals its queue | the one being moved |
+| B4 | `transferring` | this workspace is handed to the successor | the one being moved |
+| B5 | `adopting` | the successor claims serving and re-attaches the shim | the one being moved |
+| B6 | `restarting_daemon` | the stop-then-start layout restart has stopped this workspace | every workspace |
+| B7 | `replacing_shim` | this workspace's stale shim is bounced and the fresh one starts | that workspace |
 
-- B1 moves from the activity line to a substatus ONLY IF the owner rules so (question 1);
-  - otherwise B1 stays the activity's `waiting` arm on a `working`/`background` status.
-- B3 and B4 straddle the two daemons:
+- `waiting` (an unforced move waiting on this workspace's own work) stays the activity's arm,
+  because the workspace still works.
+- B4 and B5 straddle the two daemons:
   - the incumbent's streams end at the transfer;
-  - the successor must restate B4 for a client that joins late, so the manifest carries the
-    step and its start time.
-- Deferred notes (`shim_when_idle`) stay notes on the activity.
+  - the successor restates B5 for a client that joins late, so the manifest carries the step
+    and its start time.
+- When the substatus ends, the workspace's own status returns (`working`, `idle`, ...).
 
 ## Expanded footer: yes, a `deploy` panel
 
@@ -108,7 +109,7 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
 ## Questions for the owner
 
-1. Should B1 (waiting on own work) be the `deploying` status, or stay an activity on `working`?
-   - Recommended: stay an activity, because the workspace is still doing its own work.
+1. While a turn is transferred mid-flight (B4), should the strip draw `deploying` and hide the turn,
+   or should a transfer that carries a live turn stay `working` with a `transferring` activity?
+   - The shim keeps the turn running, but no prompt can be sent until the successor adopts it.
 2. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
-3. Should the status color for `deploying` be purple (as merging is), or a new color?
