@@ -546,3 +546,72 @@ func TestARefusedReplacementOfADeadQueryIsNotStatedAsTaken(t *testing.T) {
 		t.Fatalf("records = %+v, want no replacement stated for a refusal", log.Records())
 	}
 }
+
+// fakeVendorSessions records the resume handles the sink writes.
+type fakeVendorSessions struct {
+	stored string
+	err    error
+	set    []string
+}
+
+func (f *fakeVendorSessions) SetVendorSessionID(_ context.Context, _ wsm.WorkspaceID, id string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	previous := f.stored
+	f.stored = id
+	f.set = append(f.set, id)
+	return previous, nil
+}
+
+func TestTheVendorSessionIdInForceIsRecordedAsTheResumeHandle(t *testing.T) {
+	tests := []struct {
+		name     string
+		stored   string
+		level    string
+		msg      string
+		previous string
+	}{
+		{"a rotated id replaces the start's", "vendor-start", "info", "recorded the vendor session id in force as the session's resume handle", "vendor-start"},
+		{"the id the record already names is no change", "vendor-now", "debug", "the session record already names the vendor session id in force", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			sessions := &fakeVendorSessions{stored: tt.stored}
+			log := dlog.NewTestLogger()
+			sink := &lifecycleSink{sessions: sessions, log: log}
+
+			// Act
+			sink.OnVendorSessionID("ws-1", "vendor-now")
+
+			// Assert
+			if sessions.stored != "vendor-now" {
+				t.Fatalf("stored = %q, want the id in force", sessions.stored)
+			}
+			for _, r := range log.Records() {
+				if r.Level == tt.level && r.Message == tt.msg && (tt.previous == "" || r.Context["previous_vendor_session_id"] == tt.previous) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %q at %s", log.Records(), tt.msg, tt.level)
+		})
+	}
+}
+
+func TestAResumeHandleThatCannotBeRecordedIsAnError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{sessions: &fakeVendorSessions{err: errors.New("disk full")}, log: log}
+
+	// Act
+	sink.OnVendorSessionID("ws-1", "vendor-now")
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Message == "could not record the vendor session id in force; a later resume names a stale one" && r.Context["cause"] == "disk full" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the failed record at ERROR with its cause", log.Records())
+}

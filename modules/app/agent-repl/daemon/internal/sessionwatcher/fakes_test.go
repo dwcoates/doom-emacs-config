@@ -946,6 +946,10 @@ func (s *lifecycleSink) OnTurnsEndedUnobserved(_ ids.WorkspaceID, turns []ids.Tu
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnsEndedUnobserved", turns: append([]ids.TurnID(nil), turns...)})
 }
 
+func (s *lifecycleSink) OnVendorSessionID(_ ids.WorkspaceID, vendorSessionID string) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnVendorSessionID", detail: vendorSessionID})
+}
+
 func (s *lifecycleSink) OnQueryDied(ids.WorkspaceID) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnQueryDied"})
 }
