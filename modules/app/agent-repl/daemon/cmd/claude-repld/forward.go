@@ -7,7 +7,6 @@ import (
 
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
 )
@@ -18,8 +17,7 @@ import (
 // pushes onto the server's per-workspace and daemon-level streams, and the
 // workspace verbs push onto the same relay — but `server.New` takes the
 // rollout controller and the verbs as dependencies, so the server cannot exist
-// before them. The merge orchestrator's guidance route has the same shape: the
-// route needs the orchestrator's own tab to label the prompt's origin.
+// before them.
 //
 // The cycle is broken with FORWARDERS rather than by inventing behavior: each
 // one implements the consumer's interface, holds the real target once it
@@ -159,25 +157,6 @@ func (f *relayForwarder) PublishHostWorkspace(ws ids.WorkspaceID) {
 	if target, ok := f.relay(); ok {
 		target.PublishHostWorkspace(ws)
 	}
-}
-
-// mergeForwarder carries a reference to the merge orchestrator for the two
-// hooks that need the orchestrator's own facts and are wired before it exists.
-type mergeForwarder struct {
-	mu     sync.RWMutex
-	target merge.Orchestrator
-}
-
-func (f *mergeForwarder) bind(target merge.Orchestrator) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
-}
-
-func (f *mergeForwarder) orchestrator() (merge.Orchestrator, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
 }
 
 // verbsForwarder carries a reference to the workspace verbs for the lifecycle

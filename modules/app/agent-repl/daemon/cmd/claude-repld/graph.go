@@ -464,7 +464,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	pushes := &serverForwarder{}
 	relay := &relayForwarder{}
 	verbsRef := &verbsForwarder{}
-	mergeRef := &mergeForwarder{}
 
 	var queue promptqueue.Queue
 	healthRef := &healthForwarder{}
@@ -765,7 +764,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the merge orchestrator: %w", err)
 	}
-	mergeRef.bind(mergeOrchestrator)
 
 	// ---- health, login, the verbs ----
 
