@@ -869,53 +869,22 @@ to turns. Arrival order attributes nothing.
   ids and their origins, never the prompt. It is process memory, so a shim that
   died forgets; an id pushed out of the window is started as a first start.
 
-## The hibernate contract: at most one compaction per idle period
+## The hibernate contract: a stand-down never compacts
 
-`Hibernate` is the daemon's pre-hibernation directive, and the shim's answer to
-it obeys two invariants. Both were paid for on the owner's workspace on
-2026-09-14, where the idle sweep bought thirteen vendor summary turns for one
-conversation between 09:02 and 10:03 and never stood the shim down once.
+`Hibernate` is the daemon's pre-hibernation directive. Hibernation is a MEMORY
+measure: the daemon stands an idle shim down to free what it holds, and a
+session revived later pays for its own context through the cold gate. So the
+shim never compacts for it, and the transcript is left exactly as it stands.
 
-**THE ANSWER IS BOUNDED BY THE CALLER'S DEADLINE.** A compaction is a real
-vendor turn and takes as long as one; the daemon's `StandBound` is a sum of
-TEARDOWN bounds and is seconds. So the answer is not the work's completion:
+The answer is single-phase:
 
-- `compacting` — the compaction has STARTED and outlives this rpc. The
-  compaction runs to completion regardless of the rpc's cancellation, which it
-  always did; what is new is that the caller is TOLD so, defers the pass
-  without calling it a failure, and asks again.
-- `success` — there is nothing left to do. The daemon may stand the shim down.
-- `error` — a refusal, with the arm as the reason. A compaction that FAILED is
-  reported here, on the ask after the failure, because the rpc that started it
-  was answered long before it failed. It is reported once and cleared, so the
-  ask after that retries rather than repeating a stale failure forever.
+- `success` — nothing is in flight; the daemon may stand the shim down.
+- `error.turn_in_flight` — standing the shim down would kill a live turn; the
+  daemon defers and asks again on its next pass.
+- `error.no_session` — there is no session to stand down.
 
-**A TRANSCRIPT THAT IS ALREADY COMPACTED IS NEVER COMPACTED AGAIN.** The ask
-that follows a landed compaction is acked WITHOUT a vendor turn. Two
-independent readings settle it, and either one is enough, because they fail in
-different ways:
-
-- the persisted mark (`engine/compaction-mark.ts`), one file per vendor session
-  under `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/compaction/`, stating the
-  transcript's BYTE LENGTH at the instant the compaction finished. A transcript
-  is append-only, so "as long as the mark says" and "nothing has been said
-  since" are one statement — and it is a statement a FRESH PROCESS can make,
-  which is the point: a daemon bounce, or a shim restarted under one, must not
-  buy the same summary twice.
-- the transcript's own tail (`transcriptTailIsCompaction`), which is a
-  `compact_boundary` and its `isCompactSummary` partner as the LAST two
-  records. It survives the mark being lost with its state directory. The TAIL
-  and nothing else: a boundary anywhere earlier is a compaction the
-  conversation has since outgrown, which is exactly the case owed another one.
-
-A mark that cannot be read answers "no mark" and is recorded. The cost of a
-lost mark is one extra compaction; the cost of treating an unreadable mark as
-present would be a hibernation that never compacts at all.
-
-**THE SUITE AWAITS THE WORK THE DAEMON DOES NOT.** The daemon has a next sweep
-pass; a test has no clock to wait on, so `EngineDeps.onHibernationCompactionSettled`
-is injected the way the scheduler and the identity store are. Production leaves
-it absent and reads the compaction's own records instead.
+The only harness compaction is the cold gate's `compact` remediation, which the
+daemon offers per account.
 
 ## A settle stands alone
 

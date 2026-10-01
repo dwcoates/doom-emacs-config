@@ -204,14 +204,6 @@ interface EngineDeps {
   readonly newUuid?: () => string;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
-  /**
-   * Announced when a hibernation compaction settles.
-   *
-   * Injected so a suite awaits the work the DAEMON does not await: the daemon
-   * has a next sweep pass and a test has no clock to wait on. Production leaves
-   * it absent; the compaction's own records are the operator's account.
-   */
-  readonly onHibernationCompactionSettled?: (outcome: { ok: boolean; error?: string }) => void;
   /** Injected so a suite substitutes a temp directory without a state dir. */
   readonly identityStore?: AgentIdentityStore;
   /** Injected so a suite can take no kernel lock. */
@@ -3786,16 +3778,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return startSessionStarted(started_);
   }
 
-  /**
-   * WHICH COMPACTION THIS IS, and therefore whether it narrates.
-   *
-   * The cold gate's compaction is one the USER is waiting on, so it pushes its
-   * phases; hibernation's runs behind a directive the daemon has already been
-   * answered for, with nobody waiting on a progress frame it would never see
-   * completed. One function serves both, and this is the only difference.
-   */
-  type CompactionOrigin = "cold_gate" | "hibernation";
-
   type Remedy =
     | { kind: "none" }
     | { kind: "cleared"; vendorSessionId: string }
@@ -3826,7 +3808,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           facts,
           remediation.remediation.value.model?.name ?? requestedModel,
           remediation.remediation.value.scope,
-          "cold_gate",
         );
         return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error };
       }
@@ -3836,7 +3817,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * Compaction, on a THROWAWAY query.
+   * The cold gate's compaction, on a THROWAWAY query. The user is waiting on
+   * it, so every phase is narrated.
    *
    * The live query owns the session's identity, its lock and its in-flight
    * turn; handing it a summarization prompt would put harness work inside the
@@ -3847,20 +3829,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
-    origin: CompactionOrigin,
   ): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
     const queue = new PromptQueue();
     const controller = new AbortController();
     let throwaway: QueryLike | undefined;
-    /** Narrate one phase, to the fan-out and to the log, for the cold gate only. */
+    /** Narrate one phase, to the fan-out and to the log. */
     const phase = (
       which: conversationv1.SessionCompactionPhase,
       figures: { tokensBefore?: number; tokensAfter?: number; error?: string },
       said: string,
     ): void => {
-      if (origin !== "cold_gate") return;
       pushes.push(compactionProgressUpdate(which, figures));
       LOGGER.info(
         {
@@ -3882,7 +3862,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return { ok: false, error };
     };
-    if (origin === "cold_gate") coldCompactionFigures = undefined;
+    coldCompactionFigures = undefined;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
     // part of the minute the user is waiting through, so a frame that waited
     // for the query to exist would leave the opening of the wait unnarrated.
@@ -3956,9 +3936,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           requested: true,
         }),
       );
-      if (origin === "cold_gate") {
-        coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens };
-      }
+      coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens };
       phase(
         conversationv1.SessionCompactionPhase.SUMMARIZED,
         { tokensBefore: facts.contextTokens, tokensAfter: outputTokens },

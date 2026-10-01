@@ -69,15 +69,6 @@ interface Harness {
    * A scripted reply stamps the latest to answer that send, as the vendor does.
    */
   readonly minted: string[];
-  /**
-   * The next hibernation compaction to SETTLE.
-   *
-   * `Hibernate` answers `compacting` and lets the work run past the rpc, so a
-   * test that needs the compaction to have LANDED awaits this rather than a
-   * clock. Already-settled compactions queue, so a test that asks after the
-   * fact is answered at once.
-   */
-  nextCompaction(): Promise<{ ok: boolean; error?: string }>;
 }
 
 function scratch(): string {
@@ -243,15 +234,8 @@ function harness(
   const released: string[] = [];
   const workspaceLocks: string[] = [];
   const exits: number[] = [];
-  const settledCompactions: { ok: boolean; error?: string }[] = [];
   const minted: string[] = [];
-  const compactionWaiters: ((outcome: { ok: boolean; error?: string }) => void)[] = [];
   const engine = (options.engineFactory ?? createEngine)({
-    onHibernationCompactionSettled: (outcome) => {
-      const waiting = compactionWaiters.shift();
-      if (waiting === undefined) settledCompactions.push(outcome);
-      else waiting(outcome);
-    },
     ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
     persistence,
     fold,
@@ -358,11 +342,6 @@ function harness(
     released,
     exits,
     minted,
-    nextCompaction: () => {
-      const ready = settledCompactions.shift();
-      if (ready !== undefined) return Promise.resolve(ready);
-      return new Promise((resolve) => compactionWaiters.push(resolve));
-    },
   };
 }
 

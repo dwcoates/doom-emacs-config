@@ -8,9 +8,8 @@
  * handing it a summarization prompt would put harness work inside the user's
  * conversation.
  *
- * WHO ASKS FOR IT. `Hibernate` (the daemon compacts before standing a shim
- * down, and waits for the ack), and `SessionColdCompact` as a remediation for a
- * cold context.
+ * WHO ASKS FOR IT. Only `SessionColdCompact`, the cold gate's remediation for
+ * a cold context. Hibernation never compacts.
  *
  * # The two records, mimicked from OBSERVED lines
  *
@@ -156,7 +155,7 @@ interface CompactionLinesSpec {
    * records `permissionMode` on every `user` record it writes — so the
    * throwaway leaves `plan` as the last mode the transcript states. A resume
    * restores the conversation's posture from exactly that field
-   * (`engine/cold.ts`), so a session hibernated straight after a compaction
+   * (`engine/cold.ts`), so a session resumed straight after a compaction
    * came back in PLAN MODE, which nobody chose: observed on a headless sandbox
    * run's own revival, where the topbar read `plan` and the revived turn ran
    * under it. Writing the session's own mode on the last record the compaction
@@ -283,60 +282,3 @@ export function contextCleared(): conversationv1.ContextCut {
   });
 }
 
-// ---------------------------------------------------------------------------
-// reading a compaction back off the transcript
-// ---------------------------------------------------------------------------
-
-/**
- * Whether this transcript's LAST two records are a compaction's own pair.
- *
- * THE SECOND WAY TO KNOW A CONVERSATION IS ALREADY COMPACTED, beside the mark
- * `engine/compaction-mark.ts` persists. The mark is authoritative and cheap;
- * this reads the transcript itself, so it still answers for a session whose
- * mark was never written, was lost with its state directory, or belongs to a
- * transcript some other process compacted.
- *
- * THE TAIL AND NOTHING ELSE. A `compact_boundary` anywhere earlier in the file
- * is a compaction with a whole conversation after it, which is precisely the
- * case that DOES need compacting again — so the question is only ever about
- * the last two records.
- */
-export function transcriptTailIsCompaction(file: string): boolean {
-  let contents: string;
-  try {
-    contents = readFileSync(file, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      // AT INFO: this reading is an optimization, and an unreadable transcript
-      // resolves here to "compact it again". The condition itself is reported
-      // where it is fatal -- `readTranscriptFacts` re-throws it.
-      LOGGER.info(
-        { transcript: file, cause: err instanceof Error ? err.message : String(err) },
-        "could not read the transcript to see whether it already ends in a compaction",
-      );
-    }
-    return false;
-  }
-  const tail: Record<string, unknown>[] = [];
-  for (const raw of contents.split("\n")) {
-    const line = raw.trim();
-    if (line === "") continue;
-    try {
-      tail.push(JSON.parse(line) as Record<string, unknown>);
-    } catch {
-      // A line this build cannot parse is still a line the vendor wrote, so it
-      // breaks the tail rather than being skipped past: skipping it would let
-      // a compaction pair with a real conversation after it read as the end.
-      tail.push({});
-    }
-    if (tail.length > 2) tail.shift();
-  }
-  if (tail.length < 2) return false;
-  const [boundary, summary] = tail as [Record<string, unknown>, Record<string, unknown>];
-  return (
-    boundary.type === "system" &&
-    boundary.subtype === "compact_boundary" &&
-    summary.type === "user" &&
-    summary.isCompactSummary === true
-  );
-}
