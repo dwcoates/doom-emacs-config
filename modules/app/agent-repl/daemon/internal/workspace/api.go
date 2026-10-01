@@ -307,6 +307,10 @@ type Verbs interface {
 	// the interrupted turn, the number of detached items stopped, or "nothing
 	// was running", which is a success and not a failure.
 	Interrupt(ctx context.Context, ws ids.WorkspaceID, target InterruptTarget, confirm bool) (InterruptOutcome, error)
+	// RollBack performs a confirmed rollback (rollback.go): the vendor
+	// conversation, the held prompts and the feed return to just before a
+	// prompt, as one operation the prompt queue owns.
+	RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRequest) (RollbackResult, error)
 	// AnswerPermission delivers the permission card's verdict.
 	AnswerPermission(ctx context.Context, ws ids.WorkspaceID, answer *conversationv1.AgentAnswer) error
 	// AnswerQuestion delivers the question card's answer, echoing the served
@@ -468,6 +472,10 @@ type Shim interface {
 	// answered. commandedBy is HOW the person commanded the stop, relayed as
 	// KillTurnRequest.commanded_by; nil states none.
 	KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error
+	// RollBackSession rewinds the vendor conversation to just before the first
+	// of TURNS, answering the paths a files restore changed back; a refusal is
+	// a *ShimRefusal naming its arm, the vendor's words as its detail.
+	RollBackSession(ctx context.Context, turns []ids.TurnID, restoreFiles bool) ([]string, error)
 	// StopAgent sends UpdateAgent.stop to one detached subagent.
 	StopAgent(ctx context.Context, agent *conversationv1.AgentId) error
 	// StopBash stops one detached shell.

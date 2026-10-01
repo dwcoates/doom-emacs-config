@@ -240,6 +240,25 @@ func (d *fakeDB) TombstoneHeldPrompt(_ context.Context, turn ids.TurnID, why wsm
 	return nil
 }
 
+// TombstoneHeldPrompts retires several holds all or nothing, as the store does.
+func (d *fakeDB) TombstoneHeldPrompts(_ context.Context, turns []ids.TurnID, why wsm.Tombstone) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.tombstoneErr != nil {
+		return d.tombstoneErr
+	}
+	for _, turn := range turns {
+		if _, ok := d.held[turn]; !ok {
+			return errors.New("no such hold")
+		}
+	}
+	for _, turn := range turns {
+		copied := why
+		d.held[turn].Tombstone = &copied
+	}
+	return nil
+}
+
 // HeldPromptByTurn answers one hold, retired or not.
 func (d *fakeDB) HeldPromptByTurn(_ context.Context, turn ids.TurnID) (wsm.HeldPrompt, bool, error) {
 	d.mu.Lock()

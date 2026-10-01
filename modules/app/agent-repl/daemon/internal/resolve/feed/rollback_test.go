@@ -266,6 +266,107 @@ func TestAFailedRollbackLoadIsLoggedAndRaised(t *testing.T) {
 	assertRecordedFault(t, h, opRollbackRestore, "corrupt page")
 }
 
+// ---- LiveDetachedIn ----
+
+func TestLiveDetachedInDoesNotCountASettledDetachedHead(t *testing.T) {
+	// Arrange: a detached subagent, live in t1, then settled.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "go look", 1_000)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.detachWork("work-1", "spawn-1")
+	if got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"}); got != 1 {
+		t.Fatalf("LiveDetachedIn() = %d before settling, want 1", got)
+	}
+
+	// Act
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Assert
+	if got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"}); got != 0 {
+		t.Fatalf("LiveDetachedIn() = %d after settling, want 0", got)
+	}
+}
+
+func TestLiveDetachedInDoesNotCountOtherTurns(t *testing.T) {
+	// Arrange: a live detached subagent drawn in t1.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "go look", 1_000)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.detachWork("work-1", "spawn-1")
+
+	// Act: asking about a different turn.
+	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t2"})
+
+	// Assert
+	if got != 0 {
+		t.Fatalf("LiveDetachedIn([t2]) = %d, want 0 for a head drawn in t1", got)
+	}
+}
+
+func TestLiveDetachedInSumsAcrossMultipleNamedTurns(t *testing.T) {
+	// Arrange: one live detached subagent in t1, another in t2.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "go look", 1_000)
+	first := &conversationv1.AgentId{Value: "agent-explore-1"}
+	h.spawnSubagent("spawn-1", first, "Explore", "map the daemon")
+	h.detachWork("work-1", "spawn-1")
+
+	h.deliverPromptAt("t2", "go look again", 2_000)
+	second := &conversationv1.AgentId{Value: "agent-explore-2"}
+	h.spawnSubagent("spawn-2", second, "Explore", "map it again")
+	h.detachWork("work-2", "spawn-2")
+
+	// Act
+	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1", "t2"})
+
+	// Assert
+	if got != 2 {
+		t.Fatalf("LiveDetachedIn([t1 t2]) = %d, want 2 (one live head per turn)", got)
+	}
+}
+
+func TestLiveDetachedInDoesNotCountAMonitor(t *testing.T) {
+	// Arrange: a monitor, footer-only by design (AgentMonitor is "FOOTER-ONLY:
+	// no feed bubble exists", monitorActivity's own doc comment), started in
+	// t1 and then detached — exactly as TestACreatedMonitorsAnnouncementDrawsNoRowOfItsOwn
+	// and TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds arrange
+	// one. It draws no feed row anywhere, so there is nothing for the feed to
+	// hold live, though the rollback's files-restore would stop it too.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "watch the build", 1_000)
+	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("mon-1"), nil, nil, noAddress())
+	h.detachWork("work-1", "mon-1")
+
+	// Act
+	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"})
+
+	// Assert
+	if got != 0 {
+		t.Fatalf("LiveDetachedIn([t1]) = %d, want 0: a monitor has no detached head", got)
+	}
+}
+
+func TestLiveDetachedInCountsLiveDetachedSubagentsAndShellsOfTheNamedTurns(t *testing.T) {
+	// Arrange: one live detached subagent and one live detached shell, both
+	// started in t1.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "start background work", 1_000)
+	h.spawnSubagent("toolu_sub", &conversationv1.AgentId{Value: "agent-sub"}, "Explore", "look around")
+	h.detachWork("work-sub", "toolu_sub")
+	h.send(bashCall("toolu_bash", "npm test"))
+	h.detachWork("work-bash", "toolu_bash")
+
+	// Act
+	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"})
+
+	// Assert
+	if got != 2 {
+		t.Fatalf("LiveDetachedIn() = %d, want 2 (one subagent, one shell)", got)
+	}
+}
+
 // assertRecordedFault asserts an ERROR record of op naming cause, and a warning
 // raised under op.
 func assertRecordedFault(t *testing.T, h *harness, op, cause string) {
