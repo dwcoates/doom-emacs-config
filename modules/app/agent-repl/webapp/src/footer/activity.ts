@@ -830,7 +830,7 @@ export function drawFooterActivityEnduringUsage(
     const figures = document.createElement("span");
     figures.className = "footer-rate-figures";
     ordered.forEach((allowance, index) => {
-      if (index > 0) figures.appendChild(document.createTextNode(" | "));
+      if (index > 0) figures.append(" ", drawFooterRateSeparator(), " ");
       figures.appendChild(
         drawFooterAllowance(allowance.value, allowance.label, deps, `${path}.${allowance.label}`),
       );
@@ -838,6 +838,18 @@ export function drawFooterActivityEnduringUsage(
     parts.push(figures);
   }
   return parts;
+}
+
+/**
+ * The "|" between two allowances on the enduring usage line, drawn blue
+ * (`--footer-rate-separator`) so the figures it divides read as separate
+ * windows (owner ruling, 2026-09-30). The spaces around it stay the line's.
+ */
+export function drawFooterRateSeparator(): HTMLElement {
+  const separator = document.createElement("span");
+  separator.className = "footer-rate-separator";
+  separator.textContent = "|";
+  return separator;
 }
 
 /**
