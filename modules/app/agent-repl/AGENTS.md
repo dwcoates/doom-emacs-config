@@ -518,6 +518,22 @@ out of date, and restarts what is, WHEN it may.
   NOTHING and is the answer, loudly (`build_failed` naming the step, the tail
   of its output and the archived log under `<state>/deploy/logs/`).
 
+## The `wsm schema version` goes up only for a breaking table change
+
+The `wsm schema version` is the version of the daemon database's schema
+(`wsm.db`, today's `wsm.LayoutVersion` in `daemon/internal/wsm/open.go`; older
+docs call it the "state layout"). Owner ruling, 2026-10-01:
+
+- It goes up ONLY for a BREAKING table change, one the running daemon cannot
+  work beside: a table or column removed, renamed or repurposed.
+- A new daemon with a different `wsm schema version` cannot take over from a
+  running one, because it must migrate the database first and only one daemon
+  may write it; such a deploy drains every workspace and stops then starts.
+- An ADDITIVE change (a new table or column) does not raise it: the new daemon
+  applies it once it is the only writer and does not touch the new tables
+  before then, and the old daemon ignores what it does not know.
+- The same rule holds for protobuf package versions (`proto/AGENTS.md`).
+
 ## A deploy never ends a turn unless it is FORCED
 
 How the daemon puts each component into service:
