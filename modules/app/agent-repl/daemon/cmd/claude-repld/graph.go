@@ -425,7 +425,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A FORK'S OWN TURNS are the ones its workspace recorded; every other
 		// main-agent entry of its book is the conversation it inherited.
 		OwnedTurns: p.DB.RecordedTurns,
-		Faults:     p.DB,
+		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
+		DurableRows: p.DB,
+		Faults:      p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,

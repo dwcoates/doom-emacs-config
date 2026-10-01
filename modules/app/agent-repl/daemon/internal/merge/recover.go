@@ -249,7 +249,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		// The bubble that was live gets its terminal, so the trace of the
 		// interrupted merge ends where a reader can see it rather than simply
 		// stopping mid-tab.
-		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID,
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID,
 			o.abandonedLabel(ctx, ws, entry.Source), o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),

@@ -1013,7 +1013,11 @@ type synthesized struct {
 	At   int
 }
 
-func (f *fakeFeed) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+// UpsertDurable is the ONE way the orchestrator publishes a row: every merge
+// row is drawn again by a new daemon. The fake declares no UpsertSynthesized,
+// so a merge row published any other way panics on the embedded nil
+// interface rather than passing unrecorded.
+func (f *fakeFeed) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
 	at := f.seq()
 	if f.onUpsert != nil {
 		f.onUpsert(row)
