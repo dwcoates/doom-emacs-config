@@ -857,15 +857,15 @@ describe("stopTask", () => {
 });
 
 describe("backgroundTasks", () => {
-  it("reports false when nothing is live", async () => {
+  it("answers true with no tool call: the SDK backgrounds every foreground task", async () => {
     // Arrange
     const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
 
     // Act + Assert
-    await expect(query.backgroundTasks()).resolves.toBe(false);
+    await expect(query.backgroundTasks()).resolves.toBe(true);
   });
 
-  it("warns and answers the live-set question when the tool call is unknown", async () => {
+  it("answers false for a tool call that matches no foreground task", async () => {
     // Arrange
     const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
 
