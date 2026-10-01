@@ -84,6 +84,11 @@ func forceShimLogRoll(
 			// A handover carried the roll to the daemon the workspace moved
 			// to, which runs it after its adoption.
 			req.Log.Info(shimLogRollOperation, "the shim-log roll was handed across: the daemon the workspace moved to runs it after its adoption", ended)
+		case bounce.OutcomeDeferred:
+			// The registry keeps a deferred bounce's Done for the rerun, so
+			// being told a deferral is its contract broken.
+			ended["cause"] = err.Error()
+			req.Log.Error(shimLogRollOperation, "the bounce registry told the shim-log roll a deferral; it owes only the rerun's outcome", ended)
 		case bounce.OutcomeFailed:
 			ended["cause"] = err.Error()
 			req.Log.Error(shimLogRollOperation, "could not roll the shim whose log reached its hard ceiling", ended)

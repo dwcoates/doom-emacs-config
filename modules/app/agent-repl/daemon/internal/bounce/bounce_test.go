@@ -74,6 +74,8 @@ func TestOutcomeOfClassifiesADoneError(t *testing.T) {
 		{name: "a wrapped unregistered sentinel", err: fmt.Errorf("queue: %w", ErrUnregistered), want: OutcomeUnregistered},
 		{name: "the handed-across sentinel", err: ErrHandedAcross, want: OutcomeHandedAcross},
 		{name: "a wrapped handed-across sentinel", err: fmt.Errorf("carry: %w", ErrHandedAcross), want: OutcomeHandedAcross},
+		{name: "the deferred sentinel", err: ErrDeferred, want: OutcomeDeferred},
+		{name: "a wrapped deferred sentinel", err: fmt.Errorf("relaunch: %w", ErrDeferred), want: OutcomeDeferred},
 		{name: "any other error is a failure", err: errors.New("prelaunch refused"), want: OutcomeFailed},
 	}
 	for _, tc := range tests {
@@ -99,7 +101,7 @@ func TestOutcomeOfClassifiesADoneError(t *testing.T) {
 func TestDoneOutcomesAreClassifiedOnlyThroughOutcomeOf(t *testing.T) {
 	// Arrange.
 	root := filepath.Join("..", "..")
-	handRolled := regexp.MustCompile(`errors\.Is\([^)]*bounce\.Err(Unregistered|HandedAcross)\)`)
+	handRolled := regexp.MustCompile(`errors\.Is\([^)]*bounce\.Err(Unregistered|HandedAcross|Deferred)\)`)
 	exempt := filepath.Join("internal", "promptqueue") + string(os.PathSeparator)
 	var offenders []string
 

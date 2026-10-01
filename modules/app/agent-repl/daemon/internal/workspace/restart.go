@@ -82,6 +82,12 @@ func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.Works
 		// adopted it runs the restart -- and the webapp reload after it.
 		log.Info(opRestart, "the restart was handed to the daemon the workspace moved to, which runs it after its adoption", dlog.Context{"force": force})
 		return
+	case bounce.OutcomeDeferred:
+		// The registry keeps a deferred bounce's Done for the rerun, so being
+		// told a deferral is its contract broken; it is never read as a
+		// finished restart.
+		log.Error(opRestart, "the bounce registry told the restart a deferral; it owes only the rerun's outcome", dlog.Context{"force": force, "cause": err.Error()})
+		return
 	case bounce.OutcomeFailed:
 		log.Error(opRestart, "the shim relaunch failed", dlog.Context{"force": force, "cause": err.Error()})
 		return
