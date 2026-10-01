@@ -314,6 +314,14 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 		})
 }
 
+// SetBringingUp raises or lowers the workspace's bring-up-under-way fact,
+// which holds its availability at `pending` until a link connects.
+func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_bringing_up",
+		"the roster took whether a bring-up is under way",
+		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
+}
+
 // SetReviving raises or lowers the workspace's REVIVING marker, which draws a
 // shimmer across the row's name while its parked session comes back up.
 //

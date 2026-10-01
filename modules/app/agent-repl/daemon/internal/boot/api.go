@@ -244,6 +244,12 @@ type Deps struct {
 	// bring-up starts and no adoption installs, so its roster row resolves
 	// `unavailable` (drawn `start_failed`) rather than `pending` forever.
 	Unserved func(ids.WorkspaceID)
+	// BringingUp raises (true) or lowers (false) the fact that the boot's
+	// bring-up of a workspace's session is under way
+	// (sidebar.Resolver.SetBringingUp). The reconciliation raises it for
+	// every workspace it names for bring-up, before the daemon serves, and
+	// the bring-up lowers it for each one on every path.
+	BringingUp func(ws ids.WorkspaceID, underWay bool)
 	// AdoptBound bounds ONE surviving shim's adoption; zero means
 	// DefaultAdoptBound. An adoption that overruns it is reported at ERROR and
 	// the workspace is UNDETERMINED — neither adopted nor orphan-closed — which
@@ -327,6 +333,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a launchd service ensurer")
 	case deps.Unserved == nil:
 		return nil, missing("an unserved-workspace marker")
+	case deps.BringingUp == nil:
+		return nil, missing("a bring-up marker")
 	case deps.BindViews == nil:
 		return nil, missing("a view binder")
 	case deps.RunDir == "":

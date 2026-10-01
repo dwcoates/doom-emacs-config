@@ -115,6 +115,9 @@ type wsState struct {
 	// flight (SetReviving). It is a marker beside the status, never an arm:
 	// it neither changes the arm nor clears the viewed marker.
 	reviving bool
+	// bringingUp reports a bring-up of this workspace's session under way
+	// (SetBringingUp). It is what holds the row's availability at `pending`.
+	bringingUp bool
 	// lastArm is the status arm last PUBLISHED for this workspace, which is
 	// what a status CHANGE is measured against, and what a viewed report is
 	// judged against: the arm the user was looking at.

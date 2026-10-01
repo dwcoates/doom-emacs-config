@@ -1357,6 +1357,50 @@ func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
 	}
 }
 
+// TestTheReconciliationRaisesTheBringUpBeforeTheDaemonServes pins that a
+// workspace named for bring-up is held `pending` from before the listener is
+// up: Run alone, with no BringUp yet, has already raised it.
+func TestTheReconciliationRaisesTheBringUpBeforeTheDaemonServes(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	want := []bringingEdge{{ws.ID, true}}
+	if fmt.Sprint(h.bringing) != fmt.Sprint(want) {
+		t.Fatalf("BringingUp edges = %v, want %v", h.bringing, want)
+	}
+}
+
+// TestABringUpNeverBegunStillLowersTheBringUp pins that a workspace whose
+// start is never begun — the daemon left first — is not held `pending`
+// forever.
+func TestABringUpNeverBegunStillLowersTheBringUp(t *testing.T) {
+	// Arrange: the daemon is leaving, so no start is begun.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	leaving, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.seq.BringUp(leaving, report.PendingBringUp)
+
+	// Assert.
+	want := []bringingEdge{{ws.ID, true}, {ws.ID, false}}
+	if fmt.Sprint(h.bringing) != fmt.Sprint(want) {
+		t.Fatalf("BringingUp edges = %v, want %v", h.bringing, want)
+	}
+}
+
 // TestAnUndeterminedWorkspaceIsMarkedUnserved pins that a workspace the boot
 // neither adopts nor starts still resolves on its views: nothing else would
 // ever state a link for it, and an editor opening rows in registry order would

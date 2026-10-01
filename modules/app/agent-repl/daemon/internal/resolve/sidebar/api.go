@@ -88,6 +88,12 @@ type Resolver interface {
 	// verbs raise it when they decide to revive and lower it when that revival
 	// ends, success or failure; it is not a status arm and clears nothing.
 	SetReviving(ws ids.WorkspaceID, reviving bool)
+	// SetBringingUp raises (true) or lowers (false) the fact that a bring-up
+	// of the workspace's session is under way: the boot raises it for every
+	// workspace it names for bring-up before it serves, and every start
+	// raises it for its own duration. While it stands, and no shim link has
+	// connected yet, the row's availability is `pending`.
+	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
 	// SetTurn installs the accepted turn, nil when none is in flight. It is
 	// what raises `submitting` the instant StartTurn is accepted, and what
 	// tells a `/clear` and a compaction apart from an ordinary prompt — the

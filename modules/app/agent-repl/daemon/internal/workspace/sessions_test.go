@@ -397,7 +397,15 @@ func coldResponse() *shimv1.StartSessionResponse {
 const fixtureInstance = ids.InstanceID("fleet-fixture-instance")
 
 // fleetFixture is one arranged Fleet plus the fakes behind it.
+// bringUpEdge is one BringUps call the fleet made.
+type bringUpEdge struct {
+	ws       ids.WorkspaceID
+	underWay bool
+}
+
 type fleetFixture struct {
+	// bringUps records every BringUps edge, in order.
+	bringUps []bringUpEdge
 	// bundle is the installed shim bundle every spawn holds.
 	bundle     *fakeBundle
 	fleet      *Fleet
@@ -555,7 +563,10 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return "/sock/" + string(ws) + ".sock"
 		},
 		LockDir: t.TempDir(),
-		Probe:   func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		BringUps: func(ws ids.WorkspaceID, underWay bool) {
+			f.bringUps = append(f.bringUps, bringUpEdge{ws, underWay})
+		},
+		Probe: func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
 				f.onSocketProbe(path)
@@ -633,6 +644,14 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "~/.cache/agent-repl/run",
+			},
+		},
+		{
+			name: "no bring-up marker",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run",
 			},
 		},
 	}
@@ -3880,5 +3899,46 @@ func TestMarkUnservedTellsTheViewsTheLinkIsDead(t *testing.T) {
 	}
 	if fmt.Sprint(f.links.links) != fmt.Sprint(want) {
 		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+}
+
+// TestStartRaisesTheBringUpForItsOwnDuration pins that the roster holds a
+// starting workspace's row `pending` exactly while the start runs.
+func TestStartRaisesTheBringUpForItsOwnDuration(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert
+	want := []bringUpEdge{{ws.ID, true}, {ws.ID, false}}
+	if fmt.Sprint(f.bringUps) != fmt.Sprint(want) {
+		t.Fatalf("BringUps edges = %v, want %v", f.bringUps, want)
+	}
+}
+
+// TestStartOfALiveSessionRaisesNoBringUp pins that a start answered by the
+// session already up brings nothing up, so the row is never held for it.
+func TestStartOfALiveSessionRaisesNoBringUp(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.bringUps = nil
+
+	// Act
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+
+	// Assert
+	if len(f.bringUps) != 0 {
+		t.Fatalf("BringUps edges = %v, want none for a session already live", f.bringUps)
 	}
 }
