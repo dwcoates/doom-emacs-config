@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # test-run.sh — hermetic tests for the merge-queue skill's run.sh.
 #
-# git, the daemon binary and the log reader are all fakes: git answers from
-# FAKE_GIT_* bindings, the daemon records its argv and exits as told, and the
-# log reader prints one scripted record. No real git runs.
+# git and the daemon binary are fakes: git answers from FAKE_GIT_* bindings,
+# and the daemon records its argv and exits as told. No real git runs.
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../../../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -32,15 +31,21 @@ fail() {
   fi
 }
 
-# mkfixture — a main worktree holding the fake log reader, a workspace
-# worktree, a stub directory first on PATH, and the fake daemon binary.
+# mkfixture — a main worktree, a workspace worktree, a stub directory first on
+# PATH, and the fake daemon binary.
 mkfixture() {
   FX="$(mktemp -d "$TMP/fx.XXXXXX")"
-  mkdir -p "$FX/main/modules/app/agent-repl/bin" "$FX/ws/sub" "$FX/stubs"
+  mkdir -p "$FX/main" "$FX/ws/sub" "$FX/stubs"
   cat >"$FX/stubs/git" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FAKE_GIT_LOG"
 case "$*" in
-  "worktree list --porcelain") printf 'worktree %s\nHEAD 0000\n' "$FAKE_GIT_MAIN" ;;
+  *"worktree list --porcelain")
+    printf 'worktree %s\nHEAD 0000\nbranch refs/heads/master\n\n' "$FAKE_GIT_MAIN"
+    [ -z "${FAKE_GIT_BRANCH_TREE:-}" ] || printf 'worktree %s\nHEAD 0001\nbranch refs/heads/feat/x\n\n' "$FAKE_GIT_BRANCH_TREE"
+    ;;
+  *"worktree remove "*) ;;
+  *"branch -d "*) exit "${FAKE_GIT_BRANCH_D_EXIT:-0}" ;;
   "rev-parse --show-toplevel") printf '%s\n' "$FAKE_GIT_TOP" ;;
   *"status --porcelain") printf '%s' "${FAKE_GIT_DIRTY:-}" ;;
   *) printf 'unexpected git %s\n' "$*" >&2; exit 2 ;;
@@ -49,16 +54,10 @@ EOF
   cat >"$FX/daemon" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >"$FAKE_DAEMON_ARGS"
-printf 'merge-queue: enqueued x (command file f)\nmerge-queue: worktree: %s\n' "$FAKE_DAEMON_WORKTREE"
+printf 'merge-queue: ws asked to merge x (command file f)\n'
 exit "${FAKE_DAEMON_EXIT:-0}"
 EOF
-  cat >"$FX/main/modules/app/agent-repl/bin/logs.sh" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >"$FAKE_LOGS_ARGS"
-printf '{"operation":"daemon.merge.abort","context":{"summary":"the gate failed: TestX"}}\n'
-printf '{"operation":"daemon.other","context":{}}\n'
-EOF
-  chmod +x "$FX/stubs/git" "$FX/daemon" "$FX/main/modules/app/agent-repl/bin/logs.sh"
+  chmod +x "$FX/stubs/git" "$FX/daemon"
 }
 
 # invoke ARGS... — run run.sh in the fixture.
@@ -69,10 +68,11 @@ invoke() {
       FAKE_GIT_MAIN="$FX/main" \
       FAKE_GIT_TOP="${TOP:-$FX/ws}" \
       FAKE_GIT_DIRTY="${DIRTY:-}" \
+      FAKE_GIT_LOG="$FX/git-log" \
+      FAKE_GIT_BRANCH_TREE="${BRANCH_TREE:-}" \
+      FAKE_GIT_BRANCH_D_EXIT="${BRANCH_D_EXIT:-0}" \
       FAKE_DAEMON_ARGS="$FX/daemon-args" \
-      FAKE_DAEMON_WORKTREE="$FX/ws" \
       FAKE_DAEMON_EXIT="${DAEMON_EXIT:-0}" \
-      FAKE_LOGS_ARGS="$FX/logs-args" \
       AGENT_REPL_DAEMON_BIN="$FX/daemon" \
       bash "$RUN" "$@" 2>&1
   )"
@@ -84,13 +84,34 @@ daemon_args() {
   cat "$FX/daemon-args" 2>/dev/null || true
 }
 
-test_enqueue_own_merges_the_workspace_without_waiting() {
+# expect_args NAME VERB_ARGS — the run's exit is 0 and the daemon saw VERB_ARGS.
+expect_args() {
+  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "$2" ]; then
+    pass "$1"
+  else
+    fail "$1" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_enqueue_own_requests_the_own_branch() {
   mkfixture
   invoke --enqueue-own
-  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "merge-queue -dir $FX/ws" ]; then
-    pass "--enqueue-own enqueues this workspace without -wait"
+  expect_args "--enqueue-own requests this workspace's own branch without waiting" "merge-queue -own"
+}
+
+test_enqueue_own_keep_open_keeps_the_workspace() {
+  mkfixture
+  invoke --enqueue-own --keep-open
+  expect_args "--enqueue-own --keep-open asks to keep this workspace open" "merge-queue -own -keep-open"
+}
+
+test_enqueue_own_refuses_an_unknown_option() {
+  mkfixture
+  invoke --enqueue-own --bogus
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "--enqueue-own refuses an option other than --keep-open"
   else
-    fail "--enqueue-own enqueues this workspace without -wait" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+    fail "--enqueue-own refuses an option other than --keep-open" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
@@ -98,9 +119,9 @@ test_enqueue_own_refuses_uncommitted_work() {
   mkfixture
   DIRTY=" M file.el" invoke --enqueue-own
   if [ "$RUN_RC" -eq 6 ] && [ -z "$(daemon_args)" ]; then
-    pass "--enqueue-own refuses uncommitted work and enqueues nothing"
+    pass "--enqueue-own refuses uncommitted work and requests nothing"
   else
-    fail "--enqueue-own refuses uncommitted work and enqueues nothing" "exit=$RUN_RC" "$RUN_OUT"
+    fail "--enqueue-own refuses uncommitted work and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
@@ -114,43 +135,73 @@ test_enqueue_own_refuses_the_main_worktree() {
   fi
 }
 
-test_land_workspace_waits() {
+test_land_workspace_requests_without_waiting() {
   mkfixture
-  TOP="$FX/main" invoke --land-workspace "$FX/other"
-  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "merge-queue -dir $FX/other -wait" ]; then
-    pass "--land-workspace enqueues another workspace and waits"
-  else
-    fail "--land-workspace enqueues another workspace and waits" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
-  fi
+  invoke --land-workspace "$FX/other"
+  expect_args "--land-workspace requests another workspace's branch without waiting" "merge-queue -dir $FX/other"
 }
 
 test_land_workspace_refuses_its_own() {
   mkfixture
   invoke --land-workspace "$FX/ws"
   if [ "$RUN_RC" -eq 7 ] && [ -z "$(daemon_args)" ]; then
-    pass "--land-workspace refuses to wait on its own workspace"
+    pass "--land-workspace refuses this shell's own workspace"
   else
-    fail "--land-workspace refuses to wait on its own workspace" "exit=$RUN_RC" "$RUN_OUT"
+    fail "--land-workspace refuses this shell's own workspace" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
-test_land_branch_names_the_main_worktree() {
+test_land_branch_requests_the_branch() {
   mkfixture
   invoke --land-branch feat/x
-  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "merge-queue -branch feat/x -repo $FX/main -wait" ]; then
-    pass "--land-branch lands the branch through the repository's main worktree"
+  expect_args "--land-branch requests the branch without waiting" "merge-queue -branch feat/x"
+}
+
+test_pr_merged_requests_the_upstream_update() {
+  mkfixture
+  invoke --pr-merged
+  expect_args "--pr-merged requests the merged-upstream update" "merge-queue -pr-merged"
+}
+
+test_remove_branch_removes_its_worktree_and_branch() {
+  mkfixture
+  BRANCH_TREE="$FX/sub-tree" invoke --remove-branch feat/x
+  if [ "$RUN_RC" -eq 0 ] && grep -qx -- "-C $FX/main worktree remove $FX/sub-tree" "$FX/git-log" &&
+    grep -qx -- "-C $FX/main branch -d feat/x" "$FX/git-log"; then
+    pass "--remove-branch removes the branch's worktree, then the branch"
   else
-    fail "--land-branch lands the branch through the repository's main worktree" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+    fail "--remove-branch removes the branch's worktree, then the branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
+test_remove_branch_without_a_worktree_deletes_the_branch() {
+  mkfixture
+  invoke --remove-branch feat/x
+  if [ "$RUN_RC" -eq 0 ] && ! grep -q "worktree remove" "$FX/git-log" &&
+    grep -qx -- "-C $FX/main branch -d feat/x" "$FX/git-log"; then
+    pass "--remove-branch with no worktree only deletes the branch"
+  else
+    fail "--remove-branch with no worktree only deletes the branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
+test_remove_branch_refuses_an_unlanded_branch() {
+  mkfixture
+  BRANCH_D_EXIT=1 invoke --remove-branch feat/x
+  if [ "$RUN_RC" -eq 2 ] && printf '%s' "$RUN_OUT" | grep -q "may not have landed"; then
+    pass "--remove-branch fails on a branch master lacks"
+  else
+    fail "--remove-branch fails on a branch master lacks" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
 test_each_outcome_maps_to_its_exit() {
   local verb_exit want
-  for pair in "4:3" "6:5" "2:2" "0:0"; do
+  for pair in "6:5" "5:2" "2:2" "0:0"; do
     verb_exit="${pair%%:*}"
     want="${pair##*:}"
     mkfixture
-    TOP="$FX/main" DAEMON_EXIT="$verb_exit" invoke --land-branch feat/x
+    DAEMON_EXIT="$verb_exit" invoke --land-branch feat/x
     if [ "$RUN_RC" -eq "$want" ]; then
       pass "the verb's exit $verb_exit is the skill's exit $want"
     else
@@ -159,21 +210,10 @@ test_each_outcome_maps_to_its_exit() {
   done
 }
 
-test_failure_prints_the_recorded_reason() {
-  mkfixture
-  TOP="$FX/main" DAEMON_EXIT=5 invoke --land-branch feat/x
-  if [ "$RUN_RC" -eq 4 ] && printf '%s' "$RUN_OUT" | grep -q "the gate failed: TestX" &&
-    grep -q -- "--workspace $FX/ws" "$FX/logs-args"; then
-    pass "a failed merge prints the reason from the worktree the verb named"
-  else
-    fail "a failed merge prints the reason from the worktree the verb named" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
 test_passes_the_verbs_output_through() {
   mkfixture
   invoke --enqueue-own
-  if printf '%s' "$RUN_OUT" | grep -q "merge-queue: enqueued x"; then
+  if printf '%s' "$RUN_OUT" | grep -q "merge-queue: ws asked to merge x"; then
     pass "the verb's own lines reach the caller"
   else
     fail "the verb's own lines reach the caller" "$RUN_OUT"
@@ -201,14 +241,19 @@ test_unknown_verb_prints_usage() {
   fi
 }
 
-test_enqueue_own_merges_the_workspace_without_waiting
+test_enqueue_own_requests_the_own_branch
+test_enqueue_own_keep_open_keeps_the_workspace
+test_enqueue_own_refuses_an_unknown_option
 test_enqueue_own_refuses_uncommitted_work
 test_enqueue_own_refuses_the_main_worktree
-test_land_workspace_waits
+test_land_workspace_requests_without_waiting
 test_land_workspace_refuses_its_own
-test_land_branch_names_the_main_worktree
+test_land_branch_requests_the_branch
+test_pr_merged_requests_the_upstream_update
+test_remove_branch_removes_its_worktree_and_branch
+test_remove_branch_without_a_worktree_deletes_the_branch
+test_remove_branch_refuses_an_unlanded_branch
 test_each_outcome_maps_to_its_exit
-test_failure_prints_the_recorded_reason
 test_passes_the_verbs_output_through
 test_missing_daemon_binary_is_an_error
 test_unknown_verb_prints_usage
