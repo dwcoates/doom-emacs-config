@@ -40,3 +40,17 @@ after the daemon says that workspace's shim is connected.
   - A closed row also carries the field, and the editor ignores it there because a closed row gets no tab.
 
 - Evidence: `sessionlock`/boot paths verified by reading `daemon/internal/boot/sequence.go` (undetermined set) and `daemon/internal/workspace/sessions.go` (every failed bring-up and every kill calls `Sinks.Sidebar.OnLink(LinkDead)`; adoption and spawn call `OnLink(LinkConnected)`).
+
+### Correction: `pending` means a bring-up under way, not "no link yet"
+
+- WHAT: `pending` now means a bring-up of the workspace's session is under way, and `available` also covers a workspace with no bring-up under way and none failed.
+  - The earlier entry defined `pending` as "no link has connected and none has died", which is retracted.
+
+- ROOT CAUSE of the error: the first definition assumed every open workspace has a session coming, but RegisterWorkspace starts none for a freshly registered workspace (`daemon/internal/workspace/register.go`, `reviveRecordedConversation` returns early when `created`), and its session starts only on first use. Such a row was `pending` forever, so it and every row after it never got a tab.
+  - The sandbox e2e suite caught it: five Emacs e2e tests failed on "await the workspace to appear in Emacs's registry".
+
+- Daemon semantics now:
+  - The sidebar resolver tracks a per-workspace bring-up-in-flight flag.
+  - The boot raises it for every workspace it names for bring-up before it serves, and the bring-up clears it on every path.
+  - `Fleet.start` raises it for its own duration.
+  - Availability is: `available` if the link ever connected; else `pending` while a bring-up is under way; else `unavailable` if the link is dead; else `available`.
