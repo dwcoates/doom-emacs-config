@@ -41,11 +41,20 @@ export interface TabSpec {
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
   summary?: string;
+  /** When the tab's work began; `TAB_STARTED_AT_MS` unless stated. */
+  startedAtMs?: bigint;
+  /** For `settled`, when it settled; `TAB_ENDED_AT_MS` unless stated. */
+  endedAtMs?: bigint;
   label?: string;
   round?: number;
   /** Extra kind-level fields (`queue`, `progress`, `lines`, `suites`, `log`, …). */
   payload?: Record<string, unknown>;
 }
+
+/** When a fixture tab's work began, unless the spec says otherwise. */
+export const TAB_STARTED_AT_MS = 1_000n;
+/** When a settled fixture tab settled, unless the spec says otherwise. */
+export const TAB_ENDED_AT_MS = 5_000n;
 
 /** The smallest legal queue snapshot: this workspace, waiting, alone. */
 const DEFAULT_QUEUE = {
@@ -53,7 +62,7 @@ const DEFAULT_QUEUE = {
   current: {
     workspace: { ref: { id: "mine", dir: "/w/mine" } },
     label: { text: "mine" },
-    status: { case: "waiting" as const, value: {} },
+    status: { case: "waiting" as const, value: { stageEnteredAtMs: TAB_STARTED_AT_MS } },
   },
   behind: [],
 };
@@ -73,13 +82,15 @@ const REQUIRED_PAYLOADS: Readonly<Record<string, Record<string, unknown>>> = {
 
 /** A merge-tab row, built from the generated schemas. */
 export function tabRow(rowId: string, spec: TabSpec): FeedRow {
+  const startedAtMs = spec.startedAtMs ?? TAB_STARTED_AT_MS;
   const state =
     spec.state === "live"
-      ? { case: "live" as const, value: {} }
+      ? { case: "live" as const, value: { startedAtMs } }
       : {
           case: "settled" as const,
           value: {
-            endedAtMs: 5_000n,
+            startedAtMs,
+            endedAtMs: spec.endedAtMs ?? TAB_ENDED_AT_MS,
             outcome:
               spec.outcome === "failed"
                 ? { case: "failed" as const, value: { summary: spec.summary ?? "it failed" } }
