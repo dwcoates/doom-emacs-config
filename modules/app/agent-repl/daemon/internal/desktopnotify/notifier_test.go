@@ -260,6 +260,35 @@ func TestNotifierRecordsAnUnnameableWorkspace(t *testing.T) {
 	}
 }
 
+// ctxNames answers only once its ctx ends, with the ctx's own error: a name
+// lookup the stand-down cut short.
+type ctxNames struct{}
+
+func (ctxNames) WorkspaceName(ctx context.Context, _ ids.WorkspaceID) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestNotifierCloseEndsANameLookupWithoutAnError(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, ctxNames{})
+	f.notifier.Post("ws1", "turn_ended", titledBy)
+
+	// Act
+	f.notifier.Close()
+
+	// Assert
+	if _, ok := hasRecord(f.log, "info", "the daemon stood down while the workspace was named; no desktop banner"); !ok {
+		t.Fatal("a name lookup cut short by Close left no stand-down record")
+	}
+	if _, ok := hasRecord(f.log, "error", "could not name the workspace; no desktop banner"); ok {
+		t.Fatal("a name lookup cut short by Close was recorded as a naming failure")
+	}
+	if got := f.backend.banners(); len(got) != 0 {
+		t.Fatalf("posted %d banners after the stand-down, want none", len(got))
+	}
+}
+
 func TestNotifierRecordsAMissingProgram(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
