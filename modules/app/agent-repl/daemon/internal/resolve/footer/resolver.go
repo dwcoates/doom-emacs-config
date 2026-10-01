@@ -700,9 +700,10 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 		})
 }
 
-// OnSessionStarted lifts a standing vendor or account block: a session that
-// has (re)started is one the vendor served, which is the roster's rule for its
-// vendor_blocked on the same event, so the strip and the dot lift together.
+// OnSessionStarted lifts a standing vendor or account block and a dead-query
+// line: a session that has (re)started is one the vendor served, which is the
+// roster's rule for its vendor_blocked on the same event, so the strip and
+// the dot lift together.
 //
 // A START NAMING ANOTHER VENDOR SESSION IS A SWITCH: the context the
 // context-budget line warned about is not this session's, so the line ends. A
@@ -712,6 +713,11 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
+			// A STARTED SESSION HAS A LIVE QUERY: the restart the death asked
+			// for has landed, so its line comes down. An adopted shim whose
+			// query had died re-announces the death after its start, which
+			// raises the line again.
+			s.queryDied = nil
 			s.stateUnreported = false
 			if id := started.GetVendorSessionId(); id != "" {
 				if s.vendorSession != "" && s.vendorSession != id {
@@ -734,8 +740,10 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 
 // deadQueryLine is the strip's sentence for a vendor query that died and has
 // not been restarted, worded as footer.proto's FooterStatusActivityQueryDied
-// arm words it.
-const deadQueryLine = "vendor query died — the next prompt restarts it"
+// arm words it. The daemon replaces the shim the moment the death is told
+// (the lifecycle sink's OnQueryDied), and the session's next start lifts the
+// line.
+const deadQueryLine = "vendor query died — restarting the session"
 
 // sessionArm names the update's arm and returns what it changes. Every arm has
 // a branch, including the ones the footer deliberately draws nothing from.
@@ -747,7 +755,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			now := r.opts.clock.Now()
 			s.queryDied = &standing{text: deadQueryLine, at: now}
 			// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling,
-			// 2026-09-28): the next prompt restarts it, and nothing about the
+			// 2026-09-28): the daemon restarts it, and nothing about the
 			// vendor or the account refuses the session. A turn the death cut
 			// is a failed one; with no turn in flight, the last turn's end
 			// stands as it was, under the dead-query line.

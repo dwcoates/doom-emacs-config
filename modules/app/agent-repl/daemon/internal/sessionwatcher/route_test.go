@@ -1019,9 +1019,11 @@ func TestRouteQueryDied(t *testing.T) {
 	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(queryDiedUpdate()) })
 
 	// Assert.
-	// OnTurnEnded comes LAST: it is handed over off the lock (the queue
-	// delivers the next prompt from it, which opens a turn back on this
-	// watcher), while the view sinks are told inside it.
+	// OnTurnEnded comes after the views: it is handed over off the lock (the
+	// queue delivers the next prompt from it, which opens a turn back on this
+	// watcher), while the view sinks are told inside it. OnQueryDied comes
+	// LAST, so the queue has closed the turns the death ended before the
+	// session is restarted.
 	// feed.OnTurnOpened precedes feed.OnSessionUpdate: the feed draws the
 	// death's terminal against the turn it believes is running, and this
 	// watcher may be its only source for which turn that is.
@@ -1029,10 +1031,43 @@ func TestRouteQueryDied(t *testing.T) {
 		"footer.OnSessionUpdate", "feed.OnTurnOpened", "feed.OnSessionUpdate",
 		"sidebar.OnSessionUpdate",
 		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
-		"lifecycle.OnTurnEnded",
+		"lifecycle.OnTurnEnded", "lifecycle.OnQueryDied",
 	})
 	if !h.w.Free() {
 		t.Fatal("a dead session is not free; a lease holder would wait forever")
+	}
+}
+
+// A DEATH WITH NO TURN IN FLIGHT -- an idle session's vendor crashing, or the
+// death an adopted shim re-announces -- still restarts the session.
+func TestAQueryDeathBetweenTurnsIsToldToTheLifecycleSink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(queryDiedUpdate()) })
+
+	// Assert.
+	if n := countName(names(got), "lifecycle.OnQueryDied"); n != 1 {
+		t.Fatalf("OnQueryDied told %d times, want once: %v", n, names(got))
+	}
+}
+
+func TestNoOtherSessionUpdateTellsTheLifecycleSinkTheQueryDied(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.routeSessionUpdateLocked(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Compacting{
+			Compacting: &conversationv1.SessionCompacting{}}})
+	})
+
+	// Assert.
+	if n := countName(names(got), "lifecycle.OnQueryDied"); n != 0 {
+		t.Fatalf("OnQueryDied told %d times for a compaction: %v", n, names(got))
 	}
 }
 
@@ -2975,4 +3010,15 @@ func TestAJoiningTurnRefusedAtTheWatchersEdgesIsAnError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// countName counts the routed sink calls named name.
+func countName(have []string, name string) int {
+	n := 0
+	for _, h := range have {
+		if h == name {
+			n++
+		}
+	}
+	return n
 }

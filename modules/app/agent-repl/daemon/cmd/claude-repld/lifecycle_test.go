@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
@@ -427,5 +428,121 @@ func TestAVendorStartedTurnTheWatcherAdoptedReachesTheQueue(t *testing.T) {
 	// Assert
 	if len(queue.adopted) != 1 || queue.adopted[0] != "ws-1/turn-v" {
 		t.Fatalf("adopted turns handed to the queue = %v, want [ws-1/turn-v]", queue.adopted)
+	}
+}
+
+// fakeShimBouncer records the shim replacements the lifecycle sink asks for,
+// and holds each one's Done for the test to settle.
+type fakeShimBouncer struct {
+	rollout.Controller
+	asked []bounceAsk
+	err   error
+}
+
+// bounceAsk is one BounceShim call.
+type bounceAsk struct {
+	ws     ids.WorkspaceID
+	reason rollout.RelaunchReason
+	force  bool
+	done   func(error)
+}
+
+func (f *fakeShimBouncer) BounceShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+	f.asked = append(f.asked, bounceAsk{ws: ws, reason: reason, force: force, done: done})
+	return bounce.Decision{Now: true}, f.err
+}
+
+func queryDiedSink(bouncer *fakeShimBouncer) (*lifecycleSink, *dlog.TestLogger) {
+	log := dlog.NewTestLogger()
+	builds := &rolloutForwarder{}
+	builds.bind(bouncer)
+	return &lifecycleSink{health: &healthForwarder{}, builds: builds, log: log}, log
+}
+
+// hasLifecycleRecord reports whether a lifecycle record at level carries msg.
+func hasLifecycleRecord(log *dlog.TestLogger, level, msg string) bool {
+	for _, r := range log.Records() {
+		if r.Level == level && r.Message == msg {
+			return true
+		}
+	}
+	return false
+}
+
+func TestADeadQueryReplacesTheShimAtFreeness(t *testing.T) {
+	// Arrange
+	bouncer := &fakeShimBouncer{}
+	sink, log := queryDiedSink(bouncer)
+
+	// Act
+	sink.OnQueryDied("ws-1")
+
+	// Assert
+	if len(bouncer.asked) != 1 {
+		t.Fatalf("asked = %+v, want one replacement", bouncer.asked)
+	}
+	if got := bouncer.asked[0]; got.ws != "ws-1" || got.reason != rollout.ReasonQueryDied || got.force {
+		t.Fatalf("asked = %+v, want an unforced query_died replacement of ws-1", got)
+	}
+	if !hasLifecycleRecord(log, "info", "the session's vendor query died; its shim is replaced through the bounce registry") {
+		t.Fatalf("records = %+v, want the replacement stated", log.Records())
+	}
+}
+
+func TestADeadQuerysReplacementOutcomeIsRecorded(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		level string
+		msg   string
+	}{
+		{"it finished", nil, "info", "restarted the session whose query died"},
+		{"it failed", errors.New("resume refused"), "error", "could not restart the session whose query died"},
+		{"the shim departed first", bounce.ErrUnregistered, "info", "the shim whose query died departed before its replacement; the next bring-up starts the session afresh"},
+		{"a handover carried it", bounce.ErrHandedAcross, "info", "the restart of the session whose query died was handed across: the daemon the workspace moved to runs it"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bouncer := &fakeShimBouncer{}
+			sink, log := queryDiedSink(bouncer)
+			sink.OnQueryDied("ws-1")
+
+			// Act
+			bouncer.asked[0].done(tt.err)
+
+			// Assert
+			if !hasLifecycleRecord(log, tt.level, tt.msg) {
+				t.Fatalf("records = %+v, want %q at %s", log.Records(), tt.msg, tt.level)
+			}
+		})
+	}
+}
+
+func TestADeadQueryBeforeTheRolloutExistsIsRecordedNotDropped(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{health: &healthForwarder{}, builds: &rolloutForwarder{}, log: log}
+
+	// Act
+	sink.OnQueryDied("ws-1")
+
+	// Assert
+	if !hasLifecycleRecord(log, "error", "a session's query died before the rollout controller existed; nothing restarts it") {
+		t.Fatalf("records = %+v, want the unbound death at ERROR", log.Records())
+	}
+}
+
+func TestARefusedReplacementOfADeadQueryIsNotStatedAsTaken(t *testing.T) {
+	// Arrange
+	bouncer := &fakeShimBouncer{err: errors.New("refused")}
+	sink, log := queryDiedSink(bouncer)
+
+	// Act
+	sink.OnQueryDied("ws-1")
+
+	// Assert
+	if hasLifecycleRecord(log, "info", "the session's vendor query died; its shim is replaced through the bounce registry") {
+		t.Fatalf("records = %+v, want no replacement stated for a refusal", log.Records())
 	}
 }

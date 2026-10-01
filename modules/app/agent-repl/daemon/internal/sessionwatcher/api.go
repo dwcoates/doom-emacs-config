@@ -352,6 +352,12 @@ type LifecycleSink interface {
 	// their account; their durable rows are closed. It is told off the lock,
 	// like OnTurnEnded, and at most once per watcher.
 	OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID)
+	// OnQueryDied reports that the session's vendor query died: nothing in the
+	// shim restarts it, and no prompt can be taken until the session is
+	// restarted. It is told off the lock, like OnTurnEnded, and AFTER the turn
+	// ends the death closed. An adopted shim whose query had already died
+	// re-announces the death, so a boot that adopts it is told too.
+	OnQueryDied(ws ids.WorkspaceID)
 	// OnLiveWorkChanged republishes the live-work set; combined with the
 	// in-flight turn it is the freeness answer every lease holder waits on.
 	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)

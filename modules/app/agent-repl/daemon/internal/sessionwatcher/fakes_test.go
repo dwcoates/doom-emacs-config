@@ -946,6 +946,10 @@ func (s *lifecycleSink) OnTurnsEndedUnobserved(_ ids.WorkspaceID, turns []ids.Tu
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnsEndedUnobserved", turns: append([]ids.TurnID(nil), turns...)})
 }
 
+func (s *lifecycleSink) OnQueryDied(ids.WorkspaceID) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnQueryDied"})
+}
+
 func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	held := live
 	s.rec.emit(event{sink: "lifecycle", method: "OnLiveWorkChanged", live: &held})

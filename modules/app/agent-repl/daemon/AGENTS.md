@@ -993,6 +993,20 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   fails after its quiesce is taken back the same way. A handover with any
   reclaimed or failed workspace does not exit.
 
+## A dead vendor query is restarted by the daemon
+
+Nothing in the shim restarts a vendor query it lost (a crash, an EOF), and
+every StartTurn after it is refused `query_dead`. So the session watcher tells
+the lifecycle sink `OnQueryDied` (after the turn ends the death closed), and
+the sink asks the bounce registry for a shim replacement
+(`rollout.ReasonQueryDied`, unforced: the death ended every turn and live item,
+so the workspace is free). The relaunch resumes the session through the normal
+bring-up, a cold gate included, and delivers what was held meanwhile. A shim
+whose query had already died re-announces the death to every new watch, right
+after its re-announced start, so a boot that adopts it restarts it the same
+way. The footer's `query_died` line reads "restarting the session" and comes
+down at the session's next start.
+
 ## A handover never waits on work; a shim replacement does
 
 Owner ruling, 2026-09-27. A handover transfer asks the bounce registry for
