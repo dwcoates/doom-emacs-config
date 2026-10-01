@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -372,5 +373,56 @@ func TestSelectFeedRowMoveIsRecordedAtInfo(t *testing.T) {
 	}
 	if len(found) != 1 {
 		t.Fatalf("info records under %q = %v, want exactly one", opSelectFeedRow, log.Records())
+	}
+}
+
+// TestSelectFeedRowChangesReachTheWatchInTheOrderMade pins the one-writer
+// rule: every change is stored and published as one step, so a run of
+// changes reaches the webapp in the order the daemon made them.
+func TestSelectFeedRowChangesReachTheWatchInTheOrderMade(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+
+	// Act: newer from none lands on c, then wraps to a, then b.
+	for range 3 {
+		if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+			t.Fatalf("SelectFeedRow: %v", err)
+		}
+	}
+	var got []string
+	for range 3 {
+		got = append(got, receiveSelection(t, stream).GetResponse().GetRow().GetValue())
+	}
+
+	// Assert.
+	if strings.Join(got, ",") != "c,a,b" {
+		t.Fatalf("pushed rows = %v, want c,a,b", got)
+	}
+}
+
+// TestSelectFeedRowEndStoresNoneAsAbsence pins that an ended selection is no
+// selection at all: a later send or rollback reads nothing selected.
+func TestSelectFeedRowEndStoresNoneAsAbsence(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(clearMove())); err != nil {
+		t.Fatalf("SelectFeedRow clear: %v", err)
+	}
+
+	// Assert: a clear of nothing is now a no-op, which only holds if the
+	// first clear left no selection standing.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(leftViewMove(&frontendv1.FeedId{Value: "a"})))
+	if err != nil || resp.Msg.GetSuccess().GetNone() == nil {
+		t.Fatalf("left-view after clear = (%v, %v), want none with nothing to end", resp, err)
 	}
 }
