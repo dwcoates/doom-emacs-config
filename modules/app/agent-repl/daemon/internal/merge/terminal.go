@@ -294,14 +294,14 @@ func (r *run) keepOpenForHeldPrompts(ctx context.Context, log dlog.Logger) {
 	if r.subject.closes != r.ws {
 		return
 	}
-	source, err := r.o.sourceOf(ctx, r.repo, r.ws)
+	entry, err := r.o.entryOf(ctx, r.repo, r.ws)
 	if err != nil {
 		log.Error(op, "could not read whether a held prompt keeps the requester open; it is kept open", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 		r.subject.closes = ""
 		return
 	}
-	if !source.KeepOpen {
+	if !entry.Source.KeepOpen {
 		return
 	}
 	log.Info(op, "a prompt held during the merge keeps the requester open", dlog.Context{
@@ -671,7 +671,7 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // landing 7 added is `FeedMergeAbandoned.summary`: the resolved sentence for
 // the collapsed line, composed from the abandon CAUSE, so the cause reaches a
 // reader in prose even though the arm does not distinguish it.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, source wsm.MergeSource, cause AbandonCause) {
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, entry wsm.MergeQueueEntry, cause AbandonCause) {
 	const op = "daemon.merge.abandoned"
 	summary, declared := cause.summary()
 	if !declared {
@@ -688,8 +688,16 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 	o.deps.Log.Global().Info(op, "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
-		label := o.abandonedLabel(ctx, ws, source)
-		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
+		// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED, as every other
+		// drawing of the head; a queue entry with no queued time is a defect.
+		queued, err := enqueuedMS(entry)
+		if err != nil {
+			o.deps.Log.Global().Error(op, "an abandoned merge's queue entry carries no queued time; its bubble is not ended",
+				dlog.Context{"workspace": string(ws), "error": err.Error()})
+			return
+		}
+		label := o.abandonedLabel(ctx, ws, entry.Source)
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, queued,
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
 				Reason: &frontendv1.FeedMergeError_Abandoned{
@@ -860,17 +868,13 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 // with one outcome.
 func (r *run) closeOpenRounds(ctx context.Context, outcome string) {
 	r.mu.Lock()
-	var open []string
-	for key := range r.openRounds {
-		open = append(open, key)
+	open := make([]tabRound, 0, len(r.openRounds))
+	for _, round := range r.openRounds {
+		open = append(open, round)
 	}
 	r.mu.Unlock()
-	sort.Strings(open)
-	for _, key := range open {
-		kind, round, ok := splitRoundKey(key)
-		if !ok {
-			continue
-		}
-		r.closeTab(ctx, kind, round, outcome)
+	sort.Slice(open, func(i, j int) bool { return open[i].key() < open[j].key() })
+	for _, round := range open {
+		r.closeTab(ctx, round, outcome)
 	}
 }

@@ -100,22 +100,27 @@ func TestHeadOpensFolded(t *testing.T) {
 	}
 }
 
-// TestQueueSnapshotFrontCarriesItsActiveTab covers what a waiting user learns:
-// the front's progress, in the same message the front's own bubble draws.
-func TestQueueSnapshotFrontCarriesItsActiveTab(t *testing.T) {
-	// Arrange: a queue whose front is running its tests.
+// TestQueueSnapshotPlacesEachEntrysStanding covers the snapshot's assembly:
+// each entry carries the standing queueStandings resolved for its place in
+// line, so the front's progress reaches a waiting user unchanged.
+func TestQueueSnapshotPlacesEachEntrysStanding(t *testing.T) {
+	// Arrange: a queue whose front is in its second tests round.
 	entries := []wsm.MergeQueueEntry{{Workspace: "ws-1", Position: 1}, {Workspace: "ws-2", Position: 2}}
+	front := &frontendv1.FeedMergeQueueMerging{ActiveTab: tabLabel(TabTests, 2), StageEnteredAtMs: 7000}
+	standings := []*frontendv1.FeedMergeQueueEntry{
+		{Status: &frontendv1.FeedMergeQueueEntry_Merging{Merging: front}},
+		{Status: &frontendv1.FeedMergeQueueEntry_Waiting{Waiting: &frontendv1.FeedMergeQueueWaiting{StageEnteredAtMs: 3000}}},
+	}
 
 	// Act.
-	snap := queueSnapshot(entries, "ws-2", map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, tabLabel(TabTests, 2))
+	snap := queueSnapshot(entries, "ws-2", map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, standings)
 
 	// Assert.
-	merging := snap.GetAhead()[0].GetMerging()
-	if merging == nil {
-		t.Fatalf("the front's status is %T, want merging", snap.GetAhead()[0].GetStatus())
+	if got := snap.GetAhead()[0].GetMerging(); got != front {
+		t.Fatalf("the front's standing is %v, want the resolved merging standing", got)
 	}
-	if merging.GetActiveTab().GetText() != "tests" || merging.GetActiveTab().GetRound() != 2 {
-		t.Fatalf("the front's active tab is %v, want the second tests round", merging.GetActiveTab())
+	if got := snap.GetCurrent().GetWaiting().GetStageEnteredAtMs(); got != 3000 {
+		t.Fatalf("this workspace's wait began at %d, want 3000", got)
 	}
 }
 
@@ -124,11 +129,11 @@ func TestQueueSnapshotFrontCarriesItsActiveTab(t *testing.T) {
 func TestQueueTabSettlesAtTheFront(t *testing.T) {
 	tests := []struct {
 		name    string
-		front   bool
+		state   tabState
 		settled bool
 	}{
-		{name: "waiting behind another merge", front: false, settled: false},
-		{name: "at the front", front: true, settled: true},
+		{name: "waiting behind another merge", state: tabState{startedMS: 1000}, settled: false},
+		{name: "at the front", state: tabState{startedMS: 1000, settled: true, endedMS: 2000}, settled: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,12 +141,106 @@ func TestQueueTabSettlesAtTheFront(t *testing.T) {
 			snap := &frontendv1.FeedMergeQueue{}
 
 			// Act.
-			tab := queueTab(snap, tc.front, 1000)
+			tab := queueTab(snap, tc.state)
 
 			// Assert.
 			_, settled := tab.GetQueue().GetState().(*frontendv1.FeedMergeTabQueue_Settled)
 			if settled != tc.settled {
 				t.Fatalf("the queue tab settled = %v, want %v", settled, tc.settled)
+			}
+		})
+	}
+}
+
+// TestTabStateBadgeCarriesTheStart covers the one badge every tab kind selects
+// from: live or settled, it ships when the round began, and a settled one its
+// end and outcome.
+func TestTabStateBadgeCarriesTheStart(t *testing.T) {
+	tests := []struct {
+		name        string
+		state       tabState
+		wantLive    bool
+		wantEnded   int64
+		wantFailure string
+	}{
+		{name: "live", state: tabState{startedMS: 1000}, wantLive: true},
+		{name: "settled succeeded", state: tabState{startedMS: 1000, settled: true, endedMS: 4000}, wantEnded: 4000},
+		{name: "settled failed", state: tabState{startedMS: 1000, settled: true, endedMS: 4000, failure: "it broke"}, wantEnded: 4000, wantFailure: "it broke"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			live, settled := tc.state.badge()
+
+			// Assert.
+			if (live != nil) != tc.wantLive || (settled != nil) == tc.wantLive {
+				t.Fatalf("badge = live %v settled %v, want exactly the live arm = %v", live, settled, tc.wantLive)
+			}
+			if live != nil && live.GetStartedAtMs() != 1000 {
+				t.Fatalf("the live badge began at %d, want 1000", live.GetStartedAtMs())
+			}
+			if settled == nil {
+				return
+			}
+			if settled.GetStartedAtMs() != 1000 || settled.GetEndedAtMs() != tc.wantEnded {
+				t.Fatalf("the settled badge spans %d..%d, want 1000..%d", settled.GetStartedAtMs(), settled.GetEndedAtMs(), tc.wantEnded)
+			}
+			if got := settled.GetFailed().GetSummary(); got != tc.wantFailure {
+				t.Fatalf("the settled badge's failure is %q, want %q", got, tc.wantFailure)
+			}
+			if tc.wantFailure == "" && settled.GetSucceeded() == nil {
+				t.Fatalf("the settled badge's outcome is %T, want succeeded", settled.GetOutcome())
+			}
+		})
+	}
+}
+
+// tabBadgeOf reads any tab kind's state arms through the getters every kind
+// shares.
+func tabBadgeOf(t *testing.T, tab *frontendv1.FeedMergeTab) (*frontendv1.FeedMergeTabLive, *frontendv1.FeedMergeTabSettled) {
+	t.Helper()
+	m := tab.ProtoReflect()
+	field := m.WhichOneof(m.Descriptor().Oneofs().ByName("kind"))
+	if field == nil {
+		t.Fatal("the tab carries no kind")
+	}
+	inner, ok := m.Get(field).Message().Interface().(interface {
+		GetLive() *frontendv1.FeedMergeTabLive
+		GetSettled() *frontendv1.FeedMergeTabSettled
+	})
+	if !ok {
+		t.Fatalf("the %s kind has no live/settled state", field.Name())
+	}
+	return inner.GetLive(), inner.GetSettled()
+}
+
+// TestEveryTabBuilderShipsTheBadgeItWasGiven covers the call sites sharing the
+// one badge: every kind's builder places the tabState's start, live or
+// settled, so no kind can drop the instant its round began.
+func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
+	builders := map[string]func(tabState) *frontendv1.FeedMergeTab{
+		TabQueue:        func(s tabState) *frontendv1.FeedMergeTab { return queueTab(&frontendv1.FeedMergeQueue{}, s) },
+		TabPrePrompt:    func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPrePrompt, s) },
+		TabRebasing:     func(s tabState) *frontendv1.FeedMergeTab { return rebasingTab(s, 0, 0, nil) },
+		TabConflicts:    conflictsTab,
+		TabTests:        func(s tabState) *frontendv1.FeedMergeTab { return testsTab(s, nil, nil) },
+		TabFixes:        func(s tabState) *frontendv1.FeedMergeTab { return fixesTab(s, 1) },
+		TabCommitting:   func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
+		TabUpdatingMain: func(s tabState) *frontendv1.FeedMergeTab { return updatingMainTab(s, "") },
+		TabPostPrompt:   func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPostPrompt, s) },
+	}
+	for kind, build := range builders {
+		t.Run(kind, func(t *testing.T) {
+			// Act.
+			live, _ := tabBadgeOf(t, build(tabState{startedMS: 1000}))
+			_, settled := tabBadgeOf(t, build(tabState{startedMS: 1000, settled: true, endedMS: 4000}))
+
+			// Assert.
+			if live.GetStartedAtMs() != 1000 {
+				t.Fatalf("the live %s tab began at %d, want 1000", kind, live.GetStartedAtMs())
+			}
+			if settled.GetStartedAtMs() != 1000 || settled.GetEndedAtMs() != 4000 {
+				t.Fatalf("the settled %s tab spans %d..%d, want 1000..4000", kind, settled.GetStartedAtMs(), settled.GetEndedAtMs())
 			}
 		})
 	}
@@ -192,7 +291,7 @@ func TestTheNewTabsDrawTheirWords(t *testing.T) {
 
 func TestTheRebasingTabCarriesItsProgressAndLines(t *testing.T) {
 	// Act.
-	tab := rebasingTab(live(), 2, 5, []string{"replayed 2/5 · x"}, 0, "")
+	tab := rebasingTab(tabState{startedMS: 1}, 2, 5, []string{"replayed 2/5 · x"})
 
 	// Assert.
 	r := tab.GetRebasing()
@@ -203,8 +302,8 @@ func TestTheRebasingTabCarriesItsProgressAndLines(t *testing.T) {
 
 func TestTheUpdatingMainTabMovesFromFetchingToFastForwarding(t *testing.T) {
 	// Act.
-	fetching := updatingMainTab(live(), "", 0, "")
-	forwarding := updatingMainTab(nil, "abc", 9, "")
+	fetching := updatingMainTab(tabState{startedMS: 1}, "")
+	forwarding := updatingMainTab(tabState{startedMS: 1, settled: true, endedMS: 9}, "abc")
 
 	// Assert.
 	if fetching.GetUpdatingMain().GetStep().GetFetching() == nil {
@@ -217,7 +316,7 @@ func TestTheUpdatingMainTabMovesFromFetchingToFastForwarding(t *testing.T) {
 
 func TestTheCommittingTabCarriesTheMergeCommitsSubject(t *testing.T) {
 	// Act.
-	tab := committingTab(nil, "merge(master): x", 5, "it failed")
+	tab := committingTab(tabState{startedMS: 1, settled: true, endedMS: 5, failure: "it failed"}, "merge(master): x")
 
 	// Assert.
 	c := tab.GetCommitting()

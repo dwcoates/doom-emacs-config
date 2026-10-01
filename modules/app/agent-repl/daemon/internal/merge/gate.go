@@ -57,7 +57,7 @@ func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
 		"full": selection.Full, "reason": selection.Reason})
 
 	round := r.openTab(ctx, TabTests)
-	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round), started: map[string]time.Time{}}
+	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n), started: map[string]time.Time{}}
 	rows := make([]*frontendv1.FooterMergeTestRow, 0, len(selection.Suites))
 	for _, suite := range selection.Suites {
 		rows = append(rows, testRow(suite, waitingRowState()))
@@ -66,7 +66,7 @@ func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
 		f.Tests = rows
 		f.TestsRound++
 	})
-	r.upsert(TabTests, round, testsTab(live(), nil, nil, 0, ""))
+	r.upsert(round, testsTab(round.live(), nil, nil))
 
 	argv := r.o.deps.TestCommand(dir)
 	if len(argv) == 0 {
@@ -95,26 +95,26 @@ func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
 		if errors.As(err, &unstarted) && ctx.Err() == nil && !r.o.isDraining() {
 			return g.brokenGate(ctx, GateResult{}, fmt.Sprintf("it could not be started (%v)", unstarted.err)), nil
 		}
-		r.upsert(TabTests, round, testsTab(nil, nil, g.link(), r.o.nowMS(), "the test gate could not run"))
-		r.closeTab(ctx, TabTests, round, "failed")
+		r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the test gate could not run"), nil, g.link()))
+		r.closeTab(ctx, round, "failed")
 		return gateVerdict{}, err
 	}
 	if why, broken := gateDidNotRun(result.ExitCode); broken {
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
 	}
 	if result.Passed {
-		r.upsert(TabTests, round, testsTab(nil, result.Suites, g.link(), r.o.nowMS(), ""))
-		r.closeTab(ctx, TabTests, round, "succeeded")
+		r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), result.Suites, g.link()))
+		r.closeTab(ctx, round, "succeeded")
 		r.o.log(ctx, r.ws).Debug(op, "the merge's suites passed", dlog.Context{
-			"workspace": string(r.ws), "round": round, "archive": result.ArchivePath})
-		return gateVerdict{result: result, round: round}, nil
+			"workspace": string(r.ws), "round": round.n, "archive": result.ArchivePath})
+		return gateVerdict{result: result, round: round.n}, nil
 	}
 	summary := fmt.Sprintf("the test suite failed (exit %d); the whole run is archived at %s", result.ExitCode, result.ArchivePath)
-	r.upsert(TabTests, round, testsTab(nil, result.Suites, g.link(), r.o.nowMS(), summary))
-	r.closeTab(ctx, TabTests, round, "failed")
+	r.upsert(round, testsTab(round.settled(r.o.nowMS(), summary), result.Suites, g.link()))
+	r.closeTab(ctx, round, "failed")
 	r.o.log(ctx, r.ws).Info(op, "the merge's suites failed", dlog.Context{
-		"workspace": string(r.ws), "round": round, "exit_code": result.ExitCode, "archive": result.ArchivePath})
-	return gateVerdict{result: result, round: round}, nil
+		"workspace": string(r.ws), "round": round.n, "exit_code": result.ExitCode, "archive": result.ArchivePath})
+	return gateVerdict{result: result, round: round.n}, nil
 }
 
 // gateDidNotRun reads the exit statuses that mean the gate's command never
@@ -132,7 +132,7 @@ func gateDidNotRun(code int) (string, bool) {
 // gateRun is one gate run's live account.
 type gateRun struct {
 	r     *run
-	round int
+	round tabRound
 	log   testLog
 	// written reports that the log file exists, so the tab may link it.
 	written bool
@@ -167,7 +167,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 	g.written = true
 	writer := bufio.NewWriter(file)
 	var writeErr error
-	g.r.upsert(TabTests, g.round, testsTab(live(), nil, g.link(), 0, ""))
+	g.r.upsert(g.round, testsTab(g.round.live(), nil, g.link()))
 	output, code, runErr := g.r.o.deps.TestRunner.RunLines(ctx, dir, argv, func(line string) {
 		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
 			writeErr = err
@@ -233,7 +233,7 @@ func (g *gateRun) edge(line string) {
 		}
 		f.Line = suiteLine(name, state)
 	})
-	g.r.upsert(TabTests, g.round, testsTab(live(), suites, g.link(), 0, ""))
+	g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
 }
 
 // setTabSuite stands a suite's tab row at its edge. Called with g.mu held.
@@ -275,9 +275,9 @@ func suiteEdge(line string) (string, suiteState, bool) {
 // the failure line it names.
 func (g *gateRun) brokenGate(ctx context.Context, result GateResult, why string) gateVerdict {
 	line := "the test gate itself failed to run: " + why
-	g.r.upsert(TabTests, g.round, testsTab(nil, result.Suites, g.link(), g.r.o.nowMS(), line))
-	g.r.closeTab(ctx, TabTests, g.round, "gate_broken")
+	g.r.upsert(g.round, testsTab(g.round.settled(g.r.o.nowMS(), line), result.Suites, g.link()))
+	g.r.closeTab(ctx, g.round, "gate_broken")
 	g.r.o.log(ctx, g.r.ws).Warn("daemon.merge.tests", "the test gate itself failed to run; the merge fails with no fixing attempt", dlog.Context{
-		"workspace": string(g.r.ws), "round": g.round, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath})
-	return gateVerdict{result: result, round: g.round, broken: line}
+		"workspace": string(g.r.ws), "round": g.round.n, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath})
+	return gateVerdict{result: result, round: g.round.n, broken: line}
 }

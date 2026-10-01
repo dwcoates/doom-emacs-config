@@ -259,9 +259,9 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 		return err
 	}
 	o.withdrawRequest(ws)
-	source, err := o.sourceOf(ctx, repo, ws)
+	entry, err := o.entryOf(ctx, repo, ws)
 	if err != nil {
-		log.Error(op, "could not read a queued merge's source", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return err
 	}
 	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
@@ -278,7 +278,7 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
-	o.publishAbandoned(ctx, ws, ledger, source, cause)
+	o.publishAbandoned(ctx, ws, ledger, entry, cause)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
@@ -337,12 +337,16 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	o.mu.Lock()
 	front := o.running[repo]
 	o.mu.Unlock()
-	frontTab := tabLabel(TabQueue, 1)
 	var ahead *frontendv1.FooterStatusActivityMergeStep
 	var aheadAt time.Time
 	if front != nil {
-		frontTab = tabLabel(front.activeTab(), front.roundOf(front.activeTab()))
 		ahead, aheadAt = front.enqueuedLine(names[front.ws])
+	}
+	standings, err := o.queueStandings(entries)
+	if err != nil {
+		o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge entered its stage; the queue is not drawn",
+			dlog.Context{"repo": string(repo), "entries": len(entries), "error": err.Error()})
+		return err
 	}
 	waiting := 0
 	for _, entry := range entries {
@@ -357,11 +361,30 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// head to hang its queue tab on -- the tab a waiting user reads their
 		// place from, and the first of the tab sequence.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
+			// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
+			// (frontend.v1.FeedMergeRuntime), so a queue change never restarts
+			// it.
+			queued, err := enqueuedMS(entry)
+			if err != nil {
+				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
+					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
+				return err
+			}
 			o.deps.Feed.UpsertDurable(entry.Workspace, feedid.Feed{Root: true},
-				headRow(entry.Workspace, lease, o.bubbleLabel(ctx, entry), o.nowMS(), nil))
-			snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
-			o.deps.Feed.UpsertDurable(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
-				queueTab(snapshot, entry.State == wsm.MergeAdmitted, o.nowMS())))
+				headRow(entry.Workspace, lease, o.bubbleLabel(ctx, entry), queued, nil))
+			state, drawn, err := o.queueTabState(entry)
+			if err != nil {
+				o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge's queue tab began; the queue is not drawn",
+					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
+				return err
+			}
+			if drawn {
+				o.deps.Feed.UpsertDurable(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
+					queueTab(queueSnapshot(entries, entry.Workspace, names, dirs, standings), state)))
+			} else {
+				o.log(ctx, entry.Workspace).Debug("daemon.merge.queue", "an admitted merge's run is not registered yet; its admission draws its queue tab",
+					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace)})
+			}
 		}
 		if entry.State != wsm.MergeQueued {
 			continue
@@ -663,14 +686,87 @@ func (o *orchestrator) stillQueued(ctx context.Context, repo wsm.RepoKey, ws ids
 // queueTab builds the queue tab: LIVE while this workspace waits, SETTLED the
 // moment it reaches the front — the tab's whole job is the wait, so reaching
 // the front is what completes it.
-func queueTab(snapshot *frontendv1.FeedMergeQueue, atFront bool, atMS int64) *frontendv1.FeedMergeTab {
+func queueTab(snapshot *frontendv1.FeedMergeQueue, st tabState) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabQueue{Queue: snapshot}
-	if atFront {
-		inner.State = &frontendv1.FeedMergeTabQueue_Settled{Settled: settledOK(atMS)}
+	if live, settled := st.badge(); live != nil {
+		inner.State = &frontendv1.FeedMergeTabQueue_Live{Live: live}
 	} else {
-		inner.State = &frontendv1.FeedMergeTabQueue_Live{Live: live()}
+		inner.State = &frontendv1.FeedMergeTabQueue_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Queue{Queue: inner}}
+}
+
+// queueTabState resolves one queued merge's queue tab badge. THE WAIT BEGAN
+// WHEN THE MERGE WAS QUEUED, so the tab starts at the entry's queued time, and
+// it ends the moment the merge reached the front: its run's start, which
+// admission stamps. The end is that one instant on every republish, so a
+// settled queue tab's drawn run time stays fixed while the run moves on.
+//
+// An ADMITTED entry whose run is not registered yet is mid-admission (the
+// pump admitted it and the run has not taken its slot): there is no start to
+// end the wait at, and it is not drawn (false); the admission's own republish
+// draws it the moment the run exists.
+func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool, error) {
+	queuedMS, err := enqueuedMS(entry)
+	if err != nil {
+		return tabState{}, false, err
+	}
+	if entry.State != wsm.MergeAdmitted {
+		return tabState{startedMS: queuedMS}, true, nil
+	}
+	r, running := o.runFor(entry.Workspace)
+	if !running {
+		return tabState{}, false, nil
+	}
+	return tabState{startedMS: queuedMS, settled: true, endedMS: r.startedMS}, true, nil
+}
+
+// queueStandings resolves each in-line entry's standing for the queue
+// snapshot, in queue order: the FRONT's active tab and when it began, and for
+// every entry behind it, that it waits and since when it was queued.
+//
+// The front's stage is its run's ACTIVE ROUND -- its label and the instant
+// its ledger interval began, read whole -- so the snapshot's duration starts
+// over at zero whenever the front's active tab changes. A front with no run
+// (a paused queue, an admission not yet registered, a run already torn down)
+// or whose run is still in its queue round is in its QUEUE stage, which began
+// when it was queued: the same start its own queue tab carries.
+//
+// A missing queued time is an invariant violation (the column is NOT NULL and
+// every enqueue stamps it), answered as an error; it is never sent as zero.
+func (o *orchestrator) queueStandings(entries []wsm.MergeQueueEntry) ([]*frontendv1.FeedMergeQueueEntry, error) {
+	standings := make([]*frontendv1.FeedMergeQueueEntry, len(entries))
+	for i, entry := range entries {
+		queuedMS, err := enqueuedMS(entry)
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			standings[i] = &frontendv1.FeedMergeQueueEntry{Status: &frontendv1.FeedMergeQueueEntry_Waiting{
+				Waiting: &frontendv1.FeedMergeQueueWaiting{StageEnteredAtMs: queuedMS}}}
+			continue
+		}
+		merging := &frontendv1.FeedMergeQueueMerging{ActiveTab: tabLabel(TabQueue, 1), StageEnteredAtMs: queuedMS}
+		if r, running := o.runFor(entry.Workspace); running {
+			if active := r.activeRound(); active.kind != "" && active.kind != TabQueue {
+				merging = &frontendv1.FeedMergeQueueMerging{
+					ActiveTab:        tabLabel(active.kind, active.n),
+					StageEnteredAtMs: active.started.UnixMilli(),
+				}
+			}
+		}
+		standings[i] = &frontendv1.FeedMergeQueueEntry{Status: &frontendv1.FeedMergeQueueEntry_Merging{Merging: merging}}
+	}
+	return standings, nil
+}
+
+// enqueuedMS answers when an entry was queued, in epoch milliseconds. A zero
+// time is an invariant violation, never a stamp.
+func enqueuedMS(entry wsm.MergeQueueEntry) (int64, error) {
+	if entry.EnqueuedAt.IsZero() {
+		return 0, fmt.Errorf("merge: the queue entry of %s in %s carries no queued time", entry.Workspace, entry.Repo)
+	}
+	return entry.EnqueuedAt.UnixMilli(), nil
 }
 
 // nowMS is the clock in the epoch milliseconds every drawn stamp uses.
