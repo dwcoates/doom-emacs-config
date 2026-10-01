@@ -78,25 +78,66 @@ message FeedId {
   string value = 1;
 }
 
-// THE RESPONSE-SELECTION STATE for one feed (reply-to-a-past-response mode).
-// The daemon owns it and pushes it on the feed watch so the webapp can render
-// it: recolor the selected final-response bubble (green → blue),
-// center-scroll it (clamped at the feed edges), and suppress tail-follow
-// while a selection is active so a newly arriving response does not yank the
-// viewport off the centered bubble. Cleared (double-escape) returns the
-// webapp to the feed bottom.
+// THE SELECTION STATE for one workspace's feed: at most one row is selected,
+// either a final response (the next prompt replies to it) or a prompt (the
+// rollback keys roll the conversation back to just before it). The daemon owns
+// the selection and pushes it on the feed watch; the webapp draws it and never
+// decides it. The set arm IS the selection, so a response and a prompt can
+// never both be selected.
+//
+// While a row is selected the webapp draws the selection border on it,
+// centers it when the selection moves to it (clamped at the feed edges), and
+// does not follow the tail, so a newly arriving row does not pull the viewport
+// off it. A selection that is no longer visible is ended: the webapp reports
+// a selected row that has left the viewport entirely
+// (agentrepl.v1.SelectFeedRowLeftView), and the daemon answers with `none`.
 message FeedSelection {
-  // The currently selected final-response row, or UNSET for "none" (no
-  // selection, or the selection was just cleared).
-  optional FeedId selected = 1;
-  // Whether response-selection mode is active. While true the webapp does not
-  // follow the tail and does not auto-scroll on new rows. False the moment
-  // the selection clears.
-  bool active = 2;
-  // Which row the webapp should CENTER in the viewport, clamped at the feed
-  // edges by the webapp when there is not room to center. UNSET when nothing
-  // is selected (the webapp returns to the bottom instead).
-  optional FeedId center = 3;
+  // Which row is selected, if any. Exactly one arm is set on every push.
+  oneof selection {
+    // Nothing is selected.
+    FeedSelectionNone none = 4;
+    // A final response is selected.
+    FeedSelectionResponse response = 5;
+    // A prompt is selected.
+    FeedSelectionPrompt prompt = 6;
+  }
+  reserved 1, 2, 3;
+  reserved "selected", "active", "center";
+}
+
+// Nothing is selected, and what the viewport does now that nothing is.
+message FeedSelectionNone {
+  // Whether the webapp returns to the tail. A selection the user dismissed
+  // (escape twice, a background click, a sent prompt) returns the reader to
+  // the newest row; one that ended because the row scrolled out of view
+  // leaves the viewport where the reader put it.
+  oneof viewport {
+    // Scroll to the newest row and follow the tail again.
+    FeedSelectionNoneReturnToTail return_to_tail = 1;
+    // Leave the viewport where it is, and follow the tail again only once the
+    // reader is back at the newest row.
+    FeedSelectionNoneStay stay = 2;
+  }
+}
+// Scroll back to the newest row: the user dismissed the selection.
+message FeedSelectionNoneReturnToTail {}
+// Leave the viewport as the reader left it: the selection ended because the
+// selected row left the viewport.
+message FeedSelectionNoneStay {}
+
+// A selected final response: the next prompt sent is a reply to it, and the
+// daemon prepends a copy of it to that prompt.
+message FeedSelectionResponse {
+  // The selected final-response row, on the root feed.
+  FeedId row = 1;
+}
+
+// A selected prompt: the rollback keys roll the conversation back to just
+// before it. Only the main agent's prompts of the current vendor
+// conversation, after its last compaction or clear, are ever selected.
+message FeedSelectionPrompt {
+  // The selected prompt row, on the root feed.
+  FeedId row = 1;
 }
 
 // THE FEED TEXT SCALE (zoom). A SINGLE daemon-global multiplier applied to the
