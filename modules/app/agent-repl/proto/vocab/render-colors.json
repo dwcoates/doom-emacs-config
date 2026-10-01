@@ -198,17 +198,6 @@
   "composer_closed_colors": [
     "blue"
   ],
-  "_footer_allowance_comment": [
-    "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",
-    "sourced from SessionUpdate.rate_limit_status): allowed is quiet, allowed_warning",
-    "is the newsworthy rung, rejected means the vendor refused. Consumers assert row",
-    "for row against the three arm names; no private fallback table exists anywhere."
-  ],
-  "footer_allowance": {
-    "allowed": "green",
-    "allowed_warning": "yellow",
-    "rejected": "red"
-  },
   "_topbar_connectivity_comment": [
     "TopbarConnectivity.tone, keyed by the daemon's link states. The topbar",
     "reports the route to the session's shim, so its whole range is green",

@@ -45,9 +45,6 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	if err := colors.AssertFooterStatusArms(statusArms); err != nil {
 		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
 	}
-	if err := colors.AssertFooterAllowanceArms(allowanceArms); err != nil {
-		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
-	}
 	o := options{
 		clock:           SystemClock{},
 		dwell:           DefaultMomentaryDwell,
