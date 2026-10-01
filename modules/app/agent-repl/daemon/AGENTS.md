@@ -885,8 +885,13 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   tree, a made worktree (kept when the area is conflicts) and the slot.
 - **REPAIRS ARE THE REQUESTER'S OWN TURNS**, drawn in the merge bubble's tab AND
   mirrored onto the root feed (`OutputAddress.Mirror`, conflicts and fixes
-  only; the mirror copy drops the merge feed's order and parent). A history
-  replay does not reconstruct the mirror.
+  only; the mirror copy drops the merge feed's order and parent). The mirror
+  is part of the replayed history: the prompt queue records the standing
+  output address on every turn it opens (`wsm.Turn.Address`), and a replay
+  draws each recorded turn's entries at that address through the live upsert,
+  so a late reader or a relaunched daemon rebuilds the tab rows and their root
+  copies. An entry of a turn the workspace never recorded is drawn at the
+  standing address.
 - **THE TEST LOG OPENS BY TOKEN.** `FeedMergeTestLogToken` is `<lease>/<round>`;
   `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
   in the merge ledger, the file present), refuses with
