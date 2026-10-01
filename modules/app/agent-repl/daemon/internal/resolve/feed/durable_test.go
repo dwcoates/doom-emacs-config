@@ -98,19 +98,6 @@ func daemonOver(t *testing.T, store DurableRows) (*resolver, *dlog.TestLogger) {
 	return r, log
 }
 
-// feedRows answers one feed's rows in order.
-func feedRows(r *resolver, feed feedid.Feed) []*frontendv1.FeedRow {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.state(testWorkspace)
-	f := r.feed(s, feed)
-	out := make([]*frontendv1.FeedRow, 0, len(f.order))
-	for _, id := range f.order {
-		out = append(out, f.rows[id])
-	}
-	return out
-}
-
 // mergeHeadRow is a merge head on the root feed with LABEL.
 func mergeHeadRow(label string) *frontendv1.FeedRow {
 	return &frontendv1.FeedRow{
@@ -324,14 +311,4 @@ func TestAResetThatCannotForgetIsAnError(t *testing.T) {
 	if !hasRecordIn(log, "error", opDurable) {
 		t.Fatalf("records = %+v, want the failed forget at error", log.Records())
 	}
-}
-
-// hasRecordIn reports whether LOG holds a record at LEVEL for OPERATION.
-func hasRecordIn(log *dlog.TestLogger, level, operation string) bool {
-	for _, record := range log.Records() {
-		if record.Level == level && record.Operation == operation {
-			return true
-		}
-	}
-	return false
 }
