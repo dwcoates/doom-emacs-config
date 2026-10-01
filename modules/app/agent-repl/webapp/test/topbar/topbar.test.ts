@@ -18,6 +18,7 @@ import {
   workspaceGone,
 } from "../../src/failure/sink.js";
 import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
+import { withoutBlockComments } from "../source-text.js";
 
 /** A complete view; each test overrides only what it is about. */
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
@@ -516,7 +517,7 @@ function ruleBody(selector: string): string {
 
 /** The value of DECLARATION in SELECTOR's block, comments stripped. */
 function declaration(selector: string, property: string): string {
-  const body = ruleBody(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = withoutBlockComments(ruleBody(selector));
   const match = new RegExp(`(?:^|;|\\n)\\s*${property}\\s*:([^;]*);`).exec(body);
   expect(match).not.toBeNull();
   return (match?.[1] ?? "").trim();

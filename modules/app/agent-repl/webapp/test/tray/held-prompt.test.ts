@@ -77,7 +77,8 @@ import {
 import { installClickExpand } from "../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../src/feed/bubble-more.js";
 import { resetLoggingForTests } from "../../src/log.js";
-import stylesheet from "../../src/styles.css?raw";
+import { selectorOf } from "../stylesheet.js";
+import { codeOf } from "../source-text.js";
 import heldPromptSource from "../../src/tray/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -1208,7 +1209,7 @@ describe("the daemon's badge words", () => {
       "held for the build refresh",
     ];
     // Act
-    const source = heldPromptSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const source = codeOf(heldPromptSource);
     // Assert
     expect(composed.filter((sentence) => source.includes(sentence))).toEqual([]);
   });
@@ -1336,12 +1337,10 @@ describe("every status a held card shows is a badge in the table's tone", () => 
 });
 
 /** The stylesheet's selector for an expand-only element the toggle has not opened. */
-const HIDDEN_WHILE_COLLAPSED = (() => {
-  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-  const found = /([^{}]*\.bubble-expand-only)\s*\{\s*display:\s*none;\s*\}/.exec(css)?.[1]?.trim();
-  if (found === undefined) throw new Error("the stylesheet hides no expand-only region");
-  return found;
-})();
+const HIDDEN_WHILE_COLLAPSED = selectorOf(
+  /([^{}]*\.bubble-expand-only)\s*\{\s*display:\s*none;\s*\}/,
+  "hidden expand-only region",
+);
 
 describe("a held prompt collapsed and expanded", () => {
   /** A held prompt carrying every expand-only part, mounted under the one toggle. */
@@ -1737,14 +1736,6 @@ describe("the retired keep-alive hold", () => {
     expect(arms).not.toContain("keepAlive");
   });
 });
-
-/** The selector of the stylesheet rule PATTERN captures, or a loud failure naming WHAT. */
-function selectorOf(pattern: RegExp, what: string): string {
-  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-  const found = pattern.exec(css)?.[1]?.trim();
-  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
-  return found;
-}
 
 /** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
 const CLAMPED_BODY = selectorOf(/([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/, "ellipsis clamp");

@@ -18,6 +18,7 @@
  * and pinning the resolved hex would pin the theme instead of the register.
  */
 import stylesheet from "../src/styles.css?raw";
+import { withoutBlockComments } from "./source-text.js";
 
 /**
  * Install `src/styles.css` into the current document, and answer a teardown
@@ -37,4 +38,41 @@ export function installStylesheet(): () => void {
  */
 export function cascadedValue(el: Element, property: string): string {
   return window.getComputedStyle(el).getPropertyValue(property).trim();
+}
+
+/** One `selector-list { declarations }` block of a stylesheet. */
+export interface CssRule {
+  selectors: string[];
+  declarations: string;
+}
+
+/**
+ * Every `selector { declarations }` pair in CSS, in source order, comments
+ * stripped. A comment that mentions a selector is prose, never part of the
+ * selector of the rule that follows it, so a scan that kept comments would
+ * credit a rule with every class its preceding comment happens to name.
+ */
+export function rulesOf(css: string): CssRule[] {
+  const text = withoutBlockComments(css);
+  const rules: CssRule[] = [];
+  const pattern = /([^{}]+)\{([^{}]*)\}/g;
+  let match = pattern.exec(text);
+  while (match !== null) {
+    rules.push({
+      selectors: (match[1] ?? "").split(",").map((one) => one.trim()).filter((one) => one !== ""),
+      declarations: match[2] ?? "",
+    });
+    match = pattern.exec(text);
+  }
+  return rules;
+}
+
+/**
+ * The selector PATTERN's first group captures from the real stylesheet,
+ * comments stripped, or a loud failure naming WHAT the test looked for.
+ */
+export function selectorOf(pattern: RegExp, what: string): string {
+  const found = pattern.exec(withoutBlockComments(stylesheet))?.[1]?.trim();
+  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
+  return found;
 }
