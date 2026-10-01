@@ -204,6 +204,9 @@ type Resolver interface {
 	// removal always happens; an error says only that recording it durably
 	// failed, already logged and raised.
 	RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error
+	// LiveDetachedIn answers how many detached subagents and shells drawn in
+	// the turns are still live: what a files-restoring rollback stops.
+	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
 	// ResponseMarkdown answers the settled markdown of one selectable final
 	// response, and whether the feedid is selectable at all. A miss is a
 	// feedid the daemon does not deem selectable — the submit path refuses it

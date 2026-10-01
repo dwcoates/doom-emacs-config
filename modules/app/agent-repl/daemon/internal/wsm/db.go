@@ -138,6 +138,9 @@ type DB interface {
 	SetHeldPromptAccepted(ctx context.Context, turn TurnID) error
 	// TombstoneHeldPrompt retires a held prompt with its reason.
 	TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombstone) error
+	// TombstoneHeldPrompts retires several held prompts with one reason, all
+	// or nothing.
+	TombstoneHeldPrompts(ctx context.Context, turns []TurnID, why Tombstone) error
 	// ReplaceHeldPromptSaid replaces a STANDING hold's content (an edit's
 	// commit) and discards its verdict: the classification and the acceptance
 	// are cleared in the same transaction, so the new content is never read
@@ -306,6 +309,9 @@ type DB interface {
 	RecordRolledBackTurns(ctx context.Context, id WorkspaceID, turns []TurnID) error
 	// RolledBackTurns loads every rolled-back turn of a workspace.
 	RolledBackTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error)
+	// TurnStartedAt answers when a recorded turn was opened; ErrNotFound for a
+	// turn the workspace never recorded.
+	TurnStartedAt(ctx context.Context, id WorkspaceID, turn TurnID) (time.Time, error)
 
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.

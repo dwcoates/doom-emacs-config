@@ -285,6 +285,11 @@ type server struct {
 	// holder: Emacs and the webapp move it (SelectFeedRow) and are pushed it,
 	// and a sent prompt and a rollback read it here. Guarded by mu.
 	selections map[ids.WorkspaceID]*frontendv1.FeedSelection
+	// rollbackPlans are the rollbacks planned and not yet performed, by the
+	// token PlanRollback minted (rollback.go). In memory: a daemon restart
+	// forgets them, and a token it never minted is refused as a stale plan.
+	// Guarded by mu.
+	rollbackPlans map[string]rollbackPlan
 	// selectionTopics is one FeedSelection push topic per workspace, subscribed
 	// by the ROOT feed's WatchFeed so a selection change reaches every open
 	// webview. A publish.Topic replays its latest value, so a webview that
@@ -397,6 +402,7 @@ func New(deps Deps) (Server, error) {
 		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
 		now:                 time.Now,
 		selections:          make(map[ids.WorkspaceID]*frontendv1.FeedSelection),
+		rollbackPlans:       make(map[string]rollbackPlan),
 		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]),
 		// The zoom starts at the persistence default; Prime seeds the stored
 		// value onto the topic before anything is served.

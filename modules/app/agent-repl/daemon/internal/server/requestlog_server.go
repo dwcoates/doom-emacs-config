@@ -49,6 +49,40 @@ func (s *requestLoggingServer) SelectFeedRow(
 	return s.server.SelectFeedRow(ctx, req)
 }
 
+func (s *requestLoggingServer) PlanRollback(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.PlanRollbackRequest],
+) (resp *connect.Response[agentreplv1.PlanRollbackResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "PlanRollback", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.plan_rollback", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.plan_rollback", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.PlanRollback(ctx, req)
+}
+
+func (s *requestLoggingServer) RollBack(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RollBackRequest],
+) (resp *connect.Response[agentreplv1.RollBackResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "RollBack", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.roll_back", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.roll_back", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.RollBack(ctx, req)
+}
+
 func (s *requestLoggingServer) AdjustFeedTextScale(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AdjustFeedTextScaleRequest],

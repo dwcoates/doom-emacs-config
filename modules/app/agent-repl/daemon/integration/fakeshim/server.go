@@ -973,6 +973,25 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	}), nil
 }
 
+// RollBackSession answers a script when one is given, else success: the fake
+// keeps no vendor transcript to cut, and a test that is about a refusal
+// scripts the arm it wants.
+func (s *server) RollBackSession(ctx context.Context, req *connect.Request[shimv1.RollBackSessionRequest]) (*connect.Response[shimv1.RollBackSessionResponse], error) {
+	if err := s.enter(ctx, RPCRollBackSession, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.RollBackSessionResponse, *shimv1.RollBackSessionResponse](s, RPCRollBackSession); done {
+		return resp, err
+	}
+	success := &shimv1.RollBackSessionSuccess{}
+	if req.Msg.GetRestoreFiles() != nil {
+		success.FilesRestored = &shimv1.RollBackSessionFilesRestored{}
+	}
+	return connect.NewResponse(&shimv1.RollBackSessionResponse{
+		Result: &shimv1.RollBackSessionResponse_Success{Success: success},
+	}), nil
+}
+
 // killedSession reports that a KillSession was ACCEPTED, which is the process's
 // cue to exit once the answer is written.
 func (s *server) killedSession() bool {

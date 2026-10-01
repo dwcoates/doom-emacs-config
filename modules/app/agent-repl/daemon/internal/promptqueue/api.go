@@ -60,6 +60,10 @@ var (
 	// refused outright rather than held: a merged workspace closes, so work a
 	// post-merge-start prompt produced would be orphaned.
 	ErrMerging = errors.New("promptqueue: a merge is in flight for this workspace")
+	// ErrHoldsChanged is a rollback whose planned held prompts are no longer
+	// the ones standing: the plan no longer describes what would be dropped,
+	// so nothing was performed.
+	ErrHoldsChanged = errors.New("promptqueue: the held prompts changed since the rollback was planned")
 	// ErrNoSession is a submission to a workspace with no live shim.
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT
@@ -194,6 +198,14 @@ type Act struct {
 
 // Queue is the delivery path's whole surface.
 type Queue interface {
+	// HeldSince answers the held prompts queued at or after a time, in queue
+	// order: what a rollback to a prompt sent then drops. Session acts are
+	// never included.
+	HeldSince(ctx context.Context, ws ids.WorkspaceID, since time.Time) ([]ids.TurnID, error)
+	// RollBack runs a rollback while owning the workspace's turn sequence
+	// (under the delivery lock), dropping the planned held prompts only once
+	// it succeeds; ErrHoldsChanged when they are no longer the ones standing.
+	RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error
 	// Submit runs one submission through recognition-free delivery: the lease
 	// policy, the classifier, the hold decision, and the shim call. The
 	// disposition is the answer.

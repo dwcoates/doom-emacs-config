@@ -1282,3 +1282,52 @@ func TestCoalesceHeldPromptsIsAtomic(t *testing.T) {
 		t.Fatalf("the failed transaction was not logged at error: %v", log.Records())
 	}
 }
+
+func TestTombstoneHeldPromptsRetiresAllOrNothing(t *testing.T) {
+	cases := []struct {
+		name      string
+		turns     func(standing, retired TurnID) []TurnID
+		wantErr   bool
+		wantStood bool
+	}{
+		{name: "every hold standing", turns: func(s, _ TurnID) []TurnID { return []TurnID{s} }},
+		{name: "one already retired", turns: func(s, r TurnID) []TurnID { return []TurnID{s, r} }, wantErr: true, wantStood: true},
+		{name: "none named", turns: func(TurnID, TurnID) []TurnID { return nil }, wantErr: true, wantStood: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			standing, retired := heldFixture(t, s, ws.ID), heldFixture(t, s, ws.ID)
+			if err := s.TombstoneHeldPrompt(context.Background(), retired, Tombstone{Kind: "dropped", At: instant}); err != nil {
+				t.Fatalf("seed retire: %v", err)
+			}
+
+			// Act
+			err := s.TombstoneHeldPrompts(context.Background(), tc.turns(standing, retired), Tombstone{Kind: "rolled_back", At: instant})
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("TombstoneHeldPrompts() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			held, _, _ := s.HeldPromptByTurn(context.Background(), standing)
+			if stood := held.Tombstone == nil; stood != tc.wantStood {
+				t.Fatalf("standing hold stood = %v, want %v", stood, tc.wantStood)
+			}
+			if tc.wantErr && !loggedOperation(log, "daemon.wsm.tombstone_held_prompt", "error") {
+				t.Fatalf("no ERROR record: %v", log.Records())
+			}
+		})
+	}
+}
+
+// heldFixture seeds one standing held prompt and answers its turn.
+func heldFixture(t *testing.T, s *store, ws WorkspaceID) TurnID {
+	t.Helper()
+	turn := NewTurnID()
+	if err := s.PutHeldPrompt(context.Background(), HeldPrompt{Workspace: ws, Turn: turn, Said: said("held"), Origin: "webapp", QueuedAt: instant}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+	return turn
+}

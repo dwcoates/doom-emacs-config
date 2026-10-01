@@ -516,6 +516,10 @@ func (c *fakeClient) KillTurn(context.Context, *shimv1.KillTurnRequest) (*shimv1
 	panic("sessionwatcher must not call KillTurn")
 }
 
+func (c *fakeClient) RollBackSession(context.Context, *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
+	panic("sessionwatcher must not call RollBackSession")
+}
+
 func (c *fakeClient) StopBash(context.Context, *shimv1.StopBashRequest) (*shimv1.StopBashResponse, error) {
 	panic("sessionwatcher must not call StopBash")
 }
