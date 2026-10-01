@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeTabSchema,
   FeedMergeTabSettledSchema,
   FeedRowSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { createTicker } from "../../../src/clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   AGENTIC_KINDS,
@@ -13,12 +14,26 @@ import {
   autoSelectedTab,
   drawFeedMergeTab,
   drawFeedMergeTabLabel,
+  drawTabDuration,
   mergeTabsOf,
   readMergeTab,
 } from "../../../src/feed/merge/tab-strip.js";
 import { oneofArms } from "../../arms.js";
-import { id, tabRow } from "./fixtures.js";
+import { TAB_STARTED_AT_MS, id, tabRow } from "./fixtures.js";
 import { orderFor } from "../../feed-order.js";
+
+/** The shared clock the badges tick on, stepped by each test's fake timers. */
+let TICKER = createTicker(1000);
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  TICKER = createTicker(1000);
+  // Four seconds after every fixture tab's work began.
+  vi.setSystemTime(Number(TAB_STARTED_AT_MS) + 4_000);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", () => {
   it("keeps the served order rather than sorting by kind", () => {
@@ -124,33 +139,75 @@ describe("drawFeedMergeTab: the badge says label, round and state — no counts 
   it("marks the kind as the hook the suite targets", () => {
     const row = tabRow("t1", { kind: "updatingMain", state: "live" });
     const tab = readMergeTab(row, row.row.value as never);
-    expect(drawFeedMergeTab(tab, { active: true }).getAttribute("data-merge-tab")).toBe("updatingMain");
+    expect(drawFeedMergeTab(tab, { active: true, ticker: TICKER }).getAttribute("data-merge-tab")).toBe("updatingMain");
   });
 
   it("marks the state as the hook the suite targets", () => {
     const row = tabRow("t1", { kind: "committing", state: "live" });
     const tab = readMergeTab(row, row.row.value as never);
-    expect(drawFeedMergeTab(tab, { active: true }).getAttribute("data-tab-state")).toBe("live");
+    expect(drawFeedMergeTab(tab, { active: true, ticker: TICKER }).getAttribute("data-tab-state")).toBe("live");
   });
 
   it("carries no count of any kind in its text", () => {
     const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live", label: "tests" })]);
-    const el = drawFeedMergeTab(tab, { active: false });
-    expect(el.textContent).toBe("tests●");
+    const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
+    expect(el.textContent).toBe("tests4s●");
   });
 
   it("marks a settled tab with its outcome", () => {
     const [tab] = mergeTabsOf([
       tabRow("t1", { kind: "tests", state: "settled", outcome: "failed" }),
     ]);
-    const el = drawFeedMergeTab(tab, { active: false });
+    const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
     expect(el.getAttribute("data-tab-outcome")).toBe("failed");
     expect(el.querySelector(".merge-tab-glyph")?.textContent).toBe("✗");
   });
 
   it("marks the active tab so the strip shows where the reader is", () => {
     const [tab] = mergeTabsOf([tabRow("t1", { kind: "queue", state: "live" })]);
-    expect(drawFeedMergeTab(tab, { active: true }).getAttribute("aria-selected")).toBe("true");
+    expect(drawFeedMergeTab(tab, { active: true, ticker: TICKER }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("readMergeTab: the instants the tab's duration reads", () => {
+  it("reads a live tab's start", () => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live", startedAtMs: 2_000n })]);
+    expect([tab.startedMs, tab.endedMs]).toEqual([2_000, undefined]);
+  });
+
+  it("reads a settled tab's start and end", () => {
+    const [tab] = mergeTabsOf([
+      tabRow("t1", { kind: "tests", state: "settled", startedAtMs: 2_000n, endedAtMs: 9_000n }),
+    ]);
+    expect([tab.startedMs, tab.endedMs]).toEqual([2_000, 9_000]);
+  });
+});
+
+describe("drawTabDuration: how long the tab has been in its state", () => {
+  it("ticks a live tab from when its work began", () => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live" })]);
+    const el = drawTabDuration(tab, TICKER);
+    vi.advanceTimersByTime(2_000);
+    expect(el.textContent).toBe("6s");
+  });
+
+  it("shows a settled tab's run time, ended less started, and never ticks it", () => {
+    const [tab] = mergeTabsOf([
+      tabRow("t1", { kind: "tests", state: "settled", startedAtMs: 1_000n, endedAtMs: 91_000n }),
+    ]);
+    const el = drawTabDuration(tab, TICKER);
+    vi.advanceTimersByTime(5_000);
+    expect(el.textContent).toBe("1m 30s");
+  });
+
+  it("sits beside the tab's label, ahead of its state glyph", () => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live" })]);
+    const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
+    expect([...el.children].map((c) => c.className)).toEqual([
+      "merge-tab-label",
+      "merge-tab-duration",
+      "merge-tab-glyph is-live",
+    ]);
   });
 });
 
@@ -191,7 +248,7 @@ describe("drawTabStateGlyph: a state this build has no glyph for", () => {
     const row = tabRow("t1", { kind: "tests", state: "live" });
     const tab = { ...readMergeTab(row, row.row.value as never), state: "rewinding" };
 
-    const el = drawFeedMergeTab(tab, { active: false });
+    const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
 
     const glyph = el.querySelector(".merge-tab-glyph");
     expect(el.getAttribute("data-tab-state")).toBe("rewinding");

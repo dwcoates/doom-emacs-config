@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import type { Engine } from "../../src/engine/engine.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
+import * as failures from "../../src/service/failures.js";
 import { shimRoutes } from "../../src/service/routes.js";
 import * as requests from "./requests.js";
 
@@ -69,6 +70,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("killTurn")(request);
       return create(shimv1.KillTurnResponseSchema, {});
     },
+    async rollBackSession(request) {
+      record("rollBackSession")(request);
+      return create(shimv1.RollBackSessionResponseSchema, {});
+    },
     async *watchBash(request) {
       record("watchBash")(request);
       yield create(shimv1.WatchBashResponseSchema, {});
@@ -125,6 +130,7 @@ describe("shimRoutes unary delegation", () => {
     ["startTurn", requests.startTurnRequest],
     ["updateAgent", requests.updateAgentRequest],
     ["killTurn", requests.killTurnRequest],
+    ["rollBackSession", requests.rollBackSessionRequest],
     ["stopBash", requests.stopBashRequest],
     ["detachForeground", requests.detachForegroundRequest],
     ["readHistory", requests.readHistoryRequest],
@@ -139,6 +145,35 @@ describe("shimRoutes unary delegation", () => {
 
     // Assert.
     expect(calls.map((call) => call.verb)).toEqual([verb]);
+  });
+});
+
+/**
+ * RollBackSession's arms reach the caller exactly as the engine answered them:
+ * the arm IS the outcome, so a handler that reshaped one would change what
+ * happened.
+ */
+describe("shimRoutes RollBackSession outcomes", () => {
+  it.each([
+    ["success keeping the files", failures.rollBackSessionSucceeded(undefined)],
+    ["success restoring the files", failures.rollBackSessionSucceeded(["/ws/a.ts"])],
+    ["no_session", failures.rollBackSessionRefused({ kind: "noSession" }, "d")],
+    ["prompt_not_recorded", failures.rollBackSessionRefused({ kind: "promptNotRecorded" }, "d")],
+    ["first_prompt", failures.rollBackSessionRefused({ kind: "firstPrompt" }, "d")],
+    ["unseen_prompt", failures.rollBackSessionRefused({ kind: "unseenPrompt", vendorPromptUuid: "u-9" }, "d")],
+    ["vendor_refused", failures.rollBackSessionRefused({ kind: "vendorRefused", vendorMessage: "no" }, "d")],
+    ["files_not_restorable", failures.rollBackSessionRefused({ kind: "filesNotRestorable", vendorMessage: "no" }, "d")],
+  ] as const)("answers %s unchanged", async (_arm, answer) => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    engine.rollBackSession = () => Promise.resolve(answer);
+    const client = clientFor(engine);
+
+    // Act.
+    const response = await client.rollBackSession(requests.rollBackSessionRequest());
+
+    // Assert.
+    expect(response).toEqual(answer);
   });
 });
 

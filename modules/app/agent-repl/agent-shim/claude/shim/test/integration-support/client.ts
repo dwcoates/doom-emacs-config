@@ -298,12 +298,14 @@ export function freshSession(
 export function resumeSession(
   vendorSessionId: string,
   coldRemediation?: conversationv1.SessionColdRemediation,
+  rolledBackTurns: readonly string[] = [],
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {
         vendorSessionId,
+        rolledBackTurns: rolledBackTurns.map((value) => create(conversationv1.TurnIdSchema, { value })),
         ...(coldRemediation === undefined ? {} : { coldRemediation }),
       }),
     },

@@ -253,117 +253,31 @@ func TestTheMainAgentsBudgetLineOutlivesASubagentsRun(t *testing.T) {
 
 // ---- the rate-limit event --------------------------------------------------
 
-func TestARateLimitWarningStandsAsASalientLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed_warning"))
-
-	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetRateLimit()
-	if line.GetAllowedWarning() == nil || line.GetWindow().GetWeekly() == nil {
-		t.Fatalf("rate limit = %+v, want the weekly allowance's warning", line)
-	}
-	if line.GetUtilization() != 0.85 || line.GetResetsAtS() != instant.Add(time.Hour).Unix() {
-		t.Fatalf("rate limit = %+v, want the event's figures at 0.85, resetting in an hour", line)
-	}
-}
-
-func TestARateLimitRefusalExplainsAUsageLimitBlock(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, rateEvent(fiveHourWindow(), "rejected"))
-
-	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRateLimit()
-	if line.GetRejected() == nil || line.GetWindow().GetSession() == nil {
-		t.Fatalf("rate limit = %+v, want the session allowance's refusal under the block", line)
-	}
-}
-
-func TestAnAllowedEventEndsTheSameAllowancesRateLimitLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed_warning"))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed"))
-
-	// Assert
-	if got := lineNow(t, h); got.kind == "rate_limit" {
-		t.Fatalf("activity = %+v, want the rate-limit line ended", got)
-	}
-}
-
-func TestAnAllowedEventForAnotherAllowanceKeepsTheLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed_warning"))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, rateEvent(overageWindow(), "allowed"))
-
-	// Assert
-	if got := lineNow(t, h); got.kind != "rate_limit" {
-		t.Fatalf("activity = %+v, want the weekly warning still standing", got)
-	}
-}
-
-func TestAStatuslessRateEventChangesNoLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	update := rateEvent(sevenDayWindow(), "allowed")
-	update.GetRateLimitStatus().Status = nil
-
-	// Act
-	h.r.OnSessionUpdate(testWS, update)
-
-	// Assert
-	if got := lineNow(t, h); got.tier != "enduring" {
-		t.Fatalf("activity = %+v, want the enduring line", got)
-	}
-}
-
-func TestRateLimitWindowMapsEveryVendorWindow(t *testing.T) {
+func TestARateLimitEventFeedsTheUsageFiguresAndStandsNoSalientLine(t *testing.T) {
 	tests := []struct {
-		name   string
-		window *conversationv1.SessionRateLimitType
-		want   string
+		name    string
+		verdict string
+		want    func(*frontendv1.FooterAllowance) bool
 	}{
-		{"five-hour", fiveHourWindow(), "session"},
-		{"seven-day", sevenDayWindow(), "weekly"},
-		{"seven-day opus", sevenDayOpusWindow(), "weekly_opus"},
-		{"seven-day sonnet", sevenDaySonnetWindow(), "weekly_sonnet"},
-		{"seven-day overage included", sevenDayOverageIncludedWindow(), "weekly_overage_included"},
-		{"overage", overageWindow(), "overage"},
-		{"none named", nil, ""},
+		{"a warning", "allowed_warning", func(a *frontendv1.FooterAllowance) bool { return a.GetAllowedWarning() != nil }},
+		{"a refusal", "rejected", func(a *frontendv1.FooterAllowance) bool { return a.GetRejected() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			bothAllowances(h, 85, 40)
+
 			// Act
-			window, name := rateLimitWindow(tt.window)
+			h.r.OnSessionUpdate(testWS, rateEvent(fiveHourWindow(), tt.verdict))
 
 			// Assert
-			if name != tt.want {
-				t.Fatalf("name = %q, want %q", name, tt.want)
+			if got := lineNow(t, h); got.tier != "enduring" {
+				t.Fatalf("activity = %+v, want the enduring line: a rate-limit event stands no salient line", got)
 			}
-			if tt.want == "" {
-				if window != nil {
-					t.Fatalf("window = %+v, want none", window)
-				}
-				return
-			}
-			m := window.ProtoReflect()
-			if arm := m.WhichOneof(m.Descriptor().Oneofs().ByName("window")); arm == nil || string(arm.Name()) != tt.want {
-				t.Fatalf("window arm = %v, want %s", arm, tt.want)
+			if session := enduringUsageOf(h).GetSession(); !tt.want(session) {
+				t.Fatalf("session allowance = %+v, want the event's %s verdict in the usage figures", session, tt.verdict)
 			}
 		})
 	}
@@ -371,20 +285,16 @@ func TestRateLimitWindowMapsEveryVendorWindow(t *testing.T) {
 
 // ---- precedence and the shared filling -------------------------------------
 
-func TestTheSharedSalientLinesRankUpdateRateNotificationBudget(t *testing.T) {
+func TestTheSharedSalientLinesRankUpdateNotificationBudget(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
 		want    string
 	}{
-		{"a deploy outranks a rate-limit event", func(h *harness) {
-			h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed_warning"))
+		{"a deploy outranks the notification", func(h *harness) {
+			h.r.OnActivity(testWS, mainAgent, notificationFrame("look"))
 			h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Installing})
 		}, "update"},
-		{"a rate-limit event outranks the notification", func(h *harness) {
-			h.r.OnActivity(testWS, mainAgent, notificationFrame("look"))
-			h.r.OnSessionUpdate(testWS, rateEvent(sevenDayWindow(), "allowed_warning"))
-		}, "rate_limit"},
 		{"the notification outranks the budget line", func(h *harness) {
 			h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "filling"})
 			h.r.OnActivity(testWS, mainAgent, notificationFrame("look"))
@@ -439,7 +349,6 @@ var salientMessages = []proto.Message{
 func TestEverySalientMessageCarriesTheSharedKinds(t *testing.T) {
 	shared := map[protoreflect.Name]protoreflect.FullName{
 		"update":         "frontend.v1.FooterStatusActivityUpdate",
-		"rate_limit":     "frontend.v1.FooterStatusActivityRateLimit",
 		"notification":   "frontend.v1.FooterStatusActivityNotification",
 		"context_budget": "frontend.v1.FooterStatusActivityContextBudget",
 	}

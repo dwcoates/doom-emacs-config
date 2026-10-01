@@ -14,14 +14,23 @@
  * arm it was served as. An unset kind or an unset state is a malformed view.
  *
  * NO COUNTS ON A BADGE (R5): a tab says its label, its round beyond the first,
- * and its state glyph. "8/12" would be the client counting, and the client
- * counts nothing.
+ * how long it has been (or was) in its state, and its state glyph. "8/12"
+ * would be the client counting, and the client counts nothing.
+ *
+ * THE DURATION IS THE CLIENT'S CLOCK OVER THE DAEMON'S INSTANTS (owner
+ * request, 2026-10-01): a live tab ticks from its `started_at_ms`, a settled
+ * one shows `ended_at_ms - started_at_ms` and stops, through the one
+ * elapsed-clock builder every other clock on the page uses.
  */
+import type { Ticker } from "../../clock.js";
+import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
-import { requireCase, requireMessage } from "../../rpc/strict.js";
+import { msOf, requireCase, requireMessage } from "../../rpc/strict.js";
 import type {
   FeedMergeTab,
   FeedMergeTabLabel,
+  FeedMergeTabLive,
+  FeedMergeTabSettled,
   FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -64,6 +73,10 @@ export interface MergeTab {
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
+  /** When the tab's work began, epoch ms. */
+  startedMs: number;
+  /** For a settled tab, when it settled, epoch ms. */
+  endedMs?: number;
   /** The kind arm's own message, for the body renderer to read content off. */
   value: Record<string, unknown>;
 }
@@ -93,6 +106,10 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
           `${PATH}.${kind.case}.settled.outcome`,
         )
       : undefined;
+  // Every kind's state arms are the SHARED leaves, so the instants read the
+  // same off whichever kind this is.
+  const leaf = state.value as FeedMergeTabLive | FeedMergeTabSettled;
+  const statePath = `${PATH}.${kind.case}.${state.case}`;
   return {
     row,
     id: requireMessage(row.id, "FeedRow.id").value,
@@ -100,6 +117,11 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
     kind: kind.case,
     state: state.case,
     outcome: settled?.case,
+    startedMs: msOf(leaf.startedAtMs, `${statePath}.started_at_ms`),
+    endedMs:
+      state.case === "settled"
+        ? msOf((leaf as FeedMergeTabSettled).endedAtMs, `${statePath}.ended_at_ms`)
+        : undefined,
     value,
   };
 }
@@ -111,7 +133,10 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
  * takes a click of its own; selecting a tab is purely local (nothing is
  * fetched, the rows are all already here), so it raises no rpc.
  */
-export function drawFeedMergeTab(tab: MergeTab, opts: { active: boolean }): HTMLButtonElement {
+export function drawFeedMergeTab(
+  tab: MergeTab,
+  opts: { active: boolean; ticker: Ticker },
+): HTMLButtonElement {
   const el = document.createElement("button");
   el.type = "button";
   el.className = "merge-tab";
@@ -121,8 +146,22 @@ export function drawFeedMergeTab(tab: MergeTab, opts: { active: boolean }): HTML
   el.setAttribute("aria-selected", opts.active ? "true" : "false");
   el.classList.toggle("is-active", opts.active);
   el.append(drawFeedMergeTabLabel(requireMessage(tab.tab.label, `${PATH}.label`)));
+  el.append(drawTabDuration(tab, opts.ticker));
   el.append(drawTabStateGlyph(tab));
   return el;
+}
+
+/** The class of a tab's duration, beside its label. */
+export const TAB_DURATION_CLASS = "merge-tab-duration";
+
+/**
+ * How long the tab has been in its state: a live tab ticks from when its work
+ * began; a settled one shows how long it ran, fixed.
+ */
+export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
+  return tab.endedMs === undefined
+    ? liveElapsedClock(ticker, TAB_DURATION_CLASS, tab.startedMs)
+    : settledElapsedClock(TAB_DURATION_CLASS, tab.endedMs - tab.startedMs);
 }
 
 /**

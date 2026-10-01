@@ -366,7 +366,7 @@ func TestAWalkThatRunsOutWhileHistoryRemainsAnswersTruncated(t *testing.T) {
 		Boundary: &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{
 			LastEntry: &conversationv1.HistoryPointer{Value: "p1"},
 		}},
-	}, noAddress())
+	})
 	h.openPage(rootFeed(), "reader-1")
 
 	// Act: the walk is already at the oldest replayed row.
@@ -393,7 +393,7 @@ func TestAWalkThatReachesAFlooredReplayClaimsTheStart(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{
 		Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
-	}, noAddress())
+	})
 	h.deliverPrompt("turn-1", "prompt")
 	h.openPage(rootFeed(), "reader-1")
 

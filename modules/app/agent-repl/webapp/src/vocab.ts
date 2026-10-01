@@ -54,18 +54,22 @@ export function protoArmName(generatedCase: string): string {
 
 const ROSTER_STATUS: Readonly<Record<string, Color>> = renderColors.roster_status as Record<string, Color>;
 const FOOTER_STATUS: Readonly<Record<string, Color>> = renderColors.footer_status as Record<string, Color>;
-const FOOTER_ALLOWANCE: Readonly<Record<string, Color>> = renderColors.footer_allowance as Record<string, Color>;
 const TOPBAR_CONNECTIVITY: Readonly<Record<string, Color>> = renderColors.topbar_connectivity as Record<string, Color>;
 const MERGE_GLYPHS: Readonly<Record<string, string>> = renderColors.merge_glyphs;
 const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_sides as Record<string, Color>;
+const FEED_SUBAGENT_DOT: Readonly<Record<string, Color>> = renderColors.feed_subagent_dot as Record<string, Color>;
+const FEED_SHELL_DOT: Readonly<Record<string, Color>> = renderColors.feed_shell_dot as Record<string, Color>;
+
+/** Every `feed_subagent_dot` key, for the row-for-row assertion. */
+export const FEED_SUBAGENT_DOT_KEYS: readonly string[] = Object.keys(FEED_SUBAGENT_DOT);
+/** Every `feed_shell_dot` key, for the row-for-row assertion. */
+export const FEED_SHELL_DOT_KEYS: readonly string[] = Object.keys(FEED_SHELL_DOT);
 
 /** The glyph NAME the feed's merge bubble head takes. */
 export const FEED_MERGE_HEAD_GLYPH: string = renderColors.feed_merge_head_glyph;
 
 /** Every `footer_status` key, for the same assertion on the footer. */
 export const FOOTER_STATUS_ARMS: readonly string[] = Object.keys(FOOTER_STATUS);
-/** Every `footer_allowance` key, for the same assertion on the allowance cell. */
-export const FOOTER_ALLOWANCE_ARMS: readonly string[] = Object.keys(FOOTER_ALLOWANCE);
 /** The closed set of tones a received `TopbarConnectivity.tone` may name. */
 export const TOPBAR_TONES: readonly string[] = renderColors.topbar_tones;
 
@@ -104,11 +108,6 @@ const COMPOSER_CLOSED_COLORS: readonly string[] = renderColors.composer_closed_c
  */
 export function composerClosedFor(arm: string): boolean {
   return COMPOSER_CLOSED_COLORS.includes(footerStatusColor(arm));
-}
-
-/** The color a `FooterAllowance.status` arm paints its allowance cell. */
-export function footerAllowanceColor(arm: string): Color {
-  return lookup(FOOTER_ALLOWANCE, arm, "render-colors.json#footer_allowance");
 }
 
 /** The color a `TopbarConnectivity` link state paints its dot. */
@@ -167,6 +166,19 @@ export function failureSideColor(side: FailureSide): Color {
     throw new MalformedView("render-colors.json#failure_sides", `side '${side}' has no color`);
   }
   return color;
+}
+
+/**
+ * The color a feed subagent bubble's head dot takes: STATE is `live`, or the
+ * settled outcome arm (generated spelling). `none` is drawn hollow.
+ */
+export function feedSubagentDotColor(state: string): Color {
+  return lookup(FEED_SUBAGENT_DOT, state, "render-colors.json#feed_subagent_dot");
+}
+
+/** The same for a detached shell bubble's head dot. */
+export function feedShellDotColor(state: string): Color {
+  return lookup(FEED_SHELL_DOT, state, "render-colors.json#feed_shell_dot");
 }
 
 const PAINT_SYNTAX: readonly string[] = paintClasses.syntax;

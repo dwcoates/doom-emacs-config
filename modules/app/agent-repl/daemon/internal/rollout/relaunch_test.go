@@ -1126,3 +1126,311 @@ func TestARelaunchClosesTheFaultsWhoseLifetimeEndsThere(t *testing.T) {
 		})
 	}
 }
+
+// liveRefusal is the shim's refusal of an unforced stand-down: a turn the
+// vendor started on its own is in flight.
+func liveRefusal() *shimv1.KillSessionResponse {
+	return &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Failure{Failure: &shimv1.KillSessionFailure{
+			Cause: &shimv1.KillSessionFailure_Live{Live: &conversationv1.SessionLive{
+				TurnInFlight: &conversationv1.TurnId{Value: "vendor-turn"},
+			}},
+			Detail: "a turn is in flight",
+		}},
+	}
+}
+
+// deferredBounce asks for an unforced bounce of a free workspace whose shim
+// refuses the stand-down as live, and joins the run that deferred it. done
+// receives the requester's outcome, which a deferral never sends.
+func deferredBounce(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchReason) (old *fakeShim, done chan error) {
+	t.Helper()
+	old = h.fleet.live[ws]
+	old.killAnswer = liveRefusal()
+	done = make(chan error, 2)
+	if _, err := h.c.BounceShim(context.Background(), ws, reason, false, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	h.registry.wait()
+	return old, done
+}
+
+// AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK. Regression, 2026-10-01
+// (footer-activity-updates): the last detached subagent concluded, the
+// registry took the build_stale bounce, the vendor started a turn on its own,
+// the shim refused the stand-down as live, and the daemon waited out the 30s
+// window and force-killed the shim -- the running turn and a resumed subagent
+// with it.
+func TestALiveRefusalOfAnUnforcedStandDownDefersTheBounce(t *testing.T) {
+	tests := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error)
+	}{
+		{name: "the old shim is never force-killed", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			if kills := old.ForceKills(); len(kills) != 0 {
+				t.Fatalf("force-kills = %+v, want none over live work", kills)
+			}
+		}},
+		{name: "the stand-down window is never waited out", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			for _, d := range h.clock.Waits() {
+				if d == standDownWindow {
+					t.Fatalf("waits = %v, want no stand-down window armed after a live refusal", h.clock.Waits())
+				}
+			}
+		}},
+		{name: "the old shim keeps serving", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			if live, ok := h.fleet.Client(ws); !ok || live != old {
+				t.Fatalf("the workspace's client = %v, want the old shim still serving", live)
+			}
+		}},
+		{name: "the prelaunched shim is retired", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			h.fleet.mu.Lock()
+			fresh := h.fleet.prelaunched[ws]
+			h.fleet.mu.Unlock()
+			if fresh == nil || len(fresh.ForceKills()) != 1 {
+				t.Fatalf("the prelaunched shim was left running after the deferral")
+			}
+		}},
+		{name: "the restart hold is released", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+				t.Fatalf("lease held = %v (err %v), want the restart hold released", held, err)
+			}
+		}},
+		{name: "the bounce is registered again behind the work", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			deferrals := h.registry.Deferrals()
+			if !h.registry.Pending(ws) || len(deferrals) != 1 || !errors.Is(deferrals[0], ErrStandDownLive) {
+				t.Fatalf("pending = %v, deferrals = %v; want the bounce re-registered on ErrStandDownLive", h.registry.Pending(ws), deferrals)
+			}
+		}},
+		{name: "the requester is not told", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			select {
+			case err := <-done:
+				t.Fatalf("done = %v, want the requester kept for the rerun", err)
+			default:
+			}
+		}},
+		{name: "the refusal is recorded at INFO", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			for _, rec := range records(h.log, opRelaunch) {
+				if rec.Level == dlog.LevelInfo && strings.Contains(rec.Message, "refused the unforced stand-down") &&
+					rec.Context["refusal"] == "live" && rec.Context["turn_in_flight"] == true {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want the live refusal at INFO with its context", records(h.log, opRelaunch))
+		}},
+		{name: "nothing is recorded as a fault", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim, done chan error) {
+			for _, op := range []string{opRelaunch, opBounce} {
+				for _, rec := range records(h.log, op) {
+					if rec.Level == dlog.LevelError || rec.Level == dlog.LevelWarn {
+						t.Fatalf("the deferral recorded %s: %q", rec.Level, rec.Message)
+					}
+				}
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+
+			// Act
+			old, done := deferredBounce(t, h, ws, ReasonBuildStale)
+
+			// Assert
+			tt.assert(t, h, ws, old, done)
+		})
+	}
+}
+
+func TestADeferredBounceRunsAtTheNextFreeness(t *testing.T) {
+	// Arrange: the shim refused once; its turn then ends and it accepts.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old, done := deferredBounce(t, h, ws, ReasonBuildStale)
+	old.mu.Lock()
+	old.killAnswer = nil
+	old.mu.Unlock()
+	old.onKillSession = func() { old.Reap() }
+
+	// Act
+	if !h.registry.free(ws) {
+		t.Fatalf("no bounce was registered to take at the freeness edge")
+	}
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the rerun's clean finish", err)
+	}
+	if kills := old.ForceKills(); len(kills) != 0 {
+		t.Fatalf("force-kills = %+v, want the rerun's graceful stand-down alone", kills)
+	}
+	if got := old.KillRequests(); len(got) != 2 || got[1].GetForce() {
+		t.Fatalf("stand-down requests = %+v, want the refused one and the accepted unforced one", got)
+	}
+}
+
+// An unforced stand-down the shim never answered: the shim never vouched that
+// nothing is live in it, so it is not forced either.
+func TestAnUnansweredUnforcedStandDownDefersTheBounce(t *testing.T) {
+	tests := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim)
+	}{
+		{name: "the old shim is never force-killed", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim) {
+			if kills := old.ForceKills(); len(kills) != 0 {
+				t.Fatalf("force-kills = %+v, want none on an unanswered stand-down", kills)
+			}
+		}},
+		{name: "the bounce is registered again behind the work", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim) {
+			deferrals := h.registry.Deferrals()
+			if !h.registry.Pending(ws) || len(deferrals) != 1 || !errors.Is(deferrals[0], ErrStandDownUnanswered) || !errors.Is(deferrals[0], errFake) {
+				t.Fatalf("pending = %v, deferrals = %v; want the bounce re-registered on ErrStandDownUnanswered naming the call's error", h.registry.Pending(ws), deferrals)
+			}
+		}},
+		{name: "the restart hold is released", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim) {
+			if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+				t.Fatalf("lease held = %v (err %v), want the restart hold released", held, err)
+			}
+		}},
+		{name: "the unanswered stand-down is recorded at ERROR", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID, old *fakeShim) {
+			if !loggedErrorWith(h.log, opRelaunch, "did not answer the unforced stand-down", errFake.Error()) {
+				t.Fatalf("records = %+v, want the unanswered stand-down at ERROR with its cause", records(h.log, opRelaunch))
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			old := h.fleet.live[ws]
+			old.killErr = errFake
+
+			// Act
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+				t.Fatalf("BounceShim: %v", err)
+			}
+			h.clock.awaitArmed(t, standDownWindow)
+			h.clock.Fire(standDownWindow)
+			h.registry.wait()
+
+			// Assert
+			tt.assert(t, h, ws, old)
+		})
+	}
+}
+
+// The call failed but the shim LEFT: it took the stand-down and only its
+// answer was lost, so the gate is passed and the bounce goes on.
+func TestAnUnansweredUnforcedStandDownWhoseShimLeavesInsideTheWindowPassesTheGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killErr = errFake
+	done := make(chan error, 1)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	h.clock.awaitArmed(t, standDownWindow)
+	old.Reap()
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the bounce finished past the gate", err)
+	}
+	if kills := old.ForceKills(); len(kills) != 0 {
+		t.Fatalf("force-kills = %+v, want none", kills)
+	}
+}
+
+// A FORCED bounce is the user's ask: a refusal is waited out and the shim
+// force-killed at the window's end, exactly as before.
+func TestAForcedStandDownTheShimRefusesIsStillForceKilledAtTheWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killAnswer = liveRefusal()
+	done := make(chan error, 1)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	h.clock.awaitArmed(t, standDownWindow)
+	h.clock.Fire(standDownWindow)
+	waitForForceKill(t, old)
+	old.Reap()
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the forced bounce finished", err)
+	}
+	if len(h.registry.Deferrals()) != 0 {
+		t.Fatalf("deferrals = %v, want a forced bounce never deferred", h.registry.Deferrals())
+	}
+}
+
+// A DEFERRED STALE-BUILD BOUNCE NEVER RAN, so it is still the workspace's
+// bounce in flight: a re-report is skipped as in flight (never "already
+// bounced for this build" at ERROR), and the registry's rerun replaces the
+// shim.
+func TestADeferredStaleBounceIsNotRefusedAsAlreadyBounced(t *testing.T) {
+	// Arrange: the stale-build bounce is deferred by a live refusal.
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	old := h.fleet.live[ws]
+	old.killAnswer = liveRefusal()
+	if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+		t.Fatalf("CheckStaleness: %v", err)
+	}
+	h.registry.wait()
+
+	// Act: the shim re-reports, then falls free and accepts the rerun.
+	got, err := h.c.CheckStaleness(context.Background(), ws, false)
+	old.mu.Lock()
+	old.killAnswer = nil
+	old.mu.Unlock()
+	old.onKillSession = func() { old.Reap() }
+	h.registry.free(ws)
+	h.registry.wait()
+	h.c.staleChecks.Wait()
+
+	// Assert
+	if err != nil || got.Skipped != SkippedBounceInFlight {
+		t.Fatalf("re-check = (%+v, %v), want it skipped as in flight", got, err)
+	}
+	if loggedError(h.log, opStaleness, "already bounced for") {
+		t.Fatalf("records = %+v, want no already-bounced ERROR for a deferred bounce", h.log.Records())
+	}
+	h.fleet.mu.Lock()
+	installs := len(h.fleet.installs)
+	h.fleet.mu.Unlock()
+	if installs != 1 {
+		t.Fatalf("installs = %d, want the rerun to replace the shim once", installs)
+	}
+}
+
+// The registry keeps a deferred bounce's Done for the rerun, so a deferral
+// told to it is the registry's contract broken, said at ERROR.
+func TestADeferralToldToTheShimBouncesCompletionIsRecordedAsAContractBreach(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+
+	// Act
+	h.registry.endUnrun(ws, ErrStandDownLive)
+
+	// Assert
+	if !loggedError(h.log, opBounce, "told a deferral") {
+		t.Fatalf("records = %+v, want the breach at ERROR", records(h.log, opBounce))
+	}
+}

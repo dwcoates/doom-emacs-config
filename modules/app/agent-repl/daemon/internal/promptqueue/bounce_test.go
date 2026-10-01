@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"sync"
 	"sync/atomic"
@@ -1473,5 +1474,199 @@ func TestAMoveThatFinishesWithoutSealingFailsItsCarriedReplacementLoudly(t *test
 	}
 	if !recordWith(h.log.Records(), "error", opBounce, "the move finished without sealing the replacements it carried; they were not handed to the next daemon") {
 		t.Fatalf("records = %+v, want the broken carry at ERROR", h.log.Records())
+	}
+}
+
+// errDeferredRun is what a replacement's run answers when the shim refused its
+// unforced stand-down as live (rollout.ErrStandDownLive wraps the same
+// sentinel).
+var errDeferredRun = fmt.Errorf("rollout: the shim refused the unforced stand-down because work is live in it: %w", bounce.ErrDeferred)
+
+// startFreeReplacement asks for a stale-build replacement on a FREE workspace
+// and waits for its run to start.
+func startFreeReplacement(t *testing.T, h *harness, g *gate) {
+	t.Helper()
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale"))
+	if err != nil || !decision.Now {
+		t.Fatalf("RequestBounce = (%+v, %v), want the free workspace bounced now", decision, err)
+	}
+	g.awaitStart(t)
+}
+
+// registeredReplacement answers the workspace's registered replacement stage,
+// nil when none stands.
+func registeredReplacement(h *harness) *bounceStage {
+	state := h.q.state(theWorkspace)
+	h.q.mu.Lock()
+	defer h.q.mu.Unlock()
+	pending := state.bounce
+	if pending == nil {
+		return nil
+	}
+	return pending.replace
+}
+
+// AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK (2026-10-01,
+// footer-activity-updates): the vendor started a turn on its own the instant
+// the last subagent concluded, the shim refused the stand-down as live, and
+// the bounce must be re-registered behind that turn rather than ended.
+func TestADeferredReplacementIsRegisteredAgainBehindTheWork(t *testing.T) {
+	// Arrange: the workspace fell free and its replacement started; the vendor
+	// then started a turn of its own.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	running(t, h, "vendor-turn", "the subagent's completion notification")
+
+	// Act
+	g.finish(h, errDeferredRun)
+
+	// Assert
+	stage := registeredReplacement(h)
+	if stage == nil || stage.started || stage.req.Reason != "build_stale" {
+		t.Fatalf("replacement = %+v, want the build_stale replacement registered again, unstarted", stage)
+	}
+	if h.q.isDraining(theWorkspace) {
+		t.Fatalf("the workspace is still draining after its replacement was deferred")
+	}
+	if g.runs.Load() != 1 {
+		t.Fatalf("the replacement ran %d times, want once: the turn still runs", g.runs.Load())
+	}
+	if !recordWith(h.log.Records(), "info", opBounce, "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving") {
+		t.Fatalf("records = %+v, want the deferral at INFO", h.log.Records())
+	}
+}
+
+func TestADeferredReplacementsRequesterIsNotToldTheDeferral(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	running(t, h, "vendor-turn", "the subagent's completion notification")
+
+	// Act
+	g.finish(h, errDeferredRun)
+
+	// Assert
+	select {
+	case err := <-g.done:
+		t.Fatalf("done = %v, want the requester kept for the rerun's outcome", err)
+	default:
+	}
+}
+
+func TestADeferredReplacementRunsAtTheNextFreenessAndTellsItsRequesterOnce(t *testing.T) {
+	// Arrange: a deferred replacement behind the vendor's own turn.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	running(t, h, "vendor-turn", "the subagent's completion notification")
+	g.finish(h, errDeferredRun)
+
+	// Act: the vendor's turn ends.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "vendor-turn", wsm.CloseCompleted)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v, want the rerun's clean finish", err)
+	}
+	select {
+	case err := <-g.done:
+		t.Fatalf("done told a second time (%v), want once", err)
+	default:
+	}
+	if registeredReplacement(h) != nil {
+		t.Fatalf("a replacement is still registered after the rerun finished")
+	}
+}
+
+func TestADeferredReplacementResumesDispatchOnTheShimThatKeepsServing(t *testing.T) {
+	// Arrange: a prompt is queued, the workspace falls free into the bounce,
+	// and a detached item comes alive before the stand-down.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "queued", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	h.watcher.idle()
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	h.watcher.detached(monitors(1))
+
+	// Act
+	g.finish(h, errDeferredRun)
+
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "queued" {
+		t.Fatalf("started = %v, want the held prompt delivered to the shim that keeps serving", started)
+	}
+}
+
+// A freeness edge that arrived while the run was deciding found the workspace
+// draining and decided nothing; the deferral is what takes it.
+func TestADeferredReplacementIsTakenAtOnceWhenItsWorkEndedWhileItRan(t *testing.T) {
+	// Arrange: the vendor's turn starts and ends inside the run.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	running(t, h, "vendor-turn", "the subagent's completion notification")
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "vendor-turn", wsm.CloseCompleted)
+
+	// Act
+	g.releaseStage(errDeferredRun)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v, want the rerun's clean finish", err)
+	}
+}
+
+// A shim that says live while the watcher reads it free must not spin the
+// bounce: with no edge since the run started, the deferral waits for one.
+func TestADeferredReplacementWithNoEdgeSinceItsRunIsNotRetakenAtOnce(t *testing.T) {
+	// Arrange: the watcher reads the workspace free throughout.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+
+	// Act
+	g.finish(h, errDeferredRun)
+
+	// Assert
+	if g.runs.Load() != 1 {
+		t.Fatalf("the replacement ran %d times, want it left registered for the next edge", g.runs.Load())
+	}
+	if stage := registeredReplacement(h); stage == nil || stage.started {
+		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+}
+
+func TestADeferredReplacementWithADispatchQuietMoveBehindItIsCarriedAcross(t *testing.T) {
+	// Arrange: a transfer is asked while the replacement runs, and the vendor
+	// starts a turn of its own.
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	startFreeReplacement(t, h, restart)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.quietMoving("handover_transfer")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	running(t, h, "vendor-turn", "the subagent's completion notification")
+
+	// Act
+	restart.releaseStage(errDeferredRun)
+
+	// Assert: the move runs now, and its seal carries the replacement.
+	transfer.awaitStart(t)
+	_, carried, err := h.q.SealMove(context.Background(), theWorkspace)
+	if err != nil || len(carried) != 1 || carried[0].Reason != "build_stale" {
+		t.Fatalf("SealMove = (%+v, %v), want the deferred replacement carried", carried, err)
+	}
+	transfer.finish(h, nil)
+	if restart.runs.Load() != 1 {
+		t.Fatalf("the replacement ran %d times here, want only its deferred run", restart.runs.Load())
 	}
 }

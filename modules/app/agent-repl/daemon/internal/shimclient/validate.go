@@ -361,6 +361,32 @@ func validateKillTurnRequest(req *shimv1.KillTurnRequest) error {
 	return validateTurnID(m+".turn", req.GetTurn())
 }
 
+// validateRollBackSessionRequest is RollBackSessionRequest's base function:
+// the first dropped turn, every dropped turn beginning with it, and the files
+// choice are all required.
+func validateRollBackSessionRequest(req *shimv1.RollBackSessionRequest) error {
+	const m = "RollBackSessionRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if err := validateTurnID(m+".to_before", req.GetToBefore()); err != nil {
+		return err
+	}
+	dropped := req.GetDroppedTurns()
+	if len(dropped) == 0 || dropped[0].GetValue() != req.GetToBefore().GetValue() {
+		return invalid(m, m+".dropped_turns", "must begin with to_before")
+	}
+	for _, turn := range dropped {
+		if err := validateTurnID(m+".dropped_turns", turn); err != nil {
+			return err
+		}
+	}
+	if req.GetFiles() == nil {
+		return invalid(m, m+".files", "is unset")
+	}
+	return nil
+}
+
 // validateDetachedWorkID is DetachedWorkId's base function.
 func validateDetachedWorkID(field string, work *conversationv1.DetachedWorkId) error {
 	const m = "DetachedWorkId"

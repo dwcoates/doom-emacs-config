@@ -130,6 +130,30 @@ type fakeMerge struct {
 	// sources records what each enqueue merges.
 	sources []wsm.MergeSource
 	err     error
+
+	// evicted records every Evict, and evictErr is what Evict answers.
+	evicted  []ids.WorkspaceID
+	evictErr error
+	// paused and unpaused record every Pause and Unpause scope, and pauseErr
+	// is what either answers.
+	paused   []*merge.RepositoryScope
+	unpaused []*merge.RepositoryScope
+	pauseErr error
+}
+
+func (m *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {
+	m.evicted = append(m.evicted, ws)
+	return m.evictErr
+}
+
+func (m *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
+	m.paused = append(m.paused, scope)
+	return m.pauseErr
+}
+
+func (m *fakeMerge) Unpause(_ context.Context, scope *merge.RepositoryScope) error {
+	m.unpaused = append(m.unpaused, scope)
+	return m.pauseErr
 }
 
 func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
@@ -351,3 +375,16 @@ func verbNames(calls []verbCall) []string {
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s *fakeSurfaces) Evict(_ string) error { return nil }
+
+// record finds the first captured record of one operation at one level, and
+// fails the test when there is none.
+func (f *fixture) record(t *testing.T, operation, level string) dlog.Record {
+	t.Helper()
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == operation && record.Level == level {
+			return record
+		}
+	}
+	t.Fatalf("records = %+v, want a %s record under %s", f.log.logger.Records(), level, operation)
+	return dlog.Record{}
+}

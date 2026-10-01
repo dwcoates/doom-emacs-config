@@ -192,6 +192,13 @@ type placedEntry struct {
 // resolver must be provable without it), and a painter that tags its spans.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newStoredHarness(t, nil)
+}
+
+// newStoredHarness is newHarness whose rolled-back turns live in ROLLEDBACK;
+// two harnesses sharing it are a daemon and its restarted successor.
+func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
+	t.Helper()
 	log := dlog.NewTestLogger()
 	painter := &fakePainter{}
 	h := &harness{
@@ -243,11 +250,12 @@ func newHarness(t *testing.T) *harness {
 			}
 			return out, nil
 		},
-		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
-		AfterFunc: h.clock.AfterFunc,
-		Faults:    h.faults,
-		Warnings:  h.warnings,
-		PageSize:  3,
+		Now:        func() time.Time { return time.UnixMilli(h.nowMs) },
+		AfterFunc:  h.clock.AfterFunc,
+		Faults:     h.faults,
+		Warnings:   h.warnings,
+		RolledBack: rolledBack,
+		PageSize:   3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},
@@ -284,8 +292,17 @@ func TestFeedDecisionsRecordTheirSelectedBranches(t *testing.T) {
 			act: func(r *resolver) { r.feedKey(testWorkspace, rootFeed()) },
 		},
 		{
-			name: "an unset output address selects the root", condition: "s.address == nil",
-			act: func(r *resolver) { r.outputPlacement(r.state(testWorkspace)) },
+			name: "an unaddressed turn selects the root", condition: "the turn is not addressed",
+			act: func(r *resolver) { r.outputPlacement(r.state(testWorkspace), nil) },
+		},
+		{
+			name: "an addressed turn selects its address", condition: "the turn is addressed",
+			act: func(r *resolver) {
+				lease := ids.LeaseID("lease-7")
+				r.AddressTurn(testWorkspace, "turn-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+				turn := ids.TurnID("turn-1")
+				r.outputPlacement(r.state(testWorkspace), &turn)
+			},
 		},
 		{
 			name: "a missing row selects the no-retirement path", condition: "_, ok := f.rows[id]; !ok",
@@ -368,12 +385,6 @@ func testFeedValue(feed feedid.Feed) string {
 
 // rootFeed is the workspace's top-level feed.
 func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }
-
-// noAddress is the empty output address every sink call carries when no lease
-// holder has installed one.
-func noAddress() sessionwatcher.OutputAddress {
-	return sessionwatcher.OutputAddress{Feed: rootFeed()}
-}
 
 // mainAgent is the agent id the harness treats as the main thread.
 func mainAgent() *conversationv1.AgentId { return &conversationv1.AgentId{Value: "agent-main"} }
@@ -719,202 +730,21 @@ func TestAHeldPublicationIsJudgedAtRelease(t *testing.T) {
 	}
 }
 
-func TestOutputAddressPlacesEveryRowOnTheAddressedFeed(t *testing.T) {
-	// Arrange: a merge lease's output address.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
-		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "conflicts:1"}}
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
-		Feed: feedid.Feed{Merge: &lease}, Parent: &parent,
-	})
-
-	// Act.
-	h.deliverPrompt("turn-1", "resolve the conflict")
-
-	// Assert: on the merge feed, under the addressed row, and NOT on the root.
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("root rows = %d, want 0 while an output address is in force", len(rows))
-	}
-	row := h.only(feedid.Feed{Merge: &lease})
-	if row.GetParent().GetRow().GetValue() != testEncode(parent).GetValue() {
-		t.Fatalf("parent = %q, want the addressed row", row.GetParent().GetRow().GetValue())
-	}
-}
-
-// mirroredMergeAddress installs a MIRRORED output address at a merge tab, and
-// answers the tab's ref.
-func mirroredMergeAddress(h *harness, lease ids.LeaseID) feedid.Ref {
-	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
-		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
-		Feed: feedid.Feed{Merge: &lease}, Parent: &parent, Mirror: true,
-	})
-	return parent
-}
-
-func TestAMirroredOutputAddressDrawsTheRowInTheTab(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	parent := mirroredMergeAddress(h, lease)
-
-	// Act
-	h.deliverPrompt("turn-1", "resolve the conflict")
-
-	// Assert
-	row := h.only(feedid.Feed{Merge: &lease})
-	if row.GetParent().GetRow().GetValue() != testEncode(parent).GetValue() {
-		t.Fatalf("tab row parent = %q, want the addressed tab", row.GetParent().GetRow().GetValue())
-	}
-}
-
-func TestAMirroredOutputAddressDrawsTheRowOnTheRootFeedTooAsAnOrdinaryRow(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredMergeAddress(h, lease)
-
-	// Act
-	h.deliverPrompt("turn-1", "resolve the conflict")
-
-	// Assert: the root copy is the same row key on the root feed, top level.
-	row := h.only(rootFeed())
-	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}})
-	if row.GetId().GetValue() != want.GetValue() {
-		t.Fatalf("root row id = %q, want %q", row.GetId().GetValue(), want.GetValue())
-	}
-	if row.GetParent() != nil {
-		t.Fatalf("root row parent = %v, want none: the copy is an ordinary row of the conversation", row.GetParent())
-	}
-}
-
-func TestAMirroredRowNestedUnderAnotherAddressedRowNestsUnderThatRowsRootCopy(t *testing.T) {
-	// Arrange: a row of the addressed feed nests under another of its rows.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredMergeAddress(h, lease)
-	mergeFeed := feedid.Feed{Merge: &lease}
-	outer := feedid.Ref{WS: testWorkspace, Feed: mergeFeed, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}
-	inner := &frontendv1.FeedRow{
-		Id:     testEncode(feedid.Ref{WS: testWorkspace, Feed: mergeFeed, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-2"}}),
-		Parent: &frontendv1.FeedRowParent{Row: testEncode(outer)},
-		Row:    &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
-	}
-
-	// Act
-	h.resolver.mu.Lock()
-	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: mergeFeed}, inner, true)
-	h.resolver.mu.Unlock()
-
-	// Assert
-	row := h.only(rootFeed())
-	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: outer.Row})
-	if row.GetParent().GetRow().GetValue() != want.GetValue() {
-		t.Fatalf("root copy parent = %v, want the outer row's root copy %q", row.GetParent(), want.GetValue())
-	}
-}
-
-func TestAnUnmirroredOutputAddressDrawsNothingOnTheRoot(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
-
-	// Act
-	h.deliverPrompt("turn-1", "a merge prompt")
-
-	// Assert
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("root rows = %d, want 0 under an unmirrored address", len(rows))
-	}
-}
-
-func TestAMirroredRowsCopyIsOrderedOnTheRootFeedItself(t *testing.T) {
-	// Arrange: a restated row carries the addressed feed's order key.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredMergeAddress(h, lease)
-	row := &frontendv1.FeedRow{
-		Id:    testEncode(feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}),
-		Order: &frontendv1.FeedRowOrder{Key: "9.99999999"},
-		Row:   &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
-	}
-
-	// Act.
-	h.resolver.mu.Lock()
-	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: feedid.Feed{Merge: &lease}}, row, true)
-	h.resolver.mu.Unlock()
-
-	// Assert: the addressed feed's own first draw refuses the carried key;
-	// the root copy carries none to refuse.
-	for _, record := range h.records() {
-		if record.Operation == "daemon.feed.order_changed" && strings.HasSuffix(fmt.Sprint(record.Context["feed"]), "|root") {
-			t.Fatalf("the root copy contradicted its own order: %+v", record)
-		}
-	}
-}
-
-func TestRetiringAMirroredRowRetiresItsRootCopy(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredMergeAddress(h, lease)
-	h.deliverPrompt("turn-1", "resolve the conflict")
-	id := h.only(feedid.Feed{Merge: &lease}).GetId().GetValue()
-
-	// Act
-	h.resolver.mu.Lock()
-	h.resolver.retire(h.resolver.state(testWorkspace), feedid.Feed{Merge: &lease}, id)
-	h.resolver.mu.Unlock()
-
-	// Assert
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("root rows = %d after the retirement, want the copy retired too", len(rows))
-	}
-}
-
-func TestAMirroredRowThatCannotBeRekeyedIsRecordedAtErrorAndNotMirrored(t *testing.T) {
-	// Arrange: a row whose identity is no id the decoder reads.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredMergeAddress(h, lease)
-	row := &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "not-a-row-id"},
-		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}}
-
-	// Act
-	h.resolver.mu.Lock()
-	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: feedid.Feed{Merge: &lease}}, row, true)
-	h.resolver.mu.Unlock()
-
-	// Assert
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("root rows = %d, want none for a row that could not be re-keyed", len(rows))
-	}
-	if !h.hasRecord("error", "daemon.feed.mirror") {
-		t.Fatalf("the failed re-key was not recorded at ERROR: %+v", h.records())
-	}
-}
-
-func TestUpsertAtOutputAddressLandsOnTheAddressedFeedAndParent(t *testing.T) {
-	// Arrange: a merge lease has addressed the session at one of its tabs.
+func TestUpsertAtTurnAddressLandsOnTheAddressedFeedAndParent(t *testing.T) {
+	// Arrange: a merge's own turn is addressed at one of its tabs.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-9")
-	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
-		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
-		Feed: feedid.Feed{Merge: &lease}, Parent: &parent,
-	})
+	parent := addressedMergeTurn(h, lease, "turn-1")
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace,
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-1",
 		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"},
 		&frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}})
 
 	// Assert: the row's identity is the ADDRESSED feed's, and it is parented to
 	// the addressed row, so the resolver's own later draw upserts it in place.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("root rows = %d, want 0 while an output address is in force", len(rows))
+		t.Fatalf("root rows = %d, want 0 for an addressed turn", len(rows))
 	}
 	row := h.only(feedid.Feed{Merge: &lease})
 	want := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
@@ -927,12 +757,14 @@ func TestUpsertAtOutputAddressLandsOnTheAddressedFeedAndParent(t *testing.T) {
 	}
 }
 
-func TestUpsertAtOutputAddressLandsOnTheRootWhenNoAddressStands(t *testing.T) {
-	// Arrange: no lease holder has addressed the session.
+func TestUpsertAtTurnAddressLandsOnTheRootForATurnWithNoAddress(t *testing.T) {
+	// Arrange: a merge's address stands, but this turn was not handed it.
 	h := newHarness(t)
+	lease := ids.LeaseID("lease-9")
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace,
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-1",
 		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"},
 		&frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}})
 
@@ -942,22 +774,6 @@ func TestUpsertAtOutputAddressLandsOnTheRootWhenNoAddressStands(t *testing.T) {
 		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}
 	if row.GetId().GetValue() != testEncode(want).GetValue() {
 		t.Fatalf("row id = %q, want the root feed's %q", row.GetId().GetValue(), testEncode(want).GetValue())
-	}
-}
-
-func TestClearedOutputAddressRestoresTheRootFeed(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
-
-	// Act.
-	h.resolver.SetOutputAddress(testWorkspace, nil)
-	h.deliverPrompt("turn-1", "back on the root")
-
-	// Assert.
-	if rows := h.rows(rootFeed()); len(rows) != 1 {
-		t.Fatalf("root rows = %d, want 1 once the address is cleared", len(rows))
 	}
 }
 
@@ -973,7 +789,7 @@ func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
 
 	// Act: an activity for an agent whose creation was never seen.
 	h.resolver.OnActivity(testWorkspace, &conversationv1.AgentId{Value: "agent-ghost"},
-		responseSuccessActivity("unit-1", "orphaned prose"), nil, nil, noAddress())
+		responseSuccessActivity("unit-1", "orphaned prose"), nil, nil)
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 1 {
@@ -1052,7 +868,7 @@ func TestStandingTokenIsRetrievableAndNeverOnTheRow(t *testing.T) {
 			OfferedStanding: standing,
 			StartedAt:       &conversationv1.AgentActivityStartedAt{AtMs: h.nowMs},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert: presence on the row, the token held daemon-side.
 	row := h.only(rootFeed())
@@ -1092,7 +908,7 @@ func (h *harness) deliverPrompt(turn, text string) {
 				Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
 			}},
 		}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // responseSuccessActivity is a settled prose block.
@@ -1200,20 +1016,20 @@ func TestMergeTabsAreAppendOnlyTopLevelRowsOfTheBubblesOwnFeed(t *testing.T) {
 	}
 }
 
-func TestAnAgenticTabsRowsNestUnderItByTheOutputAddress(t *testing.T) {
-	// Arrange: the orchestrator addresses the conflicts tab.
+func TestAnAgenticTabsRowsNestUnderItByTheTurnsAddress(t *testing.T) {
+	// Arrange: the merge's own turn is addressed at the conflicts tab.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
 	mergeFeed := feedid.Feed{Merge: &lease}
 	tab := feedid.Ref{WS: testWorkspace, Feed: mergeFeed,
 		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "conflicts:1"}}
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+	h.resolver.AddressTurn(testWorkspace, "repair-1", &sessionwatcher.OutputAddress{
 		Feed: mergeFeed, Parent: &tab,
 	})
 
-	// Act: the lease session's own conversation.
+	// Act: the lease session's own conversation, in the merge's own turn.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "fixing TestReconnect"), nil, nil, noAddress())
+		responseSuccessActivity("unit-1", "fixing TestReconnect"), &conversationv1.TurnId{Value: "repair-1"}, nil)
 
 	// Assert: the tab's content IS the sub-feed rows parented to it.
 	rows := h.rows(mergeFeed)
@@ -1292,7 +1108,7 @@ func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
 		Agent:  mainAgent(),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: one row each, and neither leaked.
 	if rows := h.rows(rootFeed()); len(rows) != 1 {

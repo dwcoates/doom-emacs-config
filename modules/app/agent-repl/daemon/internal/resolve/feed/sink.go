@@ -19,7 +19,7 @@ import (
 // OnPrompt draws a prompt one agent addressed to another. It appears on the
 // SENDER's feed as the outgoing send and on the RECIPIENT's as the delivered
 // prompt: one kind, both ends, differing only in the composed address line.
-func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace) {
 	turn := ids.TurnID(prompt.GetId().GetValue())
 	r.learnLineage(ws, turn)
 	r.mu.Lock()
@@ -47,7 +47,7 @@ func (r *resolver) drawEntry(s *wsState, agent *conversationv1.AgentId, turn ids
 
 // OnPeerMessage draws a message another Claude session sent into this
 // conversation as the abbreviated peer bubble on the recipient's feed.
-func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -59,7 +59,7 @@ func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMe
 }
 
 // OnActivity draws one unit of a turn's synchronous progress.
-func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -305,7 +305,7 @@ func (r *resolver) publishedTurn(s *wsState, id string) *conversationv1.TurnId {
 }
 
 // OnQuestion draws the agent blocking on a choice.
-func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -317,7 +317,7 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 }
 
 // OnPermission draws the agent blocking on consent.
-func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -329,7 +329,7 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 }
 
 // OnContextCut draws the separation divider a context cut leaves.
-func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -343,7 +343,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 // OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is
 // never a terminal and never its own row: the turn's end is the frame-level
 // failure arm and nothing else.
-func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -419,7 +419,7 @@ func (r *resolver) addEvidence(s *wsState, line turnEvidenceLine) {
 // A TERMINAL THE WATCHER CHARGED TO NO TURN is drawn as it always was (it ends
 // no turn); one charged to a turn is judged like any entry, so a fork's
 // inherited terminal ends only its inherited turn, in the inherited plane.
-func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, place *conversationv1.ConversationPlace) {
 	if turn == nil {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -455,7 +455,7 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 }
 
 // OnDetachedWork draws the bubble of work that left the stream.
-func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	stamp := ids.TurnID(turn.GetValue())
 	r.learnLineage(ws, stamp)
 	r.mu.Lock()
@@ -477,7 +477,7 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live sessionwatcher.Liv
 }
 
 // OnBash draws one detached shell's progress.
-func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

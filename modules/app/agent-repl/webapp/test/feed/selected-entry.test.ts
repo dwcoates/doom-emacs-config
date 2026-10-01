@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   REVEAL_ATTRIBUTE,
   SELECTED_ENTRY_CLASS,
-  SELECTED_RESPONSE_ATTRIBUTE,
+  SELECTED_ROW_ATTRIBUTE,
   cardOf,
   syncSelectedEntry,
 } from "../../src/feed/selected-entry.js";
@@ -45,10 +45,10 @@ describe("syncSelectedEntry", () => {
     expect(card.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
   });
 
-  it("marks the card of the reply-selected row", () => {
+  it("marks the card of the selected row", () => {
     // Arrange
     const { row, card } = rowWithCard();
-    row.setAttribute(SELECTED_RESPONSE_ATTRIBUTE, "true");
+    row.setAttribute(SELECTED_ROW_ATTRIBUTE, "response");
     // Act
     syncSelectedEntry(row);
     // Assert
@@ -77,10 +77,10 @@ describe("syncSelectedEntry", () => {
     expect(card.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
   });
 
-  it("keeps the reply selection's mark when a jump's landing clears", () => {
+  it("keeps the selection's mark when a jump's landing clears", () => {
     // Arrange — both acts selected the same row; the reveal times out first.
     const { row, card } = rowWithCard();
-    row.setAttribute(SELECTED_RESPONSE_ATTRIBUTE, "true");
+    row.setAttribute(SELECTED_ROW_ATTRIBUTE, "response");
     row.setAttribute(REVEAL_ATTRIBUTE, "true");
     syncSelectedEntry(row);
     row.removeAttribute(REVEAL_ATTRIBUTE);

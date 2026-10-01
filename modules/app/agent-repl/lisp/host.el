@@ -777,6 +777,7 @@ it, and the stream standing for WS now is meant."
     (pcase arm
       (:host (agent-repl-host--apply-state ws value))
       (:notification-clicked (agent-repl-host--notification-clicked ws))
+      (:selection (agent-repl-host--apply-selection ws value))
       (:transferred (agent-repl-host--transferred ws value))
       (:reload-webapp (agent-repl-host--reload-webapp ws))
       (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -828,6 +829,24 @@ purpose."
                    (agent-repl-host-backfill ws)
                    (length (agent-repl-host-faults ws)))
   (run-hook-with-args 'agent-repl-host-update-functions ws host))
+
+;;;; ---- The feed selection ----
+
+(defun agent-repl-host--apply-selection (ws kind)
+  "Record KIND as the kind of row WS's feed has selected.
+KIND is `:none', `:response' or `:prompt', from the host watch's
+`selection' push: state, not an event, so a late subscriber is sent the
+selection in force first.  The daemon holds the selection itself; Emacs
+keeps only the kind, for the composer's escape-twice clear."
+  (agent-repl-host--put ws :selection kind)
+  (agent-repl--info ws "elisp.host.selection ws=%s kind=%S" ws kind))
+
+(defun agent-repl-host-selection (ws)
+  "Return the kind of row WS's feed has selected, or nil.
+One of `:none', `:response' and `:prompt', as the host watch last pushed
+it.  Nil means no selection push has arrived yet, which is nothing
+selected."
+  (plist-get (agent-repl-host--entry ws) :selection))
 
 ;;;; ---- The notification click ----
 
@@ -1201,6 +1220,21 @@ acceptance itself.  A successor that never arrives simply never wakes it."
             (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
             (agent-repl-host--reattach ws new :adopt "successor-accepted")))
     (add-hook 'agent-repl-link-handover-functions retry)))
+
+(defun agent-repl-host-route-handover (ws arm slug)
+  "Hand ARM, a per-workspace rpc's refusal for WS, to the handover walk.
+Answers non-nil when ARM is one of the two handover arms
+\(`agent-repl-host--handover-arms'), after logging it at INFO under the
+operation SLUG with its keyword and fields and calling
+`agent-repl-host-handle-refusal'; answers nil, doing nothing, for any
+other arm, which stays the caller's to report.  THE ONE ROUTING every
+verb's refusal handler shares, so none hand-rolls the membership test."
+  (let ((keyword (plist-get arm :arm)))
+    (when (memq keyword agent-repl-host--handover-arms)
+      (agent-repl--info ws (concat slug " ws=%s arm=%S fields=%S")
+                        ws keyword (plist-get arm :value))
+      (agent-repl-host-handle-refusal ws arm)
+      t)))
 
 (defun agent-repl-host-handle-refusal (ws arm-plist)
   "React to a per-workspace rpc's handover refusal ARM-PLIST for WS.

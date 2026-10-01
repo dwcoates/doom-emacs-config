@@ -513,9 +513,6 @@ type wsState struct {
 	transient *frontendv1.FooterActivityTransient
 	// rate is the vendor's last rate-limit status per window.
 	rate rateState
-	// rateEvent is the standing vendor rate-limit event that warned or
-	// refused, nil when none stands (salient.go).
-	rateEvent *rateEventState
 	// notification is the agent's standing push notification, nil when none
 	// stands. It stands until the next prompt (salient.go).
 	notification *standing

@@ -187,14 +187,26 @@ export function lastChainedUuid(path: string): string | null {
 export class TranscriptWriter {
   private head: string | null;
 
+  /**
+   * `forkAt` is a TRUNCATING RESUME's fork point (`resumeSessionAt`): the
+   * vendor keeps the conversation only through that record, so the next record
+   * names IT as its parent and everything after it in the file is left behind
+   * as a dropped branch. The vendor never rewrites the file; neither does this.
+   */
   constructor(
     readonly path: string,
     private readonly envelope: TranscriptEnvelope,
+    forkAt?: string,
   ) {
     ensureDir(path);
-    this.head = lastChainedUuid(path);
+    this.head = forkAt ?? lastChainedUuid(path);
     LOGGER.debug(
-      { transcript_path: path, resumed_chain_head: this.head ?? "", claude_session_id: envelope.sessionId },
+      {
+        transcript_path: path,
+        resumed_chain_head: this.head ?? "",
+        claude_session_id: envelope.sessionId,
+        forked: forkAt !== undefined,
+      },
       this.head === null ? "opened a FRESH vendor transcript" : "REOPENED a vendor transcript and adopted its chain head",
     );
   }
@@ -364,6 +376,8 @@ interface VendorFilesConfig {
   readonly sessionId: string;
   /** The branch every record reports. */
   readonly gitBranch: string;
+  /** A truncating resume's fork point: the opening transcript's chain head. */
+  readonly forkAt?: string;
 }
 
 /**
@@ -381,15 +395,19 @@ export class VendorFiles {
 
   constructor(private readonly config: VendorFilesConfig) {
     this.sessionId = config.sessionId;
-    this.transcriptWriter = this.openTranscript(config.sessionId);
+    this.transcriptWriter = this.openTranscript(config.sessionId, config.forkAt);
   }
 
-  private openTranscript(sessionId: string): TranscriptWriter {
-    return new TranscriptWriter(transcriptPath(this.config.configDir, this.config.cwd, sessionId), {
-      cwd: this.config.cwd,
-      sessionId,
-      gitBranch: this.config.gitBranch,
-    });
+  private openTranscript(sessionId: string, forkAt?: string): TranscriptWriter {
+    return new TranscriptWriter(
+      transcriptPath(this.config.configDir, this.config.cwd, sessionId),
+      {
+        cwd: this.config.cwd,
+        sessionId,
+        gitBranch: this.config.gitBranch,
+      },
+      forkAt,
+    );
   }
 
   /** The session transcript for the identity currently in force. */

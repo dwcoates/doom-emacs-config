@@ -131,6 +131,13 @@ type fakeDB struct {
 	// workspaceErr fails every registry read, standing in for the closed
 	// state client an exiting daemon leaves behind.
 	workspaceErr error
+	// turnStarted answers TurnStartedAt by turn; turnStartedErr fails every
+	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
+	turnStarted    map[ids.TurnID]time.Time
+	turnStartedErr error
+	// openTurns is what OpenTurns answers; openTurnsErr fails the read.
+	openTurns    []wsm.Turn
+	openTurnsErr error
 	// workspaceEntered, when set, is closed as the first registry read
 	// begins, and that read then waits for workspaceRelease: the seam a test
 	// holds a read in flight on.
@@ -172,6 +179,20 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 
 func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 	return f.repositories, nil
+}
+
+// TurnStartedAt answers the seeded start time, or turnStartedErr when set
+// (e.g. wsm.ErrNotFound for a turn the workspace never recorded).
+func (f *fakeDB) TurnStartedAt(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (time.Time, error) {
+	if f.turnStartedErr != nil {
+		return time.Time{}, f.turnStartedErr
+	}
+	return f.turnStarted[turn], nil
+}
+
+// OpenTurns answers the seeded open turns, or openTurnsErr when set.
+func (f *fakeDB) OpenTurns(context.Context, ids.WorkspaceID) ([]wsm.Turn, error) {
+	return f.openTurns, f.openTurnsErr
 }
 
 func (f *fakeDB) PutDrainSchedule(_ context.Context, s wsm.DrainSchedule) error {
@@ -295,6 +316,18 @@ type fakeVerbs struct {
 	teardownErr     error
 	teardownRan     chan error
 	teardownRelease chan struct{}
+
+	// rollBackReq records every RollBack request, whole, in order;
+	// rollBackResult and rollBackErr answer it.
+	rollBackReq    []workspace.RollbackRequest
+	rollBackResult workspace.RollbackResult
+	rollBackErr    error
+}
+
+// RollBack records the request and answers the scripted result or error.
+func (f *fakeVerbs) RollBack(_ context.Context, _ ids.WorkspaceID, req workspace.RollbackRequest) (workspace.RollbackResult, error) {
+	f.rollBackReq = append(f.rollBackReq, req)
+	return f.rollBackResult, f.rollBackErr
 }
 
 // BeginKill answers the scripted fast half and a teardown that reports the
@@ -481,6 +514,27 @@ type fakeQueue struct {
 	// foldErr answers a fold; folds records every fold's two turns, in order.
 	foldErr error
 	folds   [][2]ids.TurnID
+
+	// heldSince is what HeldSince answers; heldSinceErr fails the read.
+	// heldSinceCalls records every `since` HeldSince was asked with, in
+	// order, so a test can assert the far-future sentinel for a turn the DB
+	// never recorded.
+	heldSince      []ids.TurnID
+	heldSinceErr   error
+	heldSinceCalls []time.Time
+
+	// rollBackErr is RollBack's scripted refusal, answered WITHOUT calling
+	// perform — mirroring the real queue's ErrHoldsChanged contract, where a
+	// queue that changed since planning refuses before anything runs.
+	// rollBackCalls records every call's since and drop, in order.
+	rollBackErr   error
+	rollBackCalls []rollBackCall
+}
+
+// rollBackCall is one fakeQueue.RollBack call's since and drop.
+type rollBackCall struct {
+	Since time.Time
+	Drop  []ids.TurnID
 }
 
 func (f *fakeQueue) Fold(_ context.Context, _ ids.WorkspaceID, turn, above ids.TurnID) error {
@@ -531,6 +585,25 @@ func (f *fakeQueue) Release(_ context.Context, _ ids.WorkspaceID, turn ids.TurnI
 func (f *fakeQueue) Drop(context.Context, ids.WorkspaceID, ids.TurnID) error { return f.dropErr }
 
 func (f *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error { return f.acceptErr }
+
+// HeldSince records the asked `since` and answers the seeded held turns.
+func (f *fakeQueue) HeldSince(_ context.Context, _ ids.WorkspaceID, since time.Time) ([]ids.TurnID, error) {
+	f.heldSinceCalls = append(f.heldSinceCalls, since)
+	if f.heldSinceErr != nil {
+		return nil, f.heldSinceErr
+	}
+	return f.heldSince, nil
+}
+
+// RollBack records the call and, absent a scripted refusal, invokes perform
+// exactly as the real queue does when nothing refuses the rollback.
+func (f *fakeQueue) RollBack(ctx context.Context, _ ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error {
+	f.rollBackCalls = append(f.rollBackCalls, rollBackCall{Since: since, Drop: drop})
+	if f.rollBackErr != nil {
+		return f.rollBackErr
+	}
+	return perform(ctx)
+}
 
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
@@ -712,20 +785,62 @@ type fakeFeed struct {
 	lastFeed  feedid.Feed
 	lastRead  feed.ReaderID
 	openCalls int
-	// finals is the ordered selectable final-response set SelectResponse walks;
-	// markdown is each selectable row's copied markdown, keyed by FeedId value,
-	// for the reply-prefix path.
+	// finals is the ordered selectable final-response set SelectFeedRow's
+	// response step walks; prompts is the ordered selectable rollback-prompt
+	// set its prompt step walks; markdown is each selectable row's copied
+	// markdown, keyed by FeedId value, for the reply-prefix path.
 	finals   []*frontendv1.FeedId
+	prompts  []*frontendv1.FeedId
 	markdown map[string]string
+
+	// rollbackTarget and rollbackTargetOK are what RollbackTarget answers —
+	// one scripted answer suffices, since no rollback test asks it about more
+	// than one row at a time. rollbackTargetRows records every row it was
+	// asked about, in order, so a test can assert WHICH row a plan targeted.
+	rollbackTarget     feed.RollbackTarget
+	rollbackTargetOK   bool
+	rollbackTargetRows []*frontendv1.FeedId
+	// liveDetached is what LiveDetachedIn answers; liveDetachedCalls counts
+	// how many times it was called, so a test can assert it was never
+	// computed when files are kept.
+	liveDetached      int
+	liveDetachedCalls int
+	// rollBackTurnsErr is RollBackTurns' scripted error; rollBackTurnsCalls
+	// records every turns slice handed to it, in order.
+	rollBackTurnsErr   error
+	rollBackTurnsCalls [][]ids.TurnID
 }
 
 func (f *fakeFeed) FinalResponses(ids.WorkspaceID) []*frontendv1.FeedId {
 	return f.finals
 }
 
+func (f *fakeFeed) RollbackPrompts(ids.WorkspaceID) []*frontendv1.FeedId {
+	return f.prompts
+}
+
 func (f *fakeFeed) ResponseMarkdown(_ ids.WorkspaceID, id *frontendv1.FeedId) (string, bool) {
 	md, ok := f.markdown[id.GetValue()]
 	return md, ok
+}
+
+// RollbackTarget records the row it was asked about and answers the seeded
+// target and ok.
+func (f *fakeFeed) RollbackTarget(_ ids.WorkspaceID, row *frontendv1.FeedId) (feed.RollbackTarget, bool) {
+	f.rollbackTargetRows = append(f.rollbackTargetRows, row)
+	return f.rollbackTarget, f.rollbackTargetOK
+}
+
+// LiveDetachedIn records that it was called and answers the seeded count.
+func (f *fakeFeed) LiveDetachedIn(ids.WorkspaceID, []ids.TurnID) int {
+	f.liveDetachedCalls++
+	return f.liveDetached
+}
+
+// RollBackTurns records the turns it was handed and answers the seeded error.
+func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
+	f.rollBackTurnsCalls = append(f.rollBackTurnsCalls, turns)
+	return f.rollBackTurnsErr
 }
 
 func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {

@@ -64,7 +64,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 			dlog.Context{"turn": string(turn), "close": close.How.String()})
 		return
 	}
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, &turn)
 	ended := r.closedEnding(s, turn, close)
 
 	r.disarmTurnStalls(s, string(turn))
@@ -178,7 +178,5 @@ func (r *resolver) endReplayedTurn(s *wsState, next ids.TurnID) {
 	if !closed {
 		return
 	}
-	// The ending is drawn where the turn it ends was drawn.
-	defer r.addressingTurn(s, *s.replayTurn)()
 	r.endClosedTurn(s, *s.replayTurn, close)
 }

@@ -78,7 +78,7 @@ func TestAWaitKeepsTheFailedAgentsRowData(t *testing.T) {
 	}
 	row := rows[0]
 	if row.GetLabel().GetText() != "Explore" || row.GetDescription().GetText() != "scan the repo" ||
-		row.GetTokens().GetText() != "900 tok" || row.GetJump().GetEntry().GetValue() != "feed-w1" {
+		row.GetTokens().GetText() != "900" || row.GetJump().GetEntry().GetValue() != "feed-w1" {
 		t.Fatalf("row = %+v, want the failed run's label, description, tokens and jump", row)
 	}
 }

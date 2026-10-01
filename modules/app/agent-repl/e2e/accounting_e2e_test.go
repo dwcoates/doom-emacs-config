@@ -157,10 +157,8 @@ func TestAccountUsage(t *testing.T) {
 		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "account_usage"
 	})
 
-	// Assert the FRONTEND consequence. A SAMPLE is the account's figures, never
-	// the vendor speaking, so it stands no salient rate-limit line (owner
-	// ruling, 2026-09-30: only a rate-limit EVENT that warns or refuses does);
-	// its figures are the enduring usage line's, drawn whatever they are.
+	// Assert the FRONTEND consequence. A SAMPLE is the account's figures, so
+	// they are the enduring usage line's, drawn whatever they are.
 	// `usage-full`'s five_hour window is 41% (agent-shim/claude/shim/src/fake/
 	// catalogs.ts fakeAccountUsage), drawn on the enduring usage line.
 	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
@@ -192,9 +190,9 @@ func TestAccountUsageAvailableArm(t *testing.T) {
 	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
 }
 
-// assertTheSampleDrawsOnlyTheEnduringUsage fails if the footer draws a
-// rate-limit line, or draws the sample's figures anywhere but the enduring
-// usage line. It opens a FRESH footer stream and reads its FIRST view: a newly
+// assertTheSampleDrawsOnlyTheEnduringUsage fails if the footer stands a
+// salient line, or draws the sample's figures anywhere but the enduring usage
+// line. It opens a FRESH footer stream and reads its FIRST view: a newly
 // opened stream is served the CURRENT resolved state, so — called after the
 // resolver's own account_usage log record has been observed — the view it
 // answers necessarily already carries the filed sample. No sleep, and no
@@ -206,8 +204,8 @@ func assertTheSampleDrawsOnlyTheEnduringUsage(t *testing.T, w *World, ws *worksp
 	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's current view after the usage sample was filed", func(*frontendv1.FooterView) bool {
 		return true
 	})
-	if line := footerRateLimit(view); line != nil {
-		t.Errorf("footer draws a rate-limit line %v from a sample, want none: only the vendor's event stands one", line)
+	if salient := footerTier(view, "salient"); salient != nil {
+		t.Errorf("footer stands salient line %v after a sample, want none: a sample feeds the enduring usage line only", salient)
 	}
 	if footerEnduringUsage(view).GetSession() == nil {
 		t.Errorf("footer view %v, want the sample's session figure on the enduring usage line", view.GetStrip().GetStatus())

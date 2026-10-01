@@ -388,18 +388,40 @@ func (s *store) UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKi
 // TombstoneHeldPrompt retires a held prompt with its reason. A prompt already
 // retired is refused, so its recorded reason is final.
 func (s *store) TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombstone) error {
-	fields := dlog.Context{"turn": string(turn), "tombstone_kind": why.Kind, "tombstone_at": why.At}
+	return s.TombstoneHeldPrompts(ctx, []TurnID{turn}, why)
+}
+
+// TombstoneHeldPrompts retires held prompts with one reason, all or nothing: a
+// prompt already retired or unknown refuses the whole batch, so a caller that
+// drops several (a rollback) never leaves some dropped and some standing.
+func (s *store) TombstoneHeldPrompts(ctx context.Context, turns []TurnID, why Tombstone) error {
+	fields := dlog.Context{"turns": turnStrings(turns), "tombstone_kind": why.Kind, "tombstone_at": why.At}
 	return s.write(ctx, "daemon.wsm.tombstone_held_prompt", fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, turn); err != nil {
-			return err
-		}
 		if why.Kind == "" {
 			return errors.New("wsm: a tombstone names its reason")
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET tombstone_kind = ?, tombstone_at = ? WHERE turn_id = ?`,
-			why.Kind, nanos(why.At), turn)
-		return err
+		if len(turns) == 0 {
+			return errors.New("wsm: a tombstone names at least one held prompt")
+		}
+		for _, turn := range turns {
+			if err := requireStandingHold(ctx, tx, turn); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE held_prompts SET tombstone_kind = ?, tombstone_at = ? WHERE turn_id = ?`,
+				why.Kind, nanos(why.At), turn); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+}
+
+func turnStrings(turns []TurnID) []string {
+	out := make([]string, len(turns))
+	for i, turn := range turns {
+		out[i] = string(turn)
+	}
+	return out
 }
 
 // ReplaceHeldPromptSaid replaces a standing hold's content and discards its

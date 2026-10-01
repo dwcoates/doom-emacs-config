@@ -1,0 +1,137 @@
+// endpoint_select_feed_row.proto — SelectFeedRow: move, clear or end the
+// selection of one workspace's feed. FEED section.
+//
+// The DAEMON owns the selection per workspace (frontend.v1.FeedSelection): it
+// knows the ordered rows, so it COMPUTES which row a step lands on rather than
+// a client naming one, and it is the only holder of the selection, so what
+// the webapp draws and what a sent prompt or a rollback acts on can never
+// disagree. The result is pushed to the webapp on the feed watch and to
+// Emacs on the host workspace watch, and acked here.
+//
+// Emacs steps the selection (`C-p` / `C-n` through final responses, `C-S-p` /
+// `C-S-n` through prompts) and clears it (escape twice); the webapp clears it
+// (a click on the feed's background) and ends it when the selected row has
+// left the viewport entirely.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Which way a step moves along the selectable rows. Both directions start at
+// the newest row when nothing of that kind is selected, and wrap at each end.
+enum SelectFeedRowDirection {
+  // Never sent: a request carrying it is refused as InvalidArgument.
+  SELECT_FEED_ROW_DIRECTION_UNSPECIFIED = 0;
+  // The previous (older) row.
+  SELECT_FEED_ROW_DIRECTION_OLDER = 1;
+  // The next (newer) row.
+  SELECT_FEED_ROW_DIRECTION_NEWER = 2;
+}
+
+message SelectFeedRowRequest {
+  // The workspace whose selection to change — the daemon-minted ref, echoed
+  // verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // What to do to the selection. Exactly one is set; an unset move is
+  // refused as InvalidArgument.
+  oneof move {
+    // Step through the final responses. A selected prompt is replaced by the
+    // newest final response.
+    SelectFeedRowStep response = 2;
+    // Step through the prompts a rollback can reach: the main agent's prompts
+    // of the current vendor conversation, after its last compaction or clear.
+    // A selected response is replaced by the newest such prompt.
+    SelectFeedRowStep prompt = 3;
+    // The user dismissed the selection. The push returns the webapp to the
+    // tail (frontend.v1.FeedSelectionNoneReturnToTail).
+    SelectFeedRowClear clear = 4;
+    // The webapp saw the named row leave its viewport entirely. The selection
+    // ends only if that row is still the selected one, so a report about a
+    // row the user has since stepped away from changes nothing. The push
+    // leaves the viewport where it is (frontend.v1.FeedSelectionNoneStay).
+    SelectFeedRowLeftView left_view = 5;
+  }
+}
+
+// One step along the selectable rows of one kind.
+message SelectFeedRowStep {
+  // Which way to step.
+  SelectFeedRowDirection direction = 1;
+}
+
+// Dismiss the selection.
+message SelectFeedRowClear {}
+
+// The selected row is no longer visible in the webapp.
+message SelectFeedRowLeftView {
+  // The row that left the viewport, as the webapp was told it was selected.
+  frontend.v1.FeedId row = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SelectFeedRowResponse {
+  oneof result {
+    SelectFeedRowSuccess success = 1;
+    SelectFeedRowError error = 2;
+  }
+}
+
+// The move was applied. The same selection reaches the webapp and Emacs on
+// their watches; this ack lets the caller react to its own move.
+message SelectFeedRowSuccess {
+  // What the selection is after the move.
+  oneof outcome {
+    // A row is selected.
+    SelectFeedRowSuccessSelected selected = 1;
+    // A step found no row of its kind to select (no final response yet, or no
+    // prompt a rollback can reach); nothing is selected. The caller says so,
+    // so the gesture is not silent.
+    SelectFeedRowSuccessNothingSelectable nothing_selectable = 2;
+    // Nothing is selected: the move was a clear, or a left-view report.
+    SelectFeedRowSuccessNone none = 3;
+  }
+}
+// A row is selected after the move.
+message SelectFeedRowSuccessSelected {
+  // The selection in force.
+  frontend.v1.FeedSelection selection = 1;
+}
+// A step found nothing of its kind to select.
+message SelectFeedRowSuccessNothingSelectable {}
+// Nothing is selected after the move.
+message SelectFeedRowSuccessNone {}
+
+// Arms derived from the daemon's refusal sites, mirroring SelectWorkspace.
+// Validation failures (unset field, UNSPECIFIED enum) are Connect
+// InvalidArgument, never an arm.
+message SelectFeedRowError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SelectFeedRowUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SelectFeedRowWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SelectFeedRowTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SelectFeedRowNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message SelectFeedRowUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message SelectFeedRowWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message SelectFeedRowTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message SelectFeedRowNotYetAdopted {}

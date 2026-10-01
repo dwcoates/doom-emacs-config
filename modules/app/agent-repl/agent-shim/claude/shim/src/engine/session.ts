@@ -41,7 +41,7 @@ import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { isAgentTaskType } from "../convert/detached.js";
-import { subagentId, toolCallActivityId } from "../convert/ids.js";
+import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
 import { terminalUpsertKey } from "../store/keys.js";
@@ -78,6 +78,8 @@ import {
   hibernateRefused,
   killSessionClosed,
   killSessionRefused,
+  rollBackSessionRefused,
+  rollBackSessionSucceeded,
   sessionFault,
   setSessionModelRefused,
   setSessionPermissionModeRefused,
@@ -91,6 +93,8 @@ import {
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
 import { readTranscripts } from "./transcripts.js";
+import { planCut, readLiveChain, vendorCutRefusal, type GuardArming } from "./rollback.js";
+import { settleable, type Settleable } from "./settleable.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
@@ -159,6 +163,14 @@ export interface QuerySpec {
   readonly abortController: AbortController;
   /** The rewind: resume only THROUGH this record. */
   readonly resumeSessionAt?: string;
+  /**
+   * With `resumeSessionAt`: the prompt uuid of the ONE turn a rollback drops,
+   * which arms the vendor's guard against dropping anything else (sdk.d.ts,
+   * `resumeDropsTurn`). Set by RollBackSession only for a single dropped turn
+   * whose entries past the fork point the guard would all let go
+   * (engine/rollback.ts, `GuardArming`); never on a resume.
+   */
+  readonly resumeDropsTurn?: string;
   readonly prompt: AsyncIterable<SdkUserMessage>;
   /**
    * Every chunk the vendor child writes to stderr.
@@ -202,6 +214,13 @@ interface EngineDeps {
    * suite can stamp its scripted replies; production mints a random one.
    */
   readonly newUuid?: () => string;
+  /**
+   * Derives the vendor uuid a turn's prompt is sent under from its turn id —
+   * `promptVendorUuid` (convert/ids.ts), and nothing else in production.
+   * Injected only so a suite can observe each derived uuid it must stamp
+   * scripted replies with.
+   */
+  readonly promptUuid?: (turnId: string) => string;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
   /** Injected so a suite substitutes a temp directory without a state dir. */
@@ -309,6 +328,22 @@ interface OpenBashWatcher {
   /** Resolves when the handler's stream has finished, however it finished. */
   readonly ended: Promise<void>;
 }
+
+/** A query a rollback restarted, while the rollback waits on its boot. */
+interface RollbackBoot {
+  /** Bound when the query is created, before its message loop reads anything. */
+  query: QueryLike | undefined;
+  /** The error result the vendor answered its boot with, in its words. */
+  refusal: string | undefined;
+  /** Settles with how the query's stream ended, once it has. */
+  readonly ended: Settleable<string>;
+}
+
+/** How a restarted query's boot went. */
+type BootOutcome =
+  | { readonly kind: "booted" }
+  | { readonly kind: "refused"; readonly vendorMessage: string }
+  | { readonly kind: "failed"; readonly detail: string };
 
 /**
  * How long the teardown waits for ONE of its bounded stages to finish.
@@ -455,12 +490,15 @@ const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
 const KEEPALIVE_REWIND_COMPONENT = "shim-engine-keepalive-rewind";
 
 /**
- * What the vendor says when it will not resume at the uuid it was handed.
+ * How long a rollback waits for the interrupted turn's own stop result.
  *
- * Grounded on the owner's two dead sessions of 2026-09-14: the child exits 1
- * having printed `No message found with message.uuid of: <uuid>`.
+ * THE INTERRUPTED TERMINAL IS THE VENDOR'S TO WRITE, and it rides the OLD query:
+ * closing that query before its stop result is folded would leave the daemon's
+ * WatchAgent with no terminal for the turn. A LAST RESORT: an interrupt's
+ * result arrives within the vendor's own stop latency (the same round trip a
+ * KillTurn's terminal rides), so nothing healthy reaches this.
  */
-const REWIND_REFUSAL_PHRASE = "No message found with message.uuid";
+const ROLLBACK_STOP_SETTLE_MS = 10_000;
 
 /** How often the account's rate-limit windows are sampled. */
 const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
@@ -569,8 +607,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * that uuid, once, in {@link onSdkMessage}. Arrival order attributes nothing.
    */
   const sends = new SendLedger();
-  /** The minter of every send's client uuid, which the vendor echoes back. */
+  /** The minter of the keep-alive send's client uuid, which the vendor echoes back. */
   const newUuid = deps.newUuid ?? randomUUID;
+  /**
+   * EVERY OTHER SEND'S CLIENT UUID IS ITS TURN'S PROMPT UUID, derived from the
+   * turn id (`StartTurnRequest.turn`), so the prompt's transcript record can be
+   * found from the turn id alone (RollBackSession).
+   */
+  const promptUuid = deps.promptUuid ?? promptVendorUuid;
   /**
    * THE ONE NETWORK-RESUME STATE of this process, and its one probe loop
    * (engine/network-resume.ts). Fed every SDK message; delivers through
@@ -654,6 +698,37 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let stopCommand:
     | { readonly turn: conversationv1.TurnId; readonly command: conversationv1.AgentInterruptedByUser | undefined }
     | undefined;
+  /** Settled when the held {@link stopCommand} retires: the stopped turn's result was folded. */
+  let stopRetired: Settleable<void> | undefined;
+  /**
+   * THE ROLLBACK IN PROGRESS, from its first step to its answer. While it
+   * stands the keep-alive does not beat and the network resume does not
+   * deliver: either would send onto a query the rollback is about to replace.
+   */
+  let rollingBack = false;
+  /**
+   * THE RESTARTED QUERY'S BOOT, while a rollback waits on it.
+   *
+   * The vendor judges a truncating resume at BOOT (`resumeDropsTurn`'s guard
+   * runs while the CLI loads the conversation, before it serves anything), and
+   * a refusal is an error `result` followed by the child exiting. Both belong
+   * to the rollback, never to the session: the result is held here instead of
+   * folded (it would read as a vendor-started turn failing), and the query's
+   * end settles {@link RollbackBoot.ended} instead of losing the session.
+   */
+  let rollbackBoot: RollbackBoot | undefined;
+  /**
+   * EVERY TURN OF THIS WORKSPACE THAT WAS ROLLED BACK: the daemon's list a
+   * resume carried (`StartSessionResume.rolled_back_turns`), plus the dropped
+   * turns of every rollback landed since. The vendor never rewrites its
+   * transcript, so until the next send appends past a fork point the file's
+   * tail still sits on the dropped branch; the ONE rule that ends the live
+   * conversation before such a turn's prompt (engine/rollback.ts,
+   * `readLiveChain`) reads this, wherever the conversation is resumed or a
+   * rollback planned. Nothing ever clears it: a branch the next prompt starts
+   * holds none of these prompts.
+   */
+  const rolledBackTurns = new Set<string>();
   /**
    * Settled the moment the shim's own turn now in the send slot — its
    * keep-alive, or the network-resume prompt — leaves it.
@@ -662,7 +737,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * one per such turn however many ask, so an expired wait leaves nothing
    * behind to grow.
    */
-  let shimTurnEnd: { readonly promise: Promise<void>; readonly resolve: () => void } | undefined;
+  let shimTurnEnd: Settleable<void> | undefined;
   let effectiveModel = "";
   /**
    * The mode in force. `auto` IS THE UNSTATED MODE (owner ruling 2026-09-14):
@@ -2647,7 +2722,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (said === undefined) throw new Error(`shim session: the join ${turn.id.value} carries no prompt`);
     joining = { turn, prompt, into };
     try {
-      pushSend(queue, saidText(said), { uuid: newUuid(), turnId: turn.id.value, keepalive: false });
+      pushSend(queue, saidText(said), { uuid: promptUuid(turn.id.value), turnId: turn.id.value, keepalive: false });
     } catch (err) {
       joining = undefined;
       throw err;
@@ -2664,6 +2739,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const held = stopCommand;
     if (held === undefined) return;
     stopCommand = undefined;
+    const retired = stopRetired;
+    stopRetired = undefined;
+    retired?.resolve();
     LOGGER.debug(
       { turn_id: held.turn.value, command: held.command?.command.case ?? "unstated", why },
       "the held stop command retired",
@@ -2676,13 +2754,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function shimTurnEnded(): Promise<void> | undefined {
     if (open === undefined || !isShimTurn(open)) return undefined;
-    if (shimTurnEnd === undefined) {
-      let resolve = (): void => {};
-      const promise = new Promise<void>((settle) => {
-        resolve = settle;
-      });
-      shimTurnEnd = { promise, resolve };
-    }
+    shimTurnEnd ??= settleable();
     return shimTurnEnd.promise;
   }
 
@@ -2779,6 +2851,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return (async (): Promise<void> => {
       try {
         for await (const message of active) {
+          if (heldByRollbackBoot(active, message)) continue;
           await onSdkMessage(message);
           // THE BACKPRESSURE. The vendor stream is the one producer of rows
           // with no bound of its own, so while the store writer's backlog is
@@ -2787,6 +2860,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           await deps.persistence.whenWritable();
         }
         if (isStaleLoop(active)) return;
+        if (endedRollbackBoot(active, "the restarted query's stream ended")) return;
         if (!standingDown) {
           // A QUERY THAT DIED BECAUSE ITS REWIND ANCHOR WAS REFUSED IS NOT A
           // LOST SESSION. The child exits 1 having said so on stderr; the
@@ -2805,6 +2879,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       } catch (err) {
         if (isStaleLoop(active)) return;
         const cause = err instanceof Error ? err.message : String(err);
+        if (endedRollbackBoot(active, cause)) return;
         if (await recoverFromRewindRefusal(cause)) return;
         onQueryLost(
           create(conversationv1.SessionQueryDiedSchema, {
@@ -2891,7 +2966,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function submit(said: conversationv1.UserSaid, turn: OpenTurn): Promise<void> {
     const text = saidText(said);
-    const uuid = turn.keepalive ? pendingKeepaliveUuid(turn) : newUuid();
+    const uuid = turn.keepalive ? pendingKeepaliveUuid(turn) : promptUuid(turn.id.value);
     // THE ROLLBACK PRECEDES A KEEP-ALIVE TOO, not only a real prompt. The anchor
     // never advances past the last real record, so the same obligation a real
     // prompt owes is owed by the next keep-alive beat, and discharging it here
@@ -2972,6 +3047,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       await replaceQuery({
         binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
         resumeSessionAt: owed.resumeSessionAt,
+        keepsAnchor: true,
       });
     } catch (err) {
       return { ok: false, detail: err instanceof Error ? err.message : String(err) };
@@ -3097,18 +3173,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     rewind.clearAnchor("the vendor refused to resume at it");
     rewind.settled();
-    try {
-      await replaceQuery({ binding: { kind: "resume", resumeSessionId: current.vendorSessionId } });
-    } catch (err) {
-      // The plain resume failed too. Nothing here can save the session, and
-      // pretending otherwise would hide a dead query -- the caller's own loss
-      // path takes it from here.
-      LOGGER.error(
-        { cause: err instanceof Error ? err.message : String(err) },
-        "the plain resume that was to replace the refused rewind ALSO failed; the session's own loss path owns this now",
-      );
-      return false;
-    }
+    if (!(await resumePlainly(current, "the refused rewind"))) return false;
     pushes.fault(
       sessionFault(
         { kind: "keepaliveFailed" },
@@ -3120,6 +3185,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * Reopen the query on a PLAIN resume of the same vendor session — no cut of
+   * its own, only the live end every resume takes ({@link liveResumeAt}) —
+   * after the vendor refused a truncating one: THE ONE RECOVERY shared by the
+   * keep-alive rewind and RollBackSession. Answers whether the plain resume
+   * started; it never throws, because the caller is on a path whose whole
+   * purpose is that the session survives.
+   */
+  async function resumePlainly(current: SessionIdentity, replacing: string): Promise<boolean> {
+    try {
+      await replaceQuery({
+        binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
+        ...resumeAtLiveEnd(current.vendorSessionId),
+      });
+      return true;
+    } catch (err) {
+      // The plain resume failed too. Nothing here can save the session, and
+      // pretending otherwise would hide a dead query -- the caller's own loss
+      // path takes it from here.
+      LOGGER.error(
+        { cause: err instanceof Error ? err.message : String(err), replacing },
+        `the plain resume that was to replace ${replacing} ALSO failed; the session's own loss path owns this now`,
+      );
+      return false;
+    }
+  }
+
+  /**
    * What the vendor said, when it is about the anchor this rewind named.
    *
    * Either the uuid itself appears in the words, or the vendor's own sentence
@@ -3127,8 +3219,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * stderr and the uuid reaches us in an error result's `errors`.
    */
   function refusalNamesAnchor(words: string, anchorUuid: string): boolean {
-    const evidence = `${words}\n${vendorStderrTail}`;
-    return evidence.includes(REWIND_REFUSAL_PHRASE) || evidence.includes(anchorUuid);
+    return vendorCutRefusal(`${words}\n${vendorStderrTail}`, anchorUuid) !== undefined;
   }
 
   /** An error result's words, or absence when the message is not one. */
@@ -3214,6 +3305,372 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return true;
   }
 
+  // -- RollBackSession -------------------------------------------------------
+
+  /**
+   * ROLL THE CONVERSATION BACK to just before `to_before`'s prompt
+   * (endpoint_roll_back_session.proto). The steps, in the contract's order:
+   *
+   *   1. plan the cut on the vendor transcript's chain (engine/rollback.ts);
+   *   2. `restore_files`: ask the vendor, as a dry run, whether the files can
+   *      go back — a no changes NOTHING, so it is asked before anything else;
+   *   3. interrupt the open turn exactly as an unforced KillTurn does, and let
+   *      its stop result reach the fold on the OLD query, so the daemon sees
+   *      the normal interrupted terminal;
+   *   4. `restore_files`: stop the dropped turns' detached work and restore the
+   *      files, on the old query, before it closes;
+   *   5. restart the query in place on the same vendor session, resumed at the
+   *      fork point, and wait for its boot: the vendor judges the cut there.
+   *
+   * NOTHING IS RETRIED. A cut the vendor refuses leaves the conversation whole:
+   * the session is resumed plainly and the refusal answered.
+   */
+  async function rollBackSession(request: shimv1.RollBackSessionRequest): Promise<shimv1.RollBackSessionResponse> {
+    const context = {
+      to_before: request.toBefore?.value ?? "",
+      dropped_turns: request.droppedTurns.map((turn) => turn.value),
+      files: request.files.case === "restoreFiles" ? "restore" : "keep",
+    };
+    const current = identity;
+    if (!started || current === undefined || query === undefined) {
+      LOGGER.info({ ...context, outcome: "no_session" }, "refused RollBackSession: no session is open");
+      return rollBackSessionRefused({ kind: "noSession" }, "no session has been started on this shim");
+    }
+    if (rollingBack) {
+      throw new Error("shim session: a RollBackSession arrived while another is still in progress");
+    }
+    rollingBack = true;
+    try {
+      return await rollBack(request, current, context);
+    } finally {
+      rollingBack = false;
+    }
+  }
+
+  async function rollBack(
+    request: shimv1.RollBackSessionRequest,
+    current: SessionIdentity,
+    context: { to_before: string; dropped_turns: string[]; files: string },
+  ): Promise<shimv1.RollBackSessionResponse> {
+    const restore = request.files.case === "restoreFiles";
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
+    const read = readLiveChain(file, rolledBackPromptUuids());
+    if (read.kind === "unreadable") {
+      throw new Error(`shim session: the vendor transcript ${file} could not be read to plan the rollback: ${read.detail}`);
+    }
+    const prompt = promptUuid(context.to_before);
+    const plan =
+      read.kind === "no_transcript"
+        ? { kind: "promptNotRecorded" as const, detail: `no vendor transcript exists at ${file}` }
+        : planCut(read.transcript, prompt, context.dropped_turns.map((turn) => promptUuid(turn)), restore ? "restore" : "keep");
+    const head = read.kind === "ok" && read.end.kind === "cut" ? read.end.forkPoint : "";
+    const planned = { ...context, vendor_prompt_uuid: prompt, chain_head: head };
+    switch (plan.kind) {
+      case "promptNotRecorded":
+        LOGGER.info({ ...planned, outcome: "prompt_not_recorded", detail: plan.detail }, "refused RollBackSession: the prompt is not in the conversation");
+        return rollBackSessionRefused({ kind: "promptNotRecorded" }, plan.detail);
+      case "firstPrompt":
+        LOGGER.info({ ...planned, outcome: "first_prompt" }, "refused RollBackSession: the prompt is its conversation's first");
+        return rollBackSessionRefused(
+          { kind: "firstPrompt" },
+          `prompt ${prompt} opens its conversation; no chain entry precedes it to resume at`,
+        );
+      case "unseenPrompt":
+        if (plan.why === "guardWouldRefuse") {
+          LOGGER.info(
+            { ...planned, outcome: "unseen_prompt", unseen_prompt_uuid: plan.vendorPromptUuid, why: plan.why },
+            "refused RollBackSession: restoring files, a user message the vendor's guard would refuse sits after the cut; nothing was changed",
+          );
+          return rollBackSessionRefused(
+            { kind: "unseenPrompt", vendorPromptUuid: plan.vendorPromptUuid },
+            `the conversation after the cut holds user message ${plan.vendorPromptUuid}, which the vendor could refuse to drop after the files were restored`,
+          );
+        }
+        LOGGER.info(
+          { ...planned, outcome: "unseen_prompt", unseen_prompt_uuid: plan.vendorPromptUuid, why: plan.why },
+          "refused RollBackSession: a prompt the caller did not name sits after the cut",
+        );
+        return rollBackSessionRefused(
+          { kind: "unseenPrompt", vendorPromptUuid: plan.vendorPromptUuid },
+          `the conversation after the cut holds prompt ${plan.vendorPromptUuid}, which no dropped turn names`,
+        );
+      case "cut":
+        break;
+    }
+    const cut = { ...planned, fork_point: plan.forkPoint };
+    // NOTHING THE ROLLBACK MUST NOT INTERRUPT. A start still being processed or
+    // a prompt waiting to join the running turn would be sent onto the query
+    // this replaces, and lost with it.
+    if (turns.startInFlight()) {
+      throw new Error("shim session: RollBackSession arrived while a StartTurn is being processed");
+    }
+    if (joining !== undefined) {
+      throw new Error(`shim session: RollBackSession arrived while turn ${joining.turn.id.value} waits to join the running turn`);
+    }
+    const before = requireQuery();
+    if (restore) {
+      const dry = await before.rewindFiles(plan.promptUuid, { dryRun: true });
+      if (!dry.canRewind) {
+        const vendorMessage = dry.error ?? "";
+        LOGGER.info(
+          { ...cut, outcome: "files_not_restorable", vendor_message: vendorMessage, dry_run: true },
+          "refused RollBackSession: the vendor cannot restore the files to the prompt; nothing was changed",
+        );
+        return rollBackSessionRefused(
+          { kind: "filesNotRestorable", vendorMessage },
+          `the vendor cannot restore the files to prompt ${plan.promptUuid}: ${vendorMessage}`,
+        );
+      }
+    }
+    LOGGER.info(cut, "ROLLING BACK the vendor conversation to just before the prompt");
+    await interruptForRollback();
+    let restored: readonly string[] | undefined;
+    if (restore) {
+      await turns.stopWorkSpawnedBy(context.dropped_turns);
+      const done = await requireQuery().rewindFiles(plan.promptUuid);
+      if (!done.canRewind) {
+        const vendorMessage = done.error ?? "";
+        LOGGER.error(
+          { ...cut, outcome: "files_not_restorable", detail: vendorMessage, dry_run: false },
+          "the vendor refused to restore the files after its dry run allowed it; the conversation is left whole",
+        );
+        return rollBackSessionRefused(
+          { kind: "filesNotRestorable", vendorMessage },
+          `the vendor refused to restore the files to prompt ${plan.promptUuid} after its dry run allowed it: ${vendorMessage}`,
+        );
+      }
+      restored = done.filesChanged ?? [];
+      LOGGER.info({ ...cut, restored_paths: restored }, "restored the files to the prompt");
+    }
+    // THE GUARD VALIDATES ONE DROPPED TURN ONLY (sdk.d.ts, `resumeDropsTurn`),
+    // and refuses the shim's own keep-alives too, so the plan arms it only
+    // where it would let every entry past the fork point go; otherwise the
+    // plan's own check stands in.
+    const dropsTurn = armedGuard(plan.guard, cut);
+    const boot = await restartAtFork(current, plan.forkPoint, dropsTurn);
+    switch (boot.kind) {
+      case "booted":
+        // THE KEEP-ALIVE STATE STARTS OVER: its anchor and every keep-alive
+        // turn it owed lie past the fork point, in the branch just dropped.
+        rewind.clearAnchor("the conversation was rolled back past it");
+        rewind.settled();
+        rewindWatch = undefined;
+        for (const turn of context.dropped_turns) rolledBackTurns.add(turn);
+        LOGGER.info(
+          { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "success", restored_paths: restored ?? [] },
+          "ROLLED BACK: the vendor resumed the conversation at the fork point",
+        );
+        return rollBackSessionSucceeded(restored);
+      case "refused":
+        LOGGER.error(
+          { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "vendor_refused", detail: boot.vendorMessage },
+          "the vendor REFUSED the rollback's cut at resume; resuming the session whole, without retrying",
+        );
+        await resumeWholeAfterRollback(current, boot.vendorMessage);
+        return rollBackSessionRefused(
+          { kind: "vendorRefused", vendorMessage: boot.vendorMessage },
+          `the vendor refused to resume at ${plan.forkPoint}; the session was resumed whole`,
+        );
+      case "failed":
+        await resumeWholeAfterRollback(current, boot.detail);
+        throw new Error(`shim session: the rollback's restarted query did not boot: ${boot.detail}`);
+    }
+  }
+
+  /** The prompt uuid the guard is armed with, or absence, logging why it is not armed. */
+  function armedGuard(guard: GuardArming, cut: Record<string, unknown>): string | undefined {
+    switch (guard.kind) {
+      case "armed":
+        return guard.resumeDropsTurn;
+      case "severalTurns":
+        LOGGER.debug({ ...cut, guard: "several_turns" }, "the vendor's guard is not armed: the rollback drops several turns");
+        return undefined;
+      case "unattributable":
+        LOGGER.info(
+          { ...cut, guard: "unattributable", record_uuid: guard.recordUuid },
+          "the vendor's guard is not armed: an entry past the fork point it would refuse is one the shim knows",
+        );
+        return undefined;
+    }
+  }
+
+  /** The derived prompt uuids of every rolled-back turn. */
+  function rolledBackPromptUuids(): ReadonlySet<string> {
+    return new Set([...rolledBackTurns].map((turn) => promptUuid(turn)));
+  }
+
+  /**
+   * Where a resume of `vendorSessionId` starts: the conversation's live end
+   * (engine/rollback.ts, `readLiveChain`) as `resumeSessionAt`, or nothing for
+   * the newest record. NEVER `resumeDropsTurn`: the dropped turns' entries
+   * were judged when they were rolled back. A transcript whose live end cannot
+   * be read fails the resume loudly rather than bring dropped turns back.
+   */
+  function resumeAtLiveEnd(vendorSessionId: string): { resumeSessionAt?: string } {
+    if (rolledBackTurns.size === 0) return {};
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
+    const read = readLiveChain(file, rolledBackPromptUuids());
+    const context = { vendor_session_id: vendorSessionId, rolled_back_turns: [...rolledBackTurns] };
+    switch (read.kind) {
+      case "unreadable":
+        // Recorded at ERROR where it was found (engine/rollback.ts); raised here.
+        throw new Error(`shim session: the vendor transcript ${file} could not be read to resume it: ${read.detail}`);
+      case "no_transcript":
+        LOGGER.debug(context, "resuming whole: the vendor has written no transcript to end before a rolled-back turn");
+        return {};
+      case "ok":
+        if (read.end.kind !== "cut") {
+          LOGGER.debug(context, "resuming whole: no rolled-back turn's prompt is on the conversation's chain");
+          return {};
+        }
+        LOGGER.info(
+          { ...context, prompt_uuid: read.end.promptUuid, resume_session_at: read.end.forkPoint },
+          "resuming at the cut: the transcript's tail still holds a rolled-back turn",
+        );
+        return { resumeSessionAt: read.end.forkPoint };
+    }
+  }
+
+  /** The live query, which a rollback step needs; its absence is the session lost mid-rollback. */
+  function requireQuery(): QueryLike {
+    const active = query;
+    if (active === undefined) throw new Error("shim session: the vendor query is gone; the rollback cannot go on");
+    return active;
+  }
+
+  /**
+   * Step 3: interrupt whatever a consumer could address — the send slot's real
+   * turn and a vendor-started one beside it — through KillTurn's own interrupt,
+   * waiting each time for the stopped turn's result to be folded. The shim's
+   * own keep-alive is housekeeping and is let go rather than interrupted: the
+   * restart discards everything it sent.
+   */
+  async function interruptForRollback(): Promise<void> {
+    for (;;) {
+      const interrupted = await turns.interruptForRollback();
+      if (interrupted === undefined) break;
+      await awaitStopResult(interrupted);
+    }
+    const beat = open;
+    if (beat?.keepalive === true) {
+      releaseTurn(beat);
+      keepaliveScope.abandon("a rollback replaced the query the keep-alive was sent on");
+      LOGGER.info({ keepalive_turn: beat.id.value }, "let the keep-alive go: the rollback discards everything it sent");
+    }
+  }
+
+  /**
+   * Wait for the interrupted turn's own stop result to be folded — the held
+   * stop command retires on it — bounded by {@link ROLLBACK_STOP_SETTLE_MS}.
+   */
+  async function awaitStopResult(interrupted: OpenTurn): Promise<void> {
+    if (stopCommand === undefined) return;
+    stopRetired ??= settleable();
+    await withinBound(stopRetired.promise, ROLLBACK_STOP_SETTLE_MS, `the stop result of interrupted turn ${interrupted.id.value}`);
+  }
+
+  /**
+   * Step 5: restart the query in place — the one restart, {@link replaceQuery}
+   * — resumed at `forkPoint`, and judge its boot.
+   *
+   * HOW THE BOOT IS AWAITED. The CLI loads the conversation (where the
+   * `resumeDropsTurn` guard runs) during its headless boot, BEFORE its input
+   * loop starts, and its input loop is what answers control requests; a refused
+   * boot writes its error result, says it on stderr, and exits 1 (verified in
+   * the 0.3.280 binary's boot path and the sdk.d.ts contract). So the same
+   * control round-trip StartSession settles on, `supportedModels()`, answering
+   * within its bound PROVES the cut was taken, and its failure is followed by
+   * the query's end: the refusal is then read off the error result held while
+   * booting, the stream's end, and the child's stderr.
+   */
+  async function restartAtFork(current: SessionIdentity, forkPoint: string, dropsTurn: string | undefined): Promise<BootOutcome> {
+    const boot: RollbackBoot = { query: undefined, refusal: undefined, ended: settleable<string>() };
+    rollbackBoot = boot;
+    // THE NEW CHILD'S OWN WORDS ONLY: a refusal the old child printed must not
+    // read as this one's.
+    vendorStderrTail = "";
+    try {
+      try {
+        await replaceQuery({
+          binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
+          resumeSessionAt: forkPoint,
+          ...(dropsTurn === undefined ? {} : { resumeDropsTurn: dropsTurn }),
+          beforeLoop: (created) => {
+            boot.query = created;
+          },
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const refusal = vendorCutRefusal(`${detail}\n${vendorStderrTail}`);
+        return refusal === undefined
+          ? { kind: "failed", detail: `the restarted query could not be created: ${detail}` }
+          : { kind: "refused", vendorMessage: refusal };
+      }
+      return await judgeBoot(boot);
+    } finally {
+      rollbackBoot = undefined;
+    }
+  }
+
+  /** The boot's verdict; see {@link restartAtFork} for how it is read. */
+  async function judgeBoot(boot: RollbackBoot): Promise<BootOutcome> {
+    const active = boot.query;
+    if (active === undefined) throw new Error("shim session: the restarted query was never bound to its boot");
+    const boundMs = deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS;
+    try {
+      await withinBound(active.supportedModels(), boundMs, "supportedModels");
+      return { kind: "booted" };
+    } catch (err) {
+      const answer = err instanceof Error ? err.message : String(err);
+      let how: string;
+      try {
+        how = await withinBound(boot.ended.promise, boundMs, "the end of the query whose boot did not answer");
+      } catch (endErr) {
+        how = endErr instanceof Error ? endErr.message : String(endErr);
+      }
+      const refusal = vendorCutRefusal([boot.refusal ?? "", how, answer, vendorStderrTail].join("\n"));
+      if (refusal !== undefined) return { kind: "refused", vendorMessage: refusal };
+      return { kind: "failed", detail: `${answer}; ${how}; vendor stderr: ${vendorStderrTail.trim()}` };
+    }
+  }
+
+  /**
+   * The cut is off: reopen the session plainly, through the one recovery the
+   * keep-alive rewind's refusal uses ({@link resumePlainly}). A plain resume
+   * that ALSO fails has lost the session, which is the loss path's to report.
+   */
+  async function resumeWholeAfterRollback(current: SessionIdentity, why: string): Promise<void> {
+    if (await resumePlainly(current, "the refused rollback")) return;
+    const detail = `the rollback's cut failed (${why}) and the plain resume after it failed too`;
+    onQueryLost(
+      create(conversationv1.SessionQueryDiedSchema, {
+        cause: { case: "iteratorFailure", value: create(conversationv1.SessionQueryIteratorFailureSchema, { cause: detail }) },
+      }),
+      detail,
+    );
+    throw new Error(`shim session: ${detail}`);
+  }
+
+  /** The restarted query's boot holds an error result rather than folding it. */
+  function heldByRollbackBoot(active: QueryLike, message: SdkMessage): boolean {
+    const boot = rollbackBoot;
+    if (boot === undefined || boot.query !== active) return false;
+    const words = resultErrorWords(message);
+    if (words === undefined) return false;
+    boot.refusal = words;
+    LOGGER.info({ detail: words }, "the restarted query answered its boot with an error result; the rollback judges it");
+    return true;
+  }
+
+  /** The restarted query's end, while its boot is judged, is the rollback's. */
+  function endedRollbackBoot(active: QueryLike, how: string): boolean {
+    const boot = rollbackBoot;
+    if (boot === undefined || boot.query !== active) return false;
+    LOGGER.info({ detail: how }, "the restarted query ended while its boot was being judged; the rollback judges it");
+    boot.ended.resolve(how);
+    return true;
+  }
+
   /**
    * A boundary the anchor cannot be trusted across.
    *
@@ -3235,7 +3692,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function replaceQuery(options: {
     binding: QuerySpec["binding"];
     resumeSessionAt?: string;
-  }): Promise<void> {
+    resumeDropsTurn?: string;
+    /** The keep-alive rewind itself, which resumes THROUGH the anchor it keeps. */
+    keepsAnchor?: boolean;
+    /** Run on the new query before its message loop reads anything. */
+    beforeLoop?: (created: QueryLike) => void;
+  }): Promise<QueryLike> {
     const previous = query;
     const previousPrompts = prompts;
     query = undefined;
@@ -3246,18 +3708,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE REPLACED QUERY ANSWERS NOTHING MORE, so nothing it announced can
     // settle; the fold lets go of it before the new query's first message.
     deps.fold.endQuery("the query was replaced");
-    await startQuery(options.binding, options.resumeSessionAt);
+    return startQuery(options.binding, options);
   }
 
   async function startQuery(
     binding: QuerySpec["binding"],
-    resumeSessionAt?: string,
+    options: {
+      resumeSessionAt?: string;
+      resumeDropsTurn?: string;
+      keepsAnchor?: boolean;
+      beforeLoop?: (created: QueryLike) => void;
+    } = {},
   ): Promise<QueryLike> {
+    const { resumeSessionAt, resumeDropsTurn, beforeLoop } = options;
     // EVERY QUERY BINDING THAT IS NOT ITSELF THE REWIND DROPS THE ANCHOR. A
-    // session's opening, a cold-gate answer, a rotation, a restart and a plain
-    // replacement all put the vendor somewhere the remembered uuid may not
-    // exist; carrying it across one is how a dead uuid reaches `resumeSessionAt`.
-    if (resumeSessionAt === undefined) {
+    // session's opening, a cold-gate answer, a rotation, a restart, a
+    // rollback's cut and a plain replacement all put the vendor somewhere the
+    // remembered uuid may not exist; carrying it across one is how a dead uuid
+    // reaches `resumeSessionAt`.
+    if (options.keepsAnchor !== true) {
       rewind.clearAnchor("the query was replaced without a rewind");
       rewindWatch = undefined;
     }
@@ -3273,6 +3742,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       onChildExit: noteVendorExit,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
+      ...(resumeDropsTurn === undefined ? {} : { resumeDropsTurn }),
     });
     query = created;
     prompts = queue;
@@ -3280,6 +3750,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A NEW QUERY RUNS NO VENDOR TURN YET: whatever the last one was midway
     // through ended with it.
     keepaliveScope.queryBound();
+    beforeLoop?.(created);
     loop = runLoop(created);
     return created;
   }
@@ -3472,10 +3943,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // a second one would key the retry's rows to a book the first attempt's
       // rows are not on.
       vendorSessionId = recordedOriginalVendorSessionId ?? mintVendorSessionId();
+      rolledBackTurns.clear();
       requestedModel = normalizeModel(source.value.model?.name ?? "");
       if (source.value.permissionMode !== undefined) permissionMode = source.value.permissionMode;
     } else {
       vendorSessionId = source.value.vendorSessionId;
+      // THE DAEMON'S LIST IS THE WHOLE TRUTH at a resume: it replaces whatever
+      // an earlier start of this process held.
+      rolledBackTurns.clear();
+      for (const turn of source.value.rolledBackTurns) rolledBackTurns.add(turn.value);
       facts = readTranscriptFacts(
         transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId),
       );
@@ -3619,11 +4095,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // one. This attaches the handler now; `await initialized` below still
       // throws the same reason.
       initialized.catch(() => undefined);
-      const child = await startQuery(
+      const child =
         brandNew || clearedTo !== undefined
-          ? { kind: "fresh", sessionId: inForce }
-          : { kind: "resume", resumeSessionId: vendorSessionId },
-      );
+          ? await startQuery({ kind: "fresh", sessionId: inForce })
+          : await startQuery({ kind: "resume", resumeSessionId: vendorSessionId }, resumeAtLiveEnd(vendorSessionId));
       // THE PROOF THE START SETTLES ON, issued the moment the child exists.
       // It runs BESIDE the other settlers rather than instead of them: a
       // blocking hook, an error result or a query that ends can still land
@@ -3911,6 +4386,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       throwaway = await deps.createQuery({
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
+        // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
+        // the transcript's tail is neither summarized nor chained under it.
+        ...resumeAtLiveEnd(vendorSessionId),
         permissionMode: "plan",
         canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
         abortController: controller,
@@ -4483,6 +4961,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function keepaliveBeat(): Promise<void> {
     if (open !== undefined || query === undefined || identity === undefined) return;
+    // A ROLLBACK IS REPLACING THE QUERY: a beat now would send onto the query
+    // it is about to close, past the fork point it is about to resume at.
+    if (rollingBack) {
+      LOGGER.logVerbose({ outcome: "skipped_rollback" }, "keep-alive beat skipped: a rollback is in progress");
+      return;
+    }
     // A VENDOR TURN IS RUNNING: the cache is warm, and a keep-alive pushed now
     // would be queued or folded into a real turn.
     if (adopted !== undefined) {
@@ -4564,7 +5048,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const busy = mainAgentBusy();
     if (busy !== undefined) return { kind: "busy", detail: busy };
-    const uuid = newUuid();
+    const resume = mintAdoptedTurn();
+    const uuid = promptUuid(resume.id.value);
     await yieldObligation(textSaid(text), false, uuid);
     // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
     // turn; the resume waits for the next beat rather than riding into it.
@@ -4574,7 +5059,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (queue === undefined) {
       return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
     }
-    const resume = mintAdoptedTurn();
     setOpen(resume);
     cadence?.pause();
     writeAdoptedPrompt(resume, "the shim asked the main agent to resume network-killed agents", "network_resume");
@@ -4602,6 +5086,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open !== undefined) return open.keepalive ? "a keep-alive turn is open" : `turn ${open.id.value} is open`;
     if (adopted !== undefined) return `the vendor-started turn ${adopted.id.value} is running`;
     if (turns.startInFlight()) return "a StartTurn is being processed";
+    if (rollingBack) return "a rollback is in progress";
     return undefined;
   }
 
@@ -5482,6 +5967,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     watchAgent: (request) => turns.watchAgent(request),
     updateAgent: (request) => turns.updateAgent(request),
     killTurn: (request) => turns.killTurn(request),
+    rollBackSession,
     watchBash: (request) => turns.watchBash(request),
     stopBash: (request) => turns.stopBash(request),
     detachForeground: (request) => turns.detachForeground(request),

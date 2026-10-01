@@ -68,15 +68,14 @@ message SubmitPromptRequest {
   // it onto the turn's durable record (StartTurn.origin → AgentPrompt).
   // Never UNSPECIFIED: a submission carrying it is refused at once.
   conversation.v1.PromptOrigin origin = 4;
-  // OPTIONAL reply-to-a-past-response target: the FeedId of an earlier
-  // final-response row (a row the daemon deems selectable via SelectResponse)
-  // that this prompt is a reply to. Carried ALONGSIDE `said`, never in place
-  // of it: the user still authored a prompt, and the daemon PREPENDS a copy of
-  // the referenced response plus a note before delivering, so the agent knows
-  // the new message refers to that response. Unset for an ordinary prompt; a
-  // set-but-unresolvable feedid is the daemon's to refuse, exactly as `feed`
-  // is. Additive and mutually compatible with every existing field.
-  optional frontend.v1.FeedId reference_response_feedid = 6;
+  // A REPLY TO A PAST RESPONSE is not named here: when the workspace's feed
+  // has a final response selected (frontend.v1.FeedSelectionResponse) as the
+  // daemon accepts this prompt, the daemon prepends a copy of that response
+  // plus a note before delivering, and clears the selection. The daemon is the
+  // only holder of the selection, so the reply a prompt carries is always the
+  // one the webapp was drawing.
+  reserved 6;
+  reserved "reference_response_feedid";
   // OPTIONAL delivery mode. ABSENT is the ordinary delivery; set, it names the
   // one other delivery the daemon honors (SubmitPromptDelivery). Additive and
   // mutually compatible with every existing field. Set to UNSPECIFIED, the

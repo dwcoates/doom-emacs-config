@@ -223,3 +223,34 @@ func killSessionArm(failure *shimv1.KillSessionFailure) string {
 		return ArmShimUnspecified
 	}
 }
+
+// The RollBackSession failure arms (shim.v1 RollBackSessionFailure.cause).
+const (
+	ArmShimPromptNotRecorded  = "prompt_not_recorded"
+	ArmShimFirstPrompt        = "first_prompt"
+	ArmShimUnseenPrompt       = "unseen_prompt"
+	ArmShimVendorRefused      = "vendor_refused"
+	ArmShimFilesNotRestorable = "files_not_restorable"
+)
+
+// rollBackSessionArm names a RollBackSession failure's cause, and the vendor's
+// own words when the arm carries them (a refusal's message, the reason files
+// cannot be restored): those words are what the user is shown.
+func rollBackSessionArm(failure *shimv1.RollBackSessionFailure) (arm, vendor string) {
+	switch cause := failure.GetCause().(type) {
+	case *shimv1.RollBackSessionFailure_NoSession:
+		return ArmShimNoSession, ""
+	case *shimv1.RollBackSessionFailure_PromptNotRecorded:
+		return ArmShimPromptNotRecorded, ""
+	case *shimv1.RollBackSessionFailure_FirstPrompt:
+		return ArmShimFirstPrompt, ""
+	case *shimv1.RollBackSessionFailure_UnseenPrompt:
+		return ArmShimUnseenPrompt, cause.UnseenPrompt.GetVendorPromptUuid()
+	case *shimv1.RollBackSessionFailure_VendorRefused:
+		return ArmShimVendorRefused, cause.VendorRefused.GetVendorMessage()
+	case *shimv1.RollBackSessionFailure_FilesNotRestorable:
+		return ArmShimFilesNotRestorable, cause.FilesNotRestorable.GetVendorMessage()
+	default:
+		return ArmShimUnspecified, ""
+	}
+}

@@ -32,8 +32,7 @@ import {
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
-import { expandedSectionAt, installClickExpand, useVisibilityWatcher } from "../src/expand.js";
-import { fakeVisibility } from "./visibility-fake.js";
+import { expandedSectionAt, installClickExpand } from "../src/expand.js";
 
 /** An `ExpandedSectionAt` for a feed with no open section. */
 const noneOpen = (): HTMLElement | null => null;
@@ -392,13 +391,14 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the ten causes the owner rules allow", () => {
+  it("names exactly the eleven causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
       "promptHeld",
       "selectionMoved",
       "detachedWorkSelected",
+      "entryJumped",
       "itemExpanded",
       "initialPlacement",
       "replaceRestore",
@@ -951,6 +951,38 @@ describe("TailFollow.detachedWorkSelected", () => {
   });
 });
 
+describe("TailFollow.entryJumped", () => {
+  it("centers a jumped-to entry below the fold in the viewport", () => {
+    // Arrange: a 200px entry whose top is 250px down a 300px viewport.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
+    expect(box.scrollTop).toBe(300);
+  });
+
+  it("clamps at the feed's end, as the detached-work selection does", () => {
+    // Arrange: an entry near the end; the box can reach 700 at most.
+    const box = { scrollTop: 600, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 50 });
+    // Assert
+    expect(box.scrollTop).toBe(700);
+  });
+
+  it("is recorded at DEBUG as entryJumped", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert
+    expect(await moves(capture)).toEqual([{ cause: "entryJumped", from: 100, to: 300, follow: false }]);
+  });
+});
+
 describe("TailFollow.itemExpanded", () => {
   it("centers an expanded item below the fold in the viewport", () => {
     // Arrange: a 200px bubble whose top is 250px down a 300px viewport.
@@ -999,6 +1031,7 @@ describe("TailFollow's centering reveals land where their arithmetic says", () =
   type Delta = (g: RevealGeometry, box: { scrollTop: number; scrollHeight: number; clientHeight: number }) => number;
   const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void, Delta]> = [
     ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g), revealCenterDelta],
+    ["entryJumped", (tail, g) => tail.entryJumped(g), revealCenterDelta],
     ["itemExpanded", (tail, g) => tail.itemExpanded(g), expandCenterDelta],
   ];
   const geometries: RevealGeometry[] = [
@@ -1323,6 +1356,38 @@ describe("TailFollow's latest-visible latch", () => {
     expect(l.tail.isFollowing()).toBe(true);
   });
 
+  it("moves nothing when the selection ends in place", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    // Act — the selected row left the viewport (none.stay).
+    l.tail.selectionEnded();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 100]);
+  });
+
+  it("latches once the reader reaches the latest entry after the selection ended in place", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.tail.selectionEnded();
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("latches where the view stands when the latest entry is visible as the selection ends", () => {
+    // Arrange
+    const l = withLatest(650);
+    l.tail.selectionMoved(null);
+    // Act
+    l.tail.selectionEnded();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+  });
+
   it("latches after a detached-work selection that leaves the latest entry in view", () => {
     // Arrange
     const l = withLatest(500);
@@ -1342,6 +1407,98 @@ describe("TailFollow's latest-visible latch", () => {
     l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: -600, nodeHeight: 50 });
     // Assert
     expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 275]);
+  });
+
+  /** L with a counter of its `onTailReached` calls. */
+  function counted(l: ReturnType<typeof withLatest>): { reached: number } {
+    const counter = { reached: 0 };
+    l.tail.onTailReached(() => {
+      counter.reached += 1;
+    });
+    return counter;
+  }
+
+  it("tells onTailReached when the reader scrolls back until the latest entry shows", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(c.reached).toBe(1);
+  });
+
+  it("tells onTailReached once per return, however the reader goes on scrolling at the tail", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Act
+    l.box.scrollTop = 700;
+    l.gesture();
+    // Assert
+    expect(c.reached).toBe(1);
+  });
+
+  it("tells onTailReached again after the reader left the tail and came back", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    l.box.scrollTop = 650;
+    l.gesture();
+    l.box.scrollTop = 100;
+    l.gesture();
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(c.reached).toBe(2);
+  });
+
+  it("does not tell onTailReached when the follow ends and re-latches with the latest entry still in view", () => {
+    // Arrange — parked at the tail, the latest entry (900..1000) in view.
+    const l = withLatest(700);
+    l.tail.promptSent();
+    const c = counted(l);
+    // Act — a small flick up: the follow ends, and the latch takes it again.
+    l.box.scrollTop = 690;
+    l.gesture();
+    // Assert
+    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
+  });
+
+  it("does not tell onTailReached for a latch no reader input is behind", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act — the box's own movement: a scroll event with no input before it.
+    l.box.scrollTop = 650;
+    l.scroll();
+    // Assert
+    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
+  });
+
+  it("does not tell onTailReached for a latch a centering reveal made", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act — centering brings the box to its tail, where the latest entry shows.
+    l.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 800, nodeHeight: 50 });
+    // Assert
+    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
+  });
+
+  it("does not tell onTailReached for a latch a resize made", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act — the viewport grows until the latest entry shows.
+    l.box.clientHeight = 900;
+    l.resize();
+    // Assert
+    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
   });
 
   it("throws and reports at ERROR when the latest entry's geometry is not a real layout", async () => {
@@ -2349,17 +2506,15 @@ describe("installIntentScroll: an open section keeps its whole wheel", () => {
     expect([scroll.classList.contains("expanded"), feed.scrollTop]).toEqual([true, 0]);
   });
 
-  it("composes with auto-collapse: a wheel on the feed outside is the feed's, and closes the box once it is out of view", () => {
+  it("composes with auto-collapse: a wheel on the feed outside is the feed's, and leaves the box open", () => {
     // Arrange
-    const seen = fakeVisibility();
-    useVisibilityWatcher(document, seen.watcher);
     const { feed, scroll } = mount(true, 300);
     uninstall.push(installClickExpand(feed, () => ""));
     // Act
     const e = wheelAt(feed, 40);
-    seen.report(scroll, false);
-    // Assert — left to the browser to scroll the feed, and closed once unseen.
-    expect([scroll.classList.contains("expanded"), e.defaultPrevented]).toEqual([false, false]);
+    // Assert — left to the browser to scroll the feed; a box the reader opened
+    // stays open however far that scroll takes it (owner ruling, 2026-10-01).
+    expect([scroll.classList.contains("expanded"), e.defaultPrevented]).toEqual([true, false]);
   });
 });
 

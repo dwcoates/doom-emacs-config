@@ -141,3 +141,45 @@ describe("historyPointer", () => {
     expect(() => ids.storeItemPointerValue(pointer)).toThrow(/history pointer is empty/);
   });
 });
+
+describe("promptVendorUuid", () => {
+  it("passes a turn id that is already a uuid through as its own vendor uuid", () => {
+    // Arrange.
+    const turn = "1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+
+    // Act.
+    const uuid = ids.promptVendorUuid(turn);
+
+    // Assert.
+    expect(uuid).toBe(turn);
+  });
+
+  it("maps a daemon's 16-hex turn id to the version-5 uuid under the fixed namespace", () => {
+    // Arrange. The expectation is Python's `uuid.uuid5(namespace, name)`, an
+    // independent implementation of RFC 4122 §4.3.
+    const turn = "0123456789abcdef";
+
+    // Act.
+    const uuid = ids.promptVendorUuid(turn);
+
+    // Assert.
+    expect(uuid).toBe("6dd0ffc6-4a38-5e10-a69b-93b2fd0d5b5f");
+  });
+
+  it("derives the same uuid every time for the same turn id", () => {
+    // Arrange.
+    const turn = "adopted-x";
+
+    // Act.
+    const first = ids.promptVendorUuid(turn);
+    const second = ids.promptVendorUuid(turn);
+
+    // Assert.
+    expect([first, second]).toEqual(["cddc315c-f403-5457-8c93-aaa4c5f84b12", "cddc315c-f403-5457-8c93-aaa4c5f84b12"]);
+  });
+
+  it("refuses an empty turn id", () => {
+    // Arrange, Act, Assert.
+    expect(() => ids.promptVendorUuid("")).toThrow(/turn id is empty/);
+  });
+});

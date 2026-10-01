@@ -47,6 +47,38 @@ describe("validateStartSessionRequest", () => {
     expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
   });
 
+  it("accepts a resume naming its rolled-back turns", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      source: {
+        case: "resume",
+        value: create(shimv1.StartSessionResumeSchema, {
+          vendorSessionId: "v-1",
+          rolledBackTurns: [create(conversationv1.TurnIdSchema, { value: "turn-1" })],
+        }),
+      },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBeUndefined();
+  });
+
+  it("refuses a rolled-back turn with an empty id", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      source: {
+        case: "resume",
+        value: create(shimv1.StartSessionResumeSchema, {
+          vendorSessionId: "v-1",
+          rolledBackTurns: [create(conversationv1.TurnIdSchema, { value: "" })],
+        }),
+      },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
   it("refuses a resume naming no vendor session", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
@@ -276,6 +308,52 @@ describe("validateKillTurnRequest", () => {
 
     // Act, Assert.
     expect(codeOf(() => validate.validateKillTurnRequest(request))).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("validateRollBackSessionRequest", () => {
+  it("accepts a legal rollback", () => {
+    // Arrange.
+    const request = requests.rollBackSessionRequest();
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateRollBackSessionRequest(request))).toBeUndefined();
+  });
+
+  it("refuses a rollback naming no turn to cut before", () => {
+    // Arrange.
+    const request = requests.rollBackSessionRequest();
+    request.toBefore = undefined;
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateRollBackSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a dropped turn with an empty id", () => {
+    // Arrange.
+    const request = requests.rollBackSessionRequest();
+    request.droppedTurns.push(create(conversationv1.TurnIdSchema, { value: "" }));
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateRollBackSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses dropped turns that do not begin with the turn cut before", () => {
+    // Arrange.
+    const request = requests.rollBackSessionRequest();
+    request.droppedTurns = [create(conversationv1.TurnIdSchema, { value: "turn-2" })];
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateRollBackSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a rollback that says neither keep nor restore", () => {
+    // Arrange.
+    const request = requests.rollBackSessionRequest();
+    request.files = { case: undefined };
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateRollBackSessionRequest(request))).toBe(Code.InvalidArgument);
   });
 });
 

@@ -52,20 +52,20 @@ func (h *harness) deliverPromptAt(turn, text string, atMs int64) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock(text)},
 		}},
-	}, placeAt(atMs), noAddress())
+	}, placeAt(atMs))
 }
 
 // sendAt delivers a live activity whose entry sits at AT_MS.
 func (h *harness) sendAt(act *conversationv1.AgentActivity, atMs int64) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, placeAt(atMs), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, placeAt(atMs))
 }
 
 // cutPlaced delivers a live context cut whose entry sits at AT_MS.
 func (h *harness) cutPlaced(at string, cut *conversationv1.ContextCut, atMs int64) {
 	h.t.Helper()
 	h.resolver.OnContextCut(testWorkspace, mainAgent(), cut,
-		&conversationv1.HistoryPointer{Value: at}, nil, placeAt(atMs), noAddress())
+		&conversationv1.HistoryPointer{Value: at}, nil, placeAt(atMs))
 }
 
 // orderOf is the order key a feed's row carries.

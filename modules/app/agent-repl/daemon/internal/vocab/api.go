@@ -62,8 +62,6 @@ type RenderColors struct {
 	// workspace, and purple, a merge holding it. Every other color is a
 	// usable workspace whose composer is open.
 	ComposerClosedColors []string
-	// FooterAllowance maps each FooterAllowance.status arm name to its color.
-	FooterAllowance map[string]string
 	// TopbarConnectivity maps each daemon link state to a topbar tone.
 	TopbarConnectivity map[string]string
 	// TopbarTones is the closed set of tone names the topbar may serve.
@@ -87,7 +85,6 @@ type renderColorsJSON struct {
 	FeedMergeHeadGlyph   string                       `json:"feed_merge_head_glyph"`
 	FooterStatus         map[string]string            `json:"footer_status"`
 	ComposerClosedColors []string                     `json:"composer_closed_colors"`
-	FooterAllowance      map[string]string            `json:"footer_allowance"`
 	TopbarConnectivity   map[string]string            `json:"topbar_connectivity"`
 	TopbarTones          []string                     `json:"topbar_tones"`
 	SurfaceOverrides     map[string]map[string]string `json:"surface_overrides"`
@@ -151,7 +148,6 @@ func (c RenderColors) validate() error {
 	}{
 		{"roster_status", c.RosterStatus},
 		{"footer_status", c.FooterStatus},
-		{"footer_allowance", c.FooterAllowance},
 		{"failure_sides", c.FailureSides},
 	} {
 		if len(table.rows) == 0 {
@@ -298,12 +294,6 @@ func (c RenderColors) AssertFooterStatusArms(arms []string) error {
 	return assertTable("footer_status", c.FooterStatus, arms)
 }
 
-// AssertFooterAllowanceArms is AssertRosterStatusArms for
-// FooterAllowance.status: allowed, allowed_warning, rejected.
-func (c RenderColors) AssertFooterAllowanceArms(arms []string) error {
-	return assertTable("footer_allowance", c.FooterAllowance, arms)
-}
-
 // AssertMergeGlyphArms checks that every merge arm it is given carries a glyph
 // treatment: color 'none' in roster_status and a glyph name in merge_glyphs.
 // A merge arm landing without a glyph would draw as nothing at all.
@@ -331,16 +321,6 @@ func assertTable(name string, rows map[string]string, arms []string) error {
 	sort.Strings(missing)
 	sort.Strings(extra)
 	return fmt.Errorf("vocab: %s diverges from the contract: missing %v, unknown %v", name, missing, extra)
-}
-
-// FooterAllowanceColor answers the color of one FooterAllowance.status arm. An
-// arm the table does not carry is an error, never a default color.
-func (c RenderColors) FooterAllowanceColor(arm string) (string, error) {
-	color, ok := c.FooterAllowance[arm]
-	if !ok {
-		return "", fmt.Errorf("vocab: footer_allowance has no row for %q", arm)
-	}
-	return color, nil
 }
 
 // RosterStatusColor answers the color of one RosterRow.status arm on a given

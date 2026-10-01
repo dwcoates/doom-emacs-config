@@ -48,6 +48,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
+	// the read.
+	rolledBack    map[ids.WorkspaceID][]ids.TurnID
+	rolledBackErr error
+
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	byDir      map[string]wsm.Workspace
 	// listWorkspacesErr fails the roster read, for the tests about what a
@@ -203,6 +208,14 @@ func (d *fakeDB) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Faul
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// RolledBackTurns answers the workspace's scripted rolled-back turns.
+func (d *fakeDB) RolledBackTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	if d.rolledBackErr != nil {
+		return nil, d.rolledBackErr
+	}
+	return d.rolledBack[ws], nil
 }
 
 func newFakeDB() *fakeDB {
@@ -741,6 +754,32 @@ type fakeQueue struct {
 	actErr      error
 	// db is the fixture's store, which the door closes orphans on.
 	db *fakeDB
+	// rollBacks records every RollBack call, in order.
+	rollBacks []rollBackCall
+	// rollBackErr is what RollBack answers BEFORE perform runs, mirroring the
+	// real queue's contract that a refused rollback never performs it: a
+	// test wanting perform's own error (a *ShimRefusal or
+	// promptqueue.ErrHoldsChanged surfaced from inside perform) scripts that
+	// through the fake shim or leaves this nil and lets perform run.
+	rollBackErr error
+}
+
+// rollBackCall is one RollBack call the fake queue recorded.
+type rollBackCall struct {
+	WS       ids.WorkspaceID
+	Since    time.Time
+	DropHeld []ids.TurnID
+}
+
+// RollBack records the call and, absent a scripted refusal, runs perform
+// exactly as the real queue does: perform's own error (or success) is what
+// RollBack answers with.
+func (q *fakeQueue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error {
+	q.rollBacks = append(q.rollBacks, rollBackCall{WS: ws, Since: since, DropHeld: drop})
+	if q.rollBackErr != nil {
+		return q.rollBackErr
+	}
+	return perform(ctx)
 }
 
 // CloseOrphans is the queue's door, closing on the fixture's own store.
@@ -945,6 +984,15 @@ type fakeFeed struct {
 	// progress as it stood when the feed was emptied — the ordering assertion
 	// with nothing to wait on.
 	onReset func()
+	// rolledBackTurns records every RollBackTurns call's turns, in order.
+	rolledBackTurns [][]ids.TurnID
+}
+
+// RollBackTurns records the turns removed; the real resolver's own durable
+// error is deliberately not modeled here, since rollback.go swallows it.
+func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
+	f.rolledBackTurns = append(f.rolledBackTurns, turns)
+	return nil
 }
 
 // RetireRow records the retirement.
@@ -1364,6 +1412,26 @@ type fakeShim struct {
 	// transcriptReads counts the reads, so a bind can be shown to validate
 	// against a FRESH listing rather than a remembered one.
 	transcriptReads int
+	// rollBacks records every RollBackSession call, in order.
+	rollBacks []rolledBackSession
+	// rollBackPaths is the restored-files paths RollBackSession answers with.
+	rollBackPaths []string
+	// rollBackErr fails every RollBackSession call.
+	rollBackErr error
+}
+
+// rolledBackSession is one RollBackSession call the fake recorded.
+type rolledBackSession struct {
+	Turns        []ids.TurnID
+	RestoreFiles bool
+}
+
+func (s *fakeShim) RollBackSession(_ context.Context, turns []ids.TurnID, restoreFiles bool) ([]string, error) {
+	s.rollBacks = append(s.rollBacks, rolledBackSession{Turns: turns, RestoreFiles: restoreFiles})
+	if s.rollBackErr != nil {
+		return nil, s.rollBackErr
+	}
+	return s.rollBackPaths, nil
 }
 
 func (s *fakeShim) ReadTranscripts(context.Context) (*shimv1.ReadTranscriptsResponse, error) {

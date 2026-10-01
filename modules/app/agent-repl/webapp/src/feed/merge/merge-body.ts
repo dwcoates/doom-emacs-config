@@ -96,7 +96,7 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
     replaceTicking(
       strip,
       tabs.map((tab) => {
-        const el = drawFeedMergeTab(tab, { active: tab.id === active?.id });
+        const el = drawFeedMergeTab(tab, { active: tab.id === active?.id, ticker: rc.ctx.ticker });
         el.addEventListener("click", () => {
           picked = tab.id;
           draw();

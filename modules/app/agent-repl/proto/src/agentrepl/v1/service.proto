@@ -12,7 +12,9 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
-import "agentrepl/v1/endpoint_select_response.proto";
+import "agentrepl/v1/endpoint_select_feed_row.proto";
+import "agentrepl/v1/endpoint_plan_rollback.proto";
+import "agentrepl/v1/endpoint_roll_back.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
@@ -81,11 +83,11 @@ service AgentRepl {
   // handled commands transparently. See endpoint_submit_prompt.proto.
   rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
 
-  // Move or clear the response-selection cursor (reply-to-a-past-response):
-  // the daemon computes the newly selected final-response feedid from its
-  // ordered rows, pushes it to the webapp on the feed watch, and acks it
-  // here. See endpoint_select_response.proto.
-  rpc SelectResponse(SelectResponseRequest) returns (SelectResponseResponse);
+  // Move, clear or end the feed's selection (a final response to reply to,
+  // or a prompt to roll back to): the daemon computes the selected row from
+  // its ordered rows, pushes it to the webapp and Emacs, and acks it here.
+  // See endpoint_select_feed_row.proto.
+  rpc SelectFeedRow(SelectFeedRowRequest) returns (SelectFeedRowResponse);
 
   // Nudge the feed text zoom one small step up or down. Daemon-global,
   // persisted, pushed to every open feed's watch as a FeedTextScale frame. See
@@ -111,6 +113,14 @@ service AgentRepl {
   // "Stop that": the running turn, or a detached bubble's work — the arm is
   // the target. See endpoint_interrupt.proto.
   rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+
+  // ---- Rollback: return the conversation to just before one of its prompts ----
+
+  // Say what a rollback would do, for the user to confirm; changes nothing.
+  // See endpoint_plan_rollback.proto.
+  rpc PlanRollback(PlanRollbackRequest) returns (PlanRollbackResponse);
+  // Perform a confirmed plan. See endpoint_roll_back.proto.
+  rpc RollBack(RollBackRequest) returns (RollBackResponse);
 
   // The permission card's verdicts and the question card's answers. See
   // endpoint_answer_permission.proto.

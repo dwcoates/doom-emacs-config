@@ -44,9 +44,8 @@ const (
 const (
 	// AgentReplSubmitPromptProcedure is the fully-qualified name of the AgentRepl's SubmitPrompt RPC.
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
-	// AgentReplSelectResponseProcedure is the fully-qualified name of the AgentRepl's SelectResponse
-	// RPC.
-	AgentReplSelectResponseProcedure = "/agentrepl.v1.AgentRepl/SelectResponse"
+	// AgentReplSelectFeedRowProcedure is the fully-qualified name of the AgentRepl's SelectFeedRow RPC.
+	AgentReplSelectFeedRowProcedure = "/agentrepl.v1.AgentRepl/SelectFeedRow"
 	// AgentReplAdjustFeedTextScaleProcedure is the fully-qualified name of the AgentRepl's
 	// AdjustFeedTextScale RPC.
 	AgentReplAdjustFeedTextScaleProcedure = "/agentrepl.v1.AgentRepl/AdjustFeedTextScale"
@@ -61,6 +60,10 @@ const (
 	AgentReplGetFeedPageProcedure = "/agentrepl.v1.AgentRepl/GetFeedPage"
 	// AgentReplInterruptProcedure is the fully-qualified name of the AgentRepl's Interrupt RPC.
 	AgentReplInterruptProcedure = "/agentrepl.v1.AgentRepl/Interrupt"
+	// AgentReplPlanRollbackProcedure is the fully-qualified name of the AgentRepl's PlanRollback RPC.
+	AgentReplPlanRollbackProcedure = "/agentrepl.v1.AgentRepl/PlanRollback"
+	// AgentReplRollBackProcedure is the fully-qualified name of the AgentRepl's RollBack RPC.
+	AgentReplRollBackProcedure = "/agentrepl.v1.AgentRepl/RollBack"
 	// AgentReplAnswerPermissionProcedure is the fully-qualified name of the AgentRepl's
 	// AnswerPermission RPC.
 	AgentReplAnswerPermissionProcedure = "/agentrepl.v1.AgentRepl/AnswerPermission"
@@ -209,13 +212,15 @@ const (
 var (
 	agentReplServiceDescriptor                        = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
-	agentReplSelectResponseMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SelectResponse")
+	agentReplSelectFeedRowMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
 	agentReplAdjustFeedTextScaleMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
 	agentReplRequestCommandSupportMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
 	agentReplGetFeedPageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
 	agentReplInterruptMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("Interrupt")
+	agentReplPlanRollbackMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
+	agentReplRollBackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RollBack")
 	agentReplAnswerPermissionMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
 	agentReplAnswerQuestionMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
 	agentReplAnswerColdGateMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
@@ -277,11 +282,11 @@ type AgentReplClient interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
-	// Move or clear the response-selection cursor (reply-to-a-past-response):
-	// the daemon computes the newly selected final-response feedid from its
-	// ordered rows, pushes it to the webapp on the feed watch, and acks it
-	// here. See endpoint_select_response.proto.
-	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
+	// Move, clear or end the feed's selection (a final response to reply to,
+	// or a prompt to roll back to): the daemon computes the selected row from
+	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
+	// See endpoint_select_feed_row.proto.
+	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -302,6 +307,11 @@ type AgentReplClient interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Say what a rollback would do, for the user to confirm; changes nothing.
+	// See endpoint_plan_rollback.proto.
+	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
+	// Perform a confirmed plan. See endpoint_roll_back.proto.
+	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -475,10 +485,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		selectResponse: connect.NewClient[v1.SelectResponseRequest, v1.SelectResponseResponse](
+		selectFeedRow: connect.NewClient[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse](
 			httpClient,
-			baseURL+AgentReplSelectResponseProcedure,
-			connect.WithSchema(agentReplSelectResponseMethodDescriptor),
+			baseURL+AgentReplSelectFeedRowProcedure,
+			connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		adjustFeedTextScale: connect.NewClient[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse](
@@ -515,6 +525,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplInterruptProcedure,
 			connect.WithSchema(agentReplInterruptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		planRollback: connect.NewClient[v1.PlanRollbackRequest, v1.PlanRollbackResponse](
+			httpClient,
+			baseURL+AgentReplPlanRollbackProcedure,
+			connect.WithSchema(agentReplPlanRollbackMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		rollBack: connect.NewClient[v1.RollBackRequest, v1.RollBackResponse](
+			httpClient,
+			baseURL+AgentReplRollBackProcedure,
+			connect.WithSchema(agentReplRollBackMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		answerPermission: connect.NewClient[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse](
@@ -847,13 +869,15 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 // agentReplClient implements AgentReplClient.
 type agentReplClient struct {
 	submitPrompt             *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
-	selectResponse           *connect.Client[v1.SelectResponseRequest, v1.SelectResponseResponse]
+	selectFeedRow            *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
 	adjustFeedTextScale      *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
 	requestCommandSupport    *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed                 *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed                *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
 	getFeedPage              *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
 	interrupt                *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
+	planRollback             *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
+	rollBack                 *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
 	answerPermission         *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
 	answerQuestion           *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
 	answerColdGate           *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
@@ -915,9 +939,9 @@ func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request
 	return c.submitPrompt.CallUnary(ctx, req)
 }
 
-// SelectResponse calls agentrepl.v1.AgentRepl.SelectResponse.
-func (c *agentReplClient) SelectResponse(ctx context.Context, req *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
-	return c.selectResponse.CallUnary(ctx, req)
+// SelectFeedRow calls agentrepl.v1.AgentRepl.SelectFeedRow.
+func (c *agentReplClient) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
+	return c.selectFeedRow.CallUnary(ctx, req)
 }
 
 // AdjustFeedTextScale calls agentrepl.v1.AgentRepl.AdjustFeedTextScale.
@@ -948,6 +972,16 @@ func (c *agentReplClient) GetFeedPage(ctx context.Context, req *connect.Request[
 // Interrupt calls agentrepl.v1.AgentRepl.Interrupt.
 func (c *agentReplClient) Interrupt(ctx context.Context, req *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return c.interrupt.CallUnary(ctx, req)
+}
+
+// PlanRollback calls agentrepl.v1.AgentRepl.PlanRollback.
+func (c *agentReplClient) PlanRollback(ctx context.Context, req *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
+	return c.planRollback.CallUnary(ctx, req)
+}
+
+// RollBack calls agentrepl.v1.AgentRepl.RollBack.
+func (c *agentReplClient) RollBack(ctx context.Context, req *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
+	return c.rollBack.CallUnary(ctx, req)
 }
 
 // AnswerPermission calls agentrepl.v1.AgentRepl.AnswerPermission.
@@ -1225,11 +1259,11 @@ type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
-	// Move or clear the response-selection cursor (reply-to-a-past-response):
-	// the daemon computes the newly selected final-response feedid from its
-	// ordered rows, pushes it to the webapp on the feed watch, and acks it
-	// here. See endpoint_select_response.proto.
-	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
+	// Move, clear or end the feed's selection (a final response to reply to,
+	// or a prompt to roll back to): the daemon computes the selected row from
+	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
+	// See endpoint_select_feed_row.proto.
+	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -1250,6 +1284,11 @@ type AgentReplHandler interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Say what a rollback would do, for the user to confirm; changes nothing.
+	// See endpoint_plan_rollback.proto.
+	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
+	// Perform a confirmed plan. See endpoint_roll_back.proto.
+	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -1419,10 +1458,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplSelectResponseHandler := connect.NewUnaryHandler(
-		AgentReplSelectResponseProcedure,
-		svc.SelectResponse,
-		connect.WithSchema(agentReplSelectResponseMethodDescriptor),
+	agentReplSelectFeedRowHandler := connect.NewUnaryHandler(
+		AgentReplSelectFeedRowProcedure,
+		svc.SelectFeedRow,
+		connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAdjustFeedTextScaleHandler := connect.NewUnaryHandler(
@@ -1459,6 +1498,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplInterruptProcedure,
 		svc.Interrupt,
 		connect.WithSchema(agentReplInterruptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplPlanRollbackHandler := connect.NewUnaryHandler(
+		AgentReplPlanRollbackProcedure,
+		svc.PlanRollback,
+		connect.WithSchema(agentReplPlanRollbackMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRollBackHandler := connect.NewUnaryHandler(
+		AgentReplRollBackProcedure,
+		svc.RollBack,
+		connect.WithSchema(agentReplRollBackMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAnswerPermissionHandler := connect.NewUnaryHandler(
@@ -1789,8 +1840,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
-		case AgentReplSelectResponseProcedure:
-			agentReplSelectResponseHandler.ServeHTTP(w, r)
+		case AgentReplSelectFeedRowProcedure:
+			agentReplSelectFeedRowHandler.ServeHTTP(w, r)
 		case AgentReplAdjustFeedTextScaleProcedure:
 			agentReplAdjustFeedTextScaleHandler.ServeHTTP(w, r)
 		case AgentReplRequestCommandSupportProcedure:
@@ -1803,6 +1854,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplGetFeedPageHandler.ServeHTTP(w, r)
 		case AgentReplInterruptProcedure:
 			agentReplInterruptHandler.ServeHTTP(w, r)
+		case AgentReplPlanRollbackProcedure:
+			agentReplPlanRollbackHandler.ServeHTTP(w, r)
+		case AgentReplRollBackProcedure:
+			agentReplRollBackHandler.ServeHTTP(w, r)
 		case AgentReplAnswerPermissionProcedure:
 			agentReplAnswerPermissionHandler.ServeHTTP(w, r)
 		case AgentReplAnswerQuestionProcedure:
@@ -1924,8 +1979,8 @@ func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Requ
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubmitPrompt is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectResponse is not implemented"))
+func (UnimplementedAgentReplHandler) SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectFeedRow is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {
@@ -1950,6 +2005,14 @@ func (UnimplementedAgentReplHandler) GetFeedPage(context.Context, *connect.Reque
 
 func (UnimplementedAgentReplHandler) Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.Interrupt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PlanRollback is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollBack is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error) {

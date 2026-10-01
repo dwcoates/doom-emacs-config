@@ -12,10 +12,6 @@
  * landing in the proto without a colour — or a colour landing in the file
  * without an arm — fails the suite rather than the screen.
  *
- * THE ALLOWANCE TABLE IS NOT A TABLE EITHER, for the same reason: the vendor's
- * status arms are keyed in `render-colors.json#footer_allowance`, so the map is
- * built from `footerAllowanceColor` at load and never restated here.
- *
  * THE DATUM COLOURS ARE THIS COMPONENT'S OWN. footer.proto's rendering rules
  * say a STATICALLY TYPED datum inside an activity (a count, an instant, a sha)
  * deserves colour, but the shared vocabulary files scope only whole-state
@@ -24,12 +20,9 @@
  * vocabulary convention: a FIGURE the reader is tracking takes yellow (the
  * context figure's colour), and an IDENTITY takes blue.
  */
-import {
-  FooterAllowanceSchema,
-  FooterStatusSchema,
-} from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { HUE_GREEN, HUE_ORANGE, HUE_RED, HUE_YELLOW, percentGradientColor, type PercentStop } from "../percent-gradient.js";
-import { footerAllowanceColor, footerStatusColor, toneClass, type Color } from "../vocab.js";
+import { footerStatusColor, toneClass, type Color } from "../vocab.js";
 
 /**
  * Every `FooterStatus.status` arm, in the generated spelling.
@@ -59,39 +52,6 @@ export const STATUS_ARM_CLASS: Readonly<Record<string, Color>> = Object.freeze(
  */
 export function statusArmClass(arm: string): string {
   return toneClass(footerStatusColor(arm));
-}
-
-/**
- * Every `FooterAllowance.status` arm, in the generated spelling.
- *
- * Read off the SCHEMA for the same reason the status cases are: the vendor's
- * status word was a free string until the vocabulary landed in evidence, and
- * now that it is an arm the client's set of arms is the proto's own.
- */
-export const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
-  FooterAllowanceSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
-).map((field) => field.localName);
-
-/**
- * The colour each allowance status paints its cell, resolved through the shared
- * vocabulary exactly as the status arms are. Built eagerly: an arm the file has
- * no colour for throws HERE, at import, rather than drawing an unpainted cell.
- */
-export const ALLOWANCE_ARM_CLASS: Readonly<Record<string, Color>> = Object.freeze(
-  Object.fromEntries(
-    FOOTER_ALLOWANCE_STATUS_CASES.map((arm) => [arm, footerAllowanceColor(arm)]),
-  ),
-);
-
-/**
- * The CSS class an allowance cell wears for ARM.
- *
- * A thin wrapper over the shared vocabulary, like `statusArmClass`: there is
- * exactly one call path from an arm to a class, and an arm `render-colors.json`
- * has no row for is a MalformedView rather than a silently grey cell.
- */
-export function allowanceStatusClass(arm: string): string {
-  return toneClass(footerAllowanceColor(arm));
 }
 
 /** The typed datums an activity line colours. */
@@ -134,9 +94,8 @@ const FOOTER_PERCENT_STOPS: readonly PercentStop[] = [
 ];
 
 /**
- * The colour a footer percentage takes: an allowance's use, the context
- * window's fill, a rate-limit line's utilization. PERCENT is the figure as
- * drawn, 0..100.
+ * The colour a footer percentage takes: an allowance's use or the context
+ * window's fill. PERCENT is the figure as drawn, 0..100.
  */
 export function footerPercentColor(percent: number): string {
   return percentGradientColor(percent, FOOTER_PERCENT_STOPS);

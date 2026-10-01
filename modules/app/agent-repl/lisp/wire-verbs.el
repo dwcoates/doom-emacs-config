@@ -71,6 +71,7 @@
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-repository-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-user-said "agent-repl-wire-common" (said))
+(declare-function agent-repl-wire-decode-user-said "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-encode-prompt-origin "agent-repl-wire-common" (origin))
 (declare-function agent-repl-wire-encode-drain-reason "agent-repl-wire-common" (reason))
 (declare-function agent-repl-wire-encode-workspace-priority "agent-repl-wire-common" (priority))
@@ -226,6 +227,23 @@ a non-string element is a contract breach."
   "Return VALUE, or fail because MESSAGE's non-optional FIELD is unset."
   (or value
       (agent-repl-wire-verbs--fail message field "required field is unset")))
+
+(defun agent-repl-wire-verbs--decode-required-message (message field json decoder)
+  "Decode MESSAGE's REQUIRED message FIELD (a symbol) out of JSON with DECODER.
+An absent or null field is a contract breach."
+  (let ((cell (assq field json)))
+    (unless (and cell (not (eq (cdr cell) :null)))
+      (agent-repl-wire-verbs--fail message (symbol-name field) "required field is unset"))
+    (funcall decoder (cdr cell))))
+
+(defun agent-repl-wire-verbs--decode-optional-message (message field json decoder)
+  "Decode MESSAGE's OPTIONAL message FIELD (a symbol) out of JSON with DECODER.
+Returns nil when the field is absent: presence is the fact.  MESSAGE names
+the owner for the decoder's own diagnostics."
+  (ignore message)
+  (let ((cell (assq field json)))
+    (when (and cell (not (eq (cdr cell) :null)))
+      (funcall decoder (cdr cell)))))
 
 (defun agent-repl-wire-verbs--require-string (message field value)
   "Return VALUE as MESSAGE's required non-blank string FIELD, or fail."
@@ -2036,12 +2054,6 @@ arm this codec does not know is refused as an unknown field."
   "Encode SubmitPromptRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-submit-prompt-request-reference-response-feedid (feedid)
-  "Encode SubmitPromptRequest's `reference_response_feedid' use site from FEEDID.
-FEEDID is the decoded `frontend.v1.FeedId' plist SelectResponse acked; it
-is echoed back verbatim, never a value Emacs builds."
-  (agent-repl-wire-encode-feed-id feedid))
-
 (defconst agent-repl-wire-submit-prompt-deliveries
   '((:deferred . "SUBMIT_PROMPT_DELIVERY_DEFERRED"))
   "The SubmitPromptDelivery vocabulary Emacs sends, keyword to wire name.
@@ -2063,9 +2075,9 @@ unknown keyword is refused before anything is built."
 (defun agent-repl-wire-encode-submit-prompt-request (request)
   "Encode SubmitPromptRequest from plist REQUEST.
 REQUEST is (:workspace REF :said SAID :idempotency-key STRING :origin
-KEYWORD) plus the OPTIONAL :reference-response-feedid FEEDID and the
-OPTIONAL :delivery KEYWORD (`agent-repl-wire-submit-prompt-deliveries';
-absent is the ordinary delivery, so it is appended only when set).  The first
+KEYWORD) plus the OPTIONAL :delivery KEYWORD
+\(`agent-repl-wire-submit-prompt-deliveries'; absent is the ordinary
+delivery, so it is appended only when set).  The first
 four are required: the workspace names WHICH workspace the submission
 belongs to and is echoed verbatim like every other per-workspace request
 (it is required even though `feed' is not, because the root feed has no id
@@ -2075,17 +2087,12 @@ because a stored turn must trace back to the exact send site.  `feed' is
 never set — Emacs composes into the workspace's root feed only, so the
 absent field IS that fact.
 
-`reference-response-feedid' is the reply-to-a-past-response target: when
-present it carries the FeedId of the earlier final-response row the user
-selected (via SelectResponse), and the daemon prepends a copy of that
-response before delivering.  It rides ALONGSIDE `said' — the user still
-authored a prompt — and its ABSENCE is an ordinary prompt, so the field is
-appended only when set rather than sent empty."
+No reply target rides the request: the daemon holds the feed's selection
+(SelectFeedRow) and applies its own when the prompt is sent."
   (let ((message "SubmitPromptRequest")
-        (feedid (plist-get request :reference-response-feedid))
         (delivery (plist-get request :delivery)))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s reply-to=%s delivery=%S"
-                      (plist-get request :origin) (and feedid t) delivery)
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s delivery=%S"
+                      (plist-get request :origin) delivery)
     (append
      (list (cons 'workspace
                  (agent-repl-wire-encode-submit-prompt-request-workspace
@@ -2100,12 +2107,6 @@ appended only when set rather than sent empty."
            (cons 'origin (agent-repl-wire-encode-submit-prompt-request-origin
                           (agent-repl-wire-verbs--require message "origin"
                                                            (plist-get request :origin)))))
-     ;; OPTIONAL field: its absence is the ordinary-prompt fact, so it is
-     ;; appended only when a selection was active at submit time.
-     (when feedid
-       (list (cons 'referenceResponseFeedid
-                   (agent-repl-wire-encode-submit-prompt-request-reference-response-feedid
-                    feedid))))
      ;; OPTIONAL field: its absence is the ordinary delivery.
      (when delivery
        (list (cons 'delivery (agent-repl-wire-encode-submit-prompt-delivery delivery)))))))
@@ -3605,142 +3606,416 @@ with the same accessor every other verb's error uses."
    #'agent-repl-wire-decode-interrupt-success
    #'agent-repl-wire-decode-interrupt-error))
 
-;;;; ---- SelectResponse -------------------------------------------------
+;;;; ---- SelectFeedRow --------------------------------------------------
 ;;
-;; Reply-to-a-past-response cursor nav.  The client sends only a DIRECTION;
-;; the daemon owns the ordered final-response rows, computes the newly
-;; selected feedid (both directions start at the most recent and wrap at each
-;; end) and acks it here so Emacs can track selection state.
+;; Moving the feed's selection.  THE ARM IS THE MOVE on the request: Emacs
+;; steps through the final responses (`C-p' / `C-n') or through the prompts a
+;; rollback can reach (`C-S-p' / `C-S-n'), or clears the selection (escape
+;; twice).  The daemon owns the ordered rows and the selection, computes where
+;; a step lands, pushes the result to the webapp and to Emacs's host watch,
+;; and acks it here.  THE ARM IS THE OUTCOME on the success.  See
+;; endpoint_select_feed_row.proto.  The webapp's own `left_view' move is
+;; never sent from Emacs, so it has no elisp spelling.
 
-(defconst agent-repl-wire-select-response-directions
-  '((:prev . "SELECT_RESPONSE_DIRECTION_PREV")
-    (:next . "SELECT_RESPONSE_DIRECTION_NEXT")
-    (:clear . "SELECT_RESPONSE_DIRECTION_CLEAR"))
-  "The SelectResponseDirection vocabulary Emacs sends, keyword to wire name.
+(defconst agent-repl-wire-select-feed-row-directions
+  '((:older . "SELECT_FEED_ROW_DIRECTION_OLDER")
+    (:newer . "SELECT_FEED_ROW_DIRECTION_NEWER"))
+  "The SelectFeedRowDirection vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: a request carrying it is refused as
 InvalidArgument, so the zero value has no elisp spelling to reach for by
 accident.")
 
-(defun agent-repl-wire-encode-select-response-direction (value)
-  "Encode the SelectResponseDirection keyword VALUE as its protojson enum name.
+(defun agent-repl-wire-encode-select-feed-row-direction (value)
+  "Encode the SelectFeedRowDirection keyword VALUE as its protojson enum name.
 The vocabulary is closed; an unknown keyword — `:unspecified' in
 particular — is refused before the request is built."
-  (let ((name (cdr (assq value agent-repl-wire-select-response-directions))))
+  (let ((name (cdr (assq value agent-repl-wire-select-feed-row-directions))))
     (unless name
-      (agent-repl-wire-verbs--fail "SelectResponseRequest" "direction" "unknown direction"))
+      (agent-repl-wire-verbs--fail "SelectFeedRowStep" "direction" "unknown direction"))
     name))
 
-(defun agent-repl-wire-encode-select-response-request-workspace (ref)
-  "Encode SelectResponseRequest's `workspace' use site from REF."
+(defun agent-repl-wire-encode-select-feed-row-step (value)
+  "Encode SelectFeedRowStep from plist VALUE (:direction K).
+The direction is REQUIRED: a step names which way it moves."
+  (list (cons 'direction
+              (agent-repl-wire-encode-select-feed-row-direction
+               (agent-repl-wire-verbs--require "SelectFeedRowStep" "direction"
+                                                (plist-get value :direction))))))
+
+(defun agent-repl-wire-encode-select-feed-row-clear (_value)
+  "Encode the empty SelectFeedRowClear.  Presence IS the dismissal."
+  nil)
+
+(defun agent-repl-wire-encode-select-feed-row-request-workspace (ref)
+  "Encode SelectFeedRowRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-select-response-request (request)
-  "Encode SelectResponseRequest from plist REQUEST (:workspace REF :direction K).
+(defun agent-repl-wire-encode-select-feed-row-request-move (value)
+  "Encode SelectFeedRowRequest's `move' oneof from VALUE.
+VALUE is (:arm KEYWORD :value V), KEYWORD one of `:response' and `:prompt'
+\(V a step plist) and `:clear' (V nil)."
+  (agent-repl-wire-verbs--encode-oneof
+   "SelectFeedRowRequest" "move" value
+   (list (list :response 'response #'agent-repl-wire-encode-select-feed-row-step)
+         (list :prompt 'prompt #'agent-repl-wire-encode-select-feed-row-step)
+         (list :clear 'clear #'agent-repl-wire-encode-select-feed-row-clear))))
+
+(defun agent-repl-wire-encode-select-feed-row-request (request)
+  "Encode SelectFeedRowRequest from plist REQUEST (:workspace REF :move MOVE).
 Both are required: the workspace is the daemon-minted echo token naming
-WHICH workspace's cursor to move, and the direction says which way (or to
-clear).  An incomplete request errors here rather than reaching the wire."
-  (let ((message "SelectResponseRequest"))
+WHICH workspace's selection to change, and the move says what to do to
+it.  An incomplete request errors here rather than reaching the wire."
+  (let ((message "SelectFeedRowRequest"))
     (list (cons 'workspace
-                (agent-repl-wire-encode-select-response-request-workspace
+                (agent-repl-wire-encode-select-feed-row-request-workspace
                  (agent-repl-wire-verbs--require message "workspace"
                                                   (plist-get request :workspace))))
-          (cons 'direction
-                (agent-repl-wire-encode-select-response-direction
-                 (agent-repl-wire-verbs--require message "direction"
-                                                  (plist-get request :direction)))))))
+          (agent-repl-wire-encode-select-feed-row-request-move
+           (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
-(defun agent-repl-wire-decode-select-response-success-selected (json)
-  "Decode SelectResponseSuccess's `selected' use site from JSON."
-  (agent-repl-wire-decode-feed-id json))
+(defun agent-repl-wire-decode-feed-selection-row (message json)
+  "Decode the selected-row MESSAGE (`FeedSelectionResponse' or
+`FeedSelectionPrompt') from JSON into (:row FEEDID).  The row is REQUIRED:
+a selection that names no row is a contract breach."
+  (agent-repl-wire-verbs--check-keys message json '(row))
+  (list :row (agent-repl-wire-verbs--decode-required-message
+              message 'row json #'agent-repl-wire-decode-feed-id)))
 
-(defun agent-repl-wire-decode-select-response-success (json)
-  "Decode SelectResponseSuccess from JSON into (:selected FEEDID-or-nil).
-`selected' is OPTIONAL: unset is `none' — a CLEAR, or a workspace with no
-selectable final-response rows — and nil is exactly that fact."
-  (let ((message "SelectResponseSuccess")
-        (cell nil))
-    (agent-repl-wire-verbs--check-keys message json '(selected))
-    (setq cell (assq 'selected json))
-    (list :selected
-          (when (and cell (not (eq (cdr cell) :null)))
-            (agent-repl-wire-decode-select-response-success-selected (cdr cell))))))
+(defun agent-repl-wire-decode-feed-selection-none (json)
+  "Decode FeedSelectionNone from JSON into (:viewport (:arm ARM :value nil)).
+ARM is `:return-to-tail' or `:stay'; exactly one is set."
+  (let ((message "FeedSelectionNone"))
+    (agent-repl-wire-verbs--check-keys message json '(returnToTail stay))
+    (list :viewport
+          (agent-repl-wire-verbs--decode-oneof
+           message "viewport" json
+           (list (list 'returnToTail :return-to-tail
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionNoneReturnToTail" v)))
+                 (list 'stay :stay
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionNoneStay" v))))))))
 
-(defun agent-repl-wire-decode-select-response-unknown-workspace (json)
-  "Decode SelectResponseUnknownWorkspace from JSON.  Empty: the workspace id is
-not in the daemon's registry."
-  (agent-repl-wire-verbs--decode-empty "SelectResponseUnknownWorkspace" json))
+(defun agent-repl-wire-decode-feed-selection (json)
+  "Decode frontend.v1.FeedSelection from JSON into (:arm ARM :value V).
+ARM is `:none' (V the none plist), `:response' or `:prompt' (V (:row ID))."
+  (let ((message "FeedSelection"))
+    (agent-repl-wire-verbs--check-keys message json '(none response prompt))
+    (agent-repl-wire-verbs--decode-oneof
+     message "selection" json
+     (list (list 'none :none #'agent-repl-wire-decode-feed-selection-none)
+           (list 'response :response
+                 (lambda (v) (agent-repl-wire-decode-feed-selection-row
+                              "FeedSelectionResponse" v)))
+           (list 'prompt :prompt
+                 (lambda (v) (agent-repl-wire-decode-feed-selection-row
+                              "FeedSelectionPrompt" v)))))))
 
-(defun agent-repl-wire-decode-select-response-workspace-ref-mismatch (json)
-  "Decode SelectResponseWorkspaceRefMismatch from JSON into a plist
-(`:registry-dir').  The echoed dir disagrees with the registry's dir for
-this id."
-  (let ((message "SelectResponseWorkspaceRefMismatch"))
-    (agent-repl-wire-verbs--check-keys message json '(registryDir))
-    (list :registry-dir (agent-repl-wire-verbs--decode-string
-                         message 'registryDir json))))
+(defun agent-repl-wire-decode-select-feed-row-success-selected (json)
+  "Decode SelectFeedRowSuccessSelected from JSON into (:selection SEL).
+The selection is REQUIRED: a selected outcome names what is selected."
+  (let ((message "SelectFeedRowSuccessSelected"))
+    (agent-repl-wire-verbs--check-keys message json '(selection))
+    (list :selection (agent-repl-wire-verbs--decode-required-message
+                      message 'selection json #'agent-repl-wire-decode-feed-selection))))
 
-(defun agent-repl-wire-decode-select-response-transferring-away (json)
-  "Decode SelectResponseTransferringAway from JSON into a plist (`:address').
-This daemon released the workspace to a successor; dial `address'."
-  (let ((message "SelectResponseTransferringAway"))
-    (agent-repl-wire-verbs--check-keys message json '(address))
-    (list :address (agent-repl-wire-verbs--decode-string
-                    message 'address json))))
+(defun agent-repl-wire-decode-select-feed-row-success (json)
+  "Decode SelectFeedRowSuccess from JSON into (:outcome (:arm ARM :value V)).
+ARM is `:selected' (V (:selection SEL)), `:nothing-selectable' or `:none'
+\(V nil).  THE ARM IS THE OUTCOME, so an unset outcome is a contract breach."
+  (let ((message "SelectFeedRowSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(selected nothingSelectable none))
+    (list :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'selected :selected
+                       #'agent-repl-wire-decode-select-feed-row-success-selected)
+                 (list 'nothingSelectable :nothing-selectable
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowSuccessNothingSelectable" v)))
+                 (list 'none :none
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowSuccessNone" v))))))))
 
-(defun agent-repl-wire-decode-select-response-not-yet-adopted (json)
-  "Decode SelectResponseNotYetAdopted from JSON.  Empty: a joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "SelectResponseNotYetAdopted" json))
-
-(defun agent-repl-wire-decode-select-response-error-unknown-workspace (json)
-  "Decode SelectResponseError's `unknown_workspace' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-unknown-workspace json))
-
-(defun agent-repl-wire-decode-select-response-error-workspace-ref-mismatch (json)
-  "Decode SelectResponseError's `workspace_ref_mismatch' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-workspace-ref-mismatch json))
-
-(defun agent-repl-wire-decode-select-response-error-transferring-away (json)
-  "Decode SelectResponseError's `transferring_away' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-transferring-away json))
-
-(defun agent-repl-wire-decode-select-response-error-not-yet-adopted (json)
-  "Decode SelectResponseError's `not_yet_adopted' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-not-yet-adopted json))
-
-(defun agent-repl-wire-decode-select-response-error (json)
-  "Decode SelectResponseError from JSON into (:cause (:arm ARM :value V)).
+(defun agent-repl-wire-decode-select-feed-row-error (json)
+  "Decode SelectFeedRowError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an arm
 this codec does not know is refused as an unknown field."
-  (let ((message "SelectResponseError"))
+  (let ((message "SelectFeedRowError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
-           message "cause" json
-           (list (list 'unknownWorkspace :unknown-workspace
-                       #'agent-repl-wire-decode-select-response-error-unknown-workspace)
-                 (list 'workspaceRefMismatch :workspace-ref-mismatch
-                       #'agent-repl-wire-decode-select-response-error-workspace-ref-mismatch)
-                 (list 'transferringAway :transferring-away
-                       #'agent-repl-wire-decode-select-response-error-transferring-away)
-                 (list 'notYetAdopted :not-yet-adopted
-                       #'agent-repl-wire-decode-select-response-error-not-yet-adopted))))))
+           message "cause" json (agent-repl-wire-verbs--handover-arms "SelectFeedRow")))))
 
-(defun agent-repl-wire-decode-select-response-response-success (json)
-  "Decode SelectResponseResponse's `success' arm from JSON."
-  (agent-repl-wire-decode-select-response-success json))
-
-(defun agent-repl-wire-decode-select-response-response-error (json)
-  "Decode SelectResponseResponse's `error' arm from JSON."
-  (agent-repl-wire-decode-select-response-error json))
-
-(defun agent-repl-wire-decode-select-response-response (json)
-  "Decode SelectResponseResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-select-feed-row-response (json)
+  "Decode SelectFeedRowResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "SelectResponseResponse" json
-   #'agent-repl-wire-decode-select-response-response-success
-   #'agent-repl-wire-decode-select-response-response-error))
+   "SelectFeedRowResponse" json
+   #'agent-repl-wire-decode-select-feed-row-success
+   #'agent-repl-wire-decode-select-feed-row-error))
+
+;;;; ---- Rollback: the shared token ------------------------------------
+;;
+;; See rollback.proto.  The token is OPAQUE: decoded from a PlanRollback
+;; plan and handed back to RollBack unchanged, never built by Emacs.
+
+(defun agent-repl-wire-decode-rollback-token (json)
+  "Decode RollbackToken from JSON into (:value STRING).
+The value is REQUIRED: a plan without a token cannot be confirmed."
+  (let ((message "RollbackToken"))
+    (agent-repl-wire-verbs--check-keys message json '(value))
+    (list :value (agent-repl-wire-verbs--decode-required-string message 'value json))))
+
+(defun agent-repl-wire-encode-rollback-token (token)
+  "Encode RollbackToken from TOKEN, the plist a plan decoded, verbatim."
+  (list (cons 'value (agent-repl-wire-verbs--require-string
+                      "RollbackToken" "value" (plist-get token :value)))))
+
+;;;; ---- PlanRollback ---------------------------------------------------
+;;
+;; Say what a rollback would do, for the user to confirm.  THE ARM IS THE
+;; FILES CHOICE on the request and THE ARM IS THE OUTCOME on the success.
+;; See endpoint_plan_rollback.proto.
+
+(defun agent-repl-wire-encode-plan-rollback-empty-files (_value)
+  "Encode the empty PlanRollbackKeepFiles / PlanRollbackRestoreFiles arm."
+  nil)
+
+(defun agent-repl-wire-encode-plan-rollback-request-files (value)
+  "Encode PlanRollbackRequest's `files' oneof from VALUE.
+VALUE is (:arm KEYWORD :value nil), KEYWORD `:keep-files' or
+`:restore-files'."
+  (agent-repl-wire-verbs--encode-oneof
+   "PlanRollbackRequest" "files" value
+   (list (list :keep-files 'keepFiles #'agent-repl-wire-encode-plan-rollback-empty-files)
+         (list :restore-files 'restoreFiles #'agent-repl-wire-encode-plan-rollback-empty-files))))
+
+(defun agent-repl-wire-encode-plan-rollback-request (request)
+  "Encode PlanRollbackRequest from plist REQUEST (:workspace REF :files FILES).
+Both are required; an incomplete request errors here rather than reaching
+the wire."
+  (let ((message "PlanRollbackRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace))))
+          (agent-repl-wire-encode-plan-rollback-request-files
+           (agent-repl-wire-verbs--require message "files" (plist-get request :files))))))
+
+(defun agent-repl-wire-decode-rollback-plan-target (json)
+  "Decode RollbackPlanTarget from JSON into a plist.
+\(:chosen ARM :excerpt STRING :prompts-dropped N), ARM `:selected' or
+`:latest'; exactly one is set."
+  (let ((message "RollbackPlanTarget"))
+    (agent-repl-wire-verbs--check-keys message json '(selected latest excerpt promptsDropped))
+    (list :chosen (plist-get
+                   (agent-repl-wire-verbs--decode-oneof
+                    message "chosen" json
+                    (list (list 'selected :selected
+                                (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                             "RollbackPlanTargetSelected" v)))
+                          (list 'latest :latest
+                                (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                             "RollbackPlanTargetLatest" v)))))
+                   :arm)
+          :excerpt (agent-repl-wire-verbs--decode-string message 'excerpt json)
+          :prompts-dropped (agent-repl-wire--decode-uint32 message 'promptsDropped json))))
+
+(defun agent-repl-wire-decode-rollback-plan-cancel-detached (json)
+  "Decode RollbackPlanCancelDetached from JSON into (:items N)."
+  (let ((message "RollbackPlanCancelDetached"))
+    (agent-repl-wire-verbs--check-keys message json '(items))
+    (list :items (agent-repl-wire--decode-uint32 message 'items json))))
+
+(defun agent-repl-wire-decode-rollback-plan-files-restored (json)
+  "Decode RollbackPlanFilesRestored from JSON into (:cancel-detached C-or-nil)."
+  (let ((message "RollbackPlanFilesRestored"))
+    (agent-repl-wire-verbs--check-keys message json '(cancelDetached))
+    (list :cancel-detached
+          (agent-repl-wire-verbs--decode-optional-message
+           message 'cancelDetached json
+           #'agent-repl-wire-decode-rollback-plan-cancel-detached))))
+
+(defun agent-repl-wire-decode-rollback-plan-files (json)
+  "Decode RollbackPlanFiles from JSON into (:arm ARM :value V).
+ARM is `:kept' (V nil) or `:restored' (V the restored plist)."
+  (let ((message "RollbackPlanFiles"))
+    (agent-repl-wire-verbs--check-keys message json '(kept restored))
+    (agent-repl-wire-verbs--decode-oneof
+     message "files" json
+     (list (list 'kept :kept
+                 (lambda (v) (agent-repl-wire-verbs--decode-empty "RollbackPlanFilesKept" v)))
+           (list 'restored :restored #'agent-repl-wire-decode-rollback-plan-files-restored)))))
+
+(defun agent-repl-wire-decode-rollback-plan-drop-queued (json)
+  "Decode RollbackPlanDropQueued from JSON into (:prompts N)."
+  (let ((message "RollbackPlanDropQueued"))
+    (agent-repl-wire-verbs--check-keys message json '(prompts))
+    (list :prompts (agent-repl-wire--decode-uint32 message 'prompts json))))
+
+(defun agent-repl-wire-decode-rollback-plan (json)
+  "Decode RollbackPlan from JSON into a plist.
+\(:token TOKEN :target TARGET :files FILES :interrupt BOOL :drop-queued D).
+TOKEN, TARGET and FILES are required.  `interrupt' is an OPTIONAL EMPTY
+message, so its PRESENCE is the fact: t when set, nil when unset.
+`drop_queued' is nil when unset."
+  (let ((message "RollbackPlan"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(token target files interrupt dropQueued))
+    (list :token (agent-repl-wire-verbs--decode-required-message
+                  message 'token json #'agent-repl-wire-decode-rollback-token)
+          :target (agent-repl-wire-verbs--decode-required-message
+                   message 'target json #'agent-repl-wire-decode-rollback-plan-target)
+          :files (agent-repl-wire-verbs--decode-required-message
+                  message 'files json #'agent-repl-wire-decode-rollback-plan-files)
+          :interrupt (and (agent-repl-wire-verbs--decode-optional-message
+                           message 'interrupt json
+                           (lambda (v)
+                             (agent-repl-wire-verbs--decode-empty "RollbackPlanInterrupt" v)
+                             t))
+                          t)
+          :drop-queued (agent-repl-wire-verbs--decode-optional-message
+                        message 'dropQueued json
+                        #'agent-repl-wire-decode-rollback-plan-drop-queued))))
+
+(defun agent-repl-wire-decode-plan-rollback-success (json)
+  "Decode PlanRollbackSuccess from JSON into (:outcome (:arm ARM :value V)).
+ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
+  (let ((message "PlanRollbackSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(plan nothingToRollBack))
+    (list :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'plan :plan #'agent-repl-wire-decode-rollback-plan)
+                 (list 'nothingToRollBack :nothing-to-roll-back
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "PlanRollbackNothingToRollBack" v))))))))
+
+(defun agent-repl-wire-verbs--decode-registry-dir (message json)
+  "Decode the workspace-ref-mismatch MESSAGE from JSON into (:registry-dir)."
+  (agent-repl-wire-verbs--check-keys message json '(registryDir))
+  (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json)))
+
+(defun agent-repl-wire-verbs--decode-address (message json)
+  "Decode the transferring-away MESSAGE from JSON into (:address)."
+  (agent-repl-wire-verbs--check-keys message json '(address))
+  (list :address (agent-repl-wire-verbs--decode-string message 'address json)))
+
+(defun agent-repl-wire-verbs--decode-vendor-message (message json)
+  "Decode the vendor-refusal MESSAGE from JSON into (:vendor-message)."
+  (agent-repl-wire-verbs--check-keys message json '(vendorMessage))
+  (list :vendor-message (agent-repl-wire-verbs--decode-string message 'vendorMessage json)))
+
+(defun agent-repl-wire-verbs--empty-arm (message)
+  "Return a decoder for the empty refusal arm MESSAGE."
+  (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
+
+(defun agent-repl-wire-verbs--handover-arms (prefix)
+  "Return the four cross-cutting refusal arms, their messages named PREFIX*.
+`unknown_workspace', `workspace_ref_mismatch', `transferring_away' and
+`not_yet_adopted', as `agent-repl-wire-verbs--decode-oneof' arms."
+  (list (list 'unknownWorkspace :unknown-workspace
+              (agent-repl-wire-verbs--empty-arm (concat prefix "UnknownWorkspace")))
+        (list 'workspaceRefMismatch :workspace-ref-mismatch
+              (lambda (json) (agent-repl-wire-verbs--decode-registry-dir
+                              (concat prefix "WorkspaceRefMismatch") json)))
+        (list 'transferringAway :transferring-away
+              (lambda (json) (agent-repl-wire-verbs--decode-address
+                              (concat prefix "TransferringAway") json)))
+        (list 'notYetAdopted :not-yet-adopted
+              (agent-repl-wire-verbs--empty-arm (concat prefix "NotYetAdopted")))))
+
+(defun agent-repl-wire-decode-plan-rollback-error (json)
+  "Decode PlanRollbackError from JSON into (:cause (:arm ARM :value V))."
+  (let ((message "PlanRollbackError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json (agent-repl-wire-verbs--handover-arms "PlanRollback")))))
+
+(defun agent-repl-wire-decode-plan-rollback-response (json)
+  "Decode PlanRollbackResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "PlanRollbackResponse" json
+   #'agent-repl-wire-decode-plan-rollback-success
+   #'agent-repl-wire-decode-plan-rollback-error))
+
+;;;; ---- RollBack -------------------------------------------------------
+;;
+;; Perform a confirmed plan: the token goes back exactly as PlanRollback
+;; served it.  See endpoint_roll_back.proto.
+
+(defun agent-repl-wire-encode-roll-back-request (request)
+  "Encode RollBackRequest from plist REQUEST (:workspace REF :token TOKEN).
+Both are required.  TOKEN is the plan's decoded token, echoed verbatim."
+  (let ((message "RollBackRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace))))
+          (cons 'token
+                (agent-repl-wire-encode-rollback-token
+                 (agent-repl-wire-verbs--require message "token"
+                                                  (plist-get request :token)))))))
+
+(defun agent-repl-wire-decode-roll-back-files-restored (json)
+  "Decode RollBackFilesRestored from JSON into (:files N)."
+  (let ((message "RollBackFilesRestored"))
+    (agent-repl-wire-verbs--check-keys message json '(files))
+    (list :files (agent-repl-wire--decode-uint32 message 'files json))))
+
+(defun agent-repl-wire-decode-roll-back-success (json)
+  "Decode RollBackSuccess from JSON into (:prompt SAID :files-restored F-or-nil).
+The prompt is REQUIRED: it is what the composer holds again."
+  (let ((message "RollBackSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(prompt filesRestored))
+    (list :prompt (agent-repl-wire-verbs--decode-required-message
+                   message 'prompt json #'agent-repl-wire-decode-user-said)
+          :files-restored (agent-repl-wire-verbs--decode-optional-message
+                           message 'filesRestored json
+                           #'agent-repl-wire-decode-roll-back-files-restored))))
+
+(defconst agent-repl-wire-roll-back-error-own-arms
+  '((planStale :plan-stale "RollBackPlanStale")
+    (noSession :no-session "RollBackNoSession")
+    (promptNotRecorded :prompt-not-recorded "RollBackPromptNotRecorded")
+    (firstPrompt :first-prompt "RollBackFirstPrompt")
+    (unseenPrompt :unseen-prompt "RollBackUnseenPrompt"))
+  "RollBackError's own EMPTY cause arms: wire key, keyword, message name.")
+
+(defun agent-repl-wire-decode-roll-back-error (json)
+  "Decode RollBackError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS WHY.  `vendor_refused' and `files_not_restorable' carry the
+vendor's message as (:vendor-message STRING)."
+  (let ((message "RollBackError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    planStale noSession promptNotRecorded firstPrompt unseenPrompt
+                    vendorRefused filesNotRestorable))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append
+            (agent-repl-wire-verbs--handover-arms "RollBack")
+            (mapcar (lambda (arm)
+                      (list (nth 0 arm) (nth 1 arm)
+                            (agent-repl-wire-verbs--empty-arm (nth 2 arm))))
+                    agent-repl-wire-roll-back-error-own-arms)
+            (list (list 'vendorRefused :vendor-refused
+                        (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
+                                     "RollBackVendorRefused" v)))
+                  (list 'filesNotRestorable :files-not-restorable
+                        (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
+                                     "RollBackFilesNotRestorable" v)))))))))
+
+(defun agent-repl-wire-decode-roll-back-response (json)
+  "Decode RollBackResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "RollBackResponse" json
+   #'agent-repl-wire-decode-roll-back-success
+   #'agent-repl-wire-decode-roll-back-error))
 
 ;;;; ---- EditHeldPrompt -------------------------------------------------
 ;;

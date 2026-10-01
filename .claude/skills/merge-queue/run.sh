@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # run.sh — the merge-queue skill's driver.
 #
-# Every verb asks for a merge FROM the workspace this shell is inside. The
-# merge is put in line once the caller's current turn ends, runs in that
-# workspace, and reports its outcome into that workspace's session; no verb
-# waits for the outcome.
+# Every merge verb asks for a merge FROM the workspace this shell is inside.
+# The merge is put in line once the caller's current turn ends, runs in that
+# workspace, and reports its outcome into that workspace's session; no merge
+# verb waits for the outcome.
+#
+# The queue-control verbs (--dequeue-*, --pause-queue, --resume-queue) ask,
+# from the workspace this shell is inside, for the queue itself to change, and
+# wait (bounded) for the answer, which they print: the outcome when applied, the
+# refusal's cause when refused.
 #
 # Verbs:
 #   --enqueue-own [--keep-open]  Merge this workspace's own branch. The
@@ -20,14 +25,25 @@
 #   --remove-branch <branch>     After a --land-branch merge LANDED: remove the
 #                                branch's worktree (when it has one) and the
 #                                branch, refusing a branch master lacks.
+#   --dequeue-own                Take this workspace's own merge off the queue.
+#   --dequeue-workspace <dir>    Take ANOTHER workspace's merge off the queue,
+#                                named by its worktree.
+#   --pause-queue [<repo-dir>]   Pause the queue of the repository whose main
+#                                checkout is <repo-dir>, else of every
+#                                repository.
+#   --resume-queue [<repo-dir>]  Resume a paused queue, scoped as a pause is.
 #
 # Exit codes (every verb):
-#   0  requested (end the turn; the outcome reports into this session), or
-#      removed (--remove-branch)
-#   2  script/usage error, or the merge could not be requested
-#   5  refused by the daemon; how to read why is printed
+#   0  requested (end the turn; the outcome reports into this session),
+#      removed (--remove-branch), or applied (queue-control verbs; the printed
+#      outcome line is evicted, not_queued, paused or resumed, or unread)
+#   2  script/usage error, or the merge or control could not be requested
+#   5  refused by the daemon; why (or how to read why) is printed
 #   6  the workspace has uncommitted work (--enqueue-own)
 #   7  --land-workspace named this shell's own workspace
+#   8  the daemon did not answer a queue-control request in time; the request
+#      stays pending (queue-control verbs)
+
 set -uo pipefail
 
 die() {
@@ -72,6 +88,7 @@ run_verb() {
   case "$rc" in
     0) exit 0 ;;
     6) exit 5 ;;
+    7) exit 8 ;;
     *) exit 2 ;;
   esac
 }
@@ -121,8 +138,24 @@ case "${1:-}" in
     git -C "$main" branch -d "$2" || die "could not delete $2; it may not have landed on master"
     log "deleted the branch $2"
     ;;
+  --dequeue-own)
+    [ -z "${2:-}" ] || die "--dequeue-own takes no argument, not $2"
+    run_verb -evict
+    ;;
+  --dequeue-workspace)
+    [ -n "${2:-}" ] || die "--dequeue-workspace needs the workspace's worktree directory"
+    run_verb -evict-dir "$2"
+    ;;
+  --pause-queue | --resume-queue)
+    control=-pause
+    [ "$1" = --pause-queue ] || control=-resume
+    if [ -n "${2:-}" ]; then
+      run_verb "$control" -repository-dir "$2"
+    fi
+    run_verb "$control"
+    ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --pr-merged | --remove-branch <branch>\n' >&2
+    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
     exit 1
     ;;
 esac

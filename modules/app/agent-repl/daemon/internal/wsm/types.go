@@ -363,20 +363,15 @@ const (
 	PolicyParked
 )
 
-// OutputAddress is where a lease holder wants the session's output to land:
-// the feed resolver applies it to every row the session produces while the
-// lease is held.
+// OutputAddress is where a turn's output lands: the feed resolver draws every
+// row of a turn recorded with it (Turn.Address) at it. A lease holder stands
+// one for the turns it starts itself; every other turn has none and draws on
+// the root feed.
 type OutputAddress struct {
 	// Feed is the feed rows land in.
 	Feed feedid.Feed
 	// Parent is the row they nest under, nil for top-level rows.
 	Parent *feedid.Ref
-	// Mirror draws every row that lands at this address ALSO on the root feed,
-	// as an ordinary row of the conversation: a merge's repair turns are the
-	// workspace's own session's turns, shown in the merge bubble's tab AND in
-	// the main feed. The two are two resolved copies of one fact, one per
-	// component, never one row the client fans out.
-	Mirror bool
 }
 
 // HeldPrompt is one parked submission. WSM is the ONE durable hold store.
@@ -822,7 +817,9 @@ type MergeSource struct {
 	KeepOpen bool
 	// Workspace is the other workspace, for MergeSourceWorkspace only.
 	Workspace WorkspaceID
-	// Branch is the branch's name, for MergeSourceBranch only.
+	// Branch is the branch's name: the named branch for MergeSourceBranch, and
+	// the branch checked out in the workspace's worktree when the request was
+	// made for every other arm (empty on a request an earlier build recorded).
 	Branch string
 }
 

@@ -197,7 +197,7 @@ test_remove_branch_refuses_an_unlanded_branch() {
 
 test_each_outcome_maps_to_its_exit() {
   local verb_exit want
-  for pair in "6:5" "5:2" "2:2" "0:0"; do
+  for pair in "7:8" "6:5" "5:2" "2:2" "0:0"; do
     verb_exit="${pair%%:*}"
     want="${pair##*:}"
     mkfixture
@@ -241,6 +241,62 @@ test_unknown_verb_prints_usage() {
   fi
 }
 
+test_dequeue_own_evicts_the_own_merge() {
+  mkfixture
+  invoke --dequeue-own
+  expect_args "--dequeue-own asks to evict this workspace's own merge" "merge-queue -evict"
+}
+
+test_dequeue_own_refuses_an_argument() {
+  mkfixture
+  invoke --dequeue-own extra
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "--dequeue-own refuses an argument and requests nothing"
+  else
+    fail "--dequeue-own refuses an argument and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_dequeue_workspace_names_the_evicted_worktree() {
+  mkfixture
+  invoke --dequeue-workspace "$FX/other"
+  expect_args "--dequeue-workspace names the other workspace's worktree" "merge-queue -evict-dir $FX/other"
+}
+
+test_dequeue_workspace_needs_a_directory() {
+  mkfixture
+  invoke --dequeue-workspace
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "--dequeue-workspace without a directory is an error and requests nothing"
+  else
+    fail "--dequeue-workspace without a directory is an error and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_pause_queue_pauses_every_repository() {
+  mkfixture
+  invoke --pause-queue
+  expect_args "--pause-queue with no directory pauses every repository" "merge-queue -pause"
+}
+
+test_pause_queue_names_one_repository() {
+  mkfixture
+  invoke --pause-queue "$FX/main"
+  expect_args "--pause-queue <dir> pauses that repository only" "merge-queue -pause -repository-dir $FX/main"
+}
+
+test_resume_queue_resumes_every_repository() {
+  mkfixture
+  invoke --resume-queue
+  expect_args "--resume-queue with no directory resumes every repository" "merge-queue -resume"
+}
+
+test_resume_queue_names_one_repository() {
+  mkfixture
+  invoke --resume-queue "$FX/main"
+  expect_args "--resume-queue <dir> resumes that repository only" "merge-queue -resume -repository-dir $FX/main"
+}
+
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
 test_enqueue_own_refuses_an_unknown_option
@@ -257,6 +313,14 @@ test_each_outcome_maps_to_its_exit
 test_passes_the_verbs_output_through
 test_missing_daemon_binary_is_an_error
 test_unknown_verb_prints_usage
+test_dequeue_own_evicts_the_own_merge
+test_dequeue_own_refuses_an_argument
+test_dequeue_workspace_names_the_evicted_worktree
+test_dequeue_workspace_needs_a_directory
+test_pause_queue_pauses_every_repository
+test_pause_queue_names_one_repository
+test_resume_queue_resumes_every_repository
+test_resume_queue_names_one_repository
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

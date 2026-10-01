@@ -65,7 +65,9 @@ type Request struct {
 	WaitFor Gate
 	// Done, when set, is told how the bounce ended. It is called once, after
 	// the workspace has left draining (or, with KeepDraining, after Run), or
-	// with ErrUnregistered when the registry dropped the bounce unrun.
+	// with ErrUnregistered when the registry dropped the bounce unrun. A run
+	// that DEFERRED (ErrDeferred) is not an end: the registry keeps Done for
+	// the rerun, and tells it that rerun's outcome.
 	Done func(error)
 }
 
@@ -78,6 +80,13 @@ type Request struct {
 // daemon it moves to adopts it mid-turn. So a move waits only until no
 // DELIVERY is in flight, which the registry's own per-workspace delivery lock
 // already guarantees at the instant it decides.
+//
+// FREENESS IS A READING, AND THE SHIM'S REFUSAL OUTRANKS IT. The vendor can
+// start a turn on its own between the registry's judgement and the stand-down
+// (a concluding subagent's notification wakes the main agent), so an
+// unforced replacement whose shim refuses the stand-down as live answers
+// ErrDeferred and is re-registered behind that work: an unforced shim
+// replacement never ends live work.
 type Gate int
 
 // The gates.
@@ -110,6 +119,20 @@ func (g Gate) String() string {
 // an outcome, not a failure.
 var ErrHandedAcross = errors.New("bounce: handed across; the daemon the workspace moved to runs the replacement after its adoption")
 
+// ErrDeferred is what a shim REPLACEMENT's Run answers when it gave the bounce
+// back UNPERFORMED: its unforced stand-down was refused by the shim as `live`
+// (or went unanswered and the shim did not leave), so work the registry's
+// freeness gate could not see -- a turn the vendor started on its own the
+// instant a subagent concluded -- is running in the shim it would replace.
+//
+// AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK. The shim's own refusal is
+// atomic and authoritative about its liveness, where the registry's freeness
+// is a reading that can be overtaken, so the refusal wins: nothing was
+// stopped, the old shim keeps serving, and the registry re-registers the
+// bounce behind the work in flight, taking it at the next freeness edge. It is
+// an outcome, not a failure.
+var ErrDeferred = errors.New("bounce: deferred; the shim refused to stand down over live work, so the replacement waits for its next freeness")
+
 // Outcome is what a bounce's Done error MEANS. Every Done that reports a shim
 // replacement's end classifies it here, so no caller reads a non-failure
 // outcome (ErrUnregistered, ErrHandedAcross) as a failure by forgetting one.
@@ -126,6 +149,11 @@ const (
 	OutcomeHandedAcross
 	// OutcomeFailed: the bounce failed.
 	OutcomeFailed
+	// OutcomeDeferred: the run gave the bounce back unperformed, because what
+	// it would replace refused to stand down over live work (ErrDeferred).
+	// The registry re-registers it behind that work; it is never told to a
+	// Done, which hears the rerun's outcome instead.
+	OutcomeDeferred
 )
 
 // OutcomeOf classifies a Done error.
@@ -137,6 +165,8 @@ func OutcomeOf(err error) Outcome {
 		return OutcomeUnregistered
 	case errors.Is(err, ErrHandedAcross):
 		return OutcomeHandedAcross
+	case errors.Is(err, ErrDeferred):
+		return OutcomeDeferred
 	default:
 		return OutcomeFailed
 	}

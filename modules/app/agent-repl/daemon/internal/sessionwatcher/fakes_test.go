@@ -516,6 +516,10 @@ func (c *fakeClient) KillTurn(context.Context, *shimv1.KillTurnRequest) (*shimv1
 	panic("sessionwatcher must not call KillTurn")
 }
 
+func (c *fakeClient) RollBackSession(context.Context, *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
+	panic("sessionwatcher must not call RollBackSession")
+}
+
 func (c *fakeClient) StopBash(context.Context, *shimv1.StopBashRequest) (*shimv1.StopBashResponse, error) {
 	panic("sessionwatcher must not call StopBash")
 }
@@ -698,47 +702,47 @@ func (s *feedSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
 	s.rec.emit(event{sink: "feed", method: "OnTurnOpened", detail: string(turn)})
 }
 
-func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId(), place: place})
 }
 
-func (s *feedSink) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt, _ OutputAddress) {
+func (s *feedSink) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt) {
 	s.rec.emit(event{sink: "feed", method: "OnPromptRetired", agent: prompt.GetAgent().GetValue(), detail: prompt.GetId().GetValue()})
 }
 
-func (s *feedSink) OnPeerMessageRetired(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ OutputAddress) {
+func (s *feedSink) OnPeerMessageRetired(_ ids.WorkspaceID, peer *conversationv1.PeerMessage) {
 	s.rec.emit(event{sink: "feed", method: "OnPeerMessageRetired", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
 }
 
-func (s *feedSink) OnApiErrorRetired(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, _ OutputAddress) {
+func (s *feedSink) OnApiErrorRetired(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId) {
 	s.rec.emit(event{sink: "feed", method: "OnApiErrorRetired", agent: agent.GetValue(), detail: failed.GetMessage()})
 }
 
-func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnQuestion", agent: agent.GetValue(), detail: q.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue(), place: place})
 }
 
-func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnContextCut", agent: agent.GetValue(), place: place})
 }
 
-func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnApiError", agent: agent.GetValue(), detail: failed.GetMessage(), place: place})
 }
 
-func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn, place: place})
 }
 
@@ -749,11 +753,11 @@ func (s *feedSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId)
 	s.rec.nameMain("feed", agent.GetValue())
 }
 
-func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace, _ OutputAddress) {
+func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue(), place: place})
 }
 
-func (s *feedSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId, _ *conversationv1.AgentBash, _ OutputAddress) {
+func (s *feedSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId, _ *conversationv1.AgentBash) {
 	s.rec.emit(event{sink: "feed", method: "OnBash", detail: work.GetValue()})
 }
 
@@ -766,7 +770,7 @@ func (s *feedSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.Ses
 	s.rec.emit(event{sink: "feed", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
 
-func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage, _ OutputAddress) {
+func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage) {
 	boundary := ""
 	switch page.GetBoundary().(type) {
 	case *conversationv1.HistoryPage_Floor:
@@ -1950,13 +1954,6 @@ type shimResponse = shimv1.WatchAgentResponse
 func (h *harness) quietAll() []event {
 	h.t.Helper()
 	return h.sentinel(h.main)
-}
-
-// addressNow reads the output address currently in force.
-func (h *harness) addressNow() OutputAddress {
-	h.w.mu.Lock()
-	defer h.w.mu.Unlock()
-	return h.w.addr
 }
 
 // collect reads exactly n events.

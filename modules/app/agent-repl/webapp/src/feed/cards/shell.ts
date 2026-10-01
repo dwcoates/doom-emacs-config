@@ -28,7 +28,8 @@
  * turn target, so there is NO confirm step here — every error arm is an
  * ordinary call-site refusal beside the button.
  */
-import { formatElapsed, formatTickedElapsed } from "../../duration.js";
+import { formatTickedElapsed } from "../../duration.js";
+import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import type {
   FeedShell,
@@ -45,6 +46,8 @@ import {
   type InterruptResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { feedShellDotColor } from "../../vocab.js";
+import { drawWorkDot } from "../work-dot.js";
 import { callUnary } from "../../rpc/unary.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -132,11 +135,9 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   head.className = "shell-head";
   el.append(head);
 
-  const dot = document.createElement("span");
-  dot.className = "agent-dot";
-  dot.setAttribute("aria-hidden", "true");
-  dot.textContent = "●";
-  head.append(dot);
+  // THE STATE DOT: the shared vocabulary's color for `live` or the settled
+  // outcome; hollow when it spends none (work-dot.ts).
+  head.append(drawWorkDot(feedShellDotColor(shellDotState(state, PATH)), state.case === "live"));
 
   const command = drawFeedShellCommand(requireMessage(u.command, `${PATH}.command`), `${PATH}.command`);
   head.append(command);
@@ -144,7 +145,6 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   const runtime = requireMessage(u.runtime, `${PATH}.runtime`);
   switch (state.case) {
     case "live":
-      dot.classList.add("agent-running");
       head.append(drawLiveClock(runtime, rc));
       if (state.value.lastProgress !== undefined) {
         head.append(drawFeedShellLastProgress(state.value.lastProgress, rc));
@@ -158,7 +158,6 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
         return unreachableArm(`${PATH}.settled.outcome`, armName(outcome));
       }
       el.setAttribute("data-state", outcome.case);
-      dot.classList.add(outcome.case === "lost" ? "agent-lost" : "agent-done");
       head.append(drawSettledClock(runtime, settled));
       if (settled.exit !== undefined) {
         head.append(drawFeedShellExit(settled.exit, `${PATH}.settled.exit`));
@@ -297,12 +296,7 @@ export function drawFeedShellLastProgress(
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedShellRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  const el = document.createElement("span");
-  el.className = "shell-clock";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return el;
+  return liveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where the command stopped. */
@@ -312,10 +306,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  const el = document.createElement("span");
-  el.className = "shell-clock";
-  el.textContent = formatElapsed(endedMs - startedMs);
-  return el;
+  return settledElapsedClock("shell-clock", endedMs - startedMs);
 }
 
 /** The stop control on a live shell. */
@@ -453,4 +444,18 @@ function expire(el: HTMLElement, rc: RowContext): void {
     stopTicking(el);
     el.remove();
   });
+}
+
+/**
+ * The `feed_shell_dot` key a head's state draws: `live`, or the settled
+ * outcome arm, with a completed run's daemon judgment appended
+ * (`completed_failed`). An unjudged completion is plain `completed`.
+ */
+export function shellDotState(state: NonNullable<FeedShell["state"]> & { case: string }, path: string): string {
+  if (state.case !== "settled") return state.case;
+  const outcome = requireCase(state.value.outcome, `${path}.settled.outcome`);
+  if (outcome.case === "completed" && outcome.value.judgment.case !== undefined) {
+    return `completed_${outcome.value.judgment.case}`;
+  }
+  return outcome.case;
 }

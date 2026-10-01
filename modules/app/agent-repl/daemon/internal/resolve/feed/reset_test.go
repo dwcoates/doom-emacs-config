@@ -58,7 +58,7 @@ func TestAResetLeavesNoRowOfThePreviousConversationOnASubFeed(t *testing.T) {
 	h := newHarness(t)
 	h.spawnSubagent("unit-1", subAgent(), "explore", "go and look")
 	h.resolver.OnActivity(testWorkspace, subAgent(),
-		responseSuccessActivity("unit-sub", "what the subagent found"), nil, nil, noAddress())
+		responseSuccessActivity("unit-sub", "what the subagent found"), nil, nil)
 	if len(h.rows(subFeed())) == 0 {
 		t.Fatal("the arrangement drew no sub-feed rows at all")
 	}
@@ -174,18 +174,18 @@ func TestAResetDropsTheSelectableFinalResponses(t *testing.T) {
 	}
 }
 
-func TestAResetDropsTheOutputAddress(t *testing.T) {
-	// Arrange: a lease holder's address naming a merge tab of the session that
-	// is being swapped out.
+func TestAResetDropsTheTurnAddresses(t *testing.T) {
+	// Arrange: a turn addressed at a merge tab of the session that is being
+	// swapped out.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+	h.resolver.AddressTurn(testWorkspace, "turn-9", &sessionwatcher.OutputAddress{
 		Feed: feedid.Feed{Merge: &lease},
 	})
 
 	// Act.
 	h.reset()
-	h.resolver.UpsertAtOutputAddress(testWorkspace,
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-9",
 		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-9"},
 		&frontendv1.FeedRow{
 			Id: &frontendv1.FeedId{Value: "row|after-the-reset"},
@@ -194,7 +194,8 @@ func TestAResetDropsTheOutputAddress(t *testing.T) {
 			},
 		})
 
-	// Assert: the row lands on the ROOT feed, because no address stands.
+	// Assert: the row lands on the ROOT feed, because the turn's address went
+	// with the conversation it belonged to.
 	if got := len(h.rows(rootFeed())); got != 1 {
 		t.Fatalf("root feed rows = %d, want the one row the reset re-rooted", got)
 	}
@@ -211,7 +212,7 @@ func TestAResetRetractsTheStandingFinalAnswerFault(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), nil, nil, noAddress())
+		}, nil), nil, nil)
 	h.concludeWithoutAnswer("turn-1")
 	if len(h.faults.standing()) != 1 {
 		t.Fatalf("standing faults = %+v, want one", h.faults.standing())
@@ -232,7 +233,7 @@ func TestAResetStopsEveryArmedStallWindow(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, nil, noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, nil)
 	if h.clock.live() == nil {
 		t.Fatal("the arrangement armed no stall window")
 	}

@@ -45,9 +45,6 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	if err := colors.AssertFooterStatusArms(statusArms); err != nil {
 		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
 	}
-	if err := colors.AssertFooterAllowanceArms(allowanceArms); err != nil {
-		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
-	}
 	o := options{
 		clock:           SystemClock{},
 		dwell:           DefaultMomentaryDwell,
@@ -782,7 +779,6 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
 			r.observeRateLimitStatus(s, u.RateLimitStatus)
-			r.observeRateLimitEvent(ws, s, u.RateLimitStatus)
 			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and any
 			// other verdict lifts the block — the same rule, on the same event,
 			// as the roster's vendor_blocked (ladder.RateLimitBlocks).

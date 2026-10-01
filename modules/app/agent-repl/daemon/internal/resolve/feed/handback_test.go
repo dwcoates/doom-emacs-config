@@ -202,7 +202,7 @@ func TestAReplayedHandbackDrawsWhatTheLiveFrameDrew(t *testing.T) {
 	live.sendAs(subAgent(), settle())
 	replayed.resolver.OnHistoryPage(testWorkspace, subAgent(), historyPage(&conversationv1.HistoryFloor{},
 		frameEntry(subAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: settle()}}),
-	), noAddress())
+	))
 
 	// Assert.
 	if !proto.Equal(live.result(), replayed.result()) {

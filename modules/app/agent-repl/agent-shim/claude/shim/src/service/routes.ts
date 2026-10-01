@@ -31,6 +31,7 @@ import {
   validateKillTurnRequest,
   validateReadHistoryRequest,
   validateReadTranscriptsRequest,
+  validateRollBackSessionRequest,
   validateSetSessionModelRequest,
   validateSetSessionPermissionModeRequest,
   validateStartSessionRequest,
@@ -216,6 +217,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("KillTurn");
         validateKillTurnRequest(request);
         return answering("KillTurn", () => engine.killTurn(request));
+      },
+
+      async rollBackSession(request) {
+        entered("RollBackSession");
+        validateRollBackSessionRequest(request);
+        return answering("RollBackSession", () => engine.rollBackSession(request));
       },
 
       // ---- Detached work ----

@@ -62,16 +62,18 @@ func (s *server) SubmitPrompt(
 		target = &ref
 	}
 
-	// REPLY-TO-A-PAST-RESPONSE: when the submission names an earlier
-	// final-response row, the DAEMON prepends a copy of that response plus a
-	// note BEFORE the prompt reaches the shim, so the agent knows the new
-	// message refers to it. Emacs sends only the feedid. A feedid the daemon
-	// cannot resolve to a selectable final response is REFUSED, never dropped:
-	// delivering the user's message shorn of the reference they asked for would
-	// silently change what they said.
+	// REPLY-TO-A-PAST-RESPONSE: when the feed has a final response SELECTED as
+	// this prompt is accepted, the DAEMON prepends a copy of that response plus
+	// a note BEFORE the prompt reaches the shim, so the agent knows the new
+	// message refers to it. The daemon is the selection's only holder, so the
+	// reply is always the one the webapp was drawing. The selection is read
+	// ONCE, and only that selection is ended after the send: a row selected in
+	// the meantime stays selected. A selected row the daemon cannot resolve to
+	// a final response is REFUSED, never dropped: delivering the user's message
+	// shorn of the reference they saw would silently change what they said.
 	said := req.Msg.GetSaid()
-	consumedReference := false
-	if ref := req.Msg.GetReferenceResponseFeedid(); ref != nil {
+	sentWith, sentKind, sentWithSelection := s.currentSelection(subject.Record.ID)
+	if ref := sentWith; sentWithSelection && sentKind == selectionResponse {
 		markdown, ok := s.deps.Feed.ResponseMarkdown(subject.Record.ID, ref)
 		if !ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
@@ -82,7 +84,6 @@ func (s *server) SubmitPrompt(
 			}))))
 		}
 		said = prependReferencedResponse(said, markdown)
-		consumedReference = true
 	}
 
 	// VALIDATED ABOVE through the same mapping, so a failure here is a
@@ -100,14 +101,12 @@ func (s *server) SubmitPrompt(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	cerr := s.encodeSubmitOutcome(subject.Log, resp, outcome)
-	// The selection is dropped once the reference has actually been delivered
-	// (a genuine success — a minted turn, a hold, a command answer — never a
-	// refusal arm or a transport error). Emacs also sends a CLEAR from its own
-	// escape/consume path; both are idempotent, so this double-clear pushes the
-	// cleared FeedSelection at most once (clearSelection no-ops when there is
-	// nothing to clear).
-	if consumedReference && cerr == nil && resp.GetError() == nil {
-		s.clearSelection(subject.Record.ID)
+	// AN ACCEPTED PROMPT ENDS THE SELECTION it was sent with, a reply target
+	// or a prompt alike (a genuine success — a minted turn, a hold, a command
+	// answer — never a refusal arm or a transport error), and the webapp
+	// returns to the tail where the new prompt lands.
+	if sentWithSelection && cerr == nil && resp.GetError() == nil {
+		s.endSelection(subject.Log, subject.Record.ID, sentWith, returnToTail(), "prompt_sent")
 	}
 	return answer(resp, cerr)
 }

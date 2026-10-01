@@ -518,6 +518,22 @@ out of date, and restarts what is, WHEN it may.
   NOTHING and is the answer, loudly (`build_failed` naming the step, the tail
   of its output and the archived log under `<state>/deploy/logs/`).
 
+## The `wsm schema version` goes up only for a breaking table change
+
+The `wsm schema version` is the version of the daemon database's schema
+(`wsm.db`, today's `wsm.LayoutVersion` in `daemon/internal/wsm/open.go`; older
+docs call it the "state layout"). Owner ruling, 2026-10-01:
+
+- It goes up ONLY for a BREAKING table change, one the running daemon cannot
+  work beside: a table or column removed, renamed or repurposed.
+- A new daemon with a different `wsm schema version` cannot take over from a
+  running one, because it must migrate the database first and only one daemon
+  may write it; such a deploy drains every workspace and stops then starts.
+- An ADDITIVE change (a new table or column) does not raise it: the new daemon
+  applies it once it is the only writer and does not touch the new tables
+  before then, and the old daemon ignores what it does not know.
+- The same rule holds for protobuf package versions (`proto/AGENTS.md`).
+
 ## A deploy never ends a turn unless it is FORCED
 
 How the daemon puts each component into service:
@@ -547,6 +563,16 @@ How the daemon puts each component into service:
      Queued prompts never block a bounce; the workspace drains and they are
      delivered to the new shim. Monitors, background shells and background
      subagents DO block it, because they die with the shim's vendor child.
+     AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK: freeness is a reading
+     the vendor can overtake (it starts a turn on its own the moment a
+     subagent concludes), but the shim's `KillSession{force:false}` refusal is
+     atomic and authoritative. A `live` refusal, or a stand-down the shim never
+     answered and did not leave inside the window, is never forced: the old
+     shim keeps serving untouched, the prelaunch is retired, the hold released,
+     and the bounce is re-registered behind that work (`bounce.ErrDeferred`)
+     and runs at the next freeness. Only a FORCED bounce, or a stand-down the
+     shim answered without a `live` refusal and then did not leave (a hung
+     shim, not live work), is force-killed at the window's end.
      A shim replacement and a handover transfer asked of one workspace
      coalesce into TWO stages, replacement then transfer, and never one in
      place of the other (daemon/AGENTS.md, "A coalesced bounce runs every
@@ -770,6 +796,14 @@ When a fix seems to call for a look-and-feel change, do the narrowest thing that
 resolves the defect, then say what you would have changed and why, and leave it
 for the owner to rule on. Restyling that arrives attached to a bug fix is hard
 to review and hard to reverse, which is why it waits.
+
+## User controls land with the user guide
+
+Any new or changed user control (a key, a button, a click, a command the
+user drives) lands in the same change as its entry in `docs/USER-GUIDE.md`.
+That covers what the control does, its confirmation if any, and its limits.
+The guide is how the owner learns a control exists, and a control missing
+from it goes unused. Controls that predate the guide are not backfilled.
 
 ## UI changes require an explicit specification
 
@@ -1424,10 +1458,10 @@ tiers, and the tier is defined by WHAT ENDS the line:
 
 | tier | ends when | examples |
 | --- | --- | --- |
-| **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); a vendor rate-limit event (`allowed_warning`, `rejected`); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
+| **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | tool-call starts; task-tracker moves; the `submitting` line with the held-prompt queue and classification progress; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
 | **quiet** | the next feed item surfaces | the quiet-stretch line: from the moment a feed item has FULLY LANDED until the next feed item FIRST SURFACES, e.g. `✅ Bash finished — handling result...`; a prompt delivered, `✅ Prompt delivered — awaiting response...` |
-| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read) |
+| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read), fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner ruling, 2026-10-01) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then quiet, then
 enduring. A transient never covers a salient line; it covers only a quiet or

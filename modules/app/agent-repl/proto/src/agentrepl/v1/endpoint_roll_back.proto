@@ -1,0 +1,117 @@
+// endpoint_roll_back.proto — RollBack: perform a confirmed rollback plan.
+// ROLLBACK section.
+//
+// The daemon performs the whole rollback as one operation, under its prompt
+// queue's ownership of the turn sequence so no prompt is delivered part way:
+// drop the held prompts the plan named, have the shim interrupt the running
+// turn, (restoring files) stop the dropped turns' detached work and restore
+// the files, and resume the vendor conversation just before the prompt; then
+// remove the dropped turns from the feed, durably, so neither a reload nor a
+// restart draws them again. On success Emacs saves the composer's contents to
+// its history and fills it with the prompt that was rolled back.
+syntax = "proto3";
+package agentrepl.v1;
+import "workspace/v1/workspace.proto";
+import "conversation/v1/user.proto";
+import "agentrepl/v1/rollback.proto";
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RollBackRequest {
+  // The workspace whose conversation to roll back.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The plan the user confirmed, exactly as PlanRollback served it.
+  RollbackToken token = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message RollBackResponse {
+  oneof result {
+    RollBackSuccess success = 1;
+    RollBackError error = 2;
+  }
+}
+
+// The conversation now ends just before the prompt.
+message RollBackSuccess {
+  // The prompt rolled back, as the user said it: its text and attachments,
+  // for the composer to hold again.
+  conversation.v1.UserSaid prompt = 1;
+  // How many files were restored. Present exactly when the plan restored
+  // files.
+  optional RollBackFilesRestored files_restored = 2;
+}
+// The files a restore changed back.
+message RollBackFilesRestored {
+  // How many files.
+  uint32 files = 1;
+}
+
+// Not rolled back. THE ARM IS WHY. Every arm leaves the conversation, the
+// feed, the held prompts and the files as they were, except that a running
+// turn may already have been interrupted.
+message RollBackError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    RollBackUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    RollBackWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    RollBackTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    RollBackNotYetAdopted not_yet_adopted = 4;
+    // The plan no longer describes what would happen (a prompt was sent or
+    // queued, a turn started or ended, the prompt became unreachable, or
+    // the daemon restarted since it was planned). Nothing was done; plan
+    // again.
+    RollBackPlanStale plan_stale = 5;
+    // The workspace has no running session to roll back.
+    RollBackNoSession no_session = 6;
+    // The vendor transcript holds no record of the prompt.
+    RollBackPromptNotRecorded prompt_not_recorded = 7;
+    // The prompt is the first of its vendor conversation; `/clear` starts a
+    // conversation over.
+    RollBackFirstPrompt first_prompt = 8;
+    // The vendor conversation holds a prompt after this one that the feed
+    // never drew, so rolling back would drop something unseen.
+    RollBackUnseenPrompt unseen_prompt = 9;
+    // The vendor refused the cut; the conversation is whole.
+    RollBackVendorRefused vendor_refused = 10;
+    // The files cannot be restored to that prompt (it was sent before file
+    // checkpointing was on, or its checkpoint is gone). Nothing was changed.
+    RollBackFilesNotRestorable files_not_restorable = 11;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message RollBackUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message RollBackWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message RollBackTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message RollBackNotYetAdopted {}
+// The plan no longer describes what would happen.
+message RollBackPlanStale {}
+// No running session.
+message RollBackNoSession {}
+// The prompt has no record in the vendor transcript.
+message RollBackPromptNotRecorded {}
+// The prompt is its conversation's first.
+message RollBackFirstPrompt {}
+// An unseen prompt follows the cut point.
+message RollBackUnseenPrompt {}
+// The vendor refused the cut.
+message RollBackVendorRefused {
+  // The vendor's refusal, verbatim.
+  string vendor_message = 1;
+}
+// The files cannot be restored.
+message RollBackFilesNotRestorable {
+  // The vendor's reason, verbatim.
+  string vendor_message = 1;
+}

@@ -11,6 +11,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -839,5 +840,249 @@ func TestApplyFileRefusesASourceDirNoWorkspaceIsAt(t *testing.T) {
 	}
 	if len(f.merge.enqueued) != 0 {
 		t.Fatalf("enqueued %v, want nothing", f.merge.enqueued)
+	}
+}
+
+// THE MERGE QUEUE'S CONTROLS (merge_evict, merge_pause, merge_resume) reach
+// the orchestrator entry points UpdateMergeQueue calls, and answer the
+// requesting agent through the file's fate and a daemon.commandfile.merge_queue
+// record.
+
+func TestApplyFileEvictsAMergeFromTheQueue(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantEvicted ids.WorkspaceID
+		wantOwn     bool
+	}{
+		{name: "the requester's own", body: `[{"type":"merge_evict","project_dir":"/tree/w1","workspace":"one"}]`, wantEvicted: "w1", wantOwn: true},
+		{name: "another workspace's, by its worktree", body: `[{"type":"merge_evict","project_dir":"/tree/w1","evict_dir":"/tree/w2"}]`, wantEvicted: "w2", wantOwn: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			path := f.write(t, "workspace_commands_evict.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			if !reflect.DeepEqual(f.merge.evicted, []ids.WorkspaceID{tt.wantEvicted}) {
+				t.Fatalf("evicted %v, want [%s]", f.merge.evicted, tt.wantEvicted)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			want := map[string]any{"type": TypeMergeEvict, "requester": "w1", "workspace": string(tt.wantEvicted), "own": tt.wantOwn, "outcome": "evicted", "path": path}
+			for key, value := range want {
+				if record.Context[key] != value {
+					t.Fatalf("record context %v, want %s=%v", record.Context, key, value)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyFileAnswersAnEvictionOfWhatIsNotQueuedAsAnOrdinaryOutcome(t *testing.T) {
+	// Arrange: the orchestrator refuses no_such_queued_merge, which an agent
+	// asking to take a merge out reads as "there was none".
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.evictErr = &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Workspace: "w1", Reason: "no merge of this workspace is on any queue"}
+	path := f.write(t, "workspace_commands_evict.json", `[{"type":"merge_evict","project_dir":"/tree/w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ApplyFile = %v, want the file applied", err)
+	}
+	if got := entries(t, filepath.Join(f.dir, "applied")); len(got) != 1 {
+		t.Fatalf("applied files = %v, want the file applied", got)
+	}
+	record := f.record(t, opMergeQueue, "info")
+	if record.Context["outcome"] != "not_queued" || record.Context["workspace"] != "w1" {
+		t.Fatalf("record context %v, want outcome=not_queued for w1", record.Context)
+	}
+}
+
+func TestApplyFileQuarantinesAnEvictionTheOrchestratorFails(t *testing.T) {
+	// Arrange: any failure other than "not queued" is the rpc's failure too.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.evictErr = errFake
+	path := f.write(t, "workspace_commands_evict.json", `[{"type":"merge_evict","project_dir":"/tree/w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+	}
+	record := f.record(t, opEntry, "warn")
+	if record.Context["type"] != TypeMergeEvict || !strings.Contains(record.Context["cause"].(string), errFake.Error()) {
+		t.Fatalf("record context %v, want the merge_evict refusal and its cause", record.Context)
+	}
+}
+
+func TestApplyFileRefusesAMergeQueueControlFromAnUnknownWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCause string
+	}{
+		{name: "an unregistered requester evicting", body: `[{"type":"merge_evict","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
+		{name: "an unregistered evict_dir", body: `[{"type":"merge_evict","project_dir":"/tree/w1","evict_dir":"/tree/none"}]`, wantCause: `unknown_workspace: no workspace is registered at evict_dir "/tree/none"`},
+		{name: "an unregistered requester pausing", body: `[{"type":"merge_pause","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
+		{name: "an unregistered requester resuming", body: `[{"type":"merge_resume","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_unknown.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+			}
+			if len(f.merge.evicted)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
+				t.Fatalf("the orchestrator was driven (evicted %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.paused, f.merge.unpaused)
+			}
+			record := f.record(t, opEntry, "warn")
+			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.wantCause) {
+				t.Fatalf("record cause %q, want it to contain %q", cause, tt.wantCause)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesAMalformedMergeQueueControl(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCause string
+	}{
+		{name: "an eviction naming no requester", body: `[{"type":"merge_evict"}]`, wantCause: "merge_evict: a project_dir (or a dir, or a workspace id) is required"},
+		{name: "a pause naming no requester", body: `[{"type":"merge_pause"}]`, wantCause: "merge_pause: a project_dir (or a dir, or a workspace id) is required"},
+		{name: "an eviction scoped by a repository", body: `[{"type":"merge_evict","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantCause: "merge_evict: repository_dir is a merge_pause's or a merge_resume's field"},
+		{name: "a resume naming a workspace to evict", body: `[{"type":"merge_resume","project_dir":"/tree/w1","evict_dir":"/tree/w2"}]`, wantCause: "merge_resume: evict_dir is a merge_evict's field"},
+		{name: "a pause carrying a merge's source", body: `[{"type":"merge_pause","project_dir":"/tree/w1","branch":"b"}]`, wantCause: "merge_pause: branch is a merge's field"},
+		{name: "a relative repository_dir", body: `[{"type":"merge_pause","project_dir":"/tree/w1","repository_dir":"repo"}]`, wantCause: "merge_pause: repository_dir: "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			path := f.write(t, "workspace_commands_bad.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+			}
+			if len(f.merge.evicted)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
+				t.Fatalf("the orchestrator was driven (evicted %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.paused, f.merge.unpaused)
+			}
+			record := f.record(t, opQuarantine, "warn")
+			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.wantCause) {
+				t.Fatalf("record cause %q, want it to contain %q", cause, tt.wantCause)
+			}
+		})
+	}
+}
+
+func TestApplyFilePausesAndResumesTheMergeQueue(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantPaused  bool
+		wantScope   *merge.RepositoryScope
+		wantOutcome string
+	}{
+		{name: "pause every repository", body: `[{"type":"merge_pause","project_dir":"/tree/w1"}]`, wantPaused: true, wantOutcome: "paused"},
+		{name: "pause one repository", body: `[{"type":"merge_pause","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantPaused: true, wantScope: &merge.RepositoryScope{Dir: "/repo"}, wantOutcome: "paused"},
+		{name: "resume every repository", body: `[{"type":"merge_resume","project_dir":"/tree/w1"}]`, wantOutcome: "resumed"},
+		{name: "resume one repository", body: `[{"type":"merge_resume","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantScope: &merge.RepositoryScope{Dir: "/repo"}, wantOutcome: "resumed"},
+		{name: "a tilde repository_dir is expanded", body: `[{"type":"merge_pause","project_dir":"/tree/w1","repository_dir":"~/repo"}]`, wantPaused: true, wantScope: &merge.RepositoryScope{Dir: fixtureHome + "/repo"}, wantOutcome: "paused"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_pause.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			called, other := f.merge.unpaused, f.merge.paused
+			if tt.wantPaused {
+				called, other = f.merge.paused, f.merge.unpaused
+			}
+			if len(called) != 1 || len(other) != 0 || !reflect.DeepEqual(called[0], tt.wantScope) {
+				t.Fatalf("paused %v, unpaused %v, want one call scoped %+v", f.merge.paused, f.merge.unpaused, tt.wantScope)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			wantDir := ""
+			if tt.wantScope != nil {
+				wantDir = tt.wantScope.Dir
+			}
+			if record.Context["outcome"] != tt.wantOutcome || record.Context["requester"] != "w1" ||
+				record.Context["scoped"] != (tt.wantScope != nil) || record.Context["repository_dir"] != wantDir {
+				t.Fatalf("record context %v, want outcome=%s requester=w1 repository_dir=%q", record.Context, tt.wantOutcome, wantDir)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesAPauseTheOrchestratorRefuses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		arm  string
+	}{
+		{name: "pausing a paused queue", body: `[{"type":"merge_pause","project_dir":"/tree/w1"}]`, arm: merge.ArmAlreadyPaused},
+		{name: "resuming a running queue", body: `[{"type":"merge_resume","project_dir":"/tree/w1"}]`, arm: merge.ArmNotPaused},
+		{name: "pausing an unknown repository", body: `[{"type":"merge_pause","project_dir":"/tree/w1","repository_dir":"/elsewhere"}]`, arm: merge.ArmUnknownRepository},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.merge.pauseErr = &merge.RefusalError{Arm: tt.arm, Reason: "arranged"}
+			path := f.write(t, "workspace_commands_pause.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+			}
+			record := f.record(t, opEntry, "warn")
+			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.arm) {
+				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
+			}
+		})
 	}
 }

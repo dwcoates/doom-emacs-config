@@ -58,6 +58,12 @@ message WatchHostWorkspaceResponse {
     // An event, not state: never replayed to a late subscriber, because a
     // click belongs to the moment it was made.
     HostWorkspaceNotificationClicked notification_clicked = 7;
+    // THE FEED'S SELECTION, whole-replaced on every change: Emacs's copy of
+    // what the webapp draws as selected, for the composer's escape handling.
+    // State, not an event: a late subscriber is sent the selection in force
+    // first. Emacs never acts on its copy beyond that; a sent prompt and a
+    // rollback read the daemon's own selection.
+    HostWorkspaceSelection selection = 8;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -282,3 +288,23 @@ message HostFault {
   }
 }
 
+
+// What the workspace's feed has selected, as Emacs needs it: only which kind of
+// row, never the row, because Emacs never names it back.
+message HostWorkspaceSelection {
+  // Exactly one is set on every push.
+  oneof selection {
+    // Nothing is selected.
+    HostWorkspaceSelectionNone none = 1;
+    // A final response is selected; the next prompt replies to it.
+    HostWorkspaceSelectionResponse response = 2;
+    // A prompt is selected; the rollback keys roll back to just before it.
+    HostWorkspaceSelectionPrompt prompt = 3;
+  }
+}
+// Nothing is selected.
+message HostWorkspaceSelectionNone {}
+// A final response is selected.
+message HostWorkspaceSelectionResponse {}
+// A prompt is selected.
+message HostWorkspaceSelectionPrompt {}

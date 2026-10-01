@@ -92,6 +92,13 @@ export interface RealQuerySpec {
    * Meaningless without a `resume` binding, which is why it lives beside it.
    */
   readonly resumeSessionAt?: string;
+  /**
+   * With `resumeSessionAt`: the prompt uuid of the ONE turn the truncating
+   * resume discards, which arms the vendor's guard — it refuses the resume when
+   * anything past the cut is not that turn's (sdk.d.ts, `resumeDropsTurn`).
+   * RollBackSession sets it only for a single dropped turn.
+   */
+  readonly resumeDropsTurn?: string;
   /** The model to answer with, or absence for the account default. */
   readonly model?: string;
   /** The permission mode every gate starts under. */
@@ -217,6 +224,10 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     // thinking units. `type: "adaptive"` is the form current models
     // (Claude 4.7+/5 family) accept — `"enabled"` is rejected by them.
     thinking: { type: "adaptive", display: "summarized" },
+    // EVERY SESSION CHECKPOINTS ITS FILES. RollBackSession's `restore_files`
+    // rewinds the files to a prompt (`Query.rewindFiles`), which only works for
+    // a prompt sent while checkpointing was on, so it is on from the first one.
+    enableFileCheckpointing: true,
     cwd: spec.cwd,
     permissionMode: spec.permissionMode,
     canUseTool: spec.canUseTool,
@@ -240,6 +251,7 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
       : {
           resume: spec.binding.resumeSessionId,
           ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+          ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
         }),
   };
   return options;

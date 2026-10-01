@@ -428,6 +428,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
 		Faults:      p.DB,
+		// A ROLLED-BACK TURN STAYS ROLLED BACK across a restart.
+		RolledBack: p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,
