@@ -9,7 +9,6 @@ import {
   FeedPageSchema,
   FeedRowRemovedSchema,
   FeedRowSchema,
-  FeedRowSelectableSchema,
   FeedSelectionSchema,
   FeedTurnEndedInterruptedInterjectionSchema,
   type FeedId,
@@ -58,6 +57,7 @@ import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.j
 import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
+import { selectable } from "../selectable.js";
 
 /** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
 const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
@@ -2967,11 +2967,7 @@ describe("createFeedController: selected and expanded are one state", () => {
   }
 
   /** A response row the daemon published selectable. */
-  function selectableRow(id: string): FeedRow {
-    const row = responseRow(id);
-    row.selectable = create(FeedRowSelectableSchema, {});
-    return row;
-  }
+  const selectableRow = (id: string): FeedRow => selectable(responseRow(id));
 
   /** The box of row ID in HOST. */
   function boxOf(host: HTMLElement, id: string): HTMLElement {
