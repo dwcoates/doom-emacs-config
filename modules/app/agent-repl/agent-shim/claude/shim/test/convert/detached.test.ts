@@ -2510,3 +2510,52 @@ describe("TaskKindRegistry: the commission", () => {
     });
   });
 });
+
+describe("TaskKindRegistry: the facts that outlive a settle share one bounded shape", () => {
+  it("forgets the oldest agent at the bound, and says so", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    for (let i = 0; i < TASK_KIND_CAPACITY; i += 1) {
+      registry.rememberAgent(`t${String(i)}`, create(conversationv1.AgentIdSchema, { value: `a${String(i)}` }));
+    }
+    const before = logSinkMark();
+
+    // Act
+    registry.rememberAgent("one-more", create(conversationv1.AgentIdSchema, { value: "a-more" }));
+
+    // Assert
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect({ oldest: registry.agentOf("t0"), lost: warned.map((record) => record.context.lost) }).toEqual({
+      oldest: undefined,
+      lost: ["the agent it ran, so a resume of that agent cannot be named"],
+    });
+  });
+
+  it("re-remembering a task's agent at the bound forgets nothing else", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    for (let i = 0; i < TASK_KIND_CAPACITY; i += 1) {
+      registry.rememberAgent(`t${String(i)}`, create(conversationv1.AgentIdSchema, { value: `a${String(i)}` }));
+    }
+
+    // Act
+    registry.rememberAgent("t5", create(conversationv1.AgentIdSchema, { value: "again" }));
+
+    // Assert
+    expect({ oldest: registry.agentOf("t0")?.value, again: registry.agentOf("t5")?.value }).toEqual({
+      oldest: "a0",
+      again: "again",
+    });
+  });
+
+  it("is the one shape: no table in the registry hand-rolls the keep", () => {
+    // Arrange
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/convert/detached.ts"), "utf8");
+
+    // Act
+    const handRolled = source.match(/\.delete\(taskId\);\s*reserve\(/g) ?? [];
+
+    // Assert
+    expect(handRolled.length).toBe(1);
+  });
+});

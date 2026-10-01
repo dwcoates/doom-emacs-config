@@ -841,6 +841,15 @@ export function createTaskKindRegistry(): TaskKindRegistry {
   const FACTS_LOST = "its kind and cause, so its notification cannot be typed";
   /** The units the shim asked the vendor to move, by spawning call (a set: the value is unused). */
   const userDetaches = new Map<string, true>();
+  /**
+   * Keep one fact that OUTLIVES ITS TASK'S SETTLE (an agent, a commission),
+   * as the newest entry of its bounded table. ONE SHAPE for every such table.
+   */
+  const keep = <T>(table: Map<string, T>, taskId: string, value: T, lost: string): void => {
+    table.delete(taskId);
+    reserve(table, lost);
+    table.set(taskId, value);
+  };
   return {
     noteUserDetach(toolUseId) {
       if (!userDetaches.has(toolUseId)) {
@@ -872,17 +881,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       return facts.get(taskId)?.kind;
     },
     rememberAgent(taskId, agent) {
-      agents.delete(taskId);
-      reserve(agents, "the agent it ran, so a resume of that agent cannot be named");
-      agents.set(taskId, agent);
+      keep(agents, taskId, agent, "the agent it ran, so a resume of that agent cannot be named");
     },
     agentOf(taskId) {
       return agents.get(taskId);
     },
     rememberCommission(taskId, commission) {
-      commissions.delete(taskId);
-      reserve(commissions, "the commission its agent was spawned with, so a resume of that agent cannot restate it");
-      commissions.set(taskId, commission);
+      keep(commissions, taskId, commission, "the commission its agent was spawned with, so a resume of that agent cannot restate it");
     },
     commissionOf(taskId) {
       return commissions.get(taskId);
