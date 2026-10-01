@@ -285,10 +285,15 @@ func ReadManifest(path string) (Manifest, bool, error) {
 // every boot for a day, re-opening a bounce_died fault and a WARN each time for
 // a shim that had died once, long before.
 func (c *controller) Reconcile(ctx context.Context, survivors Survivors) ([]Disposition, error) {
-	out, _, landed, err := c.reconcile(ctx, survivors)
+	out, outgoing, landed, err := c.reconcile(ctx, survivors)
 	if err != nil {
 		return nil, err
 	}
+	// THE MANIFEST NAMES THE DAEMON WHOSE CARRIES THIS BOOT TAKES UP
+	// (TakeUpCarries), empty when there was no manifest.
+	c.mu.Lock()
+	c.bootOutgoing = outgoing
+	c.mu.Unlock()
 	if landed {
 		c.retireManifest("every disposition it names is recorded")
 	}
@@ -297,18 +302,19 @@ func (c *controller) Reconcile(ctx context.Context, survivors Survivors) ([]Disp
 
 // reconcile is Reconcile without the retirement, so a joining daemon can arm
 // its rendezvous from the manifest before the file goes away. It reports
-// whether a manifest was found and whether every disposition it named LANDED
+// the daemon a found manifest names (empty when none was found) and whether
+// every disposition it named LANDED
 // durably — false when any record failed, or was deferred behind a read-only
 // handle, which is exactly when the manifest must be kept.
-func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disposition, bool, bool, error) {
+func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disposition, ids.InstanceID, bool, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
 			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
-		return nil, false, false, err
+		return nil, "", false, err
 	}
 	if !found {
-		return c.reconcileWithoutManifest(ctx, survivors), false, false, nil
+		return c.reconcileWithoutManifest(ctx, survivors), "", false, nil
 	}
 	adopted := survivors.adoptedSet()
 	out := make([]Disposition, 0, len(m.Sessions))
@@ -364,7 +370,7 @@ func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disp
 	}
 	c.log.Info(opReconcile, "reconciled the stand-down intent manifest against the kernel locks",
 		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out), "recorded": landed})
-	return out, true, landed, nil
+	return out, m.Daemon, landed, nil
 }
 
 // workspaceGone reports whether a manifest entry names a workspace no view can

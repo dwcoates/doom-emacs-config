@@ -245,7 +245,10 @@ func TestSpawnArgvLeavesTheConfigurationUntouched(t *testing.T) {
 	}
 }
 
-func TestARestartStandDownWaitsForFreeness(t *testing.T) {
+// A RESTART NEVER WAITS ON WORK (owner ruling, 2026-09-30): each workspace
+// stands down the moment no prompt is mid-delivery, whatever turn or detached
+// work is running, and its shim keeps running for the replacement to adopt.
+func TestARestartStandDownDoesNotWaitForWork(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -256,26 +259,69 @@ func TestARestartStandDownWaitsForFreeness(t *testing.T) {
 		t.Fatalf("Restart: %v", err)
 	}
 
-	// Assert: the stand-down is not a handover, and keeps the freeness gate.
+	// Assert
 	requests := h.registry.Requests()
-	if len(requests) != 1 || requests[0].Req.WaitFor != bounce.GateFreeness {
-		t.Fatalf("requests = %+v, want one stand-down at freeness", requests)
-	}
-	if !h.registry.Pending(ws) {
-		t.Fatalf("the busy workspace's stand-down is not registered behind its work")
+	if len(requests) != 1 || requests[0].Req.WaitFor != bounce.GateDispatchQuiet {
+		t.Fatalf("requests = %+v, want one stand-down at the dispatch-quiet gate", requests)
 	}
 }
 
-func TestARestartStandDownCarriesNothing(t *testing.T) {
+func TestARestartStandDownCarriesTheQueueMemory(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.registry.sealed[ws] = bounce.Handoff{Head: "held-1"}
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	carry, found, err := h.c.readCarry(ws)
+	if err != nil || !found {
+		t.Fatalf("readCarry = (%v, %v), want the replacement's carry", found, err)
+	}
+	if carry.Daemon != selfInstance || !carry.MidWork || carry.Queue.Head != "held-1" {
+		t.Fatalf("carry = %+v, want this daemon's mid-work carry of the semantic head", carry)
+	}
+}
+
+func TestAnAbandonedRestartPutsEveryCarryBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.registry.sealed[ws] = bounce.Handoff{Head: "held-1"}
+	h.spawner.replacementErr = errFake
 
 	// Act
 	runRestart(t, h)
 
 	// Assert
 	if _, found, err := h.c.readCarry(ws); err != nil || found {
-		t.Fatalf("readCarry = (%v, %v), want no carry: a restart has no successor to carry to", found, err)
+		t.Fatalf("readCarry = (%v, %v), want the carry retired with the take-back", found, err)
+	}
+	if got := h.registry.unsealed[ws]; got.Head != "held-1" {
+		t.Fatalf("unsealed = %+v, want the sealed queue memory put back here", got)
+	}
+}
+
+func TestACompletedRestartTellsTheCarriedReplacementItWasHandedAcross(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	told := make(chan error, 1)
+	h.registry.across[ws] = []bounce.Request{{Reason: string(ReasonRestartVerb), Force: true, Done: func(err error) { told <- err }}}
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	select {
+	case err := <-told:
+		if !errors.Is(err, bounce.ErrHandedAcross) {
+			t.Fatalf("the carried restart was told %v, want handed across", err)
+		}
+	default:
+		t.Fatalf("the carried restart's requester was never told its outcome")
 	}
 }

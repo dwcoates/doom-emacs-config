@@ -605,6 +605,16 @@ type fakeWatcher struct {
 	refuseJoins bool
 	// departure is the watched shim's departure, nil while it runs.
 	departure *sessionwatcher.Departure
+	// factsPending reports a pure attach whose session facts have not
+	// arrived: the watcher then answers not free, whatever it holds.
+	factsPending bool
+}
+
+// Free answers the real watcher's judgement: facts in, no turn, no live work.
+func (w *fakeWatcher) Free() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return !w.factsPending && w.inFlight == nil && len(w.live.Agents)+len(w.live.Shells)+len(w.live.Monitors) == 0
 }
 
 func (w *fakeWatcher) Departed() (sessionwatcher.Departure, bool) {

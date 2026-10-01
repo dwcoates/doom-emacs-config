@@ -469,7 +469,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	var queue promptqueue.Queue
 	healthRef := &healthForwarder{}
 	rolloutRef := &rolloutForwarder{}
-	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, log: log}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, sessions: p.DB, log: log}
 
 	// THE INSTALLED SHIM BUNDLE, guarded: a spawn holds it from the hash it
 	// stamps the shim with until the shim has answered, and a deploy replaces
