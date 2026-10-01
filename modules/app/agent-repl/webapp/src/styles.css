@@ -6939,6 +6939,37 @@ bubble-body.bubble-body { display: block; }
   opacity: 0.7;
 }
 
+/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph's color
+   is the wifi arm, the disc behind it is the mode arm, each painted on its
+   own: green on a network, red on none, muted when the daemon could not
+   read it; a blue disc when the lid can close without losing the network.
+   The disc is sized so the glyph is just inscribed in it: the glyph's
+   stroked bounding box is about 23 by 17 of its 24 viewBox units, whose
+   diagonal (28.6 units) is 1.19 times the glyph box, so a 13px glyph wants a
+   ~15.5px disc. A STATUS, not a control: no cursor and no hover border. */
+.topbar-wifi {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.topbar-wifi-glyph {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.topbar-wifi[data-wifi="joined"] { color: var(--ok); }
+.topbar-wifi[data-wifi="not-joined"] { color: var(--err); }
+.topbar-wifi[data-mode="on"] { background: var(--accent); }
+
 /* ---- bubble scrollbars (src/styles.css) --------------------------------- */
 
 /* THE SYSTEM DEFAULT BAR, EVERYWHERE (owner ruling, 2026-09-24; supersedes
