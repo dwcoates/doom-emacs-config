@@ -249,7 +249,11 @@ type harness struct {
 	socketProbes map[string]shimsocket.State
 	// socketProbeErrs is the scripted socket-probe error per socket path.
 	socketProbeErrs map[string]error
-	// started records every workspace the bring-up started, in order.
+	// startedMu guards started: the bring-up starts its workspaces on
+	// concurrent goroutines.
+	startedMu sync.Mutex
+	// started records every workspace the bring-up started, in the order the
+	// starts happened to begin.
 	started []ids.WorkspaceID
 	// startErrs is the scripted start failure per workspace.
 	startErrs map[ids.WorkspaceID]error
@@ -337,7 +341,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 			return nil
 		},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
-			h.started = append(h.started, ws)
+			h.noteStarted(ws)
 			return h.startErrs[ws]
 		},
 		Now: func() time.Time { return instant },
@@ -496,6 +500,13 @@ func (s *fakeSupervisor) StandingDown() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.standingDown
+}
+
+// noteStarted records that the bring-up started ws.
+func (h *harness) noteStarted(ws ids.WorkspaceID) {
+	h.startedMu.Lock()
+	defer h.startedMu.Unlock()
+	h.started = append(h.started, ws)
 }
 
 // runAndBringUp runs the reconciliation and then the bring-up step over the
