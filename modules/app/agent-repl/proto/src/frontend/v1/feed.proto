@@ -2330,11 +2330,18 @@ message FeedMergeTabLabel {
 // SHARED STATE LEAVES — the badge vocabulary every kind's oneof selects
 // from.
 // The tab's work is running.
-message FeedMergeTabLive {}
+message FeedMergeTabLive {
+  // When the tab's work began, epoch ms. The client ticks the tab's elapsed
+  // time from it; nothing is pushed as it grows.
+  int64 started_at_ms = 1;
+}
 // The tab's work ended, successfully or not.
 message FeedMergeTabSettled {
   // When the tab settled, epoch ms.
   int64 ended_at_ms = 1;
+  // When the tab's work began, epoch ms. The tab draws how long it ran:
+  // `ended_at_ms` minus this.
+  int64 started_at_ms = 4;
   oneof outcome {
     FeedMergeTabSucceeded succeeded = 2;
     FeedMergeTabFailed failed = 3;
@@ -2580,8 +2587,17 @@ message FeedMergeQueueLabel {
 // respelled, so a waiting user sees the front's progress.
 message FeedMergeQueueMerging {
   FeedMergeTabLabel active_tab = 1;
+  // When the front entered its CURRENT stage (its active tab began), epoch
+  // ms. The queue's duration column ticks from it and starts over at zero
+  // whenever the active tab changes.
+  int64 stage_entered_at_ms = 2;
 }
-message FeedMergeQueueWaiting {}
+// The entry is waiting its turn behind the front.
+message FeedMergeQueueWaiting {
+  // When the entry began waiting (it was queued), epoch ms. The queue's
+  // duration column ticks from it.
+  int64 stage_entered_at_ms = 1;
+}
 
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
