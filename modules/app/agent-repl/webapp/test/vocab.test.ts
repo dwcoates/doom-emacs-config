@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
+import {
+  FeedShellSchema,
+  FeedShellSettledSchema,
+  FeedSubagentSchema,
+  FeedSubagentSettledSchema,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import renderColors from "../../proto/vocab/render-colors.json";
 import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
   FEED_MERGE_HEAD_GLYPH,
+  FEED_SHELL_DOT_KEYS,
+  FEED_SUBAGENT_DOT_KEYS,
+  feedShellDotColor,
+  feedSubagentDotColor,
   PAINT_CLASS_NAMES,
   TOPBAR_TONES,
   failureSideColor,
@@ -264,5 +274,54 @@ describe("failureSideColor: a side the color table does not name", () => {
       // ASSERT
       expect((err as MalformedView).path).toBe("render-colors.json#failure_sides");
     }
+  });
+});
+
+/**
+ * THE FEED WORK DOTS (owner request, 2026-10-01): one row per head state, the
+ * `live` arm plus every settled outcome arm, row for row against the schema.
+ */
+describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row for row", () => {
+  /** `live` plus the settled outcome arms, the state the dot is keyed by. */
+  const dotStates = (
+    head: Parameters<typeof oneofArmNames>[0],
+    settled: Parameters<typeof oneofArmNames>[0],
+  ): string[] => [...oneofArmNames(head, "state").filter((arm) => arm !== "settled"), ...oneofArmNames(settled, "outcome")].sort();
+
+  it("names every subagent head state", () => {
+    expect([...FEED_SUBAGENT_DOT_KEYS].sort()).toEqual(dotStates(FeedSubagentSchema, FeedSubagentSettledSchema));
+  });
+
+  it("names every shell head state", () => {
+    expect([...FEED_SHELL_DOT_KEYS].sort()).toEqual(dotStates(FeedShellSchema, FeedShellSettledSchema));
+  });
+
+  it("spends only the file's colors or none", () => {
+    const allowed = ["none", ...renderColors.colors];
+    const used = [...Object.values(renderColors.feed_subagent_dot), ...Object.values(renderColors.feed_shell_dot)];
+    expect(used.filter((c) => !allowed.includes(c))).toEqual([]);
+  });
+
+  it.each([
+    ["live", "green"],
+    ["succeeded", "none"],
+    ["failed", "red"],
+    ["cancelled", "none"],
+    ["lost", "turquoise"],
+  ])("paints a subagent head %s %s", (state, color) => {
+    expect(feedSubagentDotColor(state)).toBe(color);
+  });
+
+  it.each([
+    ["live", "green"],
+    ["completed", "none"],
+    ["cancelled", "none"],
+    ["lost", "turquoise"],
+  ])("paints a shell head %s %s", (state, color) => {
+    expect(feedShellDotColor(state)).toBe(color);
+  });
+
+  it("refuses a state the table does not name", () => {
+    expect(() => feedSubagentDotColor("nonesuch")).toThrow(MalformedView);
   });
 });

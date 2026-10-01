@@ -255,5 +255,33 @@
     "machinery": "blue",
     "vendor": "purple",
     "client_local": "blue"
+  },
+  "_feed_work_dots_comment": [
+    "The dot leading a feed subagent bubble's head (frontend.v1.FeedSubagent)",
+    "and a detached shell bubble's head (frontend.v1.FeedShell), keyed by the",
+    "state arm: 'live', else the settled outcome arm. Owner request,",
+    "2026-10-01: running is a FILLED green dot, failed a FILLED red one, and a",
+    "run that settled successfully a HOLLOW one. A dot that spends no color",
+    "('none') is drawn hollow, every colored dot filled, so the shape needs no",
+    "table of its own.",
+    "",
+    "cancelled is 'none' (hollow): the user's own stop ended it, so nothing went",
+    "wrong and nothing wants a look. lost is 'turquoise' (filled): we stopped",
+    "being able to see the run, which is unexpected and wants the user's",
+    "attention, but it is not a proven failure, so it does not take failed's",
+    "red. A shell has no 'failed' arm: a nonzero exit is still 'completed'."
+  ],
+  "feed_subagent_dot": {
+    "live": "green",
+    "succeeded": "none",
+    "failed": "red",
+    "cancelled": "none",
+    "lost": "turquoise"
+  },
+  "feed_shell_dot": {
+    "live": "green",
+    "completed": "none",
+    "cancelled": "none",
+    "lost": "turquoise"
   }
 }

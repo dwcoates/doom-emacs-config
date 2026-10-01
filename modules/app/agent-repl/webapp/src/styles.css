@@ -3176,7 +3176,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   .agent-dot.agent-starting,
   .agent-dot.agent-running,
   .task-dot.task-starting,
-  .task-dot.task-running {
+  .task-dot.task-running,
+  .work-dot-live {
     animation: none;
   }
   /* The compaction bar's sweep is a hint, not the sole signal (the
@@ -4754,6 +4755,10 @@ bubble-body.bubble-body { display: block; }
 /* LOST IS NOT FAILURE: we stopped being able to see it, which the muted dot
    says and the red error dot would not. */
 .agent-dot.agent-lost { color: var(--muted); }
+/* THE WORK DOT (src/feed/work-dot.ts): its color is the shared vocabulary's
+   `.tone-<color>`, its shape the glyph; a live one pulses as the old running
+   dot did. */
+.work-dot-live { animation: pulse 1s infinite; }
 .subagent-stop-button {
   font-size: 0.7rem;
   padding: 0 0.5rem;
