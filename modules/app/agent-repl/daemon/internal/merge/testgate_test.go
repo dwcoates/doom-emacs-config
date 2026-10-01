@@ -30,6 +30,26 @@ func TestParseSuiteStatesReadsTheScriptsOwnLines(t *testing.T) {
 			want:  suiteStateFailed,
 		},
 		{
+			// The script has always printed milliseconds; a whole-seconds-only
+			// pattern never matched a real run.
+			name:  "a pass line in the script's own decimal seconds",
+			line:  "[agent-repl-tests] daemon: passed in 28.392s",
+			suite: "daemon",
+			want:  suiteStatePassed,
+		},
+		{
+			name:  "a failure line in the script's own decimal seconds",
+			line:  "[agent-repl-tests] ERROR: webapp failed after 196.514s with exit code 1",
+			suite: "webapp",
+			want:  suiteStateFailed,
+		},
+		{
+			name:  "a failure of a unit that could not start",
+			line:  "[agent-repl-tests] ERROR: shim failed after 0.000s with exit code -1",
+			suite: "shim",
+			want:  suiteStateFailed,
+		},
+		{
 			name:  "a skip line",
 			line:  "[agent-repl-tests] webapp: not selected by --suites, skipping",
 			suite: "webapp",
