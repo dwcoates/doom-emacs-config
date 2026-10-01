@@ -232,6 +232,12 @@ type Deps struct {
 	// leave every unadopted workspace session-less, which is the state the
 	// bring-up exists to abolish.
 	StartSession StartFunc
+	// EnsureServices makes sure launchd holds the store and the sidecar,
+	// bootstrapping either one it does not, before the bring-up starts a
+	// single session (deploy.Restarter.EnsureLoaded). A shim brought up
+	// against a store that is gone for good retries a socket that never
+	// appears, and its feed stays blank.
+	EnsureServices func(context.Context) error
 	// AdoptBound bounds ONE surviving shim's adoption; zero means
 	// DefaultAdoptBound. An adoption that overruns it is reported at ERROR and
 	// the workspace is UNDETERMINED — neither adopted nor orphan-closed — which
@@ -311,6 +317,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("an adoption installer")
 	case deps.StartSession == nil:
 		return nil, missing("a session starter")
+	case deps.EnsureServices == nil:
+		return nil, missing("a launchd service ensurer")
 	case deps.BindViews == nil:
 		return nil, missing("a view binder")
 	case deps.RunDir == "":
