@@ -35,8 +35,15 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import { create } from "@bufbuild/protobuf";
+import {
+  FoldRepositoryRequestSchema,
+  FoldRepositoryResponseSchema,
+  type FoldRepositoryError,
+  type FoldRepositoryRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
 import { log } from "../log.js";
-import { requireMessage } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import {
   MERGED_FOLD_KEY,
   repoFoldKey,
@@ -168,18 +175,56 @@ export function drawRosterRepoSection(
   path: string,
 ): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const section = sectionBox(repoFoldKey(key.id), sc, false);
+  // THE FOLD IS THE DAEMON'S (FoldRepository): the Emacs tab bar hides a
+  // collapsed repository's workspaces off the same pushed arm, so the two can
+  // never disagree.
+  const section = foldedBox(repoFoldKey(key.id), drawRosterRepoSectionFold(u.fold, `${path}.fold`));
+  section.classList.add("repo-section");
   const header = drawRosterSectionHeader(
     requireMessage(u.header, `${path}.header`),
     section,
-    sc,
-    repoFoldKey(key.id),
+    repositoryFold(sc, key),
     `${path}.header`,
   );
   header.appendChild(drawCreateWorkspaceControl(key, section, sc));
   section.appendChild(header);
   section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
+}
+
+/** Whether a repository section is collapsed. EVERY arm is named; unset is malformed. */
+export function drawRosterRepoSectionFold(fold: RosterRepoSection["fold"], path: string): boolean {
+  const arm = requireCase(fold, path);
+  switch (arm.case) {
+    case "expanded":
+      return false;
+    case "collapsed":
+      return true;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(path, other.case);
+    }
+  }
+}
+
+/** FoldRepository: the arm is the fold asked for. */
+export function buildFoldRepositoryRequest(repository: RepositoryRef, collapse: boolean): FoldRepositoryRequest {
+  return create(FoldRepositoryRequestSchema, {
+    repository,
+    fold: collapse ? { case: "collapse", value: {} } : { case: "expand", value: {} },
+  });
+}
+
+/** FoldRepository's one arm of its own. */
+export function foldRepositoryRefusal(cause: NonNullable<FoldRepositoryError["cause"]> & { case: string }): string {
+  switch (cause.case) {
+    case "unknownRepository":
+      return "the daemon no longer has that repository";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("FoldRepositoryError.cause", other.case);
+    }
+  }
 }
 
 /** A repository's stable identity — the fold key and the create echo token. */
@@ -246,13 +291,7 @@ export function drawRosterMergedSection(
     return section;
   }
   section.appendChild(
-    drawRosterSectionHeader(
-      header,
-      section,
-      sc,
-      MERGED_FOLD_KEY,
-      `${path}.header`,
-    ),
+    drawRosterSectionHeader(header, section, localFold(sc, MERGED_FOLD_KEY), `${path}.header`),
   );
   section.appendChild(drawRosterRows(rows, sc, `${path}.rows`));
   return section;
@@ -262,19 +301,51 @@ export function drawRosterMergedSection(
 export function drawRosterSectionHeader(
   u: RosterSectionHeader,
   section: HTMLElement,
-  sc: SidebarContext,
-  foldKey: string,
+  gesture: FoldGesture,
   path: string,
 ): HTMLElement {
   const header = document.createElement("div");
   header.className = "repo-head";
-  header.appendChild(drawFoldToggle(section, sc, foldKey));
+  header.appendChild(drawFoldToggle(section, gesture));
   const label = document.createElement("span");
   label.className = "sb-label";
   label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
   header.appendChild(label);
-  header.addEventListener("click", () => toggleFold(section, sc, foldKey));
+  header.addEventListener("click", () => gesture(section, header));
   return header;
+}
+
+/**
+ * What a section header's fold gesture does, handed the section and the
+ * control the gesture landed on.
+ */
+export type FoldGesture = (section: HTMLElement, control: HTMLElement) => void;
+
+/** A webview-local fold: the task and merged sections' own preference. */
+function localFold(sc: SidebarContext, foldKey: string): FoldGesture {
+  return (section) => toggleFold(section, sc, foldKey);
+}
+
+/**
+ * A repository's fold: asked of the daemon, and redrawn by the roster push
+ * that answers it -- the section never folds itself, so it can never show a
+ * fold the daemon (and the Emacs tab bar) does not hold.
+ */
+function repositoryFold(sc: SidebarContext, repository: RepositoryRef): FoldGesture {
+  return (section, control) => {
+    const collapse = !section.classList.contains("folded");
+    log.debug("asking the daemon to fold a repository section", {
+      operation: "sidebar.roster.fold-repository",
+      context: { repository: repository.id, collapse },
+    });
+    void fireVerb(control, {
+      sc,
+      rpc: "FoldRepository",
+      call: (client) => client.foldRepository(buildFoldRepositoryRequest(repository, collapse)),
+      schema: FoldRepositoryResponseSchema,
+      refusalText: (cause) => foldRepositoryRefusal(cause as never),
+    });
+  };
 }
 
 /**
@@ -302,7 +373,7 @@ export function drawRosterTaskSectionHeader(
   const header = document.createElement("div");
   header.className = "task-head";
   if (done) header.classList.add("done");
-  header.appendChild(drawFoldToggle(section, sc, taskFoldKey(taskId)));
+  header.appendChild(drawFoldToggle(section, localFold(sc, taskFoldKey(taskId))));
   header.appendChild(drawTaskDoneCheck(taskId, done, sc));
 
   const label = document.createElement("span");
@@ -369,25 +440,26 @@ export function drawRosterRows(
 
 /** The box a section is drawn in, folded per the local preference. */
 function sectionBox(foldKey: string, sc: SidebarContext, defaultFolded: boolean): HTMLElement {
+  return foldedBox(foldKey, sc.prefs.isFolded(foldKey, defaultFolded));
+}
+
+/** The box a section is drawn in, folded as FOLDED says. */
+function foldedBox(foldKey: string, folded: boolean): HTMLElement {
   const section = document.createElement("div");
   section.className = "repo";
   section.setAttribute("data-section", foldKey);
-  if (sc.prefs.isFolded(foldKey, defaultFolded)) section.classList.add("folded");
+  if (folded) section.classList.add("folded");
   return section;
 }
 
 /** The ▸/▾ fold triangle. The state is webview-local and no wire element. */
-function drawFoldToggle(
-  section: HTMLElement,
-  sc: SidebarContext,
-  foldKey: string,
-): HTMLElement {
+function drawFoldToggle(section: HTMLElement, gesture: FoldGesture): HTMLElement {
   const triangle = document.createElement("span");
   triangle.className = "tri";
   triangle.setAttribute("data-section-fold", "");
   triangle.addEventListener("click", (event) => {
     event.stopPropagation();
-    toggleFold(section, sc, foldKey);
+    gesture(section, triangle);
   });
   paintTriangle(triangle, section.classList.contains("folded"));
   return triangle;

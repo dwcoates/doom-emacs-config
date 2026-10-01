@@ -1235,6 +1235,12 @@ The rules that keep this true:
 - **The status ladder ranks every unusable rung above every usable one**
   (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
   turquoise one.
+- **A repository's fold is the daemon's** (`agentrepl.v1.FoldRepository`,
+  `frontend.v1.RosterRepoSection.fold`): the sidebar draws it (header grey:
+  very light expanded, darker collapsed) and the Emacs tab bar hides a
+  collapsed repository's workspaces, numbering and navigating only the drawn
+  tabs (`agent-repl-roster-drawn-tab-order`). Task and merged folds stay
+  webview-local.
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,

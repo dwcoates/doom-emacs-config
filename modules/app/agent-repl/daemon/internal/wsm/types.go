@@ -139,6 +139,9 @@ type Repository struct {
 	Name string
 	// DefaultBranch is the repository's default branch.
 	DefaultBranch string
+	// Folded reports that the repository's roster section is collapsed: its
+	// rows hidden in the sidebar and its workspaces' tabs off the Emacs bar.
+	Folded bool
 }
 
 // ForgetReport is what a Forget removed BESIDES the workspace's own rows.

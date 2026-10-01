@@ -783,6 +783,36 @@ func (s *server) SetWorkspacePriority(
 	return connect.NewResponse(resp), nil
 }
 
+// FoldRepository expands or collapses one repository's roster section. The
+// new fold arrives on the roster stream.
+func (s *server) FoldRepository(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FoldRepositoryRequest],
+) (*connect.Response[agentreplv1.FoldRepositoryResponse], error) {
+	const rpc = "FoldRepository"
+	if err := validateFoldRepositoryRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.FoldRepositoryResponse{}
+	repository, err, known := s.repositoryFor(ctx, req.Msg.GetRepository())
+	if err != nil {
+		return nil, fail(s.log, rpc, err)
+	}
+	if !known {
+		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+			Arm:      "unknown_repository",
+			Reason:   fmt.Sprintf("no repository matches the ref %q", req.Msg.GetRepository().GetId()),
+			NotFound: true,
+		})))
+	}
+	folded := req.Msg.GetCollapse() != nil
+	if err := s.deps.Verbs.FoldRepository(ctx, repository.ID, folded); err != nil {
+		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.FoldRepositoryResponse_Success{Success: &agentreplv1.FoldRepositorySuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
 // subjectFor validates a bare {workspace} request, resolves the ref and refuses
 // an unowned workspace. `done` reports that the caller must answer at once —
 // with the refusal already encoded onto resp, or with the Connect error.

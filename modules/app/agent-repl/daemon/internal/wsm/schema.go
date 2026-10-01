@@ -23,7 +23,10 @@ CREATE TABLE repositories (
   id             TEXT PRIMARY KEY,
   dir            TEXT NOT NULL UNIQUE,
   name           TEXT NOT NULL,
-  default_branch TEXT NOT NULL
+  default_branch TEXT NOT NULL,
+  -- Whether the repository's roster section is collapsed. See
+  -- repositoriesFoldedDDL and SetRepositoryFolded.
+  folded         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE tasks (
