@@ -78,7 +78,7 @@ func TestReObserveLearnsTheOwner(t *testing.T) {
 
 	// Act.
 	tr.Observe(Work{Path: "/private/tmp/b1.output", OwnerAgentID: "agent-1"}, nowMs)
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].OwnerAgentID != "agent-1" {
@@ -92,7 +92,7 @@ func TestSilentRunIsLost(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonWentSilent {
@@ -107,7 +107,7 @@ func TestActivityKeepsARunAlive(t *testing.T) {
 
 	// Act: the file grew just before the window would have expired.
 	tr.Activity("/private/tmp/b1.output", nowMs+shellMs-1)
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -122,7 +122,7 @@ func TestVanishedRunIsLostAfterGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+1000)
+	lost := tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished {
@@ -137,7 +137,7 @@ func TestVanishedRunSurvivesInsideGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+999)
+	lost := tr.Sweep(bootMs, nowMs+999, allSeen)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -153,7 +153,7 @@ func TestAReturningFileClearsTheVanish(t *testing.T) {
 
 	// Act.
 	tr.Activity("/private/tmp/b1.output", nowMs+500)
-	lost := tr.Sweep(bootMs, nowMs+1000)
+	lost := tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -168,7 +168,7 @@ func TestSettledRunIsNeverSwept(t *testing.T) {
 
 	// Act.
 	tr.Settle("/private/tmp/b1.output")
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert: LOST is only ever the answer for a run we stopped seeing.
 	if len(lost) != 0 {
@@ -225,7 +225,7 @@ func TestSweepStopsTrackingWhatItConcluded(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, nowMs+shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert: a run is concluded once, never on every later sweep.
 	if tr.Open("/private/tmp/b1.output") {
@@ -249,7 +249,7 @@ func TestASilenceConclusionIsStatedAtInfo(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, nowMs+shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert.
 	records := parseLogLines(t, *logs)
@@ -284,7 +284,7 @@ func TestSilenceWindowIsPerKind(t *testing.T) {
 			tr.Observe(Work{Path: "/private/tmp/x.output", TaskID: "x", Kind: tc.kind, LastActivityMs: nowMs}, nowMs)
 
 			// Act.
-			lost := tr.Sweep(bootMs, nowMs+tc.elapsed)
+			lost := tr.Sweep(bootMs, nowMs+tc.elapsed, allSeen)
 
 			// Assert.
 			if len(lost) != tc.want {
@@ -301,7 +301,7 @@ func TestSweepOrdersConclusionsByPath(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert: a sweep's records must be stable across runs.
 	if len(lost) != 2 || lost[0].Path != "/private/tmp/b1.output" {
@@ -367,7 +367,7 @@ func TestSweepConcludesAPreBootRunSweptUp(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs)
+	lost := tr.Sweep(bootMs, nowMs, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonSweptUp {
@@ -382,7 +382,7 @@ func TestSweepPrefersSweptUpOverWentSilentForAPreBootRun(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonSweptUp {
@@ -396,7 +396,7 @@ func TestSweepLeavesAPostBootRunToItsSilenceWindow(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+1)
+	lost := tr.Sweep(bootMs, nowMs+1, allSeen)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -410,7 +410,7 @@ func TestSweepWithoutABootTimeCannotConcludeSweptUp(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", 1), nowMs)
 
 	// Act.
-	lost := tr.Sweep(0, nowMs+shellMs)
+	lost := tr.Sweep(0, nowMs+shellMs, allSeen)
 
 	// Assert: it is concluded by its SILENCE, never by a boot rule that has no
 	// boot time to apply.
@@ -424,8 +424,8 @@ func TestSweepStatesAnUnknownBootTimeOnce(t *testing.T) {
 	tr, logs := tracker(t, Options{})
 
 	// Act: the sweep runs on a timer, so the statement must not repeat.
-	tr.Sweep(0, nowMs)
-	tr.Sweep(0, nowMs)
+	tr.Sweep(0, nowMs, allSeen)
+	tr.Sweep(0, nowMs, allSeen)
 
 	// Assert.
 	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "debug")
@@ -442,7 +442,7 @@ func TestAVanishedRunIsStillJudgedByItsGraceWindowWhenItPredatesBoot(t *testing.
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+DefaultGrace.Milliseconds())
+	lost := tr.Sweep(bootMs, nowMs+DefaultGrace.Milliseconds(), allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished {
@@ -474,7 +474,7 @@ func TestStartupCatchUpSummarizesABacklogOfSilentRunsAsOneRecord(t *testing.T) {
 	}
 
 	// Act: the first sweep catches up on the whole backlog at once.
-	tr.Sweep(bootMs, startMs+shellMs)
+	tr.Sweep(bootMs, startMs+shellMs, allSeen)
 
 	// Assert: one summary at info naming the class and the count, never three
 	// per-item warnings.
@@ -498,7 +498,7 @@ func TestStartupCatchUpStatesEachBacklogRunAtDebug(t *testing.T) {
 	tr.Observe(Work{Path: "/private/tmp/b2.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: nowMs - 10_000}, nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, startMs+shellMs)
+	tr.Sweep(bootMs, startMs+shellMs, allSeen)
 
 	// Assert: nothing is silenced — each backlog conclusion is still stated, at
 	// debug, so the per-file detail is retrievable behind the summary.
@@ -513,7 +513,7 @@ func TestASteadyStateRunAfterCatchUpIsStatedPerItem(t *testing.T) {
 	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b1", Kind: tail.KindShellSpool, RunActivityID: "call-1", LastActivityMs: startMs + 1}, startMs+1)
 
 	// Act.
-	tr.Sweep(bootMs, startMs+1+shellMs)
+	tr.Sweep(bootMs, startMs+1+shellMs, allSeen)
 
 	// Assert: a newly-arising conclusion is stated per item, never folded into a
 	// catch-up summary.
@@ -529,7 +529,7 @@ func TestAnEmptyBacklogEmitsNoCatchUpSummary(t *testing.T) {
 	tr, logs := trackerFromStart(t, Options{}, startMs)
 
 	// Act.
-	tr.Sweep(bootMs, startMs+shellMs)
+	tr.Sweep(bootMs, startMs+shellMs, allSeen)
 
 	// Assert.
 	if got := len(opsAt(parseLogLines(t, *logs), "catchup-summary", "")); got != 0 {
@@ -544,7 +544,7 @@ func TestStartupCatchUpSummarizesEachClassSeparately(t *testing.T) {
 	tr.Observe(Work{Path: "/private/tmp/b2.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: bootMs - 1}, nowMs)
 
 	// Act.
-	tr.Sweep(bootMs, startMs+shellMs)
+	tr.Sweep(bootMs, startMs+shellMs, allSeen)
 
 	// Assert: the arm IS the class, so each gets its own one-line summary.
 	records := parseLogLines(t, *logs)
@@ -608,7 +608,7 @@ func TestABacklogConclusionIsHandedToTheCallerAsCatchUp(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs-10_000), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, startMs+shellMs)
+	lost := tr.Sweep(bootMs, startMs+shellMs, allSeen)
 
 	// Assert: the classification rides out, so the TERMINAL's own record can
 	// follow it instead of restating summarized backlog as a fresh warning.
@@ -627,7 +627,7 @@ func TestAConclusionReachedWhileWatchingIsNotCatchUp(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b2.output", startMs+1000), nowMs)
 
 	// Act.
-	lost := tr.Sweep(bootMs, startMs+1000+shellMs)
+	lost := tr.Sweep(bootMs, startMs+1000+shellMs, allSeen)
 
 	// Assert.
 	if len(lost) != 1 {
@@ -671,7 +671,7 @@ func TestATreeRemovedConclusionIsStatedAtInfo(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, BenignTreeRemoved)
 
 	// Act.
-	tr.Sweep(bootMs, nowMs+1000)
+	tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 	// Assert: no warning anywhere on the path, and the conclusion still joins to
 	// its terminal on the wire's own arm.
@@ -690,7 +690,7 @@ func TestATreeRemovedRunIsStillConcludedLostOnTheFileVanishedArm(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, BenignTreeRemoved)
 
 	// Act.
-	lost := tr.Sweep(bootMs, nowMs+1000)
+	lost := tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished || lost[0].BenignEnd != BenignTreeRemoved {
@@ -705,7 +705,7 @@ func TestAnUnlinkUnderAStandingDirectoryStillWarnsItsConclusion(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
-	tr.Sweep(bootMs, nowMs+1000)
+	tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 	// Assert: two warnings — the grace clock and the conclusion — is the old
 	// behavior, and the conclusion is the one this asserts.
@@ -758,7 +758,7 @@ func TestEveryBenignEndStatesItsConclusionWithoutWarning(t *testing.T) {
 			tr.MarkVanished("/private/tmp/b1.output", nowMs, tc.benign)
 
 			// Act.
-			lost := tr.Sweep(bootMs, nowMs+1000)
+			lost := tr.Sweep(bootMs, nowMs+1000, allSeen)
 
 			// Assert: no warning anywhere, and the wire arm is untouched.
 			requireNoneIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
@@ -855,7 +855,7 @@ func TestASweepConclusionIsNotASettleUntilTheCallerSettlesIt(t *testing.T) {
 		name  string
 		sweep func(tr *Tracker)
 	}{
-		{name: "the silence sweep", sweep: func(tr *Tracker) { tr.Sweep(bootMs, nowMs+shellMs) }},
+		{name: "the silence sweep", sweep: func(tr *Tracker) { tr.Sweep(bootMs, nowMs+shellMs, allSeen) }},
 		{name: "the boot sweep", sweep: func(tr *Tracker) { tr.BootSweep(nowMs+1, nowMs) }},
 	}
 	for _, test := range tests {
@@ -881,7 +881,7 @@ func TestObservingAConcludedRunOnceItsLostIsSettledPanics(t *testing.T) {
 	// Arrange: the caller made the LOST durable and settled it.
 	tr, _ := tracker(t, Options{})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.Sweep(bootMs, nowMs+shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs, allSeen)
 	tr.Settle("/private/tmp/b1.output")
 
 	// Act / Assert.
@@ -901,7 +901,7 @@ func TestSettledByRecordNeverTracksTheRun(t *testing.T) {
 	if tr.Open("/private/tmp/b1.output") || !tr.Settled("/private/tmp/b1.output") {
 		t.Fatal("a run the record holds as ended must be settled and untracked")
 	}
-	if lost := tr.Sweep(bootMs, nowMs+24*shellMs); len(lost) != 0 {
+	if lost := tr.Sweep(bootMs, nowMs+24*shellMs, allSeen); len(lost) != 0 {
 		t.Fatalf("swept %+v, want nothing: a settled run is never concluded LOST", lost)
 	}
 }
@@ -948,4 +948,39 @@ func requireSettleRecord(t *testing.T, records []logRecord, substring string) lo
 		t.Fatalf("the log holds %d lost-policy records saying %q, want exactly one; it held %v", len(found), substring, operationLevels(records))
 	}
 	return found[0]
+}
+
+// allSeen is a reader that has seen every byte of every file.
+func allSeen(string) bool { return false }
+
+// TestASilentRunWithUnseenBytesIsNotConcluded covers a reader that lagged
+// behind the window: the file's unseen bytes may be its own terminator, so it
+// is not silent until the reader has seen them.
+func TestASilentRunWithUnseenBytesIsNotConcluded(t *testing.T) {
+	tests := []struct {
+		name          string
+		unseen        bool
+		wantConcluded bool
+	}{
+		{"unseen bytes keep the run open", true, false},
+		{"a fully seen quiet file is silent", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			tr, _ := tracker(t, Options{})
+			tr.Observe(shellRun("/spool", nowMs), nowMs)
+
+			// Act
+			lost := tr.Sweep(bootMs, nowMs+shellMs, func(string) bool { return tt.unseen })
+
+			// Assert
+			if (len(lost) == 1) != tt.wantConcluded {
+				t.Fatalf("lost = %+v, want concluded=%v", lost, tt.wantConcluded)
+			}
+			if tr.Open("/spool") == tt.wantConcluded {
+				t.Fatalf("open = %v, want the run open only when not concluded", tr.Open("/spool"))
+			}
+		})
+	}
 }
