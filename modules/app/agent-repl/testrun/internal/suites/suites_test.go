@@ -21,14 +21,14 @@ func write(t *testing.T, path, body string, mode os.FileMode) {
 	}
 }
 
-func TestPinnedEnvPinsEveryUnitToOneCore(t *testing.T) {
+func TestPinnedEnvBoundsEveryUnitsParallelism(t *testing.T) {
 	tests := []struct {
 		name    string
 		goflags string
 		want    []string
 	}{
-		{"no caller flags", "", []string{"GOFLAGS=-p=1", "GOMAXPROCS=1"}},
-		{"caller flags are kept ahead of the pin", "-mod=mod", []string{"GOFLAGS=-mod=mod -p=1", "GOMAXPROCS=1"}},
+		{"no caller flags", "", []string{"GOFLAGS=-p=1", "GOMAXPROCS=2"}},
+		{"caller flags are kept ahead of the pin", "-mod=mod", []string{"GOFLAGS=-mod=mod -p=1", "GOMAXPROCS=2"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
