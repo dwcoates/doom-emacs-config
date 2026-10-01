@@ -15895,7 +15895,10 @@ func (x *FeedMergeTabLabel) GetRound() uint32 {
 // from.
 // The tab's work is running.
 type FeedMergeTabLive struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the tab's work began, epoch ms. The client ticks the tab's elapsed
+	// time from it; nothing is pushed as it grows.
+	StartedAtMs   int64 `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15930,11 +15933,21 @@ func (*FeedMergeTabLive) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{255}
 }
 
+func (x *FeedMergeTabLive) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
 // The tab's work ended, successfully or not.
 type FeedMergeTabSettled struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When the tab settled, epoch ms.
 	EndedAtMs int64 `protobuf:"varint,1,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
+	// When the tab's work began, epoch ms. The tab draws how long it ran:
+	// `ended_at_ms` minus this.
+	StartedAtMs int64 `protobuf:"varint,4,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	// Types that are valid to be assigned to Outcome:
 	//
 	//	*FeedMergeTabSettled_Succeeded
@@ -15977,6 +15990,13 @@ func (*FeedMergeTabSettled) Descriptor() ([]byte, []int) {
 func (x *FeedMergeTabSettled) GetEndedAtMs() int64 {
 	if x != nil {
 		return x.EndedAtMs
+	}
+	return 0
+}
+
+func (x *FeedMergeTabSettled) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
 	}
 	return 0
 }
@@ -18007,10 +18027,14 @@ func (x *FeedMergeQueueLabel) GetText() string {
 // active tab label, the SAME message its own bubble draws, imported never
 // respelled, so a waiting user sees the front's progress.
 type FeedMergeQueueMerging struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActiveTab     *FeedMergeTabLabel     `protobuf:"bytes,1,opt,name=active_tab,json=activeTab,proto3" json:"active_tab,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ActiveTab *FeedMergeTabLabel     `protobuf:"bytes,1,opt,name=active_tab,json=activeTab,proto3" json:"active_tab,omitempty"`
+	// When the front entered its CURRENT stage (its active tab began), epoch
+	// ms. The queue's duration column ticks from it and starts over at zero
+	// whenever the active tab changes.
+	StageEnteredAtMs int64 `protobuf:"varint,2,opt,name=stage_entered_at_ms,json=stageEnteredAtMs,proto3" json:"stage_entered_at_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *FeedMergeQueueMerging) Reset() {
@@ -18050,10 +18074,21 @@ func (x *FeedMergeQueueMerging) GetActiveTab() *FeedMergeTabLabel {
 	return nil
 }
 
+func (x *FeedMergeQueueMerging) GetStageEnteredAtMs() int64 {
+	if x != nil {
+		return x.StageEnteredAtMs
+	}
+	return 0
+}
+
+// The entry is waiting its turn behind the front.
 type FeedMergeQueueWaiting struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the entry began waiting (it was queued), epoch ms. The queue's
+	// duration column ticks from it.
+	StageEnteredAtMs int64 `protobuf:"varint,1,opt,name=stage_entered_at_ms,json=stageEnteredAtMs,proto3" json:"stage_entered_at_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *FeedMergeQueueWaiting) Reset() {
@@ -18084,6 +18119,13 @@ func (x *FeedMergeQueueWaiting) ProtoReflect() protoreflect.Message {
 // Deprecated: Use FeedMergeQueueWaiting.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueWaiting) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{288}
+}
+
+func (x *FeedMergeQueueWaiting) GetStageEnteredAtMs() int64 {
+	if x != nil {
+		return x.StageEnteredAtMs
+	}
+	return 0
 }
 
 var File_frontend_v1_feed_proto protoreflect.FileDescriptor
@@ -18913,10 +18955,12 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x04kindJ\x04\b\x04\x10\x05R\x05merge\"=\n" +
 	"\x11FeedMergeTabLabel\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\"\x12\n" +
-	"\x10FeedMergeTabLive\"\xbf\x01\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\"6\n" +
+	"\x10FeedMergeTabLive\x12\"\n" +
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\xe3\x01\n" +
 	"\x13FeedMergeTabSettled\x12\x1e\n" +
-	"\vended_at_ms\x18\x01 \x01(\x03R\tendedAtMs\x12B\n" +
+	"\vended_at_ms\x18\x01 \x01(\x03R\tendedAtMs\x12\"\n" +
+	"\rstarted_at_ms\x18\x04 \x01(\x03R\vstartedAtMs\x12B\n" +
 	"\tsucceeded\x18\x02 \x01(\v2\".frontend.v1.FeedMergeTabSucceededH\x00R\tsucceeded\x129\n" +
 	"\x06failed\x18\x03 \x01(\v2\x1f.frontend.v1.FeedMergeTabFailedH\x00R\x06failedB\t\n" +
 	"\aoutcome\"\x17\n" +
@@ -19019,11 +19063,13 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x17FeedMergeQueueWorkspace\x12,\n" +
 	"\x03ref\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x03ref\")\n" +
 	"\x13FeedMergeQueueLabel\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"V\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x85\x01\n" +
 	"\x15FeedMergeQueueMerging\x12=\n" +
 	"\n" +
-	"active_tab\x18\x01 \x01(\v2\x1e.frontend.v1.FeedMergeTabLabelR\tactiveTab\"\x17\n" +
-	"\x15FeedMergeQueueWaitingB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"active_tab\x18\x01 \x01(\v2\x1e.frontend.v1.FeedMergeTabLabelR\tactiveTab\x12-\n" +
+	"\x13stage_entered_at_ms\x18\x02 \x01(\x03R\x10stageEnteredAtMs\"F\n" +
+	"\x15FeedMergeQueueWaiting\x12-\n" +
+	"\x13stage_entered_at_ms\x18\x01 \x01(\x03R\x10stageEnteredAtMsB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_feed_proto_rawDescOnce sync.Once
