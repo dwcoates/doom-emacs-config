@@ -1223,7 +1223,7 @@ func TestAConflictResolutionWhoseTurnFailedGivesUp(t *testing.T) {
 	}
 }
 
-func TestAGivenUpConflictIsRecordedAtWarn(t *testing.T) {
+func TestAGivenUpConflictIsAnOutcomeRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	landing(h, 1)
@@ -1233,9 +1233,14 @@ func TestAGivenUpConflictIsRecordedAtWarn(t *testing.T) {
 	// Act.
 	admitted(t, h)
 
-	// Assert.
-	if _, logged := h.recordFor("warn", "daemon.merge.conflicts"); !logged {
-		t.Fatalf("the give-up was not recorded at WARN: %+v", h.logs.Records())
+	// Assert: a give-up is the merge's ordinary failed outcome, never a fault.
+	if _, logged := h.recordFor("info", "daemon.merge.conflicts"); !logged {
+		t.Fatalf("the give-up was not recorded at INFO: %+v", h.logs.Records())
+	}
+	for _, record := range h.logs.Records() {
+		if record.Level == "warn" || record.Level == "error" {
+			t.Fatalf("a given-up conflict produced a %s record: %+v", record.Level, record)
+		}
 	}
 }
 

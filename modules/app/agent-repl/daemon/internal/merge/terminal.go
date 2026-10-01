@@ -99,7 +99,11 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 		})
 	}
 	r.concluded(MergeFacts{State: StateFailed, FailedArea: area, Detail: summary})
-	r.o.log(ctx, r.ws).Error("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
+	// AN OUTCOME, NOT A FAULT: every failed merge is shown to the user as
+	// "merge failed" with its area. A fault behind a failure is recorded at
+	// its own site (daemon.merge.fault for an abort, the gate's and the
+	// prompt's own records), so this record is INFO whatever the area.
+	r.o.log(ctx, r.ws).Info("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
 }
 
@@ -153,6 +157,11 @@ func (r *run) abort(ctx context.Context, summary string) {
 		r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther}, nil)
 		return
 	}
+	// THE FAULT IS RECORDED HERE, at ERROR: an abort is reached by an error the
+	// run could not continue past. The failed terminal's own record is the
+	// outcome, at INFO, as for every failed merge.
+	r.o.log(ctx, r.ws).Error("daemon.merge.fault", "a merge could not continue past an error; it fails", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary})
 	r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther}, func() {
 		r.failedTerminal(ctx, summary, footer.FailedOther)
 	})

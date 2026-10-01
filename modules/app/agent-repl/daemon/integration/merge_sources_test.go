@@ -192,7 +192,7 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	t.Parallel()
 	// Arrange: the target moved, and replaying the branch's work conflicts.
 	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.start_rebase")
+
 	root := s.f.watchRootFeed()
 	harness.CommitWork(t, s.f.ws.GetDir())
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
@@ -220,7 +220,6 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	// Arrange: the front's conflict is left unresolved; a second workspace
 	// waits behind it.
 	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.start_rebase", "daemon.merge.abort")
 	repoRef := mergeRepositoryRef(t, s.d, s.repo)
 	behind := mergeCreateChild(t, s.d, repoRef, "behind", "the work behind", nil)
 	harness.CommitWork(t, behind.ws.GetDir())
@@ -262,7 +261,7 @@ func TestExhaustedFixingAttemptsFailTheMergeInTests(t *testing.T) {
 	t.Parallel()
 	// Arrange: every gate run fails.
 	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.merge.tests", "daemon.merge.fixes", "daemon.merge.abort", "daemon.scriptrunner.run")
+	s.d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
 	s.script.SetExitCode(1)
 	s.script.SetStdout("daemon: starting\ndaemon failed after 1s with exit code 1\n")
 	harness.CommitWork(t, s.f.ws.GetDir())
@@ -484,7 +483,7 @@ func TestAMissingConflictBriefFailsTheMergeLoudly(t *testing.T) {
 	t.Parallel()
 	// Arrange: the daemon's conflict brief is not there when it is needed.
 	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.gitclient.start_rebase", "daemon.merge.conflicts", "daemon.merge.abort")
+
 	if err := os.Remove(filepath.Join(s.d.PromptsDir, "merge-conflict-resolve.md")); err != nil {
 		t.Fatalf("remove the brief: %v", err)
 	}
@@ -559,7 +558,7 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 	t.Parallel()
 	// Arrange: a conflict the requester's own session resolves, kept open.
 	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.start_rebase")
+
 	root := s.f.watchRootFeed()
 	harness.CommitWork(t, s.f.ws.GetDir())
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")

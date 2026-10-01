@@ -469,7 +469,6 @@ func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
 	w := mqSelfRepoWorld(t, repo)
 	// The scripted conflict is this test's subject: the rebase stops on it,
 	// the conflict is recorded, and the resolution that gives up ends the run.
-	w.ExpectWarnings("daemon.gitclient.start_rebase", "daemon.merge.conflicts", "daemon.merge.abort")
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, name)
 	harness.CommitWork(t, child.GetDir())
@@ -983,12 +982,12 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		})
 		root := mqOpenFeedWatch(t, w, child, nil)
 		defer root.Close()
-		// Warning discipline: this run's own subject produces exactly two
-		// daemon records -- the failed precondition itself
-		// (daemon.merge.pre_prompt, internal/merge/run.go) and the merge
-		// failing and handing the workspace back (daemon.merge.abort,
-		// internal/merge/terminal.go). Both are declared rather than silenced.
-		w.ExpectWarnings("daemon.merge.pre_prompt", "daemon.merge.abort")
+		// Warning discipline: this run's own subject produces exactly one
+		// daemon warning -- the failed precondition itself
+		// (daemon.merge.pre_prompt, internal/merge/run.go). The merge failing
+		// and handing the workspace back (daemon.merge.abort) is its outcome,
+		// recorded at INFO.
+		w.ExpectWarnings("daemon.merge.pre_prompt")
 
 		// Act
 		harness.CommitWork(t, child.GetDir())

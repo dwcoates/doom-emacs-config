@@ -211,7 +211,7 @@ func TestACancelledGitAtShutdownRecordsNoAbort(t *testing.T) {
 	_ = h.admit(context.Background())
 
 	// Assert: nothing claims a failure.
-	if _, found := recordAt(h, "error", "daemon.merge.abort"); found {
+	if _, found := recordAt(h, "info", "daemon.merge.abort"); found {
 		t.Fatalf("a cancelled git was recorded as a merge abort; records = %v", h.logs.Records())
 	}
 	for _, record := range h.logs.Records() {
@@ -255,7 +255,10 @@ func TestARealGitFailureStillAborts(t *testing.T) {
 	_ = h.admit(context.Background())
 
 	// Assert.
-	if _, found := recordAt(h, "error", "daemon.merge.abort"); !found {
+	if _, found := recordAt(h, "error", "daemon.merge.fault"); !found {
+		t.Fatalf("a real git failure was not recorded as a fault; records = %v", h.logs.Records())
+	}
+	if _, found := recordAt(h, "info", "daemon.merge.abort"); !found {
 		t.Fatalf("a real git failure did not abort the run; records = %v", h.logs.Records())
 	}
 	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
@@ -303,7 +306,7 @@ func TestAnAdmittedMergeWaitsForTheWorkspaceToFallFree(t *testing.T) {
 		{
 			name: "a wait that fails aborts the merge", busy: true, awaitErr: errors.New("the watcher closed"),
 			wantAwaits: 1,
-			wantLevel:  "error", wantOp: "daemon.merge.abort", wantText: "the watcher closed",
+			wantLevel:  "error", wantOp: "daemon.merge.fault", wantText: "the watcher closed",
 		},
 	}
 	for _, tt := range tests {

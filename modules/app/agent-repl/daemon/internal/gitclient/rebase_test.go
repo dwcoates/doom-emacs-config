@@ -230,7 +230,7 @@ func TestARebaseFailureWithoutConflictsIsAFailure(t *testing.T) {
 	}
 }
 
-func TestARebaseConflictIsLoggedAtWarning(t *testing.T) {
+func TestARebaseConflictIsAnOutcomeLoggedAtInfo(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
 	newFakeGit(t, fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"))
@@ -240,9 +240,13 @@ func TestARebaseConflictIsLoggedAtWarning(t *testing.T) {
 		t.Fatalf("ContinueRebase: %v", err)
 	}
 
-	// Assert.
-	if _, found := recordFor(surfaces.records(), "warn", "daemon.gitclient.continue_rebase"); !found {
-		t.Fatalf("the conflict was not logged at WARN: %+v", surfaces.records())
+	// Assert: a conflict is the rebase's ordinary stop, which its caller
+	// resolves, so it is never a WARN.
+	if _, found := recordFor(surfaces.records(), "info", "daemon.gitclient.continue_rebase"); !found {
+		t.Fatalf("the conflict was not logged at INFO: %+v", surfaces.records())
+	}
+	if _, found := recordFor(surfaces.records(), "warn", "daemon.gitclient.continue_rebase"); found {
+		t.Fatalf("the conflict was logged at WARN: %+v", surfaces.records())
 	}
 }
 
