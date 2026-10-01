@@ -604,6 +604,18 @@ stdout, no session and no tools."
         "-p"
         "--model" agent-repl-prompt-summary-model))
 
+(defun agent-repl--prompt-summary-directory ()
+  "Return the empty private directory a headless summary runs from.
+The headless claude indexes its working directory at startup with an
+`rg --files --hidden' walk, and run from `temporary-file-directory' that
+walk covered every file under the shared temp root, at up to seven cores
+per summary (2026-09-30).  A directory of the summary's own holds nothing
+to walk, and it is no workspace, so the run's hooks resolve to none."
+  (let ((dir (file-name-as-directory
+              (expand-file-name "agent-repl-prompt-summary" temporary-file-directory))))
+    (make-directory dir t)
+    dir))
+
 (defun agent-repl--prompt-summary-spawn (ws raw)
   "Spawn the async claude process to summarize RAW for WS.
 Returns the process, or nil when prerequisites are missing.  Separated
@@ -618,12 +630,13 @@ state-mutation entry point."
         ;; doesn't resolve to any registered workspace.  Otherwise the
         ;; sentinel watcher attributes them to the calling workspace and
         ;; flips :agent-state to :done while the user's interactive Claude
-        ;; is still mid-turn.
+        ;; is still mid-turn.  The cwd is an EMPTY one of its own, so the
+        ;; run's startup index walks nothing.
         (let* ((cmd (agent-repl--prompt-summary-command))
                (context (agent-repl--prompt-summary-collect-context ws))
                (proc-input (agent-repl--prompt-summary-build-input raw context))
                (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf))
-               (default-directory temporary-file-directory))
+               (default-directory (agent-repl--prompt-summary-directory)))
           (agent-repl--log ws "prompt-summary: spawn request raw-len=%d context-count=%d input-len=%d command-argc=%d"
                             (length raw) (length context) (length proc-input) (length cmd))
           (let ((proc (agent-repl--prompt-summary-process-start ws out-buf cmd sentinel)))

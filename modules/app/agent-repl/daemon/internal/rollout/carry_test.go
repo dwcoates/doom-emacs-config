@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -917,5 +918,283 @@ func TestATakeBackWhoseReAttachedShimReAnnouncesIsNotDrawnDegraded(t *testing.T)
 	// Assert
 	if got := h.Unreported(); len(got) != 0 {
 		t.Fatalf("StateUnreported calls = %+v, want none for a shim that re-announced", got)
+	}
+}
+
+// bootFrom stands in for a fresh boot's reconcile: the manifest names the
+// previous daemon, so its carries are the ones this boot takes up.
+func bootFrom(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.c.writeManifest(context.Background(), Manifest{Daemon: previousDaemon, WrittenAt: instant}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	if _, err := h.c.Reconcile(context.Background(), Survivors{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+func TestAFreshBootTakesUpTheCarriedQueueMemory(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{MidWork: true, Queue: bounce.Handoff{Head: "held-1"}})
+	bootFrom(t, h)
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+	if got := h.registry.adoptedHandoffs[ws]; got.Head != "held-1" {
+		t.Fatalf("installed = %+v, want the carried semantic head", got)
+	}
+	if exists(t, h.c.carryPath(ws)) {
+		t.Fatalf("the taken-up carry was not retired")
+	}
+}
+
+func TestAFreshBootRaisesACarriedColdGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	carryFor(t, h, ws, Carry{ColdGate: raw})
+	bootFrom(t, h)
+
+	// Act
+	if err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws}); err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+
+	// Assert
+	if cold := h.fleet.raisedColdGates[ws]; cold.GetContextTokens() != 1234 {
+		t.Fatalf("raised = %v, want the carried gate raised again", cold)
+	}
+}
+
+func TestAFreshBootRetiresTheCarryOfAShimItDidNotAdopt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{Queue: bounce.Handoff{Head: "held-1"}})
+	bootFrom(t, h)
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+	if _, installed := h.registry.adoptedHandoffs[ws]; installed || exists(t, h.c.carryPath(ws)) {
+		t.Fatalf("the carry of a shim nobody adopted was installed or left standing")
+	}
+	if !hasRecord(h, opCarry, "info", "the carried workspace's shim was not adopted; its carry is retired untaken") {
+		t.Fatalf("records = %+v, want the untaken carry stated", records(h.log, opCarry))
+	}
+}
+
+func TestAFreshBootRetiresACarryAnotherDaemonWroteUnread(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{Daemon: "daemon-long-gone", Queue: bounce.Handoff{Head: "held-1"}})
+	bootFrom(t, h)
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+	if _, installed := h.registry.adoptedHandoffs[ws]; installed || exists(t, h.c.carryPath(ws)) {
+		t.Fatalf("a stale carry was installed or left standing")
+	}
+	if !hasRecord(h, opCarry, "error", "the handover carry was written by another daemon or for another workspace; it is stale and retired unread") {
+		t.Fatalf("records = %+v, want the stale carry at ERROR", records(h.log, opCarry))
+	}
+}
+
+func TestAFreshBootWithNoManifestTakesUpNoCarry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{Queue: bounce.Handoff{Head: "held-1"}})
+	if _, err := h.c.Reconcile(context.Background(), Survivors{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+	if _, installed := h.registry.adoptedHandoffs[ws]; installed {
+		t.Fatalf("a carry no manifest vouches for was installed")
+	}
+}
+
+func TestAFreshBootWithNoCarryDirectoryTakesUpNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	bootFrom(t, h)
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+}
+
+func TestAFreshBootSkipsAPartialCarryWrite(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	bootFrom(t, h)
+	if err := os.MkdirAll(h.c.carryDir(), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	partial := h.c.carryDir() + "/carry-123.json"
+	if err := os.WriteFile(partial, []byte("{"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries = %v, want a partial write read as no carry", err)
+	}
+}
+
+func TestAFreshBootFailsOnACarryItCannotRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	bootFrom(t, h)
+	if err := os.MkdirAll(h.c.carryDir(), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(h.c.carryPath(ws), []byte("{"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("TakeUpCarries succeeded over an unreadable carry")
+	}
+	if _, installed := h.registry.adoptedHandoffs[ws]; installed {
+		t.Fatalf("an unreadable carry installed something")
+	}
+	if !hasRecord(h, opCarry, "error", "could not read the handover carry; the workspace is not adopted") {
+		t.Fatalf("records = %+v, want the unreadable carry at ERROR", records(h.log, opCarry))
+	}
+}
+
+func TestAFreshBootWhoseQueueMemoryWillNotInstallStillRetiresTheCarry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{Queue: bounce.Handoff{Head: "held-1"}})
+	bootFrom(t, h)
+	h.registry.adoptHandoffErr = errFake
+
+	// Act
+	err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries = %v, want the boot to go on", err)
+	}
+	if exists(t, h.c.carryPath(ws)) {
+		t.Fatalf("the carry was left for the next boot to take up again")
+	}
+	if !hasRecord(h, opCarry, "error", "could not install the carried queue memory; the held prompts are drained without it") {
+		t.Fatalf("records = %+v, want the failed install at ERROR", records(h.log, opCarry))
+	}
+}
+
+func TestFinishCarriesRejudgesAndRunsTheCarriedReplacements(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{Replacements: []CarriedReplacement{{Reason: string(ReasonRestartVerb), Force: true}}})
+	bootFrom(t, h)
+	if err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws}); err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+
+	// Act
+	h.c.FinishCarries(context.Background())
+
+	// Assert
+	if !slices.Contains(h.registry.rejudged, ws) {
+		t.Fatalf("rejudged = %v, want the workspace's held verdicts re-judged", h.registry.rejudged)
+	}
+	asked := false
+	for _, r := range h.registry.Requests() {
+		if r.WS == ws && r.Req.Reason == string(ReasonRestartVerb) {
+			asked = true
+		}
+	}
+	if !asked {
+		t.Fatalf("requests = %+v, want the carried restart asked for here", h.registry.Requests())
+	}
+}
+
+func TestFinishCarriesStatesARejudgeThatFailed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{})
+	bootFrom(t, h)
+	if err := h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws}); err != nil {
+		t.Fatalf("TakeUpCarries: %v", err)
+	}
+	h.registry.rejudgeErr = errFake
+
+	// Act
+	h.c.FinishCarries(context.Background())
+
+	// Assert
+	if !hasRecord(h, opCarry, "error", "could not re-judge the held prompts whose verdicts the move superseded") {
+		t.Fatalf("records = %+v, want the failed re-judge at ERROR", records(h.log, opCarry))
+	}
+}
+
+func TestAFreshBootStatesACarriedColdGateItCouldNotRaise(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	carryFor(t, h, ws, Carry{ColdGate: raw})
+	bootFrom(t, h)
+	h.fleet.raiseErr = errFake
+
+	// Act
+	err = h.c.TakeUpCarries(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeUpCarries = %v, want the boot to go on", err)
+	}
+	if !hasRecord(h, opCarry, "error", "could not raise the carried cold gate over the adopted shim") {
+		t.Fatalf("records = %+v, want the failed raise at ERROR", records(h.log, opCarry))
 	}
 }

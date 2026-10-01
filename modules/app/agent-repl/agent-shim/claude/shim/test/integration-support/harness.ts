@@ -149,6 +149,17 @@ export interface ShimHandle {
 /** Every handle spawned in the current test, torn down by {@link cleanupShims}. */
 const live: ShimHandle[] = [];
 
+/**
+ * The environment of a shim that resumes a conversation TWO HOURS after its
+ * last request, as far as the cold gate can tell: past the mock usage's
+ * one-hour cache window, so a resume of a `!cold-seed` context is judged
+ * lapsed. Only the gate's reading of now moves (src/main.ts
+ * FAKE_COLD_GATE_LATER_ENV); every stamp the session writes stays honest.
+ */
+export const RESUMED_TWO_HOURS_LATER: Readonly<Record<string, string>> = {
+  AGENT_REPL_FAKE_COLD_GATE_LATER_MS: String(2 * 60 * 60 * 1_000),
+};
+
 /** Create the temp tree one spawn writes into. */
 export function makeDirectories(): ShimDirectories {
   const root = mkdtempSync(path.join(os.tmpdir(), "shim-itest-"));

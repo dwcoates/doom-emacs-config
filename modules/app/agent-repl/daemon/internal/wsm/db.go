@@ -80,6 +80,9 @@ type DB interface {
 	// SetSessionTerminal records a session's death with its cause. A deleted
 	// session refuses resurrection.
 	SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error
+	// SetVendorSessionID records the vendor session id a later resume names
+	// (the id in force after a rotation), answering the one it replaced.
+	SetVendorSessionID(ctx context.Context, id WorkspaceID, vendorSessionID string) (string, error)
 	// ClearSessionTerminal retires a workspace's terminal session record, so
 	// a workspace whose shim is live carries none. A workspace with no
 	// session row has nothing to retire and is not a refusal; a deleted

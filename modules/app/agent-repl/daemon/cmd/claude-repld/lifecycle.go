@@ -12,6 +12,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
@@ -32,7 +33,16 @@ type lifecycleSink struct {
 	// builds is the rollout's staleness judge: every diagnostics frame carries
 	// the build its shim runs.
 	builds *rolloutForwarder
-	log    dlog.Logger
+	// sessions records the vendor session id in force, which is what a later
+	// resume names.
+	sessions vendorSessionRecorder
+	log      dlog.Logger
+}
+
+// vendorSessionRecorder is the slice of the state client the sink records the
+// resume handle through.
+type vendorSessionRecorder interface {
+	SetVendorSessionID(ctx context.Context, id wsm.WorkspaceID, vendorSessionID string) (string, error)
 }
 
 // OnLinkChanged republishes the workspace's HOST view: `shim_attached` is part
@@ -191,6 +201,55 @@ func (s *lifecycleSink) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 // the turns an adoption found open that the adopted shim no longer runs.
 func (s *lifecycleSink) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 	s.queue.OnTurnsEndedUnobserved(ws, turns)
+}
+
+// OnVendorSessionID records the vendor session id the shim states is in force
+// -- after a rotation, or on a re-announced start -- as the session record's
+// resume handle. A /clear rotates the id, and a record left naming the start's
+// id resumed nothing after a restart: the session came up FRESH and its
+// conversation was lost to the user (2026-09-30).
+func (s *lifecycleSink) OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID string) {
+	fields := dlog.Context{"workspace": string(ws), "vendor_session_id": vendorSessionID}
+	previous, err := s.sessions.SetVendorSessionID(context.Background(), wsm.WorkspaceID(ws), vendorSessionID)
+	if err != nil {
+		fields["cause"] = err.Error()
+		s.log.Error("daemon.cmd.lifecycle", "could not record the vendor session id in force; a later resume names a stale one", fields)
+		return
+	}
+	if previous == vendorSessionID {
+		s.log.Debug("daemon.cmd.lifecycle", "the session record already names the vendor session id in force", fields)
+		return
+	}
+	fields["previous_vendor_session_id"] = previous
+	s.log.Info("daemon.cmd.lifecycle", "recorded the vendor session id in force as the session's resume handle", fields)
+}
+
+// OnQueryDied restarts a session whose vendor query died. Nothing in the shim
+// restarts a query it lost, so without this every prompt is refused
+// `query_dead` for as long as the shim lives (2026-09-30: a crashed vendor
+// left `puzzle-analysis-visuals` refusing one prompt every 10s for an hour).
+// The shim is REPLACED through the bounce registry, whose relaunch resumes the
+// session -- a cold gate included -- and delivers what was held meanwhile.
+// The death ended every turn and concluded every live item, so the workspace
+// is free and the replacement runs at once; a repeated death joins the
+// replacement already asked for.
+func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
+	fields := dlog.Context{"workspace": string(ws), "reason": string(rollout.ReasonQueryDied)}
+	controller, ok := s.builds.controller()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a session's query died before the rollout controller existed; nothing restarts it", fields)
+		return
+	}
+	// THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
+	// replacement's reason; nothing here waits on it.
+	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonQueryDied, false, nil)
+	if err != nil {
+		// BounceShim recorded the refusal at ERROR with its cause.
+		return
+	}
+	fields["bounced_now"] = decision.Now
+	fields["already_pending"] = decision.AlreadyPending
+	s.log.Info("daemon.cmd.lifecycle", "the session's vendor query died; its shim is replaced through the bounce registry", fields)
 }
 
 // OnFree is the freeness edge: the queue bounces a shim registered for it.

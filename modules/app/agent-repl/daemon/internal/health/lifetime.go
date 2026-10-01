@@ -100,8 +100,11 @@ var faultLifetimes = map[string]Lifetime{
 	// process opens its own.
 	KindLogSinkPoisoned: standing(EdgeDaemonBoot),
 	KindWsmReadOnly:     standing(EdgeDaemonBoot),
-	// A successor that would not start ends when one proves it is serving.
-	KindSuccessorSpawnFailed: standing(EdgeSuccessorServing),
+	// A successor that would not start ends when one proves it is serving,
+	// when a later failed handover records its own (the new fault supersedes
+	// it, so failures never pile up), or at the next boot: the fault is about
+	// the PROCESS that could not hand over, and a fresh daemon is not it.
+	KindSuccessorSpawnFailed: standing(EdgeSuccessorServing, EdgeSuperseded, EdgeDaemonBoot),
 	// A missing prompts directory ends at the next brief it furnishes.
 	KindPromptsDirMissing: standing(EdgePromptsDirServed),
 	// A failed deploy step ends when a later deploy gets through that step,

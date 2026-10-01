@@ -313,6 +313,40 @@ const FAKE_BEHAVIOR_WINDOW = {
 };
 
 /**
+ * The windows the account usage samples, by the name a `rate_limit_event`'s
+ * `rateLimitType` gives them.
+ */
+const SAMPLED_WINDOWS = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"] as const;
+
+/**
+ * The utilization PERCENT each sampled window was last announced at by a
+ * `rate_limit_event` the fake emitted.
+ */
+export type AnnouncedWindows = Partial<Record<(typeof SAMPLED_WINDOWS)[number], number>>;
+
+/**
+ * File one emitted vendor message into `announced` when it is a
+ * `rate_limit_event` naming a sampled window with a utilization.
+ *
+ * ONE ACCOUNT, ONE FIGURE PER WINDOW. The event states a window's utilization
+ * as a 0..1 fraction and the usage endpoint as a percent, but both describe the
+ * same account: a fake that announced the seven-day window at 91% and then
+ * sampled it at 63% modelled no account there is, and made the footer's drawn
+ * line depend on which of two streams reached the daemon first. Every sample
+ * after an event therefore reports the event's figure for its window.
+ */
+export function noteAnnouncedWindow(announced: AnnouncedWindows, message: Record<string, unknown>): void {
+  if (message.type !== "rate_limit_event") return;
+  const info = message.rate_limit_info as { rateLimitType?: unknown; utilization?: unknown } | undefined;
+  const name = info?.rateLimitType;
+  const utilization = info?.utilization;
+  if (typeof utilization !== "number") return;
+  const sampled = SAMPLED_WINDOWS.find((w) => w === name);
+  if (sampled === undefined) return;
+  announced[sampled] = Math.round(utilization * 100);
+}
+
+/**
  * The account-usage answer for one arm.
  *
  * `SessionAccountUsage` has an available arm and FOUR unavailable reasons, and
@@ -322,7 +356,11 @@ const FAKE_BEHAVIOR_WINDOW = {
  * could produce only the first arm, so the mock keeps all five and a scenario
  * picks.
  */
-export function fakeAccountUsage(arm: AccountUsageArm, nowMs: number): AccountUsageLike {
+export function fakeAccountUsage(
+  arm: AccountUsageArm,
+  nowMs: number,
+  announced: AnnouncedWindows = {},
+): AccountUsageLike {
   const base = {
     session: FAKE_SESSION_COST,
     subscription_type: "max",
@@ -332,11 +370,11 @@ export function fakeAccountUsage(arm: AccountUsageArm, nowMs: number): AccountUs
   const sessionResetsAt = resetsAfter(nowMs, FAKE_SESSION_WINDOW_RESETS_IN_MS);
   const weeklyResetsAt = resetsAfter(nowMs, FAKE_WEEKLY_WINDOW_RESETS_IN_MS);
   const allWindows = {
-    five_hour: window(41, sessionResetsAt),
-    seven_day: window(63, weeklyResetsAt),
+    five_hour: window(announced.five_hour ?? 41, sessionResetsAt),
+    seven_day: window(announced.seven_day ?? 63, weeklyResetsAt),
     seven_day_oauth_apps: window(5, weeklyResetsAt),
-    seven_day_opus: window(77, weeklyResetsAt),
-    seven_day_sonnet: window(21, weeklyResetsAt),
+    seven_day_opus: window(announced.seven_day_opus ?? 77, weeklyResetsAt),
+    seven_day_sonnet: window(announced.seven_day_sonnet ?? 21, weeklyResetsAt),
     model_scoped: [{ display_name: "Fable", utilization: 12, resets_at: weeklyResetsAt }],
     extra_usage: { is_enabled: true, monthly_limit: 100, used_credits: 13, utilization: 13, currency: "USD" },
   };

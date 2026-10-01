@@ -51,6 +51,10 @@ const (
 	// ReasonShimLogCeiling is dlog forcing a process roll after shim.log
 	// reached its hard ceiling.
 	ReasonShimLogCeiling RelaunchReason = "shim_log_hard_ceiling"
+	// ReasonQueryDied is a session whose vendor query died: nothing in the
+	// shim restarts a query it lost, so the daemon replaces the shim, and the
+	// replacement's resume brings the session back.
+	ReasonQueryDied RelaunchReason = "query_died"
 	// ReasonHandoverTransfer is a workspace handed to a successor daemon. It is
 	// a bounce of what SERVES the workspace (the daemon), not of its shim, and
 	// it keeps the workspace drained on this daemon afterwards.
@@ -155,6 +159,20 @@ type Controller interface {
 	// unaccounted is surfaced per workspace rather than passed over, so each
 	// gets an OPEN bounce_unknown fault.
 	Reconcile(ctx context.Context, survivors Survivors) ([]Disposition, error)
+	// TakeUpCarries is a FRESH boot's half of a carried move: every carry the
+	// outgoing daemon named in the reconciled manifest wrote is read and
+	// retired, and each adopted workspace's is taken up -- the queue memory
+	// installed and a carried cold gate raised again -- BEFORE the boot
+	// releases the outgoing daemon's holds, whose drain runs the carried
+	// memory ahead of the held prompts. A carry that cannot be listed or read
+	// fails the boot: the daemon would not know what the queue held. A part
+	// that cannot be installed is ERROR and the boot goes on, as a successor's
+	// adoption drains the held prompts without it.
+	TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceID) error
+	// FinishCarries runs, once the boot has released the outgoing daemon's
+	// holds, what each taken-up carry leaves for after the drain: the held
+	// prompts' verdicts re-judged and the carried shim replacements asked for.
+	FinishCarries(ctx context.Context)
 }
 
 // HandoverAcceptance is a handover that was ACCEPTED and is under way. It is
@@ -503,6 +521,10 @@ type ShimFleet interface {
 	// AdoptParked dials a running shim parked at its cold gate, holds it with
 	// no watcher, and raises the carried gate on this daemon.
 	AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error)
+	// RaiseCarriedColdGate raises a carried cold gate over the parked shim a
+	// fresh boot already adopted: the boot's adoption dials it, the gate is
+	// daemon memory the carry brought across.
+	RaiseCarriedColdGate(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) error
 }
 
 // Resumed is what a resume answered.

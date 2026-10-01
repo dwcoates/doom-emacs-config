@@ -40,16 +40,21 @@
 // the park is a cold boot and neither a Kill/Restart verb nor the idle-cutoff
 // hibernation.
 //
-// THE FAKE AFFORDANCE THIS NEEDS ALREADY EXISTS: the `!cold-seed` scenario
-// (agent-shim/claude/shim/src/fake/scenarios/session.ts's COLD_SEED) emits an
-// ordinary turn whose assistant transcript line is stamped TWO HOURS in the
-// past, using the documented AssistantOptions.timestamp lever
-// ("FOR SCENARIOS THAT DELIBERATELY LIE ABOUT WHEN, and only about when — the
-// cold-context gate reads the LAST ASSISTANT LINE's `timestamp` and `usage`
-// together", src/fake/scenario.ts). Nothing was added to the fake for this
-// file. Two hours clears the tier the fake's own usage object buys: its
-// `cache_creation.ephemeral_1h_input_tokens` is non-zero, so engine/cold.ts
-// reads CACHE_TTL_1H_MS (one hour) as the lapse bound.
+// THE LAPSE IS THE SUCCESSOR SHIM'S READING OF NOW, NOT A BACK-DATED SEED. The
+// `!cold-seed` scenario (agent-shim/claude/shim/src/fake/scenarios/session.ts's
+// COLD_SEED) runs an ordinary, honestly stamped turn whose context is above the
+// cold-gate floor, and the successor daemon's shims judge the cache two hours
+// later than the clock (coldGateResumedLaterEnv: the shim's --fake-only
+// AGENT_REPL_FAKE_COLD_GATE_LATER_MS). Two hours clears the tier the fake's
+// own usage object buys: its `cache_creation.ephemeral_1h_input_tokens` is
+// non-zero, so engine/cold.ts reads CACHE_TTL_1H_MS (one hour) as the lapse
+// bound.
+//
+// The seed was once back-dated instead, and that made the book's order a race:
+// the answer's transcript line was stamped two hours BEFORE the prompt the live
+// stream stamped now, the store keeps whichever place is written first, and a
+// replayed page reaching the book's floor then drew the answer ahead of its
+// own prompt (daemon.feed.replayed_turn_unknown).
 //
 // ALL THREE BUTTONS ARE DRIVEN FOR REAL — nothing here is faked or skipped.
 // pay resumes the same conversation, clear mints a new vendor session id
@@ -223,7 +228,7 @@ type coldGate struct {
 // (daemon.md, RESUME GUARDS). The daemon is SIGKILLed, its shim is reaped, and
 // a successor boots against the same state root, lock dir and store socket:
 // with no shim to re-adopt, the successor's own bring-up RESUMES the recorded
-// conversation, reads the two-hour-old transcript, and is refused
+// conversation, judges its transcript two hours on, and is refused
 // (daemon/internal/workspace/sessions.go:698-782 raises the gate from that
 // refusal).
 //
@@ -233,11 +238,15 @@ type coldGate struct {
 // model-mismatch branch is structurally unreachable from StartSession{resume};
 // model_switch belongs to the SetSessionModel site, which is deliberately
 // gate-free. Driving it here would have meant faking something.
+// coldGateResumedLaterEnv makes a daemon's shims judge the cold gate two hours
+// after the clock: past the fake usage's one-hour cache window.
+var coldGateResumedLaterEnv = "AGENT_REPL_FAKE_COLD_GATE_LATER_MS=" + strconv.Itoa(2*60*60*1000)
+
 func raiseColdGate(t *testing.T) *coldGate {
 	t.Helper()
 
-	// Arrange: a workspace whose one real turn leaves a two-hour-old
-	// transcript behind.
+	// Arrange: a workspace whose one real turn leaves a context above the
+	// cold-gate floor behind.
 	first := NewWorld(t, WorldOpts{})
 	first.ExpectWarnings(coldGateWarnings...)
 	repo := harness.NewRepo(t)
@@ -287,6 +296,11 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// (OmitArgs cannot help — harness.StartDaemon applies it AFTER ExtraArgs,
 	// so it would strip this restatement along with the harness's own.)
 	opts.ExtraArgs = []string{"--default-config-dir", first.DefaultConfigDir}
+	// THE SUCCESSOR'S SHIMS JUDGE THE CACHE TWO HOURS ON. The seed turn is
+	// stamped honestly by every producer; only the successor's cold gate reads
+	// now as later (the shim's --fake-only AGENT_REPL_FAKE_COLD_GATE_LATER_MS),
+	// which is what a resume two hours after the seed would read.
+	opts.ExtraEnv = append(opts.ExtraEnv, coldGateResumedLaterEnv)
 	// The successor's boot and the resume its bring-up performs are two real
 	// process lifecycles on one budget — the shape AdoptionChainTimeout
 	// documents (world_test.go), reused verbatim rather than the tighter

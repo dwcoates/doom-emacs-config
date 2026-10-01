@@ -201,6 +201,14 @@ type watcher struct {
 	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
 	// the turn ends.
 	pendingUnobserved []ids.TurnID
+	// pendingQueryDeath is a query death routed under mu and not yet handed
+	// to the lifecycle sink, which flushTurnEnds tells off the lock AFTER the
+	// turn ends the death closed.
+	pendingQueryDeath bool
+	// pendingVendorSessionID is the vendor session id in force, as the shim
+	// last stated it (a rotation, a re-announced start), not yet handed to the
+	// lifecycle sink, which records it as what a later resume names.
+	pendingVendorSessionID string
 	// pendingAdoptions are the vendor-started turns this watcher stood in
 	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
 	// them over ahead of the turn ends.
@@ -427,6 +435,10 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		openAtAttach: session.OpenAtAttach,
 		factsIn:      make(chan struct{}),
+		// A PURE ATTACH STARTS NOT FREE (freeLocked), so its facts arriving
+		// with nothing in flight is a true-to-false edge the bounce registry
+		// hears.
+		busy: session.Started == nil,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	w.unwatch = func() {}
@@ -555,7 +567,21 @@ func turnIDValue(turn *ids.TurnID) string {
 func (w *watcher) Free() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.turn == nil && w.liveWorkLocked().Empty()
+	return w.freeLocked()
+}
+
+// freeLocked is THE freeness judgement: the session facts are in, and they
+// leave no turn in flight and no live detached work.
+//
+// UNKNOWN IS NEVER FREE. A pure attach (an adopted shim) knows nothing about
+// the turn the shim may be running until the shim re-announces its facts, and
+// the diagnostics that open the watch -- whose shim build a stale-build
+// relaunch judges -- always arrive first. Read as free there, a relaunch stood
+// the shim down mid-turn, the shim refused (`live`), and the stand-down window
+// force-killed a running conversation (2026-09-30, 18:39). The facts arriving
+// with nothing in flight is the freeness edge instead.
+func (w *watcher) freeLocked() bool {
+	return w.started && w.turn == nil && w.liveWorkLocked().Empty()
 }
 
 // SetOutputAddress installs the address rows are stamped with; nil restores
@@ -1851,6 +1877,10 @@ func (w *watcher) runSession(gen, openedAt uint64, stream shimclient.Stream[*shi
 // An item the ledger holds that the shim no longer names has ended, and is
 // retired (reconcileLiveWorkLocked).
 func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, openedAt uint64) {
+	// THE RE-ANNOUNCED ID IS THE ONE IN FORCE, whether or not the facts are
+	// taken again: a rotation that happened while no daemon watched is stated
+	// here and nowhere else, and it is what a later resume names.
+	w.pendingVendorSessionID = started.GetVendorSessionId()
 	if w.started {
 		w.log.Debug("daemon.sessionwatcher.watch_session",
 			"ignored a re-announced SessionStarted's facts; they are already held, and only its live membership is reconciled",
@@ -1882,6 +1912,9 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 	w.reconcileLiveWorkLocked(started, openedAt)
 	w.adoptLiveWorkLocked(started)
 	w.publishLiveWorkLocked()
+	// THE FACTS ARE THE FIRST FREENESS JUDGEMENT a pure attach can make:
+	// with nothing in flight, the workspace falls free here.
+	w.signalFreenessLocked()
 }
 
 // applySessionStartedLocked is the ONE place the session facts are taken up,
@@ -2079,7 +2112,11 @@ func (w *watcher) flushTurnEnds() {
 	w.pendingTurnEnds = nil
 	unobserved := w.pendingUnobserved
 	w.pendingUnobserved = nil
-	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 {
+	died := w.pendingQueryDeath
+	w.pendingQueryDeath = false
+	vendorSessionID := w.pendingVendorSessionID
+	w.pendingVendorSessionID = ""
+	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died || vendorSessionID != "" {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -2089,6 +2126,9 @@ func (w *watcher) flushTurnEnds() {
 		defer w.dispatching.Done()
 	}
 	w.mu.Unlock()
+	if vendorSessionID != "" {
+		w.sinks.Lifecycle.OnVendorSessionID(w.ws, vendorSessionID)
+	}
 	if len(unobserved) > 0 {
 		w.sinks.Lifecycle.OnTurnsEndedUnobserved(w.ws, unobserved)
 	}
@@ -2105,6 +2145,11 @@ func (w *watcher) flushTurnEnds() {
 		if w.sinks.Title != nil {
 			w.sinks.Title.OnTurnEnded(w.ws)
 		}
+	}
+	// THE DEATH IS TOLD AFTER THE TURNS IT ENDED, so the queue has closed them
+	// before anything is asked to restart the session they ran in.
+	if died {
+		w.sinks.Lifecycle.OnQueryDied(w.ws)
 	}
 }
 

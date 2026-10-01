@@ -6,3 +6,12 @@ bin/
 # directory, which drops the binary here rather than in bin/. Same
 # platform-specific artifact, equally never committed.
 /claude-repld
+
+# Build output of a bare `go build` run inside a package directory, which
+# names the binary after that directory and drops it there: the daemon from
+# cmd/claude-repld, and the fake shim from here or integration/fakeshim (the
+# integration harness builds its own into a temporary directory). All
+# platform-specific artifacts, never committed.
+/cmd/claude-repld/claude-repld
+/fakeshim
+/integration/fakeshim/fakeshim
