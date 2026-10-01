@@ -66,7 +66,7 @@ func TestTheSweepBacksOffAWorkspaceWhoseHibernationKeepsFailing(t *testing.T) {
 			name: "a warned refusal backs off",
 			arrange: func(h *harness, ws ids.WorkspaceID) {
 				h.stand.answer[ws] = refusalAnswer(&shimv1.HibernateError{
-					Kind: &shimv1.HibernateError_CompactionFailed{CompactionFailed: &shimv1.HibernateCompactionFailed{}},
+					Kind: &shimv1.HibernateError_NoSession{NoSession: &shimv1.HibernateNoSession{}},
 				})
 			},
 			wantAsked: 3,
@@ -83,11 +83,6 @@ func TestTheSweepBacksOffAWorkspaceWhoseHibernationKeepsFailing(t *testing.T) {
 					Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
 				})
 			},
-			wantAsked: len(passes),
-		},
-		{
-			name:      "a compaction under way is an ordinary deferral and is asked every pass",
-			arrange:   func(h *harness, ws ids.WorkspaceID) { h.stand.answer[ws] = compactingAnswer() },
 			wantAsked: len(passes),
 		},
 	}
