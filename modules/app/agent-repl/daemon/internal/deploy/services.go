@@ -120,6 +120,64 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 	return nil
 }
 
+// EnsureLoaded makes sure launchd holds both services, BOOTSTRAPPING ONE THE
+// USER DOMAIN DOES NOT HOLD, so a daemon never brings shims up against a host
+// whose store is gone for good. Both plists set KeepAlive, so a loaded service
+// that dies comes back on its own; an UNLOADED one (a `launchctl bootout`, a
+// deploy that ended between its bootout and its bootstrap) stays down until
+// something bootstraps it, and every shim then retries a socket that never
+// appears. MEASURED, 2026-09-30 22:41:12: a boot with the store booted out
+// brought five shims up into ~80s of `connect ENOENT .../store.sock` and
+// blank feeds, until a hand-run bootstrap brought it back.
+//
+// The store comes first and its socket is awaited before the sidecar is
+// bootstrapped, the same order RestartStore keeps: a sidecar started against
+// an absent socket is an error storm in its log. A service already loaded is
+// left exactly as it is.
+func (r *Restarter) EnsureLoaded(ctx context.Context) error {
+	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel}
+	storeBootstrapped, err := r.ensureLoaded(ctx, StoreLabel, fields)
+	if err != nil {
+		return err
+	}
+	if storeBootstrapped {
+		if err := r.awaitStoreSocket(ctx, fields); err != nil {
+			return err
+		}
+	}
+	if _, err := r.ensureLoaded(ctx, SidecarLabel, fields); err != nil {
+		return err
+	}
+	r.Log.Debug(opServices, "launchd holds both services", fields)
+	return nil
+}
+
+// ensureLoaded bootstraps label from its plist when launchd does not hold it,
+// and reports whether it did.
+func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.Context) (bool, error) {
+	plist := filepath.Join(r.PlistDir, label+".plist")
+	fields = merge(fields, dlog.Context{"label": label, "plist": plist})
+	loaded, _, err := r.Launchd.Print(ctx, label)
+	if err != nil {
+		r.Log.Error(opServices, "could not read a service's launchd state", withCause(fields, err))
+		return false, fmt.Errorf("deploy: read %s: %w", label, err)
+	}
+	if loaded {
+		return false, nil
+	}
+	if _, err := os.Stat(plist); err != nil {
+		r.Log.Error(opServices, "a service is not loaded and its plist is missing", withCause(fields, err))
+		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot bring it back: %w "+
+			"(re-run .claude/install.sh --with-agent-shim-services)", label, plist, err)
+	}
+	r.Log.Info(opServices, "a service was not loaded; bootstrapping it", fields)
+	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
+		r.Log.Error(opServices, "a service could not be bootstrapped", withCause(fields, err))
+		return false, fmt.Errorf("deploy: bootstrap %s: %w", plist, err)
+	}
+	return true, nil
+}
+
 // RestartSidecar restarts the sidecar alone. The store never moved, so its
 // socket is up throughout and a plain kickstart loses nothing.
 func (r *Restarter) RestartSidecar(ctx context.Context) error {
