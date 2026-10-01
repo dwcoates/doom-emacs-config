@@ -3709,8 +3709,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE CATALOG IS ALREADY IN HAND: `proveLive` pulled it, because that pull
     // IS the round-trip the start settled on. Pulling it a second time here
     // would spend a control call to learn what the opening already knows.
+    //
+    // EACH AWAITED STEP FROM HERE TO `session started` IS TIMED. On the boot of
+    // 2026-09-27 20:52:08 the gap between the proven-live signal and `session
+    // started` was 8.5s to 21.4s per shim, and nothing said which step spent
+    // it. The durations ride the `session started` record.
+    const mcpStatusFrom = deps.nowMs();
     if (query !== undefined) await pushMcpServerStatus();
+    const liveWorkFrom = deps.nowMs();
     const liveWork = await reconcile();
+    const mcpStatusMs = liveWorkFrom - mcpStatusFrom;
+    const liveWorkMs = deps.nowMs() - liveWorkFrom;
     // THE CADENCE BEGINS BEFORE SUCCESS RETURNS: a session that is never
     // prompted still has a cache worth keeping warm.
     cadence = new KeepaliveCadence(
@@ -3725,7 +3734,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     pushModel();
     pushPermissionMode();
+    const contextUsageFrom = deps.nowMs();
     await pushContextUsage();
+    const contextUsageMs = deps.nowMs() - contextUsageFrom;
     pushSessionTitle();
     void pushAccountUsage();
     // The readiness signal, and the reason a consumer may open WatchSession
@@ -3763,6 +3774,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         original_vendor_session_id: identity.originalVendorSessionId,
         model: effectiveModel,
         live_work: liveWork.length,
+        mcp_status_ms: mcpStatusMs,
+        live_work_ms: liveWorkMs,
+        context_usage_ms: contextUsageMs,
       },
       "session started",
     );

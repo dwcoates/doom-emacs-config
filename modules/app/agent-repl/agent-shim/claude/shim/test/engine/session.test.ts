@@ -5096,6 +5096,25 @@ describe("fast mode", () => {
   });
 });
 
+describe("the session-started record", () => {
+  it("states how long each awaited start step took", async () => {
+    // Arrange.
+    const h = harness();
+    const mark = logSinkMark();
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    const record = logRecordsSince(mark).find((entry) => entry.message === "session started");
+    expect(record?.context).toMatchObject({
+      mcp_status_ms: expect.any(Number),
+      live_work_ms: expect.any(Number),
+      context_usage_ms: expect.any(Number),
+    });
+  });
+});
+
 describe("the keep-alive interval", () => {
   it("beats on the module constant when nothing overrode it", async () => {
     const h = harness();
