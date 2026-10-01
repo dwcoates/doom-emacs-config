@@ -255,10 +255,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It sits above both the codec it encodes through and the transport it
 ;; sends over.
 (agent-repl--load-module "rpc")
-;; WHY: popup.el is the ONE shared editor-popup subroutine ("open path[:line]
-;; in a doom popup, right side, half width"); notes.el, commands.el and the
-;; host stream's `open_in_editor' arm all call it, so it loads above all of
-;; them.  It depends on core.el's logging ladder and nothing else.
+;; WHY: popup.el is the ONE shared popup subroutine (a Doom popup on the
+;; right at 40% width that `q' closes); notes.el, commands.el, daemon.el,
+;; verbs.el and the host stream's `open_in_editor' arm all call it, so it
+;; loads above all of them.  It depends on core.el's logging ladder and
+;; nothing else.
 (agent-repl--load-module "popup")
 ;; WHY: daemon-link.el owns the daemon connection's whole life — discovery,
 ;; the one WatchDaemon stream, the reconnect loop and the blue-green
@@ -398,41 +399,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; capture the tail of the module load rather than the user's session.
 (agent-repl--load-module "interaction-record")
 
-;; Workspace notes popup: `agent-repl-notes-open' (notes.el) opens the
-;; current workspace's org notes file in a right-side popup that leaves the
-;; agent-repl panels the left two thirds of the frame.  `:autosave t'
-;; persists the notes when the popup is dismissed, matching the
-;; buffer-local save-on-kill hook the opener also installs.
-;;
-;; The rule matches by PREDICATE, not by buffer name: a notes buffer is
-;; named `<workspace>.org', which no name pattern can tell apart from any
-;; other org file the user opens, while its residence under the notes
-;; directory identifies it exactly.
-;;
-;; Guarded because the Doom popup module (and its `set-popup-rule!' macro)
-;; is absent under `emacs -Q' — the batch ERT suite loads this file but has
-;; no popup system to configure.
-(defun agent-repl--notes-buffer-p (buffer-name &optional _action)
-  "Return non-nil when BUFFER-NAME names a buffer visiting a notes file.
-The popup predicate for `agent-repl-notes-open': a notes buffer is
-identified by the file it visits living under `agent-repl--notes-dir',
-never by its name."
-  (let* ((buf (get-buffer buffer-name))
-         (file (and (buffer-live-p buf) (buffer-file-name buf)))
-         (match (and file
-                     (string-prefix-p (expand-file-name (agent-repl--notes-dir))
-                                      (expand-file-name file)))))
-    (agent-repl--log '(:agent-repl-central "popup classification is process-wide")
-                     "elisp.notes.popup-predicate: buffer=%S file=%S match=%s"
-                     buffer-name file (if match t nil))
-    match))
-
-(if (fboundp 'set-popup-rule!)
-    (progn
-      (set-popup-rule! #'agent-repl--notes-buffer-p
-        :side 'right :size 0.33 :select t :quit t :autosave t)
-      (agent-repl--boot-info "workspace-notes popup rule installed side=right size=0.33 autosave=t"))
-  (agent-repl--boot-info "workspace-notes popup rule skipped; set-popup-rule! is unavailable"))
+;; The ONE Doom popup rule every agent-repl popup is displayed by (popup.el):
+;; right side, 40% of the frame's width, `q' closes it and kills its buffer.
+;; Installed here, after every module has loaded, so it is a single rule
+;; whatever order the modules that show popups were loaded in.
+(agent-repl-popup-install-rule)
 
 (if agent-repl--load-errors
     (progn

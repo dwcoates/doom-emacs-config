@@ -163,42 +163,5 @@ The directory is removed afterwards, so no test observes another's files."
   "`agent-repl-notes-open' is a user-facing command."
   (should (commandp 'agent-repl-notes-open)))
 
-;;;; ---- Tests: the popup predicate --------------------------------------
-
-(ert-deftest agent-repl-test-notes-popup-predicate-matches-notes-buffer ()
-  "A buffer visiting a file under the notes directory matches the rule."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-notes--with-dir
-      (let ((buf (generate-new-buffer "alpha.org")))
-        (unwind-protect
-            (progn
-              (with-current-buffer buf
-                (setq buffer-file-name (agent-repl--notes-file "alpha")))
-              (should (agent-repl--notes-buffer-p (buffer-name buf))))
-          (with-current-buffer buf (set-buffer-modified-p nil))
-          (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-notes-popup-predicate-rejects-foreign-org-buffer ()
-  "An org buffer outside the notes directory does not match the rule."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-notes--with-dir
-      (let ((buf (generate-new-buffer "alpha.org")))
-        (unwind-protect
-            (progn
-              (with-current-buffer buf
-                (setq buffer-file-name "/tmp/somewhere-else/alpha.org"))
-              (should-not (agent-repl--notes-buffer-p (buffer-name buf))))
-          (with-current-buffer buf (set-buffer-modified-p nil))
-          (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-notes-popup-predicate-rejects-non-file-buffer ()
-  "A buffer visiting no file does not match the rule."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-notes--with-dir
-      (let ((buf (generate-new-buffer "not-a-file")))
-        (unwind-protect
-            (should-not (agent-repl--notes-buffer-p (buffer-name buf)))
-          (kill-buffer buf))))))
-
 (provide 'test-notes)
 ;;; test-notes.el ends here
