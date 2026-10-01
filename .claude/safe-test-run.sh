@@ -17,9 +17,14 @@
 #
 # Usage:
 #   .claude/safe-test-run.sh [SELECTOR]
+#   .claude/safe-test-run.sh -- COMMAND [ARGS...]
 #
 # SELECTOR is an optional ERT selector (a regex matching test names).
 # Defaults to running the full suite via test-agent-repl.el.
+#
+# `--` wraps an arbitrary COMMAND in the same before/after git-state check
+# instead of the ERT suite.  bin/test-all.sh runs its whole parallel run
+# this way, so every suite's units (not only ERT's) sit inside the net.
 #
 # Exit codes:
 #   0   — tests passed AND no git drift
@@ -49,6 +54,16 @@ if [ ! -f "$TEST_FILE" ]; then
 fi
 
 SELECTOR="${1:-}"
+WRAPPED=()
+if [ "$SELECTOR" = "--" ]; then
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "[safe-test-run] FATAL: -- needs a command to wrap" >&2
+    exit 3
+  fi
+  WRAPPED=("$@")
+  SELECTOR=""
+fi
 
 # ---- Ref snapshot scope ----------------------------------------------------
 # The refs snapshot must cover only state THIS test run could damage. The
@@ -104,7 +119,9 @@ echo ""
 # `ert-run-tests-batch-and-exit'.  When omitted, ERT runs every
 # registered test.
 EMACS_INVOKE=(emacs -batch -Q -l ert -l "$TEST_FILE")
-if [ -n "$SELECTOR" ]; then
+if [ "${#WRAPPED[@]}" -gt 0 ]; then
+  EMACS_INVOKE=("${WRAPPED[@]}")
+elif [ -n "$SELECTOR" ]; then
   EMACS_INVOKE+=(--eval "(ert-run-tests-batch-and-exit \"$SELECTOR\")")
 else
   EMACS_INVOKE+=(-f ert-run-tests-batch-and-exit)
@@ -119,7 +136,7 @@ TEST_RC=$?
 set -e
 
 echo ""
-echo "[safe-test-run] ert exited with code $TEST_RC"
+echo "[safe-test-run] ${EMACS_INVOKE[0]} exited with code $TEST_RC"
 
 # ---- Capture post-test state ----------------------------------------------
 
