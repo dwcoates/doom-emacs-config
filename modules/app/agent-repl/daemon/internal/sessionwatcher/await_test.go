@@ -439,3 +439,51 @@ func TestNoFreenessEdgeForAWatcherThatWasNeverBusy(t *testing.T) {
 	default:
 	}
 }
+
+// UNKNOWN IS NEVER FREE. A pure attach knows nothing of the turn its adopted
+// shim may be running until the shim re-announces its facts, and a stale-build
+// relaunch judged at the opening diagnostics once read that as free and
+// force-killed a running conversation (2026-09-30).
+func TestAPureAttachIsNotFreeBeforeItsFacts(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	free := h.w.Free()
+
+	// Assert.
+	if free {
+		t.Fatal("a pure attach with no facts answered free")
+	}
+}
+
+func TestAPureAttachFallsFreeWhenItsFactsNameNothingInFlight(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.reannounce(t, sessionStarted(""))
+
+	// Assert.
+	h.awaitFree(t)
+	if !h.w.Free() {
+		t.Fatal("the attach's facts named nothing in flight, and it is still not free")
+	}
+}
+
+func TestAPureAttachWhoseFactsNameATurnStaysBusy(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.reannounce(t, sessionStarted("turn-1"))
+
+	// Assert.
+	if h.w.Free() {
+		t.Fatal("the attach's facts named a turn in flight, and it answered free")
+	}
+	h.noFree(t)
+}

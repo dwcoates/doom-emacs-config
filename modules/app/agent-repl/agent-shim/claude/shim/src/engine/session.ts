@@ -233,6 +233,17 @@ interface EngineDeps {
    */
   readonly keepaliveIntervalMs?: number;
   /**
+   * How much LATER than now the cold gate judges a transcript, when something
+   * overrode the default of zero.
+   *
+   * `main.ts` fills this ONLY for a `--fake` process. It is how a suite
+   * resumes a conversation "two hours later" without waiting two hours: the
+   * seed turn is stamped honestly by every producer, and only the gate's
+   * reading of the time passed moves. Back-dating the seed's transcript
+   * instead made two producers state places hours apart for one entry.
+   */
+  readonly coldGateLaterMs?: number;
+  /**
    * How long a `StartTurn` waits behind the shim's own keep-alive, when
    * something overrode {@link KEEPALIVE_YIELD_BUDGET_MS}. A suite shortens it
    * to reach the bound's refusal; production always uses the constant.
@@ -537,6 +548,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
   const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
+  /** The instant BOTH cold-gate sites judge a transcript at. */
+  const coldNowMs = (): number => deps.nowMs() + (deps.coldGateLaterMs ?? 0);
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   const live = new LiveWorkTable();
   /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
@@ -671,6 +684,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * nothing to be told.
    */
   let announcedStart: conversationv1.SessionStarted | undefined;
+  /**
+   * The death of the live query. A watch opened after the death -- a daemon
+   * adopting this shim -- is told it again behind the re-announcement, so the
+   * daemon learns the session cannot take a prompt from the session's own typed
+   * fact, never from a fault's prose. It stands for the process's life: nothing
+   * in this process restarts a query it lost (see onQueryLost), so the daemon
+   * replaces the shim instead.
+   */
+  let standingDeath: conversationv1.SessionQueryDied | undefined;
   let standingDown = false;
   /** A model change accepted mid-turn, and the call still waiting on it. */
   let pendingModel:
@@ -2825,6 +2847,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function onQueryLost(died: conversationv1.SessionQueryDied, detail: string): void {
     LOGGER.error({ cause: detail, ...vendorDeathFields() }, "the vendor query is gone");
+    standingDeath = died;
     pushes.push(
       create(conversationv1.SessionUpdateSchema, {
         update: { case: "queryDied", value: died },
@@ -3476,7 +3499,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         );
       }
       const remediation = source.value.coldRemediation;
-      const cold = judgeCold(facts, deps.nowMs(), requestedModel);
+      const cold = judgeCold(facts, coldNowMs(), requestedModel);
       if (cold !== undefined && remediation === undefined) {
         LOGGER.debug(
           { vendor_session_id: vendorSessionId, reason: cold, context_tokens: facts.contextTokens },
@@ -4691,7 +4714,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // owner ruled the gate off below it for a model change as much as for a
       // lapse, so a caller asking for a threshold of 0 still gets a small
       // switch through rather than a refusal.
-      !underColdGateFloor(facts, deps.nowMs(), "model_switch")
+      !underColdGateFloor(facts, coldNowMs(), "model_switch")
     ) {
       LOGGER.debug(
         { model: model.name, context_tokens: facts.contextTokens },
@@ -4828,8 +4851,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function reannounceStart(): Promise<conversationv1.SessionStarted | undefined> {
     if (announcedStart === undefined) return undefined;
+    if (identity === undefined) {
+      throw new Error("shim session: a started session holds no identity to re-announce");
+    }
     return create(conversationv1.SessionStartedSchema, {
-      vendorSessionId: announcedStart.vendorSessionId,
+      // THE RESUME HANDLE IN FORCE NOW, not the one the start answered: the
+      // field is what a later resume names, and a rotation since the start (a
+      // /clear) left the start's id naming a conversation nobody continues. A
+      // daemon that adopted this shim after the rotation would otherwise
+      // resume the wrong one (2026-09-30: a restart came up FRESH).
+      vendorSessionId: identity.vendorSessionId,
       ...(announcedStart.runtime === undefined ? {} : { runtime: announcedStart.runtime }),
       ...(announcedStart.effectiveModel === undefined
         ? {}
@@ -5442,7 +5473,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
-    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart),
+    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath),
     setSessionModel,
     setSessionPermissionMode,
     hibernate,
@@ -5477,10 +5508,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
  *
  * A session that has not started yet re-announces nothing: there is no opening
  * to re-state, and the diagnostics already said so.
+ *
+ * A DEAD QUERY IS RE-ANNOUNCED TOO, after the opening: a daemon that adopts
+ * this shim after the death would otherwise attach to a session it believes
+ * can take a prompt, and learn otherwise only from a refused StartTurn.
  */
 async function* watchSessionFrames(
   updates: AsyncIterable<conversationv1.SessionUpdate>,
   reannounce: () => Promise<conversationv1.SessionStarted | undefined>,
+  standingDeath: () => conversationv1.SessionQueryDied | undefined,
 ): AsyncIterable<shimv1.WatchSessionResponse> {
   let opened = false;
   for await (const update of updates) {
@@ -5493,6 +5529,15 @@ async function* watchSessionFrames(
     if (started !== undefined) {
       yield create(shimv1.WatchSessionResponseSchema, {
         frame: { case: "sessionStarted", value: started },
+      });
+    }
+    const died = standingDeath();
+    if (died !== undefined) {
+      yield create(shimv1.WatchSessionResponseSchema, {
+        frame: {
+          case: "update",
+          value: create(conversationv1.SessionUpdateSchema, { update: { case: "queryDied", value: died } }),
+        },
       });
     }
   }

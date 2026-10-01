@@ -888,7 +888,8 @@ func (q *queue) isDraining(ws ids.WorkspaceID) bool {
 }
 
 // inFlight answers what a bounce would have to wait on: the turn in flight
-// and the live detached items. free is the conjunction. A prompt the shim is
+// and the live detached items. free is the watcher's own judgement, which is
+// their conjunction once the session's facts are in and false before. A prompt the shim is
 // holding behind its own keep-alive is a StartTurn still in flight, and the
 // bounce is decided under the same delivery lock that call is made under, so
 // it can never be judged free past one.
@@ -907,6 +908,9 @@ func (q *queue) inFlight(ws ids.WorkspaceID) (turn bool, detached int, free bool
 		}
 		live := watcher.LiveWork()
 		detached = len(live.Agents) + len(live.Shells) + len(live.Monitors)
+		// THE WATCHER'S OWN JUDGEMENT DECIDES: an adopted shim whose facts
+		// have not arrived answers no turn for a turn it may be running.
+		return turn, detached, watcher.Free()
 	}
 	return turn, detached, !turn && detached == 0
 }

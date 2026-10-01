@@ -2090,3 +2090,67 @@ func TestTheBootFailsWhenTheLeasesCannotBeRead(t *testing.T) {
 		t.Fatalf("Run = %v, want the read failure", err)
 	}
 }
+
+// A LAYOUT RESTART'S CARRIES ARE TAKEN UP BEFORE ITS HOLDS ARE RELEASED: the
+// release drains the intake, and the drain runs the carried queue memory ahead
+// of the held prompts. What each carry leaves for after the drain runs after
+// it.
+func TestTheBootTakesUpTheCarriesBeforeReleasingTheOutgoingDaemonsHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
+	releasedAtTakeUp, releasedAtFinish := -1, -1
+	h.rollout.onTakeUp = func() { releasedAtTakeUp = len(h.queue.leaseChanges()) }
+	h.rollout.onFinish = func() { releasedAtFinish = len(h.queue.leaseChanges()) }
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if releasedAtTakeUp != 0 {
+		t.Fatalf("the holds released before the take-up = %d, want none", releasedAtTakeUp)
+	}
+	if releasedAtFinish != 1 {
+		t.Fatalf("the holds released before the finish = %d, want the one", releasedAtFinish)
+	}
+}
+
+func TestTheBootHandsTheTakeUpEveryAdoptedShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld).ID
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.Adopted) != 1 || len(h.rollout.takenUp) != 1 || h.rollout.takenUp[0] != ws {
+		t.Fatalf("taken up = %v, want the adopted %v", h.rollout.takenUp, report.Adopted)
+	}
+}
+
+func TestTheBootFailsWhenTheCarriesCannotBeTakenUp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.rollout.takeUpErr = errors.New("unreadable carry")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Run succeeded over carries it could not take up")
+	}
+	if h.rollout.finishes != 0 {
+		t.Fatalf("the carries were finished after the take-up failed")
+	}
+	if !h.hasRecord("error", "daemon.boot.take_up_carries") {
+		t.Fatalf("the failed take-up was not stated at ERROR: %v", h.log.Records())
+	}
+}

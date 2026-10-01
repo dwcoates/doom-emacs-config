@@ -311,7 +311,7 @@ every vocabulary assertion built on it pass vacuously."
   (let ((arms (agent-repl-test--generated-oneof-arms
                "frontend/v1/sidebar.pb.go" "RosterRowWhen")))
     ;; Assert
-    (should (member "lastSelected" arms))
+    (should (member "active" arms))
     (should-not (member "idleAsync" arms))))
 
 (ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()

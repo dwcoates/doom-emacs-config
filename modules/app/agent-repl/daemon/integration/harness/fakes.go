@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -72,6 +73,35 @@ func (r *Recorder) SetExitCode(code int) {
 	}
 }
 
+// SetExitCodeFor makes every later invocation whose FIRST argument is verb
+// exit with the status, ahead of SetExitCode's: a test scripts the one verb
+// that must fail (launchctl's `kickstart`) while a read-only one the daemon
+// also runs (`print`, at every boot's service check) still succeeds.
+func (r *Recorder) SetExitCodeFor(verb string, code int) {
+	r.t.Helper()
+	if verb == "" || strings.ContainsAny(verb, "/ ") {
+		r.t.Fatalf("harness: SetExitCodeFor needs a plain verb, got %q", verb)
+	}
+	if err := os.WriteFile(r.Control+".verb."+verb, []byte(strconv.Itoa(code)+"\n"), 0o644); err != nil {
+		r.t.Fatalf("harness: write %s: %v", r.Control+".verb."+verb, err)
+	}
+}
+
+// InvocationsExcept reads every recorded run whose first argument is none of
+// verbs, oldest first: what a test means by "the daemon changed nothing" is
+// the runs left once the read-only verbs are set aside.
+func (r *Recorder) InvocationsExcept(verbs ...string) []Invocation {
+	r.t.Helper()
+	var out []Invocation
+	for _, inv := range r.Invocations() {
+		if len(inv.Argv) > 0 && slices.Contains(verbs, inv.Argv[0]) {
+			continue
+		}
+		out = append(out, inv)
+	}
+	return out
+}
+
 // SetStdout makes every later invocation print the text before exiting, so a
 // test can script test-suite output the merge tab paints.
 func (r *Recorder) SetStdout(text string) {
@@ -95,6 +125,7 @@ done
 cwd=$(pwd)
 printf '{"argv":[%s],"cwd":"%s","env":{"AGENT_REPL_OWNED":"%s"}}\n' "$argv" "$cwd" "$AGENT_REPL_OWNED" >> "$record"
 if [ -f "$control.stdout" ]; then cat "$control.stdout"; fi
+if [ -n "$1" ] && [ -f "$control.verb.$1" ]; then exit "$(cat "$control.verb.$1")"; fi
 if [ -f "$control" ]; then exit "$(cat "$control")"; fi
 exit 0
 `

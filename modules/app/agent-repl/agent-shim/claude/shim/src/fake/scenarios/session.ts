@@ -712,41 +712,27 @@ const COLD_SEED = scenario({
   name: "cold-seed",
   prompt: "!cold-seed",
   emits:
-    "an ordinary turn whose TRANSCRIPT RECORDS are stamped TWO HOURS IN THE PAST, so the next resume of this " +
-    "session trips the shim's own cold-context detection",
-  writes: "the ASSISTANT line (with its usage) and the turn_duration line, both carrying a two-hour-old `timestamp`",
-  arms: "SessionColdLapsed on the NEXT resume — this scenario only seeds the condition",
+    "an ordinary turn whose assistant line reports a context ABOVE the cold-gate floor, so a resume the cold gate " +
+    "judges lapsed (AGENT_REPL_FAKE_COLD_GATE_LATER_MS) or a model switch is refused rather than let through",
+  writes: "the assistant line (with its usage), the prompt line and the turn record, all stamped at the fake's own now",
+  arms: "SessionColdLapsed on a resume judged later than the cache window; SessionCold on a model switch",
   run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
-    const twoHoursAgo = new Date(ctx.nowMs() - 2 * 60 * 60 * 1_000).toISOString();
-    // THE LINE THE COLD GATE ACTUALLY READS is the last ASSISTANT line: its
-    // `message.usage` is the context size and its `timestamp` is the request
-    // instant, read from the same record. Back-dating only the turn_duration
-    // line left a freshly-stamped assistant line as the newest one, so the gate
-    // saw a session seconds old and never lapsed.
-    // AND A CONTEXT ABOVE THE COLD-GATE FLOOR. The gate does not ask below
-    // 70,000 tokens (owner ruling, engine/cold.ts COLD_GATE_FLOOR_TOKENS), and
-    // the mock's ordinary usage reports ~25,000 — a seed that left it there
-    // would produce a session that resumes warm, which is the opposite of what
-    // this scenario exists to set up.
-    ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], {
+    // A CONTEXT ABOVE THE COLD-GATE FLOOR, and nothing else. The gate does not
+    // ask below 70,000 tokens (owner ruling, engine/cold.ts
+    // COLD_GATE_FLOOR_TOKENS), and the mock's ordinary usage reports ~25,000 —
+    // a seed that left it there would produce a session that resumes warm.
+    //
+    // NOTHING HERE IS BACK-DATED. The lapse is the gate's reading of the time
+    // passed, moved by the shim's `--fake`-only AGENT_REPL_FAKE_COLD_GATE_LATER_MS
+    // (src/main.ts). Stamping the assistant line hours in the past made the
+    // turn's answer precede its own prompt, which the live stream had stamped
+    // now, and the book's order then depended on which producer wrote first.
+    ctx.assistant([{ type: "text", text: "An answer the next resume finds expensive." }], {
       stopReason: "end_turn",
-      timestamp: twoHoursAgo,
       contextTokens: COLD_SEED_CONTEXT_TOKENS,
     });
-    // Back-dated too, so nothing in the file contradicts it. Written directly
-    // rather than through a helper because the scenario is deliberately lying
-    // about WHEN, and only about when — every other field is the ordinary one.
-    ctx.files.transcript.append({
-      type: "system",
-      subtype: "turn_duration",
-      durationMs: 1_000,
-      messageCount: 1,
-      isMeta: false,
-      uuid: ctx.newUuid(),
-      timestamp: twoHoursAgo,
-    });
-    ctx.result({ subtype: "success", result: "An answer from two hours ago." });
+    ctx.result({ subtype: "success", result: "An answer the next resume finds expensive." });
   },
 });
 

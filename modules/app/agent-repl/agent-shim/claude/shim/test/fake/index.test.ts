@@ -635,6 +635,63 @@ describe("getContextUsage", () => {
   });
 });
 
+describe("the account-usage probe after a rate-limit event", () => {
+  // Drives the prompts to completion, THEN samples: every emission of the
+  // drive has been made by the time the probe answers.
+  const usageAfter = async (prompts: string[]) => {
+    let live: { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<unknown> } | undefined;
+    await driveScenario(prompts, {
+      during: (query) => {
+        live = query;
+      },
+    });
+    if (live === undefined) throw new Error("the drive handed over no query");
+    return (await live.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()) as {
+      rate_limits: Record<string, { utilization: number | null }>;
+    };
+  };
+
+  it("samples the seven-day window at the utilization the event announced", async () => {
+    // Arrange + Act
+    const answer = await usageAfter(["!rate-limit-seven-day"]);
+
+    // Assert. The event said 0.91; the endpoint describes the same account.
+    expect(answer.rate_limits.seven_day?.utilization).toBe(91);
+  });
+
+  it("samples the five-hour window at the utilization the event announced", async () => {
+    // Arrange + Act
+    const answer = await usageAfter(["!rate-limit-five-hour"]);
+
+    // Assert
+    expect(answer.rate_limits.five_hour?.utilization).toBe(82);
+  });
+
+  it("keeps its own figure for a window no event announced", async () => {
+    // Arrange + Act
+    const answer = await usageAfter(["!rate-limit-seven-day"]);
+
+    // Assert
+    expect(answer.rate_limits.five_hour?.utilization).toBe(41);
+  });
+
+  it("answers its own figure again once a scenario chooses the usage answer", async () => {
+    // Arrange + Act. `!usage-available` sets the answer after the event.
+    const answer = await usageAfter(["!rate-limit-seven-day", "!usage-available"]);
+
+    // Assert
+    expect(answer.rate_limits.seven_day?.utilization).toBe(63);
+  });
+
+  it("keeps every sampled figure for an event on a window it does not sample", async () => {
+    // Arrange + Act. `!rate-limit` announces the overage window only.
+    const answer = await usageAfter(["!rate-limit"]);
+
+    // Assert
+    expect(answer.rate_limits.seven_day?.utilization).toBe(63);
+  });
+});
+
 describe("the account-usage probe", () => {
   const usage = async (prompts: string[], nowMs?: () => number) => {
     let answer: unknown;

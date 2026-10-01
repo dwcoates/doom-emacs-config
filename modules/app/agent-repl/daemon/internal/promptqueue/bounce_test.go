@@ -175,6 +175,36 @@ func TestRequestBounceDecidesByWhatIsInFlight(t *testing.T) {
 	}
 }
 
+// AN ADOPTED SHIM WHOSE FACTS HAVE NOT ARRIVED IS NOT FREE: the bounce waits
+// for the facts' freeness edge rather than standing a running turn down
+// (2026-09-30: a stale-build relaunch judged at the opening diagnostics
+// force-killed a conversation mid-turn).
+func TestABounceWaitsForAnAdoptedShimsFacts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.watcher.mu.Lock()
+	h.watcher.factsPending = true
+	h.watcher.mu.Unlock()
+	g := newGate()
+
+	// Act
+	got, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	if got.Now || g.runs.Load() != 0 {
+		t.Fatalf("decision = %+v, runs = %d: want the bounce registered behind the facts", got, g.runs.Load())
+	}
+	h.watcher.mu.Lock()
+	h.watcher.factsPending = false
+	h.watcher.mu.Unlock()
+	h.q.OnFree(theWorkspace)
+	g.awaitStart(t)
+	g.finish(h, nil)
+}
+
 func TestARegisteredBounceIsTakenWhenItsWorkEndsInEitherOrder(t *testing.T) {
 	tests := []struct {
 		name  string

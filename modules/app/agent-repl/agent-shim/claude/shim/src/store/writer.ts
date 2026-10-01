@@ -651,8 +651,17 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       const bytes = payloadBytes(entry);
       // THE ROW IS PLACED HERE, ONCE: the writer's door is where the shim
       // first holds the fact, and the place rides the queued row through every
-      // retry rather than being re-read from the clock at each send.
-      const place = placeClock.next();
+      // retry rather than being re-read from the clock at each send. A row its
+      // vendor record placed keeps that place, which the file plane states for
+      // the same row (convert/place.ts); only a row no record placed reads the
+      // observation clock.
+      const place =
+        entry.recordPlace === undefined
+          ? placeClock.next()
+          : create(conversationv1.ConversationPlaceSchema, {
+              atMs: BigInt(Math.trunc(entry.recordPlace.atMs)),
+              ordinal: entry.recordPlace.ordinal,
+            });
       queue.push(durable === undefined ? { entry, place, bytes } : { entry, place, bytes, durable });
       queuedBytes += bytes;
     }

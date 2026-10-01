@@ -237,3 +237,34 @@ func awaitNewAdvertisement(t *testing.T, d *harness.Daemon, old string) string {
 		}
 	}
 }
+
+// AN ADDITIVE LAYOUT CHANGE IS HANDED OVER (owner ruling, 2026-09-30): the
+// fresh build's steps leave the incumbent working, so the deploy announces a
+// successor rather than a plain bounce, and no workspace waits on a restart.
+func TestAnAdditiveLayoutChangeIsHandedOverRatherThanRestarted(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	selfRepo, d := drainSelfRepoDaemon(t)
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	daemonStream := d.WatchDaemonStream()
+
+	// Act
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemonAdditiveLayout)
+
+	// Assert: the announcement names a successor -- a handover, not a restart.
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	if announced.GetAddress() == "" {
+		t.Fatalf("shutdown_announced = %v, want a successor's address for an additive layout change", announced)
+	}
+	d.AwaitLogRecord(d.RunLogPath(), "the additive handover decision", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.decide" &&
+			strings.Contains(r.Message, "differs by additive steps alone")
+	})
+}

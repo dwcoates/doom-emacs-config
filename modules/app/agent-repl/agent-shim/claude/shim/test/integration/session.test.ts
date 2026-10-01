@@ -15,7 +15,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { workspaceLockKey } from "../../src/locks.js";
 import { agentIdPath } from "../../src/engine/identity.js";
-import { cleanupShims, ITEST_BUILD_SHA, spawnShim } from "../integration-support/harness.js";
+import { cleanupShims, ITEST_BUILD_SHA, RESUMED_TWO_HOURS_LATER, spawnShim } from "../integration-support/harness.js";
 import {
   awaitAgentEntry,
   freshSession,
@@ -398,7 +398,7 @@ describe("the cold gate", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
 
-    const second = await spawnShim({ reuse: first.dirs });
+    const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
     const response = await second.clients.h1.startSession(
       resumeSession(started.vendorSessionId),
     );
@@ -421,7 +421,7 @@ describe("the cold gate", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
 
-    const second = await spawnShim({ reuse: first.dirs });
+    const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
     const response = await second.clients.h1.startSession(
       resumeSession(started.vendorSessionId, remediationPay()),
     );
@@ -439,7 +439,7 @@ describe("the cold gate", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
 
-    const second = await spawnShim({ reuse: first.dirs });
+    const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
     const response = await second.clients.h1.startSession(
       resumeSession(started.vendorSessionId, remediationClear()),
     );
@@ -457,7 +457,7 @@ describe("the cold gate", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
 
-    const second = await spawnShim({ reuse: first.dirs });
+    const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
     const response = await second.clients.h1.startSession(
       resumeSession(
         started.vendorSessionId,
@@ -1619,8 +1619,10 @@ describe("Hibernate and revival", () => {
     // is a real resume of the same vendor session, and the first page carries
     // NO context cut from the stand-down, because none was performed.
     //
-    // ABOVE THE COLD-GATE FLOOR ON PURPOSE. `!cold-seed` reports a context
-    // comfortably past it, so the resume is judged cold and asks — which is
+    // ABOVE THE COLD-GATE FLOOR ON PURPOSE, AND RESUMED LATE. `!cold-seed`
+    // reports a context comfortably past the floor, and the second shim judges
+    // the cache two hours on (RESUMED_TWO_HOURS_LATER), so the resume is judged
+    // cold and asks — which is
     // the gate doing its own job on its own terms, unchanged by this ruling
     // and no longer pre-paid by the directive. `resumeSession` is therefore
     // re-asked with the gate answered.
@@ -1633,7 +1635,7 @@ describe("Hibernate and revival", () => {
     // STOOD DOWN, NOT SIGKILLED — the graceful half the daemon actually runs.
     expect((await first.standDown()).code).toBe(0);
 
-    const second = await spawnShim({ reuse: first.dirs });
+    const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
     const response = await second.clients.h1.startSession(
       resumeSession(started.vendorSessionId),
     );

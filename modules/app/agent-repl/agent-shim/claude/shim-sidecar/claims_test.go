@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -55,6 +57,37 @@ func TestAHeldShellSpoolIsReadOnceTheShimsClaimNamesItsRun(t *testing.T) {
 		t.Fatalf("owner run = %q, want call-1", got)
 	}
 	h.requireOnce(t, "shell-run-claim", "info")
+}
+
+// A RESTARTED SIDECAR REBUILDS ITS SHELL TRACKING FROM THE STORE. The launch
+// that claimed a spool lies before the restarted reader's rewind point, so no
+// transcript line claims it again, and the spool is startup backlog; the
+// shim's durable claim is what brings it back under a tailer, whose terminal
+// or LOST conclusion then closes the run. On 2026-09-30 a spool orphaned this
+// way kept its run open in the store and held a daemon restart for minutes.
+func TestARestartedSidecarReadsABacklogShellSpoolTheStoreClaims(t *testing.T) {
+	// Arrange: the spool was last written well before this process started.
+	h := newHarness(t, &fakeStore{claims: []*storev1.ShellRunClaimed{shellClaim("sess-1")}})
+	h.transcript(t, "sess-1", promptLine)
+	spool := h.spoolFile(t, "b1", "[killed]\n")
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(spool, past, past); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.rescan()
+
+	// Assert.
+	if _, watched := h.sc.watchers[spool]; !watched {
+		t.Fatal("the backlog spool the store claims was not read")
+	}
+	if got := h.sc.owners.activityFor("b1"); got != "call-1" {
+		t.Fatalf("owner run = %q, want call-1", got)
+	}
 }
 
 func TestAShellClaimWhoseCallIsNotOnRecordLeavesTheSpoolHeld(t *testing.T) {

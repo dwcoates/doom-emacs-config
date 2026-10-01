@@ -212,11 +212,24 @@ export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
 export const FAKE_KEEPALIVE_INTERVAL_ENV = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS";
 
 /**
+ * The cold gate's lateness override, honored ONLY under `--fake`.
+ *
+ * The gate refuses a resume whose cache has lapsed (engine/cold.ts), and a
+ * lapse is an hour at least: from outside the process there was no honest way
+ * to make one happen, so the mock back-dated its own transcript — and the
+ * seed turn then carried two places hours apart for one entry, one from the
+ * transcript and one from the live stream. This moves the gate's reading of
+ * NOW instead, and nothing else. A production shim never judges a cache as if
+ * later than it is.
+ */
+export const FAKE_COLD_GATE_LATER_ENV = "AGENT_REPL_FAKE_COLD_GATE_LATER_MS";
+
+/**
  * Resolve one `--fake`-only millisecond override.
  *
- * The three overrides in this file differ only in which variable they read and
- * what they are called in the log, so the reading, the refusal and the
- * validation live here ONCE rather than drifting across three near-identical
+ * Every override in this file differs only in which variable it reads and
+ * what it is called in the log, so the reading, the refusal and the
+ * validation live here ONCE rather than drifting across near-identical
  * copies.
  *
  * Answers `undefined` for "use the module constant" in every rejecting case.
@@ -253,6 +266,15 @@ function resolveFakeMsOverride(
     `a fake session took its ${subject} from the environment`,
   );
   return parsed;
+}
+
+/**
+ * Resolve how much later than now the cold gate judges a transcript.
+ *
+ * Answers `undefined` for "judge at now".
+ */
+export function resolveColdGateLaterMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
+  return resolveFakeMsOverride(env, fake, FAKE_COLD_GATE_LATER_ENV, "cold_gate_later_override", "cold-gate lateness");
 }
 
 /**
@@ -904,6 +926,7 @@ export async function main(): Promise<void> {
   // conversation".
 
   const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
+  const coldGateLaterMs = resolveColdGateLaterMs(process.env, args.fake);
   const exitQuietBudgetMs = resolveExitQuietBudgetMs(process.env, args.fake);
   const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
   const retry = resolveRetryPolicy(process.env, args.fake);
@@ -943,6 +966,7 @@ export async function main(): Promise<void> {
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
     nowMs: () => Date.now(),
     ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
+    ...(coldGateLaterMs === undefined ? {} : { coldGateLaterMs }),
     ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),
     probeApiReachable,
     ...(networkResumeIntervalMs === undefined ? {} : { networkResumeIntervalMs }),

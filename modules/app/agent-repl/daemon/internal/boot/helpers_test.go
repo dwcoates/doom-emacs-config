@@ -181,6 +181,33 @@ type fakeRollout struct {
 	// onReconcile runs inside Reconcile, where the real controller records
 	// the bounce dispositions as faults.
 	onReconcile func()
+	// takenUp is the adopted set TakeUpCarries was handed, takeUpErr what it
+	// answers, and onTakeUp / onFinish run inside TakeUpCarries and
+	// FinishCarries, so a test reads what the boot had done by then.
+	takenUp   []wsm.WorkspaceID
+	takeUpErr error
+	onTakeUp  func()
+	finishes  int
+	onFinish  func()
+}
+
+func (r *fakeRollout) TakeUpCarries(_ context.Context, adopted []wsm.WorkspaceID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.takenUp = append([]wsm.WorkspaceID(nil), adopted...)
+	if r.onTakeUp != nil {
+		r.onTakeUp()
+	}
+	return r.takeUpErr
+}
+
+func (r *fakeRollout) FinishCarries(context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.finishes++
+	if r.onFinish != nil {
+		r.onFinish()
+	}
 }
 
 func (r *fakeRollout) Reconcile(_ context.Context, survivors rollout.Survivors) ([]rollout.Disposition, error) {

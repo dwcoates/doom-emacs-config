@@ -201,6 +201,47 @@
       (agent-repl--kickoff-prompt-summary "ws-one" 42)
       (should-not agent-repl-test-ps--started))))
 
+(ert-deftest agent-repl-ps-spawn-runs-from-an-empty-private-directory ()
+  "The summary runs from a directory of its own, never the shared temp root.
+Its startup index walks the working directory, and the temp root's walk
+cost up to seven cores per summary."
+  (let* ((temporary-file-directory (file-name-as-directory (make-temp-file "ps-tmp" t)))
+         (seen-dir nil))
+    (unwind-protect
+        (agent-repl-test-ps--with
+          (agent-repl-test-ps--unguarded
+            (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
+                       (lambda (_ws _out-buf _cmd _sentinel)
+                         (setq seen-dir default-directory)
+                         'fake-process)))
+              (agent-repl--prompt-summary-spawn "ws-one" "a reasonably long prompt to summarize"))))
+      (delete-directory temporary-file-directory t))
+    (should (equal seen-dir (file-name-as-directory
+                             (expand-file-name "agent-repl-prompt-summary" temporary-file-directory))))
+    (should-not (equal seen-dir temporary-file-directory))))
+
+(ert-deftest agent-repl-ps-directory-is-created-when-missing ()
+  "The private directory is made on demand, so a fresh temp root works."
+  (let ((temporary-file-directory (file-name-as-directory (make-temp-file "ps-tmp" t))))
+    (unwind-protect
+        (let ((dir (agent-repl--prompt-summary-directory)))
+          (should (file-directory-p dir))
+          (should (equal (directory-files dir nil directory-files-no-dot-files-regexp) nil)))
+      (delete-directory temporary-file-directory t))))
+
+(ert-deftest agent-repl-ps-spawn-fails-loudly-when-its-directory-cannot-be-made ()
+  "A private directory that cannot be made spawns nothing and says so."
+  (let ((warned nil))
+    (agent-repl-test-ps--with
+      (agent-repl-test-ps--unguarded
+        (cl-letf (((symbol-function 'make-directory)
+                   (lambda (&rest _) (error "Permission denied")))
+                  ((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+          (should-not (agent-repl--prompt-summary-spawn "ws-one" "a reasonably long prompt to summarize"))
+          (should-not agent-repl-test-ps--started))))
+    (should (cl-some (lambda (w) (string-match-p "prompt-summary: spawn failed.*Permission denied" w)) warned))))
+
 ;;;; ---- The boundaries are registered ----
 
 (ert-deftest agent-repl-ps-process-start-is-a-registered-boundary ()

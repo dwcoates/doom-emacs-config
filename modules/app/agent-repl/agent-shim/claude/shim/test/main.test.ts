@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecordsDuring } from "./log-records.js";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
@@ -32,6 +33,8 @@ import {
   logCorrelation,
   queryFactory,
   resolveKeepaliveIntervalMs,
+  resolveColdGateLaterMs,
+  FAKE_COLD_GATE_LATER_ENV,
   OWNED_ENV,
   STORE_SOCKET_ENV,
   packageVersion,
@@ -673,6 +676,41 @@ describe("the keep-alive interval override", () => {
 
   it("refuses a value that is not a number at all", () => {
     expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "soon" }, true)).toBeUndefined();
+  });
+});
+
+describe("the cold-gate lateness override", () => {
+  it("is unset when the environment names none", () => {
+    expect(resolveColdGateLaterMs({}, true)).toBeUndefined();
+  });
+
+  it("is honored under --fake", () => {
+    expect(resolveColdGateLaterMs({ [FAKE_COLD_GATE_LATER_ENV]: "7200000" }, true)).toBe(7_200_000);
+  });
+
+  it("is REFUSED for a real session", () => {
+    // A production shim must never judge a cache as if later than it is.
+    expect(resolveColdGateLaterMs({ [FAKE_COLD_GATE_LATER_ENV]: "7200000" }, false)).toBeUndefined();
+  });
+
+  it("records the refusal of a real session's override", () => {
+    // Arrange
+    const records = logRecordsDuring(() => resolveColdGateLaterMs({ [FAKE_COLD_GATE_LATER_ENV]: "7200000" }, false));
+
+    // Assert
+    expect(records.map((r) => r.context.outcome)).toContain("cold_gate_later_override_refused");
+  });
+
+  it("refuses a value that is not a positive whole number, and records it", () => {
+    // Arrange
+    let answered: number | undefined = 0;
+    const records = logRecordsDuring(() => {
+      answered = resolveColdGateLaterMs({ [FAKE_COLD_GATE_LATER_ENV]: "-5" }, true);
+    });
+
+    // Assert
+    expect(answered).toBeUndefined();
+    expect(records.map((r) => r.context.outcome)).toContain("cold_gate_later_override_invalid");
   });
 });
 

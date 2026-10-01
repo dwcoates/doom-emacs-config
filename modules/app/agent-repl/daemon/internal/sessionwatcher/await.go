@@ -26,8 +26,8 @@ type turnEnd struct {
 	err error
 }
 
-// AwaitFree blocks until the workspace has no turn in flight and no live
-// detached work, or until ctx ends. It is DRIVEN BY THE STREAMS: every turn
+// AwaitFree blocks until the workspace's facts are in and leave no turn in
+// flight and no live detached work (freeLocked), or until ctx ends. It is DRIVEN BY THE STREAMS: every turn
 // end and every live-work change signals the standing waiters, so nothing
 // polls and nothing sleeps.
 func (w *watcher) AwaitFree(ctx context.Context) error {
@@ -83,7 +83,7 @@ func (w *watcher) registerFreeWaiter() (ch chan error, standing bool, err error)
 	if w.closed {
 		return nil, false, ErrWatcherClosed
 	}
-	if w.turn == nil && w.liveWorkLocked().Empty() {
+	if w.freeLocked() {
 		return nil, false, nil
 	}
 	ch = make(chan error, 1)
@@ -221,7 +221,7 @@ func (w *watcher) rememberClosedTurnLocked(turn ids.TurnID, how TurnClose) {
 // signalFreenessLocked answers every standing freeness waiter once the
 // workspace is actually free. It is a no-op while anything is still in flight.
 func (w *watcher) signalFreenessLocked() {
-	if w.turn != nil || !w.liveWorkLocked().Empty() {
+	if !w.freeLocked() {
 		w.busy = true
 		return
 	}

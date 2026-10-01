@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/wsm"
 )
 
 // TestTheStoreSocketPrecedence pins the store socket's three-way precedence:
@@ -172,9 +174,11 @@ func TestTheRolloutFlagsAreParsed(t *testing.T) {
 		argv          []string
 		wantReplacing bool
 		wantLayout    bool
+		wantKindFrom  int
 	}{
 		{name: "the replacing flag", argv: []string{"--replacing"}, wantReplacing: true},
 		{name: "the layout question", argv: []string{"-layout-version"}, wantLayout: true},
+		{name: "the migration-kind question", argv: []string{"-migration-kind-from=13"}, wantKindFrom: 13},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,8 +189,9 @@ func TestTheRolloutFlagsAreParsed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseFlags: %v", err)
 			}
-			if opts.replacing != tt.wantReplacing || opts.layoutVersion != tt.wantLayout {
-				t.Fatalf("replacing %v layoutVersion %v, want %v %v", opts.replacing, opts.layoutVersion, tt.wantReplacing, tt.wantLayout)
+			if opts.replacing != tt.wantReplacing || opts.layoutVersion != tt.wantLayout || opts.migrationKindFrom != tt.wantKindFrom {
+				t.Fatalf("replacing %v layoutVersion %v migrationKindFrom %d, want %v %v %d", opts.replacing, opts.layoutVersion,
+					opts.migrationKindFrom, tt.wantReplacing, tt.wantLayout, tt.wantKindFrom)
 			}
 		})
 	}
@@ -230,6 +235,7 @@ func TestParseFlagsInheritsOnlyTheConfigurationFlagsThatWereSet(t *testing.T) {
 		{name: "a set bool is inherited and an unset default is not", argv: []string{"--fake"}, want: []string{"--fake=true"}},
 		{name: "a separated value is inherited as parsed", argv: []string{"--default-config-dir", "/roots/default"}, want: []string{"--default-config-dir=/roots/default"}},
 		{name: "a replacement's role is not inherited", argv: []string{"--replacing", "--default-config-dir", "/roots/default"}, want: []string{"--default-config-dir=/roots/default"}},
+		{name: "a migration-kind question is not inherited", argv: []string{"-migration-kind-from=13", "--fake"}, want: []string{"--fake=true"}},
 		{name: "a successor's role is not inherited", argv: []string{"--joining", "127.0.0.1:9", "--node", "/bin/node"}, want: []string{"--node=/bin/node"}},
 	}
 	for _, tt := range tests {
@@ -564,5 +570,35 @@ func TestProbeBootClaimFlagIsParsed(t *testing.T) {
 	}
 	if !opts.probeBootClaim {
 		t.Fatalf("probeBootClaim = false with -probe-boot-claim, want true")
+	}
+}
+
+func TestAnswerMigrationKind(t *testing.T) {
+	tests := []struct {
+		name       string
+		from       int
+		wantCode   int
+		wantStdout string
+	}{
+		{name: "an additive chain", from: wsm.LayoutVersion - 1, wantCode: exitSuccess, wantStdout: "additive\n"},
+		{name: "a breaking chain", from: 5, wantCode: exitSuccess, wantStdout: "breaking\n"},
+		{name: "no chain reaches this layout", from: 1, wantCode: exitFailure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			var stdout, stderr bytes.Buffer
+
+			// Act.
+			code := answerMigrationKind(tt.from, &stdout, &stderr)
+
+			// Assert.
+			if code != tt.wantCode || stdout.String() != tt.wantStdout {
+				t.Fatalf("answer = (%d, %q), want (%d, %q)", code, stdout.String(), tt.wantCode, tt.wantStdout)
+			}
+			if tt.wantCode == exitFailure && stderr.Len() == 0 {
+				t.Fatal("a refused question said nothing on stderr")
+			}
+		})
 	}
 }

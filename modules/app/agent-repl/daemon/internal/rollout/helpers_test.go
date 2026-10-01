@@ -557,6 +557,10 @@ type fakeFleet struct {
 	factsErr map[ids.WorkspaceID]error
 	// coldGates is the cold gate standing per workspace.
 	coldGates map[ids.WorkspaceID]*conversationv1.SessionCold
+	// raisedColdGates records every RaiseCarriedColdGate, with its gate.
+	raisedColdGates map[ids.WorkspaceID]*conversationv1.SessionCold
+	// raiseErr is what RaiseCarriedColdGate answers.
+	raiseErr error
 	// parkedAdoptions records every AdoptParked, with the gate it raised.
 	parkedAdoptions map[ids.WorkspaceID]*conversationv1.SessionCold
 	// factsAwaited records every AwaitFacts.
@@ -613,6 +617,19 @@ func (f *fakeFleet) AdoptParked(_ context.Context, ws ids.WorkspaceID, cold *con
 	c := newFakeShim(4343, f.order)
 	f.live[ws] = c
 	return c, nil
+}
+
+// RaiseCarriedColdGate records the gate a fresh boot raised from a carry,
+// answering the scripted failure.
+func (f *fakeFleet) RaiseCarriedColdGate(_ context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) error {
+	f.order.record("raise_carried_cold_gate")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.raisedColdGates == nil {
+		f.raisedColdGates = map[ids.WorkspaceID]*conversationv1.SessionCold{}
+	}
+	f.raisedColdGates[ws] = cold
+	return f.raiseErr
 }
 
 // FactsAwaited answers every workspace AwaitFacts was asked of, in order.
@@ -761,6 +778,7 @@ type fakeRegistry struct {
 	adoptedHandoffs map[ids.WorkspaceID]bounce.Handoff
 	adoptHandoffErr error
 	rejudged        []ids.WorkspaceID
+	rejudgeErr      error
 	// park registers every request unrun, forced or not, so a test asserts
 	// what was asked without the bounce running.
 	park bool
@@ -829,7 +847,7 @@ func (r *fakeRegistry) RejudgeHeld(_ context.Context, ws ids.WorkspaceID) error 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rejudged = append(r.rejudged, ws)
-	return nil
+	return r.rejudgeErr
 }
 
 func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error) {

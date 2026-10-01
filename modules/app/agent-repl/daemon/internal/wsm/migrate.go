@@ -35,8 +35,52 @@ type migration struct {
 	To int
 	// Name says what the step does, for the record the open path writes.
 	Name string
+	// Kind says whether the build BEFORE this step keeps working against the
+	// file once the step has run. It decides how a deploy that crosses the
+	// step is rolled out (see MigrationKind), so every step declares one.
+	Kind MigrationKind
 	// DDL is the whole step, run as one script inside the step's transaction.
 	DDL string
+}
+
+// MigrationKind is what one migration step means for the build before it.
+//
+// AN ADDITIVE STEP IS HANDED OVER; ONLY A BREAKING STEP IS A RESTART. An
+// additive step (a new table, a new column with a default or NULL, a backfill
+// of a value the old build never read) leaves the old build working: its
+// statements name their columns, so a wider schema is invisible to it. The
+// joining successor applies such a step while the incumbent still serves
+// (OpenJoining), and the deploy hands over as it does for any build. A
+// breaking step (a dropped or renamed column or table, a column whose meaning
+// changed) would break the incumbent's statements mid-flight, so it needs
+// the incumbent gone first: the deploy restarts across it.
+//
+// A BREAKING CHANGE IS SHIPPED AS TWO DEPLOYS WHENEVER IT CAN BE: an additive
+// step that adds the new shape beside the old (the code writes both and reads
+// the new), then, once no running build reads the old shape, the breaking
+// step that drops it. Only the second is a restart.
+type MigrationKind int
+
+// The migration kinds. The zero value is no kind at all, which the guard test
+// refuses: a step that does not say is never guessed at.
+const (
+	migrationUnmarked MigrationKind = iota
+	// MigrationAdditive is a step the previous build keeps working across.
+	MigrationAdditive
+	// MigrationBreaking is a step the previous build cannot survive.
+	MigrationBreaking
+)
+
+// String names the kind as the deploy's flag answer spells it.
+func (k MigrationKind) String() string {
+	switch k {
+	case MigrationAdditive:
+		return "additive"
+	case MigrationBreaking:
+		return "breaking"
+	default:
+		return "unmarked"
+	}
 }
 
 // migrations is the ordered list of every step this build can apply, ascending
@@ -47,18 +91,18 @@ type migration struct {
 // EACH STEP REUSES THE FRESH-FILE DDL rather than restating it, so a migrated
 // file and a created one cannot drift into two different shapes.
 var migrations = []migration{
-	{To: 4, Name: "ported_prompts", DDL: portedPromptsDDL},
-	{To: 5, Name: "host_session_identity_backfill", DDL: hostSessionIdentityBackfillDDL},
-	{To: 6, Name: "creation_jobs_drop_one_shot_finish", DDL: creationJobsDropOneShotFinishDDL},
-	{To: 7, Name: "sessions_selected_config_dir", DDL: sessionsSelectedConfigDirDDL},
-	{To: 8, Name: "workspaces_spawned_shim_pid", DDL: spawnedShimPidDDL},
-	{To: 9, Name: "workspaces_last_activity_at", DDL: lastActivityAtDDL},
-	{To: 10, Name: "feed_text_scale", DDL: feedTextScaleDDL},
-	{To: 11, Name: "idempotency_keys_accepted_at", DDL: acceptedAtDDL},
-	{To: 12, Name: "held_prompts_delivery", DDL: heldPromptsDeliveryDDL},
-	{To: 13, Name: "workspaces_turn_result", DDL: turnResultDDL},
-	{To: 14, Name: "held_prompts_act_and_coalesced", DDL: heldPromptsActDDL},
-	{To: 15, Name: "merge_queue_source", DDL: mergeQueueSourceDDL},
+	{To: 4, Name: "ported_prompts", Kind: MigrationAdditive, DDL: portedPromptsDDL},
+	{To: 5, Name: "host_session_identity_backfill", Kind: MigrationAdditive, DDL: hostSessionIdentityBackfillDDL},
+	{To: 6, Name: "creation_jobs_drop_one_shot_finish", Kind: MigrationBreaking, DDL: creationJobsDropOneShotFinishDDL},
+	{To: 7, Name: "sessions_selected_config_dir", Kind: MigrationAdditive, DDL: sessionsSelectedConfigDirDDL},
+	{To: 8, Name: "workspaces_spawned_shim_pid", Kind: MigrationAdditive, DDL: spawnedShimPidDDL},
+	{To: 9, Name: "workspaces_last_activity_at", Kind: MigrationAdditive, DDL: lastActivityAtDDL},
+	{To: 10, Name: "feed_text_scale", Kind: MigrationAdditive, DDL: feedTextScaleDDL},
+	{To: 11, Name: "idempotency_keys_accepted_at", Kind: MigrationAdditive, DDL: acceptedAtDDL},
+	{To: 12, Name: "held_prompts_delivery", Kind: MigrationAdditive, DDL: heldPromptsDeliveryDDL},
+	{To: 13, Name: "workspaces_turn_result", Kind: MigrationAdditive, DDL: turnResultDDL},
+	{To: 14, Name: "held_prompts_act_and_coalesced", Kind: MigrationAdditive, DDL: heldPromptsActDDL},
+	{To: 15, Name: "merge_queue_source", Kind: MigrationAdditive, DDL: mergeQueueSourceDDL},
 }
 
 // mergeQueueSourceDDL adds WHAT a queued merge lands (agentrepl.v1
@@ -249,6 +293,29 @@ func planMigrations(from int) ([]migration, bool) {
 		return nil, false
 	}
 	return plan, true
+}
+
+// ChainKind answers what the steps carrying a file stamped with from up to
+// this build's layout mean for the build that wrote it: breaking when any one
+// step is, additive when every one is. A file no chain reaches is refused
+// with the *LayoutError the open path would refuse it with.
+func ChainKind(from int) (MigrationKind, error) {
+	plan, ok := planMigrations(from)
+	if !ok {
+		return migrationUnmarked, &LayoutError{File: from, Binary: LayoutVersion,
+			Reason: "no migration in this build leads from it to this build's layout"}
+	}
+	return planKind(plan), nil
+}
+
+// planKind is breaking when any step of plan is, additive otherwise.
+func planKind(plan []migration) MigrationKind {
+	for _, m := range plan {
+		if m.Kind != MigrationAdditive {
+			return MigrationBreaking
+		}
+	}
+	return MigrationAdditive
 }
 
 // migrateForward carries an existing file from its stamped layout up to this

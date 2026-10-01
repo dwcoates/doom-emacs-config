@@ -197,6 +197,41 @@ func (s *store) ClearSessionTerminal(ctx context.Context, id WorkspaceID) error 
 	})
 }
 
+// SetVendorSessionID records the vendor session id a later resume names, and
+// answers the one it replaced. The vendor ROTATES the id (a /clear starts a new
+// conversation under a new id), and the shim states the id in force on every
+// rotation and on every re-announced start; a record left naming the start's
+// id resumed nothing after a restart, and the session came up FRESH
+// (2026-09-30). Recording the id the row already names is no change.
+func (s *store) SetVendorSessionID(ctx context.Context, id WorkspaceID, vendorSessionID string) (string, error) {
+	const op = "daemon.wsm.set_vendor_session_id"
+	fields := dlog.Context{"workspace": string(id), "vendor_session": vendorSessionID}
+	if vendorSessionID == "" {
+		err := fmt.Errorf("wsm: workspace %s: a recorded vendor session id is never empty", id)
+		s.log.Error(op, "refused an empty vendor session id", withError(fields, err))
+		return "", err
+	}
+	var previous string
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT vendor_session_id FROM sessions WHERE workspace_id = ?`, id).Scan(&previous)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: session for workspace %s: %w", id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET vendor_session_id = ? WHERE workspace_id = ?`, vendorSessionID, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+	if err != nil {
+		return "", err
+	}
+	return previous, nil
+}
+
 // TouchEngagement records last engagement — the idle sweep's input.
 func (s *store) TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error {
 	return s.write(ctx, "daemon.wsm.touch_engagement", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {

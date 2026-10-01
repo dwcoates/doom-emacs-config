@@ -132,6 +132,58 @@ func OpenReadOnly(ctx context.Context, path string, opts ...Option) (DB, error) 
 	return s, nil
 }
 
+// OpenJoining is a JOINING daemon's open. The incumbent is still the sole
+// writer of every row, so the handle it answers is read-only (OpenReadOnly);
+// but a file stamped older than this build is first carried forward by its
+// ADDITIVE steps alone, through a writing handle that exists only for those
+// steps. An additive step leaves the incumbent's statements working (see
+// MigrationKind), so the incumbent keeps serving across it, and the
+// successor then reads a file it can interpret. A chain with any BREAKING
+// step is refused with a *LayoutError and changes nothing: the deploy restarts
+// across it instead of handing over.
+func OpenJoining(ctx context.Context, path string, opts ...Option) (DB, error) {
+	if err := usablePath(path); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("wsm: inspect the joining db path %q: %w", path, err)
+	}
+	if err := migrateAdditiveWhileJoining(ctx, path, opts); err != nil {
+		return nil, err
+	}
+	return OpenReadOnly(ctx, path, opts...)
+}
+
+// migrateAdditiveWhileJoining applies the additive steps that carry an older
+// file to this build's layout, and nothing else: no schema is created, no row
+// is reconciled, and the writing handle is closed before the answer.
+func migrateAdditiveWhileJoining(ctx context.Context, path string, opts []Option) error {
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
+	s, err := openStore(ctx, path, dsn, false, opts)
+	if err != nil {
+		return err
+	}
+	defer s.handle.Close()
+	version, err := s.layoutVersion(ctx)
+	if err != nil {
+		return err
+	}
+	switch {
+	case version == LayoutVersion:
+		return nil
+	case version > LayoutVersion:
+		return s.refuseLayout(version, "a downgrade is not a migration")
+	}
+	plan, ok := planMigrations(version)
+	if !ok {
+		return s.refuseLayout(version, "no migration in this build leads from it to this build's layout")
+	}
+	if planKind(plan) != MigrationAdditive {
+		return s.refuseLayout(version, "a breaking migration cannot run while the incumbent still writes it; the deploy restarts across it")
+	}
+	return s.migrateForward(ctx, version)
+}
+
 // usablePath refuses the paths this store cannot be: it must be reopen-durable,
 // so an empty path and an in-memory database are both errors.
 func usablePath(path string) error {

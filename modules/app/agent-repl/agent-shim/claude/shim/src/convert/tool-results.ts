@@ -27,7 +27,13 @@ import {
   type ToolOutcome,
 } from "./tool-calls.js";
 import { skillDocumentSettle } from "./tools/skill-use.js";
-import { bashDetachmentEntry, shellRunStartEntry, type TaskKindRegistry } from "./detached.js";
+import {
+  bashDetachmentEntry,
+  resultBackgroundTaskId,
+  shellRunClaimEntry,
+  shellRunStartEntry,
+  type TaskKindRegistry,
+} from "./detached.js";
 import { activityEntry, agentActivity } from "./entries.js";
 import { convertPeerMessage } from "./peer.js";
 import { toolCallActivityId } from "./ids.js";
@@ -171,6 +177,13 @@ export function convertUserRecord(
         const start = shellRunStartEntry(context, pending.agentId, toolUseId, pending);
         if (start !== undefined) entries.push(start);
         entries.push(detachment);
+        // EVERY ANNOUNCED SHELL CARRIES ITS SPOOL'S CLAIM to the store, this
+        // path (a Ctrl-B, a timeout) as much as the task stream's: a restarted
+        // sidecar whose rewind no longer reaches this result rebuilds its
+        // tracking from the claim, or the run stays open for ever. The claim
+        // is keyed by run and task, so the task stream's copy is the same row.
+        const vendorTaskId = resultBackgroundTaskId(structured);
+        if (vendorTaskId !== undefined) entries.push(shellRunClaimEntry(context, vendorTaskId, toolUseId));
       }
     }
     entries.push(
