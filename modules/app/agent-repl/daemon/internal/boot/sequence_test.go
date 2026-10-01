@@ -1189,6 +1189,66 @@ func TestOneFailedBringUpDoesNotStopTheNext(t *testing.T) {
 	}
 }
 
+// TestABringUpEnsuresTheServicesBeforeItsFirstStart pins that the store is
+// made to exist before any shim is brought up against it. MEASURED, 2026-09-30
+// 22:41:12: five shims brought up with the store booted out sat in ~80s of
+// `connect ENOENT .../store.sock` with blank feeds.
+func TestABringUpEnsuresTheServicesBeforeItsFirstStart(t *testing.T) {
+	// Arrange: the start records how many ensures had run when it began.
+	var ensuredBeforeStart int32
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+			ensuredBeforeStart = h.ensures.Load()
+			h.noteStarted(ws)
+			return nil
+		}
+	})
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	if ensuredBeforeStart != 1 {
+		t.Fatalf("ensures before the first start = %d, want 1", ensuredBeforeStart)
+	}
+}
+
+// TestAFailedServiceEnsureStillBringsTheSessionsUp pins that a store that will
+// not come back is reported, not a reason to leave every workspace
+// session-less: each shim raises its own store fault on its surfaces.
+func TestAFailedServiceEnsureStillBringsTheSessionsUp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ensureErr = errBoom
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	_, brought := h.runAndBringUp(t)
+
+	// Assert.
+	if len(brought.BroughtUp) != 1 || brought.BroughtUp[0] != ws.ID {
+		t.Fatalf("BroughtUp = %v, want [%v]", brought.BroughtUp, ws.ID)
+	}
+}
+
+// TestAFailedServiceEnsureIsRecordedAsAnError pins the log half: a store the
+// boot could not bring back is a fault, stated at ERROR.
+func TestAFailedServiceEnsureIsRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ensureErr = errBoom
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.boot.bring_up") {
+		t.Fatalf("no error record under daemon.boot.bring_up: %v", h.log.Records())
+	}
+}
+
 // bringUpBound bounds a bring-up test's wait on its own fakes. A healthy run
 // clears every barrier in microseconds; reaching it means the starts did not
 // overlap.

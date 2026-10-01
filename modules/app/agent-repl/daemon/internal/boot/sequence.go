@@ -765,6 +765,14 @@ var _ = []rollout.DispositionKind{
 // was pending, so its slices do not depend on which start finished first.
 func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUpReport {
 	log := s.deps.Log.Global()
+	// THE STORE BEFORE ANY SHIM. A service that will not come back is stated
+	// at ERROR and the bring-up still goes on: each shim then raises its own
+	// store fault, which is what puts the dead store on every surface.
+	if err := s.deps.EnsureServices(context.WithoutCancel(ctx)); err != nil {
+		log.Error("daemon.boot.bring_up", "the store and sidecar services could not be ensured; sessions are started without them", dlog.Context{
+			"error": err.Error(),
+		})
+	}
 	outcomes := make([]bringUpOutcome, len(pending))
 	var wg sync.WaitGroup
 	for i, ws := range pending {

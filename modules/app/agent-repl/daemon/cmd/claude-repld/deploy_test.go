@@ -78,7 +78,7 @@ func TestADeployerIsNotBuiltWithoutItsOwnBuild(t *testing.T) {
 	p := deployerParamsFor(t, filepath.Join(t.TempDir(), "gone"))
 
 	// Act
-	_, err := buildDeployer(context.Background(), p)
+	_, _, err := buildDeployer(context.Background(), p)
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "hash this daemon's own binary") {
@@ -95,7 +95,7 @@ func TestADeployerIsNotBuiltWithoutARollout(t *testing.T) {
 	p := deployerParamsFor(t, exe)
 
 	// Act
-	_, err := buildDeployer(context.Background(), p)
+	_, _, err := buildDeployer(context.Background(), p)
 
 	// Assert: the deploy's own constructor refuses the missing collaborator.
 	if err == nil || !strings.Contains(err.Error(), "rollout controller is required") {
@@ -166,7 +166,7 @@ func TestTheBootingDeployerClosesTheDeployFaultsAnEarlierDaemonLeft(t *testing.T
 			p.Rollout, p.Progress, p.Faults, p.Joining = idleRollout{}, noProgress{}, faults, tc.joining
 
 			// Act
-			if _, err := buildDeployer(context.Background(), p); err != nil {
+			if _, _, err := buildDeployer(context.Background(), p); err != nil {
 				t.Fatalf("buildDeployer: %v", err)
 			}
 
