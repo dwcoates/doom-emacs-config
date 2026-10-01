@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ancestorMatching, placeChildren, scrollbarWidthPx } from "../src/dom.js";
+import { codeOf } from "./source-text.js";
 
 describe("scrollbarWidthPx", () => {
   it("answers a classic bar's width", () => {
@@ -29,7 +30,7 @@ describe("scrollbarWidthPx", () => {
     const code = new Map(
       walk(src).map((path) => [
         relative(src, path),
-        readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""),
+        codeOf(readFileSync(path, "utf8")),
       ]),
     );
     // Act

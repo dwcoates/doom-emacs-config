@@ -3,7 +3,10 @@
  *
  * The roster is the ONE global stream, and both groupings arrive resolved as
  * siblings: which one renders is a webview-local preference, not wire state,
- * and so are the folds. That split is what most of this file asserts.
+ * and so are a task section's folds. A REPOSITORY section's fold is the
+ * daemon's (FoldRepository), because the Emacs tab bar hides a collapsed
+ * repository's workspaces off the same pushed arm. That split is what most of
+ * this file asserts.
  *
  * The blink cadence gets its own section because it is specified exactly once,
  * on `RosterRowAttention` — two blinks at 500 ms on/off, then steady — and
@@ -142,35 +145,90 @@ describe("the groupings", () => {
   });
 });
 
-describe("folds", () => {
-  it("folds a section on click", async () => {
+/** A task section's fold triangle; task folds are the webview's own. */
+const TASK_FOLD = '[data-grouping="task"] [data-section-fold]';
+
+/** A repository section's fold triangle; repository folds are the daemon's. */
+const REPOSITORY_FOLD = '[data-grouping="repository"] [data-section-fold]';
+
+describe("task folds", () => {
+  it("folds a task section on click", async () => {
     // Arrange
     await withRoster({});
+    await harness.click('[data-grouping-pick="task"]');
     // Act
-    await harness.click("[data-section-fold]");
+    await harness.click(TASK_FOLD);
     // Assert
-    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
+    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
   });
 
-  it("makes no rpc call to fold a section", async () => {
+  it("makes no rpc call to fold a task section", async () => {
     // Arrange
     await withRoster({});
+    await harness.click('[data-grouping-pick="task"]');
     harness.fake.clearCalls();
     // Act
-    await harness.click("[data-section-fold]");
+    await harness.click(TASK_FOLD);
     // Assert
     expect(harness.fake.log()).toEqual([]);
   });
 
-  it("keeps the fold across a re-push", async () => {
+  it("keeps a task fold across a re-push", async () => {
     // Arrange
     await withRoster({});
-    await harness.click("[data-section-fold]");
+    await harness.click('[data-grouping-pick="task"]');
+    await harness.click(TASK_FOLD);
     // Act: R2 — the user's toggle wins after the first draw.
     harness.fake.setRoster(roster({}));
     await harness.settle();
     // Assert
-    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
+    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
+  });
+});
+
+/** The one repository section, as the daemon pushes it collapsed. */
+const COLLAPSED_REPOSITORY = [{ repositoryId: "repo-1", label: "doom", rows: [rosterRow()], collapsed: true }];
+
+describe("repository folds", () => {
+  it("asks the daemon to collapse an expanded repository on click", async () => {
+    // Arrange
+    await withRoster({});
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(REPOSITORY_FOLD);
+    // Assert
+    const [request] = harness.fake.calls<{ fold: { case?: string } }>("foldRepository");
+    expect(request?.fold.case).toBe("collapse");
+  });
+
+  it("asks the daemon to expand a collapsed repository on click", async () => {
+    // Arrange
+    await withRoster({ repositorySections: COLLAPSED_REPOSITORY });
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(REPOSITORY_FOLD);
+    // Assert
+    const [request] = harness.fake.calls<{ fold: { case?: string } }>("foldRepository");
+    expect(request?.fold.case).toBe("expand");
+  });
+
+  it("never folds the section itself ahead of the daemon's push", async () => {
+    // Arrange
+    await withRoster({});
+    // Act
+    await harness.click(REPOSITORY_FOLD);
+    // Assert
+    expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("false");
+  });
+
+  it("draws the fold the daemon pushes", async () => {
+    // Arrange
+    await withRoster({});
+    // Act
+    harness.fake.setRoster(roster({ repositorySections: COLLAPSED_REPOSITORY }));
+    await harness.settle();
+    // Assert
+    expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
   });
 });
 
@@ -695,26 +753,28 @@ describe("the remembered preferences", () => {
     expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
   });
 
-  it("stores the fold the reader closed", async () => {
+  it("stores the task fold the reader closed", async () => {
     // Arrange
     await withRoster({});
+    await harness.click('[data-grouping-pick="task"]');
     // Act
-    await harness.click("[data-section-fold]");
+    await harness.click(TASK_FOLD);
     // Assert
     expect(Object.values(stored().folded ?? {})).toContain(true);
   });
 
-  it("draws a stored fold closed on a fresh mount", async () => {
+  it("draws a stored task fold closed on a fresh mount", async () => {
     // Arrange
     await withRoster({});
-    await harness.click("[data-section-fold]");
+    await harness.click('[data-grouping-pick="task"]');
+    await harness.click(TASK_FOLD);
     const folded = stored().folded;
     await harness.stop();
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ folded }));
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task", folded }));
     // Act
     await withRoster({});
     // Assert
-    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
+    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
   });
 
   it("takes the default grouping when nothing is stored", async () => {
@@ -756,16 +816,17 @@ describe("the remembered preferences", () => {
     expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
   });
 
-  it("still folds a section when writing storage throws", async () => {
+  it("still folds a task section when writing storage throws", async () => {
     // Arrange
     vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new Error("site data is disabled");
     });
     await withRoster({});
+    await harness.click('[data-grouping-pick="task"]');
     // Act
-    await harness.click("[data-section-fold]");
+    await harness.click(TASK_FOLD);
     // Assert
-    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
+    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
   });
 });
 
