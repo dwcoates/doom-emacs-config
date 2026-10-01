@@ -43,7 +43,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/store.proto.
  */
 export const file_store_v1_store: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi+AIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBARI2CgVwbGFjZRgIIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgDiAEBQgcKBWVudHJ5QgcKBV90dXJuQhUKE19jb252ZXJzaW9uX3ZlcnNpb25CCAoGX3BsYWNlIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIm4KDVN0b3JlUGFnZUxpbmUSLwoNcGFnZV9hZ2VudF9pZBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEiwKCmFnZW50X2l0ZW0YAiABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50SXRlbSK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSKNAgoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnQSMQoQc2hlbGxfcnVuX2NsYWltcxgFIAMoCzIXLnN0b3JlLnYxLlNoZWxsUnVuQ2xhaW1CEQoPX2N1cnNvcl9hZHZhbmNlIlYKDVNoZWxsUnVuQ2xhaW0SFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSLQoDcnVuGAIgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZCJPCgxBZ2VudExvY2F0b3ISFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSJwoFYWdlbnQYAiABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCJBCg9TdG9yZVJldGlyZW1lbnQSEgoKdXBzZXJ0X2tleRgBIAEoCRIaChJjb252ZXJzaW9uX3ZlcnNpb24YAiABKA0ijwEKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwSMwoKY29udmVyc2lvbhgFIAEoCzIaLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IAIgBAUINCgtfY29udmVyc2lvbiKYAQoQQ3Vyc29yQ29udmVyc2lvbhIPCgd2ZXJzaW9uGAEgASgNEjQKB2N1cnJlbnQYAiABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uQ3VycmVudEgAEjQKB2hlYWxpbmcYAyABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uSGVhbGluZ0gAQgcKBXN0YXRlIhkKF0N1cnNvckNvbnZlcnNpb25DdXJyZW50IioKF0N1cnNvckNvbnZlcnNpb25IZWFsaW5nEg8KB3Rocm91Z2gYASABKAMiIQoQU3RvcmVJdGVtUG9pbnRlchINCgV2YWx1ZRgBIAEoCSKWAgoLU3RvcmVMaW5lQXQSJgoCYXQYASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyEiUKBGxpbmUYAiABKAsyFy5zdG9yZS52MS5TdG9yZVBhZ2VMaW5lEioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSAGIAQESPAoOcmVjb3JkZWRfcGxhY2UYBCABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIABI8Cg5yZWNlaXZlZF9wbGFjZRgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAQgcKBXBsYWNlQgcKBV90dXJuIkIKEVJlYWRBZ2VudFBhZ2VNb3JlEi0KCWxhc3RfaXRlbRgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXIiFAoSUmVhZEFnZW50UGFnZUZsb29yIiIKEUFnZW50U2Vzc2lvblRva2VuEg0KBXZhbHVlGAEgASgJIqABChBBZ2VudFNlc3Npb25QYWdlEiQKBWxpbmVzGAEgAygLMhUuc3RvcmUudjEuU3RvcmVMaW5lQXQSKwoEbW9yZRgCIAEoCzIbLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VNb3JlSAASLQoFZmxvb3IYAyABKAsyHC5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmxvb3JIAEIKCghib3VuZGFyeUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_history, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("ChRzdG9yZS92MS9zdG9yZS5wcm90bxIIc3RvcmUudjEi+AIKClN0b3JlRW50cnkSHgoFcGxhbmUYASABKAsyDy5zdG9yZS52MS5QbGFuZRIQCgh3cml0ZV9pZBgCIAEoCRISCgp1cHNlcnRfa2V5GAMgASgJEjIKDGFnZW50X3VwZGF0ZRgEIAEoCzIaLnN0b3JlLnYxLlN0b3JlQWdlbnRVcGRhdGVIABI4Cg5zZXNzaW9uX3VwZGF0ZRgFIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXBkYXRlSAASKgoEdHVybhgGIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARIfChJjb252ZXJzaW9uX3ZlcnNpb24YByABKA1IAogBARI2CgVwbGFjZRgIIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgDiAEBQgcKBWVudHJ5QgcKBV90dXJuQhUKE19jb252ZXJzaW9uX3ZlcnNpb25CCAoGX3BsYWNlIqYCChBTdG9yZUFnZW50VXBkYXRlEjAKCXRvcF9sZXZlbBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESMgoPc2VydmVhYmxlX2ZyYW1lGAIgASgLMhcuc3RvcmUudjEuU3RvcmVQYWdlTGluZUgAEjQKDXVuc2VydmVkX2l0ZW0YAyABKAsyGy5zdG9yZS52MS5TdG9yZVVuc2VydmVkSXRlbUgAEigKBGJhc2gYBCABKAsyGC5zdG9yZS52MS5TdG9yZUFnZW50QmFzaEgAEjAKCHdvcmtmbG93GAUgASgLMhwuc3RvcmUudjEuU3RvcmVBZ2VudFdvcmtmbG93SABCDAoKYWdlbnRfaW5mb0IMCgpfdG9wX2xldmVsIrYBCg1TdG9yZVBhZ2VMaW5lEjEKDXBhZ2VfYWdlbnRfaWQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAEjwKDW93bmVyX3Vua25vd24YAyABKAsyIy5zdG9yZS52MS5TdG9yZVBhZ2VMaW5lT3duZXJVbmtub3duSAASLAoKYWdlbnRfaXRlbRgCIAEoCzIYLnN0b3JlLnYxLlN0b3JlQWdlbnRJdGVtQgYKBGJvb2siGwoZU3RvcmVQYWdlTGluZU93bmVyVW5rbm93biK4AQoOU3RvcmVBZ2VudEl0ZW0SNAoMYWdlbnRfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgYKBGl0ZW0iagoOU3RvcmVBZ2VudEJhc2gSLQoDcnVuGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBIpCgVmcmFtZRgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2giagoSU3RvcmVBZ2VudFdvcmtmbG93EiUKA3J1bhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi0KBWZyYW1lGAIgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3ciXgoFUGxhbmUSJwoGc3RyZWFtGAEgASgLMhUuc3RvcmUudjEuUGxhbmVTdHJlYW1IABIjCgRmaWxlGAIgASgLMhMuc3RvcmUudjEuUGxhbmVGaWxlSABCBwoFcGxhbmUiDQoLUGxhbmVTdHJlYW0iCwoJUGxhbmVGaWxlIscBChFTdG9yZVVuc2VydmVkSXRlbRI4Cg92ZW5kb3Jfc3BlY2lmaWMYAiABKAsyHS5zdG9yZS52MS5TdG9yZVZlbmRvclNwZWNpZmljSAASKQoHdW5rbm93bhgDIAEoCzIWLnN0b3JlLnYxLlN0b3JlVW5rbm93bkgAEisKCHVucGFyc2VkGAQgASgLMhcuc3RvcmUudjEuU3RvcmVVbnBhcnNlZEgAQg8KDXVuc2VydmVkX2l0ZW1KBAgBEAJSCWtlZXBhbGl2ZSJJChNTdG9yZVZlbmRvclNwZWNpZmljEgwKBGtpbmQYASABKAkSJAoDcmF3GAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJoCgxTdG9yZVVua25vd24SFQoNZGlzY3JpbWluYXRvchgBIAEoCRIbChNkaXNjcmltaW5hdG9yX2ZpZWxkGAIgASgJEiQKA3JhdxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiUQoNU3RvcmVVbnBhcnNlZBIOCgZzb3VyY2UYASABKAkSDgoGb2Zmc2V0GAIgASgEEhMKC3BhcnNlX2Vycm9yGAMgASgJEgsKA3JhdxgEIAEoCSKNAgoKRW50cnlCYXRjaBIlCgdlbnRyaWVzGAEgAygLMhQuc3RvcmUudjEuU3RvcmVFbnRyeRIyCg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIVLnN0b3JlLnYxLkN1cnNvclN0YXRlSACIAQESLgoOYWdlbnRfbG9jYXRvcnMYAyADKAsyFi5zdG9yZS52MS5BZ2VudExvY2F0b3ISLgoLcmV0aXJlbWVudHMYBCADKAsyGS5zdG9yZS52MS5TdG9yZVJldGlyZW1lbnQSMQoQc2hlbGxfcnVuX2NsYWltcxgFIAMoCzIXLnN0b3JlLnYxLlNoZWxsUnVuQ2xhaW1CEQoPX2N1cnNvcl9hZHZhbmNlIlYKDVNoZWxsUnVuQ2xhaW0SFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSLQoDcnVuGAIgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZCJPCgxBZ2VudExvY2F0b3ISFgoOdmVuZG9yX3Rhc2tfaWQYASABKAkSJwoFYWdlbnQYAiABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCJBCg9TdG9yZVJldGlyZW1lbnQSEgoKdXBzZXJ0X2tleRgBIAEoCRIaChJjb252ZXJzaW9uX3ZlcnNpb24YAiABKA0ijwEKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwSMwoKY29udmVyc2lvbhgFIAEoCzIaLnN0b3JlLnYxLkN1cnNvckNvbnZlcnNpb25IAIgBAUINCgtfY29udmVyc2lvbiKYAQoQQ3Vyc29yQ29udmVyc2lvbhIPCgd2ZXJzaW9uGAEgASgNEjQKB2N1cnJlbnQYAiABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uQ3VycmVudEgAEjQKB2hlYWxpbmcYAyABKAsyIS5zdG9yZS52MS5DdXJzb3JDb252ZXJzaW9uSGVhbGluZ0gAQgcKBXN0YXRlIhkKF0N1cnNvckNvbnZlcnNpb25DdXJyZW50IioKF0N1cnNvckNvbnZlcnNpb25IZWFsaW5nEg8KB3Rocm91Z2gYASABKAMiIQoQU3RvcmVJdGVtUG9pbnRlchINCgV2YWx1ZRgBIAEoCSKWAgoLU3RvcmVMaW5lQXQSJgoCYXQYASABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVyEiUKBGxpbmUYAiABKAsyFy5zdG9yZS52MS5TdG9yZVBhZ2VMaW5lEioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSAGIAQESPAoOcmVjb3JkZWRfcGxhY2UYBCABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIABI8Cg5yZWNlaXZlZF9wbGFjZRgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAQgcKBXBsYWNlQgcKBV90dXJuIkIKEVJlYWRBZ2VudFBhZ2VNb3JlEi0KCWxhc3RfaXRlbRgBIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXIiFAoSUmVhZEFnZW50UGFnZUZsb29yIiIKEUFnZW50U2Vzc2lvblRva2VuEg0KBXZhbHVlGAEgASgJIqABChBBZ2VudFNlc3Npb25QYWdlEiQKBWxpbmVzGAEgAygLMhUuc3RvcmUudjEuU3RvcmVMaW5lQXQSKwoEbW9yZRgCIAEoCzIbLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VNb3JlSAASLQoFZmxvb3IYAyABKAsyHC5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmxvb3JIAEIKCghib3VuZGFyeUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_google_protobuf_struct, file_conversation_v1_agent, file_conversation_v1_agent_activity, file_conversation_v1_history, file_conversation_v1_peer, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * One write: a conversation.v1 fact inside the storage envelope.
@@ -247,12 +247,39 @@ export const StoreAgentUpdateSchema: GenMessage<StoreAgentUpdate> = /*@__PURE__*
  */
 export type StorePageLine = Message<"store.v1.StorePageLine"> & {
   /**
-   * The book: the agent whose page this line renders in. A pagination query
-   * filters on this and nothing else.
+   * WHICH BOOK THE LINE IS FILED IN, as the producer knows it. REQUIRED: a line
+   * with neither arm set is refused as an invalid request.
    *
-   * @generated from field: conversation.v1.AgentId page_agent_id = 1;
+   * A WRITER NEVER CLAIMS A BOOK IT DOES NOT KNOW. Most lines name their book,
+   * because the producer observed whose fact it is. A producer that observed a
+   * fact about a unit WITHOUT observing whose unit it is -- the vendor's task
+   * stream is session-wide and names no agent, so a backgrounded subagent's own
+   * spawn reaches it with no owner -- says so with `owner_unknown`, rather than
+   * naming a book it would only be guessing at.
+   *
+   * @generated from oneof store.v1.StorePageLine.book
    */
-  pageAgentId?: AgentId | undefined;
+  book: {
+    /**
+     * The book: the agent whose page this line renders in. A pagination query
+     * filters on this and nothing else. The line's own attribution (the
+     * frame's agent_id, the prompt's or peer message's recipient) must name
+     * the same agent, or the write is refused.
+     *
+     * @generated from field: conversation.v1.AgentId page_agent_id = 1;
+     */
+    value: AgentId;
+    case: "pageAgentId";
+  } | {
+    /**
+     * The producer does not know whose line this is. See
+     * StorePageLineOwnerUnknown for how the store places it.
+     *
+     * @generated from field: store.v1.StorePageLineOwnerUnknown owner_unknown = 3;
+     */
+    value: StorePageLineOwnerUnknown;
+    case: "ownerUnknown";
+  } | { case: undefined; value?: undefined };
 
   /**
    * The line itself.
@@ -268,6 +295,34 @@ export type StorePageLine = Message<"store.v1.StorePageLine"> & {
  */
 export const StorePageLineSchema: GenMessage<StorePageLine> = /*@__PURE__*/
   messageDesc(file_store_v1_store, 2);
+
+/**
+ * THE PRODUCER DOES NOT KNOW WHOSE LINE THIS IS, so the store places it.
+ *
+ * ONLY AN UPSERT OF A ROW THE RECORD ALREADY HOLDS CAN BE PLACED. The store
+ * files the line in the book that already holds its upsert_key, attributes it
+ * to that book's agent (it stamps the frame's agent_id, which the producer
+ * leaves UNSET), and keeps the stored row's top_level; from then on the row is
+ * exactly what a write naming that book would have stored. An upsert_key the
+ * record does not hold yet names no book at all, so nothing is stored and the
+ * entry is reported in WriteBatchSuccess.unplaced -- never filed in a guessed
+ * book.
+ *
+ * ONLY AN AGENT FRAME MAY BE UNOWNED. A prompt and a peer message always name
+ * their recipient, so a line carrying either with this arm is refused as an
+ * invalid request, as is an agent frame whose agent_id is set.
+ *
+ * @generated from message store.v1.StorePageLineOwnerUnknown
+ */
+export type StorePageLineOwnerUnknown = Message<"store.v1.StorePageLineOwnerUnknown"> & {
+};
+
+/**
+ * Describes the message store.v1.StorePageLineOwnerUnknown.
+ * Use `create(StorePageLineOwnerUnknownSchema)` to create a new message.
+ */
+export const StorePageLineOwnerUnknownSchema: GenMessage<StorePageLineOwnerUnknown> = /*@__PURE__*/
+  messageDesc(file_store_v1_store, 3);
 
 /**
  * A servable conversation fact: a prompt or an agent's frame.
@@ -308,7 +363,7 @@ export type StoreAgentItem = Message<"store.v1.StoreAgentItem"> & {
  * Use `create(StoreAgentItemSchema)` to create a new message.
  */
 export const StoreAgentItemSchema: GenMessage<StoreAgentItem> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 3);
+  messageDesc(file_store_v1_store, 4);
 
 /**
  * A detached shell run's frame, wrapped with the unit id the spawning stream
@@ -333,7 +388,7 @@ export type StoreAgentBash = Message<"store.v1.StoreAgentBash"> & {
  * Use `create(StoreAgentBashSchema)` to create a new message.
  */
 export const StoreAgentBashSchema: GenMessage<StoreAgentBash> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 4);
+  messageDesc(file_store_v1_store, 5);
 
 /**
  * A workflow run's frame, wrapped with the run's agent identity for the same
@@ -358,7 +413,7 @@ export type StoreAgentWorkflow = Message<"store.v1.StoreAgentWorkflow"> & {
  * Use `create(StoreAgentWorkflowSchema)` to create a new message.
  */
 export const StoreAgentWorkflowSchema: GenMessage<StoreAgentWorkflow> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 5);
+  messageDesc(file_store_v1_store, 6);
 
 /**
  * Which producer observed a record.
@@ -399,7 +454,7 @@ export type Plane = Message<"store.v1.Plane"> & {
  * Use `create(PlaneSchema)` to create a new message.
  */
 export const PlaneSchema: GenMessage<Plane> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 6);
+  messageDesc(file_store_v1_store, 7);
 
 /**
  * Observed by the shim, live from the SDK.
@@ -414,7 +469,7 @@ export type PlaneStream = Message<"store.v1.PlaneStream"> & {
  * Use `create(PlaneStreamSchema)` to create a new message.
  */
 export const PlaneStreamSchema: GenMessage<PlaneStream> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 7);
+  messageDesc(file_store_v1_store, 8);
 
 /**
  * Read by the sidecar from what the vendor wrote to disk.
@@ -429,7 +484,7 @@ export type PlaneFile = Message<"store.v1.PlaneFile"> & {
  * Use `create(PlaneFileSchema)` to create a new message.
  */
 export const PlaneFileSchema: GenMessage<PlaneFile> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 8);
+  messageDesc(file_store_v1_store, 9);
 
 /**
  * A fact the store holds but never serves. THE ARM IS WHY: material the
@@ -479,7 +534,7 @@ export type StoreUnservedItem = Message<"store.v1.StoreUnservedItem"> & {
  * Use `create(StoreUnservedItemSchema)` to create a new message.
  */
 export const StoreUnservedItemSchema: GenMessage<StoreUnservedItem> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 9);
+  messageDesc(file_store_v1_store, 10);
 
 /**
  * Something one vendor does that no vendor-agnostic feed can show.
@@ -507,7 +562,7 @@ export type StoreVendorSpecific = Message<"store.v1.StoreVendorSpecific"> & {
  * Use `create(StoreVendorSpecificSchema)` to create a new message.
  */
 export const StoreVendorSpecificSchema: GenMessage<StoreVendorSpecific> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 10);
+  messageDesc(file_store_v1_store, 11);
 
 /**
  * A record we read successfully and do not model.
@@ -545,7 +600,7 @@ export type StoreUnknown = Message<"store.v1.StoreUnknown"> & {
  * Use `create(StoreUnknownSchema)` to create a new message.
  */
 export const StoreUnknownSchema: GenMessage<StoreUnknown> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 11);
+  messageDesc(file_store_v1_store, 12);
 
 /**
  * A record we could not read at all.
@@ -587,7 +642,7 @@ export type StoreUnparsed = Message<"store.v1.StoreUnparsed"> & {
  * Use `create(StoreUnparsedSchema)` to create a new message.
  */
 export const StoreUnparsedSchema: GenMessage<StoreUnparsed> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 12);
+  messageDesc(file_store_v1_store, 13);
 
 /**
  * A batch of records, and the reader position that becomes durable with them.
@@ -667,7 +722,7 @@ export type EntryBatch = Message<"store.v1.EntryBatch"> & {
  * Use `create(EntryBatchSchema)` to create a new message.
  */
 export const EntryBatchSchema: GenMessage<EntryBatch> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 13);
+  messageDesc(file_store_v1_store, 14);
 
 /**
  * One detached shell run's spool, claimed by the run.
@@ -700,7 +755,7 @@ export type ShellRunClaim = Message<"store.v1.ShellRunClaim"> & {
  * Use `create(ShellRunClaimSchema)` to create a new message.
  */
 export const ShellRunClaimSchema: GenMessage<ShellRunClaim> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 14);
+  messageDesc(file_store_v1_store, 15);
 
 /**
  * One subagent's vendor task locator, paired with the agent it names.
@@ -734,7 +789,7 @@ export type AgentLocator = Message<"store.v1.AgentLocator"> & {
  * Use `create(AgentLocatorSchema)` to create a new message.
  */
 export const AgentLocatorSchema: GenMessage<AgentLocator> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 15);
+  messageDesc(file_store_v1_store, 16);
 
 /**
  * One stored row a re-read record no longer converts to.
@@ -777,7 +832,7 @@ export type StoreRetirement = Message<"store.v1.StoreRetirement"> & {
  * Use `create(StoreRetirementSchema)` to create a new message.
  */
 export const StoreRetirementSchema: GenMessage<StoreRetirement> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 16);
+  messageDesc(file_store_v1_store, 17);
 
 /**
  * Where one file has been read to.
@@ -832,7 +887,7 @@ export type CursorState = Message<"store.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 17);
+  messageDesc(file_store_v1_store, 18);
 
 /**
  * The conversion bookkeeping of one file's cursor: the version its bytes were
@@ -891,7 +946,7 @@ export type CursorConversion = Message<"store.v1.CursorConversion"> & {
  * Use `create(CursorConversionSchema)` to create a new message.
  */
 export const CursorConversionSchema: GenMessage<CursorConversion> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 18);
+  messageDesc(file_store_v1_store, 19);
 
 /**
  * Nothing past the offset was converted under an older version.
@@ -906,7 +961,7 @@ export type CursorConversionCurrent = Message<"store.v1.CursorConversionCurrent"
  * Use `create(CursorConversionCurrentSchema)` to create a new message.
  */
 export const CursorConversionCurrentSchema: GenMessage<CursorConversionCurrent> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 19);
+  messageDesc(file_store_v1_store, 20);
 
 /**
  * A re-derivation of the file under CursorConversion.version is in progress.
@@ -929,7 +984,7 @@ export type CursorConversionHealing = Message<"store.v1.CursorConversionHealing"
  * Use `create(CursorConversionHealingSchema)` to create a new message.
  */
 export const CursorConversionHealingSchema: GenMessage<CursorConversionHealing> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 20);
+  messageDesc(file_store_v1_store, 21);
 
 /**
  * An opaque, store-minted name of one item of one book. Echoed verbatim, never
@@ -951,7 +1006,7 @@ export type StoreItemPointer = Message<"store.v1.StoreItemPointer"> & {
  * Use `create(StoreItemPointerSchema)` to create a new message.
  */
 export const StoreItemPointerSchema: GenMessage<StoreItemPointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 21);
+  messageDesc(file_store_v1_store, 22);
 
 /**
  * One line, its pointer, its turn and its place, so the caller always holds a
@@ -1015,7 +1070,7 @@ export type StoreLineAt = Message<"store.v1.StoreLineAt"> & {
  * Use `create(StoreLineAtSchema)` to create a new message.
  */
 export const StoreLineAtSchema: GenMessage<StoreLineAt> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 22);
+  messageDesc(file_store_v1_store, 23);
 
 /**
  * Older lines exist below this page.
@@ -1036,7 +1091,7 @@ export type ReadAgentPageMore = Message<"store.v1.ReadAgentPageMore"> & {
  * Use `create(ReadAgentPageMoreSchema)` to create a new message.
  */
 export const ReadAgentPageMoreSchema: GenMessage<ReadAgentPageMore> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 23);
+  messageDesc(file_store_v1_store, 24);
 
 /**
  * This page reached the oldest retained line.
@@ -1051,7 +1106,7 @@ export type ReadAgentPageFloor = Message<"store.v1.ReadAgentPageFloor"> & {
  * Use `create(ReadAgentPageFloorSchema)` to create a new message.
  */
 export const ReadAgentPageFloorSchema: GenMessage<ReadAgentPageFloor> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 24);
+  messageDesc(file_store_v1_store, 25);
 
 /**
  * The address of one opened reading session: an opaque, store-minted token —
@@ -1072,7 +1127,7 @@ export type AgentSessionToken = Message<"store.v1.AgentSessionToken"> & {
  * Use `create(AgentSessionTokenSchema)` to create a new message.
  */
 export const AgentSessionTokenSchema: GenMessage<AgentSessionToken> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 25);
+  messageDesc(file_store_v1_store, 26);
 
 /**
  * The opening page, newest first.
@@ -1113,5 +1168,5 @@ export type AgentSessionPage = Message<"store.v1.AgentSessionPage"> & {
  * Use `create(AgentSessionPageSchema)` to create a new message.
  */
 export const AgentSessionPageSchema: GenMessage<AgentSessionPage> = /*@__PURE__*/
-  messageDesc(file_store_v1_store, 26);
+  messageDesc(file_store_v1_store, 27);
 

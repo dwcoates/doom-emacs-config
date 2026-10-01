@@ -489,7 +489,15 @@ type WriteBatchSuccess struct {
 	// it is reported here rather than swallowed so the producer can fold it into
 	// its own startup catch-up summary; a skip in steady state is unexpected and
 	// the producer warns. Empty on the ordinary path.
-	Skipped       []*WriteBatchSkippedEntry `protobuf:"bytes,1,rep,name=skipped,proto3" json:"skipped,omitempty"`
+	Skipped []*WriteBatchSkippedEntry `protobuf:"bytes,1,rep,name=skipped,proto3" json:"skipped,omitempty"`
+	// Entries the store did NOT STORE because they name no book it could place
+	// them in: a page line written `owner_unknown` (StorePageLineOwnerUnknown)
+	// whose upsert_key the record does not hold yet. Nothing of such an entry is
+	// committed -- no row, no ledger row -- while the batch's other entries
+	// commit in the same transaction. EACH IS AN ERROR, recorded at ERROR by the
+	// store and by the producer: a fact was observed and is not in the record.
+	// Empty on the ordinary path.
+	Unplaced      []*WriteBatchUnplacedEntry `protobuf:"bytes,2,rep,name=unplaced,proto3" json:"unplaced,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -531,6 +539,69 @@ func (x *WriteBatchSuccess) GetSkipped() []*WriteBatchSkippedEntry {
 	return nil
 }
 
+func (x *WriteBatchSuccess) GetUnplaced() []*WriteBatchUnplacedEntry {
+	if x != nil {
+		return x.Unplaced
+	}
+	return nil
+}
+
+// One entry the store could not place (WriteBatchSuccess.unplaced): what the
+// producer needs to record the loss without re-deriving it.
+type WriteBatchUnplacedEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The upsert_key the entry was written under, which no stored row holds.
+	UpsertKey string `protobuf:"bytes,1,opt,name=upsert_key,json=upsertKey,proto3" json:"upsert_key,omitempty"`
+	// The store's account of why, for a human and for logs; never switched on.
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteBatchUnplacedEntry) Reset() {
+	*x = WriteBatchUnplacedEntry{}
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteBatchUnplacedEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteBatchUnplacedEntry) ProtoMessage() {}
+
+func (x *WriteBatchUnplacedEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteBatchUnplacedEntry.ProtoReflect.Descriptor instead.
+func (*WriteBatchUnplacedEntry) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WriteBatchUnplacedEntry) GetUpsertKey() string {
+	if x != nil {
+		return x.UpsertKey
+	}
+	return ""
+}
+
+func (x *WriteBatchUnplacedEntry) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 // One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
 // skipped). It carries what the producer needs to attribute the skip without
 // re-deriving it: the identity that already existed and the two books.
@@ -548,7 +619,7 @@ type WriteBatchSkippedEntry struct {
 
 func (x *WriteBatchSkippedEntry) Reset() {
 	*x = WriteBatchSkippedEntry{}
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[7]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -560,7 +631,7 @@ func (x *WriteBatchSkippedEntry) String() string {
 func (*WriteBatchSkippedEntry) ProtoMessage() {}
 
 func (x *WriteBatchSkippedEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[7]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -573,7 +644,7 @@ func (x *WriteBatchSkippedEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchSkippedEntry.ProtoReflect.Descriptor instead.
 func (*WriteBatchSkippedEntry) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{7}
+	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WriteBatchSkippedEntry) GetUpsertKey() string {
@@ -623,7 +694,7 @@ type WriteBatchFailure struct {
 
 func (x *WriteBatchFailure) Reset() {
 	*x = WriteBatchFailure{}
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[8]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -635,7 +706,7 @@ func (x *WriteBatchFailure) String() string {
 func (*WriteBatchFailure) ProtoMessage() {}
 
 func (x *WriteBatchFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[8]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -648,7 +719,7 @@ func (x *WriteBatchFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchFailure.ProtoReflect.Descriptor instead.
 func (*WriteBatchFailure) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{8}
+	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WriteBatchFailure) GetDetail() string {
@@ -714,7 +785,7 @@ type WriteBatchInvalidRequest struct {
 
 func (x *WriteBatchInvalidRequest) Reset() {
 	*x = WriteBatchInvalidRequest{}
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[9]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -726,7 +797,7 @@ func (x *WriteBatchInvalidRequest) String() string {
 func (*WriteBatchInvalidRequest) ProtoMessage() {}
 
 func (x *WriteBatchInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[9]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +810,7 @@ func (x *WriteBatchInvalidRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchInvalidRequest.ProtoReflect.Descriptor instead.
 func (*WriteBatchInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{9}
+	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WriteBatchInvalidRequest) GetField() string {
@@ -758,7 +829,7 @@ type WriteBatchStorageFailure struct {
 
 func (x *WriteBatchStorageFailure) Reset() {
 	*x = WriteBatchStorageFailure{}
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[10]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +841,7 @@ func (x *WriteBatchStorageFailure) String() string {
 func (*WriteBatchStorageFailure) ProtoMessage() {}
 
 func (x *WriteBatchStorageFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[10]
+	mi := &file_store_v1_endpoint_write_batch_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +854,7 @@ func (x *WriteBatchStorageFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchStorageFailure.ProtoReflect.Descriptor instead.
 func (*WriteBatchStorageFailure) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{10}
+	return file_store_v1_endpoint_write_batch_proto_rawDescGZIP(), []int{11}
 }
 
 var File_store_v1_endpoint_write_batch_proto protoreflect.FileDescriptor
@@ -814,9 +885,14 @@ const file_store_v1_endpoint_write_batch_proto_rawDesc = "" +
 	"\x12WriteBatchResponse\x127\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1b.store.v1.WriteBatchSuccessH\x00R\asuccess\x127\n" +
 	"\afailure\x18\x02 \x01(\v2\x1b.store.v1.WriteBatchFailureH\x00R\afailureB\b\n" +
-	"\x06result\"O\n" +
+	"\x06result\"\x8e\x01\n" +
 	"\x11WriteBatchSuccess\x12:\n" +
-	"\askipped\x18\x01 \x03(\v2 .store.v1.WriteBatchSkippedEntryR\askipped\"m\n" +
+	"\askipped\x18\x01 \x03(\v2 .store.v1.WriteBatchSkippedEntryR\askipped\x12=\n" +
+	"\bunplaced\x18\x02 \x03(\v2!.store.v1.WriteBatchUnplacedEntryR\bunplaced\"P\n" +
+	"\x17WriteBatchUnplacedEntry\x12\x1d\n" +
+	"\n" +
+	"upsert_key\x18\x01 \x01(\tR\tupsertKey\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"m\n" +
 	"\x16WriteBatchSkippedEntry\x12\x1d\n" +
 	"\n" +
 	"upsert_key\x18\x01 \x01(\tR\tupsertKey\x12\x1b\n" +
@@ -843,7 +919,7 @@ func file_store_v1_endpoint_write_batch_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_write_batch_proto_rawDescData
 }
 
-var file_store_v1_endpoint_write_batch_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_store_v1_endpoint_write_batch_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_store_v1_endpoint_write_batch_proto_goTypes = []any{
 	(*WriteBatchRequest)(nil),        // 0: store.v1.WriteBatchRequest
 	(*WriteClass)(nil),               // 1: store.v1.WriteClass
@@ -852,28 +928,30 @@ var file_store_v1_endpoint_write_batch_proto_goTypes = []any{
 	(*ShapeObservation)(nil),         // 4: store.v1.ShapeObservation
 	(*WriteBatchResponse)(nil),       // 5: store.v1.WriteBatchResponse
 	(*WriteBatchSuccess)(nil),        // 6: store.v1.WriteBatchSuccess
-	(*WriteBatchSkippedEntry)(nil),   // 7: store.v1.WriteBatchSkippedEntry
-	(*WriteBatchFailure)(nil),        // 8: store.v1.WriteBatchFailure
-	(*WriteBatchInvalidRequest)(nil), // 9: store.v1.WriteBatchInvalidRequest
-	(*WriteBatchStorageFailure)(nil), // 10: store.v1.WriteBatchStorageFailure
-	(*EntryBatch)(nil),               // 11: store.v1.EntryBatch
+	(*WriteBatchUnplacedEntry)(nil),  // 7: store.v1.WriteBatchUnplacedEntry
+	(*WriteBatchSkippedEntry)(nil),   // 8: store.v1.WriteBatchSkippedEntry
+	(*WriteBatchFailure)(nil),        // 9: store.v1.WriteBatchFailure
+	(*WriteBatchInvalidRequest)(nil), // 10: store.v1.WriteBatchInvalidRequest
+	(*WriteBatchStorageFailure)(nil), // 11: store.v1.WriteBatchStorageFailure
+	(*EntryBatch)(nil),               // 12: store.v1.EntryBatch
 }
 var file_store_v1_endpoint_write_batch_proto_depIdxs = []int32{
-	11, // 0: store.v1.WriteBatchRequest.batch:type_name -> store.v1.EntryBatch
+	12, // 0: store.v1.WriteBatchRequest.batch:type_name -> store.v1.EntryBatch
 	4,  // 1: store.v1.WriteBatchRequest.shapes:type_name -> store.v1.ShapeObservation
 	1,  // 2: store.v1.WriteBatchRequest.write_class:type_name -> store.v1.WriteClass
 	2,  // 3: store.v1.WriteClass.interactive:type_name -> store.v1.WriteClassInteractive
 	3,  // 4: store.v1.WriteClass.bulk:type_name -> store.v1.WriteClassBulk
 	6,  // 5: store.v1.WriteBatchResponse.success:type_name -> store.v1.WriteBatchSuccess
-	8,  // 6: store.v1.WriteBatchResponse.failure:type_name -> store.v1.WriteBatchFailure
-	7,  // 7: store.v1.WriteBatchSuccess.skipped:type_name -> store.v1.WriteBatchSkippedEntry
-	9,  // 8: store.v1.WriteBatchFailure.invalid_request:type_name -> store.v1.WriteBatchInvalidRequest
-	10, // 9: store.v1.WriteBatchFailure.storage_failure:type_name -> store.v1.WriteBatchStorageFailure
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	9,  // 6: store.v1.WriteBatchResponse.failure:type_name -> store.v1.WriteBatchFailure
+	8,  // 7: store.v1.WriteBatchSuccess.skipped:type_name -> store.v1.WriteBatchSkippedEntry
+	7,  // 8: store.v1.WriteBatchSuccess.unplaced:type_name -> store.v1.WriteBatchUnplacedEntry
+	10, // 9: store.v1.WriteBatchFailure.invalid_request:type_name -> store.v1.WriteBatchInvalidRequest
+	11, // 10: store.v1.WriteBatchFailure.storage_failure:type_name -> store.v1.WriteBatchStorageFailure
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_write_batch_proto_init() }
@@ -890,7 +968,7 @@ func file_store_v1_endpoint_write_batch_proto_init() {
 		(*WriteBatchResponse_Success)(nil),
 		(*WriteBatchResponse_Failure)(nil),
 	}
-	file_store_v1_endpoint_write_batch_proto_msgTypes[8].OneofWrappers = []any{
+	file_store_v1_endpoint_write_batch_proto_msgTypes[9].OneofWrappers = []any{
 		(*WriteBatchFailure_InvalidRequest)(nil),
 		(*WriteBatchFailure_StorageFailure)(nil),
 	}
@@ -900,7 +978,7 @@ func file_store_v1_endpoint_write_batch_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_write_batch_proto_rawDesc), len(file_store_v1_endpoint_write_batch_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

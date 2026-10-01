@@ -1008,7 +1008,32 @@ type DetachedWorkKindSubagent struct {
 	// send and whose agent is the one that send woke. Stating the agent here is
 	// what lets a consumer address the right stream without deriving one
 	// identity from another.
-	AgentId       *AgentId `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentId *AgentId `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// WHAT THE RUNNING AGENT WAS COMMISSIONED WITH: the prompt of the spawn that
+	// created it -- its description, its subagent type, its instruction -- exactly
+	// as that spawn's own start states it (AgentSubagentStart.prompt).
+	//
+	// IT DESCRIBES THE RUN AT THE ANNOUNCEMENT, for a consumer that never saw the
+	// spawn. The `detached` origin carries no work payload because the unit it
+	// names already described the work -- but a subagent RESUMED BY A MESSAGE is
+	// detached from the SEND, which describes nothing about the agent, and a
+	// consumer that came up after the spawn (or whose history no longer reaches
+	// it) has no other statement of what the agent is. Stated on EVERY subagent
+	// announcement, whichever origin, so a consumer reads the agent's identity
+	// from one place: here.
+	//
+	// THE SAME AGENT KEEPS THE SAME COMMISSION. Every resume of one agent states
+	// the commission of the one spawn that created it, never the message that
+	// woke it: what was sent is the send's own fact (AgentSendMessage).
+	//
+	// On the `created` origin it restates DetachableWork's subagent start prompt,
+	// and the two must agree.
+	//
+	// UNSET only when the producer holds no record of the spawn at all -- it
+	// neither observed it nor finds it in the durable record. The producer
+	// reports that at ERROR; a consumer draws the agent undescribed and never
+	// invents a description.
+	Commission    *AgentSubagentPrompt `protobuf:"bytes,2,opt,name=commission,proto3,oneof" json:"commission,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1046,6 +1071,13 @@ func (*DetachedWorkKindSubagent) Descriptor() ([]byte, []int) {
 func (x *DetachedWorkKindSubagent) GetAgentId() *AgentId {
 	if x != nil {
 		return x.AgentId
+	}
+	return nil
+}
+
+func (x *DetachedWorkKindSubagent) GetCommission() *AgentSubagentPrompt {
+	if x != nil {
+		return x.Commission
 	}
 	return nil
 }
@@ -1266,9 +1298,13 @@ const file_conversation_v1_detached_work_proto_rawDesc = "" +
 	"\x04bash\x18\x02 \x01(\v2%.conversation.v1.DetachedWorkKindBashH\x00R\x04bash\x12G\n" +
 	"\bworkflow\x18\x03 \x01(\v2).conversation.v1.DetachedWorkKindWorkflowH\x00R\bworkflow\x12D\n" +
 	"\amonitor\x18\x04 \x01(\v2(.conversation.v1.DetachedWorkKindMonitorH\x00R\amonitorB\x06\n" +
-	"\x04kind\"O\n" +
+	"\x04kind\"\xa9\x01\n" +
 	"\x18DetachedWorkKindSubagent\x123\n" +
-	"\bagent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\aagentId\"\x16\n" +
+	"\bagent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\aagentId\x12I\n" +
+	"\n" +
+	"commission\x18\x02 \x01(\v2$.conversation.v1.AgentSubagentPromptH\x00R\n" +
+	"commission\x88\x01\x01B\r\n" +
+	"\v_commission\"\x16\n" +
 	"\x14DetachedWorkKindBash\"\x1a\n" +
 	"\x18DetachedWorkKindWorkflow\"\x19\n" +
 	"\x17DetachedWorkKindMonitor\"&\n" +
@@ -1312,6 +1348,7 @@ var file_conversation_v1_detached_work_proto_goTypes = []any{
 	(*AgentBash)(nil),                    // 20: conversation.v1.AgentBash
 	(*AgentWorkflowStart)(nil),           // 21: conversation.v1.AgentWorkflowStart
 	(*AgentMonitor)(nil),                 // 22: conversation.v1.AgentMonitor
+	(*AgentSubagentPrompt)(nil),          // 23: conversation.v1.AgentSubagentPrompt
 }
 var file_conversation_v1_detached_work_proto_depIdxs = []int32{
 	16, // 0: conversation.v1.AgentDetachedWork.work:type_name -> conversation.v1.DetachedWorkId
@@ -1337,11 +1374,12 @@ var file_conversation_v1_detached_work_proto_depIdxs = []int32{
 	14, // 20: conversation.v1.DetachedWorkKind.workflow:type_name -> conversation.v1.DetachedWorkKindWorkflow
 	15, // 21: conversation.v1.DetachedWorkKind.monitor:type_name -> conversation.v1.DetachedWorkKindMonitor
 	17, // 22: conversation.v1.DetachedWorkKindSubagent.agent_id:type_name -> conversation.v1.AgentId
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	23, // 23: conversation.v1.DetachedWorkKindSubagent.commission:type_name -> conversation.v1.AgentSubagentPrompt
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_detached_work_proto_init() }
@@ -1377,6 +1415,7 @@ func file_conversation_v1_detached_work_proto_init() {
 		(*DetachedWorkKind_Workflow)(nil),
 		(*DetachedWorkKind_Monitor)(nil),
 	}
+	file_conversation_v1_detached_work_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -54,6 +54,24 @@ message GetAgentByVendorTaskSuccess {
   // The agent, under the cross-plane minting rule: the spawning call's
   // `tool_use_id`, as every plane books it.
   conversation.v1.AgentId agent = 1;
+
+  // WHAT THE AGENT WAS COMMISSIONED WITH, as the store recorded it from the
+  // agent's spawn start (AgentSubagentStart.prompt), so a shim that never saw
+  // the spawn can restate it on the resumed run's announcement
+  // (DetachedWorkKindSubagent.commission) and on every frame of the run.
+  //
+  // THE COMMISSION, NOT THE WHOLE START. The store keeps a spawn's start as
+  // the agent row's own columns, and the start's `started_at` is not among them
+  // (the row's start instant is the store's receipt clock), so a whole start
+  // served from the record would state an instant nobody observed. Everything
+  // the commission states is recorded, except a remote isolation's session
+  // handles, which a spawn's request never states either: the remote arm is
+  // answered with both unset.
+  //
+  // UNSET when the record holds the agent's lineage but no start for it -- an
+  // agent known only from a settled spawn or as a placeholder. The caller
+  // reports that; it is never answered with an empty prompt.
+  optional conversation.v1.AgentSubagentPrompt commission = 2;
 }
 
 // No agent within the lineage is paired with this locator. An ANSWER, not a

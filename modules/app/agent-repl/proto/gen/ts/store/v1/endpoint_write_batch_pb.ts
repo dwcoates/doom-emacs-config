@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_write_batch.proto.
  */
 export const file_store_v1_endpoint_write_batch: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEioQEKEVdyaXRlQmF0Y2hSZXF1ZXN0EhAKCHByb2R1Y2VyGAEgASgJEiMKBWJhdGNoGAIgASgLMhQuc3RvcmUudjEuRW50cnlCYXRjaBIqCgZzaGFwZXMYAyADKAsyGi5zdG9yZS52MS5TaGFwZU9ic2VydmF0aW9uEikKC3dyaXRlX2NsYXNzGAQgASgLMhQuc3RvcmUudjEuV3JpdGVDbGFzcyJ9CgpXcml0ZUNsYXNzEjYKC2ludGVyYWN0aXZlGAEgASgLMh8uc3RvcmUudjEuV3JpdGVDbGFzc0ludGVyYWN0aXZlSAASKAoEYnVsaxgCIAEoCzIYLnN0b3JlLnYxLldyaXRlQ2xhc3NCdWxrSABCDQoLd3JpdGVfY2xhc3MiFwoVV3JpdGVDbGFzc0ludGVyYWN0aXZlIhAKDldyaXRlQ2xhc3NCdWxrInMKEFNoYXBlT2JzZXJ2YXRpb24SEgoKc2hhcGVfaGFzaBgBIAEoCRIMCgRraW5kGAIgASgJEhUKDWtleV9zdHJ1Y3R1cmUYAyABKAkSFQoNZmlyc3RfZXhhbXBsZRgEIAEoDBIPCgdzZWVuX21zGAUgASgDIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiRgoRV3JpdGVCYXRjaFN1Y2Nlc3MSMQoHc2tpcHBlZBgBIAMoCzIgLnN0b3JlLnYxLldyaXRlQmF0Y2hTa2lwcGVkRW50cnkiUAoWV3JpdGVCYXRjaFNraXBwZWRFbnRyeRISCgp1cHNlcnRfa2V5GAEgASgJEhEKCWZyb21fYm9vaxgCIAEoCRIPCgd0b19ib29rGAMgASgJIqkBChFXcml0ZUJhdGNoRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPQoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaEludmFsaWRSZXF1ZXN0SAASPQoPc3RvcmFnZV9mYWlsdXJlGAMgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIpChhXcml0ZUJhdGNoSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiGgoYV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_store]);
+  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEioQEKEVdyaXRlQmF0Y2hSZXF1ZXN0EhAKCHByb2R1Y2VyGAEgASgJEiMKBWJhdGNoGAIgASgLMhQuc3RvcmUudjEuRW50cnlCYXRjaBIqCgZzaGFwZXMYAyADKAsyGi5zdG9yZS52MS5TaGFwZU9ic2VydmF0aW9uEikKC3dyaXRlX2NsYXNzGAQgASgLMhQuc3RvcmUudjEuV3JpdGVDbGFzcyJ9CgpXcml0ZUNsYXNzEjYKC2ludGVyYWN0aXZlGAEgASgLMh8uc3RvcmUudjEuV3JpdGVDbGFzc0ludGVyYWN0aXZlSAASKAoEYnVsaxgCIAEoCzIYLnN0b3JlLnYxLldyaXRlQ2xhc3NCdWxrSABCDQoLd3JpdGVfY2xhc3MiFwoVV3JpdGVDbGFzc0ludGVyYWN0aXZlIhAKDldyaXRlQ2xhc3NCdWxrInMKEFNoYXBlT2JzZXJ2YXRpb24SEgoKc2hhcGVfaGFzaBgBIAEoCRIMCgRraW5kGAIgASgJEhUKDWtleV9zdHJ1Y3R1cmUYAyABKAkSFQoNZmlyc3RfZXhhbXBsZRgEIAEoDBIPCgdzZWVuX21zGAUgASgDIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiewoRV3JpdGVCYXRjaFN1Y2Nlc3MSMQoHc2tpcHBlZBgBIAMoCzIgLnN0b3JlLnYxLldyaXRlQmF0Y2hTa2lwcGVkRW50cnkSMwoIdW5wbGFjZWQYAiADKAsyIS5zdG9yZS52MS5Xcml0ZUJhdGNoVW5wbGFjZWRFbnRyeSI9ChdXcml0ZUJhdGNoVW5wbGFjZWRFbnRyeRISCgp1cHNlcnRfa2V5GAEgASgJEg4KBmRldGFpbBgCIAEoCSJQChZXcml0ZUJhdGNoU2tpcHBlZEVudHJ5EhIKCnVwc2VydF9rZXkYASABKAkSEQoJZnJvbV9ib29rGAIgASgJEg8KB3RvX2Jvb2sYAyABKAkiqQEKEVdyaXRlQmF0Y2hGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI9Cg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoSW52YWxpZFJlcXVlc3RIABI9Cg9zdG9yYWdlX2ZhaWx1cmUYAyABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIikKGFdyaXRlQmF0Y2hJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIaChhXcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_store_v1_store]);
 
 /**
  * One producer's write. The rpc is the envelope: no separate carrier message
@@ -278,6 +278,19 @@ export type WriteBatchSuccess = Message<"store.v1.WriteBatchSuccess"> & {
    * @generated from field: repeated store.v1.WriteBatchSkippedEntry skipped = 1;
    */
   skipped: WriteBatchSkippedEntry[];
+
+  /**
+   * Entries the store did NOT STORE because they name no book it could place
+   * them in: a page line written `owner_unknown` (StorePageLineOwnerUnknown)
+   * whose upsert_key the record does not hold yet. Nothing of such an entry is
+   * committed -- no row, no ledger row -- while the batch's other entries
+   * commit in the same transaction. EACH IS AN ERROR, recorded at ERROR by the
+   * store and by the producer: a fact was observed and is not in the record.
+   * Empty on the ordinary path.
+   *
+   * @generated from field: repeated store.v1.WriteBatchUnplacedEntry unplaced = 2;
+   */
+  unplaced: WriteBatchUnplacedEntry[];
 };
 
 /**
@@ -286,6 +299,35 @@ export type WriteBatchSuccess = Message<"store.v1.WriteBatchSuccess"> & {
  */
 export const WriteBatchSuccessSchema: GenMessage<WriteBatchSuccess> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_write_batch, 6);
+
+/**
+ * One entry the store could not place (WriteBatchSuccess.unplaced): what the
+ * producer needs to record the loss without re-deriving it.
+ *
+ * @generated from message store.v1.WriteBatchUnplacedEntry
+ */
+export type WriteBatchUnplacedEntry = Message<"store.v1.WriteBatchUnplacedEntry"> & {
+  /**
+   * The upsert_key the entry was written under, which no stored row holds.
+   *
+   * @generated from field: string upsert_key = 1;
+   */
+  upsertKey: string;
+
+  /**
+   * The store's account of why, for a human and for logs; never switched on.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message store.v1.WriteBatchUnplacedEntry.
+ * Use `create(WriteBatchUnplacedEntrySchema)` to create a new message.
+ */
+export const WriteBatchUnplacedEntrySchema: GenMessage<WriteBatchUnplacedEntry> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 7);
 
 /**
  * One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
@@ -322,7 +364,7 @@ export type WriteBatchSkippedEntry = Message<"store.v1.WriteBatchSkippedEntry"> 
  * Use `create(WriteBatchSkippedEntrySchema)` to create a new message.
  */
 export const WriteBatchSkippedEntrySchema: GenMessage<WriteBatchSkippedEntry> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 7);
+  messageDesc(file_store_v1_endpoint_write_batch, 8);
 
 /**
  * Nothing was committed: the transaction failed whole, so the producer
@@ -375,7 +417,7 @@ export type WriteBatchFailure = Message<"store.v1.WriteBatchFailure"> & {
  * Use `create(WriteBatchFailureSchema)` to create a new message.
  */
 export const WriteBatchFailureSchema: GenMessage<WriteBatchFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 8);
+  messageDesc(file_store_v1_endpoint_write_batch, 9);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -397,7 +439,7 @@ export type WriteBatchInvalidRequest = Message<"store.v1.WriteBatchInvalidReques
  * Use `create(WriteBatchInvalidRequestSchema)` to create a new message.
  */
 export const WriteBatchInvalidRequestSchema: GenMessage<WriteBatchInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 9);
+  messageDesc(file_store_v1_endpoint_write_batch, 10);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -412,5 +454,5 @@ export type WriteBatchStorageFailure = Message<"store.v1.WriteBatchStorageFailur
  * Use `create(WriteBatchStorageFailureSchema)` to create a new message.
  */
 export const WriteBatchStorageFailureSchema: GenMessage<WriteBatchStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 10);
+  messageDesc(file_store_v1_endpoint_write_batch, 11);
 

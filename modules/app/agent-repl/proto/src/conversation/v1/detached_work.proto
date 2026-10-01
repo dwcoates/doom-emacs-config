@@ -238,6 +238,32 @@ message DetachedWorkKindSubagent {
   // what lets a consumer address the right stream without deriving one
   // identity from another.
   AgentId agent_id = 1;
+
+  // WHAT THE RUNNING AGENT WAS COMMISSIONED WITH: the prompt of the spawn that
+  // created it -- its description, its subagent type, its instruction -- exactly
+  // as that spawn's own start states it (AgentSubagentStart.prompt).
+  //
+  // IT DESCRIBES THE RUN AT THE ANNOUNCEMENT, for a consumer that never saw the
+  // spawn. The `detached` origin carries no work payload because the unit it
+  // names already described the work -- but a subagent RESUMED BY A MESSAGE is
+  // detached from the SEND, which describes nothing about the agent, and a
+  // consumer that came up after the spawn (or whose history no longer reaches
+  // it) has no other statement of what the agent is. Stated on EVERY subagent
+  // announcement, whichever origin, so a consumer reads the agent's identity
+  // from one place: here.
+  //
+  // THE SAME AGENT KEEPS THE SAME COMMISSION. Every resume of one agent states
+  // the commission of the one spawn that created it, never the message that
+  // woke it: what was sent is the send's own fact (AgentSendMessage).
+  //
+  // On the `created` origin it restates DetachableWork's subagent start prompt,
+  // and the two must agree.
+  //
+  // UNSET only when the producer holds no record of the spawn at all -- it
+  // neither observed it nor finds it in the durable record. The producer
+  // reports that at ERROR; a consumer draws the agent undescribed and never
+  // invents a description.
+  optional AgentSubagentPrompt commission = 2;
 }
 
 // The work is a shell command.

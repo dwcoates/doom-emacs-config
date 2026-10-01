@@ -26,7 +26,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AgentId } from "../../conversation/v1/agent_activity_pb";
+import type { AgentId, AgentSubagentPrompt } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_agent_by_vendor_task.proto.
  */
 export const file_store_v1_endpoint_get_agent_by_vendor_task: GenFile = /*@__PURE__*/
-  fileDesc("CjBzdG9yZS92MS9lbmRwb2ludF9nZXRfYWdlbnRfYnlfdmVuZG9yX3Rhc2sucHJvdG8SCHN0b3JlLnYxImAKG0dldEFnZW50QnlWZW5kb3JUYXNrUmVxdWVzdBIpCgdzZXNzaW9uGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSFgoOdmVuZG9yX3Rhc2tfaWQYAiABKAki2QEKHEdldEFnZW50QnlWZW5kb3JUYXNrUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrU3VjY2Vzc0gAEjsKCW5vdF9mb3VuZBgCIAEoCzImLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrTm90Rm91bmRIABI4CgdmYWlsdXJlGAMgASgLMiUuc3RvcmUudjEuR2V0QWdlbnRCeVZlbmRvclRhc2tGYWlsdXJlSABCCAoGcmVzdWx0IkYKG0dldEFnZW50QnlWZW5kb3JUYXNrU3VjY2VzcxInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIh4KHEdldEFnZW50QnlWZW5kb3JUYXNrTm90Rm91bmQixwEKG0dldEFnZW50QnlWZW5kb3JUYXNrRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSRwoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiwuc3RvcmUudjEuR2V0QWdlbnRCeVZlbmRvclRhc2tJbnZhbGlkUmVxdWVzdEgAEkcKD3N0b3JhZ2VfZmFpbHVyZRgDIAEoCzIsLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIjMKIkdldEFnZW50QnlWZW5kb3JUYXNrSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiJAoiR2V0QWdlbnRCeVZlbmRvclRhc2tTdG9yYWdlRmFpbHVyZUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity]);
+  fileDesc("CjBzdG9yZS92MS9lbmRwb2ludF9nZXRfYWdlbnRfYnlfdmVuZG9yX3Rhc2sucHJvdG8SCHN0b3JlLnYxImAKG0dldEFnZW50QnlWZW5kb3JUYXNrUmVxdWVzdBIpCgdzZXNzaW9uGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSFgoOdmVuZG9yX3Rhc2tfaWQYAiABKAki2QEKHEdldEFnZW50QnlWZW5kb3JUYXNrUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrU3VjY2Vzc0gAEjsKCW5vdF9mb3VuZBgCIAEoCzImLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrTm90Rm91bmRIABI4CgdmYWlsdXJlGAMgASgLMiUuc3RvcmUudjEuR2V0QWdlbnRCeVZlbmRvclRhc2tGYWlsdXJlSABCCAoGcmVzdWx0IpQBChtHZXRBZ2VudEJ5VmVuZG9yVGFza1N1Y2Nlc3MSJwoFYWdlbnQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI9Cgpjb21taXNzaW9uGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50U3ViYWdlbnRQcm9tcHRIAIgBAUINCgtfY29tbWlzc2lvbiIeChxHZXRBZ2VudEJ5VmVuZG9yVGFza05vdEZvdW5kIscBChtHZXRBZ2VudEJ5VmVuZG9yVGFza0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEkcKD2ludmFsaWRfcmVxdWVzdBgCIAEoCzIsLnN0b3JlLnYxLkdldEFnZW50QnlWZW5kb3JUYXNrSW52YWxpZFJlcXVlc3RIABJHCg9zdG9yYWdlX2ZhaWx1cmUYAyABKAsyLC5zdG9yZS52MS5HZXRBZ2VudEJ5VmVuZG9yVGFza1N0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIzCiJHZXRBZ2VudEJ5VmVuZG9yVGFza0ludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIiQKIkdldEFnZW50QnlWZW5kb3JUYXNrU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
 
 /**
  * Ask which agent one vendor task locator names.
@@ -118,6 +118,28 @@ export type GetAgentByVendorTaskSuccess = Message<"store.v1.GetAgentByVendorTask
    * @generated from field: conversation.v1.AgentId agent = 1;
    */
   agent?: AgentId | undefined;
+
+  /**
+   * WHAT THE AGENT WAS COMMISSIONED WITH, as the store recorded it from the
+   * agent's spawn start (AgentSubagentStart.prompt), so a shim that never saw
+   * the spawn can restate it on the resumed run's announcement
+   * (DetachedWorkKindSubagent.commission) and on every frame of the run.
+   *
+   * THE COMMISSION, NOT THE WHOLE START. The store keeps a spawn's start as
+   * the agent row's own columns, and the start's `started_at` is not among them
+   * (the row's start instant is the store's receipt clock), so a whole start
+   * served from the record would state an instant nobody observed. Everything
+   * the commission states is recorded, except a remote isolation's session
+   * handles, which a spawn's request never states either: the remote arm is
+   * answered with both unset.
+   *
+   * UNSET when the record holds the agent's lineage but no start for it -- an
+   * agent known only from a settled spawn or as a placeholder. The caller
+   * reports that; it is never answered with an empty prompt.
+   *
+   * @generated from field: optional conversation.v1.AgentSubagentPrompt commission = 2;
+   */
+  commission?: AgentSubagentPrompt | undefined;
 };
 
 /**
