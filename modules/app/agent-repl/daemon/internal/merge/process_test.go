@@ -1569,3 +1569,21 @@ func TestUpdatingMainAlreadyAtUpstreamMovesNothing(t *testing.T) {
 		t.Fatalf("state = %q, want merged", got)
 	}
 }
+
+func TestConfiguredPromptsAreNotMirroredOntoTheMainFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.configureActions([]string{"before"}, nil)
+	h.briefs["before"] = nil
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	for _, addr := range h.feed.installed() {
+		if addr != nil && addr.Mirror {
+			t.Fatalf("addresses = %+v, want the configured prompt kept in its tab", h.feed.installed())
+		}
+	}
+}

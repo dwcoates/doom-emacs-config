@@ -186,13 +186,15 @@ func (r *run) closeTab(ctx context.Context, kind string, round int, outcome stri
 }
 
 // address stamps the requester's session output at one tab: the rows its
-// session produces land on the merge sub-feed, parented to that tab's row,
-// AND on the main feed as ordinary turns (the address is mirrored). The feed
-// resolver is merge-agnostic and applies the address without knowing what a
-// merge is.
+// session produces land on the merge sub-feed, parented to that tab's row. A
+// REPAIR -- conflict resolution, test fixing -- is mirrored: its rows are ALSO
+// drawn on the main feed as ordinary turns (owner ruling, 2026-09-29), while
+// a configured prompt's stay in its tab. The feed resolver is merge-agnostic
+// and applies the address without knowing what a merge is.
 func (r *run) address(kind string, round int) {
 	ref := tabRef(r.ws, r.lease.ID, kind, round)
-	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref, Mirror: true})
+	repair := kind == TabConflicts || kind == TabFixes
+	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref, Mirror: repair})
 }
 
 // upsert publishes one tab row.
