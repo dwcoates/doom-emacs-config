@@ -140,6 +140,54 @@ message RosterRowViewed {}
 // text while it stands.
 message RosterRowReviving {}
 
+// The workspace's AVAILABILITY: whether the daemon has this workspace's
+// session to offer an editor. An editor OPENS a workspace — its tab, its
+// panels, its webapp — only once the row says the daemon has finished
+// bringing it up, either way; before that there is nothing behind the
+// workspace to draw. At startup an editor opens the registry's rows strictly
+// IN ROSTER ORDER, each one waiting until its row leaves `pending`, so a row
+// that is `available` before an earlier one stays unopened until that earlier
+// one resolves.
+//
+// THE DAEMON DECIDES IT FROM THE SHIM LINK. `available` is the shim link
+// having CONNECTED at least once under this daemon, and it is STICKY for the
+// daemon's lifetime: a session parked by the idle sweep, severed, or killed
+// later is still a workspace the editor has opened, and its status arm
+// reports what became of it. `unavailable` is the link going dead before it
+// ever connected — the start failed, or the boot could not tell whether a
+// surviving shim owns the workspace and so served none. `pending` is
+// everything before either.
+//
+// A hibernated workspace is never `available` merely by being registered:
+// the boot wakes it, and it becomes available when the woken shim connects.
+message RosterRowAvailability {
+  // The availability. The set arm IS the availability; an unset oneof is
+  // invalid.
+  oneof availability {
+    // The daemon is still bringing the session up (or has not yet begun to):
+    // no shim link has connected and none has died. The editor does not open
+    // the workspace yet.
+    RosterRowAvailabilityPending pending = 1;
+    // A shim link to this workspace's session has connected under this
+    // daemon. The editor opens the workspace.
+    RosterRowAvailabilityAvailable available = 2;
+    // The bring-up ended without a session: the link went dead before it
+    // ever connected. The editor still opens the workspace, and the row's
+    // status arm (`start_failed`) is what it draws.
+    RosterRowAvailabilityUnavailable unavailable = 3;
+  }
+}
+
+// The session is still being brought up; the workspace is not opened yet.
+message RosterRowAvailabilityPending {}
+
+// The workspace's shim link has connected; the workspace is opened.
+message RosterRowAvailabilityAvailable {}
+
+// The bring-up ended without a session; the workspace is opened and draws
+// its start failure.
+message RosterRowAvailabilityUnavailable {}
+
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
 // never against a display name, which is not unique.
 message RosterCurrentWorkspace {
@@ -277,6 +325,12 @@ message RosterRow {
   // the daemon keeps across restarts of every client. UNSET = never selected.
   // See RosterRowLastSelected, which carries the field's whole contract.
   optional RosterRowLastSelected last_selected = 37;
+
+  // Whether this workspace may be OPENED by an editor yet: its session is
+  // being brought up, is up, or could not be brought up. See
+  // RosterRowAvailability, which carries the field's whole contract. ALWAYS
+  // SET; a row without it is a contract breach and is rejected loudly.
+  RosterRowAvailability availability = 38;
 
   // The row's display name.
   RosterRowName name = 2;
