@@ -68,7 +68,11 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, err
 		}
-		s := subject{branch: job.Layout.SourceBranch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir}
+		branch, err := o.requestedBranch(ctx, r.ws, r.source, job.Layout.SourceDir)
+		if err != nil {
+			return subject{}, err
+		}
+		s := subject{branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir}
 		if !r.source.KeepOpen {
 			s.closes = r.ws
 		}
@@ -78,8 +82,12 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, err
 		}
+		branch, err := o.requestedBranch(ctx, r.ws, r.source, job.Layout.SourceDir)
+		if err != nil {
+			return subject{}, err
+		}
 		return subject{
-			branch: job.Layout.SourceBranch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir,
+			branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir,
 			closes: r.source.Workspace, other: r.source.Workspace,
 		}, nil
 	case wsm.MergeSourceBranch:
@@ -93,10 +101,27 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
 		}
-		return subject{branch: job.Layout.SourceBranch, targetDir: main, closes: r.ws}, nil
+		branch, err := o.requestedBranch(ctx, r.ws, r.source, job.Layout.SourceDir)
+		if err != nil {
+			return subject{}, err
+		}
+		return subject{branch: branch, targetDir: main, closes: r.ws}, nil
 	default:
 		return subject{}, fmt.Errorf("merge: the undeclared source %s", r.source.Kind)
 	}
+}
+
+// requestedBranch answers the workspace branch a request merges: the one
+// recorded when it was requested (checkSource). A request recorded by an
+// earlier build carries none, and its branch is read from the worktree now,
+// by the same rule the request would have been held to.
+func (o *orchestrator) requestedBranch(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource, dir string) (string, error) {
+	if source.Branch != "" {
+		return source.Branch, nil
+	}
+	o.log(ctx, ws).Info("daemon.merge.subject", "the request was recorded with no branch; reading the branch checked out in its worktree", dlog.Context{
+		"workspace": string(ws), "source": source.Kind.String(), "worktree": dir})
+	return o.checkedOutBranch(ctx, ws, dir)
 }
 
 // branchSubject resolves a branch that is no workspace: rebased in its own
@@ -147,13 +172,21 @@ func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, sour
 		if err != nil {
 			return "", err
 		}
-		return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir), nil
+		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
+		if err != nil {
+			return "", err
+		}
+		return branchLabel(branch, job.Layout.TargetDir), nil
 	case wsm.MergeSourceWorkspace:
 		job, err := o.layoutFor(ctx, source.Workspace)
 		if err != nil {
 			return "", err
 		}
-		return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir), nil
+		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
+		if err != nil {
+			return "", err
+		}
+		return branchLabel(branch, job.Layout.TargetDir), nil
 	case wsm.MergeSourceMergedUpstream:
 		job, err := o.layoutFor(ctx, ws)
 		if err != nil {
@@ -163,7 +196,11 @@ func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, sour
 		if err != nil {
 			return "", err
 		}
-		return branchLabel(job.Layout.SourceBranch, main), nil
+		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
+		if err != nil {
+			return "", err
+		}
+		return branchLabel(branch, main), nil
 	case wsm.MergeSourceBranch:
 		record, err := o.deps.DB.Workspace(ctx, ws)
 		if err != nil {

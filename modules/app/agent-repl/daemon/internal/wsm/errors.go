@@ -331,8 +331,10 @@ func (m MergeSource) validate() error {
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}
-	if (m.Branch != "") != (m.Kind == MergeSourceBranch) {
-		return fmt.Errorf("a %s source names branch %q", m.Kind, m.Branch)
+	// A WORKSPACE'S BRANCH IS RECORDED WITH THE REQUEST (the branch checked out
+	// in its worktree), so every arm may name one, and the branch arm must.
+	if m.Kind == MergeSourceBranch && m.Branch == "" {
+		return fmt.Errorf("a %s source names no branch", m.Kind)
 	}
 	return nil
 }
