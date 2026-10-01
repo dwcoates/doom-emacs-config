@@ -2536,6 +2536,11 @@ func awaitLog(ctx context.Context, t *testing.T, path string, what string, match
 		}
 		select {
 		case <-ctx.Done():
+			// THE LOG IS THE EVIDENCE: a wait that expires states what the
+			// process did say, so a miss is diagnosable from the failure alone.
+			for _, r := range readLog(t, path) {
+				t.Logf("sidecar log: %s %s %v", r.Operation, r.Message, r.Context)
+			}
 			t.Fatalf("no sidecar log record matching %s within the deadline", what)
 		case <-tick.C:
 		}
