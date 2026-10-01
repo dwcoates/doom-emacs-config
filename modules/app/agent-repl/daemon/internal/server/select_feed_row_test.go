@@ -9,9 +9,16 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"claude-repld/internal/dlog"
 )
 
-// feedIDs renders values as a final-response slice, oldest first.
+const (
+	older = agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER
+	newer = agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_NEWER
+)
+
+// feedIDs renders values as an ordered selectable row slice, oldest first.
 func feedIDs(values ...string) []*frontendv1.FeedId {
 	out := make([]*frontendv1.FeedId, len(values))
 	for i, v := range values {
@@ -20,170 +27,350 @@ func feedIDs(values ...string) []*frontendv1.FeedId {
 	return out
 }
 
-// TestNextSelection is the whole cursor state machine: prev/next start at the
-// most recent, wrap at each end, clear and the empty set answer none, and a
-// stale cursor restarts at the most recent.
-func TestNextSelection(t *testing.T) {
-	const (
-		prev  = agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_PREV
-		next  = agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT
-		clear = agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_CLEAR
-	)
+// responseStep builds a SelectFeedRow request stepping the final responses.
+func responseStep(direction agentreplv1.SelectFeedRowDirection) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Response{
+			Response: &agentreplv1.SelectFeedRowStep{Direction: direction},
+		},
+	}
+}
+
+// promptStep builds a SelectFeedRow request stepping the rollback prompts.
+func promptStep(direction agentreplv1.SelectFeedRowDirection) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Prompt{
+			Prompt: &agentreplv1.SelectFeedRowStep{Direction: direction},
+		},
+	}
+}
+
+// clearMove builds a SelectFeedRow request that clears the selection.
+func clearMove() *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move:      &agentreplv1.SelectFeedRowRequest_Clear{Clear: &agentreplv1.SelectFeedRowClear{}},
+	}
+}
+
+// leftViewMove builds a SelectFeedRow request reporting a row left the
+// viewport.
+func leftViewMove(row *frontendv1.FeedId) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move:      &agentreplv1.SelectFeedRowRequest_LeftView{LeftView: &agentreplv1.SelectFeedRowLeftView{Row: row}},
+	}
+}
+
+// TestStepIndex is the pure index arithmetic every step rides on: the newest
+// row from nothing selected regardless of direction, wrapping at each end,
+// and a single row wrapping to itself.
+func TestStepIndex(t *testing.T) {
 	tests := []struct {
 		name      string
-		finals    []*frontendv1.FeedId
-		current   string
-		direction agentreplv1.SelectResponseDirection
-		want      string
+		at        int
+		n         int
+		direction agentreplv1.SelectFeedRowDirection
+		want      int
 	}{
-		{name: "next from none starts at most recent", finals: feedIDs("a", "b", "c"), current: "", direction: next, want: "c"},
-		{name: "prev from none starts at most recent", finals: feedIDs("a", "b", "c"), current: "", direction: prev, want: "c"},
-		{name: "prev walks older", finals: feedIDs("a", "b", "c"), current: "c", direction: prev, want: "b"},
-		{name: "next walks newer", finals: feedIDs("a", "b", "c"), current: "a", direction: next, want: "b"},
-		{name: "prev wraps past the oldest to the newest", finals: feedIDs("a", "b", "c"), current: "a", direction: prev, want: "c"},
-		{name: "next wraps past the newest to the oldest", finals: feedIDs("a", "b", "c"), current: "c", direction: next, want: "a"},
-		{name: "clear answers none", finals: feedIDs("a", "b", "c"), current: "b", direction: clear, want: ""},
-		{name: "prev on the empty set answers none", finals: nil, current: "", direction: prev, want: ""},
-		{name: "next on the empty set answers none", finals: nil, current: "", direction: next, want: ""},
-		{name: "stale cursor restarts at the most recent", finals: feedIDs("a", "b", "c"), current: "gone", direction: prev, want: "c"},
-		{name: "single row prev wraps to itself", finals: feedIDs("a"), current: "a", direction: prev, want: "a"},
-		{name: "single row next wraps to itself", finals: feedIDs("a"), current: "a", direction: next, want: "a"},
+		{name: "from nothing, OLDER starts at the newest", at: -1, n: 3, direction: older, want: 2},
+		{name: "from nothing, NEWER starts at the newest", at: -1, n: 3, direction: newer, want: 2},
+		{name: "OLDER walks older", at: 2, n: 3, direction: older, want: 1},
+		{name: "NEWER walks newer", at: 0, n: 3, direction: newer, want: 1},
+		{name: "OLDER wraps past the oldest to the newest", at: 0, n: 3, direction: older, want: 2},
+		{name: "NEWER wraps past the newest to the oldest", at: 2, n: 3, direction: newer, want: 0},
+		{name: "single row OLDER wraps to itself", at: 0, n: 1, direction: older, want: 0},
+		{name: "single row NEWER wraps to itself", at: 0, n: 1, direction: newer, want: 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			var current *frontendv1.FeedId
-			if tc.current != "" {
-				current = &frontendv1.FeedId{Value: tc.current}
-			}
-
 			// Act.
-			got := nextSelection(tc.finals, current, tc.direction)
+			got := stepIndex(tc.at, tc.n, tc.direction)
 
 			// Assert.
-			if got.GetValue() != tc.want {
-				t.Fatalf("nextSelection = %q, want %q", got.GetValue(), tc.want)
+			if got != tc.want {
+				t.Fatalf("stepIndex(%d, %d, %v) = %d, want %d", tc.at, tc.n, tc.direction, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestSelectResponseAcksTheSelectedFeedid pins that the handler answers the row
-// the direction lands on — the most recent when nothing was selected.
-func TestSelectResponseAcksTheSelectedFeedid(t *testing.T) {
+// TestSelectFeedRowResponseStepAcksTheNewest pins that a response step with
+// nothing selected lands on, and acks, the most recent final response.
+func TestSelectFeedRowResponseStepAcksTheNewest(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a", "b", "c")
 
 	// Act.
-	resp, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		}))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if got := resp.Msg.GetSuccess().GetSelected().GetValue(); got != "c" {
-		t.Fatalf("selected = %q, want the most recent c", got)
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "c" {
+		t.Fatalf("selected response = %q, want the most recent c", got)
 	}
 }
 
-// TestSelectResponseClearAnswersNone pins that CLEAR drops the selection and
-// answers none.
-func TestSelectResponseClearAnswersNone(t *testing.T) {
+// TestSelectFeedRowPromptStepWalksRollbackPrompts pins that the prompt step
+// reads its own ordered set from RollbackPrompts, distinct from FinalResponses.
+func TestSelectFeedRowPromptStepWalksRollbackPrompts(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-only")
+	h.Feed.prompts = feedIDs("p1", "p2")
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetRow().GetValue(); got != "p2" {
+		t.Fatalf("selected prompt = %q, want the most recent p2", got)
+	}
+}
+
+// TestSelectFeedRowPromptStepReplacesASelectedResponse pins that stepping
+// prompts while a response is selected drops the response and lands on the
+// newest prompt, rather than continuing from the response's position.
+func TestSelectFeedRowPromptStepReplacesASelectedResponse(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a", "b", "c")
-	if _, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_PREV,
-		})); err != nil {
-		t.Fatalf("seed selection: %v", err)
+	h.Feed.prompts = feedIDs("p1", "p2")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a response selection: %v", err)
 	}
 
 	// Act.
-	resp, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_CLEAR,
-		}))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
 
 	// Assert.
+	sel := resp.Msg.GetSuccess().GetSelected().GetSelection()
 	if err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	if sel.GetResponse() != nil {
+		t.Fatalf("selection = %v, want the response selection replaced", sel)
 	}
-	if resp.Msg.GetSuccess().Selected != nil {
-		t.Fatalf("selected = %v, want none after a clear", resp.Msg.GetSuccess().GetSelected())
+	if got := sel.GetPrompt().GetRow().GetValue(); got != "p2" {
+		t.Fatalf("selected prompt = %q, want the most recent p2", got)
 	}
 }
 
-// TestSelectResponseEmptySetIsANoOpNotAnError pins that PREV/NEXT with zero
-// final responses answer none rather than refusing.
-func TestSelectResponseEmptySetIsANoOpNotAnError(t *testing.T) {
+// TestSelectFeedRowEmptySetEndsAHeldSelectionWithReturnToTail pins that a
+// step with nothing of its kind to select answers nothing_selectable AND, when
+// a selection was held, ends it with a return_to_tail push.
+func TestSelectFeedRowEmptySetEndsAHeldSelectionWithReturnToTail(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "c" {
+		t.Fatalf("seed selection = %q, want c", got)
+	}
 	h.Feed.finals = nil
 
 	// Act.
-	resp, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		}))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if resp.Msg.GetSuccess() == nil || resp.Msg.GetSuccess().Selected != nil {
-		t.Fatalf("result = %v, want success with no selection", resp.Msg.GetResult())
+	if resp.Msg.GetSuccess().GetNothingSelectable() == nil {
+		t.Fatalf("outcome = %v, want nothing_selectable", resp.Msg.GetSuccess().GetOutcome())
+	}
+	sel := receiveSelection(t, stream)
+	if sel.GetNone().GetReturnToTail() == nil {
+		t.Fatalf("selection = %v, want none{return_to_tail} after the held selection ended", sel)
 	}
 }
 
-// TestSelectResponseRefusesAnUnknownWorkspace pins that the ref refusals mirror
-// SelectWorkspace: an unregistered id answers the unknown_workspace arm.
-func TestSelectResponseRefusesAnUnknownWorkspace(t *testing.T) {
+// TestSelectFeedRowClearPushesReturnToTail pins that CLEAR answers `none` and
+// pushes a return-to-tail frame, which is what returns the webapp to the feed
+// bottom.
+func TestSelectFeedRowClearPushesReturnToTail(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	receiveSelection(t, stream)
 
 	// Act.
-	resp, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		}))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(clearMove()))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetNone() == nil {
+		t.Fatalf("outcome = %v, want none", resp.Msg.GetSuccess().GetOutcome())
+	}
+	sel := receiveSelection(t, stream)
+	if sel.GetNone().GetReturnToTail() == nil {
+		t.Fatalf("selection = %v, want none{return_to_tail}", sel)
+	}
+}
+
+// TestSelectFeedRowLeftViewOfTheSelectedRowPushesStay pins that a left-view
+// report about the row currently selected ends the selection and pushes
+// `stay`, leaving the viewport where the reader left it.
+func TestSelectFeedRowLeftViewOfTheSelectedRowPushesStay(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	receiveSelection(t, stream)
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(),
+		connect.NewRequest(leftViewMove(&frontendv1.FeedId{Value: "c"})))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetNone() == nil {
+		t.Fatalf("outcome = %v, want none", resp.Msg.GetSuccess().GetOutcome())
+	}
+	sel := receiveSelection(t, stream)
+	if sel.GetNone().GetStay() == nil {
+		t.Fatalf("selection = %v, want none{stay}", sel)
+	}
+}
+
+// TestSelectFeedRowLeftViewOfANonSelectedRowKeepsTheSelection pins that a
+// left-view report naming a row the reader has since stepped away from
+// changes nothing: no push fires, and the held selection stands for the next
+// step to continue from. Steeping OLDER after a held "c" lands on "b"; a
+// cleared selection would instead restart at the newest, "c" (stepIndex treats
+// -1 as "start at the newest" for either direction).
+func TestSelectFeedRowLeftViewOfANonSelectedRowKeepsTheSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	receiveSelection(t, stream)
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(),
+		connect.NewRequest(leftViewMove(&frontendv1.FeedId{Value: "a"}))); err != nil {
+		t.Fatalf("report a non-selected row leaving the viewport: %v", err)
+	}
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+
+	// Assert: the very next frame on the topic is the OLDER step's own push —
+	// had the left-view report pushed anything, it would have arrived first.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "b" {
+		t.Fatalf("selected response = %q, want b (the held c stepped older)", got)
+	}
+	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "b" {
+		t.Fatalf("pushed selection = %q, want b, with no interceding push from the left-view report", got)
+	}
+}
+
+// TestSelectFeedRowValidation pins the InvalidArgument surface: an unset
+// move, an unspecified step direction, and a left-view with no row are every
+// refused before the handler runs, exactly as the proto states.
+func TestSelectFeedRowValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.SelectFeedRowRequest
+	}{
+		{name: "unset move", req: &agentreplv1.SelectFeedRowRequest{Workspace: ref()}},
+		{name: "unspecified direction on a response step", req: responseStep(agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED)},
+		{name: "unspecified direction on a prompt step", req: promptStep(agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED)},
+		{name: "left_view without a row", req: leftViewMove(nil)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.req))
+
+			// Assert.
+			if connectCode(t, err) != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", connectCode(t, err))
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowRefusesAnUnknownWorkspace pins that the ref refusals mirror
+// SelectWorkspace: an unregistered id answers the unknown_workspace arm.
+func TestSelectFeedRowRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := responseStep(newer)
+	req.Workspace = &workspacev1.WorkspaceRef{Id: "ws-nope"}
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
 }
 
-// TestSelectResponseRefusesAnUnspecifiedDirection pins that UNSPECIFIED is a
-// validation failure (InvalidArgument), never a typed arm.
-func TestSelectResponseRefusesAnUnspecifiedDirection(t *testing.T) {
+// TestSelectFeedRowMoveIsRecordedAtInfo pins that a move is a visible,
+// recorded daemon action: an owner diagnosing a wrong selection must be able
+// to find it in the workspace's own log.
+func TestSelectFeedRowMoveIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
 
 	// Act.
-	_, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_UNSPECIFIED,
-		}))
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
 
 	// Assert.
-	if connectCode(t, err) != connect.CodeInvalidArgument {
-		t.Fatalf("code = %v, want InvalidArgument", connectCode(t, err))
+	var found []dlog.Record
+	for _, rec := range log.Records() {
+		if rec.Level == "info" && rec.Operation == opSelectFeedRow {
+			found = append(found, rec)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("info records under %q = %v, want exactly one", opSelectFeedRow, log.Records())
 	}
 }

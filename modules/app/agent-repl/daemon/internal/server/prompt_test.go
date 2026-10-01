@@ -73,20 +73,25 @@ func join(parts []string) string {
 }
 
 // TestSubmitPromptPrependsTheReferencedResponse pins the exact reply-preamble
-// wording: the referenced response's markdown between the two ⟢ markers,
-// followed by the user's own words, delivered as one prompt to the shim.
+// wording: the markdown of the response SELECTED when the prompt is accepted,
+// between the two ⟢ markers, followed by the user's own words, delivered as
+// one prompt to the shim. The reply target is no longer named on the request:
+// the daemon reads its own held selection.
 func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-1")
 	h.Feed.markdown = map[string]string{"resp-1": "The capital is Paris."}
 	h.Prompts.outcome = prompthandler.Outcome{
 		Recognition: prompthandler.RecognizedNone,
 		Turn:        "turn-9",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("select the response: %v", err)
+	}
 	req := submitRequest()
 	req.Said = said("And its population?")
-	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-1"}
 
 	// Act.
 	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
@@ -103,18 +108,21 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 	}
 }
 
-// TestSubmitPromptRefusesAnUnresolvableReference pins that a reference the
-// daemon cannot resolve is REFUSED, never silently dropped: the user's message
-// is not delivered shorn of the reply they asked for.
+// TestSubmitPromptRefusesAnUnresolvableReference pins that a selected response
+// the daemon cannot resolve to markdown is REFUSED, never silently dropped:
+// the user's message is not delivered shorn of the reply they asked for, and
+// the selection they saw is not quietly cleared out from under them.
 func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-older", "resp-gone")
 	h.Feed.markdown = map[string]string{} // resolves nothing
-	req := submitRequest()
-	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-gone"}
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("select the response: %v", err)
+	}
 
 	// Act.
-	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req))
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
 
 	// Assert: no landed arm carries this refusal, so it surfaces loudly as a
 	// Connect error rather than an answer — and the prompt never reached the
@@ -125,14 +133,25 @@ func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 	if h.Prompts.lastSaid != nil {
 		t.Fatalf("the prompt was delivered despite the unresolvable reference: %v", h.Prompts.lastSaid)
 	}
+
+	// The selection is KEPT, not cleared: OLDER from the held resp-gone lands
+	// on resp-older, while OLDER from nothing would restart at the newest
+	// (resp-gone again).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-older" {
+		t.Fatalf("selected response = %q, want resp-older (the held resp-gone kept)", got)
+	}
 }
 
-// TestSubmitPromptClearsTheSelectionAfterConsumingTheReference pins that a
-// successful reply-consuming submit drops the daemon's selection cursor. The
-// two-row set makes the clear observable: with the most recent seeded, a later
-// NEXT restarts at the most recent when cleared, but would WRAP to the oldest
-// if the cursor had survived.
-func TestSubmitPromptClearsTheSelectionAfterConsumingTheReference(t *testing.T) {
+// TestSubmitPromptEndsTheSelectionAfterConsumingTheReference pins that a
+// successful reply-consuming submit ends the daemon's held selection. The
+// two-row set makes the end observable: with the most recent seeded, a later
+// NEWER restarts at the most recent when ended, but would WRAP to the oldest
+// if the selection had survived.
+func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("resp-old", "resp-new")
@@ -142,34 +161,63 @@ func TestSubmitPromptClearsTheSelectionAfterConsumingTheReference(t *testing.T) 
 		Turn:        "turn-10",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
-	// Seed the cursor at the most recent (NEXT from none).
-	if _, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		})); err != nil {
+	// Seed the selection at the most recent (NEWER from none).
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
+
+	// Act.
+	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest())); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert: a NEWER now restarts at the most recent (ended), rather than
+	// wrapping to the oldest (which a surviving selection would do).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-new" {
+		t.Fatalf("selected = %q, want resp-new (an ended selection restarts at the most recent)", got)
+	}
+}
+
+// TestSubmitPromptWithASelectedPromptSendsUnchangedAndEndsIt pins that a
+// SELECTED PROMPT (rather than a response) is not prepended to anything —
+// only a selected response changes what is sent — and that an accepted submit
+// still ends it, exactly as it ends a selected response.
+func TestSubmitPromptWithASelectedPromptSendsUnchangedAndEndsIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("p1", "p2")
+	h.Prompts.outcome = prompthandler.Outcome{
+		Recognition: prompthandler.RecognizedNone,
+		Turn:        "turn-11",
+		Disposition: promptqueue.Disposition{Delivered: true},
+	}
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer))); err != nil {
+		t.Fatalf("seed a prompt selection: %v", err)
+	}
 	req := submitRequest()
-	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-new"}
+	req.Said = said("unchanged message")
 
 	// Act.
 	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
-	// Assert: a NEXT now restarts at the most recent (cleared), rather than
-	// wrapping to the oldest (which a surviving cursor would do).
-	resp, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		}))
-	if err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+	// Assert: sent unchanged.
+	if got := promptText(h.Prompts.lastSaid); got != "unchanged message" {
+		t.Fatalf("delivered prompt = %q, want the user's words unchanged", got)
 	}
-	if got := resp.Msg.GetSuccess().GetSelected().GetValue(); got != "resp-new" {
-		t.Fatalf("selected = %q, want resp-new (a cleared cursor restarts at the most recent)", got)
+	// Assert: the prompt selection ended (NEWER restarts at the most recent
+	// rather than wrapping past it).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetRow().GetValue(); got != "p2" {
+		t.Fatalf("selected prompt = %q, want p2 (the ended selection restarts at the most recent)", got)
 	}
 }
 

@@ -374,6 +374,11 @@ func (s *server) serveHost(
 
 	states := s.hostStateTopic(ws).Subscribe(streamCtx)
 	events := s.hostTopic(ws).Subscribe(streamCtx)
+	// THE FEED'S SELECTION reaches Emacs from the one topic the webapp's root
+	// feed watch reads, mapped to the kind of row alone (hostSelectionOf), so
+	// Emacs and the webapp see one sequence of selections. The topic replays
+	// the selection in force, so a late subscriber is handed it first.
+	selections := s.selectionTopic(ws).Subscribe(streamCtx)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
@@ -405,6 +410,14 @@ func (s *server) serveHost(
 				continue
 			}
 			push = event
+		case sel, ok := <-selections:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			push = &agentreplv1.WatchHostWorkspaceResponse{
+				Push: &agentreplv1.WatchHostWorkspaceResponse_Selection{Selection: hostSelectionOf(sel)},
+			}
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",

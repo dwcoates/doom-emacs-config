@@ -410,6 +410,92 @@ func TestAHostStreamOpeningReleasesNoEdit(t *testing.T) {
 	}
 }
 
+// ---- the feed selection on the host stream ---------------------------------
+
+// TestHostStreamReceivesTheSelectionByKind pins that a SelectFeedRow move
+// reaches Emacs's host stream, mapped to the kind alone (hostSelectionOf):
+// never the row, because Emacs never names it back.
+func TestHostStreamReceivesTheSelectionByKind(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetSelection().GetResponse() == nil {
+		t.Fatalf("host selection = %v, want the response arm", push.GetSelection())
+	}
+}
+
+// TestHostStreamReceivesAPromptSelection pins the prompt arm beside the
+// response one, which Emacs tells apart to choose rollback vs. reply keys.
+func TestHostStreamReceivesAPromptSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("p1", "p2")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetSelection().GetPrompt() == nil {
+		t.Fatalf("host selection = %v, want the prompt arm", push.GetSelection())
+	}
+}
+
+// TestHostStreamReplaysTheSelectionInForceToALateSubscriber pins that a
+// selection made before a host stream even opens still reaches it: the
+// selection topic replays its latest value exactly as the host state topic
+// does, so a reconnecting Emacs is never left drawing a stale cursor.
+func TestHostStreamReplaysTheSelectionInForceToALateSubscriber(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection before any host stream opens: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act: the subscriber attaches only now.
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetSelection().GetResponse() == nil {
+		t.Fatalf("replayed host selection = %v, want the response arm standing before this stream opened", push.GetSelection())
+	}
+}
+
 // TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent pins the
 // state/event topic separation: after a drain schedule is armed and a
 // mutation-progress event is pushed, a LATE subscriber must still replay the

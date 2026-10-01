@@ -13,130 +13,210 @@ import (
 	"claude-repld/internal/publish"
 )
 
-// SelectResponse moves or clears the per-workspace response-selection cursor
-// (reply-to-a-past-response mode). See endpoint_select_response.proto.
+const opSelectFeedRow = "daemon.server.select_feed_row"
+
+// SelectFeedRow moves, clears or ends the workspace's feed selection. See
+// endpoint_select_feed_row.proto.
 //
-// The client sends only a DIRECTION; the DAEMON owns the state. It reads the
-// ordered selectable final-response rows from the feed resolver (the rows drawn
-// with the green final-answer border), computes the new cursor — PREV/NEXT both
-// START at the most recent when nothing is selected and WRAP at each end — and,
-// on any change, PUSHES the selection on the root feed's watch (FeedSelection)
-// so the webapp recolors and center-scrolls, and ACKS the resulting feedid
-// here so Emacs can track state. Zero final responses makes PREV/NEXT a no-op
-// that answers "none", never an error.
-func (s *server) SelectResponse(
+// THE DAEMON IS THE ONLY HOLDER OF THE SELECTION. A step reads the ordered
+// selectable rows of its kind from the feed resolver (final responses, or the
+// prompts a rollback can reach), computes the new row — both directions start
+// at the newest when nothing of that kind is selected, and wrap at each end —
+// and pushes the result to the webapp's root feed watch and to Emacs's host
+// watch. A sent prompt and a rollback read this same state, so nothing a
+// client holds can disagree with what the webapp draws.
+func (s *server) SelectFeedRow(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SelectResponseRequest],
-) (*connect.Response[agentreplv1.SelectResponseResponse], error) {
-	const rpc = "SelectResponse"
-	if err := validateSelectResponseRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.SelectFeedRowRequest],
+) (*connect.Response[agentreplv1.SelectFeedRowResponse], error) {
+	const rpc = "SelectFeedRow"
+	if err := validateSelectFeedRowRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.SelectResponseResponse{}
+	resp := &agentreplv1.SelectFeedRowResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
+	ws := subject.Record.ID
 
-	finals := s.deps.Feed.FinalResponses(subject.Record.ID)
-	selected, changed := s.applySelection(subject.Record.ID, finals, req.Msg.GetDirection())
-	if changed {
-		s.pushSelection(subject.Record.ID, selected)
-		subject.Log.Debug("daemon.server.select_response", "moved the response-selection cursor",
-			dlog.Context{"direction": req.Msg.GetDirection().String(), "selected": selected.GetValue()})
+	var success *agentreplv1.SelectFeedRowSuccess
+	switch move := req.Msg.GetMove().(type) {
+	case *agentreplv1.SelectFeedRowRequest_Response:
+		success = s.stepSelection(subject.Log, ws, selectionResponse,
+			s.deps.Feed.FinalResponses(ws), move.Response.GetDirection())
+	case *agentreplv1.SelectFeedRowRequest_Prompt:
+		success = s.stepSelection(subject.Log, ws, selectionPrompt,
+			s.deps.Feed.RollbackPrompts(ws), move.Prompt.GetDirection())
+	case *agentreplv1.SelectFeedRowRequest_Clear:
+		s.endSelection(subject.Log, ws, nil, returnToTail(), "cleared")
+		success = selectedNone()
+	case *agentreplv1.SelectFeedRowRequest_LeftView:
+		s.endSelection(subject.Log, ws, move.LeftView.GetRow(), stayInView(), "left_view")
+		success = selectedNone()
 	}
-
-	success := &agentreplv1.SelectResponseSuccess{}
-	if selected != nil {
-		success.Selected = selected
-	}
-	resp.Result = &agentreplv1.SelectResponseResponse_Success{Success: success}
+	resp.Result = &agentreplv1.SelectFeedRowResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 
-// applySelection computes and stores the workspace's new selection cursor for
-// one direction, reporting whether the cursor actually moved. It is the whole
-// state machine: PREV/NEXT start at the most recent from no selection and wrap
-// at each end; CLEAR drops the selection; an empty selectable set makes
-// PREV/NEXT a no-op answering none. It holds mu across the read-and-write so two
-// concurrent navs never race the cursor.
-func (s *server) applySelection(
+// selectionKind is which kind of row a step walks.
+type selectionKind int
+
+const (
+	selectionResponse selectionKind = iota
+	selectionPrompt
+)
+
+func (k selectionKind) String() string {
+	if k == selectionPrompt {
+		return "prompt"
+	}
+	return "response"
+}
+
+// selectionOf composes the selection of ROW as KIND.
+func selectionOf(kind selectionKind, row *frontendv1.FeedId) *frontendv1.FeedSelection {
+	if kind == selectionPrompt {
+		return &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_Prompt{
+			Prompt: &frontendv1.FeedSelectionPrompt{Row: row}}}
+	}
+	return &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_Response{
+		Response: &frontendv1.FeedSelectionResponse{Row: row}}}
+}
+
+// selectedRow answers the row a selection names, and of which kind; ok is
+// false when nothing is selected.
+func selectedRow(sel *frontendv1.FeedSelection) (*frontendv1.FeedId, selectionKind, bool) {
+	switch arm := sel.GetSelection().(type) {
+	case *frontendv1.FeedSelection_Response:
+		return arm.Response.GetRow(), selectionResponse, true
+	case *frontendv1.FeedSelection_Prompt:
+		return arm.Prompt.GetRow(), selectionPrompt, true
+	}
+	return nil, 0, false
+}
+
+func returnToTail() *frontendv1.FeedSelectionNone {
+	return &frontendv1.FeedSelectionNone{Viewport: &frontendv1.FeedSelectionNone_ReturnToTail{
+		ReturnToTail: &frontendv1.FeedSelectionNoneReturnToTail{}}}
+}
+
+func stayInView() *frontendv1.FeedSelectionNone {
+	return &frontendv1.FeedSelectionNone{Viewport: &frontendv1.FeedSelectionNone_Stay{
+		Stay: &frontendv1.FeedSelectionNoneStay{}}}
+}
+
+func selectedNone() *agentreplv1.SelectFeedRowSuccess {
+	return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_None{
+		None: &agentreplv1.SelectFeedRowSuccessNone{}}}
+}
+
+// stepSelection moves the selection one row of KIND in DIRECTION along ROWS
+// (oldest first) and pushes the result. No rows of that kind ends any
+// selection and answers nothing_selectable, so the caller can say so.
+func (s *server) stepSelection(
+	log dlog.Logger,
 	ws ids.WorkspaceID,
-	finals []*frontendv1.FeedId,
-	direction agentreplv1.SelectResponseDirection,
-) (*frontendv1.FeedId, bool) {
+	kind selectionKind,
+	rows []*frontendv1.FeedId,
+	direction agentreplv1.SelectFeedRowDirection,
+) *agentreplv1.SelectFeedRowSuccess {
+	s.mu.Lock()
+	current, currentKind, held := selectedRow(s.selections[ws])
+	if len(rows) == 0 {
+		delete(s.selections, ws)
+		s.mu.Unlock()
+		if held {
+			s.publishSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: returnToTail()}})
+		}
+		log.Info(opSelectFeedRow, "a selection step found no row of its kind to select",
+			dlog.Context{"kind": kind.String(), "direction": direction.String(), "ended": held})
+		return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_NothingSelectable{
+			NothingSelectable: &agentreplv1.SelectFeedRowSuccessNothingSelectable{}}}
+	}
+	at := -1
+	if held && currentKind == kind {
+		at = indexOfFeedID(rows, current)
+	}
+	at = stepIndex(at, len(rows), direction)
+	sel := selectionOf(kind, rows[at])
+	s.selections[ws] = sel
+	s.mu.Unlock()
+	s.publishSelection(ws, sel)
+	log.Info(opSelectFeedRow, "moved the feed selection",
+		dlog.Context{"kind": kind.String(), "direction": direction.String(), "row": rows[at].GetValue(), "index": at, "of": len(rows)})
+	return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_Selected{
+		Selected: &agentreplv1.SelectFeedRowSuccessSelected{Selection: sel}}}
+}
+
+// stepIndex is the index a step lands on among N rows from AT (-1 when
+// nothing of the kind is selected): the newest from nothing, wrapping at
+// each end.
+func stepIndex(at, n int, direction agentreplv1.SelectFeedRowDirection) int {
+	if at < 0 {
+		return n - 1
+	}
+	if direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER {
+		return (at - 1 + n) % n
+	}
+	return (at + 1) % n
+}
+
+// endSelection ends the workspace's selection and pushes NONE. With ONLY set,
+// it ends the selection only while that row is still the selected one: a
+// left-view report about a row the user has since stepped away from changes
+// nothing. It answers whether a selection ended.
+func (s *server) endSelection(
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	only *frontendv1.FeedId,
+	none *frontendv1.FeedSelectionNone,
+	because string,
+) bool {
+	s.mu.Lock()
+	row, kind, held := selectedRow(s.selections[ws])
+	if !held || (only != nil && row.GetValue() != only.GetValue()) {
+		s.mu.Unlock()
+		log.Debug(opSelectFeedRow, "a selection end found nothing to end",
+			dlog.Context{"because": because, "held": held, "selected": row.GetValue(), "named": only.GetValue()})
+		return false
+	}
+	delete(s.selections, ws)
+	s.mu.Unlock()
+	s.publishSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: none}})
+	log.Info(opSelectFeedRow, "ended the feed selection",
+		dlog.Context{"because": because, "kind": kind.String(), "row": row.GetValue()})
+	return true
+}
+
+// currentSelection answers the workspace's selected row and its kind; held is
+// false when nothing is selected. A caller acting on a selection reads it
+// once here and ends only that row (endSelection with `only`).
+func (s *server) currentSelection(ws ids.WorkspaceID) (row *frontendv1.FeedId, kind selectionKind, held bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current := s.selections[ws]
-
-	next := nextSelection(finals, current, direction)
-	if feedIDValue(next) == feedIDValue(current) {
-		return current, false
-	}
-	if next == nil {
-		delete(s.selections, ws)
-	} else {
-		s.selections[ws] = next
-	}
-	return next, true
+	return selectedRow(s.selections[ws])
 }
 
-// nextSelection is the pure cursor arithmetic, factored out so the wrap and the
-// start-at-most-recent rules are tested directly. It never touches server
-// state.
-//
-//   - CLEAR: none.
-//   - empty set: none (PREV/NEXT are no-ops; CLEAR is already none).
-//   - PREV/NEXT from no selection: the most recent (the last element).
-//   - PREV from the oldest wraps to the newest; NEXT from the newest wraps to
-//     the oldest.
-//   - a current selection no longer in the set (a stale cursor) is treated as
-//     no selection, so the walk restarts at the most recent.
-func nextSelection(
-	finals []*frontendv1.FeedId,
-	current *frontendv1.FeedId,
-	direction agentreplv1.SelectResponseDirection,
-) *frontendv1.FeedId {
-	if direction == agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_CLEAR {
-		return nil
-	}
-	if len(finals) == 0 {
-		return nil
-	}
-	last := len(finals) - 1
-
-	idx := indexOfFeedID(finals, current)
-	if idx < 0 {
-		// No selection, or a stale one: both PREV and NEXT start at the most
-		// recent.
-		return finals[last]
-	}
-	switch direction {
-	case agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_PREV:
-		idx--
-		if idx < 0 {
-			idx = last
-		}
-	case agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT:
-		idx++
-		if idx > last {
-			idx = 0
-		}
-	}
-	return finals[idx]
-}
-
-// pushSelection publishes the current selection on the workspace's root-feed
-// watch. active is true whenever a row is selected; on a clear (selected nil)
-// active is false and the webapp returns to the feed bottom. center rides the
-// newly selected row so the webapp center-scrolls it.
-func (s *server) pushSelection(ws ids.WorkspaceID, selected *frontendv1.FeedId) {
-	sel := &frontendv1.FeedSelection{Active: selected != nil}
-	if selected != nil {
-		sel.Selected = selected
-		sel.Center = selected
-	}
+// publishSelection pushes a selection to the root feed's watches; Emacs's host
+// watch maps the same topic (hostSelectionOf), so both see one sequence.
+func (s *server) publishSelection(ws ids.WorkspaceID, sel *frontendv1.FeedSelection) {
 	s.selectionTopic(ws).Publish(sel)
+}
+
+// hostSelectionOf is the selection as Emacs needs it: only the kind of row.
+func hostSelectionOf(sel *frontendv1.FeedSelection) *agentreplv1.HostWorkspaceSelection {
+	_, kind, held := selectedRow(sel)
+	switch {
+	case !held:
+		return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_None{
+			None: &agentreplv1.HostWorkspaceSelectionNone{}}}
+	case kind == selectionPrompt:
+		return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_Prompt{
+			Prompt: &agentreplv1.HostWorkspaceSelectionPrompt{}}}
+	}
+	return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_Response{
+		Response: &agentreplv1.HostWorkspaceSelectionResponse{}}}
 }
 
 // selectionTopic answers a workspace's FeedSelection push topic, minting it on
@@ -152,33 +232,15 @@ func (s *server) selectionTopic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.F
 	return t
 }
 
-// clearSelection drops the workspace's selection cursor and pushes the cleared
-// state, reporting whether there was a selection to clear. It is the path a
-// successful reply-consuming submit takes to drop the reference it used.
-func (s *server) clearSelection(ws ids.WorkspaceID) bool {
-	s.mu.Lock()
-	_, had := s.selections[ws]
-	delete(s.selections, ws)
-	s.mu.Unlock()
-	if had {
-		s.pushSelection(ws, nil)
-	}
-	return had
-}
-
-// indexOfFeedID answers the position of id in finals by FeedId value, or -1.
-func indexOfFeedID(finals []*frontendv1.FeedId, id *frontendv1.FeedId) int {
+// indexOfFeedID answers the position of id in rows by FeedId value, or -1.
+func indexOfFeedID(rows []*frontendv1.FeedId, id *frontendv1.FeedId) int {
 	if id == nil {
 		return -1
 	}
-	for i, f := range finals {
+	for i, f := range rows {
 		if f.GetValue() == id.GetValue() {
 			return i
 		}
 	}
 	return -1
 }
-
-// feedIDValue answers a FeedId's value, treating nil as the empty string so a
-// "none" cursor compares equal to another "none".
-func feedIDValue(id *frontendv1.FeedId) string { return id.GetValue() }
