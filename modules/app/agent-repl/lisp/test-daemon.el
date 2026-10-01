@@ -105,9 +105,6 @@ proxy for `no dial' the transport records would otherwise prove.")
 (defvar agent-repl-test-daemon--logs nil
   "Captured `(LEVEL . TEXT)' log entries, newest first.")
 
-(defvar agent-repl-test-daemon--displayed nil
-  "Names of buffers handed to `agent-repl-popup-show', newest first.")
-
 (defvar agent-repl-test-daemon--addr-file nil
   "The throwaway path the stubbed `daemon.addr' resolver answers.
 The removal paths touch a REAL file, so every scenario gets its own
@@ -169,7 +166,6 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-test-daemon--link-up nil)
          (agent-repl-test-daemon--timers nil)
          (agent-repl-test-daemon--logs nil)
-         (agent-repl-test-daemon--displayed nil)
          (agent-repl--frontend-daemon-process nil)
          (agent-repl-daemon--exit-requested nil)
          (agent-repl-daemon-build-failure nil)
@@ -281,10 +277,6 @@ a scenario names which pids are alive rather than depending on the host.")
                 (lambda (seconds _repeat function &rest _args)
                   (push (cons seconds function) agent-repl-test-daemon--timers)
                   (timer-create)))
-               ((symbol-function 'agent-repl-popup-show)
-                (lambda (buffer)
-                  (push (buffer-name buffer) agent-repl-test-daemon--displayed)
-                  (selected-window)))
                ((symbol-function 'message) (lambda (&rest _) nil))
                ;; `agent-repl--backend-phase' and `agent-repl--phase-echo' are
                ;; NOT stubbed: they are how the startup phases reach the echo
@@ -304,7 +296,7 @@ a scenario names which pids are alive rather than depending on the host.")
                 (lambda (_ws fmt &rest args)
                   (push (cons :error (apply #'format fmt args)) agent-repl-test-daemon--logs))))
        (unwind-protect
-           (progn ,@body)
+           (agent-repl-test--recording-popups ,@body)
          (when (and agent-repl-test-daemon--addr-file
                     (file-exists-p agent-repl-test-daemon--addr-file))
            (delete-file agent-repl-test-daemon--addr-file))))))
@@ -676,7 +668,8 @@ path asks."
     ;; Act
     (agent-repl-daemon-ensure)
     ;; Assert
-    (should (member agent-repl-daemon-build-buffer agent-repl-test-daemon--displayed))))
+    (should (member agent-repl-daemon-build-buffer
+                    (mapcar #'buffer-name agent-repl-test--popups-shown)))))
 
 (ert-deftest agent-repl-test-daemon-build-failure-warns ()
   "A build failure is a WARNING on the durable record."

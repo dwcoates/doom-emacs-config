@@ -82,16 +82,14 @@ system does."
   "The file's buffer is shown through `agent-repl-popup-show'."
   ;; Arrange
   (agent-repl-test-popup--with-tree dir
-    (let ((path (agent-repl-test-popup--seed dir "notes.txt" "alpha\n"))
-          (shown nil))
-      ;; Act
-      (let ((buffer (cl-letf (((symbol-function 'agent-repl-popup-show)
-                               (lambda (buf) (push buf shown) (selected-window))))
-                      (agent-repl-popup-open path))))
-        ;; Assert
-        (unwind-protect
-            (should (equal shown (list (get-file-buffer path))))
-          (kill-buffer buffer))))))
+    (let ((path (agent-repl-test-popup--seed dir "notes.txt" "alpha\n")))
+      (agent-repl-test--recording-popups
+        ;; Act
+        (let ((buffer (agent-repl-popup-open path)))
+          ;; Assert
+          (unwind-protect
+              (should (equal agent-repl-test--popups-shown (list (get-file-buffer path))))
+            (kill-buffer buffer)))))))
 
 (ert-deftest agent-repl-test-popup-open-goes-to-the-given-line ()
   "LINE is 1-indexed, exactly as `HostOpenInEditor.line' is."

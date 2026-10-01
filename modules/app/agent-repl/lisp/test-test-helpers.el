@@ -411,6 +411,52 @@ test runs next."
     ;; Assert
     (should-not offenders)))
 
+;;;; ---- the popup-recording test helper --------------------------------
+
+(ert-deftest agent-repl-test-helpers-recording-popups-records-each-buffer ()
+  "Every buffer handed to the popup inside the macro is recorded, newest first."
+  ;; Arrange
+  (with-temp-buffer
+    (let ((first (current-buffer)))
+      (with-temp-buffer
+        (let ((second (current-buffer)))
+          ;; Act
+          (agent-repl-test--recording-popups
+            (agent-repl-popup-show first)
+            (agent-repl-popup-show second)
+            ;; Assert
+            (should (equal agent-repl-test--popups-shown (list second first)))))))))
+
+(ert-deftest agent-repl-test-helpers-recording-popups-answers-a-window ()
+  "The recorded popup answers the selected window, as a working popup does."
+  (with-temp-buffer
+    (agent-repl-test--recording-popups
+      (should (eq (agent-repl-popup-show (current-buffer)) (selected-window))))))
+
+(ert-deftest agent-repl-test-helpers-recording-popups-starts-empty ()
+  "Each use starts with nothing recorded, whatever an earlier use saw."
+  (with-temp-buffer
+    (agent-repl-test--recording-popups (agent-repl-popup-show (current-buffer))))
+  (agent-repl-test--recording-popups
+    (should (null agent-repl-test--popups-shown))))
+
+(ert-deftest agent-repl-test-helpers-popup-stubs-use-the-shared-macro ()
+  "No suite but test-popup.el stubs `agent-repl-popup-show' by hand.
+test-popup.el tests the popup module itself and records one level lower."
+  ;; Arrange
+  (let ((dir agent-repl-test--module-dir)
+        (offenders nil))
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file)
+                      '("test-helpers.el" "test-test-helpers.el" "test-popup.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          ;; Act
+          (when (search-forward "(symbol-function 'agent-repl-popup-show)" nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    ;; Assert
+    (should-not offenders)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
