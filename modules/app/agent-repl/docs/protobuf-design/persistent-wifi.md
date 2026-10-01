@@ -60,6 +60,17 @@ that every protobuf decision be made without their input (2026-10-01).
   subscribers, like `faults_standing`.
 - WHY: Emacs has no topbar; the webview draws the same standing from its
   topbar view.
+- Consequences:
+  - The daemon reads the standing in its Prime step, before anything is
+    served, so an Emacs `WatchDaemon` stream now ALWAYS opens with a
+    `persistent_wifi` frame. The integration tests that asserted a fresh
+    daemon's stream carries no frame now assert that of a webview stream, and
+    the late-subscriber invariant test compares the first frame of the driven
+    topic only, since an Emacs stream merges several standing topics.
+  - Every harness that boots a real daemon (daemon integration, e2e Emacs
+    layer) points `AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR` at stateful fake
+    `sudo`/`pmset`/`networksetup`/`ipconfig`, so no test touches the real
+    machine.
 
 ### 4. `frontend.v1.TopbarView.persistent_wifi = 13` (`TopbarPersistentWifi`)
 
