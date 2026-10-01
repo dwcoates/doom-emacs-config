@@ -51,24 +51,25 @@ func (s *server) saidText(log dlog.Logger, field string, said *conversationv1.Us
 	return strings.Join(parts, "\n")
 }
 
-// repositoryDir resolves a RepositoryRef against the registry, keyed on `id`
-// and falling back to the dir when the ref names only one.
-func (s *server) repositoryDir(ctx context.Context, ref *workspacev1.RepositoryRef) (string, error, bool) {
+// repositoryFor resolves a RepositoryRef against the registry, keyed on `id`
+// and falling back to the dir when the ref names only one. The bool reports
+// that a registered repository matched.
+func (s *server) repositoryFor(ctx context.Context, ref *workspacev1.RepositoryRef) (wsm.Repository, error, bool) {
 	repositories, err := s.deps.DB.ListRepositories(ctx)
 	if err != nil {
-		return "", err, false
+		return wsm.Repository{}, err, false
 	}
 	if id := ref.GetId(); id != "" {
 		if repository, found := wsm.RepositoryWithID(repositories, ids.RepoID(id)); found {
-			return repository.Dir, nil, true
+			return repository, nil, true
 		}
 	}
 	if dir := ref.GetDir(); dir != "" {
 		if repository, found := wsm.RepositoryAt(repositories, dir); found {
-			return repository.Dir, nil, true
+			return repository, nil, true
 		}
 	}
-	return "", nil, false
+	return wsm.Repository{}, nil, false
 }
 
 // CreateWorkspace materializes a new workspace, standard or one-shot. The
@@ -83,10 +84,11 @@ func (s *server) CreateWorkspace(
 		return nil, err
 	}
 	resp := &agentreplv1.CreateWorkspaceResponse{}
-	dir, err, known := s.repositoryDir(ctx, req.Msg.GetRepository())
+	repository, err, known := s.repositoryFor(ctx, req.Msg.GetRepository())
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}
+	dir := repository.Dir
 	if !known {
 		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
 			Arm:      "unknown_repository",
