@@ -59,8 +59,17 @@ func awaitAdoptedTurnOutcome(t *testing.T, d *harness.Daemon, f *fixture, turn i
 		})
 		return
 	}
-	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the INFO record keeping the running turn open", func(r harness.LogRecord) bool {
+	kept := d.AwaitWorkspaceLogRecord(f.repo.Dir, "the INFO record keeping the running turn open", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.sessionwatcher.turn_open_at_attach" && r.Level == "info" && r.Context["turn_id"] == string(turn)
+	})
+	// THE ADOPTER'S MAIN WATCH MUST BE SUBSCRIBED BEFORE THE TURN ENDS. The
+	// keep record is written as the adopter takes the session facts, and the
+	// main agent watch is dialed only after it; the fake shim delivers a
+	// pushed frame to the streams subscribed at that moment and replays
+	// nothing. It subscribes before it sends a stream's opening page, so the
+	// page's record from the same daemon proves the end will be delivered.
+	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the adopter's main watch opening page", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.sessionwatcher.history_page" && r.PID == kept.PID
 	})
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the kept turn's own completed close", func(r harness.LogRecord) bool {
