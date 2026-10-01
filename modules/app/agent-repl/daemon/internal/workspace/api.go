@@ -600,6 +600,14 @@ type ServedColdGate struct {
 	// so the strip, the gate card and a prompt's `cold_gate` refusal cannot
 	// give three accounts of one gate.
 	Detail string
+	// Compact is the compact menu the gate served, nil when the session's
+	// account is not offered compaction; a compact answer to such a gate is
+	// refused.
+	Compact *ServedColdGateCompact
+}
+
+// ServedColdGateCompact is the compact menu a standing gate served.
+type ServedColdGateCompact struct {
 	// Models are the models the compact menu served.
 	Models []*conversationv1.AgentModel
 	// Scopes are the compaction scopes the menu served.

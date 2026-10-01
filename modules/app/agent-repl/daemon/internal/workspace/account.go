@@ -43,3 +43,12 @@ func spawnRootFor(accounts account.Resolver, dir string, session wsm.Session) st
 	}
 	return accounts.ConfigDirFor(dir)
 }
+
+// offersColdCompaction answers whether a session spending from CONFIGDIR is
+// offered the harness's own compaction -- the cold gate's compact choice, a
+// throwaway summarizing session the shim runs. The work (multi-repo) account
+// never is: it does not pay for harness summaries. The vendor CLI's own
+// auto-compaction is a different mechanism and is on for every account.
+func offersColdCompaction(accounts account.Resolver, configDir string) bool {
+	return !accounts.IsMultiRepo(configDir)
+}

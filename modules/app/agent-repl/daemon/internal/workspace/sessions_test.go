@@ -1462,8 +1462,49 @@ func TestStartRemembersTheColdGateMenu(t *testing.T) {
 
 	// Assert.
 	gate, ok := f.fleet.ColdGate(ws.ID)
-	if !ok || gate.VendorSessionID != "vendor-1" || len(gate.Models) != 1 || len(gate.Scopes) != 3 {
+	if !ok || gate.VendorSessionID != "vendor-1" || gate.Compact == nil || len(gate.Compact.Models) != 1 || len(gate.Compact.Scopes) != 3 {
 		t.Fatalf("served cold gate = (%+v, %v), want the menu the row offered", gate, ok)
+	}
+}
+
+func TestStartServesNoCompactMenuForAWorkAccountColdGate(t *testing.T) {
+	// Arrange: the routed config dir IS the work (multi-repo) account.
+	f := newFleetFixture(t)
+	f.accounts.multiRepoDir = "/config"
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	gate, ok := f.fleet.ColdGate(ws.ID)
+	if !ok || gate.Compact != nil {
+		t.Fatalf("served cold gate = (%+v, %v), want a standing gate with no compact menu", gate, ok)
+	}
+	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact != nil {
+		t.Fatalf("synthesized rows = %v, want one standing gate row with no compact menu", f.feed.synthesized)
+	}
+}
+
+func TestStartDrawsTheCompactMenuForAPersonalAccountColdGate(t *testing.T) {
+	// Arrange: no work account, so the routed config dir is personal.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact == nil {
+		t.Fatalf("synthesized rows = %v, want one standing gate row drawing the compact menu", f.feed.synthesized)
 	}
 }
 
@@ -3675,7 +3716,7 @@ func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
 	// Arrange: the gate was raised, answered, and spent.
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-reraise")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
 	f.fleet.TakeColdGate(ws.ID, "vendor-1")
 	f.feed.synthesized = nil
 
@@ -3690,6 +3731,24 @@ func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetId().GetValue() != want ||
 		f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
 		t.Fatalf("synthesized rows = %v, want the standing gate row %q", f.feed.synthesized, want)
+	}
+}
+
+func TestReraiseColdGateKeepsTheWorkAccountsMenuWithheld(t *testing.T) {
+	// Arrange: a work-account gate was raised, answered, and spent.
+	f := newFleetFixture(t)
+	f.accounts.multiRepoDir = "/work"
+	ws := f.workspace("ws-reraise-work")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/work")
+	f.fleet.TakeColdGate(ws.ID, "vendor-1")
+
+	// Act.
+	raised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
+
+	// Assert.
+	gate, standing := f.fleet.ColdGate(ws.ID)
+	if !raised || !standing || gate.Compact != nil {
+		t.Fatalf("raised = %t, gate = (%+v, %t); want the gate stood again with no compact menu", raised, gate, standing)
 	}
 }
 
@@ -3755,7 +3814,7 @@ func TestATakenColdGateStillRefusesPromptsByItsName(t *testing.T) {
 	// Arrange: the answer is taken and its remediation has not settled.
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-answering")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
 	f.fleet.TakeColdGate(ws.ID, "vendor-1")
 
 	// Act.
@@ -3786,7 +3845,7 @@ func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 			// Arrange.
 			f := newFleetFixture(t)
 			ws := f.workspace("ws-end")
-			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold())
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
 			if tt.take {
 				f.fleet.TakeColdGate(ws.ID, "vendor-1")
 			}

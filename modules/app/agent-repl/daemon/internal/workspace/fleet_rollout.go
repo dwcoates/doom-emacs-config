@@ -613,7 +613,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		}
 	}
 
-	started, err := f.startSession(ctx, log, ws, c, src, session)
+	started, err := f.startSession(ctx, log, ws, c, src, session, configDir)
 	if err != nil {
 		return rollout.Resumed{}, err
 	}
@@ -921,7 +921,7 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-	f.raiseColdGate(ws, session.VendorSessionID, cold)
+	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
 	f.publishHost(ws)
 	log.Info(opFleetRollout, "adopted the running shim parked at its cold gate; the gate stands on this daemon", dlog.Context{
 		"shim_pid": client.PID(), "vendor_session_id": session.VendorSessionID,
@@ -1023,11 +1023,17 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	if cold == nil {
 		return fmt.Errorf("workspace: raise the cold gate on %q: no cold facts", ws)
 	}
+	record, err := f.deps.DB.Workspace(context.Background(), ws)
+	if err != nil {
+		return fmt.Errorf("workspace: raise the cold gate on %q: %w", ws, err)
+	}
 	session, _, err := f.deps.DB.Session(context.Background(), ws)
 	if err != nil {
 		return fmt.Errorf("workspace: raise the cold gate on %q: read the session record: %w", ws, err)
 	}
-	f.raiseColdGate(ws, session.VendorSessionID, cold)
+	// The relaunched shim was spawned under spawnRootFor (Prelaunch), so the
+	// gate serves that account's menu.
+	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
 	return nil
 }
 
