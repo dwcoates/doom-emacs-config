@@ -29,6 +29,7 @@ import {
   stubRenderers,
   subagentRow,
   tokenFor,
+  toolCallRow,
   userPromptRow,
   type Harness,
 } from "./harness.js";
@@ -446,9 +447,11 @@ describe("mountFeed: selectDetachedWork", () => {
     expect(scroll.scrollTop).toBe(500);
   });
 
-  it("does not scroll the feed for a breadcrumb's reveal", async () => {
-    // Arrange -- REMOVED TRIGGER: a breadcrumb click used to scroll the feed to
-    // its target. The root page here carries a crumb naming its own row.
+  it("centers the feed on a breadcrumb's target, as every jump does", async () => {
+    // Arrange -- owner request, 2026-10-01: a breadcrumb is a jump, and every
+    // jump centers its entry. (It used to mark its target and leave the
+    // scroll to the reader.) The root page here carries a crumb naming its
+    // own row.
     const h = harness({
       openFeed: (req) =>
         openSuccess(page([responseRow("r1")], { crumbs: [crumb("r1", "here")] }), tokenFor(req)),
@@ -460,11 +463,12 @@ describe("mountFeed: selectDetachedWork", () => {
     // Act
     host.querySelector<HTMLElement>(".feed-breadcrumb")?.click();
     await settle();
-    // Assert -- the row is marked, and the feed is where the reader left it.
+    // Assert -- the row is marked, and its midpoint (550) is on the viewport's
+    // (150): 100 + 400.
     expect([
       cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS),
       scroll.scrollTop,
-    ]).toEqual([true, 100]);
+    ]).toEqual([true, 500]);
   });
 
   it("asks the daemon where an undrawn row lives", async () => {
@@ -495,7 +499,7 @@ describe("mountFeed: selectDetachedWork", () => {
     expect(revealed).toBe(true);
   });
 
-  it("opens only the containers selecting a nested head requires, never the head itself", async () => {
+  it("opens the containers selecting a nested head requires, then the head itself as the jump's entry", async () => {
     // Arrange: a subagent (inner) spawned by a subagent (b1); the probe of the
     // inner HEAD answers its own feed's crumbs, the head itself last.
     const channels = new Map<string, Channel<WatchFeedResponse>>();
@@ -517,12 +521,13 @@ describe("mountFeed: selectDetachedWork", () => {
     const revealed = await feed.selectDetachedWork(feedId("inner"));
     await settle();
 
-    // Assert: b1 was opened to reach the head; the head was probed once and
-    // never expanded.
+    // Assert: the head was probed, b1 was opened to reach it, and the head
+    // itself was opened last, by the landing (owner request, 2026-10-01: a
+    // jump expands its entry). The walk never opened it.
     expect({
       revealed,
       opened: h.calls.openFeed.map((req) => req.feed?.value),
-    }).toEqual({ revealed: true, opened: [undefined, "inner", "b1"] });
+    }).toEqual({ revealed: true, opened: [undefined, "inner", "b1", "inner"] });
   });
 
   it("answers false when the target's feed cannot be opened (a shell bubble)", async () => {
@@ -559,6 +564,411 @@ describe("mountFeed: selectDetachedWork", () => {
     const { feed } = mount(h);
     await settle();
     expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
+  });
+});
+
+/**
+ * EVERY JUMP EXPANDS ITS ENTRY, CENTERS IT, AND CLOSES IT AGAIN ONCE WHOLLY OUT
+ * OF VIEW (owner request, 2026-10-01). Only what the jump expanded is closed;
+ * the reader's own expansions close when the reader returns to the tail.
+ */
+describe("mountFeed: a jump expands its entry and closes it once wholly out of view", () => {
+  /** A tool card that is its own fold, as the real renderer draws one. */
+  const toolCard = (): HTMLElement => {
+    const el = document.createElement("div");
+    el.className = "tool-card tool-fold";
+    el.textContent = "card";
+    return el;
+  };
+
+  /**
+   * A mounted root feed holding two tool cards (t1, t2) apart, a subagent
+   * bubble (b1) and a last response (r1), in a 300px viewport over 2000px.
+   * BUBBLE answers the bubble's own OpenFeed.
+   */
+  async function jumping(
+    bubble: () => ReturnType<typeof openSuccess> = () => openSuccess(page([]), "tok:b1"),
+  ) {
+    const rows = [
+      toolCallRow("t1", "returned"),
+      responseRow("r0"),
+      toolCallRow("t2", "returned"),
+      subagentRow("b1"),
+      responseRow("r1"),
+    ];
+    const h = harness({
+      openFeed: (req) => (req.feed === undefined ? openSuccess(page(rows), tokenFor(req)) : bubble()),
+    });
+    let revealRow: ((id: ReturnType<typeof feedId>) => Promise<boolean>) | undefined;
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    scriptFeedBox(scroll);
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers({
+        simpleToolCall: toolCard,
+        response: (_unit, rc) => {
+          revealRow = rc.revealRow;
+          return document.createElement("div");
+        },
+      }),
+      scrollBox: scroll,
+    });
+    await settle();
+    const row = (id: string): HTMLElement => {
+      const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
+      if (el === null) throw new Error(`row ${id} is not drawn`);
+      return el;
+    };
+    const card = (id: string): HTMLElement => {
+      const el = row(id).querySelector<HTMLElement>(".tool-fold");
+      if (el === null) throw new Error(`row ${id} holds no card`);
+      return el;
+    };
+    const open = (el: HTMLElement): boolean => el.classList.contains("expanded");
+    const bubbleOpen = (): boolean => row("b1").getAttribute("data-expanded") === "true";
+    /** The rows the reader scrolls the entry ID into view and wholly out again. */
+    const seenThenLeft = (id: string): void => {
+      fireIntersection(row(id), true);
+      fireIntersection(row(id), false);
+    };
+    const cardJump = (): ((id: ReturnType<typeof feedId>) => Promise<boolean>) => {
+      if (revealRow === undefined) throw new Error("no card was handed the row context");
+      return revealRow;
+    };
+    return { feed, host, scroll, h, row, card, open, bubbleOpen, seenThenLeft, cardJump };
+  }
+
+  it("expands the tool card the footer's jump lands on", async () => {
+    // Arrange
+    const j = await jumping();
+    // Act
+    await j.feed.selectDetachedWork(feedId("t1"));
+    // Assert
+    expect(j.open(j.card("t1"))).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("expands the subagent bubble the footer's jump lands on", async () => {
+    // Arrange
+    const j = await jumping();
+    // Act
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Assert
+    expect(j.bubbleOpen()).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("expands the entry a card's jump (a breadcrumb, a hook's gated call) lands on", async () => {
+    // Arrange
+    const j = await jumping();
+    // Act
+    await j.cardJump()(feedId("t1"));
+    // Assert
+    expect(j.open(j.card("t1"))).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("centers the entry it expanded, reading the expanded layout", async () => {
+    // Arrange -- the expanded card hangs 500..600 under a 300px viewport at 100.
+    const j = await jumping();
+    j.scroll.scrollTop = 100;
+    j.row("t1").getBoundingClientRect = domRect(500, 100);
+    // Act
+    await j.feed.selectDetachedWork(feedId("t1"));
+    // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
+    expect(j.scroll.scrollTop).toBe(500);
+    j.feed.dispose();
+  });
+
+  it("centers a card's jump under entryJumped", async () => {
+    // Arrange
+    const j = await jumping();
+    j.row("t1").getBoundingClientRect = domRect(500, 100);
+    const capture = captureLogRecords("debug");
+    // Act
+    await j.cardJump()(feedId("t1"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect(record.context?.cause).toBe("entryJumped");
+    j.feed.dispose();
+  });
+
+  it("keeps the jumped card open while any part of it is in view", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    // Act
+    fireIntersection(j.row("t1"), true);
+    // Assert
+    expect(j.open(j.card("t1"))).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("closes the jumped card once it was seen and then left the view wholly", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    // Act
+    j.seenThenLeft("t1");
+    // Assert
+    expect(j.open(j.card("t1"))).toBe(false);
+    j.feed.dispose();
+  });
+
+  it("closes the jumped bubble once it was seen and then left the view wholly", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Act
+    j.seenThenLeft("b1");
+    // Assert
+    expect(j.bubbleOpen()).toBe(false);
+    j.feed.dispose();
+  });
+
+  it("closes the card a card's jump expanded once it left the view wholly", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.cardJump()(feedId("t1"));
+    // Act
+    j.seenThenLeft("t1");
+    // Assert
+    expect(j.open(j.card("t1"))).toBe(false);
+    j.feed.dispose();
+  });
+
+  it("leaves a card the reader opened by hand open when a jump lands on it and it leaves the view", async () => {
+    // Arrange
+    const j = await jumping();
+    j.card("t1").click();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    // Act -- nothing watches it, so only a fire that can reach it is asserted on.
+    const watched = intersectionObservers().some((r) => r.root === j.scroll && r.targets.has(j.row("t1")) && r.rootMargin === "0px 0px 0px 0px");
+    // Assert
+    expect([j.open(j.card("t1")), watched]).toEqual([true, false]);
+    j.feed.dispose();
+  });
+
+  it("leaves a jumped card the reader then toggled by hand as they left it", async () => {
+    // Arrange -- the jump opens it; the reader closes and reopens it.
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    j.card("t1").click();
+    j.card("t1").click();
+    // Act
+    const watched = intersectionObservers().some((r) => r.root === j.scroll && r.targets.has(j.row("t1")) && r.rootMargin === "0px 0px 0px 0px");
+    // Assert
+    expect([j.open(j.card("t1")), watched]).toEqual([true, false]);
+    j.feed.dispose();
+  });
+
+  it("keeps a first jump's watch when a second jump lands on another entry", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    await j.feed.selectDetachedWork(feedId("t2"));
+    fireIntersection(j.row("t2"), true);
+    // Act
+    j.seenThenLeft("t1");
+    // Assert
+    expect([j.open(j.card("t1")), j.open(j.card("t2"))]).toEqual([false, true]);
+    j.feed.dispose();
+  });
+
+  it("does not close a jumped card whose row was removed rather than scrolled away", async () => {
+    // Arrange
+    const j = await jumping();
+    await j.feed.selectDetachedWork(feedId("t1"));
+    const row = j.row("t1");
+    const card = j.card("t1");
+    fireIntersection(row, true);
+    row.remove();
+    // Act
+    fireIntersection(row, false);
+    // Assert
+    expect(j.open(card)).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("files a bubble the daemon would not open for the jump on the warning chip", async () => {
+    // Arrange
+    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    // Act
+    await j.feed.selectDetachedWork(feedId("b1"));
+    // Assert
+    expect(j.h.sink.reported).toContain("controlPlaneFailed");
+    j.feed.dispose();
+  });
+
+  it("logs a bubble the daemon would not open for the jump at ERROR", async () => {
+    // Arrange
+    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    const capture = captureLogRecords();
+    // Act
+    await j.feed.selectDetachedWork(feedId("b1"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.jump-expand-failed");
+    expect([record.level.case, record.context?.row]).toEqual(["error", "b1"]);
+    j.feed.dispose();
+  });
+
+  it("still centers and marks the entry whose bubble would not open", async () => {
+    // Arrange
+    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    // Act
+    const landed = await j.feed.selectDetachedWork(feedId("b1"));
+    // Assert
+    expect(landed).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("closes a container the walk opened once it left the view wholly", async () => {
+    // Arrange -- the target sits inside b1's sub-feed; the probe's crumbs name b1.
+    const h = harness({
+      openFeed: (req) => {
+        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1") return openSuccess(page([responseRow("deep")]), tokenFor(req));
+        return openSuccess(
+          page([], { crumbs: [create(FeedBreadcrumbSchema, { target: feedId("b1"), label: "Explore" })] }),
+          tokenFor(req),
+        );
+      },
+    });
+    const { feed, host } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("deep"));
+    await settle();
+    const b1 = host.querySelector<HTMLElement>('[data-feed-row="b1"]') as HTMLElement;
+    // Act
+    fireIntersection(b1, true);
+    fireIntersection(b1, false);
+    // Assert
+    expect(b1.getAttribute("data-expanded")).toBe("false");
+    feed.dispose();
+  });
+});
+
+/**
+ * THE READER RETURNING TO THE TAIL CLOSES EVERY EXPANDED ENTRY (owner ruling,
+ * 2026-10-01): the ones the reader opened by hand, which scrolling away from
+ * never closes, and any a jump opened that are still open, each once.
+ */
+describe("mountFeed: returning to the tail closes every expanded entry", () => {
+  /**
+   * A mounted root feed (a tool card t1, a subagent bubble b1, a last response
+   * r1) in a 300px viewport over 2000px, the reader wheeled up to 100 with the
+   * last row out of view.
+   */
+  async function awayFromTail() {
+    const rows = [toolCallRow("t1", "returned"), subagentRow("b1"), responseRow("r1")];
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined ? openSuccess(page(rows), tokenFor(req)) : openSuccess(page([]), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    scriptFeedBox(scroll);
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers({
+        simpleToolCall: () => {
+          const el = document.createElement("div");
+          el.className = "tool-card tool-fold";
+          return el;
+        },
+      }),
+      scrollBox: scroll,
+    });
+    await settle();
+    scroll.dispatchEvent(new Event("wheel"));
+    scroll.scrollTop = 100;
+    scroll.dispatchEvent(new Event("scroll"));
+    const row = (id: string): HTMLElement => host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`) as HTMLElement;
+    const card = (): HTMLElement => row("t1").querySelector<HTMLElement>(".tool-fold") as HTMLElement;
+    /** The reader wheels back down until the last row shows. */
+    const backToTail = (): void => {
+      row("r1").getBoundingClientRect = domRect(250, 50);
+      scroll.dispatchEvent(new Event("wheel"));
+      scroll.scrollTop = 1700;
+      scroll.dispatchEvent(new Event("scroll"));
+    };
+    return { feed, host, scroll, row, card, backToTail };
+  }
+
+  it("keeps a card the reader opened by hand open while they scroll away from it", async () => {
+    // Arrange
+    const t = await awayFromTail();
+    t.card().click();
+    // Act
+    t.scroll.dispatchEvent(new Event("wheel"));
+    t.scroll.scrollTop = 50;
+    t.scroll.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(t.card().classList.contains("expanded")).toBe(true);
+    t.feed.dispose();
+  });
+
+  it("closes a card the reader opened by hand once they return to the tail", async () => {
+    // Arrange
+    const t = await awayFromTail();
+    t.card().click();
+    // Act
+    t.backToTail();
+    // Assert
+    expect(t.card().classList.contains("expanded")).toBe(false);
+    t.feed.dispose();
+  });
+
+  it("closes a bubble the reader opened by hand once they return to the tail", async () => {
+    // Arrange
+    const t = await awayFromTail();
+    t.row("b1").querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+    // Act
+    t.backToTail();
+    // Assert
+    expect(t.row("b1").getAttribute("data-expanded")).toBe("false");
+    t.feed.dispose();
+  });
+
+  it("closes an entry a jump opened once, dropping its watch, when the reader returns to the tail", async () => {
+    // Arrange
+    const t = await awayFromTail();
+    await t.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    const capture = captureLogRecords();
+    // Act
+    t.backToTail();
+    // Assert -- one collapse, and nothing watches the row to close it again.
+    capture.logger.flush();
+    await Promise.resolve();
+    const collapses = capture.sent.filter((r) => r.operation === "feed.bubble-collapse").length;
+    const watched = intersectionObservers().some(
+      (r) => r.root === t.scroll && r.targets.has(t.row("b1")) && r.rootMargin === "0px 0px 0px 0px",
+    );
+    expect([collapses, watched]).toEqual([1, false]);
+    t.feed.dispose();
+  });
+
+  it("records the return at INFO with what it closed", async () => {
+    // Arrange
+    const t = await awayFromTail();
+    t.card().click();
+    const capture = captureLogRecords();
+    // Act
+    t.backToTail();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.tail-reached-collapse");
+    expect([record.level.case, record.context]).toEqual([
+      "info",
+      expect.objectContaining({ sections: 1, bubbles: 0 }),
+    ]);
+    t.feed.dispose();
   });
 });
 

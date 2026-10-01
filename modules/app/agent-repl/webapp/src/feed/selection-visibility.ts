@@ -9,25 +9,22 @@
  * that row is still the selected one, and pushes `none.stay`, which drops the
  * mark and leaves the viewport where the reader has it.
  *
- * WHY "SEEN" FIRST. A row is selected by a keystroke and then centered; it can
- * be out of view at the moment it is selected (an older response far above).
- * The observer's first report about it can come before the centering scroll
- * has landed, and a report of "not visible" then is no departure. So a
- * departure counts only after an arrival.
+ * WHAT "LEFT" MEANS is the one shared detector's (left-view.ts): a departure
+ * counts only after the row was SEEN (it can be out of view at the moment it
+ * is selected, before the centering scroll lands), it is reported once, and a
+ * DETACHED row (a page replace, a removal) is no departure and is logged and
+ * ignored.
  *
  * ONE REPORT PER SELECTION. Moving the selection to another row (or ending it)
  * resets the watch, so a report about a row the reader has stepped away from
- * is never sent, and a row that keeps wandering in and out is reported once.
- *
- * A DETACHED ROW IS NOT A DEPARTURE. A page replace or a row removal detaches
- * the element; the observer then reports it not intersecting, which is no
- * scroll at all. Such a report is logged and ignored.
+ * is never sent.
  *
  * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all: the
  * same standing overscan.ts gives it.
  */
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../log.js";
+import { createLeftViewWatch } from "./left-view.js";
 
 /** What the chip's `request` evidence names a failed left-view report as. */
 export const LEFT_VIEW_REQUEST = "end the selection of a row that left the view";
@@ -51,46 +48,38 @@ export function createSelectionVisibility(
   box: HTMLElement,
   leftView: (row: FeedId) => void,
 ): SelectionVisibility | null {
-  const Ctor = (globalThis as { IntersectionObserver?: typeof IntersectionObserver })
-    .IntersectionObserver;
-  if (Ctor === undefined) return null;
-  let current: { element: HTMLElement; id: FeedId; seen: boolean; reported: boolean } | null = null;
-  const observer = new Ctor(
-    (entries) => {
-      for (const entry of entries) {
-        if (current === null || entry.target !== current.element) continue;
-        if (entry.isIntersecting) {
-          current.seen = true;
-          continue;
-        }
-        if (!current.element.isConnected) {
-          log.debug("the selected row was detached, not scrolled away; the selection stands", {
-            operation: "feed.selection-row-detached",
-            context: { row: current.id.value },
-          });
-          continue;
-        }
-        if (!current.seen || current.reported) continue;
-        current.reported = true;
-        log.info("the selected row left the viewport; the daemon is told", {
-          operation: "feed.selection-left-view",
-          context: { row: current.id.value },
-        });
-        leftView(current.id);
-      }
-    },
-    { root: box, threshold: 0 },
-  );
+  const detector = createLeftViewWatch(box);
+  if (detector === null) return null;
+  let current: { element: HTMLElement; unwatch: () => void } | null = null;
   return {
     watch: (row) => {
       if (row !== null && current !== null && row.element === current.element) return;
-      if (current !== null) observer.unobserve(current.element);
-      current = row === null ? null : { ...row, seen: false, reported: false };
-      if (current !== null) observer.observe(current.element);
+      current?.unwatch();
+      current =
+        row === null
+          ? null
+          : {
+              element: row.element,
+              unwatch: detector.watch(row.element, {
+                onDetached: () => {
+                  log.debug("the selected row was detached, not scrolled away; the selection stands", {
+                    operation: "feed.selection-row-detached",
+                    context: { row: row.id.value },
+                  });
+                },
+                onLeft: () => {
+                  log.info("the selected row left the viewport; the daemon is told", {
+                    operation: "feed.selection-left-view",
+                    context: { row: row.id.value },
+                  });
+                  leftView(row.id);
+                },
+              }),
+            };
     },
     dispose: () => {
       current = null;
-      observer.disconnect();
+      detector.dispose();
     },
   };
 }

@@ -75,7 +75,10 @@ export interface RowContext {
   feed: FeedId | "root";
   /** The whole row, so a renderer can reach its id, turn and placement arm. */
   row: FeedRow;
-  /** Find and mark another row, opening bubbles along the way; never scrolls. */
+  /**
+   * JUMP to another row (owner request, 2026-10-01): open the bubbles along
+   * the way, expand the entry, center it (`entryJumped`), and mark it.
+   */
   readonly revealRow: (id: FeedId) => Promise<boolean>;
   /**
    * The element this row's PREVIOUS draw produced, when it had one.
@@ -265,9 +268,9 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
 /**
  * The breadcrumb header line — drawn ONLY when the trail is non-empty (R6).
  *
- * A crumb is a jump target, and the jump is the feed's own reveal rather than a
- * navigation: sub-feed expansion is INLINE, so "going to" a container means
- * bringing it into view where it already is.
+ * A crumb is a jump target, and the jump is the feed's own (`revealRow`)
+ * rather than a navigation: sub-feed expansion is INLINE, so "going to" a
+ * container means expanding it and centering it where it already is.
  */
 export function drawBreadcrumbTrail(
   host: HTMLElement,

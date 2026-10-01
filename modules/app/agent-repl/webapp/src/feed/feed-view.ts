@@ -143,6 +143,11 @@ export interface BubbleLike extends Handle {
   expand(): Promise<boolean>;
   /** Whether the sub-feed is open right now. */
   isExpanded(): boolean;
+  /**
+   * Close the sub-feed through the bubble's one collapse, as a head click
+   * does. A bubble that is not open is left as it is.
+   */
+  collapse(): void;
   /** The sub-feed's controller, once it has been opened at least once. */
   child(): FeedController | null;
 }

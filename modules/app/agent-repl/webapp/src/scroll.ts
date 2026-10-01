@@ -79,6 +79,10 @@ export interface ScrollPosition {
  *   expanded footer; the feed CENTERS that item's card in its viewport
  *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
  *   taller than the viewport lands with its top at the viewport's top.
+ * - `entryJumped`: the reader followed any other jump to a feed entry (a
+ *   breadcrumb, a hook's gated-call link). Owner request, 2026-10-01: every
+ *   jump expands the entry and centers it exactly as the detached-work
+ *   selection does (`revealCenterDelta`), so the two share the one routine.
  * - `itemExpanded`: the reader expanded a feed item — a capped bubble, a tool
  *   card, a subagent's bubble, a compaction's summary; the feed puts that
  *   item's vertical MIDDLE on the viewport's vertical middle at once (owner
@@ -112,6 +116,7 @@ export const SCROLL_CAUSES = [
   "promptHeld",
   "selectionMoved",
   "detachedWorkSelected",
+  "entryJumped",
   "itemExpanded",
   "initialPlacement",
   "replaceRestore",
@@ -134,6 +139,9 @@ type ParkCause =
   | "initialPlacement"
   | "replaceRestore"
   | "latestVisible";
+
+/** What asked the latest-visible latch to look: the one re-latch's callers. */
+type LatchTrigger = "scroll" | "follow" | "reveal" | "selectionEnded";
 
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
@@ -341,6 +349,14 @@ export class TailFollow {
   private anchorCarry = 0;
   /** Whether a missing anchor was last reported, so it is reported once per spell. */
   private missingReported = false;
+  /**
+   * Whether the reader is away from the tail: the latest entry was last read
+   * OUT of view, or no follow has stood yet. A park or a latch clears it, so a
+   * reader's latch is a RETURN to the tail only while it stands.
+   */
+  private latestHidden = true;
+  /** Told when the reader's own scroll returns the feed to its tail (`onTailReached`). */
+  private tailReached: (() => void) | null = null;
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
@@ -402,7 +418,7 @@ export class TailFollow {
       operation: "scroll.selection-ended",
       context: { at: this.box.scrollTop },
     });
-    this.latchIfLatestVisible();
+    this.latchIfLatestVisible("selectionEnded");
   }
 
   /**
@@ -423,6 +439,26 @@ export class TailFollow {
    */
   detachedWorkSelected(geometry: RevealGeometry): void {
     this.centerReveal("detachedWorkSelected", revealCenterDelta(geometry, this.box));
+  }
+
+  /**
+   * The reader followed another jump to a feed entry (a breadcrumb, a hook's
+   * gated-call link): stop following, and CENTER the entry exactly as the
+   * detached-work selection does (`revealCenterDelta`).
+   */
+  entryJumped(geometry: RevealGeometry): void {
+    this.centerReveal("entryJumped", revealCenterDelta(geometry, this.box));
+  }
+
+  /**
+   * THE READER RETURNED TO THE TAIL (owner ruling, 2026-10-01): LISTENER runs
+   * each time the reader's OWN scroll brings the feed's latest entry back into
+   * view after it had been out of it, so the follow re-latches
+   * (`latchIfLatestVisible`, the one place it does). A latch a reveal, a resize
+   * or a park made is not the reader returning, and runs nothing.
+   */
+  onTailReached(listener: () => void): void {
+    this.tailReached = listener;
   }
 
   /**
@@ -467,7 +503,7 @@ export class TailFollow {
   follow(): void {
     this.sync();
     if (!this.following || this.cause === null) {
-      this.latchIfLatestVisible();
+      this.latchIfLatestVisible("follow");
       return;
     }
     this.park(this.cause);
@@ -480,7 +516,7 @@ export class TailFollow {
   onScroll(): void {
     this.sync();
     this.reanchor("scroll");
-    this.latchIfLatestVisible();
+    this.latchIfLatestVisible("scroll");
   }
 
   /**
@@ -524,6 +560,7 @@ export class TailFollow {
     this.following = true;
     this.cause = cause;
     this.anchor = null;
+    this.latestHidden = false;
     // The reader's last input spoke about a position this park has replaced.
     this.touched = false;
     // A follow that found the box already at its tail moved nothing, and is
@@ -537,11 +574,14 @@ export class TailFollow {
    * caller computed under CAUSE, take the anchor there, and latch where the
    * view lands if the latest entry is then in sight.
    */
-  private centerReveal(cause: "detachedWorkSelected" | "itemExpanded", delta: number): void {
+  private centerReveal(
+    cause: "detachedWorkSelected" | "entryJumped" | "itemExpanded",
+    delta: number,
+  ): void {
     this.release();
     this.shift(cause, delta);
     this.takeAnchor();
-    this.latchIfLatestVisible();
+    this.latchIfLatestVisible("reveal");
   }
 
   /** Move the box BY delta without starting a follow. */
@@ -677,13 +717,18 @@ export class TailFollow {
    * Latch the follow, moving nothing, when the reader can see the latest entry
    * and no follow already stands -- unless an active reply selection holds it
    * off, which is reported once each time it starts to.
+   *
+   * THE ONE RE-LATCH. When TRIGGER is the box's own scroll event, with the
+   * reader's input behind it, and the latest entry was out of view before, the
+   * reader has scrolled back to the tail: `onTailReached`'s listener runs.
    */
-  private latchIfLatestVisible(): void {
+  private latchIfLatestVisible(trigger: LatchTrigger): void {
     if (this.following) return;
     const latest = this.readLatest();
     const visible = latest !== null && latestEntryVisible(latest);
     if (!visible) {
       this.heldOffReported = false;
+      this.latestHidden = true;
       return;
     }
     if (this.selectionActive) {
@@ -695,16 +740,19 @@ export class TailFollow {
       });
       return;
     }
+    const returned = trigger === "scroll" && this.touched && this.latestHidden;
     this.following = true;
     this.cause = "latestVisible";
     this.anchor = null;
+    this.latestHidden = false;
     // The input that brought the entry into view has been spent on this latch.
     this.touched = false;
     this.lastTop = this.box.scrollTop;
     log.debug("the reader can see the latest entry; the follow starts where the view stands", {
       operation: "scroll.follow-started",
-      context: { cause: "latestVisible", at: this.lastTop },
+      context: { cause: "latestVisible", at: this.lastTop, trigger, returned },
     });
+    if (returned) this.tailReached?.();
   }
 
   /** Stop following: only a parking cause starts it again. */
