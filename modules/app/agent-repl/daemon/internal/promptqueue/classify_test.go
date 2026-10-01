@@ -1271,3 +1271,43 @@ func TestReportHeldLogsAnUnreadableQueueAndReportsNothing(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed read at error", h.log.Records())
 	}
 }
+
+// --- a running turn waiting out a failed API call --------------------------
+
+func TestAPromptDuringAnApiRetryAsksNoClassifier(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.footer.standRetry()
+
+	// Act.
+	if _, err := h.q.Submit(context.Background(), submission("t1", "are you there?")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert.
+	if got := len(h.judge.questions()); got != 0 {
+		t.Fatalf("classifier calls = %d, want none while the API is being retried", got)
+	}
+}
+
+func TestAPromptDuringAnApiRetryInterruptsTheWaitingTurn(t *testing.T) {
+	// Arrange: the model would have joined the prompt at the next tool
+	// boundary, which a turn waiting on the API never reaches.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.footer.standRetry()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteAfterToolCall, Reason: "it adds to the work"}
+
+	// Act.
+	if _, err := h.q.Submit(context.Background(), submission("t1", "are you there?")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert.
+	if killed := h.sender.killed(); len(killed) != 1 || killed[0] != "running-turn" {
+		t.Fatalf("killed = %v, want the turn waiting on the API interrupted", killed)
+	}
+}

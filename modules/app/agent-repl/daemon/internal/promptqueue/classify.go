@@ -304,6 +304,22 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 		return verdict, classifier.RouteQueue
 	}
 
+	// A RUNNING TURN WAITING OUT A FAILED API CALL is decided before the model
+	// is asked (owner ruling, 2026-10-01). The turn cannot reach a tool
+	// boundary until the vendor's next scheduled attempt answers, so joining
+	// it would hold the prompt for that whole wait, and the classifier is
+	// itself an API call that fails the same way. The prompt interrupts the
+	// wait and runs as its own turn, which calls the API at once.
+	if q.deps.Footer.RetryStanding(sub.WS) {
+		log.Info(opClassify, "the running turn is waiting out a failed API call; the prompt interrupts it and the model is not asked",
+			dlog.Context{"running_turn": string(running), "held_turn": string(sub.Turn)})
+		return wsm.Classification{
+			Arm:    routeArm(classifier.RouteInterrupt),
+			Reason: "the running turn is waiting out a failed API call, so the prompt interrupts the wait and runs at once",
+			At:     q.deps.Now(),
+		}, classifier.RouteInterrupt
+	}
+
 	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
 	// busy: the watcher reported it in flight, and that turn's end is what
 	// drains the tray. A store that cannot show it as open is a DISAGREEMENT

@@ -980,6 +980,21 @@ type fakeFooter struct {
 	turns        []*footer.TurnStarted
 	dropped      []uint32
 	submissions  []footer.Submission
+	retrying     bool
+}
+
+// RetryStanding answers the retry the test stood with standRetry.
+func (f *fakeFooter) RetryStanding(ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.retrying
+}
+
+// standRetry states that the vendor is retrying the running turn's call.
+func (f *fakeFooter) standRetry() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retrying = true
 }
 
 // OnSubmission records a move of a prompt's delivery the queue reported.
