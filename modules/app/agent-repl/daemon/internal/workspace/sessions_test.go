@@ -728,7 +728,7 @@ func TestClassifySourceTable(t *testing.T) {
 			// Arrange.
 			f := newFleetFixture(t)
 			if tt.noTranscript {
-				f.accounts.transcriptErr = errors.New("no such file")
+				loseRecordedTranscript(f)
 			}
 
 			// Act.
@@ -757,8 +757,8 @@ func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	// workspace has TAKEN A TURN, which is what makes the vanished transcript
 	// a real abandonment rather than a bounce before the first turn.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
-	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	loseRecordedTranscript(f)
+	engage(f)
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
 
 	// Act.
@@ -944,7 +944,7 @@ func TestClassifySourceIsQuietWhenTheConversationNeverTookATurn(t *testing.T) {
 	// No turn was ever recorded, so no transcript was ever written and nothing
 	// is lost by coming up fresh.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
 
 	// Act.
@@ -969,7 +969,7 @@ func TestClassifySourceOpensNoFaultWhenTheConversationNeverTookATurn(t *testing.
 	// Arrange: as above. The fault is the user's only record of lost history,
 	// so a conversation that had none must not open one.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
 
 	// Act.
@@ -987,8 +987,8 @@ func TestClassifySourceWarnsWhenAnEngagedConversationsTranscriptIsGone(t *testin
 	// Arrange: the workspace took a turn, so a vanished transcript is real
 	// history abandoned and must stay exactly as loud as it has always been.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
-	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	loseRecordedTranscript(f)
+	engage(f)
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
 
 	// Act.
@@ -1007,7 +1007,7 @@ func TestClassifySourceStaysLoudWhenTheTurnsExistenceReadFails(t *testing.T) {
 	// engaged. A read that could not tell is never read as proof of nothing
 	// lost, so the abandonment stays loud.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 	f.db.hasTurnsErr = errFake
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
 
@@ -1026,7 +1026,7 @@ func TestClassifySourceReportsAFailedTurnsExistenceRead(t *testing.T) {
 	// Arrange: a state client that cannot answer an existence query is a fault
 	// of its own and is never swallowed by the branch that recovers from it.
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 	f.db.hasTurnsErr = errFake
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
 
@@ -1164,7 +1164,7 @@ func TestStartComesUpFreshWhenTheRecordedTranscriptIsMissing(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 
 	// Act.
 	err := f.fleet.Start(context.Background(), ws.ID)
@@ -1183,7 +1183,7 @@ func TestStartDoesNotDrawTranscriptMissingForANeverTurnedSession(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 
 	// Act.
 	err := f.fleet.Start(context.Background(), ws.ID)
@@ -1200,7 +1200,7 @@ func TestStartFreshSpawnsWithNoTranscriptOnDisk(t *testing.T) {
 	// to guard.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
-	f.accounts.transcriptErr = errors.New("no such file")
+	loseRecordedTranscript(f)
 
 	// Act.
 	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
@@ -4011,6 +4011,17 @@ func TestNewestAdoptableDecidesTheDirectorysNewestTranscript(t *testing.T) {
 	}
 }
 
+// loseRecordedTranscript makes every recorded conversation's transcript
+// missing from disk.
+func loseRecordedTranscript(f *fleetFixture) {
+	f.accounts.transcriptErr = errors.New("no such file")
+}
+
+// engage records a turn of w1, so the workspace has a conversation to lose.
+func engage(f *fleetFixture) {
+	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+}
+
 // restoreMessage is the record of a restored directory transcript.
 const restoreMessage = "the recorded conversation has no transcript on disk; restoring the directory's newest transcript"
 
@@ -4020,8 +4031,8 @@ const restoreMessage = "the recorded conversation has no transcript on disk; res
 func engagedWithLostTranscript(t *testing.T, modTime time.Time) (*fleetFixture, wsm.Session) {
 	t.Helper()
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
-	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	loseRecordedTranscript(f)
+	engage(f)
 	f.accounts.newest = account.AdoptableTranscript{VendorSessionID: "newest", ModTime: modTime}
 	return f, wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
 }
@@ -4123,8 +4134,8 @@ func TestClassifySourceAbandonsLoudlyWhenAnUnaccountedWriterMayHoldTheTranscript
 func TestClassifySourceAbandonsLoudlyWhenTheDirectoryHasNoTranscript(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
-	f.accounts.transcriptErr = errors.New("no such file")
-	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	loseRecordedTranscript(f)
+	engage(f)
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
 
 	// Act
@@ -4146,8 +4157,8 @@ func TestEveryAdoptingBranchAsksTheOneAdoptionDecision(t *testing.T) {
 	}{
 		{"no session record", func(*fleetFixture) (wsm.Session, bool) { return wsm.Session{}, false }},
 		{"a recorded conversation with no transcript", func(f *fleetFixture) (wsm.Session, bool) {
-			f.accounts.transcriptErr = errors.New("no such file")
-			f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+			loseRecordedTranscript(f)
+			engage(f)
 			return wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}, true
 		}},
 	}
