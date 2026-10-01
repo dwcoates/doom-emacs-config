@@ -45,6 +45,21 @@ const (
 	TypeTaskToggleDone = "task-toggle-done"
 	// TypeTaskAddWorkspace assigns a workspace to a task.
 	TypeTaskAddWorkspace = "task-add-workspace"
+
+	// THE MERGE QUEUE'S CONTROLS, mirroring UpdateMergeQueue's three arms
+	// (endpoint_update_merge_queue.proto) and calling the same orchestrator
+	// entry points it calls. Each entry's workspace is the REQUESTER, the one
+	// whose agent wrote it, exactly as a merge's is.
+
+	// TypeMergeEvict takes one workspace's merge off the queue
+	// (UpdateMergeQueueEvict): the requester's own, or the one at evict_dir.
+	TypeMergeEvict = "merge_evict"
+	// TypeMergePause stops the queue admitting merges (UpdateMergeQueuePause):
+	// the repository at repository_dir, or every repository when it is unset.
+	TypeMergePause = "merge_pause"
+	// TypeMergeResume resumes admitting merges (UpdateMergeQueueResume),
+	// scoped exactly as TypeMergePause is.
+	TypeMergeResume = "merge_resume"
 )
 
 // Entry is one decoded command-file entry. Every field the accepted types use
@@ -142,6 +157,18 @@ type Entry struct {
 	// through its pull request (source.merged_upstream): the default branch
 	// is updated from upstream and the requester closed.
 	PRWasMerged bool `json:"pr_was_merged,omitempty"`
+
+	// THE MERGE QUEUE CONTROLS' FIELDS.
+
+	// EvictDir names ANOTHER workspace, by its worktree root, whose merge a
+	// merge_evict takes off the queue (UpdateMergeQueueEvict.workspace).
+	// Unset evicts the requester's own merge. Evict-only.
+	EvictDir string `json:"evict_dir,omitempty"`
+	// RepositoryDir names the repository, by its main checkout, whose queue a
+	// merge_pause or merge_resume addresses (RepositoryRef.dir). Unset is
+	// every repository, the daemon-wide switch the rpc's unset ref means.
+	// Pause- and resume-only.
+	RepositoryDir string `json:"repository_dir,omitempty"`
 }
 
 // SourceWorkspace is a create's `source_ws`: the workspace it was spawned
@@ -175,6 +202,12 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: %s is a merge's field, and no %s reads it", e.Type, field, e.Type)
 		}
 	}
+	if e.Type != TypeMergeEvict && e.EvictDir != "" && e.Type != "" {
+		return fmt.Errorf("%s: evict_dir is a %s's field, and no %s reads it", e.Type, TypeMergeEvict, e.Type)
+	}
+	if e.Type != TypeMergePause && e.Type != TypeMergeResume && e.RepositoryDir != "" && e.Type != "" {
+		return fmt.Errorf("%s: repository_dir is a %s's or a %s's field, and no %s reads it", e.Type, TypeMergePause, TypeMergeResume, e.Type)
+	}
 	switch e.Type {
 	case "":
 		return fmt.Errorf("an entry must name a type")
@@ -193,7 +226,7 @@ func (e Entry) Validate() error {
 			return err
 		}
 		return e.validateMergeSource()
-	case TypeClose, TypeForget, TypeOpen, TypeSwitch:
+	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergePause, TypeMergeResume:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {
@@ -374,6 +407,8 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "project_dir", value: &e.ProjectDir},
 		{name: "dir", value: &e.Dir},
 		{name: "source_dir", value: &e.SourceDir},
+		{name: "evict_dir", value: &e.EvictDir},
+		{name: "repository_dir", value: &e.RepositoryDir},
 	}
 	if e.SourceWS != nil {
 		// A COPY, so resolving the path never writes through to the entry
