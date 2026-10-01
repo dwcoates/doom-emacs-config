@@ -892,7 +892,7 @@ func enumerateMockTree(t *testing.T, tree *mockTree) {
 // store, and the book/bash assertions still read back through the store's own
 // verbs.
 //
-// It implements the two verbs the sidecar's contract allows it to call and
+// It implements the verbs the sidecar's contract allows it to call and
 // nothing else: a sidecar reaching any other verb is a contract violation, and
 // an `unimplemented` answer states that instead of hiding it.
 type proxyStore struct {
@@ -993,6 +993,14 @@ func (p *proxyStore) GetSidecarCursors(ctx context.Context, req *connect.Request
 
 func (p *proxyStore) GetShellRunClaims(ctx context.Context, req *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
 	resp, err := p.up.GetShellRunClaims(ctx, connect.NewRequest(req.Msg))
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp.Msg), nil
+}
+
+func (p *proxyStore) GetRunSettlements(ctx context.Context, req *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
+	resp, err := p.up.GetRunSettlements(ctx, connect.NewRequest(req.Msg))
 	if err != nil {
 		return nil, err
 	}

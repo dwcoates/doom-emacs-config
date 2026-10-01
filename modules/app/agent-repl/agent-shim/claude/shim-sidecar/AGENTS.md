@@ -38,11 +38,13 @@ is converting that vendor reality into the vendor-agnostic contract.
 Connect protocol, binary codec, HTTP/1.1 — both verbs are unary, so no h2c
 upgrade is involved.
 
-- `WriteBatch` and `GetSidecarCursors` are the WHOLE surface. The read side
+- `WriteBatch`, `GetSidecarCursors`, `GetShellRunClaims` and
+  `GetRunSettlements` are the WHOLE surface. The read side
   (OpenAgentSession / WatchAgentSession / ReadAgentPage / GetWorkflow /
   GetLiveWork) is the SHIM's; the sidecar never calls it. In particular the
   sidecar never calls `GetLiveWork`, so it holds no authoritative open-task
-  snapshot and re-derives everything from files and cursors.
+  snapshot and re-derives its files and cursors itself; what SETTLED it asks
+  `GetRunSettlements` (`settle.go`, below).
 - THERE IS NO CONNECTION TO HOLD AND NO HEALTH VERB TO ASK. The
   length-prefixed Any-over-UDS framing, its Subscribe/Ack dial protocol,
   `ConnectionHeartbeat`, `Health`, `ErrNoHealthProbe`, `ErrNotConnected`, the
@@ -859,11 +861,37 @@ conclusion into "no terminal for the LOST run". It is dropped in `lostEntries`,
 after the statement. A run that merely went quiet keeps its tailer for good: the
 file is still there and anything appended later must still land.
 
-It RE-DERIVES FROM FILES AND CURSORS because there is nothing else: the store
-holds no open-task snapshot for the sidecar. A run is keyed by its resolved
+It RE-DERIVES ITS CLOCKS FROM FILES AND CURSORS. A run is keyed by its resolved
 path; a terminal READ FROM THE FILE ITSELF (a spool's `EXIT=` marker) settles
 the run so it can never afterwards be concluded LOST. A transcript is never
 armed: it is an agent's own record and its silence concludes nothing.
+
+A SETTLED RUN IS NEVER TRACKED AGAIN, OR CONCLUDED LOST, BY ANY SIDECAR
+PROCESS (`settle.go`, 2026-09-30). A restarted process resumes a spool at its
+committed cursor, PAST the terminator it already converted, so on 2026-09-30 it
+tracked a finished run afresh and its silence window minted a LOST over the
+real terminal. The settle is durable only in the run's `detached_work` row, so:
+
+- `trackDetached` QUEUES a watched run (`trackPending`); the end of every
+  `watchTargets` pass asks `GetRunSettlements` once for all of them, by the
+  spawning call's activity id. A run the record holds as ended is settled
+  (`stale.SettledByRecord`, one `lost-policy` INFO record naming
+  `ended_at_ms`); any other is observed. A store that cannot answer leaves them
+  untracked with one `run-settlements` ERROR, and the next pass asks again —
+  no timer, no retry loop. A watched detached run with no spawning call is an
+  invariant violation and panics.
+- A SWEEP'S CONCLUSIONS ARE PUT TO THE SAME QUESTION (`concludeLost`) before
+  any LOST is minted: a run another plane ended while tracked is settled with
+  one `lost-terminal-settled` INFO record instead. A store that cannot answer
+  mints nothing, states one `lost-terminal` ERROR and suspends production, so
+  the next cycle re-derives the conclusions.
+- `settleRun` is THE ONE WAY a run settles in-process — its own terminal made
+  durable, a transcript's conclusion, a stop, a LOST made durable — and feeds
+  the tracker's settled set. A sweep's conclusion is not a settle until its
+  LOST is durable, so a failed write is restated next cycle. Observing a
+  settled run panics; `trackDetached` asks `tracker.Settled` first.
+- The store refuses a file-plane LOST over an ended row
+  (`lost_over_settled`, shim-store AGENTS.md) as the backstop.
 
 The package MINTS NO RECORDS. A sweep returns OBSERVATIONS; spelling one as the
 run's terminal is conversion and happens behind the seam.

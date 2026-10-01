@@ -222,6 +222,13 @@ type sidecar struct {
 	// between.
 	settling map[string]string // resolved path -> run activity id
 
+	// trackPending holds the detached runs whose watcher was built but whose
+	// LOST clock has not started yet, because the store has not yet said
+	// whether each already SETTLED (settle.go). A run is observed only once the
+	// record says it has not ended; a store that cannot answer leaves it here,
+	// untracked, until the next cycle asks again.
+	trackPending map[string]stale.Work // resolved path -> the run as it would be tracked
+
 	// stopped holds the tasks a person stopped whose spool was not being read
 	// when the stop arrived, with the instant the stop was observed. ONE VALUE
 	// PER TASK: a stop is a single fact and restating it changes nothing.
@@ -430,6 +437,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		log:                log,
 		watchers:           map[string]*watched{},
 		settling:           map[string]string{},
+		trackPending:       map[string]stale.Work{},
 		stopped:            map[string]int64{},
 		concluded:          map[string]struct{}{},
 		notified:           map[string]shellNotice{},
@@ -686,7 +694,7 @@ func (s *sidecar) beginCycle() error {
 	// run once there is a store to write them to.
 	if !s.bootSwept {
 		s.bootSwept = true
-		s.emit("boot sweep", s.lostEntries(s.tracker.BootSweep(s.bootTimeMs(), s.now().UnixMilli())))
+		s.concludeLost("boot sweep", s.tracker.BootSweep(s.bootTimeMs(), s.now().UnixMilli()))
 	}
 	s.reportResumed()
 	return nil
@@ -703,6 +711,9 @@ func (s *sidecar) suspend(operation string, cause error) {
 	// A terminal whose batch never committed is a terminal the store never saw,
 	// so the promise to untrack its run goes with the cycle that made it.
 	s.settling = map[string]string{}
+	// A RUN AWAITING ITS SETTLEMENT GOES WITH ITS WATCHER: the next cycle
+	// rebuilds the watcher and asks the store again.
+	s.trackPending = map[string]stale.Work{}
 	// EVERY TAILER GOES WITH THE CURSORS. A tailer that outlived its cycle would
 	// resume from a position the NEXT cycle's store never handed us, which is
 	// the one thing the invariant forbids.
@@ -1036,6 +1047,10 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 		s.watch(resolved, identity, cursor, now)
 		watched++
 	}
+	// EVERY DETACHED RUN THIS PASS STARTED WATCHING IS ASKED ABOUT AT ONCE, in
+	// one store read, before any of their files is polled — and so is any run a
+	// failed read left waiting.
+	s.resolvePendingTracking(now)
 	return watched, true
 }
 
@@ -1495,26 +1510,6 @@ func (s *sidecar) atRest(path string, offset int64, now time.Time) (string, bool
 		age.Truncate(time.Second), silence, offset, info.Size()), true
 }
 
-// trackDetached starts the LOST policy's clock for a file that IS a detached
-// run. A transcript is not one: it is an agent's own record, and its silence is
-// not a conclusion about anything.
-func (s *sidecar) trackDetached(target discover.Target, now time.Time) {
-	if target.TaskID == "" || target.SessionID != "" {
-		return
-	}
-	work := stale.Work{
-		Path:          target.Path,
-		TaskID:        target.TaskID,
-		Kind:          target.Kind,
-		OwnerAgentID:  s.owners.agentFor(target.TaskID),
-		RunActivityID: s.owners.activityFor(target.TaskID),
-	}
-	if info, err := os.Stat(target.Path); err == nil {
-		work.LastActivityMs = info.ModTime().UnixMilli()
-	}
-	s.tracker.Observe(work, now.UnixMilli())
-}
-
 // pollAll polls every watched file once, writes any batch, and commits the
 // cursor only after that write was DURABLE. It is reachable only while
 // production is live, so a file is never read without somewhere to put what it
@@ -1883,10 +1878,9 @@ func (s *sidecar) RunSettled(path, run string) {
 func (s *sidecar) applySettled() {
 	for path, run := range s.settling {
 		delete(s.settling, path)
-		if !s.tracker.Open(path) {
+		if !s.settleRun(path) {
 			continue
 		}
-		s.tracker.Settle(path)
 		s.log.With(logging.Context{Operation: "run-settled", Path: path, ActivityID: run}).
 			Log("the run's own terminal was read from its file and is durable; it can no longer be concluded LOST")
 	}
@@ -2059,21 +2053,22 @@ func agentLocators(target discover.Target) []*storev1.AgentLocator {
 // terminals.
 func (s *sidecar) sweep() {
 	s.requireCursors("sweep")
-	s.emit("lost sweep", s.lostEntries(s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli())))
+	s.concludeLost("lost sweep", s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli()))
 }
 
 // emit writes inferred records as a single CURSOR-LESS batch: they were not
 // read at a file position, so there is no reader position that becomes durable
-// with them and nothing that could advance one wrongly.
-func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
+// with them and nothing that could advance one wrongly. It answers whether
+// every record is durable, which an empty batch trivially is.
+func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) bool {
 	if len(entries) == 0 {
-		return
+		return true
 	}
 	skips, err := s.storeWrite(what, &storev1.EntryBatch{Entries: entries})
 	if err != nil {
 		if s.interrupted(err) {
 			// storeWrite already stated the shutdown; there is no outage here.
-			return
+			return false
 		}
 		if field, invalid := storeclient.InvalidRequest(err); invalid {
 			// These conclusions name no file position — they were inferred, not
@@ -2087,15 +2082,16 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 				RefusalSite: storeclient.WriteBatchSite,
 				Field:       field, WriteIDs: writeIDsOf(entries),
 			}).Log("the store refused %d inferred %s record(s) as an invalid_request; a retry of the same records cannot help: %v", len(entries), what, err)
-			return
+			return false
 		}
 		s.log.With(logging.Context{Operation: "store-write", Level: "error"}).
 			Log("%s write failed for %d record(s); production is suspended and the conclusions are restated on the next cycle: %v", what, len(entries), err)
-		return
+		return false
 	}
 	// The write was durable. Inferred records name no file, so a skip here is
 	// never catch-up backlog: it is unexpected and warned per entry.
 	s.warnUnexpectedSkips("inferred "+what, skips)
+	return true
 }
 
 // rpcContext bounds one store call by rpcTimeout AND ties it to the process's
