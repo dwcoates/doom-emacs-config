@@ -141,10 +141,10 @@ func (s *sidecar) applyConclusion(taskID string) {
 		return
 	}
 	path, watched := s.spoolForTask(taskID)
-	if !watched || !s.tracker.Open(path) {
+	if !watched || !s.tracking(path) {
 		return
 	}
-	s.tracker.Settle(path)
+	s.settleRun(path)
 	s.log.With(logging.Context{Operation: "run-concluded", TaskID: taskID, Path: path}).
 		Log("the run was settled by its transcript; it can no longer be concluded LOST")
 }
@@ -171,7 +171,7 @@ func (s *sidecar) applyStop(taskID string) {
 	// A RUN GETS ONE TERMINAL. A run whose spool terminator, notification or
 	// LOST conclusion already ended it is no longer tracked, and a stop read
 	// afterwards would overwrite how it actually ended.
-	if !s.tracker.Open(path) {
+	if !s.tracking(path) {
 		delete(s.stopped, taskID)
 		bound.LogVerbose("the stopped task's run had already ended; the stop adds nothing to its terminal")
 		return
@@ -250,7 +250,7 @@ func (s *sidecar) commitInferredTerminal(bound *logging.Bound, t inferredTermina
 	s.warnUnexpectedSkips(t.what, skips)
 	t.retire()
 	if t.path != "" {
-		s.tracker.Settle(t.path)
+		s.settleRun(t.path)
 	}
 	bound.With(logging.Context{ActivityID: t.run}).Log("%s minted and committed entries=%d", t.what, len(entries))
 }
@@ -550,7 +550,7 @@ func (s *sidecar) applyNotified(taskID, path string) {
 		return
 	}
 	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID, Path: path})
-	if !s.tracker.Open(path) {
+	if !s.tracking(path) {
 		// The spool's terminator (or a stop, or a LOST conclusion) already
 		// ended the run: that is its one terminal, and the notification's
 		// weaker account adds nothing.

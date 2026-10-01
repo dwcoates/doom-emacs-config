@@ -84,6 +84,70 @@ type fakeStore struct {
 	claims      []*storev1.ShellRunClaimed
 	claimsFail  string
 	claimsAsked [][]string
+
+	// settled is every run the record holds as ended beyond the ones this
+	// fake's own writes ended (see GetRunSettlements); settlementsFail,
+	// non-empty, answers the failure arm; settlementsAsked is every id list
+	// asked.
+	settled          map[string]int64
+	settlementsFail  string
+	settlementsAsked [][]string
+}
+
+// GetRunSettlements answers the way the store does: a run is settled once a
+// terminal for it is on record. The record here is every batch this fake
+// accepted plus `settled`, so a FRESH sidecar pointed at the same fake sees
+// exactly what an earlier one made durable.
+func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
+	f.settlementsAsked = append(f.settlementsAsked, request.Msg.GetRunIds())
+	if f.settlementsFail != "" {
+		return connect.NewResponse(&storev1.GetRunSettlementsResponse{
+			Result: &storev1.GetRunSettlementsResponse_Failure{Failure: &storev1.GetRunSettlementsFailure{
+				Detail: f.settlementsFail,
+				Kind:   &storev1.GetRunSettlementsFailure_StorageFailure{StorageFailure: &storev1.GetRunSettlementsStorageFailure{}},
+			}},
+		}), nil
+	}
+	ended := map[string]int64{}
+	for run, ms := range f.settled {
+		ended[run] = ms
+	}
+	if f.writeFail == "" {
+		for _, batch := range f.writes {
+			for _, entry := range batch.GetEntries() {
+				if run, ok := terminalRunOf(entry); ok {
+					ended[run] = 1
+				}
+			}
+		}
+	}
+	var settled []*storev1.RunSettlement
+	for _, run := range request.Msg.GetRunIds() {
+		if ms, ok := ended[run]; ok {
+			settled = append(settled, &storev1.RunSettlement{RunId: run, EndedAtMs: ms})
+		}
+	}
+	return connect.NewResponse(&storev1.GetRunSettlementsResponse{
+		Result: &storev1.GetRunSettlementsResponse_Success{Success: &storev1.GetRunSettlementsSuccess{Settled: settled}},
+	}), nil
+}
+
+// terminalRunOf names the run an entry ENDS, the way the store's detached_work
+// row is ended: a detached shell's terminal bash frame, or a spawn activity
+// that settled (a backgrounded subagent's settle, whose activity id is the run).
+func terminalRunOf(entry *storev1.StoreEntry) (string, bool) {
+	if bash := entry.GetAgentUpdate().GetBash(); bash != nil {
+		if bash.GetFrame().GetSuccess() != nil || bash.GetFrame().GetFailure() != nil {
+			return bash.GetRun().GetValue(), true
+		}
+		return "", false
+	}
+	activity := entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
+	subagent := activity.GetSubagent()
+	if subagent.GetSuccess() != nil || subagent.GetFailure() != nil {
+		return activity.GetActivityId().GetValue(), true
+	}
+	return "", false
 }
 
 func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
@@ -204,6 +268,8 @@ type harness struct {
 	recorded map[string]string
 	clock    time.Time
 	socket   string
+	// level is the log threshold every sidecar the harness builds runs at.
+	level sharedlogging.Level
 }
 
 func shortSocket(t testing.TB) string {
@@ -255,21 +321,8 @@ func newHarnessAtLevel(t testing.TB, store *fakeStore, level sharedlogging.Level
 	if store != nil {
 		h.serve(t, store)
 	}
-	var logs []string
-	h.logs = &logs
-	log := logging.NewAtLevel(sliceWriter{lines: &logs}, io.Discard, level).With(logging.Context{Component: "sidecar-test"})
-	h.sc = newSidecar(Options{
-		StoreSocket:    h.socket,
-		StateDir:       h.state,
-		LockDir:        h.lockDir,
-		ConfigRoots:    []string{h.rootA},
-		SpoolRoot:      h.spool,
-		PollInterval:   time.Second,
-		RescanInterval: 30 * time.Second,
-	}, log)
-	h.sc.now = func() time.Time { return h.clock }
-	h.sc.jitter = func(d time.Duration) time.Duration { return d }
-	h.sc.bootTimeMs = func() int64 { return 0 }
+	h.level = level
+	h.sc = h.buildSidecar()
 	t.Cleanup(func() {
 		for key := range h.held {
 			h.release(t, key)
@@ -279,6 +332,46 @@ func newHarnessAtLevel(t testing.TB, store *fakeStore, level sharedlogging.Level
 	// spool its launch claims belongs to an active workspace.
 	h.activate(t, "session-1")
 	return h
+}
+
+// buildSidecar builds one sidecar PROCESS over the harness's store, roots and
+// clock, logging into a fresh capture that becomes h.logs.
+func (h *harness) buildSidecar() *sidecar {
+	var logs []string
+	h.logs = &logs
+	log := logging.NewAtLevel(sliceWriter{lines: &logs}, io.Discard, h.level).With(logging.Context{Component: "sidecar-test"})
+	sc := newSidecar(Options{
+		StoreSocket:    h.socket,
+		StateDir:       h.state,
+		LockDir:        h.lockDir,
+		ConfigRoots:    []string{h.rootA},
+		SpoolRoot:      h.spool,
+		PollInterval:   time.Second,
+		RescanInterval: 30 * time.Second,
+	}, log)
+	sc.now = func() time.Time { return h.clock }
+	sc.jitter = func(d time.Duration) time.Duration { return d }
+	sc.bootTimeMs = func() int64 { return 0 }
+	return sc
+}
+
+// restart replaces the harness's sidecar with a FRESH PROCESS over the same
+// store, files and clock — what a deploy does. The fake store hands the new
+// process every cursor the old one made durable, exactly as the real store's
+// GetSidecarCursors would; the new process's records are captured afresh.
+func (h *harness) restart(t testing.TB) {
+	t.Helper()
+	cursors := map[string]*storev1.CursorState{}
+	for _, batch := range h.store.writes {
+		if cursor := batch.GetCursorAdvance(); cursor != nil {
+			cursors[cursor.GetFileId()] = cursor
+		}
+	}
+	h.store.cursors = nil
+	for _, cursor := range cursors {
+		h.store.cursors = append(h.store.cursors, cursor)
+	}
+	h.sc = h.buildSidecar()
 }
 
 // workspaceKeyOf is the fixture's workspace key for a session: eight hex digits,

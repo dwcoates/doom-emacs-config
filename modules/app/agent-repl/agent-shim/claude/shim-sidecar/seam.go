@@ -309,7 +309,7 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 		if _, concluded := s.concluded[lost.TaskID]; concluded && lost.TaskID != "" {
 			bound.With(logging.Context{Operation: "lost-terminal-refused", Level: "error"}).Log(
 				"LOST refused: the run already concluded (task notification or stop) and a LOST terminal would supersede it (reason=%s)", lost.Reason)
-			s.tracker.Settle(lost.Path)
+			s.settleRun(lost.Path)
 			continue
 		}
 		if lost.Kind == tail.KindResidueSpool {

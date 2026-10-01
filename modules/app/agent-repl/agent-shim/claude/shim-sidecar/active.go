@@ -318,8 +318,9 @@ func (s *sidecar) dropDrained(now time.Time) int {
 //
 // THE BOUND IS THE LOST POLICY'S, REUSED RATHER THAN DUPLICATED:
 //
-//   - a detached run the tracker still holds OPEN is owed a conclusion — its
-//     own terminal, or LOST once its kind's silence window passes — so it stays
+//   - a detached run still tracked — held OPEN by the tracker, or awaiting the
+//     store's word on whether it already settled — is owed a conclusion: its
+//     own terminal, or LOST once its kind's silence window passes, so it stays
 //     watched until the policy has one;
 //   - durable bytes past the committed cursor are owed a read;
 //   - a transcript is owed its tail until it has been silent for the tracker's
@@ -330,7 +331,7 @@ func (s *sidecar) dropDrained(now time.Time) int {
 // A FILE THAT IS GONE IS OWED NOTHING. A file whose size cannot be read for any
 // other reason is kept, and the failure is stated once.
 func (s *sidecar) drained(path string, w *watched, now time.Time) bool {
-	if s.tracker.Open(path) {
+	if s.tracking(path) {
 		return false
 	}
 	if w.heal != nil {
