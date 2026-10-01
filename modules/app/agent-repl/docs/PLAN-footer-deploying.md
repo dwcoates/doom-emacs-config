@@ -305,10 +305,20 @@ the canonical log record), and keep the tracked suites green.
 
 ## Before starting
 
-- Remove `sessionwatcher.watcher.SetOutputAddress` and the `addr` sink parameters the feed
-  ignores (owner rule: delete code only tests call), as its own commit.
-- Request the merge of `merge-queue-rework` through `/merge-queue` (`--enqueue-own --keep-open`)
-  before starting this plan, and do not edit the worktree while that merge runs.
+- DONE: `sessionwatcher.watcher.SetOutputAddress` and the `addr` sink parameters removed (`d6ff74611`).
+- The first merge request FAILED (2026-10-01 14:34:34): the queue merged the branch recorded at
+  workspace creation (`footer-activity-updates`, which no longer exists) instead of the checked-out
+  `merge-queue-rework`, and the failure never reached this session. Owner-approved fixes, landed
+  before re-requesting the merge:
+  1. An own-branch merge request resolves the branch CHECKED OUT in the workspace's worktree at
+     request time; a detached HEAD is refused at once, saying why. The `/merge-queue` skill says
+     it merges the checked-out branch and must never be pointed at a branch that is not checked out.
+  2. A merge that fails (any area) automatically prompts the requesting workspace to analyze the
+     failure. That prompt is a new `conversation.v1.PromptOrigin` (pre-approved): the feed draws NO
+     prompt row for it (as for `PROMPT_ORIGIN_VENDOR_STARTED`) but draws the turn's responses, and
+     the store does NOT persist the prompt itself.
+- Then request the merge of `merge-queue-rework` through `/merge-queue` (`--enqueue-own
+  --keep-open`), and do not edit the worktree while that merge runs.
 - Known defect outside this plan, not yet ruled on: a user interrupt replaced the vendor process
   and killed a background agent (2026-10-01 13:03:29) while the shim logged that detached work
   keeps running.
