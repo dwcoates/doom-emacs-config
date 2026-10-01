@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/holdfold"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/wsm"
@@ -345,16 +346,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 }
 
 // saidText renders a submission's text for the classifier and the durable turn
-// record: the text blocks, joined. Images carry no text and contribute none.
+// record: holdfold.SaidText, the one reading the hold tray shares.
 func saidText(said *conversationv1.UserSaid) string {
-	out := ""
-	for _, block := range said.GetContent().GetBlocks() {
-		if text, ok := block.GetBlock().(*conversationv1.UserContentBlock_Text); ok {
-			if out != "" {
-				out += "\n"
-			}
-			out += text.Text.GetText()
-		}
-	}
-	return out
+	return holdfold.SaidText(said)
 }

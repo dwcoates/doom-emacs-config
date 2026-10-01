@@ -137,6 +137,11 @@ type DB interface {
 	// are cleared in the same transaction, so the new content is never read
 	// beside the old content's verdict. Its queue position is unchanged.
 	ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *conversationv1.UserSaid) error
+	// CoalesceHeldPrompts folds one standing hold into another standing in the
+	// same queue, in ONE transaction: the merged content (marked coalesced, and
+	// with its verdict discarded when the coalescence says so) and the folded
+	// hold's tombstone land together or not at all.
+	CoalesceHeldPrompts(ctx context.Context, c Coalescence) error
 	// HeldPromptByTurn loads ONE hold by its turn, retired or not, reporting
 	// false when no hold was ever recorded under the turn. It is what tells an
 	// unknown turn from a delivered or a dropped one.
