@@ -375,6 +375,79 @@ describe("killTurnFailure", () => {
   });
 });
 
+describe("rollBackSessionFailure", () => {
+  it.each([["noSession"], ["promptNotRecorded"], ["firstPrompt"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.rollBackSessionFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe(kind);
+  });
+
+  it("names the first unseen prompt's vendor uuid", () => {
+    // Arrange, Act.
+    const failure = failures.rollBackSessionFailure({ kind: "unseenPrompt", vendorPromptUuid: "u-9" }, "why");
+
+    // Assert.
+    expect(failure.cause.case === "unseenPrompt" ? failure.cause.value.vendorPromptUuid : "").toBe("u-9");
+  });
+
+  it("carries the vendor's refusal of the cut verbatim", () => {
+    // Arrange, Act.
+    const failure = failures.rollBackSessionFailure({ kind: "vendorRefused", vendorMessage: "Resume rejected" }, "why");
+
+    // Assert.
+    expect(failure.cause.case === "vendorRefused" ? failure.cause.value.vendorMessage : "").toBe("Resume rejected");
+  });
+
+  it("carries the vendor's reason the files cannot be restored verbatim", () => {
+    // Arrange, Act.
+    const failure = failures.rollBackSessionFailure({ kind: "filesNotRestorable", vendorMessage: "no checkpoint" }, "why");
+
+    // Assert.
+    expect(failure.cause.case === "filesNotRestorable" ? failure.cause.value.vendorMessage : "").toBe("no checkpoint");
+  });
+
+  it("carries the shim's account in the detail", () => {
+    // Arrange, Act.
+    const failure = failures.rollBackSessionFailure({ kind: "firstPrompt" }, "the prompt opens it");
+
+    // Assert.
+    expect(failure.detail).toBe("the prompt opens it");
+  });
+});
+
+describe("rollBackSessionRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.rollBackSessionRefused({ kind: "noSession" }, "idle");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("rollBackSessionSucceeded", () => {
+  it("states no restored files when the files were kept", () => {
+    // Arrange, Act.
+    const response = failures.rollBackSessionSucceeded(undefined);
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.filesRestored : "not success").toBeUndefined();
+  });
+
+  it("names every restored path when the files were restored", () => {
+    // Arrange, Act.
+    const response = failures.rollBackSessionSucceeded(["/ws/a.ts", "/ws/b.ts"]);
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.filesRestored?.paths : []).toEqual([
+      "/ws/a.ts",
+      "/ws/b.ts",
+    ]);
+  });
+});
+
 describe("killTurnRefused", () => {
   it("wraps the failure as the response's failure arm", () => {
     // Arrange, Act.

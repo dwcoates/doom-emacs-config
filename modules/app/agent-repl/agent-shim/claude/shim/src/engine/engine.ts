@@ -93,6 +93,12 @@ export interface Engine {
   /** End the turn and everything it spawned, transitively; refuses unless forced. */
   killTurn(request: shimv1.KillTurnRequest): Promise<shimv1.KillTurnResponse>;
 
+  /**
+   * Rewind the main agent's vendor conversation to just before one of its
+   * prompts, optionally restoring the files; the arm is the outcome.
+   */
+  rollBackSession(request: shimv1.RollBackSessionRequest): Promise<shimv1.RollBackSessionResponse>;
+
   // ---- Detached work ----
 
   /**
@@ -202,6 +208,10 @@ export class NotImplementedEngine implements Engine {
 
   killTurn(): Promise<shimv1.KillTurnResponse> {
     return Promise.reject(unimplemented("KillTurn"));
+  }
+
+  rollBackSession(): Promise<shimv1.RollBackSessionResponse> {
+    return Promise.reject(unimplemented("RollBackSession"));
   }
 
   watchBash(): AsyncIterable<shimv1.WatchBashResponse> {

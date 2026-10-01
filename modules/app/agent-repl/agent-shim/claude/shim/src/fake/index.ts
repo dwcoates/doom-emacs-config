@@ -49,6 +49,7 @@ import type {
   ModelInfoLike,
   PermissionModeLike,
   QueryLike,
+  RewindFilesResultLike,
   SdkMessage,
   SdkUserMessage,
   SlashCommandLike,
@@ -81,7 +82,8 @@ import type {
   ToolCall,
   ToolResultOptions,
 } from "./scenario.js";
-import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, VendorFiles } from "./vendor-files.js";
+import { fakeRewindFiles, judgeTruncatingResume } from "./rollback.js";
+import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, transcriptPath, VendorFiles } from "./vendor-files.js";
 
 /**
  * IS THIS TASK A SHELL RUN? The vendor's own distinction, read off the id.
@@ -159,8 +161,12 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
  *
  * Recognized verbs: `start` (createFakeQuery itself throws), `start-once`,
  * `start-eof`, `start-error-result`, `start-auth-error`, `set_model`,
- * `set_permission_mode`. Anything else is a refusal to start rather than a
- * silently ignored knob.
+ * `set_permission_mode`, `rewind_files`. Anything else is a refusal to start
+ * rather than a silently ignored knob.
+ *
+ * `rewind_files` answers every `rewindFiles` — dry run or real — with the
+ * vendor's `canRewind: false` (a prompt sent while checkpointing was off, or
+ * whose checkpoint is gone), which is `RollBackSession{files_not_restorable}`.
  *
  * `start-auth-error` is `start-error-result`'s AUTHENTICATION shape: the vendor
  * refuses the opening with a credential rejection carrying `api_error_status`
@@ -184,6 +190,7 @@ const REFUSABLE = new Set([
   "start-auth-error",
   "set_model",
   "set_permission_mode",
+  "rewind_files",
 ]);
 
 /**
@@ -424,6 +431,13 @@ export interface FakeQueryOpts {
    * the `resume_session_at` field of the mock's session-start record) so that claim is assertable.
    */
   readonly resumeSessionAt?: string;
+  /**
+   * With `resumeSessionAt`: the prompt uuid of the one turn the truncating
+   * resume discards. The mock's boot refuses the resume, in the CLI's words,
+   * when anything past the fork point is not that turn's (sdk.d.ts,
+   * `resumeDropsTurn`; `fake/rollback.ts`).
+   */
+  readonly resumeDropsTurn?: string;
   /** Mint a uuid. Injectable so goldens are stable. */
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
@@ -525,6 +539,23 @@ export function createFakeQuery(
   }
   const spoolRoot = opts.spoolRoot ?? process.env[SPOOL_ROOT_ENV] ?? defaultSpoolRoot();
   const nowMs = opts.nowMs ?? ((): number => Date.now());
+  /**
+   * A TRUNCATING RESUME IS JUDGED AT BOOT, before any input is read — the CLI
+   * loads the conversation, and runs `resumeDropsTurn`'s guard, before it
+   * serves a single control request. A refused boot writes its error result
+   * and exits, so every control call after it fails like a call to a process
+   * that is gone.
+   */
+  const truncating =
+    opts.resume !== undefined && opts.resumeSessionAt !== undefined
+      ? judgeTruncatingResume(transcriptPath(configDir, cwd, opts.resume), opts.resumeSessionAt, opts.resumeDropsTurn)
+      : undefined;
+  const bootRefusal = truncating?.kind === "refused" ? truncating.message : undefined;
+  /** A control call answered by a booted vendor, or failed by one whose boot refused. */
+  const control = <T>(answer: () => T): Promise<T> =>
+    bootRefusal === undefined
+      ? Promise.resolve(answer())
+      : Promise.reject(new Error(`the mocked vendor exited at boot: ${bootRefusal}`));
 
   // The session uuid every message currently reports. MUTABLE because the
   // vendor mutates it: a `/clear` retires the transcript identity mid-stream
@@ -592,6 +623,10 @@ export function createFakeQuery(
     spoolRoot,
     sessionId: sessionUuid,
     gitBranch: opts.gitBranch ?? "HEAD",
+    // A BOOTED TRUNCATING RESUME CONTINUES FROM ITS FORK POINT: the next
+    // record is the fork point's child, and what followed it in the file is a
+    // dropped branch. A refused one appends nothing at all.
+    ...(truncating?.kind === "booted" && opts.resumeSessionAt !== undefined ? { forkAt: opts.resumeSessionAt } : {}),
   });
 
   // THE SPAWN TAG THAT MAKES A FAKE API MESSAGE ID GLOBALLY UNIQUE. The id used
@@ -1423,6 +1458,22 @@ export function createFakeQuery(
   };
 
   const main = async (): Promise<void> => {
+    if (bootRefusal !== undefined) {
+      // THE CLI'S OWN REFUSAL AT BOOT: an `error_during_execution` result in
+      // its words, then the process is gone. No init, nothing else.
+      LOGGER.info(
+        {
+          claude_session_id: sessionUuid,
+          vendor_resume_session_at: opts.resumeSessionAt ?? "",
+          vendor_resume_drops_turn: opts.resumeDropsTurn ?? "",
+          detail: bootRefusal,
+        },
+        "the mocked vendor REFUSED the truncating resume at boot",
+      );
+      result({ subtype: "error_during_execution", errors: [bootRefusal] });
+      out.end();
+      return;
+    }
     if (refuse.has("start-eof")) {
       // THE CHILD IS GONE BEFORE IT SAID ANYTHING. No init, no result, no
       // error: the stream simply ends, which is what a vendor binary that died
@@ -1483,6 +1534,7 @@ export function createFakeQuery(
         ...(opts.resumeSessionAt === undefined
           ? {}
           : { vendor_resume_session_at: opts.resumeSessionAt }),
+        ...(opts.resumeDropsTurn === undefined ? {} : { vendor_resume_drops_turn: opts.resumeDropsTurn }),
       },
       opts.resume === undefined
         ? "fake vendor session STARTED"
@@ -1536,11 +1588,14 @@ export function createFakeQuery(
         operation: "enqueue",
         timestamp: nowIso(),
       });
+      // THE SEND'S CLIENT UUID IS THE RECORD'S UUID, as the CLI files a
+      // streaming-input message: a sender that names its message finds it in
+      // the transcript under that name (RollBackSession stands on this).
       files.transcript.append({
         promptId,
         type: "user",
         message: { role: "user", content: [{ type: "text", text }] },
-        uuid: opts.newUuid(),
+        uuid: userMessage.uuid ?? opts.newUuid(),
         timestamp: nowIso(),
         permissionMode,
         promptSource: "sdk",
@@ -1695,9 +1750,9 @@ export function createFakeQuery(
       systemMessage("session_state_changed", { state: "idle" });
     },
 
-    supportedModels: async (): Promise<ModelInfoLike[]> => FAKE_MODELS,
-    supportedCommands: async (): Promise<SlashCommandLike[]> => FAKE_COMMANDS,
-    supportedAgents: async (): Promise<AgentInfoLike[]> => FAKE_AGENTS,
+    supportedModels: (): Promise<ModelInfoLike[]> => control(() => FAKE_MODELS),
+    supportedCommands: (): Promise<SlashCommandLike[]> => control(() => FAKE_COMMANDS),
+    supportedAgents: (): Promise<AgentInfoLike[]> => control(() => FAKE_AGENTS),
     mcpServerStatus: async (): Promise<McpServerStatusLike[]> =>
       mcpArm === "all" ? FAKE_MCP_SERVERS : FAKE_MCP_SERVERS_HEALTHY,
     getContextUsage: async (): Promise<ContextUsageLike> =>
@@ -1711,6 +1766,30 @@ export function createFakeQuery(
       fakeAccountUsage(accountUsageArm, nowMs(), announcedWindows),
     accountInfo: async (): Promise<AccountInfoLike> => FAKE_ACCOUNT_INFO,
     initializationResult: async (): Promise<InitializationResultLike> => FAKE_INITIALIZATION_RESULT,
+
+    /**
+     * File checkpointing, offline (`fake/rollback.ts`): the files the main
+     * agent's edit tools touched from that prompt on, read off the transcript.
+     * `rewind_files` in {@link REFUSE_ENV} answers `canRewind: false`.
+     */
+    rewindFiles: (userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResultLike> =>
+      control(() => {
+        const dryRun = options?.dryRun === true;
+        const answer: RewindFilesResultLike = refuse.has("rewind_files")
+          ? { canRewind: false, error: `No file checkpoint found for message ${userMessageId}` }
+          : fakeRewindFiles(transcriptPath(configDir, cwd, files.vendorSessionId), userMessageId);
+        LOGGER.info(
+          {
+            claude_session_id: sessionUuid,
+            user_message_uuid: userMessageId,
+            dry_run: dryRun,
+            can_rewind: answer.canRewind,
+            files_changed: answer.filesChanged?.length ?? 0,
+          },
+          dryRun ? "fake vendor answered a file-rewind dry run" : "fake vendor rewound the files to a prompt",
+        );
+        return answer;
+      }),
 
     /**
      * The vendor's per-task stop, offline.

@@ -848,6 +848,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
           ...(spec.onStderr === undefined ? {} : { onStderr: spec.onStderr }),
           ...(spec.onChildExit === undefined ? {} : { onChildExit: spec.onChildExit }),
           ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+          ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
         },
         spec.prompt,
       );
@@ -870,6 +871,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
         // keep-alive rewind was unobservable on the vendor side: the shim's own
         // log said what it intended, which is not evidence the value arrived.
         ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+        ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
         // THE SAME DECLARATION THE REAL QUERY MAKES, so the mock's interrupt
         // runs under the posture production runs under.
         perTaskStopAffordance: PER_TASK_STOP_AFFORDANCE,
