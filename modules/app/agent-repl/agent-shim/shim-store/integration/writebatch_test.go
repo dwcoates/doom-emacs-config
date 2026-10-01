@@ -93,8 +93,8 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 	bad := sidecar.agentEntry("w-partial-2", "u-main-line-2", &storev1.StoreAgentUpdate{
 		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
 			ServeableFrame: &storev1.StorePageLine{
-				PageAgentId: agentID("main"),
-				AgentItem:   frameItem(responseFrame("", "act-2", "invalid")),
+				Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: agentID("main")},
+				AgentItem: frameItem(responseFrame("", "act-2", "invalid")),
 			},
 		},
 	})

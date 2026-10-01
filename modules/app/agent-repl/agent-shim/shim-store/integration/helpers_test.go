@@ -1372,8 +1372,8 @@ func frameLine(topLevel *conversationv1.AgentId, f *conversationv1.AgentFrame) *
 		TopLevel: topLevel,
 		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
 			ServeableFrame: &storev1.StorePageLine{
-				PageAgentId: f.GetAgentId(),
-				AgentItem:   frameItem(f),
+				Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: f.GetAgentId()},
+				AgentItem: frameItem(f),
 			},
 		},
 	}
@@ -1385,8 +1385,8 @@ func promptLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentPrompt)
 		TopLevel: topLevel,
 		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
 			ServeableFrame: &storev1.StorePageLine{
-				PageAgentId: p.GetAgent(),
-				AgentItem:   promptItem(p),
+				Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: p.GetAgent()},
+				AgentItem: promptItem(p),
 			},
 		},
 	}

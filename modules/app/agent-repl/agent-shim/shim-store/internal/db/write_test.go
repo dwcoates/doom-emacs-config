@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1739,5 +1740,127 @@ func TestAFilePlaneReReadGivingALegacyRowItsPlaceIsPublished(t *testing.T) {
 	// Assert: the row moved within its book, so its watchers are told.
 	if len(result.Lines) != 1 || result.Lines[0].Line.GetRecordedPlace().GetAtMs() != 500 {
 		t.Fatalf("published = %v, want the row at its new recorded place", result.Lines)
+	}
+}
+
+// ---- placing an owner_unknown line (placeUnownedLine) ----
+
+// The production case (workspace footer-activity-updates, 2026-09-30): the
+// spawn unit toolu_01CieP7uiZSR86ZztFV134Gv was spawned by the background
+// subagent toolu_016fJ1MXgpBhD13bnUrwNzPE, so the sidecar booked its row in
+// that subagent's book, and the shim's task stream, which names no owner,
+// wrote its running beat.
+const (
+	nestedSpawn   = "toolu_01CieP7uiZSR86ZztFV134Gv"
+	nestedSpawner = "toolu_016fJ1MXgpBhD13bnUrwNzPE"
+	nestedKey     = "activity:" + nestedSpawn
+)
+
+// storedEntry decodes the row stored under KEY.
+func storedEntry(t *testing.T, d *DB, key string) *storev1.StoreEntry {
+	t.Helper()
+	entry := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(scalar[[]byte](t, d, `SELECT frame FROM entry WHERE upsert_key = ?`, key), entry); err != nil {
+		t.Fatalf("decode the stored row %q: %v", key, err)
+	}
+	return entry
+}
+
+// seedNestedSpawn stores the spawn unit's row in its spawner's book, with the
+// spawner as its top_level, as the sidecar does.
+func seedNestedSpawn(t *testing.T, d *DB) {
+	t.Helper()
+	spawn := pageEntry("sidecar-spawn", nestedKey, nestedSpawner, frameItem(activityFrame(nestedSpawner, nestedSpawn, subagentStart(nestedSpawn))))
+	spawn.GetAgentUpdate().TopLevel = &conversationv1.AgentId{Value: nestedSpawner}
+	writeOK(t, d, spawn)
+}
+
+// THE PRODUCTION CASE: the nested spawn's beat lands in its spawner's book.
+func TestAnUnownedBeatIsPlacedInTheBookThatHoldsItsUnit(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedNestedSpawn(t, d)
+
+	// Act
+	result := writeOK(t, d, unownedEntry("shim-beat", nestedKey, beat(nestedSpawn, 900)))
+
+	// Assert
+	stored := storedEntry(t, d, nestedKey)
+	line := stored.GetAgentUpdate().GetServeableFrame()
+	if book := scalar[string](t, d, `SELECT book_agent_id FROM entry WHERE upsert_key = ?`, nestedKey); book != nestedSpawner {
+		t.Fatalf("book = %q, want the spawner's book %q", book, nestedSpawner)
+	}
+	if line.GetPageAgentId().GetValue() != nestedSpawner || line.GetAgentItem().GetAgentFrame().GetAgentId().GetValue() != nestedSpawner ||
+		stored.GetAgentUpdate().GetTopLevel().GetValue() != nestedSpawner {
+		t.Fatalf("stored line = %v, want it booked, attributed and top-levelled as the spawner's", stored)
+	}
+	if got := line.GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetSubagent().GetUpdate().GetProgress().GetTotalTokens(); got != 900 {
+		t.Fatalf("stored tokens = %d, want the beat's 900", got)
+	}
+	if len(result.Skipped) != 0 || len(result.Unplaced) != 0 || result.Written != 1 {
+		t.Fatalf("result = %+v, want one written entry and nothing skipped or unplaced", result)
+	}
+}
+
+func TestAnUnownedLinePlacedIsPublishedToItsBooksWatchers(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedNestedSpawn(t, d)
+
+	// Act
+	result := writeOK(t, d, unownedEntry("shim-beat", nestedKey, beat(nestedSpawn, 900)))
+
+	// Assert
+	if len(result.Lines) != 1 || result.Lines[0].AgentID != nestedSpawner {
+		t.Fatalf("lines = %+v, want one line published to the spawner's book", result.Lines)
+	}
+}
+
+func TestAnUnownedLineWithANewKeyIsUnplacedAndRecordedAtError(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+
+	// Act
+	result := writeOK(t, d, unownedEntry("shim-beat", nestedKey, beat(nestedSpawn, 900)))
+
+	// Assert
+	if len(result.Unplaced) != 1 || result.Unplaced[0].UpsertKey != nestedKey || result.Written != 0 {
+		t.Fatalf("result = %+v, want the entry reported unplaced and nothing written", result)
+	}
+	if n := scalar[int64](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = ?`, nestedKey); n != 0 {
+		t.Fatalf("%d rows stored under %q, want none", n, nestedKey)
+	}
+	s.assertLogged(t, "error", "entry not stored: it is owner_unknown")
+	s.assertContext(t, "upsert_key", nestedKey)
+}
+
+func TestAnUnownedLineUnderANeverServedRowIsUnplaced(t *testing.T) {
+	// Arrange: a residue row holds the key, and residue has no book.
+	d, _ := newStore(t)
+	writeOK(t, d, unservedEntry("residue", nestedKey, &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{
+		Unparsed: &storev1.StoreUnparsed{Source: "transcript.jsonl", Raw: "{\"broken\":"},
+	}}))
+
+	// Act
+	result := writeOK(t, d, unownedEntry("shim-beat", nestedKey, beat(nestedSpawn, 900)))
+
+	// Assert
+	if len(result.Unplaced) != 1 || !strings.Contains(result.Unplaced[0].Detail, "never served") {
+		t.Fatalf("unplaced = %+v, want the entry unplaced because the row has no book", result.Unplaced)
+	}
+}
+
+func TestAnUnplacedEntryDoesNotKeepTheBatchsOtherEntriesOut(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	result := writeOK(t, d,
+		unownedEntry("shim-beat", nestedKey, beat(nestedSpawn, 900)),
+		pageEntry("other", "activity:other", "agent-main", frameItem(activityFrame("agent-main", "other", prose()))))
+
+	// Assert
+	if result.Written != 1 || len(result.Unplaced) != 1 {
+		t.Fatalf("result = %+v, want the booked entry written beside the unplaced one", result)
 	}
 }

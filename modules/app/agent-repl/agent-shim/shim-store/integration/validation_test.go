@@ -86,8 +86,8 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 				return p.agentEntry("w-valid", "u-valid", &storev1.StoreAgentUpdate{
 					AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
 						ServeableFrame: &storev1.StorePageLine{
-							PageAgentId: agentID(""),
-							AgentItem:   frameItem(responseFrame("main", "act-1", "x")),
+							Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: agentID("")},
+							AgentItem: frameItem(responseFrame("main", "act-1", "x")),
 						},
 					},
 				})

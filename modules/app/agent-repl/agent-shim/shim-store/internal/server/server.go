@@ -266,7 +266,8 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{
-			Skipped: skippedEntries(result.Skipped),
+			Skipped:  skippedEntries(result.Skipped),
+			Unplaced: unplacedEntries(result.Unplaced),
 		}},
 	}), nil
 }
@@ -284,6 +285,21 @@ func writeClassOf(class *storev1.WriteClass) WriteClass {
 	default:
 		return db.WriteClassUnset
 	}
+}
+
+// unplacedEntries carries the owner-unknown entries the store could not place
+// onto the success arm, so the producer records each one at ERROR with the
+// store's own account. The batch was durable for every other entry, so they
+// ride success, exactly as a skip does.
+func unplacedEntries(unplaced []UnplacedEntry) []*storev1.WriteBatchUnplacedEntry {
+	if len(unplaced) == 0 {
+		return nil
+	}
+	out := make([]*storev1.WriteBatchUnplacedEntry, 0, len(unplaced))
+	for _, u := range unplaced {
+		out = append(out, &storev1.WriteBatchUnplacedEntry{UpsertKey: u.UpsertKey, Detail: u.Detail})
+	}
+	return out
 }
 
 // skippedEntries carries the store's per-entry legacy book-conflict skips onto
@@ -721,11 +737,21 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 			Result: &storev1.GetAgentByVendorTaskResponse_NotFound{NotFound: &storev1.GetAgentByVendorTaskNotFound{}},
 		}), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s", agent)
+	// THE COMMISSION RIDES THE SAME ANSWER (GetAgentByVendorTaskSuccess.
+	// commission): a record holding the agent's lineage but no start answers
+	// the agent with the commission UNSET, and the caller reports that.
+	commission, described, err := s.store.AgentCommission(correlated(ctx, req.Header()), agent)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-agent-by-vendor-task", err, fields)
+		return agentByVendorTaskFailure(ref), nil
+	}
+	success := &storev1.GetAgentByVendorTaskSuccess{Agent: &conversationv1.AgentId{Value: agent}}
+	if described {
+		success.Commission = commission
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s commission_recorded=%t", agent, described)
 	return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
-		Result: &storev1.GetAgentByVendorTaskResponse_Success{Success: &storev1.GetAgentByVendorTaskSuccess{
-			Agent: &conversationv1.AgentId{Value: agent},
-		}},
+		Result: &storev1.GetAgentByVendorTaskResponse_Success{Success: success},
 	}), nil
 }
 

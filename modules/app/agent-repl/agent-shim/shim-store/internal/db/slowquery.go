@@ -80,6 +80,8 @@ const (
 	StatementLiveWork   = "live_work"
 	// StatementAgentByVendorTask is the lineage-scoped locator lookup.
 	StatementAgentByVendorTask = "agent_by_vendor_task"
+	// StatementAgentCommission is the read of an agent's recorded commission.
+	StatementAgentCommission = "agent_commission"
 	// StatementShellRunClaims is the sidecar's claim lookup by task ids.
 	StatementShellRunClaims = "shell_run_claims"
 	// StatementRunSettlements is the sidecar's settled-run lookup by run ids.
