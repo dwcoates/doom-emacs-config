@@ -1164,11 +1164,27 @@ unselected one (owner ruling, 2026-09-14): it paints the lightish grey
 `agent-repl--color-selected-bg' with a foreground chosen against THAT
 grey, in place of the state color, and also carries `:underline', which
 `agent-repl--render-tab' turns into the secondary selection marker.
-Keys in the returned plist: :bg :fg :bracket-fg :underline :weight."
+
+THE [N] BRACKET KEEPS THE STATUS COLOR WHEN SELECTED (owner ruling,
+2026-10-01): the selection grey is the NAME's ground alone, so a
+selected tab still says its status at a glance.  The selected spec
+therefore carries the UNSELECTED row's bracket colors as `:bracket-bg'
+and `:bracket-fg', ahead of the selected row's own keys.
+Keys in the returned plist: :bg :fg :bracket-bg :bracket-fg :underline
+:weight."
   (let* ((row (alist-get state agent-repl--tab-palette))
-         (key (if selected :selected :unselected)))
-    (or (plist-get row key)
-        (plist-get (agent-repl--tab-default) key))))
+         (spec-for (lambda (key)
+                     (or (plist-get row key)
+                         (plist-get (agent-repl--tab-default) key))))
+         (spec (funcall spec-for (if selected :selected :unselected))))
+    (if (not selected)
+        spec
+      (let ((status (funcall spec-for :unselected)))
+        (append (list :bracket-bg (or (plist-get status :bracket-bg)
+                                      (plist-get status :bg))
+                      :bracket-fg (or (plist-get status :bracket-fg)
+                                      (plist-get status :fg)))
+                spec)))))
 
 (defun agent-repl--tab-spec-bracket-only (state selected)
   "Return appearance spec applying STATE's color to the [N] bracket only.
@@ -1180,12 +1196,11 @@ bracket retains the state's color and the workspace's
 state stays visible while the rest of the tab falls back to the default
 appearance.
 
-When SELECTED, `agent-repl--tab-spec' already answered with the
-selection grey rather than the connection color (owner ruling,
-2026-09-14), so a selected panels-closed tab's bracket paints THAT grey,
-not the state color — the owner's grey wins over both the connection
-color and the panels-closed extent for the selected tab.  The `:underline'
-is carried through unchanged as the secondary marker.  The name region's
+When SELECTED, `agent-repl--tab-spec' answers the selection grey for
+the name but keeps the state color on the bracket (owner ruling,
+2026-10-01), so a selected panels-closed tab's bracket still paints the
+state color.  The `:underline' is carried through unchanged as the
+secondary marker.  The name region's
 own grey comes independently from `agent-repl--tab-face', not from this
 spec's (unspecified) :bg/:fg."
   (let* ((full (agent-repl--tab-spec state selected))
