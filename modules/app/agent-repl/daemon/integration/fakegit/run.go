@@ -123,6 +123,10 @@ func answer(s *State, cwd string, args []string) Result {
 		return mergeTree(s, repo, wt, subject)
 	case "update-ref":
 		return updateRef(repo, subject)
+	case "rebase":
+		return rebase(s, repo, wt, subject)
+	case "fetch":
+		return fetch(repo, subject)
 	}
 	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
 }
@@ -333,6 +337,11 @@ func splitPrefix(top, dir string) []string {
 }
 
 func revParse(s *State, repo *Repo, wt *Worktree, dir string, subject []string) Result {
+	// `--git-path <name>` names a path inside the worktree's own git dir,
+	// absolute, which is how a rebase in progress is found.
+	if len(subject) == 3 && subject[1] == "--git-path" && wt != nil {
+		return Result{Stdout: filepath.Join(gitDir(repo, wt), subject[2]) + "\n"}
+	}
 	// A fixture repository has no remotes, so every `@{upstream}` reference
 	// is refused exactly as real git refuses it. This has to come first:
 	// `rev-parse --verify --abbrev-ref <branch>@{upstream}` carries a flag
@@ -439,6 +448,11 @@ func (s *State) resolve(repo *Repo, wt *Worktree, ref string) (string, bool) {
 	if sha, ok := repo.BranchHeads[ref]; ok {
 		return sha, true
 	}
+	// An upstream branch resolves to what the last fetch brought in.
+	if name, remote := strings.CutPrefix(ref, "refs/remotes/origin/"); remote {
+		sha, ok := repo.RemoteHeads[name]
+		return sha, ok && sha != ""
+	}
 	// A FULL branch ref names the same branch its short name does.
 	if name, full := strings.CutPrefix(ref, "refs/heads/"); full {
 		if sha, ok := repo.BranchHeads[name]; ok {
@@ -484,6 +498,9 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 					base = subject[i]
 				}
 			}
+		}
+		if branchName == "" && dir != "" && base != "" {
+			return addExisting(repo, dir, base)
 		}
 		if branchName == "" || dir == "" {
 			return Result{Stderr: "fatal: fakegit: `worktree add` needs -b <branch> <dir> <base>\n", Exit: 128}
@@ -670,7 +687,7 @@ func merge(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 			Exit:   1,
 		}
 	}
-	sourceHead, ok := repo.BranchHeads[source]
+	sourceHead, ok := s.resolve(repo, wt, source)
 	if !ok {
 		return Result{Stderr: fmt.Sprintf("merge: %s - not something we can merge\n", source), Exit: 1}
 	}
@@ -984,6 +1001,9 @@ func revList(s *State, repo *Repo, subject []string) Result {
 	commits := s.rangeCommits(repo, rangeSpec)
 	out := ""
 	for _, c := range commits {
+		if contains(subject, "--no-merges") && len(c.Parents) > 1 {
+			continue
+		}
 		out += s.render(format, c) + "\n"
 	}
 	return Result{Stdout: out}
@@ -1317,4 +1337,110 @@ func updateRef(repo *Repo, subject []string) Result {
 	}
 	repo.RemoveBranch(name)
 	return Result{}
+}
+
+// addExisting implements `worktree add <dir> <branch>`: an EXISTING branch
+// checked out in a new tree.
+func addExisting(repo *Repo, dir, branch string) Result {
+	head, ok := repo.BranchHeads[branch]
+	if !ok || !repo.HasBranch(branch) {
+		return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", branch), Exit: 128}
+	}
+	for _, wt := range repo.Worktrees {
+		if wt.Branch == branch {
+			return Result{Stderr: fmt.Sprintf("fatal: '%s' is already checked out at '%s'\n", branch, wt.Dir), Exit: 128}
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
+		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	}
+	repo.Worktrees = append(repo.Worktrees, &Worktree{Dir: dir, Branch: branch, Head: head})
+	return Result{Stdout: "Preparing worktree (checking out '" + branch + "')\n"}
+}
+
+// fetch implements `fetch origin`: the fixture's upstream heads are already
+// what a fetch brings in, so it answers success and changes nothing.
+func fetch(repo *Repo, subject []string) Result {
+	if len(subject) != 2 || subject[1] != "origin" {
+		return Result{Stderr: "fatal: fakegit: only `fetch origin` is modeled\n", Exit: 128}
+	}
+	return Result{}
+}
+
+// rebase implements the merge queue's rebase: `rebase -i --empty=drop <onto>`
+// replays the first commit of HEAD's range onto onto and stops at the break
+// after it; `rebase --continue` replays the next. A scripted rebase conflict
+// stops its commit's first replay with the paths conflicted, and the rebase
+// stays in progress until --continue finds them resolved. The rebase's state
+// directory is real, under the worktree's git dir, because the client reads
+// it off disk.
+func rebase(s *State, repo *Repo, wt *Worktree, subject []string) Result {
+	if wt == nil {
+		return Result{Stderr: "fatal: not a working tree\n", Exit: 128}
+	}
+	stateDir := filepath.Join(gitDir(repo, wt), "rebase-merge")
+	switch {
+	case contains(subject, "--continue"):
+		if wt.Rebase == nil {
+			return Result{Stderr: "fatal: No rebase in progress?\n", Exit: 128}
+		}
+		if len(wt.Conflicted) > 0 {
+			return Result{Stdout: "", Stderr: "error: you must edit all merge conflicts and then mark them as resolved using git add\n", Exit: 1}
+		}
+		wt.Rebase.Stopped = false
+	case contains(subject, "-i"):
+		if wt.Rebase != nil {
+			return Result{Stderr: "fatal: It seems that there is already a rebase-merge directory\n", Exit: 128}
+		}
+		onto, ok := s.resolve(repo, wt, subject[len(subject)-1])
+		if !ok {
+			return Result{Stderr: "fatal: invalid upstream\n", Exit: 128}
+		}
+		var todo []string
+		for _, c := range s.rangeCommits(repo, onto+".."+wt.Head) {
+			if len(c.Parents) <= 1 {
+				todo = append(todo, c.SHA)
+			}
+		}
+		wt.Rebase = &Rebase{Onto: onto, Todo: todo, NewHead: onto}
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			return Result{Stderr: err.Error() + "\n", Exit: 128}
+		}
+	default:
+		return Result{Stderr: "fatal: fakegit: only `rebase -i` and `rebase --continue` are modeled\n", Exit: 128}
+	}
+	r := wt.Rebase
+	if r.Done < len(r.Todo) {
+		k := r.Done + 1
+		for _, c := range s.Conflicts {
+			if c.RebaseCommit != k || c.Met || c.Branch != wt.Branch || !sameRepoTree(repo, c.Dir, wt.Dir) {
+				continue
+			}
+			c.Met = true
+			r.Stopped = true
+			wt.Conflicted = c.Paths
+			return Result{Stdout: "CONFLICT (content): Merge conflict\n", Stderr: "error: could not apply " + r.Todo[r.Done] + "\n", Exit: 1}
+		}
+		original := s.Commits[r.Todo[r.Done]]
+		replayed := s.AddCommit(repo, "", original.Subject, []string{r.NewHead}, original.Paths)
+		r.NewHead = replayed.SHA
+		r.Done = k
+		wt.Head = r.NewHead
+	}
+	if r.Done < len(r.Todo) {
+		return Result{Stdout: "Stopped at " + r.NewHead + "\n"}
+	}
+	// THE REBASE IS DONE: the branch moves to the replayed head.
+	if wt.Branch != "" {
+		repo.BranchHeads[wt.Branch] = r.NewHead
+	}
+	wt.Head = r.NewHead
+	wt.Rebase = nil
+	if err := os.RemoveAll(stateDir); err != nil {
+		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	}
+	return Result{Stdout: "Successfully rebased and updated refs/heads/" + wt.Branch + ".\n"}
 }

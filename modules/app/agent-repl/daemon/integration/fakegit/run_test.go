@@ -48,11 +48,11 @@ func TestRunRefusesACommandWithNoFixture(t *testing.T) {
 	s, _, dir := world(t)
 
 	// Act.
-	got := Run(s, "/", []string{"-C", dir, "fetch", "origin"})
+	got := Run(s, "/", []string{"-C", dir, "push", "origin"})
 
 	// Assert.
 	if got.Exit == 0 || !strings.Contains(got.Stderr, "no fixture") {
-		t.Fatalf("`git fetch` = %+v, want a loud refusal", got)
+		t.Fatalf("`git push` = %+v, want a loud refusal", got)
 	}
 }
 
@@ -1617,5 +1617,121 @@ func TestDiffOverAThreeDotRangeListsWhatTheBranchBrought(t *testing.T) {
 	// Assert.
 	if got.Stdout != "b.txt\x00" {
 		t.Fatalf("diff main...feature = %q, want only what the branch brought", got.Stdout)
+	}
+}
+
+// branchWorld adds a branch `feature` two commits ahead of main, checked out in
+// a linked worktree, and answers that worktree.
+func branchWorld(t *testing.T, s *State, repo *Repo) string {
+	t.Helper()
+	wt := filepath.Join(t.TempDir(), "feature")
+	if res := Run(s, "/", []string{"-C", repo.Dir, "worktree", "add", "-b", "feature", wt, "main"}); res.Exit != 0 {
+		t.Fatalf("worktree add: %+v", res)
+	}
+	tree := repo.Worktree(wt)
+	s.AddCommit(repo, "feature", "one", []string{tree.Head}, []string{"a.go"})
+	s.AddCommit(repo, "feature", "two", []string{repo.BranchHeads["feature"]}, []string{"b.go"})
+	return wt
+}
+
+func TestRebaseStopsAfterEachReplayedCommit(t *testing.T) {
+	// Arrange: main moves, so feature is rebased onto its new tip.
+	s, repo, dir := world(t)
+	wt := branchWorld(t, s, repo)
+	s.AddCommit(repo, "main", "main moved", []string{repo.BranchHeads["main"]}, []string{"c.go"})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", repo.BranchHeads["main"]})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(wt).Rebase == nil || repo.Worktree(wt).Rebase.Done != 1 {
+		t.Fatalf("rebase = %+v, rebase state %+v; want one commit replayed and the rebase stopped", got, repo.Worktree(wt).Rebase)
+	}
+	_ = dir
+}
+
+func TestRebaseContinueFinishesAndMovesTheBranchOntoTheTip(t *testing.T) {
+	// Arrange.
+	s, repo, _ := world(t)
+	wt := branchWorld(t, s, repo)
+	tip := s.AddCommit(repo, "main", "main moved", []string{repo.BranchHeads["main"]}, []string{"c.go"}).SHA
+	Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", tip})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "--continue"})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(wt).Rebase != nil {
+		t.Fatalf("continue = %+v, want the rebase finished", got)
+	}
+	if !s.reachable(repo.BranchHeads["feature"])[tip] {
+		t.Fatal("the rebased branch is not on the tip")
+	}
+	if res := Run(s, "/", []string{"-C", wt, "rev-parse", "--git-path", "rebase-merge"}); res.Exit != 0 {
+		t.Fatalf("rev-parse --git-path = %+v", res)
+	} else if _, err := os.Stat(strings.TrimSpace(res.Stdout)); !os.IsNotExist(err) {
+		t.Fatalf("the rebase-merge directory survived the finished rebase: %v", err)
+	}
+}
+
+func TestARebaseConflictStopsTheReplayInProgress(t *testing.T) {
+	// Arrange.
+	s, repo, _ := world(t)
+	wt := branchWorld(t, s, repo)
+	s.Conflicts = append(s.Conflicts, &Conflict{Dir: repo.Dir, Branch: "feature", Paths: []string{"a.go"}, RebaseCommit: 1})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", repo.BranchHeads["main"]})
+
+	// Assert.
+	tree := repo.Worktree(wt)
+	if got.Exit != 1 || tree.Rebase == nil || !tree.Rebase.Stopped || len(tree.Conflicted) != 1 {
+		t.Fatalf("rebase = %+v, tree %+v; want a stopped rebase with a.go conflicted", got, tree)
+	}
+}
+
+func TestARebaseContinueRefusesUnresolvedConflicts(t *testing.T) {
+	// Arrange.
+	s, repo, _ := world(t)
+	wt := branchWorld(t, s, repo)
+	s.Conflicts = append(s.Conflicts, &Conflict{Dir: repo.Dir, Branch: "feature", Paths: []string{"a.go"}, RebaseCommit: 1})
+	Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", repo.BranchHeads["main"]})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "--continue"})
+
+	// Assert.
+	if got.Exit != 1 || repo.Worktree(wt).Rebase == nil {
+		t.Fatalf("continue = %+v, want it refused with the rebase still standing", got)
+	}
+}
+
+func TestAWorktreeOfAnExistingBranchChecksItOut(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.AddBranch("agent/fix", repo.BranchHeads["main"])
+	wt := filepath.Join(t.TempDir(), "made")
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", wt, "agent/fix"})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(wt) == nil || repo.Worktree(wt).Branch != "agent/fix" {
+		t.Fatalf("worktree add = %+v, want agent/fix checked out at %s", got, wt)
+	}
+}
+
+func TestAnUpstreamBranchResolvesToWhatTheFetchBringsIn(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}
+
+	// Act.
+	fetched := Run(s, "/", []string{"-C", dir, "fetch", "origin"})
+	got := Run(s, "/", []string{"-C", dir, "rev-parse", "refs/remotes/origin/main"})
+
+	// Assert.
+	if fetched.Exit != 0 || strings.TrimSpace(got.Stdout) != repo.RemoteHeads["main"] {
+		t.Fatalf("fetch %+v, rev-parse %+v; want origin/main resolved", fetched, got)
 	}
 }
