@@ -1,4 +1,4 @@
-# Plan: a deploy in the footer (status, steps, activities, expanded panel)
+# Plan: a deploy in the footer (status, steps, activities, sidebar notice)
 
 Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
@@ -173,37 +173,55 @@ In every combination the client sees ONE transfer, from step 3 to step 6 (`deplo
   - It stands until the restart has brought the stale service onto the fresh build.
 - Required: a full Emacs restart actually restarts a stale store or sidecar onto the installed build.
 
-## Expanded footer: yes, a `deploy` panel
+## Expanded footer: no deploy panel (owner ruling, 2026-10-01)
 
-- It earns a panel for the same reason merge tests do: several components progress in
-  parallel states, and one line can name only the current one.
-- Proposed `frontend.v1.FooterExpanded.deploy`, plus a `frontend.v1.FooterFocusDeploy` focus arm.
-- One row per component, in the async rows' column layout (fixed duration column):
+- A deploy is drawn ONLY in the footer's status, its steps and its activity line.
+- A failed deploy raises a SALIENT activity naming the failed step, standing until the user's next
+  EXPLICIT prompt.
+  - A held prompt delivered automatically does not clear it.
+  - It replaces today's transient `deploy_failed` fault line for this purpose.
+- Every failure is also logged at ERROR with its step, detail and build-log path, as the
+  deployer already does (`daemon/internal/deploy/{deploy,builder}.go`); the implementation
+  confirms each failure path has its record.
 
-| Row | States |
-|---|---|
-| proto, shim, webapp, daemon, store, sidecar, lock | pending, building, built, failed |
-| store, sidecar | up to date, out of date (Emacs restart needed) |
-| daemon | up to date, handing over, restarting, handed over |
-| shim (this workspace) | up to date, replacing, when idle |
-| webapp | up to date, reloading |
+## Client reloads: backends first, clients second (proposal)
 
-- The row dot reuses the work-dot colors: running filled green, failed filled red, done hollow.
-- The panel stays visible until the `updated` transient expires, so the final result can be read.
-- The panel's state must survive the handover, so the manifest carries the row table.
+- Clients are the webapp (one per webview) and the Emacs lisp (one per Emacs).
+- ORDER: the backends (daemon, shim) always move first, and a client reloads only after
+  the backend it talks to has moved.
+  - Within one protocol version a new backend serves an old client, so the window between the two
+    is safe; a breaking change is a protocol version bump, which is never hot reloaded (see below).
+- Webapp: each workspace's webview reloads as the LAST step of that workspace's transfer, or at
+  once when no backend changed.
+  - A busy workspace's webview therefore waits with its transfer.
+- Emacs lisp: ONE reload per Emacs, after every workspace's backend has moved (the old daemon has
+  exited), or at once when no backend changed.
+- Neither cuts the vendor path, so a client reload is an ACTIVITY (`reloading webapp`,
+  `reloading emacs`), never the `deploying` status.
+- So every deploy is a backend combination (none, daemon, shim, both) followed by the clients
+  that changed (none, webapp, lisp, both).
+
+## Deploys that are never hot reloaded
+
+- A stale store or sidecar (above).
+- A protocol version bump: any change of a proto package's version (`frontend.v1` to
+  `frontend.v2`, say), which happens only on a breaking change.
+  - Nothing records the versions a build speaks today: the build stamps them, and a deploy whose
+    fresh set differs from the running one is blocked.
+- Both draw the same red sidebar notice and block EVERY hot reload until a full Emacs restart.
 
 ## Work, by system
 
-1. Proto (`frontend.v1`): new status arm and substatuses, new activity arms, the panel and focus arm.
+1. Proto (`frontend.v1`): new status arm and substatuses, new activity arms, the failed-deploy salient activity, and the sidebar restart notice.
 2. Daemon:
    - `deployprogress.Progress` grows the steps and per-component rows;
    - the builder callback;
    - the resolver derives the B substatuses from the rollout's per-workspace transfer state;
    - the manifest carries steps and rows across the handover.
-3. Webapp: the status, activity arms, panel rows and durations in `footer/`.
+3. Webapp: the status, activity arms, durations, and the sidebar restart notice in `footer/`.
 4. Lisp: nothing beyond the generic status rendering, to be confirmed.
 5. Docs: `docs/USER-GUIDE.md` gains the deploy footer, per the `AGENTS.md` rule.
 
 ## Questions for the owner
 
-1. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
+None open.
