@@ -4,9 +4,9 @@
  * `--fake` runs: a wrong path or a wrong field name is a silent ingestion gap,
  * not a test failure, unless it is pinned here.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -414,34 +414,4 @@ describe("VendorFiles", () => {
     expect(files.vendorSessionId).toBe("sess-2");
   });
 
-  it("finds shell runs a PRIOR process left running, by their unfinished spool plus the transcript", () => {
-    // Arrange: a spool this fresh VendorFiles never opened, with no EXIT= line
-    // -- exactly what a run that survived its shim leaves on disk.
-    const files = new VendorFiles(config(temp()));
-    const spoolPathForB1 = files.spoolPathFor("b1");
-    mkdirSync(dirname(spoolPathForB1), { recursive: true });
-    writeFileSync(spoolPathForB1, "still going\n");
-    mkdirSync(dirname(files.transcript.path), { recursive: true });
-    writeFileSync(
-      files.transcript.path,
-      `${JSON.stringify({
-        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1" }] },
-        toolUseResult: { backgroundTaskId: "b1", command: "sleep 600" },
-      })}\n`,
-    );
-
-    // Act
-    const surviving = files.survivingShellRuns();
-
-    // Assert
-    expect(surviving).toEqual([{ taskId: "b1", toolUseId: "toolu_1", description: "sleep 600" }]);
-  });
-
-  it("finds nothing surviving when no spool directory was ever created", () => {
-    // Arrange
-    const files = new VendorFiles(config(temp()));
-
-    // Act + Assert
-    expect(files.survivingShellRuns()).toEqual([]);
-  });
 });

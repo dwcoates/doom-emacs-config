@@ -243,6 +243,9 @@ export interface FakeStoreRead {
 }
 
 /** Start the fake store on `socketPath`. Resolves once it is accepting. */
+/** The activity arms the real store's `activityIsTerminal` reads as a unit's end. */
+const TERMINAL_ACTIVITY_ARMS: ReadonlySet<string> = new Set(["success", "failure", "ended", "blocking_error"]);
+
 export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   /** Every agent the fake holds an `agent` row for — the store's `agent` table. */
   const knownAgents = new Set<string>();
@@ -291,6 +294,15 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const bashRowsByRun = new Map<string, Array<{ readonly key: string; row: storev1.StoreAgentBash }>>();
   /** Runs a terminal bash row has ENDED — what `GetLiveWork` reads; never cleared. */
   const bashEndedRuns = new Set<string>();
+  /**
+   * Detached work a unit's TERMINAL ACTIVITY ARM ended (`success`, `failure`,
+   * `ended`, `blocking_error`, exactly the arms the real store's
+   * `activityIsTerminal` reads). Its `closeDetachedByOrigin` ends every row
+   * ALREADY announced with that unit as its origin, so a spawn's or a
+   * monitor's own terminal ends its detached work; a row announced later is a
+   * new live row. Never cleared.
+   */
+  const endedByUnit = new Set<string>();
   /** Every write id an accepted batch APPLIED: the store's write ledger. */
   const appliedWriteIds = new Set<string>();
   /** Tails following one run's rows. */
@@ -420,12 +432,34 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     const item = line.agentItem?.item;
     if (item?.case !== "agentFrame") return;
     const frame = item.value;
+    if (frame.result.case === "update" && frame.result.value.update.case === "activity") {
+      const activity = frame.result.value.update.value;
+      const unit = activity.activityId?.value;
+      const arm = (activity.item.value as { result?: { case?: string } } | undefined)?.result?.case;
+      if (unit !== undefined && unit !== "" && arm !== undefined && TERMINAL_ACTIVITY_ARMS.has(arm)) {
+        for (const [workId, runId] of detachedAnnounced) {
+          if (runId === unit) endedByUnit.add(workId);
+        }
+      }
+      return;
+    }
     if (frame.result.case !== "detachedWork") return;
     const detached = frame.result.value;
     const workId = detached.work?.value;
     if (workId === undefined || workId === "") return;
+    // THE ORIGIN UNIT, as the real store's `announceDetachedWork` takes it: the
+    // unit a `detached` origin names, or the created agent of a `created`
+    // subagent start.
+    const created =
+      detached.origin.case === "created" && detached.origin.value.workCreated?.work.case === "subagent"
+        ? detached.origin.value.workCreated.work.value.result
+        : undefined;
     const runId =
-      detached.origin.case === "detached" ? detached.origin.value.detachedFromId?.value : undefined;
+      detached.origin.case === "detached"
+        ? detached.origin.value.detachedFromId?.value
+        : created?.case === "start"
+          ? created.value.createdAgentId?.value
+          : undefined;
     detachedAnnounced.set(workId, runId);
     const owner = frame.agentId?.value;
     if (owner !== undefined && owner !== "") detachedOwner.set(workId, owner);
@@ -901,7 +935,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         for (const [workId, runId] of detachedAnnounced) {
           const owner = detachedOwner.get(workId);
           if (owner === undefined || !lineage.has(owner)) continue;
-          const ended = runId !== undefined && bashEndedRuns.has(runId);
+          const ended = (runId !== undefined && bashEndedRuns.has(runId)) || endedByUnit.has(workId);
           if (!ended) {
             liveDetached.push(create(conversationv1.DetachedWorkIdSchema, { value: workId }));
           }

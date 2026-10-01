@@ -4351,104 +4351,240 @@ describe("GetLiveWork reconciliation", () => {
     });
   }
 
-  it("writes a closing terminal for detached work the vendor no longer has", async () => {
+  /** One recorded unit of the main book, keyed `unit`, holding `item`. */
+  function recordedUnit(unit: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: unit }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** An announcement of `work` in the main book, stating `kind` and no unit row. */
+  function recordedAnnouncement(work: string, kind: conversationv1.DetachedWorkKind["kind"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: `announce-${work}` }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "detachedWork",
+              value: create(conversationv1.AgentDetachedWorkSchema, {
+                work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+                kind: create(conversationv1.DetachedWorkKindSchema, { kind }),
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** A session revived over a store holding `work` live and a book of `entries`. */
+  function revivedOver(work: string, entries: conversationv1.HistoryEntryAt[]): Harness {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: work })],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [recordedBashRun("b01")],
+      entries,
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
+    return h;
+  }
 
+  const RUNNING_SPAWN: conversationv1.AgentActivity["item"] = {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: {
+        case: "update",
+        value: create(conversationv1.AgentSubagentUpdateSchema, {
+          prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "sweep" }),
+        }),
+      },
+    }),
+  };
+
+  const ARMED_MONITOR: conversationv1.AgentActivity["item"] = {
+    case: "monitor",
+    value: create(conversationv1.AgentMonitorSchema, {
+      result: { case: "start", value: create(conversationv1.AgentMonitorStartSchema, { description: "watch" }) },
+    }),
+  };
+
+  it("leaves a recorded shell run live, writing no terminal: its spool is the sidecar's", async () => {
+    // Arrange.
+    const h = revivedOver("b01", [recordedBashRun("b01")]);
+
+    // Act.
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
-  });
-
-  it("RE-ADOPTS work the vendor still holds, asked directly rather than waited for", async () => {
-    // The live table is built from messages the shim has already seen, and at
-    // StartSession it has seen almost none: a revived process announces its
-    // surviving tasks on its own schedule, after the init this reconciliation
-    // follows. Judging survival off that table alone swept up work the vendor
-    // still had.
-    const h = harness({ backgroundTasks: true });
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
-    h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [recordedBashRun("b01")],
-      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-    });
-    await started(h);
-
+    // Assert.
     expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
   });
 
-  it("treats work the vendor could not be ASKED about as surviving", async () => {
-    // A vendor that cannot answer is not a vendor that said "gone": closing the
-    // run would write a terminal over something that may still be producing.
-    const h = harness({ backgroundTasksThrows: true });
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
-    h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [recordedBashRun("b01")],
-      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-    });
-    await started(h);
+  it("re-adopts the recorded shell run as live work at StartSession", async () => {
+    // Arrange.
+    const h = revivedOver("b01", [recordedBashRun("b01")]);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(live.map((work) => work.work?.value)).toEqual(["b01"]);
   });
 
-  it("closes work the record cannot describe rather than leaving it open", async () => {
-    // RULING (landing 5): `live_detached` is the store's shell table, so a row
-    // there IS a shell run and its kind is known from where it was found. An
-    // obligation the shim declines to close never gets a terminal at all.
-    const h = harness();
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
+  it("records the shell left for the sidecar at debug", async () => {
+    // Arrange.
+    const h = revivedOver("b01", [recordedBashRun("b01")]);
+    const before = logSinkMark();
 
+    // Act.
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+    // Assert.
+    const message = "a spool-backed run outlives the CLI process; it stays live and its terminal is the sidecar's";
+    expect([logLevelFor(before, message), logContextFor(before, message)?.work_id]).toEqual(["debug", "b01"]);
   });
 
-  it("closes an undescribable run with lost.swept_up", async () => {
-    const h = harness();
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
+  it("never asks the vendor about survival at StartSession", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_spawn", [recordedUnit("toolu_spawn", RUNNING_SPAWN)]);
 
+    // Act.
     await started(h);
 
-    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
-    const outcome =
-      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
-        ? entry.item.frame.result.value.outcome
-        : undefined;
+    // Assert.
+    expect(h.queries[0]?.query.calls.filter((call) => call.startsWith("backgroundTasks"))).toEqual([]);
+  });
+
+  it("closes a recorded subagent run with its lost terminal: it ran inside the replaced CLI process", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_spawn", [recordedUnit("toolu_spawn", RUNNING_SPAWN)]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
     expect(
-      outcome?.case === "interrupted" && outcome.value.cause.case === "lost"
-        ? outcome.value.cause.value.how.case
-        : "",
-    ).toBe("sweptUp");
+      h.persistence.buffered
+        .filter((entry) => entry.upsertKey === "activity:toolu_spawn")
+        .map((entry) => entry.source.discriminator),
+    ).toEqual(["activity.subagent.failure.lost.swept_up"]);
   });
 
-  it("states no command for a run whose start the record never held", async () => {
-    const h = harness();
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
+  it("records the in-process closing at INFO, naming the reason", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_spawn", [recordedUnit("toolu_spawn", RUNNING_SPAWN)]);
+    const before = logSinkMark();
 
+    // Act.
     await started(h);
 
-    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
-    const command =
-      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
-        ? entry.item.frame.result.value.command
-        : undefined;
-    expect(command?.line).toBe("");
+    // Assert.
+    const message = "closed live work that ran inside the CLI process: the CLI process that ran it was replaced";
+    expect([logLevelFor(before, message), logContextFor(before, message)?.reason]).toEqual([
+      "info",
+      "the CLI process that ran it was replaced",
+    ]);
+  });
+
+  it("does not re-adopt the closed subagent run", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_spawn", [recordedUnit("toolu_spawn", RUNNING_SPAWN)]);
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.session?.liveWork : undefined).toEqual([]);
+  });
+
+  it("closes a recorded monitor with its ended arm: its watch was the CLI's", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_mon", [recordedUnit("toolu_mon", ARMED_MONITOR)]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    const closing = h.persistence.buffered.find((entry) => entry.upsertKey === "activity:toolu_mon");
+    const frame = closing?.item.kind === "frame" ? closing.item.frame : undefined;
+    const activity = frame?.result.case === "update" && frame.result.value.update.case === "activity" ? frame.result.value.update.value : undefined;
+    expect(activity?.item.case === "monitor" ? activity.item.value.result.case : undefined).toBe("ended");
+  });
+
+  it("closes an item its announcement states is a subagent, with no unit row in the book", async () => {
+    // Arrange.
+    const h = revivedOver("toolu_sub", [
+      recordedAnnouncement("toolu_sub", {
+        case: "subagent",
+        value: create(conversationv1.DetachedWorkKindSubagentSchema, { agentId: create(conversationv1.AgentIdSchema, { value: "toolu_sub" }) }),
+      }),
+    ]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "activity:toolu_sub")).toBe(true);
+  });
+
+  it("leaves live an item its announcement states is a shell, with no unit row in the book", async () => {
+    // Arrange.
+    const h = revivedOver("b09", [
+      recordedAnnouncement("b09", { case: "bash", value: create(conversationv1.DetachedWorkKindBashSchema, {}) }),
+    ]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(h.persistence.buffered.filter((entry) => entry.upsertKey.includes("b09"))).toEqual([]);
+  });
+
+  it("leaves live an item the record states no kind for, writing nothing for it", async () => {
+    // Arrange.
+    const h = revivedOver("b01", []);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(h.persistence.buffered.filter((entry) => entry.upsertKey.includes("b01"))).toEqual([]);
+  });
+
+  it("records an item the record states no kind for at WARN, as the decision to leave it live", async () => {
+    // Arrange.
+    const h = revivedOver("b01", []);
+    const before = logSinkMark();
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    const message =
+      "the record states no kind for this live work; it is left live, since only work that ran in the CLI process may be closed at revival";
+    expect([logLevelFor(before, message), logContextFor(before, message)?.work_id]).toEqual(["warn", "b01"]);
   });
 
   it("re-announces the live membership as it is NOW on a new watch", async () => {
@@ -7621,24 +7757,19 @@ describe("the cold gate's COMPACT remediation", () => {
 });
 
 describe("reconciliation when the record cannot describe the work", () => {
-  it("closes a live run as swept up with no command when the book cannot be read", async () => {
+  it("leaves a live run live when the book cannot be read: nothing states it ran in the CLI process", async () => {
+    // Arrange.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
-    h.persistence.openError = new PersistenceError(
-      "store_unavailable",
-      "the store is down",
-    );
+    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
 
+    // Act.
     await started(h);
 
-    const terminal = h.persistence.buffered.find((entry) => entry.upsertKey === "bash:b01:terminal");
-    expect(
-      terminal?.item.kind === "bash_run" && terminal.item.frame.result.case === "success"
-        ? terminal.item.frame.result.value.command?.line
-        : undefined,
-    ).toBe("");
+    // Assert.
+    expect(h.persistence.buffered.filter((entry) => entry.upsertKey.includes("b01"))).toEqual([]);
   });
 
   it("closes a SPAWN the book describes as a subagent, not as a shell run", async () => {
@@ -8562,24 +8693,6 @@ describe("a vendor failure that is not an Error", () => {
     expect(logContextFor(before, "could not be read for reconciliation")?.cause).toBe(
       "the store socket went away",
     );
-  });
-
-  it("logs a bare-string backgroundTasks rejection while reconciling", async () => {
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.backgroundTasks = () => Promise.reject("the task registry went away");
-      },
-    });
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
-    });
-    const before = logSinkMark();
-
-    await started(h);
-
-    expect(
-      logContextFor(before, "could not be asked whether it still holds this work")?.cause,
-    ).toBe("the task registry went away");
   });
 
   it("carries a bare-string keep-alive row failure into the fault", async () => {
@@ -9557,7 +9670,7 @@ describe("the cold gate's compact remediation, in detail", () => {
 });
 
 describe("reconciliation's remaining descriptions", () => {
-  it("states no command for a live run the book holds only a finished frame for", async () => {
+  it("re-adopts a live shell whose row holds no arm, announcing it with an empty command", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b02" })],
@@ -9592,11 +9705,13 @@ describe("reconciliation's remaining descriptions", () => {
       ],
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
-    const before = logSinkMark();
 
-    await started(h);
+    const response = await started(h);
 
-    expect(logContextFor(before, "no describable start for this live shell run")?.kind).toBe("bash");
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    const origin = live[0]?.origin;
+    const work = origin?.case === "created" ? origin.value.workCreated?.work : undefined;
+    expect(work?.case === "bash" && work.value.result.case === "start" ? work.value.result.value.command?.line : undefined).toBe("");
   });
 
   it("does not close the MAIN agent's own book when the store lists it as live", async () => {
@@ -9741,12 +9856,12 @@ describe("StartSession's remaining steps when the query died under them", () => 
     expect(h.queries[0]?.query.calls).not.toContain("getContextUsage");
   });
 
-  it("closes live work it cannot ask the vendor about rather than re-adopting it", async () => {
-    // A dead vendor holds nothing. Leaving the obligation open would strand a
-    // run in the record with no process left that could ever conclude it.
+  it("writes no terminal for live work the record states no kind for, even with the query gone", async () => {
+    // Survival is never the vendor's to answer: a shell's spool may still be
+    // growing whether or not any query is alive, so only its sidecar ends it.
     const h = await startedWithQueryLostMidOpening();
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
   });
 });
 
@@ -11443,7 +11558,24 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     return h;
   }
 
-  it("re-announces a surviving resumed agent at StartSession, named by the store and described by its spawn", async () => {
+  it("closes a send-resumed run at StartSession under the agent the store names: it ran in the replaced CLI process", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    const closing = h.persistence.buffered.find((entry) => entry.upsertKey === "activity:toolu_send");
+    const frame = closing?.item.kind === "frame" ? closing.item.frame : undefined;
+    const activity = frame?.result.case === "update" && frame.result.value.update.case === "activity" ? frame.result.value.update.value : undefined;
+    const failure =
+      activity?.item.case === "subagent" && activity.item.value.result.case === "failure" ? activity.item.value.result.value : undefined;
+    expect([failure?.cause.case, failure?.createdAgentId?.value]).toEqual(["lost", "toolu_spawn"]);
+  });
+
+  it("does not re-adopt the send-resumed run at StartSession", async () => {
     // Arrange.
     const h = restoredHarness();
     h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
@@ -11452,14 +11584,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     const response = await started(h);
 
     // Assert.
-    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
-    expect(
-      live.map((work) => [
-        work.work?.value,
-        work.kind?.kind.case === "subagent" ? work.kind.kind.value.agentId?.value : "",
-        work.origin.case,
-      ]),
-    ).toEqual([["toolu_send", "toolu_spawn", "created"]]);
+    expect(response.result.case === "success" ? response.result.value.session?.liveWork : undefined).toEqual([]);
   });
 
   it("re-announces a resumed agent to a new watch", async () => {
@@ -11479,21 +11604,19 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     expect(live.map((work) => work.work?.value)).toEqual(["toolu_send"]);
   });
 
-  it("announces nothing for a resumed handle the store names no agent for, recorded at ERROR", async () => {
+  it("closes a send-resumed run the store names no agent for under the send's own id, at ERROR", async () => {
     // Arrange.
     const h = restoredHarness();
     const before = logSinkMark();
 
     // Act.
-    const response = await started(h);
+    await started(h);
 
     // Assert.
-    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
-    expect(live).toEqual([]);
-    expect(
-      logRecordsSince(before)
-        .filter((record) => record.level === "error")
-        .map((record) => record.context.site),
-    ).toEqual(["restore"]);
+    const message = "the agent a send resumed could not be named; its run is closed under the send's own id";
+    expect([
+      logLevelFor(before, message),
+      h.persistence.buffered.some((entry) => entry.upsertKey === "activity:toolu_send"),
+    ]).toEqual(["error", true]);
   });
 });
