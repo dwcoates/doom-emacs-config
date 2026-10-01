@@ -1534,6 +1534,14 @@ func subagentKind(agent string) *conversationv1.DetachedWorkKind {
 	}}
 }
 
+// commissionedKind is subagentKind stating the commission DESCRIPTION (with
+// the instruction "go"), as every subagent announcement does.
+func commissionedKind(agent, description string) *conversationv1.DetachedWorkKind {
+	kind := subagentKind(agent)
+	kind.GetSubagent().Commission = &conversationv1.AgentSubagentPrompt{Text: "go", Description: &description}
+	return kind
+}
+
 func bashKind() *conversationv1.DetachedWorkKind {
 	return &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Bash{Bash: &conversationv1.DetachedWorkKindBash{}}}
 }
