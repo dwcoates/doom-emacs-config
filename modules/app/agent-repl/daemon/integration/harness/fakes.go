@@ -310,3 +310,56 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// FakeHostNetwork is the Wi-Fi network the fake host tools report joined.
+const FakeHostNetwork = "Harness Net"
+
+// FakeHotspot is the hotspot the daemon is told to join
+// (AGENT_REPL_PERSISTENT_WIFI_HOTSPOT); joining it changes nothing the fakes
+// report.
+const FakeHotspot = "Harness Hotspot"
+
+// fakeHostTools are the persistent-wifi host tools, by name. They are
+// STATEFUL where the daemon reads back what it wrote: `pmset -a disablesleep`
+// writes the value `pmset -g` reports, through the fake `sudo`, which runs
+// the command it is handed. No test ever touches the real machine's power or
+// network settings.
+var fakeHostTools = map[string]string{
+	"sudo": `#!/bin/sh
+[ "$1" = "-n" ] && shift
+exec "$@"
+`,
+	"pmset": `#!/bin/sh
+state="$(dirname "$0")/pmset.state"
+case "$1" in
+  -g) printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n' "$(cat "$state" 2>/dev/null || echo 0)" ;;
+  -a) [ "$2" = disablesleep ] && printf '%s\n' "$3" > "$state" ;;
+esac
+exit 0
+`,
+	"networksetup": `#!/bin/sh
+[ "$1" = -listallhardwareports ] && printf 'Hardware Port: Wi-Fi\nDevice: en9\n'
+exit 0
+`,
+	"ipconfig": `#!/bin/sh
+printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : ` + FakeHostNetwork + `\n}\n'
+`,
+	"wifi-util":      "#!/bin/sh\nexit 0\n",
+	"mac-brightness": "#!/bin/sh\nexit 0\n",
+}
+
+// NewFakeHostTools writes the persistent-wifi host tools into dir
+// (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR) and answers it. The machine they
+// describe starts joined to FakeHostNetwork with the mode off.
+func NewFakeHostTools(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("harness: mkdir %s: %v", dir, err)
+	}
+	for name, script := range fakeHostTools {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatalf("harness: write %s: %v", name, err)
+		}
+	}
+	return dir
+}

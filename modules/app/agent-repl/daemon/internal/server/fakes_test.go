@@ -1013,9 +1013,11 @@ type harness struct {
 	// LoudFaults is the standing loud faults every Emacs stream is told.
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
-	Focus      *desktopnotify.Focus
-	Surfaces   *fakeSurfaces
-	WebappDist string
+	Focus *desktopnotify.Focus
+	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
+	PersistentWifi *fakePersistentWifi
+	Surfaces       *fakeSurfaces
+	WebappDist     string
 }
 
 // option customizes a harness before it is built.
@@ -1057,6 +1059,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
+
+		PersistentWifi: &fakePersistentWifi{},
 	}
 
 	deps := Deps{
@@ -1080,6 +1084,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Holds:            h.Holds,
 		LoudFaults:       &h.LoudFaults,
 		Focus:            h.Focus,
+		PersistentWifi:   h.PersistentWifi,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,
@@ -1212,4 +1217,23 @@ type repositoryFold struct {
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
 	v.folds = append(v.folds, repositoryFold{repo: repo, folded: folded})
 	return v.foldErr
+}
+
+// fakePersistentWifi records every action and answers a scripted response.
+type fakePersistentWifi struct {
+	mu       sync.Mutex
+	topic    publish.Topic[*agentreplv1.PersistentWifiState]
+	requests []*agentreplv1.UpdatePersistentWifiModeRequest
+	response *agentreplv1.UpdatePersistentWifiModeResponse
+}
+
+func (f *fakePersistentWifi) Update(_ context.Context, req *agentreplv1.UpdatePersistentWifiModeRequest) *agentreplv1.UpdatePersistentWifiModeResponse {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	return f.response
+}
+
+func (f *fakePersistentWifi) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] {
+	return &f.topic
 }

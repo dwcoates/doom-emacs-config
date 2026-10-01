@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -28,6 +29,9 @@ type resolver struct {
 	// daemonRaised are the standing daemon-scoped warnings, by key. A
 	// workspace whose accumulation is made later takes them at once.
 	daemonRaised map[string]DaemonWarning
+	// persistentWifi is the machine's persistent-wifi standing, which every
+	// strip draws alike; nil before the controller's first read.
+	persistentWifi *agentreplv1.PersistentWifiState
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -217,6 +221,7 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		Account:              r.account(s),
 		PermissionModePicker: r.permissionModePicker(s),
 		FastMode:             fastMode(s),
+		PersistentWifi:       persistentWifiChip(r.persistentWifi),
 	}, nil
 }
 
