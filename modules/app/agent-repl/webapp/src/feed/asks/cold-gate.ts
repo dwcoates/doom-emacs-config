@@ -132,7 +132,11 @@ export function drawFeedColdGate(u: FeedColdGate, rc: RowContext): HTMLElement {
   }
 }
 
-/** The standing gate: the facts, then the three remediations. */
+/**
+ * The standing gate: the facts, then the remediations. The compact choice is
+ * drawn only when the gate serves a compact menu; an account that is not
+ * offered compaction gets pay and clear alone.
+ */
 export function drawFeedColdGateStanding(
   u: FeedColdGateStanding,
   rc: RowContext,
@@ -141,10 +145,15 @@ export function drawFeedColdGateStanding(
   const tokens = requireMessage(u.contextTokens, `${path}.context_tokens`);
   const lastRequest = requireMessage(u.lastRequest, `${path}.last_request`);
   const model = requireMessage(u.model, `${path}.model`);
-  const menu = requireMessage(u.compact, `${path}.compact`);
+  const menu = u.compact;
   log.debug("drawing a standing cold gate", {
     operation: "feed.asks.cold-gate.standing",
-    context: { path, models: menu.models.length, scopes: menu.scopes.length },
+    context: {
+      path,
+      compaction_offered: menu !== undefined,
+      models: menu?.models.length ?? 0,
+      scopes: menu?.scopes.length ?? 0,
+    },
   });
 
   const card = document.createElement("div");
@@ -306,7 +315,7 @@ export function drawFeedColdGateResolvedCompact(
 /** The three action rows, plus the compact submenu the third one opens. */
 function drawActions(
   rc: RowContext,
-  menu: FeedColdGateCompactMenu,
+  menu: FeedColdGateCompactMenu | undefined,
   path: string,
 ): HTMLElement {
   const actions = document.createElement("div");
@@ -329,6 +338,16 @@ function drawActions(
   const pay = actionRow("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionRow("clear", COLD_GATE_COPY.clear, buttons);
   actions.append(pay.row, clear.row);
+  pay.button.addEventListener("click", () => {
+    void answer(rc, actions, buttons, progress, { kind: "pay" });
+  });
+  clear.button.addEventListener("click", () => {
+    void answer(rc, actions, buttons, progress, { kind: "clear" });
+  });
+  if (menu === undefined) {
+    actions.append(progress);
+    return actions;
+  }
 
   // The compact path needs two values before it can be sent, so its row opens a
   // submenu rather than firing on the first click. The opener is not the verb's
@@ -356,13 +375,6 @@ function drawActions(
       operation: "feed.asks.cold-gate.submenu-toggled",
       context: { open: !submenu.el.hidden },
     });
-  });
-
-  pay.button.addEventListener("click", () => {
-    void answer(rc, actions, buttons, progress, { kind: "pay" });
-  });
-  clear.button.addEventListener("click", () => {
-    void answer(rc, actions, buttons, progress, { kind: "clear" });
   });
   return actions;
 }

@@ -47,6 +47,8 @@ function standing(
     lastRequestMs?: bigint;
     models?: string[];
     scopes?: SessionCompactScope[];
+    /** True for a gate whose account is not offered compaction. */
+    noCompact?: boolean;
   } = {},
 ): InitState {
   return {
@@ -55,14 +57,18 @@ function standing(
       contextTokens: { tokens: opts.tokens ?? 182_000n },
       lastRequest: { atMs: opts.lastRequestMs ?? 0n },
       model: { model: { name: MODEL } },
-      compact: {
-        models: (opts.models ?? [SUMMARIZER, MODEL]).map((name) => ({ model: { name } })),
-        scopes: opts.scopes ?? [
-          SessionCompactScope.ALL,
-          SessionCompactScope.PROMPTS,
-          SessionCompactScope.RESPONSES,
-        ],
-      },
+      ...(opts.noCompact
+        ? {}
+        : {
+            compact: {
+              models: (opts.models ?? [SUMMARIZER, MODEL]).map((name) => ({ model: { name } })),
+              scopes: opts.scopes ?? [
+                SessionCompactScope.ALL,
+                SessionCompactScope.PROMPTS,
+                SessionCompactScope.RESPONSES,
+              ],
+            },
+          }),
     },
   };
 }
@@ -194,6 +200,24 @@ describe("the standing gate", () => {
     ).toEqual(["pay", "clear", "compact"]);
   });
 
+  it("draws only pay and clear for a gate that offers no compaction", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
+    expect(
+      [...el.querySelectorAll("[data-cold-gate]")].map((n) => n.getAttribute("data-cold-gate")),
+    ).toEqual(["pay", "clear"]);
+  });
+
+  it("draws no compact opener or submenu for a gate that offers no compaction", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
+    expect(el.querySelector("[data-compact-open]")).toBeNull();
+    expect(el.querySelector(".cold-gate-submenu")).toBeNull();
+  });
+
+  it("keeps the progress slot on a gate that offers no compaction", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
+    expect(el.querySelector<HTMLElement>("[data-cold-gate-progress]")?.hidden).toBe(true);
+  });
+
   it("says what each choice keeps, not only what it costs", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect([...el.querySelectorAll(".hibernation-option-text")].map((n) => n.textContent)).toEqual([
@@ -281,6 +305,16 @@ describe("answering the gate", () => {
     it(`sends the ${c.arm} arm`, async () => {
       const h = askHarness();
       const el = drawFeedColdGate(gate(standing()), h.rc);
+      el.querySelector<HTMLButtonElement>(`[data-cold-gate="${c.hook}"]`)?.click();
+      await settle();
+      expect(h.calls.coldGate[0]?.choice.case).toBe(c.arm);
+    });
+  }
+
+  for (const c of simple) {
+    it(`sends the ${c.arm} arm from a gate that offers no compaction`, async () => {
+      const h = askHarness();
+      const el = drawFeedColdGate(gate(standing({ noCompact: true })), h.rc);
       el.querySelector<HTMLButtonElement>(`[data-cold-gate="${c.hook}"]`)?.click();
       await settle();
       expect(h.calls.coldGate[0]?.choice.case).toBe(c.arm);
@@ -735,12 +769,6 @@ describe("drawFeedColdGate malformed input", () => {
   it("refuses a standing gate with no last request", () => {
     const u = gate(standing());
     (u.state as unknown as { value: { lastRequest: undefined } }).value.lastRequest = undefined;
-    expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(MalformedView);
-  });
-
-  it("refuses a standing gate with no compact menu", () => {
-    const u = gate(standing());
-    (u.state as unknown as { value: { compact: undefined } }).value.compact = undefined;
     expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(MalformedView);
   });
 
