@@ -1042,6 +1042,16 @@ they lack rather than dropping the line:
   follows.
 `--harvest` keeps its established scope and does not gain these two sources.
 
+**EVERY WORKSPACE IS SHOWN BY ITS NAME.** `bin/logs.sh` hands the reader the
+daemon's ID-to-name table (`wsm.db`'s `workspaces`), and the reader stamps a
+synthetic `workspace_name` on every record whose `workspace_id` it names:
+the default format prints `workspace=<name>` in place of `workspace_id=` and
+`workspace_dir=`, `--json` appends `"workspace_name"` as the record's last
+key, and `--fields` projects it. The ID stays the records' join key, because
+it is stable across a rename and never reused; the name is the daemon's
+CURRENT name for it. A record whose ID the daemon no longer knows keeps its
+ID. A daemon workspace with no name is refused. `--harvest` is unchanged.
+
 `bin/logs.sh --help` documents every compact flag; the fixtures in
 `bin/test-logs.sh` are worked examples of each mode, including a stderr and a
 Messages fixture line.

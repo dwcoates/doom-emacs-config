@@ -135,7 +135,7 @@ test_workspace_directory_and_default_format() {
     last_operation="$(printf '%s\n' "$out" | tail -n 1 | awk '{print $4}')"
     if [ "$first_operation" = daemon.rotated ] &&
         [ "$last_operation" = daemon.third ] &&
-        printf '%s\n' "$out" | grep -q 'WARN  daemon.*daemon.warning.*workspace_id=ws-a.*context={"order":1}'; then
+        printf '%s\n' "$out" | grep -q 'WARN  daemon.*daemon.warning.*workspace=alpha .*context={"order":1}'; then
         pass "--workspace directory emits compact local-time records merged with rotations"
     else
         fail "--workspace directory emits compact local-time records merged with rotations"
@@ -720,6 +720,74 @@ EOF
     fi
 }
 
+
+test_human_names_the_workspace_and_hides_its_id() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon)"
+    if printf '%s\n' "$out" | grep -q 'workspace=alpha ' &&
+        ! printf '%s\n' "$out" | grep -q 'workspace_id=\|workspace_dir='; then
+        pass "the compact format names the workspace and hides its ID and directory"
+    else
+        fail "the compact format names the workspace and hides its ID and directory"
+    fi
+}
+
+test_json_appends_the_workspace_name_last() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime shim --json)"
+    if printf '%s\n' "$out" | grep -q '"workspace_id":"ws-a".*,"workspace_name":"alpha"}$'; then
+        pass "--json appends the synthetic workspace_name as the record's last key"
+    else
+        fail "--json appends the synthetic workspace_name as the record's last key"
+    fi
+}
+
+test_fields_projects_the_workspace_name() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime shim --fields workspace_name,operation)"
+    if printf '%s\n' "$out" | grep -q '^workspace_name=alpha operation=shim.failure$'; then
+        pass "--fields projects the synthetic workspace_name"
+    else
+        fail "--fields projects the synthetic workspace_name"
+    fi
+}
+
+test_an_unknown_workspace_keeps_its_id() {
+    local only_b="$TMP/only-beta-workspaces.tsv" out
+    printf 'ws-b\t%s\tbeta\n' "$workspace_b" >"$only_b"
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$only_b" run_logs --workspace "$workspace_a" --runtime daemon)"
+    if printf '%s\n' "$out" | grep -q 'workspace_id=ws-a' && ! printf '%s\n' "$out" | grep -q 'workspace='; then
+        pass "a record whose workspace the daemon cannot name keeps its ID"
+    else
+        fail "a record whose workspace the daemon cannot name keeps its ID"
+    fi
+}
+
+test_an_unnamed_daemon_workspace_is_refused() {
+    local unnamed="$TMP/unnamed-workspaces.tsv" rc=0 err
+    printf 'ws-a\t%s\t\nws-b\t%s\tbeta\n' "$workspace_a" "$workspace_b" >"$unnamed"
+    err="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$unnamed" run_logs --workspace "$workspace_b" 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$err" | grep -q 'daemon workspace ws-a has an empty name'; then
+        pass "a daemon workspace with no name is refused rather than shown by its ID"
+    else
+        fail "a daemon workspace with no name is refused rather than shown by its ID"
+    fi
+}
+
+
+test_reader_refuses_a_malformed_or_repeated_workspace_name() {
+    local reader rc1=0 rc2=0 err1 err2
+    reader="$(ls "$TMP"/build/logs-reader-* | head -n 1)"
+    err1="$("$reader" --workspace-name "ws-a" 2>&1)" || rc1=$?
+    err2="$("$reader" --workspace-name "ws-a=alpha" --workspace-name "ws-a=again" 2>&1)" || rc2=$?
+    if [ "$rc1" -ne 0 ] && printf '%s\n' "$err1" | grep -q 'is not ID=NAME' &&
+        [ "$rc2" -ne 0 ] && printf '%s\n' "$err2" | grep -q 'names workspace "ws-a" twice'; then
+        pass "the reader refuses a malformed or repeated --workspace-name"
+    else
+        fail "the reader refuses a malformed or repeated --workspace-name"
+    fi
+}
+
 test_workspace_directory_and_default_format
 test_workspace_id
 test_workspace_name
@@ -733,6 +801,12 @@ test_until
 test_level
 test_runtime_list
 test_json
+test_human_names_the_workspace_and_hides_its_id
+test_json_appends_the_workspace_name_last
+test_fields_projects_the_workspace_name
+test_an_unknown_workspace_keeps_its_id
+test_an_unnamed_daemon_workspace_is_refused
+test_reader_refuses_a_malformed_or_repeated_workspace_name
 test_harvest
 test_empty_harvest_window
 test_harvest_incomplete_workspace_attribution
