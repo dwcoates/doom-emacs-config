@@ -245,6 +245,10 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			finishUnit(cres)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		// Cancelled while nothing was running: what never started never will.
+		return results, r.suiteList(suites, order), err
+	}
 	if p := q.Pending(); p != 0 {
 		panic(fmt.Sprintf("run: %d units never became ready, which NewQueue's validation rules out", p))
 	}

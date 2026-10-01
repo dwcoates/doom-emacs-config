@@ -122,14 +122,24 @@ func PlanRun(atomic []Unit, chunkables []Chunkable, n int) (Plan, error) {
 		all = append(all, scored{p, work})
 		bestMakespan = math.Min(bestMakespan, p.Makespan)
 	}
+	// better orders plans by less work, then a shorter makespan, then fewer
+	// units (fewer processes for the same predicted result).
+	better := func(a, b scored) bool {
+		if math.Abs(a.work-b.work) > 1e-9 {
+			return a.work < b.work
+		}
+		if math.Abs(a.plan.Makespan-b.plan.Makespan) > 1e-9 {
+			return a.plan.Makespan < b.plan.Makespan
+		}
+		return len(a.plan.Units) < len(b.plan.Units)
+	}
 	var best *scored
 	for i := range all {
 		s := &all[i]
 		if s.plan.Makespan > bestMakespan*(1+MakespanSlack)+1e-9 {
 			continue
 		}
-		if best == nil || s.work < best.work-1e-9 ||
-			(math.Abs(s.work-best.work) <= 1e-9 && s.plan.Makespan < best.plan.Makespan) {
+		if best == nil || better(*s, *best) {
 			best = s
 		}
 	}

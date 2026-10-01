@@ -405,3 +405,22 @@ func TestRunRefusesZeroSlots(t *testing.T) {
 		t.Fatal("Run accepted zero slots")
 	}
 }
+
+func TestRunCancelledBeforeAnythingStartsReturnsTheCancellation(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{}}
+	r, _, _ := newRunner(2, e)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, _, err := r.Run(ctx, []Spec{spec("a", "s")})
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started %v after cancellation", e.started)
+	}
+}
