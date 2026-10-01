@@ -7693,7 +7693,7 @@ export const FooterAgentRowDescriptionSchema: GenMessage<FooterAgentRowDescripti
  */
 export type FooterAgentRowTokens = Message<"frontend.v1.FooterAgentRowTokens"> & {
   /**
-   * The formatted running sum ("12.4k tok"). Re-pushed as it grows.
+   * The formatted running sum ("12.4k"; the panel's "tokens" column header names the unit). Re-pushed as it grows.
    *
    * @generated from field: string text = 1;
    */

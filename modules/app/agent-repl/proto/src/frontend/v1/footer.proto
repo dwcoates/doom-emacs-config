@@ -2595,7 +2595,7 @@ message FooterAgentRowDescription {
 }
 // The row's token element.
 message FooterAgentRowTokens {
-  // The formatted running sum ("12.4k tok"). Re-pushed as it grows.
+  // The formatted running sum ("12.4k"; the panel's "tokens" column header names the unit). Re-pushed as it grows.
   string text = 1;
 }
 // The row's clock element. Carries only the start instant: the client draws
