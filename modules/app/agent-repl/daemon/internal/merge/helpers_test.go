@@ -871,6 +871,9 @@ func (q *fakeQueue) EditorGone(ids.WorkspaceID)                                 
 func (q *fakeQueue) Editing(ids.WorkspaceID) (promptqueue.Edit, bool) {
 	return promptqueue.Edit{}, false
 }
+func (q *fakeQueue) Fold(context.Context, ids.WorkspaceID, ids.TurnID, ids.TurnID) error {
+	return nil
+}
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }

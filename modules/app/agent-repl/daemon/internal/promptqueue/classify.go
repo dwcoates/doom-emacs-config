@@ -432,11 +432,18 @@ func (q *queue) replaceContent(ctx context.Context, ws ids.WorkspaceID, turn ids
 	if err := q.deps.DB.ReplaceHeldPromptSaid(ctx, turn, said); err != nil {
 		return err
 	}
+	state.bumpEpochLocked(turn)
+	return nil
+}
+
+// bumpEpochLocked records that TURN's content was replaced, so a verdict
+// judged about the content before it settles as a discard. The caller holds
+// the verdict lock.
+func (state *wsState) bumpEpochLocked(turn ids.TurnID) {
 	if state.epochs == nil {
 		state.epochs = map[ids.TurnID]uint64{}
 	}
 	state.epochs[turn]++
-	return nil
 }
 
 // runningText reads the running turn's text, which is half of what the judge
