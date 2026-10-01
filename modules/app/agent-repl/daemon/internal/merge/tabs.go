@@ -62,14 +62,18 @@ func tabWord(kind string) string {
 		return "queue"
 	case TabPrePrompt:
 		return "pre-prompt"
-	case TabMerge:
-		return "merge"
+	case TabRebasing:
+		return "rebasing"
 	case TabConflicts:
 		return "conflicts"
 	case TabTests:
 		return "tests"
 	case TabFixes:
 		return "fixes"
+	case TabCommitting:
+		return "committing"
+	case TabUpdatingMain:
+		return "updating main"
 	case TabPostPrompt:
 		return "post-prompt"
 	}
@@ -94,12 +98,6 @@ func settledFailed(atMS int64, summary string) *frontendv1.FeedMergeTabSettled {
 		EndedAtMs: atMS,
 		Outcome:   &frontendv1.FeedMergeTabSettled_Failed{Failed: &frontendv1.FeedMergeTabFailed{Summary: summary}},
 	}
-}
-
-// parkedBadge is the shared parked badge, carrying the daemon-composed standing
-// line the footer draws verbatim too.
-func parkedBadge(line string) *frontendv1.FeedMergeTabParked {
-	return &frontendv1.FeedMergeTabParked{Line: &frontendv1.FeedMergeTabParkedLine{Text: line}}
 }
 
 // tabRow wraps one tab's kind arm into the feed row that carries it.
@@ -205,33 +203,31 @@ func saidText(text string) *conversationv1.UserSaid {
 	}}
 }
 
-// mergeTabRow builds the merge tab: the landing's narration, replaced whole per
-// push.
-func mergeTabRow(liveState *frontendv1.FeedMergeTabLive, lines []string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabMerge{}
+// rebasingTab builds a rebasing round's tab: the replay's progress and its
+// narration, replaced whole per push. endedMS zero is a round still live.
+func rebasingTab(liveState *frontendv1.FeedMergeTabLive, replayed, total int, lines []string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabRebasing{Progress: &frontendv1.FeedMergeRebaseProgress{Replayed: uint32(replayed), Total: uint32(total)}}
 	for _, line := range lines {
-		inner.Lines = append(inner.Lines, &frontendv1.FeedMergeMergeLine{Text: line})
+		inner.Lines = append(inner.Lines, &frontendv1.FeedMergeRebaseLine{Text: line})
 	}
-	if liveState != nil || endedMS == 0 {
-		inner.State = &frontendv1.FeedMergeTabMerge_Live{Live: live()}
-	} else if failure != "" {
-		inner.State = &frontendv1.FeedMergeTabMerge_Settled{Settled: settledFailed(endedMS, failure)}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabMerge_Settled{Settled: settledOK(endedMS)}
+	switch {
+	case liveState != nil:
+		inner.State = &frontendv1.FeedMergeTabRebasing_Live{Live: liveState}
+	case failure != "":
+		inner.State = &frontendv1.FeedMergeTabRebasing_Settled{Settled: settledFailed(endedMS, failure)}
+	default:
+		inner.State = &frontendv1.FeedMergeTabRebasing_Settled{Settled: settledOK(endedMS)}
 	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Merge{Merge: inner}}
+	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: inner}}
 }
 
-// conflictsTabRow builds the conflicts tab, whose content is the sub-feed rows
-// parented to it. PARKED exists here because this is one of the two loops with
-// a give-up-to-human path.
-func conflictsTabRow(liveState *frontendv1.FeedMergeTabLive, parkedLine string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+// conflictsTab builds the conflicts tab, whose content is the sub-feed rows
+// parented to it: the requester's own session resolving the conflict.
+func conflictsTab(liveState *frontendv1.FeedMergeTabLive, endedMS int64, failure string) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabConflicts{}
 	switch {
-	case parkedLine != "":
-		inner.State = &frontendv1.FeedMergeTabConflicts_Parked{Parked: parkedBadge(parkedLine)}
 	case liveState != nil:
-		inner.State = &frontendv1.FeedMergeTabConflicts_Live{Live: live()}
+		inner.State = &frontendv1.FeedMergeTabConflicts_Live{Live: liveState}
 	case failure != "":
 		inner.State = &frontendv1.FeedMergeTabConflicts_Settled{Settled: settledFailed(endedMS, failure)}
 	default:
@@ -240,13 +236,14 @@ func conflictsTabRow(liveState *frontendv1.FeedMergeTabLive, parkedLine string, 
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: inner}}
 }
 
-// testsTabRow builds the tests tab: the per-suite rows with their painted
-// output, replaced whole per push.
-func testsTabRow(liveState *frontendv1.FeedMergeTabLive, suites []*frontendv1.FeedMergeTestSuite, endedMS int64, failure string) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabTests{Suites: suites}
+// testsTab builds a tests round's tab: the per-suite rows with their painted
+// output, and the round's log link once the run has written it, replaced whole
+// per push.
+func testsTab(liveState *frontendv1.FeedMergeTabLive, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabTests{Suites: suites, Log: log}
 	switch {
 	case liveState != nil:
-		inner.State = &frontendv1.FeedMergeTabTests_Live{Live: live()}
+		inner.State = &frontendv1.FeedMergeTabTests_Live{Live: liveState}
 	case failure != "":
 		inner.State = &frontendv1.FeedMergeTabTests_Settled{Settled: settledFailed(endedMS, failure)}
 	default:
@@ -255,18 +252,51 @@ func testsTabRow(liveState *frontendv1.FeedMergeTabLive, suites []*frontendv1.Fe
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Tests{Tests: inner}}
 }
 
-// fixesTabRow builds the fixes tab, the other loop with a give-up-to-human path.
-func fixesTabRow(liveState *frontendv1.FeedMergeTabLive, parkedLine string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabFixes{}
+// fixesTab builds a fixing attempt's tab, carrying the attempt and the ONE
+// bound; its content is the sub-feed rows parented to it.
+func fixesTab(liveState *frontendv1.FeedMergeTabLive, attempt int, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabFixes{Attempt: &frontendv1.FeedMergeFixAttempt{Attempt: uint32(attempt), MaxAttempts: MaxFixAttempts}}
 	switch {
-	case parkedLine != "":
-		inner.State = &frontendv1.FeedMergeTabFixes_Parked{Parked: parkedBadge(parkedLine)}
 	case liveState != nil:
-		inner.State = &frontendv1.FeedMergeTabFixes_Live{Live: live()}
+		inner.State = &frontendv1.FeedMergeTabFixes_Live{Live: liveState}
 	case failure != "":
 		inner.State = &frontendv1.FeedMergeTabFixes_Settled{Settled: settledFailed(endedMS, failure)}
 	default:
 		inner.State = &frontendv1.FeedMergeTabFixes_Settled{Settled: settledOK(endedMS)}
 	}
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Fixes{Fixes: inner}}
+}
+
+// committingTab builds the committing tab: the merge commit's subject.
+func committingTab(liveState *frontendv1.FeedMergeTabLive, subject string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabCommitting{Subject: &frontendv1.FeedMergeCommitSubject{Text: subject}}
+	switch {
+	case liveState != nil:
+		inner.State = &frontendv1.FeedMergeTabCommitting_Live{Live: liveState}
+	case failure != "":
+		inner.State = &frontendv1.FeedMergeTabCommitting_Settled{Settled: settledFailed(endedMS, failure)}
+	default:
+		inner.State = &frontendv1.FeedMergeTabCommitting_Settled{Settled: settledOK(endedMS)}
+	}
+	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Committing{Committing: inner}}
+}
+
+// updatingMainTab builds the updating-main tab: fetching until the upstream
+// tip is known, then fast-forwarding to it.
+func updatingMainTab(liveState *frontendv1.FeedMergeTabLive, commit string, endedMS int64, failure string) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabUpdatingMain{Step: &frontendv1.FeedMergeUpdatingMainStep{
+		Step: &frontendv1.FeedMergeUpdatingMainStep_Fetching{Fetching: &frontendv1.FeedMergeUpdatingMainFetching{}}}}
+	if commit != "" {
+		inner.Step = &frontendv1.FeedMergeUpdatingMainStep{Step: &frontendv1.FeedMergeUpdatingMainStep_FastForwarding{
+			FastForwarding: &frontendv1.FeedMergeUpdatingMainFastForwarding{Commit: commit}}}
+	}
+	switch {
+	case liveState != nil:
+		inner.State = &frontendv1.FeedMergeTabUpdatingMain_Live{Live: liveState}
+	case failure != "":
+		inner.State = &frontendv1.FeedMergeTabUpdatingMain_Settled{Settled: settledFailed(endedMS, failure)}
+	default:
+		inner.State = &frontendv1.FeedMergeTabUpdatingMain_Settled{Settled: settledOK(endedMS)}
+	}
+	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_UpdatingMain{UpdatingMain: inner}}
 }

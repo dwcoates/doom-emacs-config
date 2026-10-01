@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -283,25 +284,52 @@ func (f *fakeDB) MergeLedger(_ context.Context, id ids.WorkspaceID) ([]wsm.Merge
 	return append([]wsm.MergeLedgerEntry(nil), f.ledger[id]...), nil
 }
 
-func (f *fakeDB) EnqueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, at time.Time) (int, error) {
+func (f *fakeDB) RequestMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, source wsm.MergeSource, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.enqueueErr != nil {
 		err := f.enqueueErr
 		f.enqueueErr = nil
-		return 0, err
+		return err
 	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id {
-			return 0, &wsm.MergeQueuedError{Repo: repo, Workspace: id, Position: i + 1, State: entry.State}
+			return &wsm.MergeQueuedError{Repo: repo, Workspace: id, Position: i + 1, State: entry.State}
 		}
 	}
 	f.seq++
 	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
-		Repo: repo, Workspace: id, State: wsm.MergeQueued, EnqueuedAt: at,
+		Repo: repo, Workspace: id, State: wsm.MergeRequested, Source: source, EnqueuedAt: at,
 	})
 	f.renumber(repo)
-	return len(f.queues[repo]), nil
+	return nil
+}
+
+// QueueMerge moves a requested entry to the back of the line, exactly as the
+// durable queue re-sequences it.
+func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeRequested {
+			return 0, fmt.Errorf("the merge of %s is %s, not requested", id, entry.State)
+		}
+		f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
+		entry.State = wsm.MergeQueued
+		f.queues[repo] = append(f.queues[repo], entry)
+		f.renumber(repo)
+		place := 0
+		for _, e := range f.queues[repo] {
+			if e.State != wsm.MergeRequested {
+				place++
+			}
+		}
+		return place, nil
+	}
+	return 0, fmt.Errorf("no queue entry for %s", id)
 }
 
 // renumber restates the positions, which are derived from order rather than
@@ -377,14 +405,6 @@ func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, er
 	return f.paused[repo], nil
 }
 
-// policyOf reports a lease's current policy, which is how a parked merge is
-// asserted.
-func (f *fakeDB) policyOf(lease wsm.LeaseID) wsm.LeasePolicy {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.policies[lease]
-}
-
 // fakeGit answers every git fact from a script. It embeds nothing: the whole
 // interface is declared, so a call the orchestrator adds later is a compile
 // error rather than a surprise at run time.
@@ -434,8 +454,31 @@ type fakeGit struct {
 	// fastForwards records every landing, as "<dir>@<commit>".
 	fastForwards   []string
 	fastForwardErr error
-	// contained answers IsAncestor: the source branch is already in the target.
+	// contained answers IsAncestor for the source branch: it is already in the
+	// target. ancestry answers every other IsAncestor, keyed "<a>><b>", false
+	// when unscripted.
 	contained bool
+	ancestry  map[string]bool
+	// branches answers CurrentBranch by directory, "master" when unscripted.
+	branches map[string]string
+	// between answers CommitsBetween; nil answers one commit of work.
+	between    []gitclient.Commit
+	betweenErr error
+	// rebase is the scripted rebase: the commits it replays, the replay index
+	// (1-based) whose first replay conflicts with the files named, and a
+	// failure every rebase command answers.
+	rebaseTotal     int
+	rebaseReplayed  int
+	rebaseConflicts map[int][]string
+	rebaseMet       map[int]bool
+	rebaseErr       error
+	rebaseCommands  []string
+	// worktrees answers ListWorktrees; addedWorktrees records AddWorktree.
+	worktrees      []gitclient.Worktree
+	addedWorktrees []string
+	// fetches records every Fetch; fetchErr fails them.
+	fetches  []string
+	fetchErr error
 
 	// calls records what was asked of git, in order.
 	calls []string
@@ -450,14 +493,18 @@ type fakeGit struct {
 
 func newFakeGit(seq func() int) *fakeGit {
 	return &fakeGit{
-		seq:           seq,
-		at:            map[string]int{},
-		defaultBranch: "master",
-		commonDirs:    map[string]string{},
-		refs:          map[string]string{},
-		refSeqs:       map[string][]string{},
-		changedIn:     map[string][][]string{},
-		clean:         true,
+		seq:             seq,
+		at:              map[string]int{},
+		defaultBranch:   "master",
+		commonDirs:      map[string]string{},
+		refs:            map[string]string{},
+		refSeqs:         map[string][]string{},
+		changedIn:       map[string][][]string{},
+		clean:           true,
+		ancestry:        map[string]bool{},
+		branches:        map[string]string{},
+		rebaseConflicts: map[int][]string{},
+		rebaseMet:       map[int]bool{},
 	}
 }
 
@@ -544,11 +591,14 @@ func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
 	return g.fastForwardErr
 }
 
-func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, _ string) (bool, error) {
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
 	g.record("is_ancestor")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.contained, nil
+	if ancestor == "feature" {
+		return g.contained, nil
+	}
+	return g.ancestry[ancestor+">"+descendant], nil
 }
 
 func (g *fakeGit) Nuke(context.Context, string, string, string) error {
@@ -663,16 +713,89 @@ func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
 	return g.clean, g.cleanErr
 }
 
-func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
+func (g *fakeGit) CurrentBranch(_ context.Context, dir string) (string, error) {
 	g.record("current_branch")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if branch, ok := g.branches[dir]; ok {
+		return branch, nil
+	}
 	return "master", nil
+}
+
+func (g *fakeGit) CommitsBetween(context.Context, string, string, string) ([]gitclient.Commit, error) {
+	g.record("commits_between")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.between == nil {
+		return []gitclient.Commit{{SHA: "c0ffee0000001", Subject: "the work"}}, g.betweenErr
+	}
+	return g.between, g.betweenErr
+}
+
+func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []string) (gitclient.RebaseStep, error) {
+	g.record("start_rebase")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rebaseTotal = len(commits)
+	g.rebaseReplayed = 0
+	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
+	return g.replayLocked()
+}
+
+func (g *fakeGit) ContinueRebase(context.Context, string) (gitclient.RebaseStep, error) {
+	g.record("continue_rebase")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rebaseCommands = append(g.rebaseCommands, "continue")
+	return g.replayLocked()
+}
+
+// replayLocked answers one rebase command: the next commit replayed, or its
+// scripted conflict the first time it is met.
+func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
+	if g.rebaseErr != nil {
+		return gitclient.RebaseStep{}, g.rebaseErr
+	}
+	k := g.rebaseReplayed + 1
+	if files, scripted := g.rebaseConflicts[k]; scripted && !g.rebaseMet[k] {
+		g.rebaseMet[k] = true
+		return gitclient.RebaseStep{Conflicted: files}, nil
+	}
+	g.rebaseReplayed = k
+	return gitclient.RebaseStep{Done: g.rebaseReplayed >= g.rebaseTotal}, nil
+}
+
+func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
+	g.record("rebase_in_progress")
+	return false, nil
+}
+
+func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
+	g.record("add_worktree")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.addedWorktrees = append(g.addedWorktrees, worktreeDir)
+	g.branches[worktreeDir] = branch
+	return nil
+}
+
+func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
+	g.record("fetch")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.fetches = append(g.fetches, dir+"<"+remote)
+	return g.fetchErr
 }
 
 // THE REAPER'S OPERATIONS are no part of a merge. Each one fails loudly, so a
 // merge that ever reached for one would fail its test rather than pass on a
 // zero answer.
 func (g *fakeGit) ListWorktrees(context.Context, string) ([]gitclient.Worktree, error) {
-	return nil, errors.New("merge fake git: ListWorktrees is not a merge operation")
+	g.record("list_worktrees")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]gitclient.Worktree(nil), g.worktrees...), nil
 }
 
 func (g *fakeGit) PruneWorktrees(context.Context, string) error {
@@ -976,8 +1099,12 @@ func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 		return TabQueue
 	case *frontendv1.FeedMergeTab_PrePrompt:
 		return TabPrePrompt
-	case *frontendv1.FeedMergeTab_Merge:
-		return TabMerge
+	case *frontendv1.FeedMergeTab_Rebasing:
+		return TabRebasing
+	case *frontendv1.FeedMergeTab_Committing:
+		return TabCommitting
+	case *frontendv1.FeedMergeTab_UpdatingMain:
+		return TabUpdatingMain
 	case *frontendv1.FeedMergeTab_Conflicts:
 		return TabConflicts
 	case *frontendv1.FeedMergeTab_Tests:
@@ -1086,7 +1213,7 @@ type scriptedRun struct {
 	Err    error
 }
 
-func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+func (r *fakeRunner) RunLines(_ context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
 	r.mu.Lock()
 	before := r.before
 	r.mu.Unlock()
@@ -1102,6 +1229,13 @@ func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, 
 	}
 	run := r.runs[0]
 	r.runs = r.runs[1:]
+	if run.Err == nil && onLine != nil {
+		for _, line := range strings.SplitAfter(run.Output, "\n") {
+			if line != "" {
+				onLine(strings.TrimSuffix(line, "\n"))
+			}
+		}
+	}
 	return run.Output, run.Code, run.Err
 }
 
@@ -1160,26 +1294,17 @@ type harness struct {
 	captures int
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
-	// parkedTurns records the turn each guidance was routed under.
-	parkedTurns []ids.TurnID
 	// awaitedTurns records every turn AwaitTurnEnd waited on.
 	awaitedTurns []ids.TurnID
-	// parkedSaid records what guidance was delivered.
-	parkedSaid []*conversationv1.UserSaid
-	// parkedWS records the workspace each guidance was routed to.
-	parkedWS []ids.WorkspaceID
-	// parkedErr fails every guidance route when set.
-	parkedErr error
+	// awaitGate, when set, holds every AwaitTurnEnd until it is closed or the
+	// wait's context ends: the requesting turn still running.
+	awaitGate chan struct{}
+	// inFlight is the turn TurnInFlight answers, empty for none.
+	inFlight ids.TurnID
 	// script is the gate's script, a real file so the gate's preflight finds
 	// it; gateTrees records the tree each gate command was resolved for.
 	script    string
 	gateTrees []string
-	// waiting is signalled when a parked run asks for its slot back.
-	waiting chan ids.WorkspaceID
-
-	// parked is signalled the moment a run parks, so a test synchronizes on the
-	// state rather than on elapsed time.
-	parked chan ids.WorkspaceID
 	// seq is the shared monotonic sequence both the feed and the git fakes
 	// stamp their calls with, so an ordering between two subsystems is asserted
 	// on the real order.
@@ -1312,8 +1437,8 @@ func newHarness(t *testing.T) *harness {
 	h.rollout = &fakeRollout{db: h.db}
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
-	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "source_dir", "target_branch", "target_dir", "conflicted_files"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "source_dir", "target_branch", "target_dir", "queue_dir", "archive_path", "failure_tail", "escalation_file", "escalation_marker"}
+	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker"}
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
@@ -1327,13 +1452,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("building the orchestrator: %v", err)
 	}
 	h.o = o
-	h.parked = make(chan ids.WorkspaceID, 8)
-	h.waiting = make(chan ids.WorkspaceID, 8)
-	o.onPark = func(ws ids.WorkspaceID) { h.parked <- ws }
-	o.onWait = func(ws ids.WorkspaceID) { h.waiting <- ws }
-	// NO RUN OUTLIVES ITS TEST. A test that leaves one parked ends it by
-	// cancelling the context it admitted it under; this waits, bounded, for
-	// every run goroutine to be gone.
+	// NOTHING THE ORCHESTRATOR STARTED OUTLIVES ITS TEST; this waits, bounded,
+	// for every goroutine it counted to be gone.
 	t.Cleanup(func() {
 		gone := make(chan struct{})
 		go func() { o.live.Wait(); close(gone) }()
@@ -1391,7 +1511,17 @@ func (h *harness) deps() Deps {
 				h.mu.Unlock()
 			}, true, nil
 		},
-		AwaitTurnEnd: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
+		AwaitTurnEnd: func(ctx context.Context, _ ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
+			h.mu.Lock()
+			gate := h.awaitGate
+			h.mu.Unlock()
+			if gate != nil {
+				select {
+				case <-gate:
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
+			}
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.awaitedTurns = append(h.awaitedTurns, turn)
@@ -1414,17 +1544,12 @@ func (h *harness) deps() Deps {
 		Freeness:          h.freeness,
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
-		ParkedRoute: func(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
+		TurnInFlight: func(ids.WorkspaceID) (ids.TurnID, bool) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			if h.parkedErr != nil {
-				return h.parkedErr
-			}
-			h.parkedSaid = append(h.parkedSaid, said)
-			h.parkedTurns = append(h.parkedTurns, turn)
-			h.parkedWS = append(h.parkedWS, ws)
-			return nil
+			return h.inFlight, h.inFlight != ""
 		},
+		Home:    "/home/tester",
 		Rollout: h.rollout,
 		Now:     h.clock,
 		Log:     h.logs,
@@ -1482,6 +1607,11 @@ func (h *harness) register(ws ids.WorkspaceID, name string) {
 		},
 	}
 	h.db.sessions[ws] = wsm.Session{Workspace: ws}
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "feature"
+	// ONE REPOSITORY: every worktree of it reports the target's common dir.
+	h.git.commonDirs[h.sourceD] = string(h.repoKey())
+	h.git.mu.Unlock()
 }
 
 // registerRepo records one repository in the fake registry, which is what a
@@ -1576,23 +1706,8 @@ func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
 // test if it is refused.
 func enqueue(t *testing.T, h *harness) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing: %v", err)
-	}
-}
-
-// waitForWaiting blocks until the harness's parked merge asks for its slot
-// back, then grants it by running the pump once, which returns when the run
-// next parks or ends.
-func resume(t *testing.T, h *harness, ctx context.Context) {
-	t.Helper()
-	select {
-	case <-h.waiting:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the parked merge never asked for its slot back")
-	}
-	if _, err := h.o.pumpOnce(ctx, h.repoKey()); err != nil {
-		t.Fatalf("granting the resumed merge its slot: %v", err)
 	}
 }
 
@@ -1648,16 +1763,6 @@ func (f *fakeFeed) roundsOfKind(kind string) []int {
 	return out
 }
 
-// waitForParked blocks until the harness's merge parks.
-func waitForParked(t *testing.T, h *harness) {
-	t.Helper()
-	select {
-	case <-h.parked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the merge never parked")
-	}
-}
-
 // ListRepositories answers the fake registry, in registration order.
 func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error) {
 	d.mu.Lock()
@@ -1674,22 +1779,6 @@ func (h *harness) gateBroken(n int) {
 		h.runner.runs = append(h.runner.runs, scriptedRun{
 			Output: "bash: modules/app/agent-repl/bin/test-all.sh: No such file or directory\n", Code: 127})
 	}
-}
-
-// parkOnABrokenGate admits the harness's merge on a gate that exits 127 every
-// time it runs, and returns once the run has parked. The run stays alive,
-// parked, until ctx ends -- so every caller cancels ctx before it returns.
-func parkOnABrokenGate(t *testing.T, h *harness, ctx context.Context, runs int) {
-	t.Helper()
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gateBroken(runs)
-	enqueue(t, h)
-	if err := h.admit(ctx); err != nil {
-		t.Fatalf("admitting the merge: %v", err)
-	}
-	waitForParked(t, h)
 }
 
 // openIntervals names every ledger interval of the harness's merge that was
@@ -1748,10 +1837,104 @@ func (h *harness) queuedEntries() []string {
 	return out
 }
 
-// route submits guidance to the harness's parked merge under a bounded wait,
-// so a park that never answers fails the test rather than hanging it.
-func route(h *harness, ctx context.Context, turn ids.TurnID, text string) error {
-	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	return h.o.RouteParked(bounded, theWorkspace, turn, saidText(text))
+// otherWorkspace is the second workspace a source-workspace merge lands.
+const otherWorkspace = ids.WorkspaceID("ws-2")
+
+// registerOther records a second workspace of the harness's repository, with
+// its own worktree on its own branch, and answers its worktree.
+func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string {
+	h.t.Helper()
+	dir := h.t.TempDir()
+	h.db.mu.Lock()
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: name, Dir: dir, Branch: branch, Repo: theRepository}
+	h.db.jobs[ws] = wsm.CreationJob{Workspace: ws, Layout: wsm.MergeLayout{
+		SourceBranch: branch, SourceDir: dir, TargetDir: h.targetD, Origin: "create"}}
+	h.db.sessions[ws] = wsm.Session{Workspace: ws}
+	h.db.mu.Unlock()
+	h.git.mu.Lock()
+	h.git.branches[dir] = branch
+	h.git.commonDirs[dir] = string(h.repoKey())
+	h.git.mu.Unlock()
+	return dir
+}
+
+// request records the harness workspace's merge of one source, as asked by.
+func (h *harness) request(t *testing.T, source wsm.MergeSource, by Requester) error {
+	t.Helper()
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by})
+}
+
+// runWait runs the harness workspace's standing request wait to its end, as
+// its goroutine would: the requesting turn's end, then its place in line.
+func (h *harness) runWait(t *testing.T) {
+	t.Helper()
+	h.o.mu.Lock()
+	wait := h.o.requested[theWorkspace]
+	h.o.mu.Unlock()
+	if wait == nil {
+		t.Fatal("no request wait stands for the harness workspace")
+	}
+	h.o.waitThenQueue(wait)
+}
+
+// entryState answers the harness workspace's queue entry's state, and false
+// when it has none.
+func (h *harness) entryState() (wsm.MergeQueueState, bool) {
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	for _, entry := range entries {
+		if entry.Workspace == theWorkspace {
+			return entry.State, true
+		}
+	}
+	return 0, false
+}
+
+// steps answers every step the footer was told, in order, one per change.
+func (f *fakeFooter) steps() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, facts := range f.facts {
+		step := string(facts.Step)
+		if facts.State == StateFailed || facts.State == StateMerged {
+			step = facts.State
+		}
+		if len(out) == 0 || out[len(out)-1] != step {
+			out = append(out, step)
+		}
+	}
+	return out
+}
+
+// all answers every facts value the footer was told.
+func (f *fakeFooter) all() []footer.MergeFacts {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]footer.MergeFacts(nil), f.facts...)
+}
+
+// recordFor answers the first record with one level and operation.
+func (h *harness) recordFor(level, operation string) (dlog.Record, bool) {
+	for _, r := range h.logs.Records() {
+		if r.Level == level && r.Operation == operation {
+			return r, true
+		}
+	}
+	return dlog.Record{}, false
+}
+
+// commits answers n commits of work, the rebase's replay.
+func commits(n int) []gitclient.Commit {
+	out := make([]gitclient.Commit, n)
+	for i := range out {
+		out[i] = gitclient.Commit{SHA: fmt.Sprintf("c%012d", i+1), Subject: fmt.Sprintf("commit %d", i+1)}
+	}
+	return out
+}
+
+// addresses answers every output address the merge installed.
+func (f *fakeFeed) installed() []*wsm.OutputAddress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*wsm.OutputAddress(nil), f.addresses...)
 }

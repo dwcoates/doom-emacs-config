@@ -1,19 +1,26 @@
 // Package merge is the merge orchestrator: a per-repo queue, two methods,
 // tabs, the lease, the test gate, the briefs and the ledger.
 //
+// A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT (owner, 2026-09-30). No
+// workspace is ever created for a merge: the requesting workspace's feed
+// carries the bubble, its footer and roster row carry the status, and its own
+// session does the conflict resolution and the test fixing. What it merges is
+// the request's SOURCE: its own branch, another workspace's, a branch that is
+// no workspace, or its own branch already merged upstream.
+//
 // The two methods are keyed by gitclient.SameRepo(target, daemonCheckout). The
-// Emacs repo runs pre-prompt, no-ff merge, conflicts, tests, fixes, a rollout
-// bounce and post-prompt; EVERY OTHER repo runs pre-prompt, merge,
-// post-prompt. Briefs are read from prompts/ AT USE TIME. The displaced user
-// turn is captured durably and resubmitted EXACTLY ONCE at lease release. See
-// ARCHITECTURE.md "merge".
+// Emacs repo runs pre-prompt, rebase (with conflict resolution), tests (with
+// fixing), the non-fast-forward merge commit and post-prompt; EVERY OTHER repo
+// runs pre-prompt and post-prompt. A branch already merged upstream runs
+// updating main and post-prompt. Nothing parks: a merge that gives up FAILS
+// and hands the workspace back. Briefs are read from prompts/ AT USE TIME. The
+// displaced user turn is captured durably and resubmitted EXACTLY ONCE at
+// lease release. See docs/protobuf-design/merge-landing.md.
 package merge
 
 import (
 	"context"
 	"time"
-
-	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
@@ -42,8 +49,8 @@ const (
 	BriefTestFailureResolve = "merge-test-failure-resolve"
 )
 
-// EscalationFile is the file the test-fix agent writes in the merge target to
-// end the fixes loop without a passing suite, and EscalationMarker is the
+// EscalationFile is the file the test-fix agent writes in the worktree it
+// fixes to end the fixing attempts without a passing suite, and EscalationMarker is the
 // exact first line that makes it one. THE DAEMON SUBSTITUTES BOTH INTO THE
 // BRIEF: a user-edited brief must not be able to drift into instructing the
 // agent to write a record nothing reads.
@@ -56,11 +63,14 @@ const (
 
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
-	// Enqueue queues a workspace's merge. It REFUSES pre-state: no layout
-	// facts recorded at creation, a deleted session, or a workspace already
-	// queued or merging. `by` says who asked, which decides whether the
-	// admission may displace the workspace's turn in flight (see Requester).
-	Enqueue(ctx context.Context, ws ids.WorkspaceID, by Requester) error
+	// Enqueue records a merge request. It REFUSES pre-state: no layout facts
+	// recorded at creation, a deleted session, a source workspace or branch
+	// that is not there, or a workspace already requested, queued or merging.
+	// The request is DURABLE from here, and it is put in line -- and reported
+	// to any client -- only once the turn that asked for it has ended (a
+	// merge the USER asked for over an rpc has no requesting turn and is put
+	// in line at once).
+	Enqueue(ctx context.Context, req Request) error
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
@@ -68,10 +78,9 @@ type Orchestrator interface {
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// Evict removes a workspace's merge from the queue. A merge that is
-	// already RUNNING -- merging, testing, repairing or parked -- is
-	// ABANDONED: it is ended through the one release path, which gives back
-	// its lease, its queue entry, its ledger interval and its repository's
-	// slot, and the call returns once that is done.
+	// already RUNNING is ABANDONED: it is ended through the one release path,
+	// which gives back its lease, its queue entry, its ledger interval and its
+	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
 	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
 	// or take it out. Taking out a running merge abandons it, as Evict does.
@@ -81,55 +90,62 @@ type Orchestrator interface {
 	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
 	// OnWorkspaceClosed abandons a workspace's merge when the workspace
 	// itself is torn down (killed or nuked), recording the close as the
-	// abandon cause: a waiting merge leaves its queue, and a running or
-	// parked one is ended through the one release path. It is a no-op for a
+	// abandon cause: a request or a waiting merge leaves its queue, and a
+	// running one is ended through the one release path. It is a no-op for a
 	// workspace with no merge.
 	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
-	// RouteParked delivers a submission that arrived while this workspace's
-	// merge lease stands PARKED. It is the queue's one ingress into the
-	// orchestrator: the queue recognizes the parked lease policy, never merge
-	// as a concept, and hands the submission here rather than starting a turn
-	// of the session's own. THE LEASE STATE IS THE RECOGNITION — no classifier
-	// and no content inspection happens on this path. The guidance runs under
-	// turn, the submission's own, so the shim recognizes a re-driven retry of
-	// it as the start it already took.
-	RouteParked(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
 	// RetireConcluded retires a CONCLUDED merge's standing state (failed or
 	// merged) once the workspace has moved on -- the queue accepted a
-	// submission of its own. A merge that is queued, running or parked is
-	// untouched. Before it nothing ever retired one: a failed merge's state
-	// stood on the footer and the roster until the daemon restarted.
+	// submission of its own. A merge that is queued or running is untouched.
 	RetireConcluded(ctx context.Context, ws ids.WorkspaceID)
+	// TestLogPath resolves the test log a merge bubble named by token, for
+	// that workspace. A token that names no log this daemon holds for the
+	// workspace is REFUSED (unknown_merge_test_log).
+	TestLogPath(ctx context.Context, ws ids.WorkspaceID, token string) (string, error)
 	// Drain stops admitting merges and waits, WITHIN A BOUND
 	// (TerminalDrainBound), for every run that has already reached its
 	// TERMINAL to finish its durable stamps and its teardown. The daemon's
 	// orderly exit calls it with the state client STILL OPEN: without it a
 	// SIGTERM landing mid-terminal closed the store under those writes, and
 	// merged_at, closed and the lease release were lost to failed
-	// transactions. A merge still in a long phase is announced at INFO and
+	// transactions. A merge still in a long step is announced at INFO and
 	// left to the boot recovery, never waited for.
 	Drain(ctx context.Context)
-	// Recover resumes or LOUDLY FAILS every in-flight merge at boot, and
-	// re-enqueues every merge that was queued but not started, in the order it
-	// was waiting in. It never silently abandons one.
+	// Recover resumes or LOUDLY FAILS every in-flight merge at boot, re-arms
+	// every request still waiting for its turn to end, and re-enqueues every
+	// merge that was queued but not started, in the order it was waiting in.
+	// It never silently abandons one.
 	Recover(ctx context.Context) error
+}
+
+// Request is one merge request: the REQUESTING workspace, which the merge
+// runs in, and the SOURCE, which is what it lands.
+type Request struct {
+	// Workspace is the requester.
+	Workspace ids.WorkspaceID
+	// Source is what the requester merges.
+	Source wsm.MergeSource
+	// By says who asked, which decides whether the admission may displace the
+	// requester's turn in flight (see Requester).
+	By Requester
 }
 
 // Requester names who asked for a merge.
 //
-// IT DECIDES WHETHER THE ADMISSION MAY DISPLACE THE WORKSPACE'S TURN. A merge
-// the USER asks for (MergeWorkspace, from Emacs or the webapp) takes the
-// session away from the turn in flight: that turn is captured, ended unforced
-// and resubmitted at the lease's release. A merge an AGENT asks for (the
-// command-file ingress, which is what a one-shot's own turn writes to) never
-// does: the turn in flight is, as far as the daemon can tell, the requester
-// itself, and ending it would kill the very turn that asked (2026-09-28,
-// prompt-bubble-height: "the turn was interrupted"). Such a merge waits for
-// the workspace to fall free instead, and nothing is marked for
-// resubmission.
+// IT DECIDES WHEN THE MERGE IS PUT IN LINE AND WHETHER ITS ADMISSION MAY
+// DISPLACE THE WORKSPACE'S TURN. A merge an AGENT asks for (the command-file
+// ingress, which is what a turn writes to) is put in line only once the
+// requesting workspace's turn in flight has ended -- nothing about it reaches
+// any client before that (owner, 2026-09-29) -- and it never displaces
+// anything: ending the turn in flight would kill the very turn that asked
+// (2026-09-28, prompt-bubble-height: "the turn was interrupted"). A merge the
+// USER asks for (MergeWorkspace, from Emacs or the webapp) has no requesting
+// turn: it is put in line at once, and its admission takes the session away
+// from the turn in flight, which is captured, ended unforced and resubmitted
+// at the lease's release.
 type Requester int
 
 const (
@@ -174,6 +190,9 @@ type Deps struct {
 	Git gitclient.Git
 	// Queue delivers the briefs and the resubmitted displaced turn.
 	Queue promptqueue.Queue
+	// TurnInFlight answers the workspace's turn in flight, false when none is.
+	// An agent's merge request is put in line once THAT turn has ended.
+	TurnInFlight func(ws ids.WorkspaceID) (ids.TurnID, bool)
 	// Feed carries the merge bubble's tabs.
 	Feed feed.Resolver
 	// Footer and Sidebar receive the merge facts.
@@ -201,12 +220,18 @@ type Deps struct {
 	// tests, and the self-reload trigger STAYS ON under that override.
 	SelfRepoDir string
 	// StateDir is the state root, whose merge-logs/ subdirectory archives every
-	// test-gate run's output.
+	// test-gate run's output, and whose merge-trees/ and merge-worktrees/ hold
+	// the queue's own scratch trees and the worktrees it makes for a branch
+	// that has none.
 	StateDir string
+	// Home is the user's home directory, which a test log's drawn label
+	// shortens to ~. Empty means os.UserHomeDir.
+	Home string
 	// TestCommand answers the Emacs-repo method's test gate FOR ONE TREE, run
 	// with the selected suites, no flake re-run, output archived. The gate
-	// runs in the queue's own tree, and a repository's test entrypoint tests
-	// the tree it lives in, so the command is resolved per tree (TestCommandFor;
+	// runs in the worktree checked out on the rebased branch, and a
+	// repository's test entrypoint tests the tree it lives in, so the command is
+	// resolved per tree (TestCommandFor;
 	// AGENT_REPL_TEST_ALL_SCRIPT overrides the script). Its LAST element is the
 	// script, which the gate checks is there before it runs; `--suites <a,b>`
 	// is appended.
@@ -232,9 +257,9 @@ type Deps struct {
 	// verb happens to refresh the registry. Nil means no roster is wired.
 	PublishRegistry func(context.Context) error
 	// PublishHost recomposes and republishes one workspace's HOST view. The
-	// composer gate on it is a function of the merge's own state -- merging,
-	// parked, or neither -- and the server cannot see a lease taken, parked
-	// or released. Nil means no host surface is wired yet.
+	// composer gate on it is a function of the merge's own state -- merging or
+	// not -- and the server cannot see a lease taken or released. Nil means no
+	// host surface is wired yet.
 	PublishHost func(ids.WorkspaceID)
 	// Occupy takes the shim client's in-memory occupancy guard that backs the
 	// WSM lease row. The lock arbitrates; the row describes.
@@ -267,9 +292,6 @@ type Deps struct {
 	// suite land a deliberate stop exactly in the window the drain covers.
 	// Nil in production, where a terminal runs straight through.
 	PauseInTerminal AdmissionPause
-	// ParkedRoute delivers a parked submission to the resolution agent as
-	// guidance, landing it in the parked tab.
-	ParkedRoute ParkedRouter
 	// Rollout is the deploy, told of a landing ONLY after lease release and
 	// terminal publication.
 	Rollout Trigger
@@ -304,9 +326,10 @@ func BriefsFrom(dir string) BriefLoader {
 // could not be spawned); a suite that ran and failed is a non-zero code and a
 // nil error, because a failing suite is an answer.
 type ScriptRunner interface {
-	// Run executes argv in dir and returns the combined stdout and stderr with
-	// the process's exit code.
-	Run(ctx context.Context, dir string, argv []string) (output string, exitCode int, err error)
+	// RunLines executes argv in dir and returns the combined stdout and stderr
+	// with the process's exit code, handing each line to onLine as it is
+	// written, so the gate follows its suites live.
+	RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (output string, exitCode int, err error)
 }
 
 // StartSessionFunc starts a workspace's session under the merge lease, for a
@@ -352,11 +375,6 @@ type AdmissionPause func(ctx context.Context, ws ids.WorkspaceID)
 // DisplacedCapture durably records the turn a merge displaced. The bool is
 // false when no turn was in flight, which is not a failure.
 type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (Displaced, bool, error)
-
-// ParkedRouter delivers one parked submission to the resolution agent as
-// guidance, addressed at the parked tab, under turn: the submission's own turn,
-// which the orchestrator then resumes on the real end of rather than a timer.
-type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 
 // Trigger is the slice of the daemon's deploy merge uses: the self-reload,
 // told what landed. It is a narrow interface so merge imports neither the
