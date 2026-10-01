@@ -142,9 +142,32 @@ func WithRunRoot(body func() int) int {
 func RunRoot() string { return runRoot }
 
 func mainIn(m *testing.M, module, root string) int {
-	dir, err := os.MkdirTemp(root, "agent-repl-integration-bin-")
+	mode, shared, err := BinaryMode(os.Getenv)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "harness: temp dir:", err)
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if mode == UsePrebuilt {
+		for _, b := range []struct {
+			path *string
+			name string
+		}{{&daemonBinary, "claude-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
+			if *b.path, err = SharedBinary(shared, prebuiltSub, b.name); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+		}
+		// The pinned checkout is this process's own, never shared.
+		return runPinned(m, module, root)
+	}
+	dir := filepath.Join(shared, prebuiltSub)
+	if mode == BuildHere {
+		dir, err = os.MkdirTemp(root, "agent-repl-integration-bin-")
+	} else {
+		err = os.MkdirAll(dir, 0o755)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "harness: binary dir:", err)
 		return 1
 	}
 
@@ -187,8 +210,22 @@ func mainIn(m *testing.M, module, root string) int {
 			return 1
 		}
 	}
+	if mode == BuildInto {
+		return 0
+	}
+	return runPinned(m, module, dir)
+}
+
+// prebuiltSub is the harness's own subdirectory of a shared prebuilt
+// directory; a suite that builds more keeps its binaries beside it.
+const prebuiltSub = "harness"
+
+// runPinned lays out the pinned checkout under parent, self-checks the build
+// identity and runs the suite.
+func runPinned(m *testing.M, module, parent string) int {
 	repo := filepath.Dir(module)
-	pinnedCheckout, err = newPinnedCheckout(filepath.Join(dir, "checkout"), repo)
+	var err error
+	pinnedCheckout, err = newPinnedCheckout(filepath.Join(parent, "checkout"), repo)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
