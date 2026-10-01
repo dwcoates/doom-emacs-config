@@ -47,7 +47,8 @@ A row's non-optional message fields are all present; FRAGMENTS supply the
 status arm and whatever else the case is about."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
-          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{}"
+          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
+          "\"availability\":{\"available\":{}}"
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
 
@@ -64,6 +65,7 @@ status arm and whatever else the case is about."
                    :viewed nil
                    :reviving nil
                    :last-selected nil
+                   :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -236,7 +238,7 @@ reserved."
   "The row's join key is not optional."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
+                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"when\":{},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" workspace "required message field is absent"))))
 
@@ -244,7 +246,7 @@ reserved."
   "Every row has a display name element."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},"
                           "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
@@ -253,7 +255,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"when\":{},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
 
@@ -262,7 +264,7 @@ reserved."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-row
                              (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                                     "\"name\":{\"text\":\"n\"},\"ready\":{},"
+                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},"
                                      "\"current\":{},\"when\":{},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
                             :closed)
@@ -318,7 +320,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" when "required message field is absent"))))
 
@@ -358,7 +360,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"when\":{},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
 
@@ -589,3 +591,38 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
 (provide 'test-wire-roster)
 
 ;;; test-wire-roster.el ends here
+
+;;;; ---- RosterRow.availability ----
+
+(ert-deftest agent-repl-test-wire-roster-availability-decodes-pending ()
+  "The daemon is still bringing the session up."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-availability "{\"pending\":{}}")
+                 '(:arm :pending :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-availability-decodes-available ()
+  "The shim link has connected."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-availability "{\"available\":{}}")
+                 '(:arm :available :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-availability-decodes-unavailable ()
+  "The bring-up ended without a session."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-availability "{\"unavailable\":{}}")
+                 '(:arm :unavailable :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-availability-unset-is-a-breach ()
+  "An unset availability oneof is a contract breach, never a default."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-availability "{}")
+                 '("RosterRowAvailability" availability "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-without-availability-is-a-breach ()
+  "Every row states whether its workspace may be opened yet."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
+                          "\"when\":{},\"detail\":{},\"closed\":{}}"))
+                 '("RosterRow" availability "required message field is absent"))))

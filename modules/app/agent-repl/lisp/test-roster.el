@@ -25,12 +25,15 @@
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
-`:attention', `:priority', `:viewed', `:current', `:dir'."
+`:attention', `:priority', `:viewed', `:current', `:dir', `:availability'
+\(an arm keyword, default `:available')."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
+          :availability (list :arm (or (plist-get overrides :availability) :available)
+                              :value nil)
           :name (list :text name)
           :status (list :arm status :value nil)
           :current (list :current (or (plist-get overrides :current) :false))
@@ -106,6 +109,8 @@ whose calls are the observation."
            (agent-repl-roster-status-change-functions nil)
            (agent-repl-roster-update-functions nil)
            (agent-repl-roster-bringup-functions nil)
+           (agent-repl-roster--bringup-carry nil)
+           (agent-repl-roster--held-id nil)
            (agent-repl-host-last-selected-id nil)
            (agent-repl-host-reselect-pending nil))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
@@ -2158,3 +2163,155 @@ saying the roster had been asked for one and declined."
                            "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
       ;; Assert
       (should (equal order '(panels landing))))))
+
+;;;; ---- Availability: a workspace opens only once the daemon has it ----
+
+(defun agent-repl-test-roster--one-section (&rest rows)
+  "Return a roster whose one repository section carries ROWS in order."
+  (agent-repl-test-roster--roster
+   :sections (list (agent-repl-test-roster--section "repo" rows))))
+
+(ert-deftest agent-repl-test-roster-a-pending-row-gets-no-tab ()
+  "The daemon has no session to offer yet, so there is nothing to open."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)))
+    ;; Assert
+    (should-not (agent-repl--ws-by-ref-id "a"))))
+
+(ert-deftest agent-repl-test-roster-a-pending-row-holds-every-later-row ()
+  "Registry order: a ready row after a pending one waits for it."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Assert
+    (should-not (agent-repl--ws-by-ref-id "b"))))
+
+(ert-deftest agent-repl-test-roster-rows-before-a-pending-row-open ()
+  "Only the rows AFTER the first pending row are held."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)
+      (agent-repl-test-roster--row "b" "two" :init :availability :pending)))
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one")))))
+
+(ert-deftest agent-repl-test-roster-an-unavailable-row-opens ()
+  "A failed bring-up still opens; its status arm draws the failure."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :start-failed :availability :unavailable)))
+    ;; Assert
+    (should (agent-repl--ws-by-ref-id "a"))))
+
+(ert-deftest agent-repl-test-roster-a-tabbed-row-reported-pending-is-kept ()
+  "A relaunched daemon re-reporting an open workspace pending tears nothing down."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)))
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one")))))
+
+(ert-deftest agent-repl-test-roster-a-tabbed-pending-row-holds-nothing-after-it ()
+  "An open workspace does not hold the rows after it, whatever it reports."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one" "two")))))
+
+(ert-deftest agent-repl-test-roster-a-resolved-row-opens-with-the-rows-it-held ()
+  "The push that resolves the held row opens it and walks on."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one" "two")))))
+
+(ert-deftest agent-repl-test-roster-a-held-pass-does-not-finish-the-bringup ()
+  "A held row is a bring-up still under way, so no FINISHED publication."
+  (agent-repl-test-roster--with-editor
+    (let (seen)
+      (agent-repl-test-roster--recording-bringup seen
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--one-section
+          (agent-repl-test-roster--row "a" "one" :ready)
+          (agent-repl-test-roster--row "b" "two" :init :availability :pending))))
+      ;; Assert
+      (should-not (seq-filter (lambda (step) (nth 2 step)) seen)))))
+
+(ert-deftest agent-repl-test-roster-a-held-bringup-keeps-its-count-across-passes ()
+  "The pass that opens the held rows goes on counting the same bring-up."
+  (agent-repl-test-roster--with-editor
+    (let (seen)
+      ;; Arrange
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--one-section
+        (agent-repl-test-roster--row "a" "one" :ready)
+        (agent-repl-test-roster--row "b" "two" :init :availability :pending)))
+      (agent-repl-test-roster--recording-bringup seen
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--one-section
+          (agent-repl-test-roster--row "a" "one" :ready)
+          (agent-repl-test-roster--row "b" "two" :ready))))
+      ;; Assert
+      (should (equal seen '((2 2 nil) (2 2 t)))))))
+
+(ert-deftest agent-repl-test-roster-a-held-startup-leaves-the-arrival-gate-unarmed ()
+  "Rows still arriving pass by pass keep the startup's panel exemption."
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed nil))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--one-section
+        (agent-repl-test-roster--row "a" "one" :init :availability :pending)))
+      ;; Assert
+      (should-not agent-repl--panels-arrivals-armed))))
+
+(ert-deftest agent-repl-test-roster-a-hold-is-recorded-once-per-row ()
+  "A bring-up pushes the roster many times; the hold is stated once."
+  (agent-repl-test-roster--with-editor
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        ;; Act
+        (dotimes (_ 2)
+          (agent-repl-roster-apply
+           (agent-repl-test-roster--one-section
+            (agent-repl-test-roster--row "a" "one" :init :availability :pending)))))
+      ;; Assert
+      (should (= 1 (seq-count (lambda (text) (string-search "elisp.roster.held:" text))
+                              logs))))))

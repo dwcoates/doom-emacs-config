@@ -1702,7 +1702,8 @@ overrides the display name, defaulting to ID."
     (current . ((current . :false)))
     (when . ())
     (detail . ())
-    (closed . ((closed . ,(if closed t :false))))))
+    (closed . ((closed . ,(if closed t :false))))
+    (availability . ((available . ())))))
 
 (defun agent-repl-itest-verbs--roster (rows)
   "Return a WorkspaceRoster protojson alist carrying ROWS in the fixture section.
