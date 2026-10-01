@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/prompthandler"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -62,28 +63,29 @@ func (s *server) SubmitPrompt(
 		target = &ref
 	}
 
-	// REPLY-TO-A-PAST-RESPONSE: when the feed has a final response SELECTED as
-	// this prompt is accepted, the DAEMON prepends a copy of that response plus
-	// a note BEFORE the prompt reaches the shim, so the agent knows the new
-	// message refers to it. The daemon is the selection's only holder, so the
-	// reply is always the one the webapp was drawing. The selection is read
-	// ONCE, and only that selection is ended after the send: a row selected in
-	// the meantime stays selected. A selected row the daemon cannot resolve to
-	// a final response is REFUSED, never dropped: delivering the user's message
-	// shorn of the reference they saw would silently change what they said.
+	// REPLY-TO: when the feed has a bubble SELECTED as this prompt is accepted
+	// — a final response, a prompt, or any other selected bubble — the DAEMON
+	// prepends a copy of its text plus a note BEFORE the prompt reaches the
+	// shim, so the agent knows the new message refers to it. The daemon is the
+	// selection's only holder, so the reply is always the one the webapp was
+	// drawing. The selection is read ONCE, and only that selection is ended
+	// after the send: a row selected in the meantime stays selected. A selected
+	// row the daemon cannot resolve to a selectable bubble is REFUSED, never
+	// dropped: delivering the user's message shorn of the reference they saw
+	// would silently change what they said.
 	said := req.Msg.GetSaid()
-	sentWith, sentKind, sentWithSelection := s.currentSelection(subject.Record.ID)
-	if ref := sentWith; sentWithSelection && sentKind == selectionResponse {
-		markdown, ok := s.deps.Feed.ResponseMarkdown(subject.Record.ID, ref)
+	sentWith, _, sentWithSelection := s.currentSelection(subject.Record.ID)
+	if ref := sentWith; sentWithSelection {
+		quoted, ok := s.deps.Feed.SelectableText(subject.Record.ID, ref)
 		if !ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
 				Arm: "reference_response_unresolvable",
-				Reason: fmt.Sprintf("the referenced response %q is not a selectable final response of this workspace",
+				Reason: fmt.Sprintf("the referenced row %q is not a selectable bubble of this workspace's root feed",
 					ref.GetValue()),
 				NotFound: true,
 			}))))
 		}
-		said = prependReferencedResponse(said, markdown)
+		said = prependReferencedResponse(said, quoted)
 	}
 
 	// VALIDATED ABOVE through the same mapping, so a failure here is a
@@ -117,7 +119,7 @@ func (s *server) SubmitPrompt(
 // ⟢ markers, then the user's own words — followed by every non-text block the
 // user attached, preserved in order. The user's text blocks are flattened into
 // the preamble, so the shim receives one prompt reading exactly as specified.
-func prependReferencedResponse(said *conversationv1.UserSaid, markdown string) *conversationv1.UserSaid {
+func prependReferencedResponse(said *conversationv1.UserSaid, quoted feed.SelectableText) *conversationv1.UserSaid {
 	var userText []string
 	var attachments []*conversationv1.UserContentBlock
 	for _, block := range said.GetContent().GetBlocks() {
@@ -128,7 +130,11 @@ func prependReferencedResponse(said *conversationv1.UserSaid, markdown string) *
 		attachments = append(attachments, block)
 	}
 
-	combined := replyPrefixOpening + markdown + replyPrefixMessage + strings.Join(userText, "\n")
+	opening := replyPrefixOpening
+	if quoted.Prompt {
+		opening = replyPrefixPromptOpening
+	}
+	combined := opening + quoted.Markdown + replyPrefixMessage + strings.Join(userText, "\n")
 
 	blocks := make([]*conversationv1.UserContentBlock, 0, len(attachments)+1)
 	blocks = append(blocks, &conversationv1.UserContentBlock{
@@ -145,7 +151,9 @@ func prependReferencedResponse(said *conversationv1.UserSaid, markdown string) *
 // by the tests), so a change here is a change to what the model is told.
 const (
 	replyPrefixOpening = "⟢ Replying to an earlier response of yours:\n\n"
-	replyPrefixMessage = "\n\n⟢ My message:\n\n"
+	// A selected PROMPT is quoted as a prompt: it was not the agent's response.
+	replyPrefixPromptOpening = "⟢ Replying to an earlier prompt in this conversation:\n\n"
+	replyPrefixMessage       = "\n\n⟢ My message:\n\n"
 )
 
 // encodeSubmitOutcome renders the handler's outcome as SubmitPromptSuccess.

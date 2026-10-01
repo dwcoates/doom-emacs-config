@@ -950,7 +950,7 @@ func TestARetiredDivergentAnswerIsSelectableAsTheWholeNotTheFragment(t *testing.
 	if len(finals) != 1 {
 		t.Fatalf("final responses = %d, want one", len(finals))
 	}
-	md, ok := h.resolver.ResponseMarkdown(testWorkspace, finals[0])
+	md, ok := selectableTextOf(h, testWorkspace, finals[0])
 	if !ok {
 		t.Fatal("the concluded answer row is not selectable")
 	}

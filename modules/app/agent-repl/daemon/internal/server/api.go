@@ -293,7 +293,7 @@ type server struct {
 	// selected response or prompt, ABSENT for none. The daemon is its only
 	// holder: Emacs and the webapp move it (SelectFeedRow) and are pushed it,
 	// and a sent prompt and a rollback read it here. Guarded by selectionMu.
-	selections map[ids.WorkspaceID]*frontendv1.FeedSelection
+	selections map[ids.WorkspaceID]*selectionState
 	// rollbackPlans are the rollbacks planned and not yet performed, by the
 	// token PlanRollback minted (rollback.go). In memory: a daemon restart
 	// forgets them, and a token it never minted is refused as a stale plan.
@@ -303,7 +303,7 @@ type server struct {
 	// by the ROOT feed's WatchFeed so a selection change reaches every open
 	// webview. A publish.Topic replays its latest value, so a webview that
 	// attaches mid-selection is handed the current selection at once.
-	selectionTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]
+	selectionTopics map[ids.WorkspaceID]*publish.Topic[*selectionState]
 
 	// feedTextScaleMu guards the feed text zoom below. It is SEPARATE from mu so
 	// an AdjustFeedTextScale that persists to the state store never blocks a
@@ -412,9 +412,9 @@ func New(deps Deps) (Server, error) {
 		pages:               make(map[string]*pageStream),
 		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
 		now:                 time.Now,
-		selections:          make(map[ids.WorkspaceID]*frontendv1.FeedSelection),
+		selections:          make(map[ids.WorkspaceID]*selectionState),
 		rollbackPlans:       make(map[string]rollbackPlan),
-		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]),
+		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
 		// The zoom starts at the persistence default; Prime seeds the stored
 		// value onto the topic before anything is served.
 		feedTextScale: wsm.DefaultFeedTextScale,

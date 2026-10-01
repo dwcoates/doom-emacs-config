@@ -165,7 +165,7 @@ func (s *server) watchFeed(
 	// final-response rows), and those rows live on the root feed; a sub-feed's
 	// watch carries none, so it subscribes to no selection. A nil channel in
 	// the select below simply never fires, which is what a non-root feed wants.
-	var selections <-chan *frontendv1.FeedSelection
+	var selections <-chan *selectionState
 	if target.Feed.Root {
 		selections = s.selectionTopic(target.WS).Subscribe(streamCtx)
 	}
@@ -209,7 +209,7 @@ func (s *server) watchFeed(
 				log.Error(rpc, "the selection topic raised an empty selection; it was not sent", nil)
 				continue
 			}
-			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel}); err != nil {
+			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel.selection}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

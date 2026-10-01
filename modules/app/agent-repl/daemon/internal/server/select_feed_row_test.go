@@ -312,6 +312,7 @@ func TestSelectFeedRowValidation(t *testing.T) {
 		{name: "unspecified direction on a response step", req: responseStep(agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED)},
 		{name: "unspecified direction on a prompt step", req: promptStep(agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED)},
 		{name: "left_view without a row", req: leftViewMove(nil)},
+		{name: "bubble without a row", req: bubbleMove(nil)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -424,5 +425,189 @@ func TestSelectFeedRowEndStoresNoneAsAbsence(t *testing.T) {
 	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(leftViewMove(&frontendv1.FeedId{Value: "a"})))
 	if err != nil || resp.Msg.GetSuccess().GetNone() == nil {
 		t.Fatalf("left-view after clear = (%v, %v), want none with nothing to end", resp, err)
+	}
+}
+
+// bubbleMove is the click move naming ROW.
+func bubbleMove(row *frontendv1.FeedId) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move:      &agentreplv1.SelectFeedRowRequest_Bubble{Bubble: &agentreplv1.SelectFeedRowBubble{Row: row}},
+	}
+}
+
+// clickRow sends the click move for ROW and answers the response.
+func clickRow(t *testing.T, h *harness, row string) *connect.Response[agentreplv1.SelectFeedRowResponse] {
+	t.Helper()
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(bubbleMove(&frontendv1.FeedId{Value: row})))
+	if err != nil {
+		t.Fatalf("SelectFeedRow bubble %q: %v", row, err)
+	}
+	return resp
+}
+
+// TestSelectFeedRowBubbleSelectsAsTheRowsKind pins the classification of a
+// click: a final response is the response arm, a rollback prompt the prompt
+// arm, and any other selectable bubble the bubble arm.
+func TestSelectFeedRowBubbleSelectsAsTheRowsKind(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		want string
+	}{
+		{name: "a final response", row: "final-1", want: "response"},
+		{name: "a rollback prompt", row: "prompt-1", want: "prompt"},
+		{name: "an interim response", row: "interim-1", want: "bubble"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("final-1")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"interim-1": "meanwhile"}
+
+			// Act.
+			resp := clickRow(t, h, tc.row)
+
+			// Assert.
+			sel := resp.Msg.GetSuccess().GetSelected().GetSelection()
+			row, kind, held := selectedRow(sel)
+			if !held || kind.String() != tc.want || row.GetValue() != tc.row {
+				t.Fatalf("selection = %v, want %s of %s", sel, tc.want, tc.row)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowBubbleRefusesAnUnselectableRow pins the not_selectable arm:
+// the row is echoed and the standing selection is left as it was.
+func TestSelectFeedRowBubbleRefusesAnUnselectableRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("final-1")
+	clickRow(t, h, "final-1")
+
+	// Act.
+	resp := clickRow(t, h, "streaming-1")
+
+	// Assert.
+	refused := resp.Msg.GetError().GetNotSelectable()
+	if refused.GetRow().GetValue() != "streaming-1" {
+		t.Fatalf("result = %v, want not_selectable echoing streaming-1", resp.Msg.GetResult())
+	}
+	if row, _, held := h.Server.(*server).currentSelection(testWorkspaceID); !held || row.GetValue() != "final-1" {
+		t.Fatalf("standing selection = %v (held %v), want final-1 left in place", row, held)
+	}
+}
+
+// TestSelectFeedRowBubbleLogsTheRefusal pins that the refusal enters the
+// workspace log with its arm and a reason naming the row.
+func TestSelectFeedRowBubbleLogsTheRefusal(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log, global: log}
+	})
+
+	// Act.
+	clickRow(t, h, "streaming-1")
+
+	// Assert.
+	for _, rec := range log.records {
+		if rec.Context["arm"] == "not_selectable" {
+			if reason, _ := rec.Context["reason"].(string); !strings.Contains(reason, "streaming-1") {
+				t.Fatalf("reason = %q, want it to name streaming-1", reason)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the not_selectable refusal", log.records)
+}
+
+// TestSelectFeedRowStepFailsOnAnUnreadableFinal pins the invariant: a final
+// response the resolver cannot read is a defect, answered Internal and logged
+// at ERROR, and nothing is selected or published.
+func TestSelectFeedRowStepFailsOnAnUnreadableFinal(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log, global: log}
+	})
+	h.Feed.finals = feedIDs("final-1")
+	h.Feed.unreadable = map[string]bool{"final-1": true}
+
+	// Act.
+	_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+
+	// Assert.
+	if connectCode(t, err) != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", connectCode(t, err))
+	}
+	if len(log.at("ERROR")) == 0 {
+		t.Fatalf("records = %v, want the failure at ERROR", log.records)
+	}
+	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+		t.Fatalf("a selection was stored for an unreadable final")
+	}
+}
+
+// receiveHostSelection reads the host stream until a selection push.
+func receiveHostSelection(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
+) *agentreplv1.HostWorkspaceSelection {
+	t.Helper()
+	for stream.Receive() {
+		if sel := stream.Msg().GetSelection(); sel != nil {
+			return sel
+		}
+	}
+	t.Fatalf("the host stream ended before a selection arrived: %v", stream.Err())
+	return nil
+}
+
+// TestHostSelectionCarriesTheSelectedText pins what Emacs is handed for each
+// selected arm: its kind and the bubble's text, which the composer searches.
+func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		text func(*agentreplv1.HostWorkspaceSelection) string
+	}{
+		{name: "a final response", row: "final-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
+			return s.GetResponse().GetMarkdown().GetText()
+		}},
+		{name: "a rollback prompt", row: "prompt-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
+			return s.GetPrompt().GetMarkdown().GetText()
+		}},
+		{name: "another bubble", row: "interim-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
+			return s.GetBubble().GetMarkdown().GetText()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("final-1")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"final-1": "the answer", "prompt-1": "the question", "interim-1": "meanwhile"}
+			want := h.Feed.markdown[tc.row]
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+			if err != nil {
+				t.Fatalf("open the host stream: %v", err)
+			}
+
+			// Act.
+			clickRow(t, h, tc.row)
+			sel := receiveHostSelection(t, stream)
+
+			// Assert.
+			if got := tc.text(sel); got != want {
+				t.Fatalf("selection = %v, want text %q", sel, want)
+			}
+		})
 	}
 }

@@ -896,6 +896,10 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// A THINKING ROW'S `superseded` IS STATED HERE TOO, from the feed's own
 	// record, so every draw of the fold restates it (superseded.go).
 	stampSuperseded(f, id, snapshot)
+	// A ROW'S `selectable` IS STATED HERE, on every publication, so a response
+	// gains it on the publication that settles it and no producer can publish
+	// a row whose selectability disagrees with the one rule (selection.go).
+	stampSelectable(at.feed, snapshot)
 	existing, seen := f.rows[id]
 	// THE ROW'S ORDER KEY IS FIXED AT ITS FIRST DRAW and stated on every
 	// publication of it (order.go), so it is settled before the snapshot is
