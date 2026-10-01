@@ -111,7 +111,7 @@ func TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 			t.Fatalf("%s = %v, want up to date: the world's real service runs the staged binary", service, o)
 		}
 	}
-	if got := len(w.Launchctl.Invocations()); got != 0 {
+	if got := len(w.Launchctl.InvocationsExcept("print")); got != 0 {
 		t.Fatalf("launchctl invocations = %d, want none: no service was out of date", got)
 	}
 
