@@ -67,7 +67,7 @@ func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	if got := len(d.Deploy.Invocations()); got != 1 {
 		t.Fatalf("builds = %d, want one", got)
 	}
-	if got := len(d.Launchctl.Invocations()); got != 0 {
+	if got := len(d.Launchctl.InvocationsExcept("print")); got != 0 {
 		t.Fatalf("launchctl invocations = %d, want none: nothing was out of date", got)
 	}
 }
@@ -90,7 +90,7 @@ func TestADeployWhoseBuildFailsDeploysNothingAndSaysWhy(t *testing.T) {
 	if failed.GetStep() != "build" || !strings.Contains(failed.GetDetail(), harness.FakeDeployBuildRefusal) || failed.GetLog() == "" {
 		t.Fatalf("Deploy = %v, want build_failed naming the step, the build's own words and the archived log", resp.Msg)
 	}
-	if got := len(d.Launchctl.Invocations()); got != 0 {
+	if got := len(d.Launchctl.InvocationsExcept("print")); got != 0 {
 		t.Fatalf("launchctl invocations = %d, want none: a failed build restarts nothing", got)
 	}
 }
@@ -403,7 +403,9 @@ func failSidecarRestart(t *testing.T, d *harness.Daemon) {
 	if err := buildreport.Write(d.LockDir, buildreport.ServiceSidecar, buildreport.Report{PID: d.PID(), Build: "an older sidecar"}); err != nil {
 		t.Fatalf("state the sidecar's stale build report: %v", err)
 	}
-	d.Launchctl.SetExitCode(1)
+	for _, verb := range []string{"kickstart", "bootout", "bootstrap"} {
+		d.Launchctl.SetExitCodeFor(verb, 1)
+	}
 	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.services", "daemon.deploy.decide",
 		"daemon.deploy.rollback", "daemon.deploy.run")
 }
