@@ -1512,17 +1512,12 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   fault: { kind: "link_severed", detail: "the socket closed" },
   startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
   closeBlocked: { text: "a turn is live" },
-  rateLimit: {
-    window: { window: { case: "weekly", value: {} } },
-    verdict: { case: "allowedWarning", value: {} },
-    utilization: 0.85,
-  },
   notification: { text: "the agent addressed you" },
   contextBudget: { text: "84% of the window" },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
-const SHARED_SALIENTS = ["rateLimit", "notification", "contextBudget"] as const;
+const SHARED_SALIENTS = ["notification", "contextBudget"] as const;
 
 /**
  * Which salient kinds each status arm's cell legally carries (footer.proto;
