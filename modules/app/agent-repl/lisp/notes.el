@@ -13,11 +13,8 @@
 ;; `kill-buffer-hook' that saves it when modified, so dismissing the popup
 ;; persists the notes however it closes.
 ;;
-;; OPENER: `find-file' for now.  The shared editor-popup subroutine
-;; `agent-repl-popup-open' (popup.el, webview agent) is the intended opener
-;; and replaces the `find-file' call here the moment it exists — it is the
-;; one place Emacs puts a file on screen in response to a host action, and
-;; the notes popup is one of its callers.
+;; OPENER: the shared popup subroutine `agent-repl-popup-open' (popup.el),
+;; the one place Emacs puts an agent-repl popup on screen.
 
 ;;; Code:
 
@@ -108,9 +105,9 @@ by workspace and there is nothing to key them by."
       (user-error "agent-repl: no current workspace to open notes for"))
     (agent-repl--log workspace "elisp.notes.open: begin workspace=%s" workspace)
     (let ((file (agent-repl--notes-ensure workspace)))
-      ;; The ONE shared editor-popup subroutine (popup.el): right side, half
-      ;; the frame width.  Every open-a-file affordance goes through it, and
-      ;; a local `find-file' here would be the divergence that rule forbids.
+      ;; The ONE shared popup subroutine (popup.el).  Every agent-repl popup
+      ;; goes through it, and a local `find-file' here would be the
+      ;; divergence that rule forbids.
       (agent-repl-popup-open file)
       (agent-repl--notes-install-save-on-kill (get-file-buffer file) workspace)
       (agent-repl--info workspace "elisp.notes.open: opened workspace=%s file=%s" workspace file)

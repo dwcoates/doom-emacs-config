@@ -203,7 +203,7 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :daemon-health))
                 ((symbol-function 'agent-repl-rpc-session-health)
                  (agent-repl-test-verbs--stub :session-health)))
-       ,@body)))
+       (agent-repl-test--recording-popups ,@body))))
 
 (defvar agent-repl-test-verbs--restart-holds nil
   "Workspaces whose composer a forced restart closed, bound by `--with'.")
@@ -2196,6 +2196,15 @@ pause sent."
   "Return the health buffer's contents."
   (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer)
     (buffer-string)))
+
+(ert-deftest agent-repl-verbs-health-insert-shows-the-health-buffer-in-the-popup ()
+  "The health report is shown through the ONE shared popup."
+  (agent-repl-test--recording-popups
+    ;; Act
+    (agent-repl-verbs--health-insert '("daemon: HEALTHY"))
+    ;; Assert
+    (should (equal agent-repl-test--popups-shown
+                   (list (get-buffer agent-repl-verbs-health-buffer))))))
 
 (ert-deftest agent-repl-verbs-daemon-health-healthy-says-so ()
   "A healthy daemon renders the verdict and no faults."
