@@ -105,12 +105,7 @@ not "stop".
 
 ## Leftovers for the final report (out of scope)
 
-- `/tmp` CEE worktree directory left behind; CEE `test-skill.sh` 14 failures.
-- Shim latent late-resume bug (a late delivery can clear a newer wait).
-- An agent moved to the background by a `task_updated` patch is still
-  announced `by_user`; the patch states no cause for agents either.
-- The vendor hang of 2026-09-30 (a retry promised in 32s never came): the
-  countdown makes it visible; nothing yet acts on an overdue retry.
+- All four resolved; see "Status, 2026-09-30 night" below.
 
 ## Next, after this branch (owner, 2026-09-30 evening)
 
@@ -174,3 +169,24 @@ be revisited):
   opus-medium agents take item B, the shim's late-resume bug and the agent
   moved-by-patch cause, and the master duplication plus the overdue WARN; the
   explanation-engine test-skill failures go through /explanation-engine-skill.
+
+## Status, 2026-09-30 night
+
+Landed on master (cherry-picked):
+- The enduring-line trim: no context-window line, only each `<number>%` colored, no reading age; the blue `|` between allowances.
+- B, reselect after close, with the roster row's durable last-selected instant.
+- Leftovers: the shim's late-resume bug, an agent moved by a patch announced `vendor_moved`, and the overdue-retry WARN.
+- A live background item is re-announced to a newly attached daemon, and a revival decides survival by where the work ran.
+- A settled run is never tracked again or concluded LOST (store.v1 GetRunSettlements).
+- Two test races: the merge drain's admission count, and the adopted kept turn.
+
+On the landing branch `merge-queue-rework`, waiting for the last two agents:
+- A and C, the merge queue rework (proto, daemon, webapp, Emacs); the e2e rewrite is in progress on `mq-e2e`.
+- The footer draws only the main agent's live work (owner ruling).
+- Fold above for held prompts (FoldHeldPrompt).
+- Workspace names in logs, and the metaprompt rules on memory changes and workspace names.
+- The resumed subagent's footer identity is in progress on `resumed-agent-footer`.
+
+Then: rebase the landing branch onto master, run every suite once in sequence at background priority, cherry-pick onto master. The owner deploys.
+
+Dropped by the owner: repairing the store rows the sidecar wrongly concluded LOST, and queueing the explanation-engine PR.
