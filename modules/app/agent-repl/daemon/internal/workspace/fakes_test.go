@@ -117,11 +117,13 @@ type fakeDB struct {
 	// A workspace with no session row surfaces wsm.ErrNotFound here, and any
 	// other error stands for a real terminal-recording failure.
 	setTerminalErr error
-	orphanReport   wsm.OrphanReport
-	createdTasks   []string
-	taskChanges    map[ids.TaskID]wsm.TaskChange
-	assignments    map[ids.WorkspaceID]*ids.TaskID
-	taskErr        error
+	// setVendorErr fails the resume-handle write, which the map cannot.
+	setVendorErr error
+	orphanReport wsm.OrphanReport
+	createdTasks []string
+	taskChanges  map[ids.TaskID]wsm.TaskChange
+	assignments  map[ids.WorkspaceID]*ids.TaskID
+	taskErr      error
 
 	// dbFaults is the fault table the fleet opens and closes lost-link rows
 	// in; dbClosed records the ids CloseFault was called with.
@@ -2064,4 +2066,17 @@ func (d *fakeDB) SetRepositoryFolded(_ context.Context, id ids.RepoID, folded bo
 		}
 	}
 	return fmt.Errorf("fake: repository %s: %w", id, wsm.ErrNotFound)
+}
+
+// SetVendorSessionID records the resume handle on the fake's session row and
+// answers the one it replaced; setVendorErr fails it.
+func (d *fakeDB) SetVendorSessionID(_ context.Context, id ids.WorkspaceID, vendorSessionID string) (string, error) {
+	if d.setVendorErr != nil {
+		return "", d.setVendorErr
+	}
+	session := d.sessions[id]
+	replaced := session.VendorSessionID
+	session.Workspace, session.VendorSessionID = id, vendorSessionID
+	d.sessions[id] = session
+	return replaced, nil
 }
