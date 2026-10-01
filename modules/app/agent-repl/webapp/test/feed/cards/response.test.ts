@@ -38,7 +38,7 @@ import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.
 import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
-import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { cascadedValue, installStylesheet, selectorOf } from "../../stylesheet.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
 import {
@@ -2051,14 +2051,6 @@ describe("the thinking bubble's one-line cap", () => {
     }
   });
 });
-
-/** The selector of the stylesheet rule PATTERN captures, or a loud failure naming WHAT. */
-function selectorOf(pattern: RegExp, what: string): string {
-  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-  const found = pattern.exec(css)?.[1]?.trim();
-  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
-  return found;
-}
 
 /**
  * A THINKING BUBBLE SAYS "MORE" WITH THE ELLIPSIS, NEVER THE FADE (owner

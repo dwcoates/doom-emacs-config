@@ -33,7 +33,8 @@ import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, installStylesheet } from "./stylesheet.js";
+import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
+import { withoutBlockComments } from "./source-text.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -44,27 +45,6 @@ const ALLOWED: ReadonlyMap<string, string> = new Map([
   ["#ws-sidebar .repo-head .tri", "the repo header's fold triangle, the same glyph and the same state"],
   [".thinking summary::marker", "the disclosure marker only; the summary's TEXT stays user-select: text"],
 ]);
-
-interface Rule {
-  selectors: string[];
-  declarations: string;
-}
-
-/** Every `selector { declarations }` pair in the file, comments stripped. */
-function rulesOf(css: string): Rule[] {
-  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules: Rule[] = [];
-  const pattern = /([^{}]+)\{([^{}]*)\}/g;
-  let match = pattern.exec(withoutComments);
-  while (match !== null) {
-    rules.push({
-      selectors: (match[1] ?? "").split(",").map((one) => one.trim()).filter((one) => one !== ""),
-      declarations: match[2] ?? "",
-    });
-    match = pattern.exec(withoutComments);
-  }
-  return rules;
-}
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -88,7 +68,7 @@ describe("the stylesheet's selectability contract", () => {
 
   it("leaves the thinking fold's summary text selectable", () => {
     // Arrange / Act
-    const summaryRule = rulesOf(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).find((rule) =>
+    const summaryRule = rulesOf(stylesheet).find((rule) =>
       rule.selectors.includes(".thinking summary"),
     );
 
@@ -241,14 +221,14 @@ describe("the bubble geometry: the two caps", () => {
 
   it("leaves no second copy of the old 75% cap behind", () => {
     // Arrange / Act / Assert
-    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(
+    expect(withoutBlockComments(stylesheet)).not.toMatch(
       /--agent-bubble-cap:\s*75%/,
     );
   });
 
   it("leaves no second copy of the old 25-line budget behind", () => {
     // Arrange / Act / Assert
-    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(
+    expect(withoutBlockComments(stylesheet)).not.toMatch(
       /--feed-cap-lines:\s*25\s*;/,
     );
   });
@@ -413,7 +393,7 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
 
   it("never parks a dead channel on a box that fits, which overflow-y: scroll would", () => {
     // Arrange / Act / Assert
-    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/overflow-y:\s*scroll/);
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/overflow-y:\s*scroll/);
   });
 });
 
@@ -1765,7 +1745,7 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
 
   it("no longer marks the full-width row wrapper", () => {
     // Arrange / Act
-    const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+    const css = withoutBlockComments(stylesheet);
 
     // Assert
     expect(css.includes(".row-revealed")).toBe(false);
@@ -1791,7 +1771,7 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
   it("defines the --selected-response token so the blue rule resolves", () => {
     // Arrange / Act — comments are stripped, so a bare token declaration remains.
     const declared = /--selected-response:\s*#[0-9a-fA-F]{3,6}/.test(
-      stylesheet.replace(/\/\*[\s\S]*?\*\//g, ""),
+      withoutBlockComments(stylesheet),
     );
 
     // Assert
@@ -1801,7 +1781,7 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
   it("declares the blue rule AFTER the green one, so the selection outranks the answer", () => {
     // Arrange — the green rule reserves the border and the blue rule replaces it;
     // equal specificity is broken by source order, so blue must come later.
-    const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+    const css = withoutBlockComments(stylesheet);
     // The green rule excludes thinking bubbles (`:not([data-variant="thinking"])`),
     // so the concluded answer's border can never land on intermediate reasoning.
     const green = css.indexOf('.bubble.final-response:not([data-variant="thinking"]) {');
@@ -2804,7 +2784,7 @@ describe("the one bubble rule set", () => {
 
   it("carries no second leading token for prompts", () => {
     // Arrange / Act / Assert
-    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/--prompt-line-h/);
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--prompt-line-h/);
   });
 
 
@@ -3049,7 +3029,7 @@ describe("the compaction summary's border is the compaction divider bar's", () =
 
   it("gives the summary no fill of its own: it is a response bubble", () => {
     // Arrange / Act / Assert
-    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/--compact-summary-bg/);
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--compact-summary-bg/);
   });
 });
 
@@ -3059,7 +3039,7 @@ describe("the compaction summary's border is the compaction divider bar's", () =
  */
 describe("the bubble's expand-only region", () => {
   /** Every rule whose selector names the expand-only class. */
-  const regionRules = (): Rule[] =>
+  const regionRules = (): CssRule[] =>
     rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_EXPAND_ONLY_CLASS}`)));
 
   it("hides the region only behind a scroll box that is not expanded", () => {

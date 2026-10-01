@@ -10,7 +10,7 @@ import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import STYLESHEET from "../../src/styles.css?raw";
-import { installStylesheet } from "../stylesheet.js";
+import { installStylesheet, rulesOf } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
 import {
   Channel,
@@ -892,14 +892,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
 
   /** Every rule block in the sheet, in source order, as selector + body. */
   function rules(): { selector: string; body: string }[] {
-    const found: { selector: string; body: string }[] = [];
-    const pattern = /([^{}]+)\{([^{}]*)\}/g;
-    let match: RegExpExecArray | null = pattern.exec(STYLESHEET);
-    while (match !== null) {
-      found.push({ selector: match[1].trim(), body: match[2] });
-      match = pattern.exec(STYLESHEET);
-    }
-    return found;
+    return rulesOf(STYLESHEET).map((rule) => ({ selector: rule.selectors.join(", "), body: rule.declarations }));
   }
 
   it("guards every display the sheet sets on the panel with a [hidden] rule", () => {
@@ -988,11 +981,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     return rules().filter(
       (rule) =>
         new RegExp(`(^|[;\\s])${prop}\\s*:`).test(rule.body) &&
-        // `rules()` captures the preceding `/* … */` comment into the selector,
-        // so it is stripped before the split -- otherwise every group is an
-        // invalid selector `.matches` throws on.
         rule.selector
-          .replace(/\/\*[\s\S]*?\*\//g, "")
           .split(",")
           .some((group) => {
             const bare = group.trim().replace(/::[a-z-]+$/i, "");

@@ -59,6 +59,7 @@ import {
   RosterRowSchema,
   type RosterRow,
   type WorkspaceRoster,
+  RosterRepoSectionSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   DaemonHoldTraySchema,
@@ -2133,6 +2134,14 @@ export const ROSTER_STATUS_ARMS = [
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
 /**
+ * A repository section's `fold` arm. The wire never leaves the oneof unset
+ * (`frontend.v1.RosterRepoSection.fold`), so every fixture section names one.
+ */
+function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoSectionSchema>["fold"] {
+  return collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} };
+}
+
+/**
  * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
  * the ones render-colors.json declares in `colored_merge_arms` also spend a
  * color (every one does since 2026-09-28; merge_failed is turquoise).
@@ -2193,8 +2202,8 @@ export function roster(init?: {
   currentUnset?: boolean;
   /** The task section header's done check, as the daemon resolved it. */
   taskDone?: boolean;
-  /** Replace the repository grouping's sections, IN WIRE ORDER. */
-  repositorySections?: { repositoryId: string; label: string; rows: RosterRow[] }[];
+  /** Replace the repository grouping's sections, IN WIRE ORDER; a section is expanded unless `collapsed`. */
+  repositorySections?: { repositoryId: string; label: string; rows: RosterRow[]; collapsed?: boolean }[];
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
@@ -2203,8 +2212,14 @@ export function roster(init?: {
         key: { repository: repositoryRef(section.repositoryId) },
         header: { label: { text: section.label } },
         rows: { rows: section.rows },
+        fold: repositoryFold(section.collapsed === true),
       })) ?? [
-        { key: { repository: repositoryRef() }, header: { label: { text: "doom" } }, rows: { rows } },
+        {
+          key: { repository: repositoryRef() },
+          header: { label: { text: "doom" } },
+          rows: { rows },
+          fold: repositoryFold(false),
+        },
       ],
     },
     task: {
@@ -2240,13 +2255,14 @@ export const HOLD_CLASSIFICATION_ARMS = [
   "holdForTurnEnd",
   "uninterruptibleTurn",
   "classificationError",
+  "daemonHeld",
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
 /** The ONE classification that draws an [accept] button (ruled). */
 export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
 
-export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh"] as const;
+export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh", "merge"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -2271,6 +2287,8 @@ const classificationValue = (
       return { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } };
     case "classificationError":
       return { case: "classificationError", value: { detail: "the classifier timed out" } };
+    case "daemonHeld":
+      return { case: "daemonHeld", value: {} };
   }
 };
 
@@ -2282,6 +2300,8 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
       return { case: "sessionStarting", value: {} };
     case "buildRefresh":
       return { case: "buildRefresh", value: {} };
+    case "merge":
+      return { case: "merge", value: {} };
   }
 };
 
@@ -2302,6 +2322,7 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
   sessionStarting: { label: "starting up", detail: "held until the session is up" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
+  merge: { label: "after the merge", detail: "held until the merge ends; the workspace stays open for it" },
 };
 
 export function heldPrompt(init?: {
@@ -2315,7 +2336,8 @@ export function heldPrompt(init?: {
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "sessionStarting";
-  const statuses: string[] = [classification];
+  // `daemon_held` draws no badge of its own: the hold arm's badge says what holds it.
+  const statuses: string[] = classification === "daemonHeld" ? [] : [classification];
   if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
   statuses.push(hold);
   return create(HeldPromptSchema, {

@@ -24,6 +24,7 @@ import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { measureTitle } from "./title-measure.js";
+import { codeOf } from "../source-text.js";
 
 /** A connected `.tool-card.tool-fold` holding one card-owned title. */
 function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLElement } {
@@ -336,11 +337,6 @@ describe("the error paths, logged through the canonical logger", () => {
     expect(CARD_FOLD_SELECTOR).toBe(".tool-fold, .bubble-fold");
   });
 });
-
-/** SOURCE with its block and whole-line comments dropped. */
-function codeOf(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
 
 /** Every `.ts` file under DIR, recursively. */
 function sourcesUnder(dir: string): string[] {
