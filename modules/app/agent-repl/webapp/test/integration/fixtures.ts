@@ -2153,7 +2153,7 @@ type RosterRowInit = {
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
-  when?: "lastSelected" | "merged" | "active" | "created";
+  when?: "merged" | "active" | "created";
   whenAtMs?: bigint;
   children?: RosterRow[];
 };
@@ -2167,7 +2167,7 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
     status: { case: init?.status ?? "ready", value: {} } as RosterRow["status"],
     current: { current: init?.current ?? false },
     children: init?.children ?? [],
-    when: { shown: { case: init?.when ?? "lastSelected", value: { atMs: init?.whenAtMs ?? 1_000n } } },
+    when: { shown: { case: init?.when ?? "active", value: { atMs: init?.whenAtMs ?? 1_000n } } },
     detail:
       init?.detail === false
         ? undefined

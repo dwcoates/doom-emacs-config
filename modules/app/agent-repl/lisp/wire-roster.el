@@ -200,16 +200,6 @@ restart.  Emacs orders by it and never draws it
 ;; oneof list and the check-keys allow-list below in the same change, or the
 ;; tab bar goes dark.  Watch for a new arm outrunning this file again.
 
-(defun agent-repl-wire-decode-roster-row-when-last-selected (value)
-  "Decode VALUE as `RosterRowWhenLastSelected', a plist `(:at-ms)'.
-Epoch MILLISECONDS; the client renders the relative age and ticks locally."
-  (let ((object (agent-repl-wire--object "RosterRowWhenLastSelected" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenLastSelected" object '(atMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenLastSelected"
-     (list :at-ms (agent-repl-wire--decode-int64
-                   "RosterRowWhenLastSelected" 'atMs object)))))
-
 (defun agent-repl-wire-decode-roster-row-when-merged (value)
   "Decode VALUE as `RosterRowWhenMerged', a plist `(:at-ms)'."
   (let ((object (agent-repl-wire--object "RosterRowWhenMerged" value)))
@@ -244,8 +234,7 @@ UNSET IS LEGAL and means nothing to show — never active, not created, not
 merged — so the column is empty rather than \"0ms ago\"."
   (agent-repl-wire--decode-oneof
    "RosterRowWhen" 'shown value
-   '((lastSelected :last-selected agent-repl-wire-decode-roster-row-when-last-selected)
-     (active :active agent-repl-wire-decode-roster-row-when-active)
+   '((active :active agent-repl-wire-decode-roster-row-when-active)
      (created :created agent-repl-wire-decode-roster-row-when-created)
      (merged :merged agent-repl-wire-decode-roster-row-when-merged))
    t))
@@ -254,7 +243,7 @@ merged — so the column is empty rather than \"0ms ago\"."
   "Decode VALUE as `RosterRowWhen': the oneof plist, or nil when unset."
   (let ((object (agent-repl-wire--object "RosterRowWhen" value)))
     (agent-repl-wire--check-keys "RosterRowWhen" object
-                                 '(lastSelected active created merged))
+                                 '(active created merged))
     (agent-repl-wire--decoded
      "RosterRowWhen" (agent-repl-wire-decode-roster-row-when-shown object))))
 
