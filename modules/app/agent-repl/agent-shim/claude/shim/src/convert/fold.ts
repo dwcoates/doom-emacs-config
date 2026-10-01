@@ -678,13 +678,13 @@ function rememberVendorApiError(
   if (kind === "shim.vendor.auth_rejected" || kind === "shim.vendor.model_missing") {
     LOGGER.info(
       { operation: kind, vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
-      "the vendor stated an authentication or resource error class; held for the turn's terminal",
+      "an API attempt failed with an authentication or resource error class; the vendor may still retry past it, and the turn's terminal records the outcome",
     );
     return;
   }
   LOGGER.logVerbose(
     { vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
-    "the vendor stated an API failure class; held for the turn's terminal",
+    "an API attempt failed; the vendor may still retry past it, and the turn's terminal records the outcome",
   );
 }
 
