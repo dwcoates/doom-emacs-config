@@ -149,30 +149,35 @@ message RosterRowReviving {}
 // that is `available` before an earlier one stays unopened until that earlier
 // one resolves.
 //
-// THE DAEMON DECIDES IT FROM THE SHIM LINK. `available` is the shim link
-// having CONNECTED at least once under this daemon, and it is STICKY for the
-// daemon's lifetime: a session parked by the idle sweep, severed, or killed
-// later is still a workspace the editor has opened, and its status arm
-// reports what became of it. `unavailable` is the link going dead before it
-// ever connected — the start failed, or the boot could not tell whether a
-// surviving shim owns the workspace and so served none. `pending` is
-// everything before either.
+// THE DAEMON DECIDES IT FROM ITS BRING-UPS AND THE SHIM LINK. `pending` is a
+// bring-up of the workspace's session being under way: the boot's bring-up of
+// the workspaces it reconciled (named before the daemon serves, so no editor
+// sees such a row any other way first), or any start in flight. `available`
+// is the shim link having CONNECTED at least once under this daemon — STICKY
+// for the daemon's lifetime: a session parked by the idle sweep, severed or
+// killed later is still a workspace the editor has opened, and its status arm
+// reports what became of it — and it is equally a workspace with no bring-up
+// under way and no failed one, such as a freshly registered workspace whose
+// session starts only when it is first used: there is nothing to wait for.
+// `unavailable` is the link going dead before it ever connected, with no
+// bring-up under way: the start failed, or the boot could not tell whether a
+// surviving shim owns the workspace and so served none.
 //
 // A hibernated workspace is never `available` merely by being registered:
-// the boot wakes it, and it becomes available when the woken shim connects.
+// the boot wakes it, and it is `pending` until the woken shim connects.
 message RosterRowAvailability {
   // The availability. The set arm IS the availability; an unset oneof is
   // invalid.
   oneof availability {
-    // The daemon is still bringing the session up (or has not yet begun to):
-    // no shim link has connected and none has died. The editor does not open
-    // the workspace yet.
+    // A bring-up of the session is under way and no shim link has connected
+    // yet. The editor does not open the workspace yet.
     RosterRowAvailabilityPending pending = 1;
     // A shim link to this workspace's session has connected under this
-    // daemon. The editor opens the workspace.
+    // daemon, or no bring-up is under way and none failed. The editor opens
+    // the workspace.
     RosterRowAvailabilityAvailable available = 2;
     // The bring-up ended without a session: the link went dead before it
-    // ever connected. The editor still opens the workspace, and the row's
+    // ever connected, and no bring-up is under way. The editor still opens the workspace, and the row's
     // status arm (`start_failed`) is what it draws.
     RosterRowAvailabilityUnavailable unavailable = 3;
   }
@@ -181,7 +186,7 @@ message RosterRowAvailability {
 // The session is still being brought up; the workspace is not opened yet.
 message RosterRowAvailabilityPending {}
 
-// The workspace's shim link has connected; the workspace is opened.
+// The workspace has nothing more to wait for; the workspace is opened.
 message RosterRowAvailabilityAvailable {}
 
 // The bring-up ended without a session; the workspace is opened and draws
