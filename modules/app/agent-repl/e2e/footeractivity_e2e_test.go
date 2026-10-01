@@ -10,7 +10,7 @@ import (
 // arm carries its cell under the same shape (footer.proto, the status family's
 // rules): a salient line, or the unpinned tiers — a transient over an optional
 // quiet-stretch line over the one enduring line. The status-independent
-// salient kinds (update, rate_limit, notification, context_budget) ride every
+// salient kinds (update, notification, context_budget) ride every
 // arm's salient oneof under the same field names, so one reader serves every
 // arm and a test never misses a line because the status moved underneath it.
 
@@ -62,14 +62,6 @@ func footerSalientKind(v *frontendv1.FooterView, kind protoreflect.Name) protore
 		return nil
 	}
 	return salient.Get(field).Message()
-}
-
-// footerRateLimit answers the standing vendor rate-limit line, or nil.
-func footerRateLimit(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRateLimit {
-	if m := footerSalientKind(v, "rate_limit"); m != nil {
-		return m.Interface().(*frontendv1.FooterStatusActivityRateLimit)
-	}
-	return nil
 }
 
 // footerNotification answers the standing push notification's text, or "".
