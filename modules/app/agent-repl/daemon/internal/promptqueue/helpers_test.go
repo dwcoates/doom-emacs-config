@@ -827,6 +827,18 @@ func (f *fakeFeed) UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, 
 	f.rows = append(f.rows, row)
 }
 
+// OutputAddress answers a copy of the standing output address, as the resolver
+// does.
+func (f *fakeFeed) OutputAddress(_ ids.WorkspaceID) *sessionwatcher.OutputAddress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.address == nil {
+		return nil
+	}
+	copied := *f.address
+	return &copied
+}
+
 // SetOutputAddress records the standing output address the mirror lands at.
 func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *sessionwatcher.OutputAddress) {
 	f.mu.Lock()

@@ -178,5 +178,7 @@ func (r *resolver) endReplayedTurn(s *wsState, next ids.TurnID) {
 	if !closed {
 		return
 	}
+	// The ending is drawn where the turn it ends was drawn.
+	defer r.addressingTurn(s, *s.replayTurn)()
 	r.endClosedTurn(s, *s.replayTurn, close)
 }
