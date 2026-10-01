@@ -4231,6 +4231,41 @@ describe("WatchSession", () => {
     expect((await frames(h, 2))[1]).toBe("sessionStarted");
   });
 
+  it("re-announces a DEAD query after the opening, to a watch opened after the death", async () => {
+    // A daemon adopting this shim after its query died must learn the session
+    // cannot take a prompt from the typed fact, not from a refused StartTurn.
+    const h = harness();
+    await started(h);
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(await frames(h, 3)).toEqual(["update.diagnostics", "sessionStarted", "update.queryDied"]);
+  });
+
+  it("re-announces no death for a session whose query lives", async () => {
+    // A marker frame is pushed so the read ends on a real frame rather than
+    // waiting out a stream that would correctly never produce a death.
+    const h = harness();
+    await started(h);
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+      }),
+    );
+
+    const seen: string[] = [];
+    for (let index = 0; index < 16 && !seen.includes("update.compacting"); index++) {
+      const frame = (await nextPush(iterator)).frame;
+      seen.push(frame.case === "update" ? `update.${frame.value.update.case ?? "unset"}` : (frame.case ?? "unset"));
+    }
+    await iterator.return?.();
+
+    expect(seen).toContain("update.compacting");
+    expect(seen).not.toContain("update.queryDied");
+  });
+
   it("re-announces on EVERY new watch, not only the first", async () => {
     const h = harness();
     await started(h);

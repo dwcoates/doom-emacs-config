@@ -173,6 +173,9 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	if changed := w.concludeAllLocked(concludedQueryDied); changed {
 		w.publishLiveWorkLocked()
 	}
+	// THE DAEMON RESTARTS THE SESSION: nothing in the shim restarts a query
+	// it lost, so the lifecycle sink is told once the lock is let go.
+	w.pendingQueryDeath = true
 }
 
 // sessionArm names a SessionUpdate's set arm for a log record.

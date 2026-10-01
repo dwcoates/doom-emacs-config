@@ -671,6 +671,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * nothing to be told.
    */
   let announcedStart: conversationv1.SessionStarted | undefined;
+  /**
+   * The death of the live query. A watch opened after the death -- a daemon
+   * adopting this shim -- is told it again behind the re-announcement, so the
+   * daemon learns the session cannot take a prompt from the session's own typed
+   * fact, never from a fault's prose. It stands for the process's life: nothing
+   * in this process restarts a query it lost (see onQueryLost), so the daemon
+   * replaces the shim instead.
+   */
+  let standingDeath: conversationv1.SessionQueryDied | undefined;
   let standingDown = false;
   /** A model change accepted mid-turn, and the call still waiting on it. */
   let pendingModel:
@@ -2825,6 +2834,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function onQueryLost(died: conversationv1.SessionQueryDied, detail: string): void {
     LOGGER.error({ cause: detail, ...vendorDeathFields() }, "the vendor query is gone");
+    standingDeath = died;
     pushes.push(
       create(conversationv1.SessionUpdateSchema, {
         update: { case: "queryDied", value: died },
@@ -5442,7 +5452,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
-    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart),
+    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath),
     setSessionModel,
     setSessionPermissionMode,
     hibernate,
@@ -5477,10 +5487,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
  *
  * A session that has not started yet re-announces nothing: there is no opening
  * to re-state, and the diagnostics already said so.
+ *
+ * A DEAD QUERY IS RE-ANNOUNCED TOO, after the opening: a daemon that adopts
+ * this shim after the death would otherwise attach to a session it believes
+ * can take a prompt, and learn otherwise only from a refused StartTurn.
  */
 async function* watchSessionFrames(
   updates: AsyncIterable<conversationv1.SessionUpdate>,
   reannounce: () => Promise<conversationv1.SessionStarted | undefined>,
+  standingDeath: () => conversationv1.SessionQueryDied | undefined,
 ): AsyncIterable<shimv1.WatchSessionResponse> {
   let opened = false;
   for await (const update of updates) {
@@ -5493,6 +5508,15 @@ async function* watchSessionFrames(
     if (started !== undefined) {
       yield create(shimv1.WatchSessionResponseSchema, {
         frame: { case: "sessionStarted", value: started },
+      });
+    }
+    const died = standingDeath();
+    if (died !== undefined) {
+      yield create(shimv1.WatchSessionResponseSchema, {
+        frame: {
+          case: "update",
+          value: create(conversationv1.SessionUpdateSchema, { update: { case: "queryDied", value: died } }),
+        },
       });
     }
   }
