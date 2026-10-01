@@ -300,6 +300,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; teardown it calls on a close resolve at call time, long after every
 ;; module is loaded.
 (agent-repl--load-module "verbs")
+;; WHY: persistent-wifi.el is the machine's persistent wifi mode: the
+;; standing daemon-link.el hands it from WatchDaemon, and the toggle verb.
+;; It sends through verbs.el's dispatcher, so it loads right after it.
+(agent-repl--load-module "persistent-wifi")
 ;; WHY: roster.el is the WatchWorkspaceRoster consumer — the one source of
 ;; Emacs's tabs, their order and their paint.  It sits above rpc.el (it
 ;; subscribes through it) and calls workspace.el and status.el at runtime

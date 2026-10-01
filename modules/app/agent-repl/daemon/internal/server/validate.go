@@ -607,6 +607,14 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 
 // validateUpdateShutdownScheduleRequest is UpdateShutdownScheduleRequest's base
 // function.
+// validateUpdatePersistentWifiModeRequest refuses a request naming no action.
+func validateUpdatePersistentWifiModeRequest(req *agentreplv1.UpdatePersistentWifiModeRequest) *connect.Error {
+	if req.GetAction() == nil {
+		return invalid("action", "a persistent-wifi action arm is required")
+	}
+	return nil
+}
+
 func validateUpdateShutdownScheduleRequest(req *agentreplv1.UpdateShutdownScheduleRequest) *connect.Error {
 	if req.GetAction() == nil {
 		return invalid("action", "a shutdown-schedule action arm is required")

@@ -2503,6 +2503,148 @@ arm this codec does not know is refused as an unknown field."
    #'agent-repl-wire-decode-update-shutdown-schedule-response-error))
 
 
+;;;; ---- UpdatePersistentWifiMode ---------------------------------------
+
+(defun agent-repl-wire-verbs--decode-string-fields (message json fields)
+  "Decode MESSAGE out of JSON as a message whose every field is a string.
+FIELDS is a list of (WIRE-SYMBOL KEYWORD).  Returns a plist of KEYWORD to
+the decoded string, after refusing any key not among FIELDS."
+  (agent-repl-wire-verbs--check-keys message json (mapcar #'car fields))
+  (let (out)
+    (dolist (field fields)
+      (setq out (plist-put out (nth 1 field)
+                           (agent-repl-wire-verbs--decode-string message (nth 0 field) json))))
+    out))
+
+(defun agent-repl-wire-decode-persistent-wifi-joined (json)
+  "Decode PersistentWifiJoined from JSON into (:network-name NAME).
+NAME is nil when macOS withholds the network's name."
+  (let ((object (agent-repl-wire--object "PersistentWifiJoined" json)))
+    (agent-repl-wire--check-keys "PersistentWifiJoined" object '(networkName))
+    (list :network-name (agent-repl-wire--decode-optional-string
+                         "PersistentWifiJoined" 'networkName object))))
+
+(defun agent-repl-wire-decode-persistent-wifi-not-joined (json)
+  "Decode the empty PersistentWifiNotJoined from JSON."
+  (agent-repl-wire-verbs--decode-empty "PersistentWifiNotJoined" json))
+
+(defun agent-repl-wire-decode-persistent-wifi-mode-on (json)
+  "Decode the empty PersistentWifiModeOn from JSON."
+  (agent-repl-wire-verbs--decode-empty "PersistentWifiModeOn" json))
+
+(defun agent-repl-wire-decode-persistent-wifi-mode-off (json)
+  "Decode the empty PersistentWifiModeOff from JSON."
+  (agent-repl-wire-verbs--decode-empty "PersistentWifiModeOff" json))
+
+(defun agent-repl-wire-decode-persistent-wifi-state (json)
+  "Decode PersistentWifiState from JSON into (:wifi ONEOF :mode ONEOF).
+Each ONEOF is (:arm ARM :value V), or nil when the daemon could not read
+that fact -- the two facts are independent, and an unassigned one is the
+daemon saying it does not know, never a contract breach.  Shared by the
+WatchDaemon push and UpdatePersistentWifiMode's success."
+  (let ((message "PersistentWifiState")
+        (object (agent-repl-wire--object "PersistentWifiState" json)))
+    (agent-repl-wire--check-keys message object '(joined notJoined on off))
+    (agent-repl-wire--decoded
+     message
+     (list :wifi (agent-repl-wire--decode-oneof
+                  message 'wifi object
+                  '((joined :joined agent-repl-wire-decode-persistent-wifi-joined)
+                    (notJoined :not-joined agent-repl-wire-decode-persistent-wifi-not-joined))
+                  t)
+           :mode (agent-repl-wire--decode-oneof
+                  message 'mode object
+                  '((on :on agent-repl-wire-decode-persistent-wifi-mode-on)
+                    (off :off agent-repl-wire-decode-persistent-wifi-mode-off))
+                  t)))))
+
+(defun agent-repl-wire-encode-update-persistent-wifi-mode-request (request)
+  "Encode UpdatePersistentWifiModeRequest from plist REQUEST (:action ONEOF).
+ONEOF is `(:arm :on)', `(:arm :off)' or `(:arm :toggle)'; every arm is
+empty, so the arm is the whole action."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "UpdatePersistentWifiModeRequest" "action" (plist-get request :action)
+         (list (list :on 'on #'ignore)
+               (list :off 'off #'ignore)
+               (list :toggle 'toggle #'ignore)))))
+
+(defconst agent-repl-wire-persistent-wifi-hotspot-arms
+  '((joined :joined ((networkName :network-name)))
+    (alreadyJoined :already-joined ((networkName :network-name)))
+    (left :left ((networkName :network-name)))
+    (notOnHotspot :not-on-hotspot nil)
+    (networkUnreadable :network-unreadable nil)
+    (noWifiInterface :no-wifi-interface nil)
+    (failed :failed ((networkName :network-name) (detail :detail))))
+  "UpdatePersistentWifiModeHotspot's outcome arms: (WIRE KEYWORD FIELDS).
+Every arm's message is all strings, so FIELDS is its whole schema.")
+
+(defconst agent-repl-wire-persistent-wifi-display-arms
+  '((dimmed :dimmed nil)
+    (restored :restored nil)
+    (toolMissing :tool-missing ((toolPath :tool-path)))
+    (failed :failed ((detail :detail))))
+  "UpdatePersistentWifiModeDisplay's outcome arms: (WIRE KEYWORD FIELDS).")
+
+(defconst agent-repl-wire-persistent-wifi-error-arms
+  '((powerSettingsRefused :power-settings-refused ((detail :detail)))
+    (modeUnreadable :mode-unreadable ((detail :detail))))
+  "UpdatePersistentWifiModeError's cause arms: (WIRE KEYWORD FIELDS).")
+
+(defun agent-repl-wire-verbs--decode-string-arms (message field json arms)
+  "Decode MESSAGE's required oneof FIELD from JSON over string-only ARMS.
+ARMS is a list of (WIRE KEYWORD FIELDS) as in
+`agent-repl-wire-persistent-wifi-hotspot-arms'; each arm decodes with
+`agent-repl-wire-verbs--decode-string-fields' named WIRE."
+  (agent-repl-wire-verbs--check-keys message json (mapcar #'car arms))
+  (agent-repl-wire-verbs--decode-oneof
+   message field json
+   (mapcar (lambda (arm)
+             (let ((fields (nth 2 arm))
+                   (arm-name (format "%s.%s" message (nth 0 arm))))
+               (list (nth 0 arm) (nth 1 arm)
+                     (lambda (value)
+                       (agent-repl-wire-verbs--decode-string-fields arm-name value fields)))))
+           arms)))
+
+(defun agent-repl-wire-decode-update-persistent-wifi-mode-success (json)
+  "Decode UpdatePersistentWifiModeSuccess from JSON.
+Returns (:state STATE :hotspot ONEOF :display ONEOF): the standing re-read
+after the change, and how the hotspot and display steps went."
+  (let ((message "UpdatePersistentWifiModeSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(state hotspot display))
+    ;; Presence, not value: protojson spells a message with nothing set as
+    ;; `{}', which parses to nil, and a standing with both facts unread is
+    ;; exactly that.
+    (list :state (agent-repl-wire--decode-message
+                  message 'state json #'agent-repl-wire-decode-persistent-wifi-state)
+          :hotspot (agent-repl-wire--decode-message
+                    message 'hotspot json
+                    (lambda (value)
+                      (agent-repl-wire-verbs--decode-string-arms
+                       "UpdatePersistentWifiModeHotspot" "outcome" value
+                       agent-repl-wire-persistent-wifi-hotspot-arms)))
+          :display (agent-repl-wire--decode-message
+                    message 'display json
+                    (lambda (value)
+                      (agent-repl-wire-verbs--decode-string-arms
+                       "UpdatePersistentWifiModeDisplay" "outcome" value
+                       agent-repl-wire-persistent-wifi-display-arms))))))
+
+(defun agent-repl-wire-decode-update-persistent-wifi-mode-error (json)
+  "Decode UpdatePersistentWifiModeError from JSON into (:cause ONEOF)."
+  (list :cause (agent-repl-wire-verbs--decode-string-arms
+                "UpdatePersistentWifiModeError" "cause" json
+                agent-repl-wire-persistent-wifi-error-arms)))
+
+(defun agent-repl-wire-decode-update-persistent-wifi-mode-response (json)
+  "Decode UpdatePersistentWifiModeResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdatePersistentWifiModeResponse" json
+   #'agent-repl-wire-decode-update-persistent-wifi-mode-success
+   #'agent-repl-wire-decode-update-persistent-wifi-mode-error))
+
+
 ;;;; ---- Deploy -------------------------------------------------------
 
 (defun agent-repl-wire-encode-deploy-request (request)

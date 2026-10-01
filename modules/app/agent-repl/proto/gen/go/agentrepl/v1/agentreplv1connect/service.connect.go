@@ -159,6 +159,9 @@ const (
 	AgentReplSessionHealthProcedure = "/agentrepl.v1.AgentRepl/SessionHealth"
 	// AgentReplClientLogProcedure is the fully-qualified name of the AgentRepl's ClientLog RPC.
 	AgentReplClientLogProcedure = "/agentrepl.v1.AgentRepl/ClientLog"
+	// AgentReplUpdatePersistentWifiModeProcedure is the fully-qualified name of the AgentRepl's
+	// UpdatePersistentWifiMode RPC.
+	AgentReplUpdatePersistentWifiModeProcedure = "/agentrepl.v1.AgentRepl/UpdatePersistentWifiMode"
 	// AgentReplRegisterWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RegisterWorkspace RPC.
 	AgentReplRegisterWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RegisterWorkspace"
@@ -257,6 +260,7 @@ var (
 	agentReplDaemonHealthMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ClientLog")
+	agentReplUpdatePersistentWifiModeMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
 	agentReplRegisterWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
@@ -413,6 +417,9 @@ type AgentReplClient interface {
 	// A console-less client's diagnostic record, into the durable log. See
 	// endpoint_client_log.proto.
 	ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error)
+	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
+	// endpoint_update_persistent_wifi_mode.proto.
+	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
@@ -755,6 +762,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplClientLogMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		updatePersistentWifiMode: connect.NewClient[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](
+			httpClient,
+			baseURL+AgentReplUpdatePersistentWifiModeProcedure,
+			connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		registerWorkspace: connect.NewClient[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplRegisterWorkspaceProcedure,
@@ -914,6 +927,7 @@ type agentReplClient struct {
 	daemonHealth             *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth            *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
+	updatePersistentWifiMode *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
 	registerWorkspace        *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace          *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed      *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
@@ -1164,6 +1178,11 @@ func (c *agentReplClient) ClientLog(ctx context.Context, req *connect.Request[v1
 	return c.clientLog.CallUnary(ctx, req)
 }
 
+// UpdatePersistentWifiMode calls agentrepl.v1.AgentRepl.UpdatePersistentWifiMode.
+func (c *agentReplClient) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
+	return c.updatePersistentWifiMode.CallUnary(ctx, req)
+}
+
 // RegisterWorkspace calls agentrepl.v1.AgentRepl.RegisterWorkspace.
 func (c *agentReplClient) RegisterWorkspace(ctx context.Context, req *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {
 	return c.registerWorkspace.CallUnary(ctx, req)
@@ -1390,6 +1409,9 @@ type AgentReplHandler interface {
 	// A console-less client's diagnostic record, into the durable log. See
 	// endpoint_client_log.proto.
 	ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error)
+	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
+	// endpoint_update_persistent_wifi_mode.proto.
+	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
@@ -1728,6 +1750,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplClientLogMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdatePersistentWifiModeHandler := connect.NewUnaryHandler(
+		AgentReplUpdatePersistentWifiModeProcedure,
+		svc.UpdatePersistentWifiMode,
+		connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRegisterWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplRegisterWorkspaceProcedure,
 		svc.RegisterWorkspace,
@@ -1930,6 +1958,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSessionHealthHandler.ServeHTTP(w, r)
 		case AgentReplClientLogProcedure:
 			agentReplClientLogHandler.ServeHTTP(w, r)
+		case AgentReplUpdatePersistentWifiModeProcedure:
+			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspaceProcedure:
 			agentReplRegisterWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSelectWorkspaceProcedure:
@@ -2157,6 +2187,10 @@ func (UnimplementedAgentReplHandler) SessionHealth(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ClientLog is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdatePersistentWifiMode is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {

@@ -451,6 +451,16 @@ with `confirm_agents' set.")
   "Schedule, cancel or immediately trigger the daemon's shutdown.
 This is how Emacs stops a daemon; Emacs never kills a daemon that answers.")
 
+(agent-repl-rpc--defverb agent-repl-rpc-update-persistent-wifi-mode
+  "UpdatePersistentWifiMode"
+  agent-repl-wire-encode-update-persistent-wifi-mode-request
+  agent-repl-wire-decode-update-persistent-wifi-mode-response
+  "Turn the machine's persistent wifi mode (lid-closed operation) on, off or over.
+Daemon-scoped: nothing names a workspace.  A toggle is resolved by the
+daemon from the mode it reads under its own lock.  Only a refused power
+step is an error; the hotspot and display steps report how they went
+inside the success.")
+
 (agent-repl-rpc--defverb agent-repl-rpc-deploy
   "Deploy"
   agent-repl-wire-encode-deploy-request
