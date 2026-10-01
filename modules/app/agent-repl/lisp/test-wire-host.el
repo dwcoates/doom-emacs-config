@@ -756,7 +756,8 @@ composer and vendor_info arms together."
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
-                             "mutationProgress" "reloadElisp" "ending" "faultsStanding")
+                             "mutationProgress" "reloadElisp" "ending" "faultsStanding"
+                             "persistentWifi")
                        #'string<))))
 
 (defconst agent-repl-test-wire-host--standing-fault-json
@@ -782,6 +783,14 @@ composer and vendor_info arms together."
                                                            :value (:step "webapp" :detail "tsc"
                                                                    :log "/s/build.log")))))
                              :opened-at-ms 1756400000000)))))))
+
+(ert-deftest agent-repl-test-wire-host-persistent-wifi-push-decodes-the-standing ()
+  "The persistent-wifi push decodes through the standing's one codec."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"persistentWifi\":{\"notJoined\":{},\"on\":{}}}")
+                 '(:arm :persistent-wifi
+                   :value (:wifi (:arm :not-joined :value nil) :mode (:arm :on :value nil))))))
 
 (ert-deftest agent-repl-test-wire-host-faults-standing-empty-is-none-standing ()
   "An empty standing set decodes to no faults: the last one closed."

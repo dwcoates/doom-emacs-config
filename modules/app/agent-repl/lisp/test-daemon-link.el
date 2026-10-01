@@ -1065,6 +1065,20 @@ as if it were understood."
       ;; Assert
       (should (equal handled '((:module-root "/r/" :build "b1")))))))
 
+(ert-deftest agent-repl-test-link-a-persistent-wifi-push-is-handed-on ()
+  "A `persistent_wifi' push is handed to persistent-wifi.el, value intact."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (handled nil))
+      (cl-letf (((symbol-function 'agent-repl-persistent-wifi-handle)
+                 (lambda (state) (push state handled))))
+        ;; Act
+        (agent-repl-test-link--push
+         conn (list :arm :persistent-wifi :value '(:wifi nil :mode (:arm :on :value nil)))))
+      ;; Assert
+      (should (equal handled '((:wifi nil :mode (:arm :on :value nil))))))))
+
 ;;;; ---- The daemon's standing loud faults ----
 
 (defun agent-repl-test-link--standing (&rest ids)

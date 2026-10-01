@@ -27,6 +27,7 @@ package topbar
 import (
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -191,6 +192,10 @@ type Resolver interface {
 	// RetractDaemonWarning takes a daemon-scoped warning off every strip. A
 	// key that is not raised retracts nothing.
 	RetractDaemonWarning(key string)
+	// SetPersistentWifi states the machine's persistent-wifi standing, which
+	// every strip draws as its persistent-wifi chip. The persistent-wifi
+	// controller calls it on every change.
+	SetPersistentWifi(state *agentreplv1.PersistentWifiState)
 	// Topic is the workspace's topbar publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView]
 	// StatusFacts answers the session facts the /status panel splices —

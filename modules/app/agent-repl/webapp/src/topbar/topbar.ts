@@ -3,8 +3,8 @@
  *
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
  * account cell (its connectivity glyph, then its label) at the left edge, then
- * the model selector, the permission-mode picker, the context chip and the
- * warning chip at the right edge.
+ * the model selector, the permission-mode picker, the context chip, the
+ * persistent-wifi chip and the warning chip at the right edge.
  *
  * THE RULE IS EQUAL CLEAR SPACE, NOT A SHARED MIDPOINT (owner ruling,
  * 2026-09-14, superseding the "true center" rule of 2026-09-13). The row is a
@@ -54,6 +54,7 @@ import type { TopbarContext, WarningChipContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
+import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
@@ -250,6 +251,9 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     // sibling of.
     drawTopbarFastMode(u.fastMode),
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
+    // The machine's persistent-wifi chip sits between the context chip and
+    // the warning chip, on every strip alike.
+    drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi")),
   );
   // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
   // client-local failure standing yields no chip at all, not a quiet one.

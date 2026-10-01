@@ -49,6 +49,7 @@
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
 (declare-function agent-repl-wire-decode-nuke-workspace-error "wire-verbs")
 (declare-function agent-repl-wire-decode-daemon-fault "wire-verbs")
+(declare-function agent-repl-wire-decode-persistent-wifi-state "wire-verbs")
 (declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
@@ -1496,7 +1497,15 @@ list is the daemon saying none stands."
      (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp)
      (ending :ending agent-repl-wire-decode-watch-daemon-response-ending)
      (faultsStanding :faults-standing
-                     agent-repl-wire-decode-watch-daemon-response-faults-standing))))
+                     agent-repl-wire-decode-watch-daemon-response-faults-standing)
+     (persistentWifi :persistent-wifi
+                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi))))
+
+(defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
+  "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
+The machine's standing, decoded by the one codec it has (shared with
+UpdatePersistentWifiMode's success)."
+  (agent-repl-wire-decode-persistent-wifi-state value))
 
 (defun agent-repl-wire-decode-watch-daemon-response-ending (value)
   "Decode `WatchDaemonResponse''s `ending' push arm VALUE."
@@ -1512,7 +1521,7 @@ list is the daemon saying none stands."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding))
+       ending faultsStanding persistentWifi))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

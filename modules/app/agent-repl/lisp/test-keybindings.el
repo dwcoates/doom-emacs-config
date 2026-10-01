@@ -50,7 +50,8 @@
                  agent-repl-daemon-shutdown-now
                  agent-repl-merge-queue-pause
                  agent-repl-merge-queue-resume
-                 agent-repl-merge-queue-evict))
+                 agent-repl-merge-queue-evict
+                 agent-repl-persistent-wifi-mode-toggle))
     (should (commandp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-oneshot-command-is-defined ()

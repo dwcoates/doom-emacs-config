@@ -510,6 +510,9 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// no scenario may raise a real banner, and the container carries no
 	// banner program, which a daemon records at ERROR on its boot.
 	fakeNotifier := harness.NewFakeNotifier(t, filepath.Join(root, "fakebin"))
+	// The persistent-wifi controller's host tools are faked too: the sandbox
+	// has no pmset or networksetup, and no scenario may touch a real one.
+	hostTools := harness.NewFakeHostTools(t, filepath.Join(root, "host-tools"))
 	e.Notifier = fakeNotifier
 	prewarmTrampolines(t, box)
 	staged := time.Now()
@@ -547,6 +550,8 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
+		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR=" + hostTools,
+		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT=" + harness.FakeHotspot,
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
 		// A tty frame needs a terminal that can position the cursor, and
 		// `dumb` by definition cannot: it has no `cup` capability, so Emacs

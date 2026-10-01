@@ -39,6 +39,8 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)
+//	AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR  the fake pmset/networksetup/ipconfig/sudo the persistent-wifi controller runs
+//	AGENT_REPL_PERSISTENT_WIFI_HOTSPOT    the hotspot it joins (FakeHotspot)
 //	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
 //	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's stages what runs)
 //

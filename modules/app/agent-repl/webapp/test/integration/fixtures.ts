@@ -2061,6 +2061,11 @@ export function topbarView(init?: TopbarInit): TopbarView {
       title: init?.connectivityTitle ?? "connected to claude-repld",
     },
     warnings: { warnings: init?.warnings ?? [] },
+    persistentWifi: {
+      wifi: { case: "joined", value: {} },
+      mode: { case: "off", value: {} },
+      tooltip: { text: "Wi-Fi: joined to Home · persistent wifi off: closing the lid sleeps" },
+    },
     context: {
       text: init?.contextText ?? "184k",
       breakdown:
@@ -2453,6 +2458,9 @@ export const WATCH_DAEMON_PUSHES = [
   // The daemon's standing loud faults: an EMACS stream's alone (a webview
   // draws the same faults on its topbar and footer), skipped as the same skew.
   "faultsStanding",
+  // The machine's persistent-wifi standing: an EMACS stream's alone too (a
+  // webview draws it as its topbar's chip), skipped as the same skew.
+  "persistentWifi",
   // The planned end of the stream: consumed by the stream pipeline itself
   // (`plannedEnding`), which then reopens without filing a failure.
   "ending",

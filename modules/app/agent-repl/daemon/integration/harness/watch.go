@@ -335,6 +335,17 @@ func (d *Daemon) WatchDaemonStreamOn(client interface {
 	return d.watchEmacsDaemonStream(client, UnfocusedEditor())
 }
 
+// WatchWebviewDaemonStream opens a WEBVIEW's daemon stream: the one client
+// told only the daemon-wide announcements, never Emacs's standing state.
+func (d *Daemon) WatchWebviewDaemonStream() *Stream[*agentreplv1.WatchDaemonResponse] {
+	d.t.Helper()
+	return runStream(d.t, d.ctx,
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
+			return d.Client().WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Webview{Webview: &agentreplv1.WatchDaemonWebview{}}}))
+		},
+		func(r *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return r })
+}
+
 // WatchEmacsDaemonStream opens an Emacs daemon stream connecting with focus,
 // and waits until the daemon has attached that focus, so a banner decided
 // after it returns is decided on it.

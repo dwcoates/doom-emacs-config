@@ -47,6 +47,12 @@ type subscriptionScenario struct {
 	drive2 func(t *testing.T, f *fixture)
 	// isSecond identifies drive2's resulting view on the wire.
 	isSecond func(msg proto.Message) bool
+	// ofTopic identifies the frames of the DRIVEN topic, for a stream that
+	// merges several standing topics onto one wire (an Emacs WatchDaemon is
+	// also told the loud faults and the persistent-wifi standing). The
+	// invariant is per topic, and the replay order BETWEEN topics is not part
+	// of it. Nil is a single-topic stream: every frame is the driven topic's.
+	ofTopic func(msg proto.Message) bool
 }
 
 // subscriptionScenarioFor answers the lightweight two-step driver for one
@@ -155,6 +161,10 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 			isSecond: func(msg proto.Message) bool {
 				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainCancelled() != nil
 			},
+			ofTopic: func(msg proto.Message) bool {
+				r := msg.(*agentreplv1.WatchDaemonResponse)
+				return r.GetDrainScheduled() != nil || r.GetDrainCancelled() != nil || r.GetShutdownAnnounced() != nil
+			},
 		}, true
 
 	case "WatchDaemonHolds":
@@ -232,7 +242,11 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 
 			// Assert (a): the first push a late subscriber receives is the
 			// last-published view.
-			gotFirst := harness.AwaitNext(t, f.d.Ctx(), late, k.Name+": the late subscriber's first push")
+			ofTopic := scenario.ofTopic
+			if ofTopic == nil {
+				ofTopic = func(proto.Message) bool { return true }
+			}
+			gotFirst := harness.AwaitView(t, f.d.Ctx(), late, k.Name+": the late subscriber's first push", ofTopic)
 			if !proto.Equal(gotFirst, first) {
 				t.Fatalf("%s: late subscriber's first push = %v, want the last-published view %v", k.Name, gotFirst, first)
 			}
@@ -354,6 +368,15 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				if view.GetModelSelector() != nil {
 					t.Fatalf("%s on a workspace with no session = model_selector %v, want absent", k.Name, view.GetModelSelector())
 				}
+			case "WatchDaemon":
+				// THE BOOT READS THE PERSISTENT-WIFI STANDING: cmd/claude-repld's
+				// Prime step refreshes it before anything is served, and an
+				// Emacs stream (which this one is) is told it as standing state,
+				// so even a daemon that never scheduled a drain opens with it.
+				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the persistent-wifi standing the boot read")
+				if push.(*agentreplv1.WatchDaemonResponse).GetPersistentWifi() == nil {
+					t.Fatalf("%s first frame = %v, want persistent_wifi (read before anything is served)", k.Name, push)
+				}
 			case "WatchWorkspaceRoster":
 				// The BOOT publishes the roster: cmd/claude-repld's Prime step
 				// runs verbs.PublishRegistry after the push surface is bound
@@ -370,15 +393,16 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 // TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled is
 // the sub-brief's specific "WatchDaemon with no view yet" case: the
 // daemon-wide announcement topic is published only by a drain schedule or
-// cancellation, never at boot, so a fresh daemon's WatchDaemon has genuinely
-// nothing to send.
+// cancellation, never at boot. A WEBVIEW's stream subscribes to nothing else,
+// so a fresh daemon's webview WatchDaemon has genuinely nothing to send (an
+// Emacs stream is also told the boot-read persistent-wifi standing).
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
 	// Act
-	s := d.WatchDaemonStream()
+	s := d.WatchWebviewDaemonStream()
 
 	// Assert: headers arrive even though nothing was ever published, and no
 	// frame follows.

@@ -62,6 +62,7 @@ import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_client_log.proto";
+import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
@@ -261,6 +262,14 @@ service AgentRepl {
   // A console-less client's diagnostic record, into the durable log. See
   // endpoint_client_log.proto.
   rpc ClientLog(ClientLogRequest) returns (ClientLogResponse);
+
+  // ---- HOST MACHINE ----
+  // Facts and controls about the machine the daemon runs on, never about a
+  // workspace.
+
+  // Turn persistent wifi mode (lid-closed operation) on, off, or over. See
+  // endpoint_update_persistent_wifi_mode.proto.
+  rpc UpdatePersistentWifiMode(UpdatePersistentWifiModeRequest) returns (UpdatePersistentWifiModeResponse);
 
   // ---- HOST ----
 
